@@ -1,0 +1,15 @@
+# Acropolis architecture workspace root
+
+[workspace]
+members = [
+    # Global message definitions
+    "messages",
+
+    # Modules
+    "modules/miniprotocols",  # Mini-protocol multiplexer
+
+    # Process builds
+    "processes/network",      # Network connector process
+]
+
+resolver = "2"

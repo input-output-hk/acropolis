@@ -1,0 +1,23 @@
+# Acropolis miniprotocols module
+
+[package]
+name = "miniprotocols"
+version = "0.1.0"
+edition = "2021"
+authors = ["Paul Clark <paul.clark@iohk.io>"]
+description = "Miniprotocols module for Caryatid"
+license = "Apache-2.0"
+
+[dependencies]
+caryatid_sdk = "0.1.0"
+acropolis_messages = { path = "../../messages" }
+anyhow = "1.0"
+tokio = { version = "1", features = ["full"] }
+serde_json = "1.0"
+config = "0.14.0"
+tracing = "0.1.40"
+tracing-subscriber = "0.3.18"
+serde = { version = "1.0.214", features = ["derive"] }
+
+[lib]
+path = "src/miniprotocols.rs"
