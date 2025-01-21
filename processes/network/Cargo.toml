@@ -1,6 +1,6 @@
 # Acropolis network process
 [package]
-name = "acropolis_network"
+name = "acropolis_process_network"
 version = "0.1.0"
 edition = "2021"
 authors = ["Paul Clark <paul.clark@iohk.io>"]
@@ -16,7 +16,7 @@ caryatid_module_clock = "0.1.0"
 acropolis_messages = { path = "../../messages" }
 
 # Modules we use
-miniprotocols = { path = "../../modules/miniprotocols" }
+acropolis_module_miniprotocols = { path = "../../modules/miniprotocols" }
 
 anyhow = "1.0"
 config = "0.14.0"

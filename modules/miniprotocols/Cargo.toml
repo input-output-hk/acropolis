@@ -1,11 +1,11 @@
 # Acropolis miniprotocols module
 
 [package]
-name = "miniprotocols"
+name = "acropolis_module_miniprotocols"
 version = "0.1.0"
 edition = "2021"
 authors = ["Paul Clark <paul.clark@iohk.io>"]
-description = "Miniprotocols module for Caryatid"
+description = "Miniprotocols Caryatid module for Acropolis"
 license = "Apache-2.0"
 
 [dependencies]
