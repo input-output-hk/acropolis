@@ -1,0 +1,24 @@
+# Top-level configuration for Acropolis network process
+
+[module.miniprotocols]
+
+[module.clock]
+
+[message-bus.external]
+class = "rabbit-mq"
+url = "amqp://127.0.0.1:5672/%2f"
+exchange = "caryatid"
+
+[message-bus.internal]
+class = "in-memory"
+workers = 10
+
+# Message routing
+[[message-router.route]]  # Route clock internally only
+pattern = "clock.#"
+bus = "internal"
+
+[[message-router.route]]  # Everything goes to both
+pattern = "#"
+bus = [ "internal", "external" ]
+
