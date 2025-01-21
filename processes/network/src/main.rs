@@ -9,9 +9,7 @@ use std::sync::Arc;
 use acropolis_messages::Message;
 
 // External modules
-extern crate miniprotocols;
-use miniprotocols::Miniprotocols;
-
+use acropolis_module_miniprotocols::Miniprotocols;
 use caryatid_module_clock::Clock;
 
 /// Standard main
