@@ -6,21 +6,33 @@
 // Caryatid core messages
 use caryatid_sdk::messages::ClockTickMessage;
 
-/// Incoming mini-protocol message
+/// New chain header message
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
-pub struct MiniprotocolIncomingMessage {
-    /// Data
-    pub data: Vec<u8>,
+pub struct NewTipHeaderMessage {
+    /// Slot number
+    pub slot: u64,
+
+    /// Header number
+    pub number: u64,
+
+    /// Raw Data
+    pub raw: Vec<u8>,
 }
 
 // === Global message enum ===
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum Message {
-    None(()),                 // Just so we have a simple default
-    String(String),           // Simple string
-    Clock(ClockTickMessage),  // Clock tick
-    MiniprotocolIncoming(MiniprotocolIncomingMessage),  // MP incoming
-    JSON(serde_json::Value),  // Get out of jail free card
+    None(()),                               // Just so we have a simple default
+
+    // Generic messages, get of jail free cards
+    String(String),                         // Simple string
+    JSON(serde_json::Value),                // JSON object
+
+    // Caryatid standard messages
+    Clock(ClockTickMessage),                // Clock tick
+
+    // Cardano messages
+    NewTipHeader(NewTipHeaderMessage),      // New tip of chain available
 }
 
 impl Default for Message {
@@ -36,9 +48,9 @@ impl From<ClockTickMessage> for Message {
     }
 }
 
-impl From<MiniprotocolIncomingMessage> for Message {
-    fn from(msg: MiniprotocolIncomingMessage) -> Self {
-        Message::MiniprotocolIncoming(msg)
+impl From<NewTipHeaderMessage> for Message {
+    fn from(msg: NewTipHeaderMessage) -> Self {
+        Message::NewTipHeader(msg)
     }
 }
 

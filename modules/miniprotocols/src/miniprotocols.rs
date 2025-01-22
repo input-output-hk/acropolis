@@ -2,17 +2,25 @@
 //! Multi-connection, multi-protocol client interface to the Cardano node
 
 use caryatid_sdk::{Context, Module, module, MessageBounds};
-use acropolis_messages::MiniprotocolIncomingMessage;
+use acropolis_messages::{NewTipHeaderMessage};
 use std::sync::Arc;
 use anyhow::Result;
 use config::Config;
-use tracing::{info, error};
+use tracing::{debug, info, error};
 
-use pallas::network::{
-    facades::PeerClient,
+use pallas::{
+    network::{
+        facades::PeerClient,
+        miniprotocols::{
+            chainsync::{NextResponse, Tip},
+        },
+    },
+    ledger::{
+        traverse::MultiEraHeader,
+    }
 };
 
-const DEFAULT_TOPIC: &str = "cardano.network.incoming.";
+const DEFAULT_TOPIC: &str = "cardano.network.new.tip.header";
 const DEFAULT_NODE_ADDRESS: &str = "preview-node.world.dev.cardano.org:30002";
 const DEFAULT_MAGIC_NUMBER: u64 = 2;
 
@@ -23,13 +31,13 @@ const DEFAULT_MAGIC_NUMBER: u64 = 2;
     name = "miniprotocols",
     description = "Mini-protocol interface to the Cardano node"
 )]
-pub struct Miniprotocols<M: From<MiniprotocolIncomingMessage> + MessageBounds>;
+pub struct Miniprotocols<M: From<NewTipHeaderMessage> + MessageBounds>;
 
-impl<M: From<MiniprotocolIncomingMessage> + MessageBounds> Miniprotocols<M>
+impl<M: From<NewTipHeaderMessage> + MessageBounds> Miniprotocols<M>
 {
     fn init(&self, context: Arc<Context<M>>, config: Arc<Config>) -> Result<()> {
-        let _message_bus = context.message_bus.clone();
-        let _topic = config.get_string("topic").unwrap_or(DEFAULT_TOPIC.to_string());
+        let message_bus = context.message_bus.clone();
+        let topic = config.get_string("topic").unwrap_or(DEFAULT_TOPIC.to_string());
 
         let node_address = config.get_string("node_address")
             .unwrap_or(DEFAULT_NODE_ADDRESS.to_string());
@@ -50,13 +58,49 @@ impl<M: From<MiniprotocolIncomingMessage> + MessageBounds> Miniprotocols<M>
 
                     // Loop fetching messages
                     loop {
-                        let next = if client.has_agency() {
-                            client.request_next().await.unwrap()
-                        } else {
-                            client.recv_while_must_reply().await.unwrap()
-                        };
+                        let next = client.request_or_await_next().await;
 
-                        info!("Incoming message: {next:?}");
+                        match next {
+                            Ok(next) => match next {
+                                NextResponse::RollForward(h, Tip(point, _)) => {
+                                    debug!("RollForward to {point:?}");
+                                    match h.byron_prefix {
+                                        None => {
+                                            let header = MultiEraHeader::decode(h.variant,
+                                                                                None, &h.cbor);
+                                            match header {
+                                                Ok(header) => {
+                                                    info!("Header for slot {} number {}",
+                                                          header.slot(), header.number());
+
+                                                    // Construct message
+                                                    let message = NewTipHeaderMessage {
+                                                        slot: header.slot(),
+                                                        number: header.number(),
+                                                        raw: h.cbor
+                                                    };
+
+                                                    debug!("Miniprotocols sending {:?}", message);
+
+                                                    let message_enum: M = message.into();
+                                                    message_bus.publish(&topic,
+                                                                        Arc::new(message_enum))
+                                                        .await
+                                                        .unwrap_or_else(
+                                                            |e| error!("Failed to publish: {e}"));
+                                                }
+                                                Err(e) => error!("Bad header: {e}"),
+                                            }
+                                        },
+                                        Some(_) => info!("Skipping a Byron block"),
+                                    }
+                                },
+
+                                _ => debug!("Ignoring message: {next:?}")
+                            },
+
+                            Err(e) => { error!("Connection failed: {e}"); break; }
+                        }
                     }
                 },
                 Err(e) => error!("Failed to connect to peer: {e}")
