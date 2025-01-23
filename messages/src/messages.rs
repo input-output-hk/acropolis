@@ -6,14 +6,24 @@
 // Caryatid core messages
 use caryatid_sdk::messages::ClockTickMessage;
 
-/// New chain header message
+/// Block header message
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
-pub struct NewTipHeaderMessage {
+pub struct BlockHeaderMessage {
     /// Slot number
     pub slot: u64,
 
     /// Header number
     pub number: u64,
+
+    /// Raw Data
+    pub raw: Vec<u8>,
+}
+
+/// Block body message
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BlockBodyMessage {
+    /// Slot number
+    pub slot: u64,
 
     /// Raw Data
     pub raw: Vec<u8>,
@@ -32,7 +42,8 @@ pub enum Message {
     Clock(ClockTickMessage),                // Clock tick
 
     // Cardano messages
-    NewTipHeader(NewTipHeaderMessage),      // New tip of chain available
+    BlockHeader(BlockHeaderMessage),        // Block header available
+    BlockBody(BlockBodyMessage),            // Block body available
 }
 
 impl Default for Message {
@@ -48,9 +59,15 @@ impl From<ClockTickMessage> for Message {
     }
 }
 
-impl From<NewTipHeaderMessage> for Message {
-    fn from(msg: NewTipHeaderMessage) -> Self {
-        Message::NewTipHeader(msg)
+impl From<BlockHeaderMessage> for Message {
+    fn from(msg: BlockHeaderMessage) -> Self {
+        Message::BlockHeader(msg)
+    }
+}
+
+impl From<BlockBodyMessage> for Message {
+    fn from(msg: BlockBodyMessage) -> Self {
+        Message::BlockBody(msg)
     }
 }
 
