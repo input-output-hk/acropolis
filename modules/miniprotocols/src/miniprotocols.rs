@@ -2,7 +2,7 @@
 //! Multi-connection, multi-protocol client interface to the Cardano node
 
 use caryatid_sdk::{Context, Module, module, MessageBounds};
-use acropolis_messages::{NewTipHeaderMessage};
+use acropolis_messages::{BlockHeaderMessage, BlockBodyMessage};
 use std::sync::Arc;
 use anyhow::Result;
 use config::Config;
@@ -13,6 +13,7 @@ use pallas::{
         facades::PeerClient,
         miniprotocols::{
             chainsync::{NextResponse, Tip},
+            Point,
         },
     },
     ledger::{
@@ -20,7 +21,9 @@ use pallas::{
     }
 };
 
-const DEFAULT_TOPIC: &str = "cardano.network.new.tip.header";
+const DEFAULT_HEADER_TOPIC: &str = "cardano.network.block.header";
+const DEFAULT_BODY_TOPIC: &str = "cardano.network.block.body";
+
 const DEFAULT_NODE_ADDRESS: &str = "preview-node.world.dev.cardano.org:30002";
 const DEFAULT_MAGIC_NUMBER: u64 = 2;
 
@@ -31,22 +34,54 @@ const DEFAULT_MAGIC_NUMBER: u64 = 2;
     name = "miniprotocols",
     description = "Mini-protocol interface to the Cardano node"
 )]
-pub struct Miniprotocols<M: From<NewTipHeaderMessage> + MessageBounds>;
+pub struct Miniprotocols<M: From<BlockHeaderMessage> + From<BlockBodyMessage> + MessageBounds>;
 
-impl<M: From<NewTipHeaderMessage> + MessageBounds> Miniprotocols<M>
+impl<M: From<BlockHeaderMessage> + From<BlockBodyMessage> + MessageBounds> Miniprotocols<M>
 {
-    /// ChainSync client loop
+    /// Fetch an individual block and unpack it into messages
+    // TODO fetch in batches
+    async fn fetch_block(context: Arc<Context<M>>, config: Arc<Config>,
+                         peer: &mut PeerClient, point: Point) -> Result<()> {
+        let topic = config.get_string("body-topic").unwrap_or(DEFAULT_BODY_TOPIC.to_string());
+
+        // Fetch the block body
+        let body = peer.blockfetch().fetch_single(point.clone()).await;
+
+        match body {
+            Ok(body) => {
+                info!("Got block {point:?} body size {}", body.len());
+
+                // Construct message
+                let message = BlockBodyMessage {
+                    slot: point.slot_or_default(),
+                    raw: body
+                };
+
+                debug!("Miniprotocols sending {:?}", message);
+
+                let message_enum: M = message.into();
+                context.message_bus.publish(&topic, Arc::new(message_enum))
+                    .await
+                    .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+            },
+
+            Err(e) => error!("Can't fetch block at {point:?}: {e}")
+        }
+
+        Ok(())
+    }
+
+    /// ChainSync client loop - fetch headers and publish details, plus fetch each block
     async fn run_chain_sync(context: Arc<Context<M>>, config: Arc<Config>,
-                            mut peer: PeerClient) -> Result<()> {
-        let topic = config.get_string("topic").unwrap_or(DEFAULT_TOPIC.to_string());
+                            peer: &mut PeerClient) -> Result<()> {
+        let topic = config.get_string("header-topic").unwrap_or(DEFAULT_HEADER_TOPIC.to_string());
 
         // Start a chain sync at the tip
-        let client = peer.chainsync();
-        client.intersect_tip().await?;
+        peer.chainsync().intersect_tip().await?;
 
         // Loop fetching messages
         loop {
-            let next = client.request_or_await_next().await?;
+            let next = peer.chainsync().request_or_await_next().await?;
 
             match next {
                 NextResponse::RollForward(h, Tip(point, _)) => {
@@ -60,7 +95,7 @@ impl<M: From<NewTipHeaderMessage> + MessageBounds> Miniprotocols<M>
                                           header.slot(), header.number());
 
                                     // Construct message
-                                    let message = NewTipHeaderMessage {
+                                    let message = BlockHeaderMessage {
                                         slot: header.slot(),
                                         number: header.number(),
                                         raw: h.cbor
@@ -72,13 +107,21 @@ impl<M: From<NewTipHeaderMessage> + MessageBounds> Miniprotocols<M>
                                     context.message_bus.publish(&topic, Arc::new(message_enum))
                                         .await
                                         .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+
+                                    // Fetch and publish the block itself
+                                    Self::fetch_block(context.clone(), config.clone(),
+                                                      peer, point).await?;
                                 }
                                 Err(e) => error!("Bad header: {e}"),
                             }
                         },
+
+                        // TODO Handle byron blocks
                         Some(_) => info!("Skipping a Byron block"),
                     }
                 },
+
+                // TODO Handle RollBackward, publish sync message
 
                 _ => debug!("Ignoring message: {next:?}")
             }
@@ -93,13 +136,14 @@ impl<M: From<NewTipHeaderMessage> + MessageBounds> Miniprotocols<M>
             .unwrap_or(DEFAULT_MAGIC_NUMBER);
 
         tokio::spawn(async move {
+            // TODO Multiple peers
             info!("Connecting to {node_address} ({magic_number})");
             let peer = PeerClient::connect(node_address, magic_number).await;
 
             match peer {
-                Ok(peer) => {
+                Ok(mut peer) => {
                     info!("Connected");
-                    Self::run_chain_sync(context, config, peer)
+                    Self::run_chain_sync(context, config, &mut peer)
                         .await
                         .unwrap_or_else(|e| error!("Chain sync failed: {e}"));
                 },
