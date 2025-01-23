@@ -2,6 +2,8 @@
 
 [module.miniprotocols]
 
+[module.block-unpacker]
+
 [module.clock]
 
 [message-bus.external]

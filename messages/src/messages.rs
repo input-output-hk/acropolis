@@ -29,6 +29,19 @@ pub struct BlockBodyMessage {
     pub raw: Vec<u8>,
 }
 
+/// Transaction message
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TxMessage {
+    /// Slot number
+    pub slot: u64,
+
+    /// Index in block
+    pub index: u32,
+
+    /// Raw Data
+    pub raw: Vec<u8>,
+}
+
 // === Global message enum ===
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum Message {
@@ -44,6 +57,7 @@ pub enum Message {
     // Cardano messages
     BlockHeader(BlockHeaderMessage),        // Block header available
     BlockBody(BlockBodyMessage),            // Block body available
+    Tx(TxMessage),                          // Transaction available
 }
 
 impl Default for Message {
@@ -68,6 +82,12 @@ impl From<BlockHeaderMessage> for Message {
 impl From<BlockBodyMessage> for Message {
     fn from(msg: BlockBodyMessage) -> Self {
         Message::BlockBody(msg)
+    }
+}
+
+impl From<TxMessage> for Message {
+    fn from(msg: TxMessage) -> Self {
+        Message::Tx(msg)
     }
 }
 
