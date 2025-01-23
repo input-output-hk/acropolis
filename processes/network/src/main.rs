@@ -32,7 +32,7 @@ pub async fn main() -> Result<()> {
     let mut process = Process::<Message>::create(config).await;
 
     // Register modules
-    Miniprotocols::<Message>::register(&mut process);
+    Miniprotocols::register(&mut process);
     Clock::<Message>::register(&mut process);
 
     // Run it

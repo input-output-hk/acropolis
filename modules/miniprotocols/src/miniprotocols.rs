@@ -1,8 +1,8 @@
 //! Acropolis Miniprotocols module for Caryatid
 //! Multi-connection, multi-protocol client interface to the Cardano node
 
-use caryatid_sdk::{Context, Module, module, MessageBounds};
-use acropolis_messages::{BlockHeaderMessage, BlockBodyMessage};
+use caryatid_sdk::{Context, Module, module};
+use acropolis_messages::{BlockHeaderMessage, BlockBodyMessage, Message};
 use std::sync::Arc;
 use anyhow::Result;
 use config::Config;
@@ -21,8 +21,8 @@ use pallas::{
     }
 };
 
-const DEFAULT_HEADER_TOPIC: &str = "cardano.network.block.header";
-const DEFAULT_BODY_TOPIC: &str = "cardano.network.block.body";
+const DEFAULT_HEADER_TOPIC: &str = "cardano.block.header";
+const DEFAULT_BODY_TOPIC: &str = "cardano.block.body";
 
 const DEFAULT_NODE_ADDRESS: &str = "preview-node.world.dev.cardano.org:30002";
 const DEFAULT_MAGIC_NUMBER: u64 = 2;
@@ -30,17 +30,17 @@ const DEFAULT_MAGIC_NUMBER: u64 = 2;
 /// Network mini-protocols module
 /// Parameterised by the outer message enum used on the bus
 #[module(
-    message_type(M),
+    message_type(Message),
     name = "miniprotocols",
     description = "Mini-protocol interface to the Cardano node"
 )]
-pub struct Miniprotocols<M: From<BlockHeaderMessage> + From<BlockBodyMessage> + MessageBounds>;
+pub struct Miniprotocols;
 
-impl<M: From<BlockHeaderMessage> + From<BlockBodyMessage> + MessageBounds> Miniprotocols<M>
+impl Miniprotocols
 {
     /// Fetch an individual block and unpack it into messages
     // TODO fetch in batches
-    async fn fetch_block(context: Arc<Context<M>>, config: Arc<Config>,
+    async fn fetch_block(context: Arc<Context<Message>>, config: Arc<Config>,
                          peer: &mut PeerClient, point: Point) -> Result<()> {
         let topic = config.get_string("body-topic").unwrap_or(DEFAULT_BODY_TOPIC.to_string());
 
@@ -59,7 +59,7 @@ impl<M: From<BlockHeaderMessage> + From<BlockBodyMessage> + MessageBounds> Minip
 
                 debug!("Miniprotocols sending {:?}", message);
 
-                let message_enum: M = message.into();
+                let message_enum: Message = message.into();
                 context.message_bus.publish(&topic, Arc::new(message_enum))
                     .await
                     .unwrap_or_else(|e| error!("Failed to publish: {e}"));
@@ -72,7 +72,7 @@ impl<M: From<BlockHeaderMessage> + From<BlockBodyMessage> + MessageBounds> Minip
     }
 
     /// ChainSync client loop - fetch headers and publish details, plus fetch each block
-    async fn run_chain_sync(context: Arc<Context<M>>, config: Arc<Config>,
+    async fn run_chain_sync(context: Arc<Context<Message>>, config: Arc<Config>,
                             peer: &mut PeerClient) -> Result<()> {
         let topic = config.get_string("header-topic").unwrap_or(DEFAULT_HEADER_TOPIC.to_string());
 
@@ -103,7 +103,7 @@ impl<M: From<BlockHeaderMessage> + From<BlockBodyMessage> + MessageBounds> Minip
 
                                     debug!("Miniprotocols sending {:?}", message);
 
-                                    let message_enum: M = message.into();
+                                    let message_enum: Message = message.into();
                                     context.message_bus.publish(&topic, Arc::new(message_enum))
                                         .await
                                         .unwrap_or_else(|e| error!("Failed to publish: {e}"));
@@ -129,7 +129,7 @@ impl<M: From<BlockHeaderMessage> + From<BlockBodyMessage> + MessageBounds> Minip
     }
 
     /// Main init function
-    pub fn init(&self, context: Arc<Context<M>>, config: Arc<Config>) -> Result<()> {
+    pub fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         let node_address = config.get_string("node_address")
             .unwrap_or(DEFAULT_NODE_ADDRESS.to_string());
         let magic_number: u64 = config.get::<u64>("magic_number")

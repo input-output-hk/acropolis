@@ -6,7 +6,7 @@ client implementing the Cardano node mini-protocol multiplexer layer.
 ## Configuration
 
 ```toml
-[module.network-miniprotocols]
+[module.miniprotocols]
 ```
 
 ## Messages
