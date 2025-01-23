@@ -17,6 +17,7 @@ acropolis_messages = { path = "../../messages" }
 
 # Modules we use
 acropolis_module_miniprotocols = { path = "../../modules/miniprotocols" }
+acropolis_module_block_unpacker = { path = "../../modules/block_unpacker" }
 
 anyhow = "1.0"
 config = "0.14.0"
