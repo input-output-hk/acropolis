@@ -4,6 +4,8 @@
 
 [module.block-unpacker]
 
+[module.tx-unpacker]
+
 [module.clock]
 
 [message-bus.external]

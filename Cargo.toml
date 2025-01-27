@@ -8,6 +8,7 @@ members = [
     # Modules
     "modules/miniprotocols",  # Mini-protocol multiplexer
     "modules/block_unpacker", # Block to transaction unpacker
+    "modules/tx_unpacker",    # Tx to UTXO unpacker
 
     # Process builds
     "processes/network",      # Network connector process
