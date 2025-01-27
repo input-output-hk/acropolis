@@ -11,6 +11,7 @@ use acropolis_messages::Message;
 // External modules
 use acropolis_module_miniprotocols::Miniprotocols;
 use acropolis_module_block_unpacker::BlockUnpacker;
+use acropolis_module_tx_unpacker::TxUnpacker;
 use caryatid_module_clock::Clock;
 
 /// Standard main
@@ -35,6 +36,7 @@ pub async fn main() -> Result<()> {
     // Register modules
     Miniprotocols::register(&mut process);
     BlockUnpacker::register(&mut process);
+    TxUnpacker::register(&mut process);
     Clock::<Message>::register(&mut process);
 
     // Run it

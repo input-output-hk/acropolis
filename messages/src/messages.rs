@@ -42,6 +42,22 @@ pub struct TxMessage {
     pub raw: Vec<u8>,
 }
 
+/// UTXO created message (tx output)
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct OutputMessage {
+    /// Slot number
+    pub slot: u64,
+
+    /// Tx index in block
+    pub tx_index: u32,
+
+    /// Output index in tx
+    pub index: u32,
+
+    /// Address data (raw)
+    pub address: Vec<u8>,
+}
+
 // === Global message enum ===
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum Message {
@@ -58,6 +74,7 @@ pub enum Message {
     BlockHeader(BlockHeaderMessage),        // Block header available
     BlockBody(BlockBodyMessage),            // Block body available
     Tx(TxMessage),                          // Transaction available
+    Output(OutputMessage),                  // New output (UTXO) created
 }
 
 impl Default for Message {
@@ -88,6 +105,12 @@ impl From<BlockBodyMessage> for Message {
 impl From<TxMessage> for Message {
     fn from(msg: TxMessage) -> Self {
         Message::Tx(msg)
+    }
+}
+
+impl From<OutputMessage> for Message {
+    fn from(msg: OutputMessage) -> Self {
+        Message::Output(msg)
     }
 }
 
