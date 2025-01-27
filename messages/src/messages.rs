@@ -56,6 +56,28 @@ pub struct OutputMessage {
 
     /// Address data (raw)
     pub address: Vec<u8>,
+
+    /// Output value (Lovelace)
+    pub value: u64,
+}
+
+/// UTXO spent message (tx input)
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct InputMessage {
+    /// Slot number
+    pub slot: u64,
+
+    /// Tx index in block
+    pub tx_index: u32,
+
+    /// Output index in tx
+    pub index: u32,
+
+    /// Tx hash of referenced UTXO
+    pub ref_hash: Vec<u8>,
+
+    /// Index of UTXO in referenced tx
+    pub ref_index: u64,
 }
 
 // === Global message enum ===
@@ -75,6 +97,7 @@ pub enum Message {
     BlockBody(BlockBodyMessage),            // Block body available
     Tx(TxMessage),                          // Transaction available
     Output(OutputMessage),                  // New output (UTXO) created
+    Input(InputMessage),                    // Input used - UTXO spent
 }
 
 impl Default for Message {
@@ -114,3 +137,8 @@ impl From<OutputMessage> for Message {
     }
 }
 
+impl From<InputMessage> for Message {
+    fn from(msg: InputMessage) -> Self {
+        Message::Input(msg)
+    }
+}
