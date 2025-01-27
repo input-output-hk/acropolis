@@ -1,14 +1,15 @@
 //! Acropolis Block unpacker module for Caryatid
 //! Unpacks block bodies into transactions
 
-use caryatid_sdk::{Context, Module, module, MessageBounds, MessageBusExt};
-use acropolis_messages::{BlockBodyMessage, TxMessage, Message};
+use caryatid_sdk::{Context, Module, module, MessageBusExt};
+use acropolis_messages::{TxMessage, Message};
 use std::sync::Arc;
 use anyhow::Result;
 use config::Config;
 use tracing::{debug, info, error};
 
 use pallas::{
+    ledger::traverse::MultiEraBlock,
 };
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.block.body";
@@ -30,17 +31,56 @@ impl BlockUnpacker
 
         // Subscribe for block body messages
         // Get configuration
-        let topic = config.get_string("subscribe-topic")
+        let subscribe_topic = config.get_string("subscribe-topic")
             .unwrap_or(DEFAULT_SUBSCRIBE_TOPIC.to_string());
-        info!("Creating subscriber on '{}'", topic);
+        info!("Creating subscriber on '{subscribe_topic}'");
 
-        context.message_bus.subscribe(&topic,
+        let publish_topic = config.get_string("publish-topic")
+            .unwrap_or(DEFAULT_PUBLISH_TOPIC.to_string());
+        info!("Publishing on '{publish_topic}'");
+
+        context.clone().message_bus.subscribe(&subscribe_topic,
                                       move |message: Arc<Message>| {
            match message.as_ref() {
                Message::BlockBody(body_msg) => {
                    info!("Received block {}", body_msg.slot);
 
-                   // TODO parse body and publish transactions
+                   // Parse the body
+                   match MultiEraBlock::decode(&body_msg.raw) {
+                       Ok(block) => {
+                           let txs = block.txs();
+
+                           info!("Decoded block height {} with {} txs", block.number(), txs.len());
+
+                           // Output all the TX
+                           let mut index: u32 = 0;
+                           for tx in txs {
+
+                               // Construct message
+                               let message = TxMessage {
+                                   slot: body_msg.slot,
+                                   index: index,
+                                   raw: tx.encode()
+                               };
+
+                               debug!("Block unpacker sending {:?}", message);
+                               let message_enum: Message = message.into();
+
+                               let context = context.clone();
+                               let publish_topic = publish_topic.clone();
+                               tokio::spawn(async move {
+                                   context.message_bus.publish(&publish_topic,
+                                                               Arc::new(message_enum))
+                                       .await
+                                       .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+                               });
+
+                               index += 1;
+                           }
+                       },
+
+                       Err(e) => error!("Can't decode block {}: {e}", body_msg.slot)
+                   }
                }
 
                _ => error!("Unexpected message type: {message:?}")

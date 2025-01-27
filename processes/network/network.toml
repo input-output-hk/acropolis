@@ -20,6 +20,10 @@ workers = 10
 pattern = "clock.#"
 bus = "internal"
 
+[[message-router.route]]  # Route all cardano externally only, so we can monitor them
+pattern = "cardano.#"
+bus = "external"
+
 [[message-router.route]]  # Everything goes to both
 pattern = "#"
 bus = [ "internal", "external" ]
