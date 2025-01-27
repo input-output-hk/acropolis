@@ -2,7 +2,7 @@
 //! Unpacks transaction bodies into UTXO events
 
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
-use acropolis_messages::{OutputMessage, Message};
+use acropolis_messages::{OutputMessage, InputMessage, Message};
 use std::sync::Arc;
 use anyhow::Result;
 use config::Config;
@@ -49,10 +49,42 @@ impl TxUnpacker
                    match MultiEraTx::decode(&tx_msg.raw) {
                        Ok(tx) => {
                            let outputs = tx.outputs();
-                           info!("Decoded transaction with {} outputs", outputs.len());
+                           let inputs = tx.inputs();
+                           info!("Decoded transaction with {} inputs, {} outputs",
+                                 inputs.len(), outputs.len());
+
+                           // Publish all the inputs
+                           let mut index: u32 = 0;
+                           for input in inputs {  // MultiEraInput
+
+                               let oref = input.output_ref();
+
+                               // Construct message
+                               let message = InputMessage {
+                                   slot: tx_msg.slot,
+                                   tx_index: tx_msg.index,
+                                   index: index,
+                                   ref_index: oref.index(),
+                                   ref_hash: oref.hash().to_vec(),
+                               };
+
+                               debug!("Tx unpacker sending input {:?}", message);
+                               let message_enum: Message = message.into();
+
+                               let context = context.clone();
+                               let topic = publish_topic.clone() + "spent";
+                               tokio::spawn(async move {
+                                   context.message_bus.publish(&topic,
+                                                               Arc::new(message_enum))
+                                       .await
+                                       .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+                               });
+
+                               index += 1;
+                           }
 
                            // Publish all the outputs
-                           let mut index: u32 = 0;
+                           index = 0;
                            for output in outputs {  // MultiEraOutput
 
                                match output.address() {
@@ -63,14 +95,15 @@ impl TxUnpacker
                                            slot: tx_msg.slot,
                                            tx_index: tx_msg.index,
                                            index: index,
-                                           address: address.to_vec()
+                                           address: address.to_vec(),
+                                           value: output.value().coin(),
                                        };
 
                                        debug!("Tx unpacker sending output {:?}", message);
                                        let message_enum: Message = message.into();
 
                                        let context = context.clone();
-                                       let topic = publish_topic.clone() + "spent";
+                                       let topic = publish_topic.clone() + "created";
                                        tokio::spawn(async move {
                                            context.message_bus.publish(&topic,
                                                                        Arc::new(message_enum))
