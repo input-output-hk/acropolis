@@ -48,35 +48,41 @@ impl BlockUnpacker
                    // Parse the body
                    match MultiEraBlock::decode(&body_msg.raw) {
                        Ok(block) => {
-                           let txs = block.txs();
+                           info!("Decoded block height {} with {} txs", block.number(),
+                                 block.txs().len());
 
-                           info!("Decoded block height {} with {} txs", block.number(), txs.len());
+                           let context = context.clone();
+                           let publish_topic = publish_topic.clone();
+                           let slot = body_msg.slot;
 
-                           // Output all the TX
-                           let mut index: u32 = 0;
-                           for tx in txs {
+                           // Encode the Tx into hex, and take ownership
+                           let txs: Vec<_> = block.txs().into_iter().map(|tx| tx.encode()).collect();
 
-                               // Construct message
-                               let message = TxMessage {
-                                   slot: body_msg.slot,
-                                   index: index,
-                                   raw: tx.encode()
-                               };
+                           tokio::spawn(async move {
+                               // Output all the TX in order
+                               let mut index: u32 = 0;
+                               for tx in txs {
 
-                               debug!("Block unpacker sending {:?}", message);
-                               let message_enum: Message = message.into();
+                                   // Construct message
+                                   let tx_message = TxMessage {
+                                       slot: slot,
+                                       index: index,
+                                       raw: tx,
+                                   };
 
-                               let context = context.clone();
-                               let publish_topic = publish_topic.clone();
-                               tokio::spawn(async move {
+                                   debug!("Block unpacker sending {:?}", tx_message);
+                                   let message_enum: Message = tx_message.into();
+
+                                   let context = context.clone();
+                                   let publish_topic = publish_topic.clone();
                                    context.message_bus.publish(&publish_topic,
                                                                Arc::new(message_enum))
                                        .await
                                        .unwrap_or_else(|e| error!("Failed to publish: {e}"));
-                               });
 
-                               index += 1;
-                           }
+                                   index += 1;
+                               }
+                           });
                        },
 
                        Err(e) => error!("Can't decode block {}: {e}", body_msg.slot)
