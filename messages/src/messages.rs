@@ -51,6 +51,9 @@ pub struct OutputMessage {
     /// Tx index in block
     pub tx_index: u32,
 
+    /// Tx hash
+    pub tx_hash: Vec<u8>,
+
     /// Output index in tx
     pub index: u32,
 

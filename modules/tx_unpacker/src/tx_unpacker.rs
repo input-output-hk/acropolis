@@ -94,6 +94,7 @@ impl TxUnpacker
                                        let message = OutputMessage {
                                            slot: tx_msg.slot,
                                            tx_index: tx_msg.index,
+                                           tx_hash: tx.hash().to_vec(),
                                            index: index,
                                            address: address.to_vec(),
                                            value: output.value().coin(),
