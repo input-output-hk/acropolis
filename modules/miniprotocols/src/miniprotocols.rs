@@ -135,9 +135,10 @@ impl Miniprotocols
         let magic_number: u64 = config.get::<u64>("magic_number")
             .unwrap_or(DEFAULT_MAGIC_NUMBER);
 
+        info!("Connecting to {node_address} ({magic_number})");
+
         tokio::spawn(async move {
             // TODO Multiple peers
-            info!("Connecting to {node_address} ({magic_number})");
             let peer = PeerClient::connect(node_address, magic_number).await;
 
             match peer {
