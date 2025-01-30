@@ -14,11 +14,8 @@ acropolis_messages = { path = "../../messages" }
 pallas = "0.32.0"
 anyhow = "1.0"
 tokio = { version = "1", features = ["full"] }
-serde_json = "1.0"
 config = "0.14.0"
 tracing = "0.1.40"
-tracing-subscriber = "0.3.18"
-serde = { version = "1.0.214", features = ["derive"] }
 
 [lib]
 path = "src/block_unpacker.rs"
