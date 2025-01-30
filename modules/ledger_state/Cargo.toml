@@ -1,0 +1,21 @@
+# Acropolis ledger state module
+
+[package]
+name = "acropolis_module_ledger_state"
+version = "0.1.0"
+edition = "2021"
+authors = ["Paul Clark <paul.clark@iohk.io>"]
+description = "Ledger state Caryatid module for Acropolis"
+license = "Apache-2.0"
+
+[dependencies]
+caryatid_sdk = "0.1.0"
+acropolis_messages = { path = "../../messages" }
+anyhow = "1.0"
+tokio = { version = "1", features = ["full"] }
+config = "0.14.0"
+tracing = "0.1.40"
+hex = "0.4.3"
+
+[lib]
+path = "src/ledger_state.rs"
