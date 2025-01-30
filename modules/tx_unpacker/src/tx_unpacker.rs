@@ -13,7 +13,8 @@ use pallas::{
 };
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.tx";
-const DEFAULT_PUBLISH_TOPIC: &str = "cardano.utxo";
+const DEFAULT_PUBLISH_INPUT_TOPIC: &str = "cardano.utxo.spent";
+const DEFAULT_PUBLISH_OUTPUT_TOPIC: &str = "cardano.utxo.created";
 
 /// Tx unpacker module
 /// Parameterised by the outer message enum used on the bus
@@ -35,9 +36,13 @@ impl TxUnpacker
             .unwrap_or(DEFAULT_SUBSCRIBE_TOPIC.to_string());
         info!("Creating subscriber on '{subscribe_topic}'");
 
-        let publish_topic = config.get_string("publish-topic")
-            .unwrap_or(DEFAULT_PUBLISH_TOPIC.to_string());
-        info!("Publishing on '{publish_topic}'");
+        let publish_input_topic = config.get_string("publish-input-topic")
+            .unwrap_or(DEFAULT_PUBLISH_INPUT_TOPIC.to_string());
+        info!("Publishing input UTXOs on '{publish_input_topic}'");
+
+        let publish_output_topic = config.get_string("publish-output-topic")
+            .unwrap_or(DEFAULT_PUBLISH_OUTPUT_TOPIC.to_string());
+        info!("Publishing output UTXOs on '{publish_output_topic}'");
 
         context.clone().message_bus.subscribe(&subscribe_topic,
                                       move |message: Arc<Message>| {
@@ -72,7 +77,7 @@ impl TxUnpacker
                                let message_enum: Message = message.into();
 
                                let context = context.clone();
-                               let topic = publish_topic.clone() + "spent";
+                               let topic = publish_input_topic.clone();
                                tokio::spawn(async move {
                                    context.message_bus.publish(&topic,
                                                                Arc::new(message_enum))
@@ -104,7 +109,7 @@ impl TxUnpacker
                                        let message_enum: Message = message.into();
 
                                        let context = context.clone();
-                                       let topic = publish_topic.clone() + "created";
+                                       let topic = publish_input_topic.clone();
                                        tokio::spawn(async move {
                                            context.message_bus.publish(&topic,
                                                                        Arc::new(message_enum))

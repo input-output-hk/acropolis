@@ -6,6 +6,8 @@
 
 [module.tx-unpacker]
 
+[module.ledger-state]
+
 [module.clock]
 
 [message-bus.external]

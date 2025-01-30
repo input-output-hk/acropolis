@@ -12,6 +12,7 @@ use acropolis_messages::Message;
 use acropolis_module_miniprotocols::Miniprotocols;
 use acropolis_module_block_unpacker::BlockUnpacker;
 use acropolis_module_tx_unpacker::TxUnpacker;
+use acropolis_module_ledger_state::LedgerState;
 use caryatid_module_clock::Clock;
 
 /// Standard main
@@ -37,6 +38,8 @@ pub async fn main() -> Result<()> {
     Miniprotocols::register(&mut process);
     BlockUnpacker::register(&mut process);
     TxUnpacker::register(&mut process);
+    LedgerState::register(&mut process);
+
     Clock::<Message>::register(&mut process);
 
     // Run it
