@@ -12,7 +12,7 @@ members = [
     "modules/ledger_state",   # Ledger state
 
     # Process builds
-    "processes/network",      # Network connector process
+    "processes/omnibus",      # All-inclusive omnibus process
 ]
 
 resolver = "2"
