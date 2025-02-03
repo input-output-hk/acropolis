@@ -1,10 +1,10 @@
-# Acropolis network process
+# Acropolis omnibus process
 [package]
-name = "acropolis_process_network"
+name = "acropolis_process_omnibus"
 version = "0.1.0"
 edition = "2021"
 authors = ["Paul Clark <paul.clark@iohk.io>"]
-description = "Acropolis network interface process"
+description = "Acropolis omnibus process containing every module"
 license = "Apache-2.0"
 
 [dependencies]

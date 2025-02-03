@@ -1,4 +1,4 @@
-//! 'main' for the Acropolis network process
+//! 'main' for the Acropolis omnibus process
 
 use caryatid_process::Process;
 use anyhow::Result;
@@ -22,11 +22,11 @@ pub async fn main() -> Result<()> {
     // Initialise tracing
     tracing_subscriber::fmt::init();
 
-    info!("Acropolis network process");
+    info!("Acropolis omnibus process");
 
     // Read the config
     let config = Arc::new(Config::builder()
-        .add_source(File::with_name("network"))
+        .add_source(File::with_name("omnibus"))
         .add_source(Environment::with_prefix("ACROPOLIS"))
         .build()
         .unwrap());
