@@ -4,7 +4,7 @@
 use caryatid_sdk::{Context, Module, module};
 use acropolis_messages::{BlockHeaderMessage, BlockBodyMessage, Message};
 use std::sync::Arc;
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use config::Config;
 use tracing::{debug, info, error};
 
@@ -26,6 +26,8 @@ const DEFAULT_BODY_TOPIC: &str = "cardano.block.body";
 
 const DEFAULT_NODE_ADDRESS: &str = "preview-node.world.dev.cardano.org:30002";
 const DEFAULT_MAGIC_NUMBER: u64 = 2;
+
+const DEFAULT_SYNC_POINT: &str = "tip";
 
 /// Network mini-protocols module
 /// Parameterised by the outer message enum used on the bus
@@ -75,9 +77,15 @@ impl Miniprotocols
     async fn run_chain_sync(context: Arc<Context<Message>>, config: Arc<Config>,
                             peer: &mut PeerClient) -> Result<()> {
         let topic = config.get_string("header-topic").unwrap_or(DEFAULT_HEADER_TOPIC.to_string());
+        let sync_point = config.get_string("sync-point").unwrap_or(DEFAULT_SYNC_POINT.to_string());
 
-        // Start a chain sync at the tip
-        peer.chainsync().intersect_tip().await?;
+        match sync_point.as_str() {
+            "tip" => peer.chainsync().intersect_tip().await?,
+            "origin" => peer.chainsync().intersect_origin().await?,
+            _ => return Err(anyhow!("Sync point {sync_point} not understood"))
+        };
+
+        info!("Synchronising to {sync_point}");
 
         // Loop fetching messages
         loop {

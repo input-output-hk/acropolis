@@ -1,6 +1,7 @@
 # Top-level configuration for Acropolis omnibus process
 
 [module.miniprotocols]
+sync-point = "origin"
 
 [module.block-unpacker]
 
