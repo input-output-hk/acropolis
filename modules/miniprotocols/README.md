@@ -21,8 +21,8 @@ node_address = "preview-node.world.dev.cardano.org:30002"
 magic_number = 2
 
 # Message topics
-header-topic = cardano.block.header
-body-topic = cardano.block.body
+header-topic = "cardano.block.header"
+body-topic = "cardano.block.body"
 
 ```
 

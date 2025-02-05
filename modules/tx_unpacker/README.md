@@ -12,15 +12,15 @@ everything except the section header can be left out.
 
 # Message topics
 subscribe-topic = cardano.tx
-publish-input-topic = cardano.utxo.spent
-publish-output-topic = cardano.utxo.created
+publish-input-topic = "cardano.utxo.spent"
+publish-output-topic = "cardano.utxo.created"
 
 ```
 
 ## Messages
 
 The transaction unpacker subscribes for TxMessages on `cardano.tx`
-(see the [Block Unpacker](../block-unpacker) module for details).  It decodes
+(see the [Block Unpacker](../block_unpacker) module for details).  It decodes
 the transactions (without any validation!), and extracts the inputs and outputs.
 
 Inputs are published as multiple InputMessages on `cardano.utxo.spent`,
