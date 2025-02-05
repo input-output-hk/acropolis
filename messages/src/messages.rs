@@ -73,7 +73,7 @@ pub struct InputMessage {
     /// Tx index in block
     pub tx_index: u32,
 
-    /// Output index in tx
+    /// Input index in tx
     pub index: u32,
 
     /// Tx hash of referenced UTXO
