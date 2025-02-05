@@ -20,6 +20,9 @@ everything except the section header can be left out.
 node_address = "preview-node.world.dev.cardano.org:30002"
 magic_number = 2
 
+# Initial sync point
+sync-point = "tip"   # or "origin"
+
 # Message topics
 header-topic = "cardano.block.header"
 body-topic = "cardano.block.body"
