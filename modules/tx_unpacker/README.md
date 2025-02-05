@@ -11,7 +11,7 @@ everything except the section header can be left out.
 [module.tx-unpacker]
 
 # Message topics
-subscribe-topic = cardano.tx
+subscribe-topic = "cardano.tx"
 publish-input-topic = "cardano.utxo.spent"
 publish-output-topic = "cardano.utxo.created"
 
@@ -35,7 +35,7 @@ pub struct InputMessage {
     /// Tx index in block
     pub tx_index: u32,
 
-    /// Inpu index in tx
+    /// Input index in tx
     pub index: u32,
 
     /// Tx hash of referenced UTXO
