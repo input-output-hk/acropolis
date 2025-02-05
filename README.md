@@ -51,6 +51,11 @@ are very basic and naive:
   changes
 * [Ledger State](modules/ledger_state) - watches UTXO changes and maintains a basic in-memory ledger state
 
+## Messages
+
+The messages passed between modules are defined in a single global enum in
+the [Messages](messages) crate.
+
 ## Processes
 
 There is currently only one process, for testing:
