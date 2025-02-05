@@ -17,8 +17,8 @@ everything except the section header can be left out.
 [module.miniprotocols]
 
 # Upstream node connection
-node_address = "preview-node.world.dev.cardano.org:30002"
-magic_number = 2
+node-address = "preview-node.world.dev.cardano.org:30002"
+magic-number = 2
 
 # Initial sync point
 sync-point = "tip"   # or "origin"
