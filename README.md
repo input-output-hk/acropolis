@@ -51,6 +51,19 @@ are very basic and naive:
   changes
 * [Ledger State](modules/ledger_state) - watches UTXO changes and maintains a basic in-memory ledger state
 
+```mermaid
+graph LR
+
+   Miniprotocols
+   BlockUnpacker(Block Unpacker)
+   TxUnpacker(Transaction Unpacker)
+   LedgerState(LedgerState)
+
+   Miniprotocols --> BlockUnpacker
+   BlockUnpacker --> TxUnpacker
+   TxUnpacker --> LedgerState
+```
+
 ## Messages
 
 The messages passed between modules are defined in a single global enum in

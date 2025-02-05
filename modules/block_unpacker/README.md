@@ -11,8 +11,8 @@ everything except the section header can be left out.
 [module.block-unpacker]
 
 # Message topics
-subscribe-topic = cardano.block.body
-publish-topic = cardano.tx
+subscribe-topic = "cardano.block.body"
+publish-topic = "cardano.tx"
 
 ```
 
