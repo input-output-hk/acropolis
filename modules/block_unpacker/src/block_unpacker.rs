@@ -39,58 +39,59 @@ impl BlockUnpacker
             .unwrap_or(DEFAULT_PUBLISH_TOPIC.to_string());
         info!("Publishing on '{publish_topic}'");
 
-        context.clone().message_bus.subscribe(&subscribe_topic,
-                                      move |message: Arc<Message>| {
-           match message.as_ref() {
-               Message::BlockBody(body_msg) => {
-                   info!("Received block {}", body_msg.slot);
+        context.clone().message_bus.subscribe(&subscribe_topic, move |message: Arc<Message>| {
+            let context = context.clone();
+            let publish_topic = publish_topic.clone();
 
-                   // Parse the body
-                   match MultiEraBlock::decode(&body_msg.raw) {
-                       Ok(block) => {
-                           info!("Decoded block height {} with {} txs", block.number(),
-                                 block.txs().len());
+            async move {
+                match message.as_ref() {
+                    Message::BlockBody(body_msg) => {
+                        info!("Received block {}", body_msg.slot);
 
-                           let context = context.clone();
-                           let publish_topic = publish_topic.clone();
-                           let slot = body_msg.slot;
+                        // Parse the body
+                        match MultiEraBlock::decode(&body_msg.raw) {
+                            Ok(block) => {
+                                info!("Decoded block height {} with {} txs", block.number(),
+                                      block.txs().len());
 
-                           // Encode the Tx into hex, and take ownership
-                           let txs: Vec<_> = block.txs().into_iter().map(|tx| tx.encode()).collect();
+                                let context = context.clone();
+                                let publish_topic = publish_topic.clone();
+                                let slot = body_msg.slot;
 
-                           tokio::spawn(async move {
-                               // Output all the TX in order
-                               let mut index: u32 = 0;
-                               for tx in txs {
+                                // Encode the Tx into hex, and take ownership
+                                let txs: Vec<_> = block.txs().into_iter()
+                                    .map(|tx| tx.encode()).collect();
 
-                                   // Construct message
-                                   let tx_message = TxMessage {
-                                       slot: slot,
-                                       index: index,
-                                       raw: tx,
-                                   };
+                                // Output all the TX in order
+                                let mut index: u32 = 0;
+                                for tx in txs {
 
-                                   debug!("Block unpacker sending {:?}", tx_message);
-                                   let message_enum: Message = tx_message.into();
+                                    // Construct message
+                                    let tx_message = TxMessage {
+                                        slot: slot,
+                                        index: index,
+                                        raw: tx,
+                                    };
 
-                                   let context = context.clone();
-                                   let publish_topic = publish_topic.clone();
-                                   context.message_bus.publish(&publish_topic,
-                                                               Arc::new(message_enum))
-                                       .await
-                                       .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+                                    debug!("Block unpacker sending {:?}", tx_message);
+                                    let message_enum: Message = tx_message.into();
 
-                                   index += 1;
-                               }
-                           });
-                       },
+                                    context.message_bus.publish(&publish_topic,
+                                                                Arc::new(message_enum))
+                                        .await
+                                        .unwrap_or_else(|e| error!("Failed to publish: {e}"));
 
-                       Err(e) => error!("Can't decode block {}: {e}", body_msg.slot)
-                   }
-               }
+                                    index += 1;
+                                }
+                            },
 
-               _ => error!("Unexpected message type: {message:?}")
-           }
+                            Err(e) => error!("Can't decode block {}: {e}", body_msg.slot)
+                        }
+                    }
+
+                    _ => error!("Unexpected message type: {message:?}")
+                }
+            }
         })?;
 
         Ok(())

@@ -85,31 +85,36 @@ impl LedgerState
             .unwrap_or(DEFAULT_SUBSCRIBE_TOPIC.to_string());
         info!("Creating subscriber on '{subscribe_topic}'");
 
-        context.clone().message_bus.subscribe(&subscribe_topic,
-                                      move |message: Arc<Message>| {
-           match message.as_ref() {
-               Message::Input(input_msg) => {
-                   info!("UTXO << {}:{}", encode(&input_msg.ref_hash), input_msg.ref_index);
-                   let key = UTXOKey::new(&input_msg.ref_hash, input_msg.index);
-                   let mut state = state.write().unwrap();
-                   match state.utxos.remove(&key) {
-                       Some(previous) => info!("        - spent {} from {}", previous.value,
-                                               encode(previous.address)),
-                       None => info!("        - not previously seen")
-                   }
-               }
+        context.clone().message_bus.subscribe(&subscribe_topic, move |message: Arc<Message>| {
 
-               Message::Output(output_msg) => {
-                   info!("UTXO >> {}:{}", encode(&output_msg.tx_hash), output_msg.index);
-                   info!("        - adding {} to {}", output_msg.value, encode(&output_msg.address));
-                   let key = UTXOKey::new(&output_msg.tx_hash, output_msg.index);
-                   let mut state = state.write().unwrap();
-                   state.utxos.insert(key, UTXOValue { address: output_msg.address.clone(),
-                                                       value: output_msg.value });
-               }
+            let state = state.clone();
 
-               _ => error!("Unexpected message type: {message:?}")
-           }
+            async move {
+                match message.as_ref() {
+                    Message::Input(input_msg) => {
+                        info!("UTXO << {}:{}", encode(&input_msg.ref_hash), input_msg.ref_index);
+                        let key = UTXOKey::new(&input_msg.ref_hash, input_msg.index);
+                        let mut state = state.write().unwrap();
+                        match state.utxos.remove(&key) {
+                            Some(previous) => info!("        - spent {} from {}", previous.value,
+                                                    encode(previous.address)),
+                            None => info!("        - not previously seen")
+                        }
+                    }
+
+                    Message::Output(output_msg) => {
+                        info!("UTXO >> {}:{}", encode(&output_msg.tx_hash), output_msg.index);
+                        info!("        - adding {} to {}", output_msg.value,
+                              encode(&output_msg.address));
+                        let key = UTXOKey::new(&output_msg.tx_hash, output_msg.index);
+                        let mut state = state.write().unwrap();
+                        state.utxos.insert(key, UTXOValue { address: output_msg.address.clone(),
+                                                            value: output_msg.value });
+                    }
+
+                    _ => error!("Unexpected message type: {message:?}")
+                }
+            }
         })?;
 
         Ok(())

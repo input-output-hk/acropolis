@@ -8,9 +8,9 @@ description = "Acropolis omnibus process containing every module"
 license = "Apache-2.0"
 
 [dependencies]
-caryatid_process = "0.1.0"
-caryatid_sdk = "0.1.0"
-caryatid_module_clock = "0.1.0"
+caryatid_process = "0.2"
+caryatid_sdk = "0.2"
+caryatid_module_clock = "0.2"
 
 # Core message definition
 acropolis_messages = { path = "../../messages" }

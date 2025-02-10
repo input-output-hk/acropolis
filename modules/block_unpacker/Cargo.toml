@@ -2,14 +2,14 @@
 
 [package]
 name = "acropolis_module_block_unpacker"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["Paul Clark <paul.clark@iohk.io>"]
 description = "Block unpacker Caryatid module for Acropolis"
 license = "Apache-2.0"
 
 [dependencies]
-caryatid_sdk = "0.1.0"
+caryatid_sdk = "0.2.0"
 acropolis_messages = { path = "../../messages" }
 pallas = "0.32.0"
 anyhow = "1.0"

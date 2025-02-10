@@ -44,94 +44,92 @@ impl TxUnpacker
             .unwrap_or(DEFAULT_PUBLISH_OUTPUT_TOPIC.to_string());
         info!("Publishing output UTXOs on '{publish_output_topic}'");
 
-        context.clone().message_bus.subscribe(&subscribe_topic,
-                                      move |message: Arc<Message>| {
-           match message.as_ref() {
-               Message::Tx(tx_msg) => {
-                   info!("Received tx {}:{}", tx_msg.slot, tx_msg.index);
+        context.clone().message_bus.subscribe(&subscribe_topic, move |message: Arc<Message>| {
 
-                   // Parse the tx
-                   match MultiEraTx::decode(&tx_msg.raw) {
-                       Ok(tx) => {
-                           let outputs = tx.outputs();
-                           let inputs = tx.inputs();
-                           info!("Decoded transaction with {} inputs, {} outputs",
-                                 inputs.len(), outputs.len());
+            let context = context.clone();
+            let publish_input_topic = publish_input_topic.clone();
+            let publish_output_topic = publish_output_topic.clone();
 
-                           // Publish all the inputs
-                           let mut index: u32 = 0;
-                           for input in inputs {  // MultiEraInput
+            async move {
+                match message.as_ref() {
+                    Message::Tx(tx_msg) => {
+                        info!("Received tx {}:{}", tx_msg.slot, tx_msg.index);
 
-                               let oref = input.output_ref();
+                        // Parse the tx
+                        match MultiEraTx::decode(&tx_msg.raw) {
+                            Ok(tx) => {
+                                let outputs = tx.outputs();
+                                let inputs = tx.inputs();
+                                info!("Decoded transaction with {} inputs, {} outputs",
+                                      inputs.len(), outputs.len());
 
-                               // Construct message
-                               let message = InputMessage {
-                                   slot: tx_msg.slot,
-                                   tx_index: tx_msg.index,
-                                   index: index,
-                                   ref_index: oref.index(),
-                                   ref_hash: oref.hash().to_vec(),
-                               };
+                                // Publish all the inputs
+                                let mut index: u32 = 0;
+                                for input in inputs {  // MultiEraInput
 
-                               debug!("Tx unpacker sending input {:?}", message);
-                               let message_enum: Message = message.into();
+                                    let oref = input.output_ref();
 
-                               let context = context.clone();
-                               let topic = publish_input_topic.clone();
-                               tokio::spawn(async move {
-                                   context.message_bus.publish(&topic,
-                                                               Arc::new(message_enum))
-                                       .await
-                                       .unwrap_or_else(|e| error!("Failed to publish: {e}"));
-                               });
+                                    // Construct message
+                                    let message = InputMessage {
+                                        slot: tx_msg.slot,
+                                        tx_index: tx_msg.index,
+                                        index: index,
+                                        ref_index: oref.index(),
+                                        ref_hash: oref.hash().to_vec(),
+                                    };
 
-                               index += 1;
-                           }
+                                    debug!("Tx unpacker sending input {:?}", message);
+                                    let message_enum: Message = message.into();
 
-                           // Publish all the outputs
-                           index = 0;
-                           for output in outputs {  // MultiEraOutput
+                                    context.message_bus.publish(&publish_output_topic,
+                                                                Arc::new(message_enum))
+                                        .await
+                                        .unwrap_or_else(|e| error!("Failed to publish: {e}"));
 
-                               match output.address() {
-                                   Ok(address) =>
-                                   {
-                                       // Construct message
-                                       let message = OutputMessage {
-                                           slot: tx_msg.slot,
-                                           tx_index: tx_msg.index,
-                                           tx_hash: tx.hash().to_vec(),
-                                           index: index,
-                                           address: address.to_vec(),
-                                           value: output.value().coin(),
-                                       };
+                                    index += 1;
+                                }
 
-                                       debug!("Tx unpacker sending output {:?}", message);
-                                       let message_enum: Message = message.into();
+                                // Publish all the outputs
+                                index = 0;
+                                for output in outputs {  // MultiEraOutput
 
-                                       let context = context.clone();
-                                       let topic = publish_input_topic.clone();
-                                       tokio::spawn(async move {
-                                           context.message_bus.publish(&topic,
-                                                                       Arc::new(message_enum))
-                                               .await
-                                               .unwrap_or_else(|e| error!("Failed to publish: {e}"));
-                                       });
-                                   },
+                                    match output.address() {
+                                        Ok(address) =>
+                                        {
+                                            // Construct message
+                                            let message = OutputMessage {
+                                                slot: tx_msg.slot,
+                                                tx_index: tx_msg.index,
+                                                tx_hash: tx.hash().to_vec(),
+                                                index: index,
+                                                address: address.to_vec(),
+                                                value: output.value().coin(),
+                                            };
 
-                                   Err(e) => error!("Can't parse output {index} in tx: {e}")
-                               }
+                                            debug!("Tx unpacker sending output {:?}", message);
+                                            let message_enum: Message = message.into();
 
-                               index += 1;
-                           }
-                       },
+                                            context.message_bus.publish(&publish_input_topic,
+                                                                        Arc::new(message_enum))
+                                                .await
+                                                .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+                                        },
 
-                       Err(e) => error!("Can't decode transaction {}:{}: {e}",
-                                        tx_msg.slot, tx_msg.index)
-                   }
-               }
+                                        Err(e) => error!("Can't parse output {index} in tx: {e}")
+                                    }
 
-               _ => error!("Unexpected message type: {message:?}")
-           }
+                                    index += 1;
+                                }
+                            },
+
+                            Err(e) => error!("Can't decode transaction {}:{}: {e}",
+                                             tx_msg.slot, tx_msg.index)
+                        }
+                    }
+
+                    _ => error!("Unexpected message type: {message:?}")
+                }
+            }
         })?;
 
         Ok(())
