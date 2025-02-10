@@ -9,7 +9,7 @@ description = "Ledger state Caryatid module for Acropolis"
 license = "Apache-2.0"
 
 [dependencies]
-caryatid_sdk = "0.1.0"
+caryatid_sdk = "0.2"
 acropolis_messages = { path = "../../messages" }
 anyhow = "1.0"
 tokio = { version = "1", features = ["full"] }

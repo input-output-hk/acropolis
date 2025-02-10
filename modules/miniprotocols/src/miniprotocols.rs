@@ -93,7 +93,7 @@ impl Miniprotocols
 
             match next {
                 NextResponse::RollForward(h, Tip(point, _)) => {
-                    debug!("RollForward to {point:?}");
+                    info!("RollForward to {point:?}");
                     match h.byron_prefix {
                         None => {
                             let header = MultiEraHeader::decode(h.variant, None, &h.cbor);
@@ -130,6 +130,9 @@ impl Miniprotocols
                 },
 
                 // TODO Handle RollBackward, publish sync message
+                NextResponse::RollBackward(point, _) => {
+                    info!("RollBackward to {point:?}");
+                },
 
                 _ => debug!("Ignoring message: {next:?}")
             }
