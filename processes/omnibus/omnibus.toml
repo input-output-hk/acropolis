@@ -1,7 +1,9 @@
 # Top-level configuration for Acropolis omnibus process
 
 [module.miniprotocols]
-sync-point = "origin"
+sync-point = "tip"
+node-address = "backbone.cardano.iog.io:3001"
+magic-number = 764824073
 
 [module.block-unpacker]
 
