@@ -12,52 +12,26 @@ everything except the section header can be left out.
 
 # Message topics
 subscribe-topic = "cardano.tx"
-publish-input-topic = "cardano.utxo.spent"
-publish-output-topic = "cardano.utxo.created"
+publish-utxo-deltas-topic = "cardano.utxo.deltas"
 
 ```
 
 ## Messages
 
-The transaction unpacker subscribes for TxMessages on `cardano.tx`
+The transaction unpacker subscribes for TxMessages on `cardano.txs`
 (see the [Block Unpacker](../block_unpacker) module for details).  It decodes
 the transactions (without any validation!), and extracts the inputs and outputs.
 
-Inputs are published as multiple InputMessages on `cardano.utxo.spent`,
-containing the slot number, transaction index in the block, input index in the
-transaction, referenced transaction hash and referenced output index:
+Inputs are published as a single UTXODeltasMessage on `cardano.utxo.deltas`,
+containing the slot number, and an ordered list of input and output changes for the
+entire block.  This ensure the deltas are kept in order and are valid in case of
+intra-block references:
+
 
 ```rust
-pub struct InputMessage {
-    /// Slot number
-    pub slot: u64,
-
-    /// Tx index in block
-    pub tx_index: u32,
-
-    /// Input index in tx
-    pub index: u32,
-
-    /// Tx hash of referenced UTXO
-    pub ref_hash: Vec<u8>,
-
-    /// Index of UTXO in referenced tx
-    pub ref_index: u64,
-}
-```
-
-Outputs are published as multiple OutputMessages on `cardano.utxo.created`,
-containing the slot number, transaction index in the block, transaction hash,
-output index, address and value:
-
-```rust
-pub struct OutputMessage {
-    /// Slot number
-    pub slot: u64,
-
-    /// Tx index in block
-    pub tx_index: u32,
-
+/// Transaction output (UTXO)
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TxOutput {
     /// Tx hash
     pub tx_hash: Vec<u8>,
 
@@ -69,6 +43,40 @@ pub struct OutputMessage {
 
     /// Output value (Lovelace)
     pub value: u64,
+}
+
+/// Transaction input (UTXO reference)
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TxInput {
+    /// Tx hash of referenced UTXO
+    pub tx_hash: Vec<u8>,
+
+    /// Index of UTXO in referenced tx
+    pub index: u64,
+}
+
+/// Option of either TxOutput or TxInput
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum UTXODelta {
+    None(()),
+    Output(TxOutput),
+    Input(TxInput),
+}
+
+impl Default for UTXODelta {
+    fn default() -> Self {
+        UTXODelta::None(())
+    }
+}
+
+/// Message encapsulating multiple UTXO deltas, in order
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct UTXODeltasMessage {
+    /// Slot number
+    pub slot: u64,
+
+    /// Ordered set of deltas
+    pub deltas: Vec<UTXODelta>
 }
 ```
 

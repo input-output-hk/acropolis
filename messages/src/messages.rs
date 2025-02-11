@@ -29,58 +29,67 @@ pub struct BlockBodyMessage {
     pub raw: Vec<u8>,
 }
 
-/// Transaction message
+/// Transactions message
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
-pub struct TxMessage {
+pub struct RawTxsMessage {
     /// Slot number
     pub slot: u64,
 
-    /// Index in block
-    pub index: u32,
-
-    /// Raw Data
-    pub raw: Vec<u8>,
+    /// Raw Data for each transaction
+    pub txs: Vec<Vec<u8>>,
 }
 
-/// UTXO created message (tx output)
+/// Transaction output (UTXO)
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
-pub struct OutputMessage {
-    /// Slot number
-    pub slot: u64,
-
-    /// Tx index in block
-    pub tx_index: u32,
-
+pub struct TxOutput {
     /// Tx hash
     pub tx_hash: Vec<u8>,
 
     /// Output index in tx
-    pub index: u32,
+    pub index: u64,
 
     /// Address data (raw)
     pub address: Vec<u8>,
 
     /// Output value (Lovelace)
     pub value: u64,
+
+// todo: Implement datum    /// Datum (raw)
+// !!!    pub datum: Vec<u8>,
 }
 
-/// UTXO spent message (tx input)
+/// Transaction input (UTXO reference)
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
-pub struct InputMessage {
+pub struct TxInput {
+    /// Tx hash of referenced UTXO
+    pub tx_hash: Vec<u8>,
+
+    /// Index of UTXO in referenced tx
+    pub index: u64,
+}
+
+/// Option of either TxOutput or TxInput
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum UTXODelta {
+    None(()),
+    Output(TxOutput),
+    Input(TxInput),
+}
+
+impl Default for UTXODelta {
+    fn default() -> Self {
+        UTXODelta::None(())
+    }
+}
+
+/// Message encapsulating multiple UTXO deltas, in order
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct UTXODeltasMessage {
     /// Slot number
     pub slot: u64,
 
-    /// Tx index in block
-    pub tx_index: u32,
-
-    /// Input index in tx
-    pub index: u32,
-
-    /// Tx hash of referenced UTXO
-    pub ref_hash: Vec<u8>,
-
-    /// Index of UTXO in referenced tx
-    pub ref_index: u64,
+    /// Ordered set of deltas
+    pub deltas: Vec<UTXODelta>
 }
 
 // === Global message enum ===
@@ -98,9 +107,8 @@ pub enum Message {
     // Cardano messages
     BlockHeader(BlockHeaderMessage),        // Block header available
     BlockBody(BlockBodyMessage),            // Block body available
-    Tx(TxMessage),                          // Transaction available
-    Output(OutputMessage),                  // New output (UTXO) created
-    Input(InputMessage),                    // Input used - UTXO spent
+    ReceivedTxs(RawTxsMessage),             // Transaction available
+    UTXODeltas(UTXODeltasMessage),          // UTXO deltas received
 }
 
 impl Default for Message {
@@ -128,20 +136,15 @@ impl From<BlockBodyMessage> for Message {
     }
 }
 
-impl From<TxMessage> for Message {
-    fn from(msg: TxMessage) -> Self {
-        Message::Tx(msg)
+impl From<RawTxsMessage> for Message {
+    fn from(msg: RawTxsMessage) -> Self {
+        Message::ReceivedTxs(msg)
     }
 }
 
-impl From<OutputMessage> for Message {
-    fn from(msg: OutputMessage) -> Self {
-        Message::Output(msg)
+impl From<UTXODeltasMessage> for Message {
+    fn from(msg: UTXODeltasMessage) -> Self {
+        Message::UTXODeltas(msg)
     }
 }
 
-impl From<InputMessage> for Message {
-    fn from(msg: InputMessage) -> Self {
-        Message::Input(msg)
-    }
-}

@@ -2,7 +2,7 @@
 //! Accepts UTXO events and derives the current ledger state in memory
 
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
-use acropolis_messages::Message;
+use acropolis_messages::{UTXODelta, Message};
 use anyhow::Result;
 use config::Config;
 use tracing::{info, error};
@@ -11,18 +11,18 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, RwLock};
 
-const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.utxo.#";
+const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.utxo.deltas";
 
 /// Key of ledger state store
 #[derive(Debug, Clone, Eq)]
 struct UTXOKey {
     hash: [u8; 32], // Tx hash
-    index: u32,     // Output index in the transaction
+    index: u64,     // Output index in the transaction
 }
 
 impl UTXOKey {
     /// Creates a new UTXOKey from any slice (pads with zeros if < 32 bytes)
-    pub fn new(hash_slice: &[u8], index: u32) -> Self {
+    pub fn new(hash_slice: &[u8], index: u64) -> Self {
         let mut hash = [0u8; 32]; // Initialize with zeros
         let len = hash_slice.len().min(32); // Cap at 32 bytes
         hash[..len].copy_from_slice(&hash_slice[..len]); // Copy input hash
@@ -91,25 +91,42 @@ impl LedgerState
 
             async move {
                 match message.as_ref() {
-                    Message::Input(input_msg) => {
-                        info!("UTXO << {}:{}", encode(&input_msg.ref_hash), input_msg.ref_index);
-                        let key = UTXOKey::new(&input_msg.ref_hash, input_msg.index);
-                        let mut state = state.write().unwrap();
-                        match state.utxos.remove(&key) {
-                            Some(previous) => info!("        - spent {} from {}", previous.value,
-                                                    encode(previous.address)),
-                            None => info!("        - not previously seen")
-                        }
-                    }
+                    Message::UTXODeltas(deltas_msg) => {
 
-                    Message::Output(output_msg) => {
-                        info!("UTXO >> {}:{}", encode(&output_msg.tx_hash), output_msg.index);
-                        info!("        - adding {} to {}", output_msg.value,
-                              encode(&output_msg.address));
-                        let key = UTXOKey::new(&output_msg.tx_hash, output_msg.index);
-                        let mut state = state.write().unwrap();
-                        state.utxos.insert(key, UTXOValue { address: output_msg.address.clone(),
-                                                            value: output_msg.value });
+                        info!("Received {} deltas for slot {}", deltas_msg.deltas.len(),
+                              deltas_msg.slot);
+
+                        for delta in &deltas_msg.deltas {  // UTXODelta
+                            match delta {
+                                UTXODelta::Input(tx_input) => {
+                                    info!("UTXO << {}:{}", encode(&tx_input.tx_hash),
+                                          tx_input.index);
+                                    let key = UTXOKey::new(&tx_input.tx_hash, tx_input.index);
+                                    let mut state = state.write().unwrap();
+                                    match state.utxos.remove(&key) {
+                                        Some(previous) => info!("        - spent {} from {}",
+                                                                previous.value,
+                                                                encode(previous.address)),
+                                        None => info!("        - not previously seen")
+                                    }
+                                },
+
+                                UTXODelta::Output(tx_output) => {
+                                    info!("UTXO >> {}:{}", encode(&tx_output.tx_hash),
+                                          tx_output.index);
+                                    info!("        - adding {} to {}", tx_output.value,
+                                          encode(&tx_output.address));
+                                    let key = UTXOKey::new(&tx_output.tx_hash, tx_output.index);
+                                    let mut state = state.write().unwrap();
+                                    state.utxos.insert(key, UTXOValue {
+                                        address: tx_output.address.clone(),
+                                        value: tx_output.value
+                                    });
+                                },
+
+                                _ => {}
+                            }
+                        }
                     }
 
                     _ => error!("Unexpected message type: {message:?}")

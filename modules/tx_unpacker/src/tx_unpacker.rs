@@ -2,7 +2,7 @@
 //! Unpacks transaction bodies into UTXO events
 
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
-use acropolis_messages::{OutputMessage, InputMessage, Message};
+use acropolis_messages::{TxInput, TxOutput, UTXODelta, UTXODeltasMessage, Message};
 use std::sync::Arc;
 use anyhow::Result;
 use config::Config;
@@ -12,9 +12,8 @@ use pallas::{
     ledger::traverse::MultiEraTx,
 };
 
-const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.tx";
-const DEFAULT_PUBLISH_INPUT_TOPIC: &str = "cardano.utxo.spent";
-const DEFAULT_PUBLISH_OUTPUT_TOPIC: &str = "cardano.utxo.created";
+const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.txs";
+const DEFAULT_PUBLISH_UTXO_DELTAS_TOPIC: &str = "cardano.utxo.deltas";
 
 /// Tx unpacker module
 /// Parameterised by the outer message enum used on the bus
@@ -36,95 +35,85 @@ impl TxUnpacker
             .unwrap_or(DEFAULT_SUBSCRIBE_TOPIC.to_string());
         info!("Creating subscriber on '{subscribe_topic}'");
 
-        let publish_input_topic = config.get_string("publish-input-topic")
-            .unwrap_or(DEFAULT_PUBLISH_INPUT_TOPIC.to_string());
-        info!("Publishing input UTXOs on '{publish_input_topic}'");
-
-        let publish_output_topic = config.get_string("publish-output-topic")
-            .unwrap_or(DEFAULT_PUBLISH_OUTPUT_TOPIC.to_string());
-        info!("Publishing output UTXOs on '{publish_output_topic}'");
+        let publish_utxo_deltas_topic = config.get_string("publish-utxo-deltas-topic")
+            .unwrap_or(DEFAULT_PUBLISH_UTXO_DELTAS_TOPIC.to_string());
+        info!("Publishing UTXO deltas on '{publish_utxo_deltas_topic}'");
 
         context.clone().message_bus.subscribe(&subscribe_topic, move |message: Arc<Message>| {
 
             let context = context.clone();
-            let publish_input_topic = publish_input_topic.clone();
-            let publish_output_topic = publish_output_topic.clone();
+            let publish_utxo_deltas_topic = publish_utxo_deltas_topic.clone();
 
             async move {
                 match message.as_ref() {
-                    Message::Tx(tx_msg) => {
-                        info!("Received tx {}:{}", tx_msg.slot, tx_msg.index);
+                    Message::ReceivedTxs(txs_msg) => {
+                        info!("Received {} txs for slot {}", txs_msg.txs.len(), txs_msg.slot);
 
-                        // Parse the tx
-                        match MultiEraTx::decode(&tx_msg.raw) {
-                            Ok(tx) => {
-                                let outputs = tx.outputs();
-                                let inputs = tx.inputs();
-                                info!("Decoded transaction with {} inputs, {} outputs",
-                                      inputs.len(), outputs.len());
+                        // Construct message
+                        let mut message = UTXODeltasMessage {
+                            slot: txs_msg.slot,
+                            deltas: Vec::new(),
+                        };
 
-                                // Publish all the inputs
-                                let mut index: u32 = 0;
-                                for input in inputs {  // MultiEraInput
+                        for raw_tx in &txs_msg.txs {
+                            // Parse the tx
+                            match MultiEraTx::decode(&raw_tx) {
+                                Ok(tx) => {
+                                    let outputs = tx.outputs();
+                                    let inputs = tx.inputs();
+                                    info!("Decoded transaction with {} inputs, {} outputs",
+                                          inputs.len(), outputs.len());
 
-                                    let oref = input.output_ref();
+                                    // Add all the inputs
+                                    for input in inputs {  // MultiEraInput
 
-                                    // Construct message
-                                    let message = InputMessage {
-                                        slot: tx_msg.slot,
-                                        tx_index: tx_msg.index,
-                                        index: index,
-                                        ref_index: oref.index(),
-                                        ref_hash: oref.hash().to_vec(),
-                                    };
+                                        let oref = input.output_ref();
 
-                                    debug!("Tx unpacker sending input {:?}", message);
-                                    let message_enum: Message = message.into();
+                                        // Construct message
+                                        let tx_input = TxInput {
+                                            tx_hash: oref.hash().to_vec(),
+                                            index: oref.index(),
+                                        };
 
-                                    context.message_bus.publish(&publish_output_topic,
-                                                                Arc::new(message_enum))
-                                        .await
-                                        .unwrap_or_else(|e| error!("Failed to publish: {e}"));
-
-                                    index += 1;
-                                }
-
-                                // Publish all the outputs
-                                index = 0;
-                                for output in outputs {  // MultiEraOutput
-
-                                    match output.address() {
-                                        Ok(address) =>
-                                        {
-                                            // Construct message
-                                            let message = OutputMessage {
-                                                slot: tx_msg.slot,
-                                                tx_index: tx_msg.index,
-                                                tx_hash: tx.hash().to_vec(),
-                                                index: index,
-                                                address: address.to_vec(),
-                                                value: output.value().coin(),
-                                            };
-
-                                            debug!("Tx unpacker sending output {:?}", message);
-                                            let message_enum: Message = message.into();
-
-                                            context.message_bus.publish(&publish_input_topic,
-                                                                        Arc::new(message_enum))
-                                                .await
-                                                .unwrap_or_else(|e| error!("Failed to publish: {e}"));
-                                        },
-
-                                        Err(e) => error!("Can't parse output {index} in tx: {e}")
+                                        message.deltas.push(UTXODelta::Input(tx_input));
                                     }
 
-                                    index += 1;
-                                }
-                            },
+                                    // Add all the outputs
+                                    let mut index: u64 = 0;
+                                    for output in outputs {  // MultiEraOutput
 
-                            Err(e) => error!("Can't decode transaction {}:{}: {e}",
-                                             tx_msg.slot, tx_msg.index)
+                                        match output.address() {
+                                            Ok(address) =>
+                                            {
+                                                let tx_output = TxOutput {
+                                                    tx_hash: tx.hash().to_vec(),
+                                                    index: index,
+                                                    address: address.to_vec(),
+                                                    value: output.value().coin(),
+                                                    // !!! datum
+                                                };
+
+                                                message.deltas.push(UTXODelta::Output(tx_output));
+                                                index += 1;
+                                            }
+
+                                            Err(e) => error!("Can't parse output {index} in tx: {e}")
+                                        }
+                                    }
+                                },
+
+                                Err(e) => error!("Can't decode transaction in slot {}: {e}",
+                                                 txs_msg.slot)
+                            }
                         }
+
+                        debug!("Tx unpacker sending {:?}", message);
+                        let message_enum: Message = message.into();
+
+                        context.message_bus.publish(&publish_utxo_deltas_topic,
+                                                    Arc::new(message_enum))
+                            .await
+                            .unwrap_or_else(|e| error!("Failed to publish: {e}"));
                     }
 
                     _ => error!("Unexpected message type: {message:?}")

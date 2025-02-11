@@ -2,7 +2,7 @@
 //! Unpacks block bodies into transactions
 
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
-use acropolis_messages::{TxMessage, Message};
+use acropolis_messages::{RawTxsMessage, Message};
 use std::sync::Arc;
 use anyhow::Result;
 use config::Config;
@@ -13,7 +13,7 @@ use pallas::{
 };
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.block.body";
-const DEFAULT_PUBLISH_TOPIC: &str = "cardano.tx";
+const DEFAULT_PUBLISH_TOPIC: &str = "cardano.txs";
 
 /// Block unpacker module
 /// Parameterised by the outer message enum used on the bus
@@ -62,27 +62,15 @@ impl BlockUnpacker
                                 let txs: Vec<_> = block.txs().into_iter()
                                     .map(|tx| tx.encode()).collect();
 
-                                // Output all the TX in order
-                                let mut index: u32 = 0;
-                                for tx in txs {
+                                // Construct message
+                                let tx_message = RawTxsMessage { slot, txs };
+                                debug!("Block unpacker sending {:?}", tx_message);
+                                let message_enum: Message = tx_message.into();
 
-                                    // Construct message
-                                    let tx_message = TxMessage {
-                                        slot: slot,
-                                        index: index,
-                                        raw: tx,
-                                    };
-
-                                    debug!("Block unpacker sending {:?}", tx_message);
-                                    let message_enum: Message = tx_message.into();
-
-                                    context.message_bus.publish(&publish_topic,
-                                                                Arc::new(message_enum))
-                                        .await
-                                        .unwrap_or_else(|e| error!("Failed to publish: {e}"));
-
-                                    index += 1;
-                                }
+                                context.message_bus.publish(&publish_topic,
+                                                            Arc::new(message_enum))
+                                    .await
+                                    .unwrap_or_else(|e| error!("Failed to publish: {e}"));
                             },
 
                             Err(e) => error!("Can't decode block {}: {e}", body_msg.slot)
