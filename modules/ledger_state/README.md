@@ -16,12 +16,12 @@ everything except the section header can be left out.
 [module.ledger-state]
 
 # Message topics
-subscribe-topic = "cardano.utxo.#"
+subscribe-topic = "cardano.utxo.deltas"
 ```
 
 ## Messages
 
-The ledger state module subscribes for InputMessages and OutputMessages on `cardano.utxo.#`
+The ledger state module subscribes for UTXODeltasMessages `cardano.utxo.deltas`
 (see the [Transaction Unpacker](../tx_unpacker) module for details).
 
 It doesn't currently publish any messages.

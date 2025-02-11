@@ -12,7 +12,7 @@ everything except the section header can be left out.
 
 # Message topics
 subscribe-topic = "cardano.block.body"
-publish-topic = "cardano.tx"
+publish-topic = "cardano.txs"
 
 ```
 
@@ -20,19 +20,17 @@ publish-topic = "cardano.tx"
 
 The block unpacker subscribes for BlockBodyMessages on `cardano.block.body`
 (see the [Mini-protocols](../miniprotocols) module for details).  It unpacks
-this into transactions, which it publishes as multiple TxMessages on `cardano.tx`,
-containing the slot number, transaction index in the block, and raw CBOR:
+this into transactions, which it publishes as a single RawTxsMessage on `cardano.txs`,
+containing the slot number and an ordered vector of raw transaction CBOR.  This ensure
+the transactions are kept in order.
 
 ```rust
-pub struct TxMessage {
+pub struct RawTxsMessage {
     /// Slot number
     pub slot: u64,
 
-    /// Index in block
-    pub index: u32,
-
-    /// Raw Data
-    pub raw: Vec<u8>,
+    /// Raw Data for each transaction
+    pub txs: Vec<Vec<u8>>,
 }
 ```
 

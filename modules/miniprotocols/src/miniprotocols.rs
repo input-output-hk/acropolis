@@ -24,7 +24,7 @@ use pallas::{
 const DEFAULT_HEADER_TOPIC: &str = "cardano.block.header";
 const DEFAULT_BODY_TOPIC: &str = "cardano.block.body";
 
-const DEFAULT_NODE_ADDRESS: &str = "preview-node.world.dev.cardano.org:30002";
+const DEFAULT_NODE_ADDRESS: &str = "preview-node.play.dev.cardano.org:3001";
 const DEFAULT_MAGIC_NUMBER: u64 = 2;
 
 const DEFAULT_SYNC_POINT: &str = "tip";
