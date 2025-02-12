@@ -54,23 +54,26 @@ impl BlockUnpacker
                                 info!("Decoded block height {} with {} txs", block.number(),
                                       block.txs().len());
 
-                                let context = context.clone();
-                                let publish_topic = publish_topic.clone();
-                                let slot = body_msg.slot;
+                                // Ignore empty blocks
+                                if !block.txs().is_empty() {
+                                    let context = context.clone();
+                                    let publish_topic = publish_topic.clone();
+                                    let slot = body_msg.slot;
 
-                                // Encode the Tx into hex, and take ownership
-                                let txs: Vec<_> = block.txs().into_iter()
-                                    .map(|tx| tx.encode()).collect();
+                                    // Encode the Tx into hex, and take ownership
+                                    let txs: Vec<_> = block.txs().into_iter()
+                                        .map(|tx| tx.encode()).collect();
 
-                                // Construct message
-                                let tx_message = RawTxsMessage { slot, txs };
-                                debug!("Block unpacker sending {:?}", tx_message);
-                                let message_enum: Message = tx_message.into();
+                                    // Construct message
+                                    let tx_message = RawTxsMessage { slot, txs };
+                                    debug!("Block unpacker sending {:?}", tx_message);
+                                    let message_enum: Message = tx_message.into();
 
-                                context.message_bus.publish(&publish_topic,
-                                                            Arc::new(message_enum))
-                                    .await
-                                    .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+                                    context.message_bus.publish(&publish_topic,
+                                                                Arc::new(message_enum))
+                                        .await
+                                        .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+                                }
                             },
 
                             Err(e) => error!("Can't decode block {}: {e}", body_msg.slot)
