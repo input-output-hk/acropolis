@@ -6,13 +6,14 @@ members = [
     "messages",
 
     # Modules
-    "modules/miniprotocols",  # Mini-protocol multiplexer
-    "modules/block_unpacker", # Block to transaction unpacker
-    "modules/tx_unpacker",    # Tx to UTXO unpacker
-    "modules/ledger_state",   # Ledger state
+    "modules/genesis_bootstrapper",    # Genesis bootstrap UTXOs
+    "modules/miniprotocols",           # Mini-protocol multiplexer
+    "modules/block_unpacker",          # Block to transaction unpacker
+    "modules/tx_unpacker",             # Tx to UTXO unpacker
+    "modules/ledger_state",            # Ledger state
 
     # Process builds
-    "processes/omnibus",      # All-inclusive omnibus process
+    "processes/omnibus",               # All-inclusive omnibus process
 ]
 
 resolver = "2"

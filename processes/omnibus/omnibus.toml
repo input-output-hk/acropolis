@@ -1,7 +1,9 @@
 # Top-level configuration for Acropolis omnibus process
 
+[module.genesis-bootstrapper]
+
 [module.miniprotocols]
-sync-point = "tip"
+sync-point = "origin"
 node-address = "backbone.cardano.iog.io:3001"
 magic-number = 764824073
 
@@ -23,15 +25,6 @@ class = "in-memory"
 workers = 10
 
 # Message routing
-[[message-router.route]]  # Route clock internally only
-pattern = "clock.#"
-bus = "internal"
-
-[[message-router.route]]  # Route all cardano externally only, so we can monitor them
-pattern = "cardano.#"
-bus = "external"
-
-[[message-router.route]]  # Everything goes to both
+[[message-router.route]]  # Everything is internal only
 pattern = "#"
-bus = [ "internal", "external" ]
-
+bus = "internal"
