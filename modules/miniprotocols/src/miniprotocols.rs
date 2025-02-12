@@ -47,6 +47,7 @@ impl Miniprotocols
         let topic = config.get_string("body-topic").unwrap_or(DEFAULT_BODY_TOPIC.to_string());
 
         // Fetch the block body
+        info!("Requesting single block {point:?}");
         let body = peer.blockfetch().fetch_single(point.clone()).await;
 
         match body {
@@ -93,7 +94,7 @@ impl Miniprotocols
 
             match next {
                 NextResponse::RollForward(h, Tip(point, _)) => {
-                    info!("RollForward to {point:?}");
+                    debug!("RollForward, tip is {point:?}");
 
                     // Get Byron sub-tag if any
                     let tag = match h.byron_prefix {
@@ -105,13 +106,15 @@ impl Miniprotocols
                     let header = MultiEraHeader::decode(h.variant, tag, &h.cbor);
                     match header {
                         Ok(header) => {
-                            info!("Header for slot {} number {}",
-                                  header.slot(), header.number());
+                            let slot = header.slot();
+                            let number = header.number();
+                            let hash = header.hash().to_vec();
+                            info!("Header for slot {slot} number {number}");
 
                             // Construct message
                             let message = BlockHeaderMessage {
-                                slot: header.slot(),
-                                number: header.number(),
+                                slot: slot,
+                                number: number,
                                 raw: h.cbor
                             };
 
@@ -122,9 +125,12 @@ impl Miniprotocols
                                 .await
                                 .unwrap_or_else(|e| error!("Failed to publish: {e}"));
 
-                            // Fetch and publish the block itself
+                            // Fetch and publish the block itself - note we need to
+                            // reconstruct a Point from the header because the one we get
+                            // in the RollForward is the *tip*, not the next read point
+                            let fetch_point = Point::Specific(slot, hash);
                             Self::fetch_block(context.clone(), config.clone(),
-                                              peer, point).await?;
+                                              peer, fetch_point).await?;
                         }
                         Err(e) => error!("Bad header: {e}"),
                     }
