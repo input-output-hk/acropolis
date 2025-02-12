@@ -94,38 +94,39 @@ impl Miniprotocols
             match next {
                 NextResponse::RollForward(h, Tip(point, _)) => {
                     info!("RollForward to {point:?}");
-                    match h.byron_prefix {
-                        None => {
-                            let header = MultiEraHeader::decode(h.variant, None, &h.cbor);
-                            match header {
-                                Ok(header) => {
-                                    info!("Header for slot {} number {}",
-                                          header.slot(), header.number());
 
-                                    // Construct message
-                                    let message = BlockHeaderMessage {
-                                        slot: header.slot(),
-                                        number: header.number(),
-                                        raw: h.cbor
-                                    };
+                    // Get Byron sub-tag if any
+                    let tag = match h.byron_prefix {
+                        Some((tag, _)) => Some(tag),
+                        None => None
+                    };
 
-                                    debug!("Miniprotocols sending {:?}", message);
+                    // Decode header
+                    let header = MultiEraHeader::decode(h.variant, tag, &h.cbor);
+                    match header {
+                        Ok(header) => {
+                            info!("Header for slot {} number {}",
+                                  header.slot(), header.number());
 
-                                    let message_enum: Message = message.into();
-                                    context.message_bus.publish(&topic, Arc::new(message_enum))
-                                        .await
-                                        .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+                            // Construct message
+                            let message = BlockHeaderMessage {
+                                slot: header.slot(),
+                                number: header.number(),
+                                raw: h.cbor
+                            };
 
-                                    // Fetch and publish the block itself
-                                    Self::fetch_block(context.clone(), config.clone(),
-                                                      peer, point).await?;
-                                }
-                                Err(e) => error!("Bad header: {e}"),
-                            }
-                        },
+                            debug!("Miniprotocols sending {:?}", message);
 
-                        // TODO Handle byron blocks
-                        Some(_) => info!("Skipping a Byron block"),
+                            let message_enum: Message = message.into();
+                            context.message_bus.publish(&topic, Arc::new(message_enum))
+                                .await
+                                .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+
+                            // Fetch and publish the block itself
+                            Self::fetch_block(context.clone(), config.clone(),
+                                              peer, point).await?;
+                        }
+                        Err(e) => error!("Bad header: {e}"),
                     }
                 },
 
