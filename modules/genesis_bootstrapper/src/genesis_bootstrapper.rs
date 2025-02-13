@@ -7,8 +7,12 @@ use std::sync::Arc;
 use anyhow::Result;
 use config::Config;
 use tracing::{debug, info, error};
+use pallas::ledger::configs::byron::{GenesisFile, genesis_utxos};
 
 const DEFAULT_PUBLISH_UTXO_DELTAS_TOPIC: &str = "cardano.utxo.deltas";
+
+// Include genesis data (downloaded by build.rs)
+const MAINNET_BYRON_GENESIS: &[u8] = include_bytes!("../downloads/mainnet-byron-genesis.json");
 
 /// Genesis bootstrapper module
 #[module(
@@ -27,9 +31,9 @@ impl GenesisBootstrapper
             .unwrap_or(DEFAULT_PUBLISH_UTXO_DELTAS_TOPIC.to_string());
         info!("Publishing UTXO deltas on '{publish_utxo_deltas_topic}'");
 
-        // TODO read genesis files
-        // TODO read outputs and generate delta message
-        // TODO output bootstrap done message for miniprotocols to take over
+        // Read genesis data
+        let genesis: GenesisFile = serde_json::from_slice(MAINNET_BYRON_GENESIS)
+            .expect("Invalid JSON in {MAINNET_BYRON_GENESIS}");
 
         // Construct message
         let mut message = UTXODeltasMessage {
@@ -37,16 +41,20 @@ impl GenesisBootstrapper
             deltas: Vec::new(),
         };
 
-        // For each initial UTXO
-        //let tx_output = TxOutput {
-        //  tx_hash: tx.hash().to_vec(),
-        //  index: index,
-        //  address: address.to_vec(),
-        //  value: output.value().coin(),
-        // };
+        // Convert the AVVM distributions into pseudo-UTXOs
+        let gen_utxos = genesis_utxos(&genesis);
+        let mut index: u64 = 0;
+        for (hash, address, amount) in gen_utxos {
+            let tx_output = TxOutput {
+                tx_hash: hash.to_vec(),
+                index: index,
+                address: address.to_vec(),
+                value: amount
+            };
 
-        // message.deltas.push(UTXODelta::Output(tx_output));
-        // index += 1;
+            message.deltas.push(UTXODelta::Output(tx_output));
+            index += 1;
+        }
 
         debug!("Genesis bootstrapper sending {:?}", message);
         let message_enum: Message = message.into();
@@ -56,6 +64,8 @@ impl GenesisBootstrapper
                                         Arc::new(message_enum))
                 .await
                 .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+
+            // TODO output bootstrap done message for miniprotocols to take over
         });
 
         Ok(())
