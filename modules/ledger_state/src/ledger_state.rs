@@ -107,7 +107,8 @@ impl LedgerState
                                         Some(previous) => info!("        - spent {} from {}",
                                                                 previous.value,
                                                                 encode(previous.address)),
-                                        None => info!("        - not previously seen")
+                                        None => error!("UTXO {}:{} not previously seen",
+                                                       encode(&tx_input.tx_hash), tx_input.index),
                                     }
                                 },
 
