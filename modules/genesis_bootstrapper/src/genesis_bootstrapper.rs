@@ -43,17 +43,15 @@ impl GenesisBootstrapper
 
         // Convert the AVVM distributions into pseudo-UTXOs
         let gen_utxos = genesis_utxos(&genesis);
-        let mut index: u64 = 0;
         for (hash, address, amount) in gen_utxos {
             let tx_output = TxOutput {
                 tx_hash: hash.to_vec(),
-                index: index,
+                index: 0,
                 address: address.to_vec(),
                 value: amount
             };
 
             message.deltas.push(UTXODelta::Output(tx_output));
-            index += 1;
         }
 
         debug!("Genesis bootstrapper sending {:?}", message);
