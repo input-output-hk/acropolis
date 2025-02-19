@@ -45,6 +45,8 @@ are very basic and naive:
 * [Mini-protocols](modules/miniprotocols) - implementation of the
   Node-to-Node (N2N) client-side (initiator) protocol, allowing chain
   synchronisation and block fetching
+* [Genesis Bootstrapper](modules/genesis_bootstrapper) - reads the Genesis
+  file for a chain and generates initial UTXOs
 * [Block Unpacker](modules/block_unpacker) - unpacks received blocks
   into individual transactions
 * [Tx Unpacker](modules/tx_unpacker) - parses transactions and generates UTXO
@@ -55,12 +57,14 @@ are very basic and naive:
 graph LR
 
    Miniprotocols
+   GenesisBootstrapper(Genesis Bootstrapper)
    BlockUnpacker(Block Unpacker)
    TxUnpacker(Transaction Unpacker)
    LedgerState(LedgerState)
 
    Miniprotocols --> BlockUnpacker
    BlockUnpacker --> TxUnpacker
+   GenesisBootstrapper --> LedgerState
    TxUnpacker --> LedgerState
 ```
 
