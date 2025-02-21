@@ -1,7 +1,7 @@
 //! Acropolis genesis bootstrapper module for Caryatid
 //! Reads genesis files and outputs initial UTXO events
 
-use caryatid_sdk::{Context, Module, module, MessageBusExt};
+use caryatid_sdk::{Context, Module, module};
 use acropolis_messages::{TxOutput, UTXODelta, UTXODeltasMessage, Message};
 use std::sync::Arc;
 use anyhow::Result;
