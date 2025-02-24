@@ -16,9 +16,7 @@ use pallas::{
             Point,
         },
     },
-    ledger::{
-        traverse::MultiEraHeader,
-    }
+    ledger::traverse::MultiEraHeader,
 };
 
 const DEFAULT_HEADER_TOPIC: &str = "cardano.block.header";

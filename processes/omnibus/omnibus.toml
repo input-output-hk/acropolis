@@ -2,6 +2,8 @@
 
 [module.genesis-bootstrapper]
 
+[module.mithril-snapshot-fetcher]
+
 [module.miniprotocols]
 sync-point = "origin"
 node-address = "backbone.cardano.iog.io:3001"
