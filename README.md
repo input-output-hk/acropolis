@@ -56,7 +56,7 @@ are very basic and naive:
 ```mermaid
 graph LR
 
-   Miniprotocols
+   Miniprotocols(Mini-protocols)
    GenesisBootstrapper(Genesis Bootstrapper)
    BlockUnpacker(Block Unpacker)
    TxUnpacker(Transaction Unpacker)
