@@ -7,6 +7,7 @@ members = [
 
     # Modules
     "modules/genesis_bootstrapper",    # Genesis bootstrap UTXOs
+    "modules/mithril_snapshot_fetcher",# Mithril snapshot fetcher
     "modules/miniprotocols",           # Mini-protocol multiplexer
     "modules/block_unpacker",          # Block to transaction unpacker
     "modules/tx_unpacker",             # Tx to UTXO unpacker

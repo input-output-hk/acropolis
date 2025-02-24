@@ -10,6 +10,7 @@ use acropolis_messages::Message;
 
 // External modules
 use acropolis_module_genesis_bootstrapper::GenesisBootstrapper;
+use acropolis_module_mithril_snapshot_fetcher::MithrilSnapshotFetcher;
 use acropolis_module_miniprotocols::Miniprotocols;
 use acropolis_module_block_unpacker::BlockUnpacker;
 use acropolis_module_tx_unpacker::TxUnpacker;
@@ -37,6 +38,7 @@ pub async fn main() -> Result<()> {
 
     // Register modules
     GenesisBootstrapper::register(&mut process);
+    MithrilSnapshotFetcher::register(&mut process);
     Miniprotocols::register(&mut process);
     BlockUnpacker::register(&mut process);
     TxUnpacker::register(&mut process);
