@@ -8,7 +8,7 @@ description = "Acropolis omnibus process containing every module"
 license = "Apache-2.0"
 
 [dependencies]
-caryatid_process = "0.2"
+caryatid_process = "0.2.1"
 caryatid_sdk = "0.2"
 caryatid_module_clock = "0.2"
 

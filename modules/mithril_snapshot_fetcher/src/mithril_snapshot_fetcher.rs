@@ -1,7 +1,7 @@
 //! Acropolis Mithril snapshot fetcher module for Caryatid
 //! Fetches a snapshot from Mithril and replays all the blocks in it
 
-use caryatid_sdk::{Context, Module, module};
+use caryatid_sdk::{Context, Module, module, MessageBusExt};
 use acropolis_messages::{BlockHeaderMessage, BlockBodyMessage, Message};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -20,8 +20,10 @@ use std::fs;
 use std::path::Path;
 use pallas::{ledger::traverse::MultiEraBlock, storage::hardano};
 
+const DEFAULT_STARTUP_TOPIC: &str = "cardano.sequence.bootstrapped";
 const DEFAULT_HEADER_TOPIC: &str = "cardano.block.header";
 const DEFAULT_BODY_TOPIC: &str = "cardano.block.body";
+
 const DEFAULT_AGGREGATOR_URL: &str = 
     "https://aggregator.release-mainnet.api.mithril.network/aggregator";
 const DEFAULT_GENESIS_KEY: &str = r#"
@@ -207,20 +209,33 @@ impl MithrilSnapshotFetcher
 
     /// Main init function
     pub fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
-        tokio::spawn(async move {
+        
+        let startup_topic = config.get_string("startup-topic")
+            .unwrap_or(DEFAULT_STARTUP_TOPIC.to_string());
+        info!("Creating startup subscriber on '{startup_topic}'");
 
-            if config.get_bool("download").unwrap_or(true) {
-               match Self::download_snapshot(config.clone()).await {
-                    Err(e) => error!("Failed to fetch Mithril snapshot: {e}"),
-                    _ => {}
+        context.clone().message_bus.subscribe(&startup_topic, 
+            move |_message: Arc<Message>| {
+                let context = context.clone();
+                let config = config.clone();
+                info!("Received startup message");
+
+                async move {
+
+                    if config.get_bool("download").unwrap_or(true) {
+                        match Self::download_snapshot(config.clone()).await {
+                            Err(e) => error!("Failed to fetch Mithril snapshot: {e}"),
+                            _ => {}
+                        }
+                    }
+
+                    match Self::process_snapshot(context, config).await {
+                        Err(e) => error!("Failed to process Mithril snapshot: {e}"),
+                        _ => {}
+                    }
                 }
             }
-
-            match Self::process_snapshot(context, config).await {
-                Err(e) => error!("Failed to process Mithril snapshot: {e}"),
-                _ => {}
-            }
-        });
+        )?;
 
         Ok(())
     }

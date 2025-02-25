@@ -7,10 +7,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use config::Config;
 use tracing::{debug, info, error};
-
-use pallas::{
-    ledger::traverse::MultiEraBlock,
-};
+use pallas::ledger::traverse::MultiEraBlock;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.block.body";
 const DEFAULT_PUBLISH_TOPIC: &str = "cardano.txs";
