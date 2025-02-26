@@ -9,8 +9,8 @@ use anyhow::{Result, anyhow};
 use config::Config;
 use tracing::{debug, info, error};
 use mithril_client::{
-    ClientBuilder, 
-    MessageBuilder, 
+    ClientBuilder,
+    MessageBuilder,
     feedback::{
         FeedbackReceiver,
         MithrilEvent
@@ -24,7 +24,7 @@ const DEFAULT_STARTUP_TOPIC: &str = "cardano.sequence.bootstrapped";
 const DEFAULT_HEADER_TOPIC: &str = "cardano.block.header";
 const DEFAULT_BODY_TOPIC: &str = "cardano.block.body";
 
-const DEFAULT_AGGREGATOR_URL: &str = 
+const DEFAULT_AGGREGATOR_URL: &str =
     "https://aggregator.release-mainnet.api.mithril.network/aggregator";
 const DEFAULT_GENESIS_KEY: &str = r#"
 5b3139312c36362c3134302c3138352c3133382c31312c3233372c3230372c3235302c3134342c32
@@ -127,7 +127,7 @@ impl MithrilSnapshotFetcher
             error!("Could not increment snapshot download statistics: {:?}", e);
             // But that doesn't affect us...
         }
-    
+
         // Verify the snapshot
         let message = MessageBuilder::new()
             .compute_snapshot_message(&certificate, dir)
@@ -164,6 +164,7 @@ impl MithrilSnapshotFetcher
                 Ok(raw_block) => {
 
                     // Decode it
+                    // TODO - can we avoid this and still get the slot & number?
                     let block = MultiEraBlock::decode(&raw_block)?;
                     let slot = block.slot();
                     let number = block.number();
@@ -172,6 +173,7 @@ impl MithrilSnapshotFetcher
                         info!("Read block number {}, slot {}", number, slot);
                     }
 
+                    // TODO - messages could be sent in parallel
                     // Send the block header message
                     let header = block.header();
                     let header_message = BlockHeaderMessage {
@@ -209,12 +211,12 @@ impl MithrilSnapshotFetcher
 
     /// Main init function
     pub fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
-        
+
         let startup_topic = config.get_string("startup-topic")
             .unwrap_or(DEFAULT_STARTUP_TOPIC.to_string());
         info!("Creating startup subscriber on '{startup_topic}'");
 
-        context.clone().message_bus.subscribe(&startup_topic, 
+        context.clone().message_bus.subscribe(&startup_topic,
             move |_message: Arc<Message>| {
                 let context = context.clone();
                 let config = config.clone();

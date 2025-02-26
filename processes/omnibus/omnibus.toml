@@ -32,6 +32,8 @@ exchange = "caryatid"
 [message-bus.internal]
 class = "in-memory"
 workers = 10
+dispatch-queue-size = 1000
+worker-queue-size = 1000
 
 # Message routing
 [[message-router.route]]  # Everything is internal only
