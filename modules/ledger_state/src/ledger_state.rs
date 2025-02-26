@@ -7,7 +7,7 @@ use anyhow::Result;
 use config::Config;
 use tracing::{info, error};
 use hex::encode;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, RwLock};
 
@@ -52,7 +52,9 @@ struct UTXOValue {
 
 /// Ledger state storage
 struct State {
-    utxos: HashMap<UTXOKey, UTXOValue>,
+    utxos: HashMap<UTXOKey, UTXOValue>,    //< Live UTXOs
+    future_spends: HashSet<UTXOKey>,       //< UTXOs spent in blocks arriving out of order
+    max_slot: u64,                         //< Maximum block slot number received
 }
 
 impl State {
@@ -60,6 +62,8 @@ impl State {
     pub fn new() -> Self {
         Self {
             utxos: HashMap::new(),
+            future_spends: HashSet::new(),
+            max_slot: 0,
         }
     }
 }
@@ -85,16 +89,19 @@ impl LedgerState
             .unwrap_or(DEFAULT_SUBSCRIBE_TOPIC.to_string());
         info!("Creating subscriber on '{subscribe_topic}'");
 
+        let state2 = state.clone();
         context.clone().message_bus.subscribe(&subscribe_topic, move |message: Arc<Message>| {
-
             let state = state.clone();
-
             async move {
                 match message.as_ref() {
                     Message::UTXODeltas(deltas_msg) => {
-
                         info!("Received {} deltas for slot {}", deltas_msg.deltas.len(),
                               deltas_msg.slot);
+
+                        { // Capture maximum slot received
+                            let mut state = state.write().unwrap();
+                            state.max_slot = state.max_slot.max(deltas_msg.slot);
+                        }
 
                         for delta in &deltas_msg.deltas {  // UTXODelta
                             match delta {
@@ -107,8 +114,13 @@ impl LedgerState
                                         Some(previous) => info!("        - spent {} from {}",
                                                                 previous.value,
                                                                 encode(previous.address)),
-                                        None => error!("UTXO {}:{} not previously seen",
-                                                       encode(&tx_input.tx_hash), tx_input.index),
+                                        None => {
+                                            info!("UTXO {}:{} arrived out of order",
+                                                  encode(&tx_input.tx_hash), tx_input.index);
+
+                                            // Add to future spend set
+                                            state.future_spends.insert(key);
+                                        }
                                     }
                                 },
 
@@ -119,10 +131,17 @@ impl LedgerState
                                           encode(&tx_output.address));
                                     let key = UTXOKey::new(&tx_output.tx_hash, tx_output.index);
                                     let mut state = state.write().unwrap();
-                                    state.utxos.insert(key, UTXOValue {
-                                        address: tx_output.address.clone(),
-                                        value: tx_output.value
-                                    });
+                                    // Check if it was spent in a future block (that arrived
+                                    // out of order)
+                                    if state.future_spends.contains(&key) {
+                                        // Net effect is zero, so we ignore it
+                                        state.future_spends.remove(&key);
+                                    } else {
+                                        state.utxos.insert(key, UTXOValue {
+                                            address: tx_output.address.clone(),
+                                            value: tx_output.value
+                                        });
+                                    }
                                 },
 
                                 _ => {}
@@ -133,6 +152,19 @@ impl LedgerState
                     _ => error!("Unexpected message type: {message:?}")
                 }
             }
+        })?;
+
+        // Ticker to log stats
+        context.clone().message_bus.subscribe("clock.tick", move |message: Arc<Message>| {
+            if let Message::Clock(message) = message.as_ref() {
+                if (message.number % 60) == 0 {
+                    let state = state2.write().unwrap();
+                    error!("Slot {}, UTXOs {}, future spends {}",
+                           state.max_slot, state.utxos.len(), state.future_spends.len());
+                }
+            }
+
+            async {}
         })?;
 
         Ok(())
