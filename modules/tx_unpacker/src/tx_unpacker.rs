@@ -47,7 +47,7 @@ impl TxUnpacker
             async move {
                 match message.as_ref() {
                     Message::ReceivedTxs(txs_msg) => {
-                        info!("Received {} txs for slot {}", txs_msg.txs.len(), txs_msg.slot);
+                        debug!("Received {} txs for slot {}", txs_msg.txs.len(), txs_msg.slot);
 
                         // Construct message
                         let mut message = UTXODeltasMessage {
@@ -61,8 +61,8 @@ impl TxUnpacker
                                 Ok(tx) => {
                                     let outputs = tx.outputs();
                                     let inputs = tx.inputs();
-                                    info!("Decoded transaction with {} inputs, {} outputs",
-                                          inputs.len(), outputs.len());
+                                    debug!("Decoded transaction with {} inputs, {} outputs",
+                                           inputs.len(), outputs.len());
 
                                     // Add all the inputs
                                     for input in inputs {  // MultiEraInput
@@ -107,9 +107,7 @@ impl TxUnpacker
                             }
                         }
 
-                        debug!("Tx unpacker sending {:?}", message);
                         let message_enum: Message = message.into();
-
                         context.message_bus.publish(&publish_utxo_deltas_topic,
                                                     Arc::new(message_enum))
                             .await

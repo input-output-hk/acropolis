@@ -6,7 +6,7 @@ use acropolis_messages::{TxOutput, UTXODelta, UTXODeltasMessage, Message};
 use std::sync::Arc;
 use anyhow::Result;
 use config::Config;
-use tracing::{debug, info, error};
+use tracing::{info, error};
 use pallas::ledger::configs::byron::{GenesisFile, genesis_utxos};
 
 const DEFAULT_STARTUP_TOPIC: &str = "cardano.sequence.start";
@@ -71,7 +71,6 @@ impl GenesisBootstrapper
                         message.deltas.push(UTXODelta::Output(tx_output));
                     }
 
-                    debug!("Genesis bootstrapper sending {:?}", message);
                     let message_enum: Message = message.into();
 
                     context.message_bus.publish(&publish_utxo_deltas_topic,
