@@ -222,7 +222,7 @@ impl MithrilSnapshotFetcher
                 let config = config.clone();
                 info!("Received startup message");
 
-                async move {
+                tokio::spawn(async move {
 
                     if config.get_bool("download").unwrap_or(true) {
                         match Self::download_snapshot(config.clone()).await {
@@ -235,7 +235,9 @@ impl MithrilSnapshotFetcher
                         Err(e) => error!("Failed to process Mithril snapshot: {e}"),
                         _ => {}
                     }
-                }
+                });
+
+                async {}
             }
         )?;
 

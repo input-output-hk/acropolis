@@ -39,7 +39,7 @@ impl GenesisBootstrapper
                 let config = config.clone();
                 info!("Received startup message");
 
-                async move {
+                tokio::spawn(async move {
                     let publish_utxo_deltas_topic = config.get_string("publish-utxo-deltas-topic")
                         .unwrap_or(DEFAULT_PUBLISH_UTXO_DELTAS_TOPIC.to_string());
                     info!("Publishing UTXO deltas on '{publish_utxo_deltas_topic}'");
@@ -83,7 +83,9 @@ impl GenesisBootstrapper
                     context.message_bus.publish(&completion_topic, Arc::new(Message::None(())))
                         .await
                         .unwrap_or_else(|e| error!("Failed to publish: {e}"));
-                }
+                });
+
+                async {}
             }
         )?;
 
