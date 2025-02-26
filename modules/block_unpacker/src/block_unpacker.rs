@@ -43,13 +43,11 @@ impl BlockUnpacker
             async move {
                 match message.as_ref() {
                     Message::BlockBody(body_msg) => {
-                        info!("Received block {}", body_msg.slot);
-
                         // Parse the body
                         match MultiEraBlock::decode(&body_msg.raw) {
                             Ok(block) => {
-                                info!("Decoded block height {} with {} txs", block.number(),
-                                      block.txs().len());
+                                info!("Decoded block number {} slot {} with {} txs", 
+                                    block.number(), block.slot(), block.txs().len());
 
                                 // Ignore empty blocks
                                 if !block.txs().is_empty() {
