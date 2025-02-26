@@ -53,7 +53,7 @@ struct UTXOValue {
 /// Ledger state storage
 struct State {
     utxos: HashMap<UTXOKey, UTXOValue>,    //< Live UTXOs
-    future_spends: HashSet<UTXOKey>,       //< UTXOs spent in blocks arriving out of order
+    future_spends: HashMap<UTXOKey, u64>,  //< UTXOs spent in blocks arriving out of order, to slot
     max_slot: u64,                         //< Maximum block slot number received
 }
 
@@ -62,7 +62,7 @@ impl State {
     pub fn new() -> Self {
         Self {
             utxos: HashMap::new(),
-            future_spends: HashSet::new(),
+            future_spends: HashMap::new(),
             max_slot: 0,
         }
     }
@@ -116,11 +116,12 @@ impl LedgerState
                                                    previous.value, encode(previous.address));
                                         }
                                         None => {
-                                            debug!("UTXO {}:{} arrived out of order",
-                                                   encode(&tx_input.tx_hash), tx_input.index);
+                                            info!("UTXO {}:{} arrived out of order (slot {})",
+                                                  encode(&tx_input.tx_hash), tx_input.index,
+                                                  deltas_msg.slot);
 
                                             // Add to future spend set
-                                            state.future_spends.insert(key);
+                                            state.future_spends.insert(key, deltas_msg.slot);
                                         }
                                     }
                                 },
@@ -134,8 +135,11 @@ impl LedgerState
                                     let mut state = state.write().unwrap();
                                     // Check if it was spent in a future block (that arrived
                                     // out of order)
-                                    if state.future_spends.contains(&key) {
+                                    if let Some(slot) = state.future_spends.get(&key) {
                                         // Net effect is zero, so we ignore it
+                                        info!("UTXO {}:{} in future spends removed (created in slot {}, spent in slot {})",
+                                              encode(&tx_output.tx_hash), tx_output.index,
+                                              deltas_msg.slot, slot);
                                         state.future_spends.remove(&key);
                                     } else {
                                         state.utxos.insert(key, UTXOValue {
@@ -161,7 +165,15 @@ impl LedgerState
                 if (message.number % 60) == 0 {
                     let state = state2.write().unwrap();
                     info!("Slot {}, UTXOs {}, future spends {}",
-                           state.max_slot, state.utxos.len(), state.future_spends.len());
+                          state.max_slot, state.utxos.len(), state.future_spends.len());
+                    for (key, slot) in &state.future_spends {
+                        info!("Future spend: UTXO {}:{} from slot {slot}",
+                              encode(key.hash), key.index);
+                        if state.max_slot - slot > 1000 {
+                            error!("Future spend UTXO {}:{} from slot {slot} is too old (max slot {})",
+                                   encode(key.hash), key.index, state.max_slot);
+                        }
+                    }
                 }
             }
 
