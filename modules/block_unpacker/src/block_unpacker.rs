@@ -46,8 +46,8 @@ impl BlockUnpacker
                         // Parse the body
                         match MultiEraBlock::decode(&body_msg.raw) {
                             Ok(block) => {
-                                info!("Decoded block number {} slot {} with {} txs", 
-                                    block.number(), block.slot(), block.txs().len());
+                                debug!("Decoded block number {} slot {} with {} txs",
+                                       block.number(), block.slot(), block.txs().len());
 
                                 // Ignore empty blocks
                                 if !block.txs().is_empty() {
@@ -61,9 +61,7 @@ impl BlockUnpacker
 
                                     // Construct message
                                     let tx_message = RawTxsMessage { slot, txs };
-                                    debug!("Block unpacker sending {:?}", tx_message);
                                     let message_enum: Message = tx_message.into();
-
                                     context.message_bus.publish(&publish_topic,
                                                                 Arc::new(message_enum))
                                         .await

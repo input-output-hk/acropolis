@@ -7,7 +7,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use anyhow::{Result, anyhow};
 use config::Config;
-use tracing::{debug, info, error};
+use tracing::{info, error};
 use mithril_client::{
     ClientBuilder,
     MessageBuilder,
@@ -182,8 +182,6 @@ impl MithrilSnapshotFetcher
                         raw: header.cbor().to_vec()
                     };
 
-                    debug!("Mithril snapshot sending {:?}", header_message);
-
                     let header_message_enum: Message = header_message.into();
                     context.message_bus.publish(&header_topic, Arc::new(header_message_enum))
                         .await
@@ -194,8 +192,6 @@ impl MithrilSnapshotFetcher
                         slot: slot,
                         raw: raw_block
                     };
-
-                    debug!("Mithril snapshot fetcher sending {:?}", body_message);
 
                     let body_message_enum: Message = body_message.into();
                     context.message_bus.publish(&body_topic, Arc::new(body_message_enum))
