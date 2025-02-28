@@ -8,7 +8,7 @@ genesis-key = "5b3139312c36362c3134302c3138352c3133382c31312c3233372c3230372c323
 download = false
 #startup-topic = "cardano.sequence.start"
 
-#[module.miniprotocols]
+#[module.upstream-chain-fetcher]
 #sync-point = "origin"
 #node-address = "backbone.cardano.iog.io:3001"
 #magic-number = 764824073

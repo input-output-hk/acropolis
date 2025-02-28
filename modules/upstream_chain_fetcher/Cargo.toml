@@ -1,11 +1,11 @@
-# Acropolis miniprotocols module
+# Acropolis upstream chain fetcher module
 
 [package]
-name = "acropolis_module_miniprotocols"
+name = "acropolis_module_upstream_chain_fetcher"
 version = "0.2.0"
 edition = "2021"
 authors = ["Paul Clark <paul.clark@iohk.io>"]
-description = "Miniprotocols Caryatid module for Acropolis"
+description = "Upstream chain fetcher Caryatid module for Acropolis"
 license = "Apache-2.0"
 
 [dependencies]
@@ -18,4 +18,4 @@ config = "0.14.0"
 tracing = "0.1.40"
 
 [lib]
-path = "src/miniprotocols.rs"
+path = "src/upstream_chain_fetcher.rs"
