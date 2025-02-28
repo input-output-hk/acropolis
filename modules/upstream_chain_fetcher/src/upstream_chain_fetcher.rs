@@ -27,16 +27,16 @@ const DEFAULT_MAGIC_NUMBER: u64 = 2;
 
 const DEFAULT_SYNC_POINT: &str = "tip";
 
-/// Network mini-protocols module
+/// Upstream chain fetcher module
 /// Parameterised by the outer message enum used on the bus
 #[module(
     message_type(Message),
-    name = "miniprotocols",
-    description = "Mini-protocol interface to the Cardano node"
+    name = "upstream-chain-fetcher",
+    description = "Mini-protocol chain fetcher from an upstream Cardano node"
 )]
-pub struct Miniprotocols;
+pub struct UpstreamChainFetcher;
 
-impl Miniprotocols
+impl UpstreamChainFetcher
 {
     /// Fetch an individual block and unpack it into messages
     // TODO fetch in batches
@@ -57,8 +57,6 @@ impl Miniprotocols
                     slot: point.slot_or_default(),
                     raw: body
                 };
-
-                debug!("Miniprotocols sending {:?}", message);
 
                 let message_enum: Message = message.into();
                 context.message_bus.publish(&topic, Arc::new(message_enum))
