@@ -61,8 +61,8 @@ impl TxUnpacker
                             // Parse the tx
                             match MultiEraTx::decode(&raw_tx) {
                                 Ok(tx) => {
-                                    let outputs = tx.outputs();
-                                    let inputs = tx.inputs();
+                                    let inputs = tx.consumes();
+                                    let outputs = tx.produces();
                                     if tracing::enabled!(tracing::Level::DEBUG) {
                                         debug!("Decoded transaction with {} inputs, {} outputs",
                                            inputs.len(), outputs.len());
@@ -83,22 +83,20 @@ impl TxUnpacker
                                     }
 
                                     // Add all the outputs
-                                    let mut index: u64 = 0;
-                                    for output in outputs {  // MultiEraOutput
+                                    for (index, output) in outputs {  // MultiEraOutput
 
                                         match output.address() {
                                             Ok(address) =>
                                             {
                                                 let tx_output = TxOutput {
                                                     tx_hash: tx.hash().to_vec(),
-                                                    index: index,
+                                                    index: index as u64,
                                                     address: address.to_vec(),
                                                     value: output.value().coin(),
                                                     // !!! datum
                                                 };
 
                                                 message.deltas.push(UTXODelta::Output(tx_output));
-                                                index += 1;
                                             }
 
                                             Err(e) => error!("Can't parse output {index} in tx: {e}")

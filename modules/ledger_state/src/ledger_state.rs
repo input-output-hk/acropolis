@@ -123,8 +123,8 @@ impl LedgerState
                                         }
                                         None => {
                                             if tracing::enabled!(tracing::Level::DEBUG) {
-                                                info!("UTXO {}:{} arrived out of order (slot {})",
-                                                      encode(&tx_input.tx_hash), tx_input.index,
+                                                debug!("UTXO {}:{} arrived out of order (slot {})",
+                                                    encode(&tx_input.tx_hash), tx_input.index,
                                                     deltas_msg.slot);
                                             }
                                             // Add to future spend set
