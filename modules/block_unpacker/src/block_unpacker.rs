@@ -46,8 +46,10 @@ impl BlockUnpacker
                         // Parse the body
                         match MultiEraBlock::decode(&body_msg.raw) {
                             Ok(block) => {
-                                debug!("Decoded block number {} slot {} with {} txs",
-                                       block.number(), block.slot(), block.txs().len());
+                                if tracing::enabled!(tracing::Level::DEBUG) {
+                                    debug!("Decoded block number {} slot {} with {} txs",
+                                           block.number(), block.slot(), block.txs().len());
+                                }
 
                                 // Ignore empty blocks
                                 if !block.txs().is_empty() {

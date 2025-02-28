@@ -7,7 +7,7 @@ use anyhow::Result;
 use config::Config;
 use tracing::{debug, info, error};
 use hex::encode;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap};
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, RwLock};
 
@@ -95,8 +95,10 @@ impl LedgerState
             async move {
                 match message.as_ref() {
                     Message::UTXODeltas(deltas_msg) => {
-                        debug!("Received {} deltas for slot {}", deltas_msg.deltas.len(),
-                              deltas_msg.slot);
+                        if tracing::enabled!(tracing::Level::DEBUG) {
+                            debug!("Received {} deltas for slot {}", deltas_msg.deltas.len(),
+                                  deltas_msg.slot);
+                        }
 
                         { // Capture maximum slot received
                             let mut state = state.write().unwrap();
@@ -106,20 +108,25 @@ impl LedgerState
                         for delta in &deltas_msg.deltas {  // UTXODelta
                             match delta {
                                 UTXODelta::Input(tx_input) => {
-                                    debug!("UTXO << {}:{}", encode(&tx_input.tx_hash),
-                                          tx_input.index);
+                                    if tracing::enabled!(tracing::Level::DEBUG) {
+                                        debug!("UTXO << {}:{}", encode(&tx_input.tx_hash),
+                                              tx_input.index);
+                                    }
                                     let key = UTXOKey::new(&tx_input.tx_hash, tx_input.index);
                                     let mut state = state.write().unwrap();
                                     match state.utxos.remove(&key) {
                                         Some(previous) => {
-                                            debug!("        - spent {} from {}",
-                                                   previous.value, encode(previous.address));
+                                            if tracing::enabled!(tracing::Level::DEBUG) {
+                                                debug!("        - spent {} from {}",
+                                                       previous.value, encode(previous.address));
+                                            }
                                         }
                                         None => {
-                                            info!("UTXO {}:{} arrived out of order (slot {})",
-                                                  encode(&tx_input.tx_hash), tx_input.index,
-                                                  deltas_msg.slot);
-
+                                            if tracing::enabled!(tracing::Level::DEBUG) {
+                                                info!("UTXO {}:{} arrived out of order (slot {})",
+                                                      encode(&tx_input.tx_hash), tx_input.index,
+                                                    deltas_msg.slot);
+                                            }
                                             // Add to future spend set
                                             state.future_spends.insert(key, deltas_msg.slot);
                                         }
@@ -127,19 +134,23 @@ impl LedgerState
                                 },
 
                                 UTXODelta::Output(tx_output) => {
-                                    debug!("UTXO >> {}:{}", encode(&tx_output.tx_hash),
-                                           tx_output.index);
-                                    debug!("        - adding {} to {}", tx_output.value,
-                                           encode(&tx_output.address));
+                                    if tracing::enabled!(tracing::Level::DEBUG) {
+                                        debug!("UTXO >> {}:{}", encode(&tx_output.tx_hash),
+                                               tx_output.index);
+                                        debug!("        - adding {} to {}", tx_output.value,
+                                            encode(&tx_output.address));
+                                    }
                                     let key = UTXOKey::new(&tx_output.tx_hash, tx_output.index);
                                     let mut state = state.write().unwrap();
                                     // Check if it was spent in a future block (that arrived
                                     // out of order)
                                     if let Some(slot) = state.future_spends.get(&key) {
                                         // Net effect is zero, so we ignore it
-                                        info!("UTXO {}:{} in future spends removed (created in slot {}, spent in slot {})",
-                                              encode(&tx_output.tx_hash), tx_output.index,
-                                              deltas_msg.slot, slot);
+                                        if tracing::enabled!(tracing::Level::DEBUG) {
+                                            debug!("UTXO {}:{} in future spends removed (created in slot {}, spent in slot {})",
+                                                  encode(&tx_output.tx_hash), tx_output.index,
+                                                  deltas_msg.slot, slot);
+                                        }
                                         state.future_spends.remove(&key);
                                     } else {
                                         state.utxos.insert(key, UTXOValue {
@@ -169,7 +180,7 @@ impl LedgerState
                     for (key, slot) in &state.future_spends {
                         info!("Future spend: UTXO {}:{} from slot {slot}",
                               encode(key.hash), key.index);
-                        if state.max_slot - slot > 1000 {
+                        if state.max_slot - slot > 10000 {
                             error!("Future spend UTXO {}:{} from slot {slot} is too old (max slot {})",
                                    encode(key.hash), key.index, state.max_slot);
                         }

@@ -116,8 +116,6 @@ impl Miniprotocols
                                 raw: h.cbor
                             };
 
-                            debug!("Miniprotocols sending {:?}", message);
-
                             let message_enum: Message = message.into();
                             context.message_bus.publish(&topic, Arc::new(message_enum))
                                 .await
