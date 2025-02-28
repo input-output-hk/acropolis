@@ -4,7 +4,7 @@
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
 use acropolis_messages::{BlockHeaderMessage, BlockBodyMessage, Message};
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::{join, sync::Mutex};
 use anyhow::{Result, anyhow};
 use config::Config;
 use tracing::{info, error};
@@ -173,7 +173,6 @@ impl MithrilSnapshotFetcher
                         info!("Read block number {}, slot {}", number, slot);
                     }
 
-                    // TODO - messages could be sent in parallel
                     // Send the block header message
                     let header = block.header();
                     let header_message = BlockHeaderMessage {
@@ -183,9 +182,8 @@ impl MithrilSnapshotFetcher
                     };
 
                     let header_message_enum: Message = header_message.into();
-                    context.message_bus.publish(&header_topic, Arc::new(header_message_enum))
-                        .await
-                        .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+                    let header_future = context.message_bus.publish(&header_topic,
+                        Arc::new(header_message_enum));
 
                     // Send the block body message
                     let body_message = BlockBodyMessage {
@@ -194,9 +192,12 @@ impl MithrilSnapshotFetcher
                     };
 
                     let body_message_enum: Message = body_message.into();
-                    context.message_bus.publish(&body_topic, Arc::new(body_message_enum))
-                        .await
-                        .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+                    let body_future = context.message_bus.publish(&body_topic,
+                        Arc::new(body_message_enum));
+
+                    let (header_result, body_result) = join!(header_future, body_future);
+                    header_result.unwrap_or_else(|e| error!("Failed to publish header: {e}"));
+                    body_result.unwrap_or_else(|e| error!("Failed to publish body: {e}"));
                 }
                 Err(e) => error!("Error reading block: {e}")
             }
