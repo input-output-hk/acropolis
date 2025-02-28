@@ -47,7 +47,9 @@ impl TxUnpacker
             async move {
                 match message.as_ref() {
                     Message::ReceivedTxs(txs_msg) => {
-                        debug!("Received {} txs for slot {}", txs_msg.txs.len(), txs_msg.slot);
+                        if tracing::enabled!(tracing::Level::DEBUG) {
+                            debug!("Received {} txs for slot {}", txs_msg.txs.len(), txs_msg.slot);
+                        }
 
                         // Construct message
                         let mut message = UTXODeltasMessage {
@@ -61,8 +63,10 @@ impl TxUnpacker
                                 Ok(tx) => {
                                     let outputs = tx.outputs();
                                     let inputs = tx.inputs();
-                                    debug!("Decoded transaction with {} inputs, {} outputs",
+                                    if tracing::enabled!(tracing::Level::DEBUG) {
+                                        debug!("Decoded transaction with {} inputs, {} outputs",
                                            inputs.len(), outputs.len());
+                                    }
 
                                     // Add all the inputs
                                     for input in inputs {  // MultiEraInput
