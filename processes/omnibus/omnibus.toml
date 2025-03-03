@@ -6,12 +6,11 @@
 aggregator-url = "https://aggregator.release-mainnet.api.mithril.network/aggregator"
 genesis-key = "5b3139312c36362c3134302c3138352c3133382c31312c3233372c3230372c3235302c3134342c32372c322c3138382c33302c31322c38312c3135352c3230342c31302c3137392c37352c32332c3133382c3139362c3231372c352c31342c32302c35372c37392c33392c3137365d"
 download = false
-#startup-topic = "cardano.sequence.start"
 
-#[module.upstream-chain-fetcher]
-#sync-point = "origin"
-#node-address = "backbone.cardano.iog.io:3001"
-#magic-number = 764824073
+[module.upstream-chain-fetcher]
+sync-point = "snapshot"
+node-address = "backbone.cardano.iog.io:3001"
+magic-number = 764824073
 
 [module.block-unpacker]
 
@@ -31,7 +30,7 @@ exchange = "caryatid"
 
 [message-bus.internal]
 class = "in-memory"
-workers = 10
+workers = 20
 dispatch-queue-size = 1000
 worker-queue-size = 1000
 
