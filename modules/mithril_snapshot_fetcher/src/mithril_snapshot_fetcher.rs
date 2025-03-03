@@ -2,7 +2,12 @@
 //! Fetches a snapshot from Mithril and replays all the blocks in it
 
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
-use acropolis_messages::{BlockHeaderMessage, BlockBodyMessage, Message};
+use acropolis_messages::{
+    BlockHeaderMessage,
+    BlockBodyMessage,
+    SnapshotCompleteMessage,
+    Message
+};
 use std::sync::Arc;
 use tokio::{join, sync::Mutex};
 use anyhow::{Result, anyhow};
@@ -18,11 +23,18 @@ use mithril_client::{
 };
 use std::fs;
 use std::path::Path;
-use pallas::{ledger::traverse::MultiEraBlock, storage::hardano};
+use pallas::{
+    ledger::{
+        traverse::MultiEraBlock,
+        primitives::Hash
+    },
+    storage::hardano,
+};
 
 const DEFAULT_STARTUP_TOPIC: &str = "cardano.sequence.bootstrapped";
 const DEFAULT_HEADER_TOPIC: &str = "cardano.block.header";
 const DEFAULT_BODY_TOPIC: &str = "cardano.block.body";
+const DEFAULT_COMPLETION_TOPIC: &str = "cardano.snapshot.complete";
 
 const DEFAULT_AGGREGATOR_URL: &str =
     "https://aggregator.release-mainnet.api.mithril.network/aggregator";
@@ -147,6 +159,8 @@ impl MithrilSnapshotFetcher
             .unwrap_or(DEFAULT_HEADER_TOPIC.to_string());
         let body_topic = config.get_string("body-topic")
             .unwrap_or(DEFAULT_BODY_TOPIC.to_string());
+        let completion_topic = config.get_string("completion-topic")
+            .unwrap_or(DEFAULT_COMPLETION_TOPIC.to_string());
         let directory = config.get_string("directory")
             .unwrap_or(DEFAULT_DIRECTORY.to_string());
 
@@ -157,6 +171,9 @@ impl MithrilSnapshotFetcher
         if let Some(tip) = hardano::immutable::get_tip(&path)? {
             info!("Snapshot contains blocks up to slot {}", tip.slot_or_default());
         }
+
+        let mut last_block_slot: u64 = 0;
+        let mut last_block_hash: Option<Hash<32>> = None;
 
         let blocks = hardano::immutable::read_blocks(&path)?;
         for raw_block in blocks {
@@ -172,6 +189,9 @@ impl MithrilSnapshotFetcher
                     if number % 100000 == 0 {
                         info!("Read block number {}, slot {}", number, slot);
                     }
+
+                    last_block_slot = slot;
+                    last_block_hash = Some(block.hash());
 
                     // Send the block header message
                     let header = block.header();
@@ -203,6 +223,19 @@ impl MithrilSnapshotFetcher
             }
         }
 
+        // Send completion message
+        if let Some(last_block_hash) = last_block_hash {
+            let message = SnapshotCompleteMessage {
+                last_block_slot: last_block_slot,
+                last_block_hash: last_block_hash.to_vec()
+            };
+
+            let message_enum: Message = message.into();
+            context.message_bus.publish(&completion_topic,
+                Arc::new(message_enum))
+                .await
+                .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+        }
         Ok(())
     }
 

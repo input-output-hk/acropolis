@@ -1,13 +1,13 @@
 //! Acropolis Miniprotocols module for Caryatid
 //! Multi-connection, multi-protocol client interface to the Cardano node
 
-use caryatid_sdk::{Context, Module, module};
+use caryatid_sdk::{Context, Module, module, MessageBusExt};
 use acropolis_messages::{BlockHeaderMessage, BlockBodyMessage, Message};
 use std::sync::Arc;
 use anyhow::{Result, anyhow};
 use config::Config;
 use tracing::{debug, info, error};
-
+use tokio::sync::Mutex;
 use pallas::{
     network::{
         facades::PeerClient,
@@ -21,11 +21,12 @@ use pallas::{
 
 const DEFAULT_HEADER_TOPIC: &str = "cardano.block.header";
 const DEFAULT_BODY_TOPIC: &str = "cardano.block.body";
+const DEFAULT_SNAPSHOT_COMPLETION_TOPIC: &str = "cardano.snapshot.complete";
 
-const DEFAULT_NODE_ADDRESS: &str = "preview-node.play.dev.cardano.org:3001";
-const DEFAULT_MAGIC_NUMBER: u64 = 2;
+const DEFAULT_NODE_ADDRESS: &str = "backbone.cardano.iog.io:3001";
+const DEFAULT_MAGIC_NUMBER: u64 = 764824073;
 
-const DEFAULT_SYNC_POINT: &str = "tip";
+const DEFAULT_SYNC_POINT: &str = "snapshot";
 
 /// Upstream chain fetcher module
 /// Parameterised by the outer message enum used on the bus
@@ -41,11 +42,12 @@ impl UpstreamChainFetcher
     /// Fetch an individual block and unpack it into messages
     // TODO fetch in batches
     async fn fetch_block(context: Arc<Context<Message>>, config: Arc<Config>,
-                         peer: &mut PeerClient, point: Point) -> Result<()> {
+                         peer: Arc<Mutex<PeerClient>>, point: Point) -> Result<()> {
         let topic = config.get_string("body-topic").unwrap_or(DEFAULT_BODY_TOPIC.to_string());
 
         // Fetch the block body
         info!("Requesting single block {point:?}");
+        let mut peer = peer.lock().await;
         let body = peer.blockfetch().fetch_single(point.clone()).await;
 
         match body {
@@ -71,22 +73,22 @@ impl UpstreamChainFetcher
     }
 
     /// ChainSync client loop - fetch headers and publish details, plus fetch each block
-    async fn run_chain_sync(context: Arc<Context<Message>>, config: Arc<Config>,
-                            peer: &mut PeerClient) -> Result<()> {
+    async fn sync_to_point(context: Arc<Context<Message>>, config: Arc<Config>,
+                           peer: Arc<Mutex<PeerClient>>,
+                           point: Point) -> Result<()> {
+
         let topic = config.get_string("header-topic").unwrap_or(DEFAULT_HEADER_TOPIC.to_string());
-        let sync_point = config.get_string("sync-point").unwrap_or(DEFAULT_SYNC_POINT.to_string());
 
-        match sync_point.as_str() {
-            "tip" => peer.chainsync().intersect_tip().await?,
-            "origin" => peer.chainsync().intersect_origin().await?,
-            _ => return Err(anyhow!("Sync point {sync_point} not understood"))
-        };
-
-        info!("Synchronising to {sync_point}");
+        // Find intersect to given point
+        let slot = point.slot_or_default();
+        info!("Synchronising to slot {slot}");
+        let mut my_peer = peer.lock().await;
+        let (point, _) = my_peer.chainsync().find_intersect(vec![point]).await?;
+        point.ok_or(anyhow!("Intersection for slot {slot} not found"))?;
 
         // Loop fetching messages
         loop {
-            let next = peer.chainsync().request_or_await_next().await?;
+            let next = my_peer.chainsync().request_or_await_next().await?;
 
             match next {
                 NextResponse::RollForward(h, Tip(point, _)) => {
@@ -124,7 +126,7 @@ impl UpstreamChainFetcher
                             // in the RollForward is the *tip*, not the next read point
                             let fetch_point = Point::Specific(slot, hash);
                             Self::fetch_block(context.clone(), config.clone(),
-                                              peer, fetch_point).await?;
+                                              peer.clone(), fetch_point).await?;
                         }
                         Err(e) => error!("Bad header: {e}"),
                     }
@@ -138,6 +140,58 @@ impl UpstreamChainFetcher
                 _ => debug!("Ignoring message: {next:?}")
             }
         }
+    }
+
+    /// ChainSync client loop - fetch headers and publish details, plus fetch each block
+    async fn run_chain_sync(context: Arc<Context<Message>>, config: Arc<Config>,
+                            peer: Arc<Mutex<PeerClient>>) -> Result<()> {
+        let sync_point = config.get_string("sync-point").unwrap_or(DEFAULT_SYNC_POINT.to_string());
+        let mut my_peer = peer.lock().await;
+
+        match sync_point.as_str() {
+            "tip" => {
+                // Ask for origin but get the tip as well
+                let (_, Tip(point, _)) = my_peer.chainsync().find_intersect(vec![Point::Origin]).await?;
+                Self::sync_to_point(context, config, peer.clone(), point).await?;
+            }
+            "origin" => {
+                Self::sync_to_point(context, config, peer.clone(), Point::Origin).await?;
+            }
+            "snapshot" => {
+                // Subscribe to snapshotter and sync to its point
+                let topic = config.get_string("snapshot-complete-topic")
+                    .unwrap_or(DEFAULT_SNAPSHOT_COMPLETION_TOPIC.to_string());
+                info!("Waiting for snapshot completion on {topic}");
+
+                let peer = peer.clone();
+                context.clone().message_bus.subscribe(&topic, move |message: Arc<Message>| {
+
+                    let context = context.clone();
+                    let config = config.clone();
+                    let peer = peer.clone();
+
+                    async move {
+                        match message.as_ref() {
+                            Message::SnapshotComplete(msg) => {
+                                info!("Notified snapshot complete at slot {}",
+                                    msg.last_block_slot);
+                                let point = Point::Specific(
+                                    msg.last_block_slot,
+                                    msg.last_block_hash.clone());
+
+                                Self::sync_to_point(context, config, peer, point)
+                                    .await
+                                    .unwrap_or_else(|e| error!("Can't sync: {e}"));
+                            }
+                            _ => error!("Unexpected message type: {message:?}")
+                        }
+                    }
+                })?;
+            }
+            _ => return Err(anyhow!("Sync point {sync_point} not understood"))
+        };
+
+        Ok(())
     }
 
     /// Main init function
@@ -154,9 +208,9 @@ impl UpstreamChainFetcher
             let peer = PeerClient::connect(node_address, magic_number).await;
 
             match peer {
-                Ok(mut peer) => {
+                Ok(peer) => {
                     info!("Connected");
-                    Self::run_chain_sync(context, config, &mut peer)
+                    Self::run_chain_sync(context, config, Arc::new(Mutex::new(peer)))
                         .await
                         .unwrap_or_else(|e| error!("Chain sync failed: {e}"));
                 },

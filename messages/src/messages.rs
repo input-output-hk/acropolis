@@ -29,6 +29,16 @@ pub struct BlockBodyMessage {
     pub raw: Vec<u8>,
 }
 
+/// Snapshot completion message
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SnapshotCompleteMessage {
+    /// Slot number
+    pub last_block_slot: u64,
+
+    /// Block hash
+    pub last_block_hash: Vec<u8>,
+}
+
 /// Transactions message
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RawTxsMessage {
@@ -95,20 +105,21 @@ pub struct UTXODeltasMessage {
 // === Global message enum ===
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum Message {
-    None(()),                               // Just so we have a simple default
+    None(()),                                  // Just so we have a simple default
 
     // Generic messages, get of jail free cards
-    String(String),                         // Simple string
-    JSON(serde_json::Value),                // JSON object
+    String(String),                            // Simple string
+    JSON(serde_json::Value),                   // JSON object
 
     // Caryatid standard messages
-    Clock(ClockTickMessage),                // Clock tick
+    Clock(ClockTickMessage),                   // Clock tick
 
     // Cardano messages
-    BlockHeader(BlockHeaderMessage),        // Block header available
-    BlockBody(BlockBodyMessage),            // Block body available
-    ReceivedTxs(RawTxsMessage),             // Transaction available
-    UTXODeltas(UTXODeltasMessage),          // UTXO deltas received
+    BlockHeader(BlockHeaderMessage),           // Block header available
+    BlockBody(BlockBodyMessage),               // Block body available
+    SnapshotComplete(SnapshotCompleteMessage), // Mithril snapshot loaded
+    ReceivedTxs(RawTxsMessage),                // Transaction available
+    UTXODeltas(UTXODeltasMessage),             // UTXO deltas received
 }
 
 impl Default for Message {
@@ -133,6 +144,12 @@ impl From<BlockHeaderMessage> for Message {
 impl From<BlockBodyMessage> for Message {
     fn from(msg: BlockBodyMessage) -> Self {
         Message::BlockBody(msg)
+    }
+}
+
+impl From<SnapshotCompleteMessage> for Message {
+    fn from(msg: SnapshotCompleteMessage) -> Self {
+        Message::SnapshotComplete(msg)
     }
 }
 
