@@ -178,8 +178,10 @@ impl LedgerState
                     info!("Slot {}, UTXOs {}, future spends {}",
                           state.max_slot, state.utxos.len(), state.future_spends.len());
                     for (key, slot) in &state.future_spends {
-                        info!("Future spend: UTXO {}:{} from slot {slot}",
-                              encode(key.hash), key.index);
+                        if tracing::enabled!(tracing::Level::DEBUG) {
+                            debug!("Future spend: UTXO {}:{} from slot {slot}",
+                                encode(key.hash), key.index);
+                        }
                         if state.max_slot - slot > 10000 {
                             error!("Future spend UTXO {}:{} from slot {slot} is too old (max slot {})",
                                    encode(key.hash), key.index, state.max_slot);
