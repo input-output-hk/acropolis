@@ -2,7 +2,13 @@
 //! Multi-connection, multi-protocol client interface to the Cardano node
 
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
-use acropolis_messages::{BlockHeaderMessage, BlockBodyMessage, Message};
+use acropolis_messages::{
+    BlockHeaderMessage,
+    BlockBodyMessage,
+    Message,
+    BlockInfo,
+    BlockStatus
+};
 use std::sync::Arc;
 use anyhow::{Result, anyhow};
 use config::Config;
@@ -42,7 +48,8 @@ impl UpstreamChainFetcher
     /// Fetch an individual block and unpack it into messages
     // TODO fetch in batches
     async fn fetch_block(context: Arc<Context<Message>>, config: Arc<Config>,
-                         peer: &mut PeerClient, point: Point) -> Result<()> {
+                         peer: &mut PeerClient, point: Point,
+                         block_info: BlockInfo) -> Result<()> {
         let topic = config.get_string("body-topic").unwrap_or(DEFAULT_BODY_TOPIC.to_string());
 
         // Fetch the block body
@@ -55,7 +62,7 @@ impl UpstreamChainFetcher
 
                 // Construct message
                 let message = BlockBodyMessage {
-                    slot: point.slot_or_default(),
+                    block: block_info,
                     raw: body
                 };
 
@@ -96,7 +103,7 @@ impl UpstreamChainFetcher
                     // Get Byron sub-tag if any
                     let tag = match h.byron_prefix {
                         Some((tag, _)) => Some(tag),
-                        None => None
+                        _ => None
                     };
 
                     // Decode header
@@ -109,9 +116,14 @@ impl UpstreamChainFetcher
                             info!("Header for slot {slot} number {number}");
 
                             // Construct message
+                            let block_info = BlockInfo {
+                                status: BlockStatus::Volatile, // TODO vary with 'k'
+                                slot,
+                                number,
+                                hash: hash.clone(),
+                            };
                             let message = BlockHeaderMessage {
-                                slot: slot,
-                                number: number,
+                                block: block_info.clone(),
                                 raw: h.cbor
                             };
 
@@ -125,7 +137,8 @@ impl UpstreamChainFetcher
                             // in the RollForward is the *tip*, not the next read point
                             let fetch_point = Point::Specific(slot, hash);
                             Self::fetch_block(context.clone(), config.clone(),
-                                              &mut *my_peer, fetch_point).await?;
+                                              &mut *my_peer, fetch_point, block_info)
+                                .await?;
                         }
                         Err(e) => error!("Bad header: {e}"),
                     }
@@ -172,11 +185,11 @@ impl UpstreamChainFetcher
                     tokio::spawn(async move {
                         match message.as_ref() {
                             Message::SnapshotComplete(msg) => {
-                                info!("Notified snapshot complete at slot {}",
-                                    msg.last_block_slot);
+                                info!("Notified snapshot complete at slot {} block number {}",
+                                    msg.last_block.slot, msg.last_block.number);
                                 let point = Point::Specific(
-                                    msg.last_block_slot,
-                                    msg.last_block_hash.clone());
+                                    msg.last_block.slot,
+                                    msg.last_block.hash.clone());
 
                                 Self::sync_to_point(context, config, peer, point)
                                     .await

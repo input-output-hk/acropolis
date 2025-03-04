@@ -2,7 +2,10 @@
 //! Reads genesis files and outputs initial UTXO events
 
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
-use acropolis_messages::{TxOutput, UTXODelta, UTXODeltasMessage, Message};
+use acropolis_messages::{
+    TxOutput, UTXODelta, UTXODeltasMessage, Message,
+    BlockInfo, BlockStatus
+};
 use std::sync::Arc;
 use anyhow::Result;
 use config::Config;
@@ -54,7 +57,12 @@ impl GenesisBootstrapper
 
                     // Construct message
                     let mut message = UTXODeltasMessage {
-                        slot: 0,
+                        block: BlockInfo {
+                            status: BlockStatus::Bootstrap,
+                            slot: 0,
+                            number: 0,
+                            hash: Vec::new(),
+                        },
                         deltas: Vec::new(),
                     };
 
