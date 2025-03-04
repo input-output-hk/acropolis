@@ -93,6 +93,7 @@ impl UpstreamChainFetcher
         point.ok_or(anyhow!("Intersection for slot {slot} not found"))?;
 
         // Loop fetching messages
+        let mut rolled_back = false;
         loop {
             let next = my_peer.chainsync().request_or_await_next().await?;
 
@@ -117,7 +118,10 @@ impl UpstreamChainFetcher
 
                             // Construct message
                             let block_info = BlockInfo {
-                                status: BlockStatus::Volatile, // TODO vary with 'k'
+                                status: if rolled_back 
+                                            { BlockStatus::RolledBack }
+                                        else 
+                                            { BlockStatus::Volatile }, // TODO vary with 'k'
                                 slot,
                                 number,
                                 hash: hash.clone(),
@@ -142,11 +146,14 @@ impl UpstreamChainFetcher
                         }
                         Err(e) => error!("Bad header: {e}"),
                     }
+
+                    rolled_back = false;
                 },
 
                 // TODO Handle RollBackward, publish sync message
                 NextResponse::RollBackward(point, _) => {
                     info!("RollBackward to {point:?}");
+                    rolled_back = true;
                 },
 
                 _ => debug!("Ignoring message: {next:?}")
