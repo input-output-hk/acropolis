@@ -2,7 +2,7 @@
 //! Accepts UTXO events and derives the current ledger state in memory
 
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
-use acropolis_messages::{UTXODelta, Message};
+use acropolis_messages::{BlockStatus, Message, UTXODelta};
 use anyhow::Result;
 use config::Config;
 use tracing::{debug, info, error};
@@ -108,6 +108,12 @@ impl LedgerState
                             state.max_number = state.max_number.max(deltas_msg.block.number);
                         }
 
+                        if let BlockStatus::RolledBack = deltas_msg.block.status {
+                            error!(slot = deltas_msg.block.slot,
+                                number = deltas_msg.block.number,
+                                "Rollback received - we don't handle this yet!")
+                        }
+
                         for delta in &deltas_msg.deltas {  // UTXODelta
                             match delta {
                                 UTXODelta::Input(tx_input) => {
@@ -178,9 +184,10 @@ impl LedgerState
             if let Message::Clock(message) = message.as_ref() {
                 if (message.number % 60) == 0 {
                     let state = state2.write().unwrap();
-                    info!("Slot {}, number {}, UTXOs {}, future spends {}",
-                          state.max_slot, state.max_number, 
-                          state.utxos.len(), state.future_spends.len());
+                    info!(slot = state.max_slot,
+                          number = state.max_number,
+                          utxos = state.utxos.len(),
+                          future_spends = state.future_spends.len());
                     for (key, slot) in &state.future_spends {
                         if tracing::enabled!(tracing::Level::DEBUG) {
                             debug!("Future spend: UTXO {}:{} from slot {slot}",
