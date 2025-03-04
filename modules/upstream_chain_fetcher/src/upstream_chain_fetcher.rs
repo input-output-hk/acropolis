@@ -42,12 +42,11 @@ impl UpstreamChainFetcher
     /// Fetch an individual block and unpack it into messages
     // TODO fetch in batches
     async fn fetch_block(context: Arc<Context<Message>>, config: Arc<Config>,
-                         peer: Arc<Mutex<PeerClient>>, point: Point) -> Result<()> {
+                         peer: &mut PeerClient, point: Point) -> Result<()> {
         let topic = config.get_string("body-topic").unwrap_or(DEFAULT_BODY_TOPIC.to_string());
 
         // Fetch the block body
         info!("Requesting single block {point:?}");
-        let mut peer = peer.lock().await;
         let body = peer.blockfetch().fetch_single(point.clone()).await;
 
         match body {
@@ -126,7 +125,7 @@ impl UpstreamChainFetcher
                             // in the RollForward is the *tip*, not the next read point
                             let fetch_point = Point::Specific(slot, hash);
                             Self::fetch_block(context.clone(), config.clone(),
-                                              peer.clone(), fetch_point).await?;
+                                              &mut *my_peer, fetch_point).await?;
                         }
                         Err(e) => error!("Bad header: {e}"),
                     }
@@ -170,7 +169,7 @@ impl UpstreamChainFetcher
                     let config = config.clone();
                     let peer = peer.clone();
 
-                    async move {
+                    tokio::spawn(async move {
                         match message.as_ref() {
                             Message::SnapshotComplete(msg) => {
                                 info!("Notified snapshot complete at slot {}",
@@ -185,7 +184,9 @@ impl UpstreamChainFetcher
                             }
                             _ => error!("Unexpected message type: {message:?}")
                         }
-                    }
+                    });
+
+                    async {}
                 })?;
             }
             _ => return Err(anyhow!("Sync point {sync_point} not understood"))
