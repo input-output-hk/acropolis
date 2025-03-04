@@ -7,10 +7,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use config::Config;
 use tracing::{debug, info, error};
-
-use pallas::{
-    ledger::traverse::MultiEraTx,
-};
+use pallas::ledger::traverse::MultiEraTx;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.txs";
 const DEFAULT_PUBLISH_UTXO_DELTAS_TOPIC: &str = "cardano.utxo.deltas";
@@ -48,12 +45,13 @@ impl TxUnpacker
                 match message.as_ref() {
                     Message::ReceivedTxs(txs_msg) => {
                         if tracing::enabled!(tracing::Level::DEBUG) {
-                            debug!("Received {} txs for slot {}", txs_msg.txs.len(), txs_msg.slot);
+                            debug!("Received {} txs for slot {}",
+                                txs_msg.txs.len(), txs_msg.block.slot);
                         }
 
                         // Construct message
                         let mut message = UTXODeltasMessage {
-                            slot: txs_msg.slot,
+                            block: txs_msg.block.clone(),
                             deltas: Vec::new(),
                         };
 
@@ -105,7 +103,7 @@ impl TxUnpacker
                                 },
 
                                 Err(e) => error!("Can't decode transaction in slot {}: {e}",
-                                                 txs_msg.slot)
+                                                 txs_msg.block.slot)
                             }
                         }
 

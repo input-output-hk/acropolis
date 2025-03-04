@@ -6,14 +6,43 @@
 // Caryatid core messages
 use caryatid_sdk::messages::ClockTickMessage;
 
-/// Block header message
+/// Block status
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum BlockStatus
+{
+    Bootstrap,   // Pseudo-block from bootstrap data
+    Immutable,   // Now immutable (more than 'k' blocks ago)
+    Volatile,    // Volatile, in sequence
+    RolledBack,  // Volatile, restarted after rollback
+}
+
+impl Default for BlockStatus {
+    fn default() -> Self {
+        BlockStatus::Immutable
+    }
+}
+
+/// Block info, shared across multiple messages
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
-pub struct BlockHeaderMessage {
+pub struct BlockInfo {
+    /// Block status
+    pub status: BlockStatus,
+
     /// Slot number
     pub slot: u64,
 
-    /// Header number
+    /// Block number
     pub number: u64,
+
+    /// Block hash
+    pub hash: Vec<u8>,
+}
+
+/// Block header message
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BlockHeaderMessage {
+    /// Block info
+    pub block: BlockInfo,
 
     /// Raw Data
     pub raw: Vec<u8>,
@@ -22,8 +51,8 @@ pub struct BlockHeaderMessage {
 /// Block body message
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BlockBodyMessage {
-    /// Slot number
-    pub slot: u64,
+    /// Block info
+    pub block: BlockInfo,
 
     /// Raw Data
     pub raw: Vec<u8>,
@@ -32,18 +61,15 @@ pub struct BlockBodyMessage {
 /// Snapshot completion message
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SnapshotCompleteMessage {
-    /// Slot number
-    pub last_block_slot: u64,
-
-    /// Block hash
-    pub last_block_hash: Vec<u8>,
+    /// Last block in snapshot data
+    pub last_block: BlockInfo,
 }
 
 /// Transactions message
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RawTxsMessage {
-    /// Slot number
-    pub slot: u64,
+    /// Block info
+    pub block: BlockInfo,
 
     /// Raw Data for each transaction
     pub txs: Vec<Vec<u8>>,
@@ -95,8 +121,8 @@ impl Default for UTXODelta {
 /// Message encapsulating multiple UTXO deltas, in order
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct UTXODeltasMessage {
-    /// Slot number
-    pub slot: u64,
+    /// Block info
+    pub block: BlockInfo,
 
     /// Ordered set of deltas
     pub deltas: Vec<UTXODelta>

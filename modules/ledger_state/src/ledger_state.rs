@@ -7,7 +7,7 @@ use anyhow::Result;
 use config::Config;
 use tracing::{debug, info, error};
 use hex::encode;
-use std::collections::{HashMap};
+use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, RwLock};
 
@@ -54,7 +54,8 @@ struct UTXOValue {
 struct State {
     utxos: HashMap<UTXOKey, UTXOValue>,    //< Live UTXOs
     future_spends: HashMap<UTXOKey, u64>,  //< UTXOs spent in blocks arriving out of order, to slot
-    max_slot: u64,                         //< Maximum block slot number received
+    max_slot: u64,                         //< Maximum block slot received
+    max_number: u64,                       //< Maximum block number received
 }
 
 impl State {
@@ -64,6 +65,7 @@ impl State {
             utxos: HashMap::new(),
             future_spends: HashMap::new(),
             max_slot: 0,
+            max_number: 0,
         }
     }
 }
@@ -97,12 +99,13 @@ impl LedgerState
                     Message::UTXODeltas(deltas_msg) => {
                         if tracing::enabled!(tracing::Level::DEBUG) {
                             debug!("Received {} deltas for slot {}", deltas_msg.deltas.len(),
-                                  deltas_msg.slot);
+                                  deltas_msg.block.slot);
                         }
 
                         { // Capture maximum slot received
                             let mut state = state.write().unwrap();
-                            state.max_slot = state.max_slot.max(deltas_msg.slot);
+                            state.max_slot = state.max_slot.max(deltas_msg.block.slot);
+                            state.max_number = state.max_number.max(deltas_msg.block.number);
                         }
 
                         for delta in &deltas_msg.deltas {  // UTXODelta
@@ -125,10 +128,10 @@ impl LedgerState
                                             if tracing::enabled!(tracing::Level::DEBUG) {
                                                 debug!("UTXO {}:{} arrived out of order (slot {})",
                                                     encode(&tx_input.tx_hash), tx_input.index,
-                                                    deltas_msg.slot);
+                                                    deltas_msg.block.slot);
                                             }
                                             // Add to future spend set
-                                            state.future_spends.insert(key, deltas_msg.slot);
+                                            state.future_spends.insert(key, deltas_msg.block.slot);
                                         }
                                     }
                                 },
@@ -149,7 +152,7 @@ impl LedgerState
                                         if tracing::enabled!(tracing::Level::DEBUG) {
                                             debug!("UTXO {}:{} in future spends removed (created in slot {}, spent in slot {})",
                                                   encode(&tx_output.tx_hash), tx_output.index,
-                                                  deltas_msg.slot, slot);
+                                                  deltas_msg.block.slot, slot);
                                         }
                                         state.future_spends.remove(&key);
                                     } else {
@@ -175,8 +178,9 @@ impl LedgerState
             if let Message::Clock(message) = message.as_ref() {
                 if (message.number % 60) == 0 {
                     let state = state2.write().unwrap();
-                    info!("Slot {}, UTXOs {}, future spends {}",
-                          state.max_slot, state.utxos.len(), state.future_spends.len());
+                    info!("Slot {}, number {}, UTXOs {}, future spends {}",
+                          state.max_slot, state.max_number, 
+                          state.utxos.len(), state.future_spends.len());
                     for (key, slot) in &state.future_spends {
                         if tracing::enabled!(tracing::Level::DEBUG) {
                             debug!("Future spend: UTXO {}:{} from slot {slot}",

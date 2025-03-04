@@ -55,14 +55,15 @@ impl BlockUnpacker
                                 if !block.txs().is_empty() {
                                     let context = context.clone();
                                     let publish_topic = publish_topic.clone();
-                                    let slot = body_msg.slot;
 
                                     // Encode the Tx into hex, and take ownership
                                     let txs: Vec<_> = block.txs().into_iter()
                                         .map(|tx| tx.encode()).collect();
 
-                                    // Construct message
-                                    let tx_message = RawTxsMessage { slot, txs };
+                                    let tx_message = RawTxsMessage { 
+                                        block: body_msg.block.clone(), 
+                                        txs
+                                    };
                                     let message_enum: Message = tx_message.into();
                                     context.message_bus.publish(&publish_topic,
                                                                 Arc::new(message_enum))
@@ -71,7 +72,7 @@ impl BlockUnpacker
                                 }
                             },
 
-                            Err(e) => error!("Can't decode block {}: {e}", body_msg.slot)
+                            Err(e) => error!("Can't decode block {}: {e}", body_msg.block.slot)
                         }
                     }
 

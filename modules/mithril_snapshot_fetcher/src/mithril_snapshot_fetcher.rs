@@ -6,7 +6,9 @@ use acropolis_messages::{
     BlockHeaderMessage,
     BlockBodyMessage,
     SnapshotCompleteMessage,
-    Message
+    Message,
+    BlockInfo,
+    BlockStatus
 };
 use std::sync::Arc;
 use tokio::{join, sync::Mutex};
@@ -24,10 +26,7 @@ use mithril_client::{
 use std::fs;
 use std::path::Path;
 use pallas::{
-    ledger::{
-        traverse::MultiEraBlock,
-        primitives::Hash
-    },
+    ledger::traverse::MultiEraBlock,
     storage::hardano,
 };
 
@@ -172,8 +171,7 @@ impl MithrilSnapshotFetcher
             info!("Snapshot contains blocks up to slot {}", tip.slot_or_default());
         }
 
-        let mut last_block_slot: u64 = 0;
-        let mut last_block_hash: Option<Hash<32>> = None;
+        let mut last_block_info: Option<BlockInfo> = None;
 
         let blocks = hardano::immutable::read_blocks(&path)?;
         for raw_block in blocks {
@@ -190,14 +188,17 @@ impl MithrilSnapshotFetcher
                         info!("Read block number {}, slot {}", number, slot);
                     }
 
-                    last_block_slot = slot;
-                    last_block_hash = Some(block.hash());
+                    let block_info = BlockInfo {
+                        status: BlockStatus::Immutable,
+                        slot,
+                        number,
+                        hash: block.hash().to_vec()
+                    };
 
                     // Send the block header message
                     let header = block.header();
                     let header_message = BlockHeaderMessage {
-                        slot: slot,
-                        number: number,
+                        block: block_info.clone(),
                         raw: header.cbor().to_vec()
                     };
 
@@ -207,7 +208,7 @@ impl MithrilSnapshotFetcher
 
                     // Send the block body message
                     let body_message = BlockBodyMessage {
-                        slot: slot,
+                        block: block_info.clone(),
                         raw: raw_block
                     };
 
@@ -218,16 +219,17 @@ impl MithrilSnapshotFetcher
                     let (header_result, body_result) = join!(header_future, body_future);
                     header_result.unwrap_or_else(|e| error!("Failed to publish header: {e}"));
                     body_result.unwrap_or_else(|e| error!("Failed to publish body: {e}"));
+
+                    last_block_info = Some(block_info);
                 }
                 Err(e) => error!("Error reading block: {e}")
             }
         }
 
         // Send completion message
-        if let Some(last_block_hash) = last_block_hash {
+        if let Some(last_block_info) = last_block_info {
             let message = SnapshotCompleteMessage {
-                last_block_slot: last_block_slot,
-                last_block_hash: last_block_hash.to_vec()
+                last_block: last_block_info,
             };
 
             let message_enum: Message = message.into();
