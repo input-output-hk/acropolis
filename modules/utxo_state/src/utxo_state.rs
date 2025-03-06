@@ -1,4 +1,4 @@
-//! Acropolis ledger state module for Caryatid
+//! Acropolis UTXO state module for Caryatid
 //! Accepts UTXO events and derives the current ledger state in memory
 
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
@@ -70,15 +70,15 @@ impl State {
     }
 }
 
-/// Ledger state module
+/// UTXO state module
 #[module(
     message_type(Message),
-    name = "ledger-state",
-    description = "In-memory ledger state from UTXO events"
+    name = "utxo-state",
+    description = "In-memory UTXO state from UTXO events"
 )]
-pub struct LedgerState;
+pub struct UTXOState;
 
-impl LedgerState
+impl UTXOState
 {
     /// Main init function
     pub fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {

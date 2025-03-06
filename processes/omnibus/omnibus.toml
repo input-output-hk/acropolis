@@ -16,7 +16,7 @@ magic-number = 764824073
 
 [module.tx-unpacker]
 
-[module.ledger-state]
+[module.utxo-state]
 
 [module.clock]
 

@@ -14,7 +14,7 @@ use acropolis_module_mithril_snapshot_fetcher::MithrilSnapshotFetcher;
 use acropolis_module_upstream_chain_fetcher::UpstreamChainFetcher;
 use acropolis_module_block_unpacker::BlockUnpacker;
 use acropolis_module_tx_unpacker::TxUnpacker;
-use acropolis_module_ledger_state::LedgerState;
+use acropolis_module_utxo_state::UTXOState;
 use caryatid_module_clock::Clock;
 
 /// Standard main
@@ -42,7 +42,7 @@ pub async fn main() -> Result<()> {
     UpstreamChainFetcher::register(&mut process);
     BlockUnpacker::register(&mut process);
     TxUnpacker::register(&mut process);
-    LedgerState::register(&mut process);
+    UTXOState::register(&mut process);
 
     Clock::<Message>::register(&mut process);
 
