@@ -57,15 +57,16 @@ impl UTXOState
                         }
 
                         for delta in &deltas_msg.deltas {  // UTXODelta
+                            let slot = deltas_msg.block.slot;
                             let mut state = state.write().unwrap();
 
                             match delta {
                                 UTXODelta::Input(tx_input) => {
-                                    state.notice_input(tx_input, deltas_msg.block.slot);
+                                    state.notice_input(&tx_input, slot);
                                 },
 
                                 UTXODelta::Output(tx_output) => {
-                                    state.notice_output(&tx_output, deltas_msg.block.slot);
+                                    state.notice_output(&tx_output, slot);
                                 },
 
                                 _ => {}

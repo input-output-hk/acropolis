@@ -82,7 +82,7 @@ impl State {
                            previous.value, encode(previous.address));
                 }
             }
-            None => {
+            _ => {
                 if tracing::enabled!(tracing::Level::DEBUG) {
                     debug!("UTXO {}:{} arrived out of order (slot {})",
                            encode(&key.hash), key.index, slot);
