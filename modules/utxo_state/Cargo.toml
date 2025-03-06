@@ -1,11 +1,11 @@
-# Acropolis ledger state module
+# Acropolis UTXO state module
 
 [package]
-name = "acropolis_module_ledger_state"
+name = "acropolis_module_utxo_state"
 version = "0.1.0"
 edition = "2021"
 authors = ["Paul Clark <paul.clark@iohk.io>"]
-description = "Ledger state Caryatid module for Acropolis"
+description = "UTXO state Caryatid module for Acropolis"
 license = "Apache-2.0"
 
 [dependencies]
@@ -18,4 +18,4 @@ tracing = "0.1.40"
 hex = "0.4.3"
 
 [lib]
-path = "src/ledger_state.rs"
+path = "src/utxo_state.rs"
