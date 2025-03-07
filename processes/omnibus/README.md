@@ -1,13 +1,13 @@
-# Acropolis network process
+# Acropolis 'omnibus' process
 
-This process implements the Cardano node network client, using the following
-modules:
-
-* [`Miniprotocols`](../../../modules/miniprotocols)
+This process contains all the [modules](../../modules), communicating
+over the in-memory message bus, which makes it very easy to test.  It
+is not suggested this is the right way to package things for
+production.
 
 ## How to run it
 
 ```shell
-$ cd examples/network
+$ cd processes/omnibus
 $ cargo run
 ```
