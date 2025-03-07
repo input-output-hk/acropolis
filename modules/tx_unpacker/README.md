@@ -1,6 +1,7 @@
 # Transaction unpacker module
 
-The transaction unpacker module accepts raw transactions and unpacks them into UTXO events.
+The transaction unpacker module accepts raw transactions and unpacks
+them into UTXO events.
 
 ## Configuration
 
@@ -22,10 +23,11 @@ The transaction unpacker subscribes for TxMessages on `cardano.txs`
 (see the [Block Unpacker](../block_unpacker) module for details).  It decodes
 the transactions (without any validation!), and extracts the inputs and outputs.
 
-Inputs are published as a single UTXODeltasMessage on `cardano.utxo.deltas`,
-containing the slot number, and an ordered list of input and output changes for the
-entire block.  This ensure the deltas are kept in order and are valid in case of
-intra-block references:
+Inputs are published as a single UTXODeltasMessage on
+`cardano.utxo.deltas`, containing the block information, and an ordered
+list of input and output changes for the entire block.  This ensure
+the deltas are kept in order and are valid in case of intra-block
+references:
 
 
 ```rust
@@ -72,8 +74,8 @@ impl Default for UTXODelta {
 /// Message encapsulating multiple UTXO deltas, in order
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct UTXODeltasMessage {
-    /// Slot number
-    pub slot: u64,
+    /// Block info
+    pub block: BlockInfo,
 
     /// Ordered set of deltas
     pub deltas: Vec<UTXODelta>

@@ -1,6 +1,7 @@
 # Block unpacker module
 
-The block unpacker module accepts block bodies and unpacks them into transactions
+The block unpacker module accepts block bodies and unpacks them into
+transactions
 
 ## Configuration
 
@@ -18,16 +19,17 @@ publish-topic = "cardano.txs"
 
 ## Messages
 
-The block unpacker subscribes for BlockBodyMessages on `cardano.block.body`
-(see the [Mini-protocols](../miniprotocols) module for details).  It unpacks
-this into transactions, which it publishes as a single RawTxsMessage on `cardano.txs`,
-containing the slot number and an ordered vector of raw transaction CBOR.  This ensure
-the transactions are kept in order.
+The block unpacker subscribes for BlockBodyMessages on
+`cardano.block.body` (see the [Upstream Chain
+Fetcher](../upstream_chain_fetcher) module for details).  It unpacks
+this into transactions, which it publishes as a single RawTxsMessage
+on `cardano.txs`, containing the block information and an ordered vector of
+raw transaction CBOR.  This ensure the transactions are kept in order.
 
 ```rust
 pub struct RawTxsMessage {
-    /// Slot number
-    pub slot: u64,
+    /// Block info
+    pub block: BlockInfo,
 
     /// Raw Data for each transaction
     pub txs: Vec<Vec<u8>>,

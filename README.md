@@ -39,33 +39,37 @@ graph TB
 
 ## Modules
 
-This project is in an experimental phase at the moment, and the modules
-are very basic and naive:
+This project is in an experimental phase at the moment, and the module
+structure is highly subject to change:
 
-* [Mini-protocols](modules/miniprotocols) - implementation of the
-  Node-to-Node (N2N) client-side (initiator) protocol, allowing chain
-  synchronisation and block fetching
+* [Upstream Chain Fetcher](modules/upstream_chain_fetcher) -
+  implementation of the Node-to-Node (N2N) client-side (initiator)
+  protocol, allowing chain synchronisation and block fetching
+* [Mithril Snapshot Fetcher](modules/mithril_snapshot_fetcher) -
+  Fetches a chain snapshot from Mithril and replays all the blocks in it
 * [Genesis Bootstrapper](modules/genesis_bootstrapper) - reads the Genesis
   file for a chain and generates initial UTXOs
 * [Block Unpacker](modules/block_unpacker) - unpacks received blocks
   into individual transactions
 * [Tx Unpacker](modules/tx_unpacker) - parses transactions and generates UTXO
   changes
-* [Ledger State](modules/ledger_state) - watches UTXO changes and maintains a basic in-memory ledger state
+* [UTXO State](modules/utxo_state) - watches UTXO changes and maintains a basic in-memory UTXO state
 
 ```mermaid
 graph LR
 
-   Miniprotocols(Mini-protocols)
+   UpstreamChainFetcher(Upstream Chain Fetcher)
    GenesisBootstrapper(Genesis Bootstrapper)
+   MithrilSnapshotFetcher(Mithril Snapshot Fetcher)
    BlockUnpacker(Block Unpacker)
    TxUnpacker(Transaction Unpacker)
-   LedgerState(LedgerState)
+   UTXOState(UTXOState)
 
-   Miniprotocols --> BlockUnpacker
+   UpstreamChainFetcher --> BlockUnpacker
+   MithrilSnapshotFetcher --> BlockUnpacker
    BlockUnpacker --> TxUnpacker
-   GenesisBootstrapper --> LedgerState
-   TxUnpacker --> LedgerState
+   GenesisBootstrapper --> UTXOState
+   TxUnpacker --> UTXOState
 ```
 
 ## Messages
