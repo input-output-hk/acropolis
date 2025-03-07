@@ -2,4 +2,4 @@
 
 These are the process builds for the Acropolis architecture:
 
-* [Network](network/) - the node network client interface
+* [Omnibus](omnibus/) - All-you-can-eat container for testing
