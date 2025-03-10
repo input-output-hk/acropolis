@@ -77,7 +77,8 @@ impl UTXOState
         context.clone().message_bus.subscribe("clock.tick", move |message: Arc<Message>| {
             if let Message::Clock(message) = message.as_ref() {
                 if (message.number % 60) == 0 {
-                    let state = state2.read().unwrap();
+                    let mut state = state2.write().unwrap();
+                    state.prune();
                     state.log_stats();
                 }
             }
