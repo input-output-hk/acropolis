@@ -1,7 +1,7 @@
 //! Acropolis UTXOState: State storage
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
-use acropolis_messages::{BlockInfo, TxInput, TxOutput};
+use acropolis_messages::{BlockInfo, BlockStatus, TxInput, TxOutput};
 use tracing::{debug, info, error};
 use hex::encode;
 
@@ -61,14 +61,19 @@ impl State {
         }
     }
 
-    /// Notice a block for statistics
-    pub fn notice_block(&mut self, block: &BlockInfo) {
+    /// Observe a block for statistics and handle rollbacks
+    pub fn observe_block(&mut self, block: &BlockInfo) {
         self.max_slot = self.max_slot.max(block.slot);
         self.max_number = self.max_number.max(block.number);
+
+        if matches!(block.status, BlockStatus::RolledBack) {
+            error!(slot = block.slot, number = block.number,
+                "Rollback received - we don't handle this yet!")
+        }
     }
 
-    /// Notice an input UTXO spend
-    pub fn notice_input(&mut self, input: &TxInput, slot: u64) {
+    /// Observe an input UTXO spend
+    pub fn observe_input(&mut self, input: &TxInput, slot: u64) {
         let key = UTXOKey::new(&input.tx_hash, input.index);
         
         if tracing::enabled!(tracing::Level::DEBUG) {
@@ -93,8 +98,8 @@ impl State {
         }
     } 
 
-    /// Notice an output UXTO creation
-    pub fn notice_output(&mut self,  output: &TxOutput, slot: u64) {
+    /// Observe an output UXTO creation
+    pub fn observe_output(&mut self,  output: &TxOutput, slot: u64) {
 
         let key = UTXOKey::new(&output.tx_hash, output.index);
 
