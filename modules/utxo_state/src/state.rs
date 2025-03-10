@@ -45,7 +45,7 @@ pub struct UTXOValue {
 /// Ledger state storage
 pub struct State {
     utxos: HashMap<UTXOKey, UTXOValue>,    //< Live UTXOs
-    future_spends: HashMap<UTXOKey, u64>,  //< UTXOs spent in blocks arriving out of order, to slot
+    future_spends: HashMap<UTXOKey, u64>,  //< UTXOs spent in blocks out of order, to block no
     max_slot: u64,                         //< Maximum block slot received
     max_number: u64,                       //< Maximum block number received
 }
@@ -79,7 +79,7 @@ impl State {
     }
 
     /// Observe an input UTXO spend
-    pub fn observe_input(&mut self, input: &TxInput, slot: u64) {
+    pub fn observe_input(&mut self, input: &TxInput, block_number: u64) {
         let key = UTXOKey::new(&input.tx_hash, input.index);
         
         if tracing::enabled!(tracing::Level::DEBUG) {
@@ -95,17 +95,17 @@ impl State {
             }
             _ => {
                 if tracing::enabled!(tracing::Level::DEBUG) {
-                    debug!("UTXO {}:{} arrived out of order (slot {})",
-                           encode(&key.hash), key.index, slot);
+                    debug!("UTXO {}:{} arrived out of order (block {})",
+                           encode(&key.hash), key.index, block_number);
                 }
                 // Add to future spend set
-                self.future_spends.insert(key, slot);
+                self.future_spends.insert(key, block_number);
             }
         }
     } 
 
     /// Observe an output UXTO creation
-    pub fn observe_output(&mut self,  output: &TxOutput, slot: u64) {
+    pub fn observe_output(&mut self,  output: &TxOutput, block_number: u64) {
 
         let key = UTXOKey::new(&output.tx_hash, output.index);
 
@@ -116,11 +116,11 @@ impl State {
 
         // Check if it was spent in a future block (that arrived
         // out of order)
-        if let Some(old_slot) = self.future_spends.get(&key) {
+        if let Some(old_block_number) = self.future_spends.get(&key) {
             // Net effect is zero, so we ignore it
             if tracing::enabled!(tracing::Level::DEBUG) {
-                debug!("UTXO {}:{} in future spends removed (created in slot {}, spent in slot {})",
-                        encode(&key.hash), key.index, slot, old_slot);
+                debug!("UTXO {}:{} in future spends removed (created in block {}, spent in block {})",
+                        encode(&key.hash), key.index, block_number, old_block_number);
             }
             self.future_spends.remove(&key);
         } else {
@@ -137,14 +137,14 @@ impl State {
             number = self.max_number,
             utxos = self.utxos.len(),
             future_spends = self.future_spends.len());
-      for (key, slot) in &self.future_spends {
+      for (key, block_number) in &self.future_spends {
           if tracing::enabled!(tracing::Level::DEBUG) {
-              debug!("Future spend: UTXO {}:{} from slot {slot}",
+              debug!("Future spend: UTXO {}:{} from block {block_number}",
                   encode(key.hash), key.index);
           }
-          if self.max_slot - slot > 10000 {
-              error!("Future spend UTXO {}:{} from slot {slot} is too old (max slot {})",
-                     encode(key.hash), key.index, self.max_slot);
+          if self.max_number - block_number > 1000 {
+              error!("Future spend UTXO {}:{} from block {block_number} is too old (max number {})",
+                     encode(key.hash), key.index, self.max_number);
           }
       }
     }
