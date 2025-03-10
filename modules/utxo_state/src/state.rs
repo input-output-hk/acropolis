@@ -93,8 +93,36 @@ impl State {
         self.max_number = self.max_number.max(block.number);
 
         if matches!(block.status, BlockStatus::RolledBack) {
-            error!(slot = block.slot, number = block.number,
-                "Rollback received - we don't handle this yet!")
+            info!(slot = block.slot, number = block.number,
+                "Rollback received");
+
+            // TODO think hard about what can happen with re-ordering here
+            // - what if we get a rolled-back block before a later UTXO-creating one?
+            // - it may be impossible to reconcile rollbacks with re-ordering!
+            // We could check this by checking for contiguity of block numbers,
+            // or enforcing serialisation of volatile blocks (pending queue),
+            // while retaining parallel handling of immutable for fast sync
+
+            // Check all UTXOs - any created in or after this block,
+            // or spent in the future after this block, can be deleted
+            self.utxos.retain(|_, value| match value.created_at {
+                Some(number) => number < block.number,
+                _ => match value.spent_at {
+                    Some(number) => number < block.number,
+                    _ => true
+                }
+            });
+           
+           // Any remaining (which were necessarily created before this block)
+           // that were spent in or after this block can be reinstated
+           for value in self.utxos.values_mut() {
+                match value.spent_at {
+                    Some(number) if number >= block.number => value.spent_at = None,
+                    _ => {} 
+                }
+           }
+
+           // Let the pruner compress the map
         }
     }
 
