@@ -69,15 +69,22 @@ impl State {
         return self.utxos.get(key);
     }
 
-    /// Get the number of unspent UTXOs - that is, that have a valid created_at
+    /// Get the number of valid UTXOs - that is, that have a valid created_at
     /// but no spent_at
-    #[cfg(test)] // until used outside
-    pub fn count_utxos(&self) -> usize {
+    pub fn count_valid_utxos(&self) -> usize {
         return self.utxos.values().filter(
             |value| value.spent_at.is_none() && value.created_at.is_some()
         ).count(); 
     }
 
+    /// Get the number of future (out of order) UTXOs - that is, that have a
+    /// spent_at but no created_at
+    pub fn count_future_utxos(&self) -> usize {
+        return self.utxos.values().filter(
+            |value| value.spent_at.is_some() && value.created_at.is_none()
+        ).count(); 
+    }
+    
     /// Observe a block for statistics and handle rollbacks
     pub fn observe_block(&mut self, block: &BlockInfo) {
         self.max_slot = self.max_slot.max(block.slot);
@@ -179,7 +186,9 @@ impl State {
     pub fn log_stats(&self) {
         info!(slot = self.max_slot,
             number = self.max_number,
-            utxos = self.utxos.len());
+            total_utxos = self.utxos.len(),
+            valid_utxos = self.count_valid_utxos(),
+            future_utxos = self.count_future_utxos());
     }
 
 }
@@ -195,7 +204,8 @@ mod tests {
         assert_eq!(0, state.utxos.len());
         assert_eq!(0, state.max_slot);
         assert_eq!(0, state.max_number);
-        assert_eq!(0, state.count_utxos());
+        assert_eq!(0, state.count_valid_utxos());
+        assert_eq!(0, state.count_future_utxos());
     }
 
     #[test]
@@ -236,7 +246,7 @@ mod tests {
 
         state.observe_output(&output, 1);
         assert_eq!(1, state.utxos.len());
-        assert_eq!(1, state.count_utxos());
+        assert_eq!(1, state.count_valid_utxos());
 
         let key = UTXOKey::new(&output.tx_hash, output.index);
         match state.lookup_utxo(&key) {
@@ -261,7 +271,7 @@ mod tests {
 
         state.observe_output(&output, 1);
         assert_eq!(1, state.utxos.len());
-        assert_eq!(1, state.count_utxos());
+        assert_eq!(1, state.count_valid_utxos());
 
         let input = TxInput {
             tx_hash: output.tx_hash,
@@ -270,7 +280,7 @@ mod tests {
 
         state.observe_input(&input, 2);
         assert_eq!(1, state.utxos.len());
-        assert_eq!(0, state.count_utxos());
+        assert_eq!(0, state.count_valid_utxos());
     }
 
     #[test]
@@ -286,7 +296,7 @@ mod tests {
         state.observe_input(&input, 2);
 
         assert_eq!(1, state.utxos.len());
-        assert_eq!(0, state.count_utxos());
+        assert_eq!(0, state.count_valid_utxos());
 
         let output = TxOutput {
            tx_hash: vec!(42),
@@ -297,7 +307,7 @@ mod tests {
 
         state.observe_output(&output, 1);
         assert_eq!(1, state.utxos.len());
-        assert_eq!(0, state.count_utxos());
+        assert_eq!(0, state.count_valid_utxos());
     }
 
 }
