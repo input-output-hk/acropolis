@@ -5,6 +5,8 @@ use acropolis_messages::{BlockInfo, BlockStatus, TxInput, TxOutput};
 use tracing::{debug, info, error};
 use hex::encode;
 
+const SECURITY_PARAMETER_K: u64 = 2160;
+
 /// Key of ledger state store
 #[derive(Debug, Clone, Eq)]
 pub struct UTXOKey {
@@ -182,6 +184,19 @@ impl State {
         }
     }
 
+    /// Background prune
+    pub fn prune(&mut self) {
+        // Remove all UTXOs which were spent older than 'k' before max_number
+        if self.max_number >= SECURITY_PARAMETER_K {
+            let boundary = self.max_number - SECURITY_PARAMETER_K;
+            self.utxos.retain(|_, value| match value.spent_at {
+                Some(number) => number >= boundary,
+                _ => true
+            });
+            self.utxos.shrink_to_fit();
+        }
+    }
+
     /// Log statistics
     pub fn log_stats(&self) {
         info!(slot = self.max_slot,
@@ -308,6 +323,48 @@ mod tests {
         state.observe_output(&output, 1);
         assert_eq!(1, state.utxos.len());
         assert_eq!(0, state.count_valid_utxos());
+    }
+
+    #[test]
+    fn prune_deletes_old_spent_utxos() {
+        let mut state = State::new();
+        let output = TxOutput {
+           tx_hash: vec!(42),
+           index: 0,
+           address: vec!(99),
+           value: 42,
+        };
+
+        state.observe_output(&output, 1);
+        assert_eq!(1, state.utxos.len());
+        assert_eq!(1, state.count_valid_utxos());
+
+        let input = TxInput {
+            tx_hash: output.tx_hash,
+            index: output.index,
+        };
+
+        state.observe_input(&input, 2);
+        assert_eq!(1, state.utxos.len());
+        assert_eq!(0, state.count_valid_utxos());
+
+        // Prune shouldn't do anything yet
+        state.prune();
+        assert_eq!(1, state.utxos.len());
+
+        // Observe a block much later
+        let block = BlockInfo {
+            status: BlockStatus::Volatile,
+            slot: 23492,
+            number: 5483,
+            hash: vec!(),
+        };
+
+        state.observe_block(&block);
+        assert_eq!(5483, state.max_number);
+
+        state.prune();
+        assert_eq!(0, state.utxos.len());
     }
 
 }
