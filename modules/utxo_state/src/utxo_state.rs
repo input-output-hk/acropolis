@@ -2,7 +2,7 @@
 //! Accepts UTXO events and derives the current ledger state in memory
 
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
-use acropolis_messages::{BlockStatus, Message, UTXODelta};
+use acropolis_messages::{Message, UTXODelta};
 use anyhow::Result;
 use config::Config;
 use tracing::{debug, info, error};
@@ -45,15 +45,9 @@ impl UTXOState
                                   deltas_msg.block.slot);
                         }
 
-                        { // Capture maximum slot received
+                        { // Capture maximum slot received and handle rollbacks
                             let mut state = state.write().unwrap();
-                            state.notice_block(&deltas_msg.block);
-                        }
-
-                        if let BlockStatus::RolledBack = deltas_msg.block.status {
-                            error!(slot = deltas_msg.block.slot,
-                                number = deltas_msg.block.number,
-                                "Rollback received - we don't handle this yet!")
+                            state.observe_block(&deltas_msg.block);
                         }
 
                         for delta in &deltas_msg.deltas {  // UTXODelta
@@ -62,11 +56,11 @@ impl UTXOState
 
                             match delta {
                                 UTXODelta::Input(tx_input) => {
-                                    state.notice_input(&tx_input, slot);
+                                    state.observe_input(&tx_input, slot);
                                 },
 
                                 UTXODelta::Output(tx_output) => {
-                                    state.notice_output(&tx_output, slot);
+                                    state.observe_output(&tx_output, slot);
                                 },
 
                                 _ => {}
