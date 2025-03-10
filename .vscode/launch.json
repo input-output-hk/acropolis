@@ -1,118 +1,20 @@
 {
-  // Use IntelliSense to learn about possible attributes.
-  // Hover to view descriptions of existing attributes.
-  // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
   "version": "0.2.0",
   "configurations": [
   
     {
       "type": "lldb",
       "request": "launch",
-      "name": "Debug unit tests in library 'acropolis_messages'",
+      "name": "Debug unit tests in library 'acropolis_module_utxo_state'",
       "cargo": {
         "args": [
           "test",
           "--no-run",
           "--lib",
-          "--package=acropolis_messages"
+          "--package=acropolis_module_utxo_state"
         ],
         "filter": {
-          "name": "acropolis_messages",
-          "kind": "lib"
-        }
-      },
-      "args": [],
-      "cwd": "${workspaceFolder}"
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "Debug unit tests in library 'acropolis_module_genesis_bootstrapper'",
-      "cargo": {
-        "args": [
-          "test",
-          "--no-run",
-          "--lib",
-          "--package=acropolis_module_genesis_bootstrapper"
-        ],
-        "filter": {
-          "name": "acropolis_module_genesis_bootstrapper",
-          "kind": "lib"
-        }
-      },
-      "args": [],
-      "cwd": "${workspaceFolder}"
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "Debug unit tests in library 'acropolis_module_miniprotocols'",
-      "cargo": {
-        "args": [
-          "test",
-          "--no-run",
-          "--lib",
-          "--package=acropolis_module_miniprotocols"
-        ],
-        "filter": {
-          "name": "acropolis_module_miniprotocols",
-          "kind": "lib"
-        }
-      },
-      "args": [],
-      "cwd": "${workspaceFolder}"
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "Debug unit tests in library 'acropolis_module_block_unpacker'",
-      "cargo": {
-        "args": [
-          "test",
-          "--no-run",
-          "--lib",
-          "--package=acropolis_module_block_unpacker"
-        ],
-        "filter": {
-          "name": "acropolis_module_block_unpacker",
-          "kind": "lib"
-        }
-      },
-      "args": [],
-      "cwd": "${workspaceFolder}"
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "Debug unit tests in library 'acropolis_module_tx_unpacker'",
-      "cargo": {
-        "args": [
-          "test",
-          "--no-run",
-          "--lib",
-          "--package=acropolis_module_tx_unpacker"
-        ],
-        "filter": {
-          "name": "acropolis_module_tx_unpacker",
-          "kind": "lib"
-        }
-      },
-      "args": [],
-      "cwd": "${workspaceFolder}"
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "Debug unit tests in library 'acropolis_module_ledger_state'",
-      "cargo": {
-        "args": [
-          "test",
-          "--no-run",
-          "--lib",
-          "--package=acropolis_module_ledger_state"
-        ],
-        "filter": {
-          "name": "acropolis_module_ledger_state",
+          "name": "acropolis_module_utxo_state",
           "kind": "lib"
         }
       },
@@ -137,24 +39,5 @@
       "args": [],
       "cwd": "${workspaceFolder}/processes/omnibus"
     },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "Debug unit tests in executable 'acropolis_process_omnibus'",
-      "cargo": {
-        "args": [
-          "test",
-          "--no-run",
-          "--bin=acropolis_process_omnibus",
-          "--package=acropolis_process_omnibus"
-        ],
-        "filter": {
-          "name": "acropolis_process_omnibus",
-          "kind": "bin"
-        }
-      },
-      "args": [],
-      "cwd": "${workspaceFolder}"
-    }
-  ]
+ ]
 }
