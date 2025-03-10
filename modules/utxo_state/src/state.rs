@@ -61,6 +61,12 @@ impl State {
         }
     }
 
+    /// Look up a UTXO
+    #[cfg(test)] // until used outside
+    pub fn lookup_utxo(&self, key: &UTXOKey) -> Option<&UTXOValue> {
+        return self.utxos.get(key);
+    }
+
     /// Observe a block for statistics and handle rollbacks
     pub fn observe_block(&mut self, block: &BlockInfo) {
         self.max_slot = self.max_slot.max(block.slot);
@@ -145,3 +151,117 @@ impl State {
 
 }
 
+// -- Tests --
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_state_is_empty() {
+        let state = State::new();
+        assert_eq!(0, state.utxos.len());
+        assert_eq!(0, state.future_spends.len());
+        assert_eq!(0, state.max_slot);
+        assert_eq!(0, state.max_number);
+    }
+
+    #[test]
+    fn observe_block_gathers_maxima() {
+        let mut state = State::new();
+        let block1 = BlockInfo {
+            status: BlockStatus::Immutable,
+            slot: 99,
+            number: 42,
+            hash: vec!(),
+        };
+
+        state.observe_block(&block1);
+        assert_eq!(99, state.max_slot);
+        assert_eq!(42, state.max_number);
+
+        let block2 = BlockInfo {
+            status: BlockStatus::Immutable,
+            slot: 98,  // Can't happen but tests max
+            number: 43,
+            hash: vec!(),
+        };
+
+        state.observe_block(&block2);
+        assert_eq!(99, state.max_slot);
+        assert_eq!(43, state.max_number);
+    }
+
+    #[test]
+    fn observe_output_adds_to_utxos() {
+        let mut state = State::new();
+        let output = TxOutput {
+           tx_hash: vec!(42),
+           index: 0,
+           address: vec!(99),
+           value: 42,
+        };
+
+        state.observe_output(&output, 1);
+        assert_eq!(1, state.utxos.len());
+
+        let key = UTXOKey::new(&output.tx_hash, output.index);
+        match state.lookup_utxo(&key) {
+            Some(value) => {
+                assert_eq!(99, *value.address.get(0).unwrap());
+                assert_eq!(42, value.value);
+            },
+
+            _ => panic!("UTXO not found")
+        }
+    }
+
+    #[test]
+    fn observe_output_then_input_spends_utxo() {
+        let mut state = State::new();
+        let output = TxOutput {
+           tx_hash: vec!(42),
+           index: 0,
+           address: vec!(99),
+           value: 42,
+        };
+
+        state.observe_output(&output, 1);
+        assert_eq!(1, state.utxos.len());
+
+        let input = TxInput {
+            tx_hash: output.tx_hash,
+            index: output.index,
+        };
+
+        state.observe_input(&input, 2);
+        assert_eq!(0, state.utxos.len());
+    }
+
+    #[test]
+    fn observe_input_then_output_spends_utxo() {
+        let mut state = State::new();
+
+        // Input received first
+        let input = TxInput {
+            tx_hash: vec!(42),
+            index: 0,
+        };
+        
+        state.observe_input(&input, 2);
+
+        assert_eq!(0, state.utxos.len());
+        assert_eq!(1, state.future_spends.len());
+
+        let output = TxOutput {
+           tx_hash: vec!(42),
+           index: 0,
+           address: vec!(99),
+           value: 42,
+        };
+
+        state.observe_output(&output, 1);
+        assert_eq!(0, state.utxos.len());
+        assert_eq!(0, state.future_spends.len());
+    }
+
+}
