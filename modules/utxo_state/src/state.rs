@@ -38,14 +38,17 @@ impl Hash for UTXOKey {
 /// Value stored in UTXO
 #[derive(Debug, Clone)]
 pub struct UTXOValue {
-    address: Vec<u8>, // Address
-    value: u64,       // Value in Lovelace
+    address: Vec<u8>, //< Address
+    value: u64,       //< Value in Lovelace
+
+    // Lifetime - note that a UTXO can be spent but not created if they arrive out of order
+    created_at: Option<u64>, //< Block number UTXO was created (output), if any
+    spent_at: Option<u64>,   //< Block number UTXO was spent (input), if any
 }
 
 /// Ledger state storage
 pub struct State {
     utxos: HashMap<UTXOKey, UTXOValue>,    //< Live UTXOs
-    future_spends: HashMap<UTXOKey, u64>,  //< UTXOs spent in blocks out of order, to block no
     max_slot: u64,                         //< Maximum block slot received
     max_number: u64,                       //< Maximum block number received
 }
@@ -55,7 +58,6 @@ impl State {
     pub fn new() -> Self {
         Self {
             utxos: HashMap::new(),
-            future_spends: HashMap::new(),
             max_slot: 0,
             max_number: 0,
         }
@@ -65,6 +67,15 @@ impl State {
     #[cfg(test)] // until used outside
     pub fn lookup_utxo(&self, key: &UTXOKey) -> Option<&UTXOValue> {
         return self.utxos.get(key);
+    }
+
+    /// Get the number of unspent UTXOs - that is, that have a valid created_at
+    /// but no spent_at
+    #[cfg(test)] // until used outside
+    pub fn count_utxos(&self) -> usize {
+        return self.utxos.values().filter(
+            |value| value.spent_at.is_none() && value.created_at.is_some()
+        ).count(); 
     }
 
     /// Observe a block for statistics and handle rollbacks
@@ -86,20 +97,33 @@ impl State {
             debug!("UTXO << {}:{}", encode(&key.hash), key.index);
         }
 
-        match self.utxos.remove(&key) {
-            Some(previous) => {
+        // UTXO exists?
+        match self.utxos.get_mut(&key) {
+            Some(utxo) => {
+                // Normal case - just mark as spent in this block
                 if tracing::enabled!(tracing::Level::DEBUG) {
                     debug!("        - spent {} from {}",
-                           previous.value, encode(previous.address));
+                           utxo.value, encode(utxo.address.clone()));
                 }
+
+                utxo.spent_at = Some(block_number);
             }
             _ => {
+                // Out-of-order case - since we assume spend of a non-existent
+                // UTXO can never happen in a valid chain, it must have arrived
+                // out of order - we mark it as spent but not created yet
                 if tracing::enabled!(tracing::Level::DEBUG) {
                     debug!("UTXO {}:{} arrived out of order (block {})",
                            encode(&key.hash), key.index, block_number);
                 }
-                // Add to future spend set
-                self.future_spends.insert(key, block_number);
+
+                // Create already spent UTXO, with no created_at
+                self.utxos.insert(key, UTXOValue {
+                    address: Vec::new(),  // Not known yet
+                    value: 0,
+                    created_at: None,
+                    spent_at: Some(block_number),
+                });
             }
         }
     } 
@@ -114,20 +138,40 @@ impl State {
             debug!("        - adding {} to {}", output.value, encode(&output.address));
         }
 
-        // Check if it was spent in a future block (that arrived
-        // out of order)
-        if let Some(old_block_number) = self.future_spends.get(&key) {
-            // Net effect is zero, so we ignore it
-            if tracing::enabled!(tracing::Level::DEBUG) {
-                debug!("UTXO {}:{} in future spends removed (created in block {}, spent in block {})",
-                        encode(&key.hash), key.index, block_number, old_block_number);
+        // Check if it was spent in a future that block arrived out of order
+        match self.utxos.get_mut(&key) {
+            Some(utxo) => {
+
+                // Already seen - unless created twice (impossible) then it must be one that
+                // arrived out of order
+                match utxo.spent_at {
+                    Some(spent_block_number) => {
+                        if tracing::enabled!(tracing::Level::DEBUG) {
+                            debug!("UTXO {}:{} already seen (created in block {}, spent in block {})",
+                                encode(&key.hash), key.index, block_number, spent_block_number);
+                        }
+
+                        // We just mark it as created now, with the value - although note that
+                        // it's already spent, so this value doesn't accumulate to anything
+                        utxo.created_at = Some(block_number);
+                        utxo.address = output.address.clone();
+                        utxo.value = output.value;
+                    }
+
+                    _ => error!("Saw UTXO {}:{} before but not spent!",
+                        encode(&key.hash), key.index)
+                }
             }
-            self.future_spends.remove(&key);
-        } else {
-            self.utxos.insert(key, UTXOValue {
-                address: output.address.clone(),
-                value: output.value
-            });
+
+            _ => {
+                // Normal case - insert a new UTXO, created but not spent
+                self.utxos.insert(key, UTXOValue {
+                    address: output.address.clone(),
+                    value: output.value,
+                    created_at: Some(block_number),
+                    spent_at: None,
+                });
+            }
         }
     }
 
@@ -135,18 +179,7 @@ impl State {
     pub fn log_stats(&self) {
         info!(slot = self.max_slot,
             number = self.max_number,
-            utxos = self.utxos.len(),
-            future_spends = self.future_spends.len());
-      for (key, block_number) in &self.future_spends {
-          if tracing::enabled!(tracing::Level::DEBUG) {
-              debug!("Future spend: UTXO {}:{} from block {block_number}",
-                  encode(key.hash), key.index);
-          }
-          if self.max_number - block_number > 1000 {
-              error!("Future spend UTXO {}:{} from block {block_number} is too old (max number {})",
-                     encode(key.hash), key.index, self.max_number);
-          }
-      }
+            utxos = self.utxos.len());
     }
 
 }
@@ -160,9 +193,9 @@ mod tests {
     fn new_state_is_empty() {
         let state = State::new();
         assert_eq!(0, state.utxos.len());
-        assert_eq!(0, state.future_spends.len());
         assert_eq!(0, state.max_slot);
         assert_eq!(0, state.max_number);
+        assert_eq!(0, state.count_utxos());
     }
 
     #[test]
@@ -203,6 +236,7 @@ mod tests {
 
         state.observe_output(&output, 1);
         assert_eq!(1, state.utxos.len());
+        assert_eq!(1, state.count_utxos());
 
         let key = UTXOKey::new(&output.tx_hash, output.index);
         match state.lookup_utxo(&key) {
@@ -227,6 +261,7 @@ mod tests {
 
         state.observe_output(&output, 1);
         assert_eq!(1, state.utxos.len());
+        assert_eq!(1, state.count_utxos());
 
         let input = TxInput {
             tx_hash: output.tx_hash,
@@ -234,7 +269,8 @@ mod tests {
         };
 
         state.observe_input(&input, 2);
-        assert_eq!(0, state.utxos.len());
+        assert_eq!(1, state.utxos.len());
+        assert_eq!(0, state.count_utxos());
     }
 
     #[test]
@@ -249,8 +285,8 @@ mod tests {
         
         state.observe_input(&input, 2);
 
-        assert_eq!(0, state.utxos.len());
-        assert_eq!(1, state.future_spends.len());
+        assert_eq!(1, state.utxos.len());
+        assert_eq!(0, state.count_utxos());
 
         let output = TxOutput {
            tx_hash: vec!(42),
@@ -260,8 +296,8 @@ mod tests {
         };
 
         state.observe_output(&output, 1);
-        assert_eq!(0, state.utxos.len());
-        assert_eq!(0, state.future_spends.len());
+        assert_eq!(1, state.utxos.len());
+        assert_eq!(0, state.count_utxos());
     }
 
 }
