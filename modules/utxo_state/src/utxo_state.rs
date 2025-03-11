@@ -2,14 +2,15 @@
 //! Accepts UTXO events and derives the current ledger state in memory
 
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
-use acropolis_messages::{Message, UTXODelta};
+use acropolis_messages::Message;
 use anyhow::Result;
 use config::Config;
 use tracing::{debug, info, error};
 use std::sync::{Arc, RwLock};
 
 mod state;
-use state::State;
+mod serialiser;
+use serialiser::Serialiser;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.utxo.deltas";
 
@@ -26,7 +27,7 @@ impl UTXOState
     /// Main init function
     pub fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
 
-        let state = Arc::new(RwLock::new(State::new()));
+        let serialiser = Arc::new(RwLock::new(Serialiser::new()));
 
         // Subscribe for UTXO messages
         // Get configuration
@@ -34,9 +35,9 @@ impl UTXOState
             .unwrap_or(DEFAULT_SUBSCRIBE_TOPIC.to_string());
         info!("Creating subscriber on '{subscribe_topic}'");
 
-        let state2 = state.clone();
+        let serialiser2 = serialiser.clone();
         context.clone().message_bus.subscribe(&subscribe_topic, move |message: Arc<Message>| {
-            let state = state.clone();
+            let serialiser = serialiser.clone();
             async move {
                 match message.as_ref() {
                     Message::UTXODeltas(deltas_msg) => {
@@ -45,27 +46,8 @@ impl UTXOState
                                   deltas_msg.block.slot);
                         }
 
-                        { // Capture maximum slot received and handle rollbacks
-                            let mut state = state.write().unwrap();
-                            state.observe_block(&deltas_msg.block);
-                        }
-
-                        for delta in &deltas_msg.deltas {  // UTXODelta
-                            let number = deltas_msg.block.number;
-                            let mut state = state.write().unwrap();
-
-                            match delta {
-                                UTXODelta::Input(tx_input) => {
-                                    state.observe_input(&tx_input, number);
-                                },
-
-                                UTXODelta::Output(tx_output) => {
-                                    state.observe_output(&tx_output, number);
-                                },
-
-                                _ => {}
-                            }
-                        }
+                        let mut serialiser = serialiser.write().unwrap();
+                        serialiser.observe_utxo_deltas(&deltas_msg);
                     }
 
                     _ => error!("Unexpected message type: {message:?}")
@@ -77,9 +59,8 @@ impl UTXOState
         context.clone().message_bus.subscribe("clock.tick", move |message: Arc<Message>| {
             if let Message::Clock(message) = message.as_ref() {
                 if (message.number % 60) == 0 {
-                    let mut state = state2.write().unwrap();
-                    state.prune();
-                    state.log_stats();
+                    let mut serialiser = serialiser2.write().unwrap();
+                    serialiser.tick();
                 }
             }
 
