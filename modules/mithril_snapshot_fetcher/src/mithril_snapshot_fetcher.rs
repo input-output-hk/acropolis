@@ -14,7 +14,7 @@ use std::sync::Arc;
 use tokio::{join, sync::Mutex};
 use anyhow::{Result, anyhow};
 use config::Config;
-use tracing::{info, error};
+use tracing::{debug, info, error};
 use mithril_client::{
     ClientBuilder,
     MessageBuilder,
@@ -174,6 +174,7 @@ impl MithrilSnapshotFetcher
         let mut last_block_info: Option<BlockInfo> = None;
 
         let blocks = hardano::immutable::read_blocks(&path)?;
+        let mut last_block_number: u64 = 0;
         for raw_block in blocks {
             match raw_block {
                 Ok(raw_block) => {
@@ -183,6 +184,17 @@ impl MithrilSnapshotFetcher
                     let block = MultiEraBlock::decode(&raw_block)?;
                     let slot = block.slot();
                     let number = block.number();
+
+                    if tracing::enabled!(tracing::Level::DEBUG) {
+                        debug!(number, slot);
+                    }
+       
+                    if number <= last_block_number && last_block_number != 0 {
+                        error!(number, last_block_number,
+                            "Rewind of block number in Mithril! Skipped...");
+                        continue;    
+                    }
+                    last_block_number = number;
 
                     if number % 100000 == 0 {
                         info!("Read block number {}, slot {}", number, slot);

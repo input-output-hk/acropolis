@@ -5,7 +5,7 @@ use caryatid_sdk::{Context, Module, module, MessageBusExt};
 use acropolis_messages::Message;
 use anyhow::Result;
 use config::Config;
-use tracing::{debug, info, error};
+use tracing::{info, error};
 use std::sync::{Arc, RwLock};
 
 mod state;
@@ -41,11 +41,6 @@ impl UTXOState
             async move {
                 match message.as_ref() {
                     Message::UTXODeltas(deltas_msg) => {
-                        if tracing::enabled!(tracing::Level::DEBUG) {
-                            debug!("Received {} deltas for slot {}", deltas_msg.deltas.len(),
-                                  deltas_msg.block.slot);
-                        }
-
                         let mut serialiser = serialiser.write().unwrap();
                         serialiser.observe_utxo_deltas(&deltas_msg);
                     }

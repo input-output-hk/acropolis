@@ -40,19 +40,29 @@ impl Hash for UTXOKey {
 /// Value stored in UTXO
 #[derive(Debug, Clone)]
 pub struct UTXOValue {
-    address: Vec<u8>, //< Address
-    value: u64,       //< Value in Lovelace
+    /// Address in binary
+    address: Vec<u8>,
 
-    // Lifetime - note that a UTXO can be spent but not created if they arrive out of order
-    created_at: Option<u64>, //< Block number UTXO was created (output), if any
-    spent_at: Option<u64>,   //< Block number UTXO was spent (input), if any
+    /// Value in Lovelace
+    value: u64,
+
+    /// Block number UTXO was created (output)
+    created_at: u64,
+
+    /// Block number UTXO was spent (input), if any
+    spent_at: Option<u64>,   
 }
 
 /// Ledger state storage
 pub struct State {
-    utxos: HashMap<UTXOKey, UTXOValue>,    //< Live UTXOs
-    max_slot: u64,                         //< Maximum block slot received
-    max_number: u64,                       //< Maximum block number received
+    /// Live UTXOs
+    utxos: HashMap<UTXOKey, UTXOValue>,
+
+    /// Last slot number received
+    last_slot: u64,
+
+    /// Last block number received
+    last_number: u64,
 }
 
 impl State {
@@ -60,8 +70,8 @@ impl State {
     pub fn new() -> Self {
         Self {
             utxos: HashMap::new(),
-            max_slot: 0,
-            max_number: 0,
+            last_slot: 0,
+            last_number: 0,
         }
     }
 
@@ -74,48 +84,41 @@ impl State {
     /// Get the number of valid UTXOs - that is, that have a valid created_at
     /// but no spent_at
     pub fn count_valid_utxos(&self) -> usize {
-        return self.utxos.values().filter(
-            |value| value.spent_at.is_none() && value.created_at.is_some()
-        ).count(); 
+        return self.utxos.values().filter(|value| value.spent_at.is_none())
+            .count(); 
     }
 
-    /// Get the number of future (out of order) UTXOs - that is, that have a
-    /// spent_at but no created_at
-    pub fn count_future_utxos(&self) -> usize {
-        return self.utxos.values().filter(
-            |value| value.spent_at.is_some() && value.created_at.is_none()
-        ).count(); 
-    }
-    
     /// Observe a block for statistics and handle rollbacks
-    pub fn observe_block(&mut self, block: &BlockInfo) {
-        self.max_slot = self.max_slot.max(block.slot);
-        self.max_number = self.max_number.max(block.number);
+    /// Returns whether the block was accepted (number is 1 more than max_number)
+    pub fn observe_block(&mut self, block: &BlockInfo) -> bool {
+
+        // Double check we don't see rewinds or duplicates
+        if block.number <= self.last_number && block.number != 0 {
+            error!("Block {} received expecting {} - ignored!",
+                block.number, self.last_number+1);
+            return true;  // Pretend we processed it
+        }
+
+        // They must arrive in order at this point - but note we receive two block 0's,
+        // one from genesis, one from the chain
+        if block.number != self.last_number + 1 && block.number != 0 {
+            return false;
+        }
+
+        // Note we use max because the genesis block can arrive at any point
+        self.last_slot = self.last_slot.max(block.slot);
+        self.last_number = self.last_number.max(block.number);
 
         if matches!(block.status, BlockStatus::RolledBack) {
             info!(slot = block.slot, number = block.number,
                 "Rollback received");
 
-            // TODO think hard about what can happen with re-ordering here
-            // - what if we get a rolled-back block before a later UTXO-creating one?
-            // - it may be impossible to reconcile rollbacks with re-ordering!
-            // We could check this by checking for contiguity of block numbers,
-            // or enforcing serialisation of volatile blocks (pending queue),
-            // while retaining parallel handling of immutable for fast sync
-
-            // Check all UTXOs - any created in or after this block,
-            // or spent in the future after this block, can be deleted
-            self.utxos.retain(|_, value| match value.created_at {
-                Some(number) => number < block.number,
-                _ => match value.spent_at {
-                    Some(number) => number < block.number,
-                    _ => true
-                }
-            });
+            // Check all UTXOs - any created in or after this can be deleted
+            self.utxos.retain(|_, value| value.created_at < block.number);
            
-           // Any remaining (which were necessarily created before this block)
-           // that were spent in or after this block can be reinstated
-           for value in self.utxos.values_mut() {
+            // Any remaining (which were necessarily created before this block)
+            // that were spent in or after this block can be reinstated
+            for value in self.utxos.values_mut() {
                 match value.spent_at {
                     Some(number) if number >= block.number => value.spent_at = None,
                     _ => {} 
@@ -124,6 +127,9 @@ impl State {
 
            // Let the pruner compress the map
         }
+
+        return true;
+
     }
 
     /// Observe an input UTXO spend
@@ -137,30 +143,17 @@ impl State {
         // UTXO exists?
         match self.utxos.get_mut(&key) {
             Some(utxo) => {
-                // Normal case - just mark as spent in this block
                 if tracing::enabled!(tracing::Level::DEBUG) {
                     debug!("        - spent {} from {}",
                            utxo.value, encode(utxo.address.clone()));
                 }
 
+                // Just mark as spent in this block
                 utxo.spent_at = Some(block_number);
             }
             _ => {
-                // Out-of-order case - since we assume spend of a non-existent
-                // UTXO can never happen in a valid chain, it must have arrived
-                // out of order - we mark it as spent but not created yet
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                    debug!("UTXO {}:{} arrived out of order (block {})",
-                           encode(&key.hash), key.index, block_number);
-                }
-
-                // Create already spent UTXO, with no created_at
-                self.utxos.insert(key, UTXOValue {
-                    address: Vec::new(),  // Not known yet
-                    value: 0,
-                    created_at: None,
-                    spent_at: Some(block_number),
-                });
+                error!("UTXO {}:{} unknown in block {}",
+                    encode(&key.hash), key.index, block_number);
             }
         }
     } 
@@ -168,55 +161,29 @@ impl State {
     /// Observe an output UXTO creation
     pub fn observe_output(&mut self,  output: &TxOutput, block_number: u64) {
 
-        let key = UTXOKey::new(&output.tx_hash, output.index);
-
         if tracing::enabled!(tracing::Level::DEBUG) {
-            debug!("UTXO >> {}:{}", encode(&key.hash), key.index);
+            debug!("UTXO >> {}:{}", encode(&output.tx_hash), output.index);
             debug!("        - adding {} to {}", output.value, encode(&output.address));
         }
 
-        // Check if it was spent in a future that block arrived out of order
-        match self.utxos.get_mut(&key) {
-            Some(utxo) => {
-
-                // Already seen - unless created twice (impossible) then it must be one that
-                // arrived out of order
-                match utxo.spent_at {
-                    Some(spent_block_number) => {
-                        if tracing::enabled!(tracing::Level::DEBUG) {
-                            debug!("UTXO {}:{} already seen (created in block {}, spent in block {})",
-                                encode(&key.hash), key.index, block_number, spent_block_number);
-                        }
-
-                        // We just mark it as created now, with the value - although note that
-                        // it's already spent, so this value doesn't accumulate to anything
-                        utxo.created_at = Some(block_number);
-                        utxo.address = output.address.clone();
-                        utxo.value = output.value;
-                    }
-
-                    _ => error!("Saw UTXO {}:{} before but not spent!",
-                        encode(&key.hash), key.index)
-                }
-            }
-
-            _ => {
-                // Normal case - insert a new UTXO, created but not spent
-                self.utxos.insert(key, UTXOValue {
-                    address: output.address.clone(),
-                    value: output.value,
-                    created_at: Some(block_number),
-                    spent_at: None,
-                });
-            }
+        // Insert the UTXO, checking if it already existed
+        let key = UTXOKey::new(&output.tx_hash, output.index);
+        if let Some(_) = self.utxos.insert(key, UTXOValue {
+            address: output.address.clone(),
+            value: output.value,
+            created_at: block_number,
+            spent_at: None,
+        }) {
+            error!("Saw UTXO {}:{} before, in block {block_number}",
+                encode(&output.tx_hash), output.index);
         }
     }
 
     /// Background prune
     pub fn prune(&mut self) {
         // Remove all UTXOs which were spent older than 'k' before max_number
-        if self.max_number >= SECURITY_PARAMETER_K {
-            let boundary = self.max_number - SECURITY_PARAMETER_K;
+        if self.last_number >= SECURITY_PARAMETER_K {
+            let boundary = self.last_number - SECURITY_PARAMETER_K;
             self.utxos.retain(|_, value| match value.spent_at {
                 Some(number) => number >= boundary,
                 _ => true
@@ -227,11 +194,10 @@ impl State {
 
     /// Log statistics
     pub fn log_stats(&self) {
-        info!(slot = self.max_slot,
-            number = self.max_number,
+        info!(slot = self.last_slot,
+            number = self.last_number,
             total_utxos = self.utxos.len(),
-            valid_utxos = self.count_valid_utxos(),
-            future_utxos = self.count_future_utxos());
+            valid_utxos = self.count_valid_utxos());
     }
 
 }
@@ -245,36 +211,35 @@ mod tests {
     fn new_state_is_empty() {
         let state = State::new();
         assert_eq!(0, state.utxos.len());
-        assert_eq!(0, state.max_slot);
-        assert_eq!(0, state.max_number);
+        assert_eq!(0, state.last_slot);
+        assert_eq!(0, state.last_number);
         assert_eq!(0, state.count_valid_utxos());
-        assert_eq!(0, state.count_future_utxos());
     }
 
     #[test]
-    fn observe_block_gathers_maxima() {
+    fn observe_block_accepts_only_serial_input() {
         let mut state = State::new();
         let block1 = BlockInfo {
             status: BlockStatus::Immutable,
             slot: 99,
-            number: 42,
+            number: 1,
             hash: vec!(),
         };
 
-        state.observe_block(&block1);
-        assert_eq!(99, state.max_slot);
-        assert_eq!(42, state.max_number);
+        assert!(state.observe_block(&block1));
+        assert_eq!(99, state.last_slot);
+        assert_eq!(1, state.last_number);
 
         let block2 = BlockInfo {
             status: BlockStatus::Immutable,
-            slot: 98,  // Can't happen but tests max
-            number: 43,
+            slot: 200,  // Can't happen but tests max
+            number: 3,  // Out of order
             hash: vec!(),
         };
 
-        state.observe_block(&block2);
-        assert_eq!(99, state.max_slot);
-        assert_eq!(43, state.max_number);
+        assert!(!state.observe_block(&block2));
+        assert_eq!(99, state.last_slot);
+        assert_eq!(1, state.last_number);
     }
 
     #[test]
@@ -327,33 +292,6 @@ mod tests {
     }
 
     #[test]
-    fn observe_input_then_output_spends_utxo() {
-        let mut state = State::new();
-
-        // Input received first
-        let input = TxInput {
-            tx_hash: vec!(42),
-            index: 0,
-        };
-        
-        state.observe_input(&input, 2);
-
-        assert_eq!(1, state.utxos.len());
-        assert_eq!(0, state.count_valid_utxos());
-
-        let output = TxOutput {
-           tx_hash: vec!(42),
-           index: 0,
-           address: vec!(99),
-           value: 42,
-        };
-
-        state.observe_output(&output, 1);
-        assert_eq!(1, state.utxos.len());
-        assert_eq!(0, state.count_valid_utxos());
-    }
-
-    #[test]
     fn prune_deletes_old_spent_utxos() {
         let mut state = State::new();
         let output = TxOutput {
@@ -388,8 +326,10 @@ mod tests {
             hash: vec!(),
         };
 
-        state.observe_block(&block);
-        assert_eq!(5483, state.max_number);
+        // Fudge so it accepts the block
+        state.last_number = 5482;
+        assert!(state.observe_block(&block));
+        assert_eq!(5483, state.last_number);
 
         state.prune();
         assert_eq!(0, state.utxos.len());
