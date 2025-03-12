@@ -82,7 +82,7 @@ impl Serialiser {
     /// Handle a UTXO delta message
     pub fn observe_utxo_deltas(&mut self, deltas: &UTXODeltasMessage) {
 
-        // Observe block for stats and rollbacks
+        // Observe block for stats and rollbacks, checking it is in order
         if self.state.observe_block(&deltas.block) {
 
             // Accepted - it's in order
