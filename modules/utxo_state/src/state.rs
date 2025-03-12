@@ -96,7 +96,9 @@ impl State {
             BlockStatus::RolledBack => {
                 // Check if we can process it yet - only if it is behind our current tip
                 // If it replaces our tip (the most common occurrence), that's fine
-                if block.number > self.last_number {
+                // It it's actually the next block (as happens in the handover between Mithril
+                // upstream chain fetch), that's OK too.
+                if block.number > self.last_number+1 {
                     return false;
                 }
 
