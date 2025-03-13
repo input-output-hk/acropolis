@@ -2,8 +2,9 @@
 
 [workspace]
 members = [
-    # Global message definitions
+    # Global message and common definitions
     "messages",
+    "common",
 
     # Modules
     "modules/genesis_bootstrapper",    # Genesis bootstrap UTXOs

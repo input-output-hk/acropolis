@@ -1,7 +1,8 @@
 //! Acropolis UTXOState: State storage
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
-use acropolis_messages::{BlockInfo, BlockStatus, TxInput, TxOutput};
+use acropolis_common::SerialisedMessageHandler;
+use acropolis_messages::{BlockInfo, BlockStatus, TxInput, TxOutput, UTXODelta, UTXODeltasMessage};
 use tracing::{debug, info, error};
 use hex::encode;
 
@@ -165,7 +166,7 @@ impl State {
     }
 
     /// Background prune
-    pub fn prune(&mut self) {
+    fn prune(&mut self) {
         // Remove all UTXOs which were spent older than 'k' before max_number
         if self.last_number >= SECURITY_PARAMETER_K {
             let boundary = self.last_number - SECURITY_PARAMETER_K;
@@ -178,13 +179,44 @@ impl State {
     }
 
     /// Log statistics
-    pub fn log_stats(&self) {
+    fn log_stats(&self) {
         info!(slot = self.last_slot,
             number = self.last_number,
             total_utxos = self.utxos.len(),
             valid_utxos = self.count_valid_utxos());
     }
 
+    /// Tick for pruning and logging
+    pub fn tick(&mut self) {
+        self.prune();
+        self.log_stats();
+    }
+}
+
+impl SerialisedMessageHandler<UTXODeltasMessage> for State {
+
+    /// Handle a message
+    fn handle(&mut self, deltas: &UTXODeltasMessage) {
+
+       // Observe block for stats and rollbacks
+       self.observe_block(&deltas.block);
+
+       // Process the deltas
+       for delta in &deltas.deltas {  // UTXODelta
+
+           match delta {
+               UTXODelta::Input(tx_input) => {
+                   self.observe_input(&tx_input, deltas.block.number);
+               }, 
+
+               UTXODelta::Output(tx_output) => {
+                   self.observe_output(&tx_output, deltas.block.number);
+               },
+
+               _ => {}
+           }
+       }
+    }
 }
 
 // -- Tests --
