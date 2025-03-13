@@ -25,6 +25,8 @@ use mithril_client::{
 };
 use std::fs;
 use std::path::Path;
+use std::thread::sleep;
+use std::time::Duration;
 use pallas::{
     ledger::traverse::MultiEraBlock,
     storage::hardano,
@@ -269,9 +271,16 @@ impl MithrilSnapshotFetcher
                 tokio::spawn(async move {
 
                     if config.get_bool("download").unwrap_or(true) {
-                        match Self::download_snapshot(config.clone()).await {
-                            Err(e) => error!("Failed to fetch Mithril snapshot: {e}"),
-                            _ => {}
+                        let mut delay = 1;
+                        loop {
+                            match Self::download_snapshot(config.clone()).await {
+                                Err(e) => error!("Failed to fetch Mithril snapshot: {e}"),
+                                _ => { break; }
+                            }
+                            info!("Will retry in {delay}s");
+                            sleep(Duration::from_secs(delay));
+                            info!("Retrying snapshot download");
+                            delay = (delay * 2).min(60);
                         }
                     }
 
