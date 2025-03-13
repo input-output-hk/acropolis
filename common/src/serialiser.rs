@@ -114,10 +114,7 @@ impl <MSG: MessageBounds> Serialiser<MSG> {
         let number = block.number;
 
         // Pass to the handler
-        {
-            let mut handler = self.handler.lock().unwrap();
-            handler.handle(message);
-        }
+        self.handler.lock().unwrap().handle(message);
 
         // Update sequence - but note we get two block 0 from genesis
         // and chain itself (this is ugly!)
@@ -142,10 +139,9 @@ impl <MSG: MessageBounds> Serialiser<MSG> {
                         debug!("Now accepted block {}", next.block.number);
                     }
 
-                    // We have to clone to avoid mut borrow of self when we obtained
-                    // next_pending by immut borrow in peek() - not pleasant!
-                    self.process_message(&next.block.clone(), &next.message.clone());
-                    self.pending.pop();
+                    if let Some(next) = self.pending.pop() {
+                        self.process_message(&next.block, &next.message);
+                    }
                 } else {
                     break;
                 }
