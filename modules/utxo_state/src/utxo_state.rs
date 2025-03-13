@@ -44,7 +44,7 @@ impl UTXOState
                 match message.as_ref() {
                     Message::UTXODeltas(deltas_msg) => {
                         let mut serialiser = serialiser.lock().unwrap();
-                        serialiser.handle_message(&deltas_msg.block, &deltas_msg);
+                        serialiser.handle_message(&deltas_msg.block, deltas_msg);
                     }
 
                     _ => error!("Unexpected message type: {message:?}")
