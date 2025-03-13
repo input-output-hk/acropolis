@@ -3,6 +3,21 @@
   "configurations": [
   
     {
+        "type": "lldb",
+        "request": "launch",
+        "name": "Debug unit tests in library 'acropolis_common'",
+        "cargo": {
+          "args": [
+            "test",
+            "--no-run",
+            "--lib",
+            "--package=acropolis_common"
+          ]
+        },
+        "args": [],
+        "cwd": "${workspaceFolder}"
+      },
+      {
       "type": "lldb",
       "request": "launch",
       "name": "Debug unit tests in library 'acropolis_module_utxo_state'",
@@ -12,11 +27,7 @@
           "--no-run",
           "--lib",
           "--package=acropolis_module_utxo_state"
-        ],
-        "filter": {
-          "name": "acropolis_module_utxo_state",
-          "kind": "lib"
-        }
+        ]
       },
       "args": [],
       "cwd": "${workspaceFolder}"

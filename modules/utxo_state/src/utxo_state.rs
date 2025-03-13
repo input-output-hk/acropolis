@@ -3,14 +3,14 @@
 
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
 use acropolis_messages::Message;
+use acropolis_common::Serialiser;
 use anyhow::Result;
 use config::Config;
 use tracing::{info, error};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex};
 
 mod state;
-mod serialiser;
-use serialiser::Serialiser;
+use state::State;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.utxo.deltas";
 
@@ -27,22 +27,24 @@ impl UTXOState
     /// Main init function
     pub fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
 
-        let serialiser = Arc::new(RwLock::new(Serialiser::new()));
+        let state = Arc::new(Mutex::new(State::new()));
+        let state2 = state.clone();
+        let serialiser = Arc::new(Mutex::new(Serialiser::new(state)));
+        let serialiser2 = serialiser.clone();
 
-        // Subscribe for UTXO messages
         // Get configuration
         let subscribe_topic = config.get_string("subscribe-topic")
             .unwrap_or(DEFAULT_SUBSCRIBE_TOPIC.to_string());
         info!("Creating subscriber on '{subscribe_topic}'");
 
-        let serialiser2 = serialiser.clone();
+        // Subscribe for UTXO messages
         context.clone().message_bus.subscribe(&subscribe_topic, move |message: Arc<Message>| {
             let serialiser = serialiser.clone();
             async move {
                 match message.as_ref() {
                     Message::UTXODeltas(deltas_msg) => {
-                        let mut serialiser = serialiser.write().unwrap();
-                        serialiser.observe_utxo_deltas(&deltas_msg);
+                        let mut serialiser = serialiser.lock().unwrap();
+                        serialiser.handle_message(&deltas_msg.block, &deltas_msg);
                     }
 
                     _ => error!("Unexpected message type: {message:?}")
@@ -50,12 +52,12 @@ impl UTXOState
             }
         })?;
 
-        // Ticker to log stats
+        // Ticker to log stats and prune state
         context.clone().message_bus.subscribe("clock.tick", move |message: Arc<Message>| {
             if let Message::Clock(message) = message.as_ref() {
                 if (message.number % 60) == 0 {
-                    let mut serialiser = serialiser2.write().unwrap();
-                    serialiser.tick();
+                    state2.lock().unwrap().tick();
+                    serialiser2.lock().unwrap().tick();
                 }
             }
 
