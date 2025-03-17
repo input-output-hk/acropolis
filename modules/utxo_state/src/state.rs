@@ -2,17 +2,22 @@
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use acropolis_common::SerialisedMessageHandler;
-use acropolis_messages::{BlockInfo, BlockStatus, TxInput, TxOutput, UTXODelta, UTXODeltasMessage};
+use acropolis_messages::{
+    BlockInfo, BlockStatus, TxInput, TxOutput,
+    UTXODelta, UTXODeltasMessage
+};
 use tracing::{debug, info, error};
 use hex::encode;
+
+use crate::volatile_index::VolatileIndex;
 
 const SECURITY_PARAMETER_K: u64 = 2160;
 
 /// Key of ledger state store
 #[derive(Debug, Clone, Eq)]
 pub struct UTXOKey {
-    hash: [u8; 32], // Tx hash
-    index: u64,     // Output index in the transaction
+    pub hash: [u8; 32], // Tx hash
+    pub index: u64,     // Output index in the transaction
 }
 
 impl UTXOKey {
@@ -42,16 +47,13 @@ impl Hash for UTXOKey {
 #[derive(Debug, Clone)]
 pub struct UTXOValue {
     /// Address in binary
-    address: Vec<u8>,
+    pub address: Vec<u8>,
 
     /// Value in Lovelace
-    value: u64,
-
-    /// Block number UTXO was created (output)
-    created_at: u64,
+    pub value: u64,
 
     /// Block number UTXO was spent (input), if any
-    spent_at: Option<u64>,   
+    pub spent_at: Option<u64>,   
 }
 
 /// Ledger state storage
@@ -64,6 +66,12 @@ pub struct State {
 
     /// Last block number received
     last_number: u64,
+
+    /// Index of volatile UTXOs by created block
+    volatile_created: VolatileIndex,
+
+    /// Index of volatile UTXOs by spent block
+    volatile_spent: VolatileIndex,
 }
 
 impl State {
@@ -73,6 +81,8 @@ impl State {
             utxos: HashMap::new(),
             last_slot: 0,
             last_number: 0,
+            volatile_created: VolatileIndex::new(),
+            volatile_spent: VolatileIndex::new(),
         }
     }
 
@@ -96,17 +106,19 @@ impl State {
             BlockStatus::RolledBack => {
                 info!(slot = block.slot, number = block.number, "Rollback received");
 
-                // Check all UTXOs - any created in or after this can be deleted
-                self.utxos.retain(|_, value| value.created_at < block.number);
-            
+                // Delete all UTXOs created in or after this block
+                self.volatile_created.prune_on_or_after(block.number, |key| { 
+                    self.utxos.remove(key);
+                });
+
                 // Any remaining (which were necessarily created before this block)
                 // that were spent in or after this block can be reinstated
-                for value in self.utxos.values_mut() {
-                    match value.spent_at {
-                        Some(number) if number >= block.number => value.spent_at = None,
-                        _ => {} 
+                self.volatile_spent.prune_on_or_after(block.number, |key| {
+                    if let Some(utxo) = self.utxos.get_mut(&key) {
+                        // Just mark as unspent
+                        utxo.spent_at = None;
                     }
-                }
+                });
 
                 // Let the pruner compress the map
             }
@@ -116,10 +128,21 @@ impl State {
 
         self.last_slot = block.slot;
         self.last_number = block.number;
+
+        // Add to index only if volatile or rolled-back volatile
+        // Note avoids issues with duplicate block 0, which aren't
+        match block.status {
+            BlockStatus::Volatile | BlockStatus::RolledBack => {
+                self.volatile_created.add_block(block.number);
+                self.volatile_spent.add_block(block.number);
+            }
+
+            _ => {}
+        }
     }
 
     /// Observe an input UTXO spend
-    pub fn observe_input(&mut self, input: &TxInput, block_number: u64) {
+    pub fn observe_input(&mut self, input: &TxInput, block: &BlockInfo) {
         let key = UTXOKey::new(&input.tx_hash, input.index);
         
         if tracing::enabled!(tracing::Level::DEBUG) {
@@ -135,17 +158,25 @@ impl State {
                 }
 
                 // Just mark as spent in this block
-                utxo.spent_at = Some(block_number);
+                utxo.spent_at = Some(block.number);
+
+                // Add to volatile spent index
+                match block.status {
+                    BlockStatus::Volatile | BlockStatus::RolledBack => {
+                        self.volatile_spent.add_utxo(&key);
+                    }
+                    _ => {}
+                }
             }
             _ => {
                 error!("UTXO {}:{} unknown in block {}",
-                    encode(&key.hash), key.index, block_number);
+                    encode(&key.hash), key.index, block.number);
             }
         }
     } 
 
     /// Observe an output UXTO creation
-    pub fn observe_output(&mut self,  output: &TxOutput, block_number: u64) {
+    pub fn observe_output(&mut self,  output: &TxOutput, block: &BlockInfo) {
 
         if tracing::enabled!(tracing::Level::DEBUG) {
             debug!("UTXO >> {}:{}", encode(&output.tx_hash), output.index);
@@ -154,26 +185,43 @@ impl State {
 
         // Insert the UTXO, checking if it already existed
         let key = UTXOKey::new(&output.tx_hash, output.index);
-        if let Some(_) = self.utxos.insert(key, UTXOValue {
+
+        // Add to volatile index
+        match block.status {
+            BlockStatus::Volatile | BlockStatus::RolledBack => {
+                self.volatile_created.add_utxo(&key);
+            }
+            _ => {}
+        }
+
+        // Add to full UTXO map
+        if self.utxos.insert(key, UTXOValue {
             address: output.address.clone(),
             value: output.value,
-            created_at: block_number,
             spent_at: None,
-        }) {
-            error!("Saw UTXO {}:{} before, in block {block_number}",
-                encode(&output.tx_hash), output.index);
+        }).is_none() {
+        } else {
+            error!("Saw UTXO {}:{} before, in block {}",
+                encode(&output.tx_hash), output.index, block.number);
         }
+
     }
 
     /// Background prune
     fn prune(&mut self) {
-        // Remove all UTXOs which were spent older than 'k' before max_number
+        // Remove all UTXOs that have now become immutably spent
         if self.last_number >= SECURITY_PARAMETER_K {
             let boundary = self.last_number - SECURITY_PARAMETER_K;
-            self.utxos.retain(|_, value| match value.spent_at {
-                Some(number) => number >= boundary,
-                _ => true
+
+            // Find all UTXOs in the volatile index spent before this boundary
+            // and remove from main map
+            self.volatile_spent.prune_before(boundary, |key| {
+                self.utxos.remove(key);
             });
+
+            // Prune the created index too, but leave the UTXOs
+            self.volatile_created.prune_before(boundary, |_| {});
+
             self.utxos.shrink_to_fit();
         }
     }
@@ -206,11 +254,11 @@ impl SerialisedMessageHandler<UTXODeltasMessage> for State {
 
            match delta {
                UTXODelta::Input(tx_input) => {
-                   self.observe_input(&tx_input, deltas.block.number);
+                   self.observe_input(&tx_input, &deltas.block);
                }, 
 
                UTXODelta::Output(tx_output) => {
-                   self.observe_output(&tx_output, deltas.block.number);
+                   self.observe_output(&tx_output, &deltas.block);
                },
 
                _ => {}
@@ -243,7 +291,14 @@ mod tests {
            value: 42,
         };
 
-        state.observe_output(&output, 1);
+        let block = BlockInfo {
+            status: BlockStatus::Immutable,
+            slot: 1,
+            number: 1,
+            hash: vec!(),
+        };
+
+        state.observe_output(&output, &block);
         assert_eq!(1, state.utxos.len());
         assert_eq!(1, state.count_valid_utxos());
 
@@ -268,7 +323,14 @@ mod tests {
            value: 42,
         };
 
-        state.observe_output(&output, 1);
+        let block1 = BlockInfo {
+            status: BlockStatus::Immutable,
+            slot: 1,
+            number: 1,
+            hash: vec!(),
+        };
+
+        state.observe_output(&output, &block1);
         assert_eq!(1, state.utxos.len());
         assert_eq!(1, state.count_valid_utxos());
 
@@ -277,7 +339,15 @@ mod tests {
             index: output.index,
         };
 
-        state.observe_input(&input, 2);
+
+        let block2 = BlockInfo {
+            status: BlockStatus::Immutable,
+            slot: 2,
+            number: 2,
+            hash: vec!(),
+        };
+
+        state.observe_input(&input, &block2);
         assert_eq!(1, state.utxos.len());
         assert_eq!(0, state.count_valid_utxos());
     }
@@ -292,18 +362,25 @@ mod tests {
            value: 42,
         };
 
-        state.observe_output(&output, 10);
+        let block10 = BlockInfo {
+            status: BlockStatus::Volatile,
+            slot: 10,
+            number: 10,
+            hash: vec!(),
+        };
+
+        state.observe_output(&output, &block10);
         assert_eq!(1, state.utxos.len());
         assert_eq!(1, state.count_valid_utxos());
 
-        let block = BlockInfo {
+        let block9 = BlockInfo {
             status: BlockStatus::RolledBack,
             slot: 200,
             number: 9,
             hash: vec!(),
         };
 
-        state.observe_block(&block);
+        state.observe_block(&block9);
 
         assert_eq!(0, state.utxos.len());
         assert_eq!(0, state.count_valid_utxos());
@@ -321,7 +398,14 @@ mod tests {
            value: 42,
         };
 
-        state.observe_output(&output, 10);
+        let block10 = BlockInfo {
+            status: BlockStatus::Volatile,
+            slot: 10,
+            number: 10,
+            hash: vec!(),
+        };
+
+        state.observe_output(&output, &block10);
         assert_eq!(1, state.utxos.len());
         assert_eq!(1, state.count_valid_utxos());
 
@@ -331,19 +415,26 @@ mod tests {
             index: output.index,
         };
 
-        state.observe_input(&input, 15);
+        let block15 = BlockInfo {
+            status: BlockStatus::Volatile,
+            slot: 15,
+            number: 15,
+            hash: vec!(),
+        };
+
+        state.observe_input(&input, &block15);
         assert_eq!(1, state.utxos.len());
         assert_eq!(0, state.count_valid_utxos());
 
         // Roll back to 12
-        let block = BlockInfo {
+        let block12= BlockInfo {
             status: BlockStatus::RolledBack,
             slot: 200,
             number: 12,
             hash: vec!(),
         };
 
-        state.observe_block(&block);
+        state.observe_block(&block12);
 
         // Should be reinstated
         assert_eq!(1, state.utxos.len());
@@ -360,7 +451,14 @@ mod tests {
            value: 42,
         };
 
-        state.observe_output(&output, 1);
+        let block1 = BlockInfo {
+            status: BlockStatus::Immutable,
+            slot: 1,
+            number: 1,
+            hash: vec!(),
+        };
+
+        state.observe_output(&output, &block1);
         assert_eq!(1, state.utxos.len());
         assert_eq!(1, state.count_valid_utxos());
 
@@ -369,7 +467,14 @@ mod tests {
             index: output.index,
         };
 
-        state.observe_input(&input, 2);
+        let block2 = BlockInfo {
+            status: BlockStatus::Immutable,
+            slot: 2,
+            number: 2,
+            hash: vec!(),
+        };
+
+        state.observe_input(&input, &block2);
         assert_eq!(1, state.utxos.len());
         assert_eq!(0, state.count_valid_utxos());
 

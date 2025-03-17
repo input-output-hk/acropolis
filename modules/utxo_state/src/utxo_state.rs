@@ -12,6 +12,8 @@ use std::sync::{Arc, Mutex};
 mod state;
 use state::State;
 
+mod volatile_index;
+
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.utxo.deltas";
 
 /// UTXO state module
