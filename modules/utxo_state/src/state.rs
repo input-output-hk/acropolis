@@ -157,15 +157,18 @@ impl State {
                            utxo.value, encode(utxo.address.clone()));
                 }
 
-                // Just mark as spent in this block
-                utxo.spent_at = Some(block.number);
-
-                // Add to volatile spent index
                 match block.status {
                     BlockStatus::Volatile | BlockStatus::RolledBack => {
+                        // Just mark as spent in this block
+                        utxo.spent_at = Some(block.number);
+
+                        // Add to volatile spent index
                         self.volatile_spent.add_utxo(&key);
                     }
-                    _ => {}
+                    _ => {
+                        // Immutable - we can delete it immediately
+                        self.utxos.remove(&key);
+                    }
                 }
             }
             _ => {
