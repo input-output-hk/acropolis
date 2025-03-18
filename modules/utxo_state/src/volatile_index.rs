@@ -68,6 +68,7 @@ impl VolatileIndex {
     pub fn prune_on_or_after<F>(&mut self, boundary: u64, mut callback: F)
         where F: FnMut(&UTXOKey),
     {
+        if self.first_block == 0 { return; }
         let mut last_block = self.first_block + self.blocks.len() as u64 - 1;
 
         // Remove blocks before boundary, calling back for all UTXOs in them

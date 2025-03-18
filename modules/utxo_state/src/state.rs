@@ -4,7 +4,7 @@ use std::hash::{Hash, Hasher};
 use acropolis_common::SerialisedMessageHandler;
 use acropolis_messages::{
     BlockInfo, BlockStatus, TxInput, TxOutput,
-    UTXODelta, UTXODeltasMessage
+    UTXODelta, UTXODeltasMessage,
 };
 use tracing::{debug, info, error};
 use hex::encode;
@@ -56,6 +56,8 @@ pub struct UTXOValue {
     pub spent_at: Option<u64>,   
 }
 
+type AddressDeltaObserver = dyn FnMut(&BlockInfo, &Vec<u8>, i64) + Sync + Send;
+
 /// Ledger state storage
 pub struct State {
     /// Live UTXOs
@@ -72,6 +74,9 @@ pub struct State {
 
     /// Index of volatile UTXOs by spent block
     volatile_spent: VolatileIndex,
+
+    /// Address delta observer
+    address_delta_observer: Option<Box<AddressDeltaObserver>>,
 }
 
 impl State {
@@ -83,7 +88,14 @@ impl State {
             last_number: 0,
             volatile_created: VolatileIndex::new(),
             volatile_spent: VolatileIndex::new(),
+            address_delta_observer: None,
         }
+    }
+
+    /// Register the delta observer
+    pub fn register_address_delta_observer(&mut self, 
+        observer: Box<AddressDeltaObserver>) {
+        self.address_delta_observer = Some(observer);
     }
 
     /// Look up a UTXO
@@ -108,7 +120,12 @@ impl State {
 
                 // Delete all UTXOs created in or after this block
                 self.volatile_created.prune_on_or_after(block.number, |key| { 
-                    self.utxos.remove(key);
+                    if let Some(utxo) = self.utxos.remove(key) {
+                        // Tell the observer to debit it
+                        if let Some(observer) = self.address_delta_observer.as_mut() {
+                            observer(block, &utxo.address, -(utxo.value as i64));
+                        }                                 
+                    }
                 });
 
                 // Any remaining (which were necessarily created before this block)
@@ -117,6 +134,11 @@ impl State {
                     if let Some(utxo) = self.utxos.get_mut(&key) {
                         // Just mark as unspent
                         utxo.spent_at = None;
+
+                        // Tell the observer to recredit it
+                        if let Some(observer) = self.address_delta_observer.as_mut() {
+                            observer(block, &utxo.address, utxo.value as i64);
+                        } 
                     }
                 });
 
@@ -156,6 +178,11 @@ impl State {
                     debug!("        - spent {} from {}",
                            utxo.value, encode(utxo.address.clone()));
                 }
+
+                // Tell the observer it's spent
+                if let Some(observer) = self.address_delta_observer.as_mut() {
+                    observer(block, &utxo.address, -(utxo.value as i64));
+                }        
 
                 match block.status {
                     BlockStatus::Volatile | BlockStatus::RolledBack => {
@@ -208,6 +235,10 @@ impl State {
                 encode(&output.tx_hash), output.index, block.number);
         }
 
+        // Tell the observer
+        if let Some(observer) = self.address_delta_observer.as_mut() {
+            observer(block, &output.address, output.value as i64);
+        }        
     }
 
     /// Background prune
@@ -274,6 +305,7 @@ impl SerialisedMessageHandler<UTXODeltasMessage> for State {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn new_state_is_empty() {
@@ -351,7 +383,7 @@ mod tests {
         };
 
         state.observe_input(&input, &block2);
-        assert_eq!(1, state.utxos.len());
+        assert_eq!(0, state.utxos.len());
         assert_eq!(0, state.count_valid_utxos());
     }
 
@@ -372,6 +404,7 @@ mod tests {
             hash: vec!(),
         };
 
+        state.observe_block(&block10);
         state.observe_output(&output, &block10);
         assert_eq!(1, state.utxos.len());
         assert_eq!(1, state.count_valid_utxos());
@@ -408,36 +441,38 @@ mod tests {
             hash: vec!(),
         };
 
+        state.observe_block(&block10);
         state.observe_output(&output, &block10);
         assert_eq!(1, state.utxos.len());
         assert_eq!(1, state.count_valid_utxos());
 
-        // Spend it in block 15
+        // Spend it in block 11
         let input = TxInput {
             tx_hash: output.tx_hash,
             index: output.index,
         };
 
-        let block15 = BlockInfo {
+        let block11 = BlockInfo {
             status: BlockStatus::Volatile,
-            slot: 15,
-            number: 15,
+            slot: 11,
+            number: 11,
             hash: vec!(),
         };
 
-        state.observe_input(&input, &block15);
+        state.observe_block(&block11);
+        state.observe_input(&input, &block11);
         assert_eq!(1, state.utxos.len());
         assert_eq!(0, state.count_valid_utxos());
 
-        // Roll back to 12
-        let block12= BlockInfo {
+        // Roll back to 11
+        let block11_2= BlockInfo {
             status: BlockStatus::RolledBack,
             slot: 200,
-            number: 12,
+            number: 11,
             hash: vec!(),
         };
 
-        state.observe_block(&block12);
+        state.observe_block(&block11_2);
 
         // Should be reinstated
         assert_eq!(1, state.utxos.len());
@@ -455,12 +490,13 @@ mod tests {
         };
 
         let block1 = BlockInfo {
-            status: BlockStatus::Immutable,
+            status: BlockStatus::Volatile,
             slot: 1,
             number: 1,
             hash: vec!(),
         };
 
+        state.observe_block(&block1);
         state.observe_output(&output, &block1);
         assert_eq!(1, state.utxos.len());
         assert_eq!(1, state.count_valid_utxos());
@@ -471,12 +507,13 @@ mod tests {
         };
 
         let block2 = BlockInfo {
-            status: BlockStatus::Immutable,
+            status: BlockStatus::Volatile,
             slot: 2,
             number: 2,
             hash: vec!(),
         };
 
+        state.observe_block(&block2);
         state.observe_input(&input, &block2);
         assert_eq!(1, state.utxos.len());
         assert_eq!(0, state.count_valid_utxos());
@@ -498,6 +535,178 @@ mod tests {
 
         state.prune();
         assert_eq!(0, state.utxos.len());
+    }
+
+    #[test]
+    fn observe_output_then_input_notifies_net_0_balance_change() {
+        let mut state = State::new();
+        let balance = Arc::new(Mutex::new(0));
+
+        let bal = balance.clone();
+        state.register_address_delta_observer(Box::new(move |_block, address, delta| {
+            assert_eq!(1, address.len());
+            assert_eq!(99, address[0]);
+            assert!(delta == 42 || delta == -42);
+
+            let mut bal = bal.lock().unwrap();
+            *bal = *bal + delta;
+        }));
+
+        let output = TxOutput {
+           tx_hash: vec!(42),
+           index: 0,
+           address: vec!(99),
+           value: 42,
+        };
+
+        let block1 = BlockInfo {
+            status: BlockStatus::Immutable,
+            slot: 1,
+            number: 1,
+            hash: vec!(),
+        };
+
+        state.observe_output(&output, &block1);
+        assert_eq!(1, state.utxos.len());
+        assert_eq!(1, state.count_valid_utxos());
+        assert_eq!(42, *balance.lock().unwrap());
+
+        let input = TxInput {
+            tx_hash: output.tx_hash,
+            index: output.index,
+        };
+
+        let block2 = BlockInfo {
+            status: BlockStatus::Immutable,
+            slot: 2,
+            number: 2,
+            hash: vec!(),
+        };
+
+        state.observe_input(&input, &block2);
+        assert_eq!(0, state.utxos.len());
+        assert_eq!(0, state.count_valid_utxos());
+        assert_eq!(0, *balance.lock().unwrap());
+    }
+
+    #[test]
+    fn observe_rollback_notifies_balance_debit_on_future_created_utxos() {
+        let mut state = State::new();
+        let balance = Arc::new(Mutex::new(0));
+
+        let bal = balance.clone();
+        state.register_address_delta_observer(Box::new(move |_block, address, delta| {
+            assert_eq!(1, address.len());
+            assert_eq!(99, address[0]);
+            assert!(delta == 42 || delta == -42);
+
+            let mut bal = bal.lock().unwrap();
+            *bal = *bal + delta;
+        }));
+
+        let output = TxOutput {
+           tx_hash: vec!(42),
+           index: 0,
+           address: vec!(99),
+           value: 42,
+        };
+
+        let block10 = BlockInfo {
+            status: BlockStatus::Volatile,
+            slot: 10,
+            number: 10,
+            hash: vec!(),
+        };
+
+        state.observe_block(&block10);
+        state.observe_output(&output, &block10);
+        assert_eq!(1, state.utxos.len());
+        assert_eq!(1, state.count_valid_utxos());
+        assert_eq!(42, *balance.lock().unwrap());
+
+        let block9 = BlockInfo {
+            status: BlockStatus::RolledBack,
+            slot: 200,
+            number: 9,
+            hash: vec!(),
+        };
+
+        state.observe_block(&block9);
+
+        assert_eq!(0, state.utxos.len());
+        assert_eq!(0, state.count_valid_utxos());
+        assert_eq!(0, *balance.lock().unwrap());
+    }
+
+    #[test]
+    fn observe_rollback_notifies_balance_credit_on_future_spent_utxos() {
+        let mut state = State::new();
+        let balance = Arc::new(Mutex::new(0));
+
+        let bal = balance.clone();
+        state.register_address_delta_observer(Box::new(move |_block, address, delta| {
+            assert_eq!(1, address.len());
+            assert_eq!(99, address[0]);
+            assert!(delta == 42 || delta == -42);
+
+            let mut bal = bal.lock().unwrap();
+            *bal = *bal + delta;
+        }));
+
+        // Create the UTXO in block 10
+        let output = TxOutput {
+           tx_hash: vec!(42),
+           index: 0,
+           address: vec!(99),
+           value: 42,
+        };
+
+        let block10 = BlockInfo {
+            status: BlockStatus::Volatile,
+            slot: 10,
+            number: 10,
+            hash: vec!(),
+        };
+
+        state.observe_block(&block10);
+        state.observe_output(&output, &block10);
+        assert_eq!(1, state.utxos.len());
+        assert_eq!(1, state.count_valid_utxos());
+        assert_eq!(42, *balance.lock().unwrap());
+
+        // Spend it in block 11
+        let input = TxInput {
+            tx_hash: output.tx_hash,
+            index: output.index,
+        };
+
+        let block11 = BlockInfo {
+            status: BlockStatus::Volatile,
+            slot: 11,
+            number: 11,
+            hash: vec!(),
+        };
+
+        state.observe_block(&block11);
+        state.observe_input(&input, &block11);
+        assert_eq!(1, state.utxos.len());
+        assert_eq!(0, state.count_valid_utxos());
+        assert_eq!(0, *balance.lock().unwrap());
+
+        // Roll back to 11
+        let block11_2= BlockInfo {
+            status: BlockStatus::RolledBack,
+            slot: 200,
+            number: 11,
+            hash: vec!(),
+        };
+
+        state.observe_block(&block11_2);
+
+        // Should be reinstated
+        assert_eq!(1, state.utxos.len());
+        assert_eq!(1, state.count_valid_utxos());
+        assert_eq!(42, *balance.lock().unwrap());
     }
 
 }
