@@ -128,6 +128,43 @@ pub struct UTXODeltasMessage {
     pub deltas: Vec<UTXODelta>
 }
 
+/// Address type
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum AddressType {
+    Payment,
+    Staking,
+}
+
+impl Default for AddressType {
+    fn default() -> Self {
+        AddressType::Payment
+    }
+}
+
+/// Individual address balance change
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AddressDelta {
+    /// Address type
+    pub address_type: AddressType,
+
+    /// Address - raw bytes
+    pub address: Vec<u8>,
+
+    /// Balance change
+    pub delta: i64,
+}
+
+/// Address deltas message
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AddressDeltasMessage {
+    /// Block info
+    pub block: BlockInfo,
+
+    /// Set of deltas
+    pub deltas: Vec<AddressDelta>
+}
+
+
 // === Global message enum ===
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum Message {
@@ -146,6 +183,7 @@ pub enum Message {
     SnapshotComplete(SnapshotCompleteMessage), // Mithril snapshot loaded
     ReceivedTxs(RawTxsMessage),                // Transaction available
     UTXODeltas(UTXODeltasMessage),             // UTXO deltas received
+    AddressDeltas(AddressDeltasMessage),       // Address deltas received
 }
 
 impl Default for Message {
@@ -188,6 +226,12 @@ impl From<RawTxsMessage> for Message {
 impl From<UTXODeltasMessage> for Message {
     fn from(msg: UTXODeltasMessage) -> Self {
         Message::UTXODeltas(msg)
+    }
+}
+
+impl From<AddressDeltasMessage> for Message {
+    fn from(msg: AddressDeltasMessage) -> Self {
+        Message::AddressDeltas(msg)
     }
 }
 
