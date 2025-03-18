@@ -2,7 +2,10 @@
 //! Unpacks transaction bodies into UTXO events
 
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
-use acropolis_messages::{TxInput, TxOutput, UTXODelta, UTXODeltasMessage, Message};
+use acropolis_messages::{
+    TxInput, TxOutput, UTXODelta, UTXODeltasMessage, 
+    Address, AddressType,
+    Message};
 use std::sync::Arc;
 use anyhow::Result;
 use config::Config;
@@ -89,7 +92,11 @@ impl TxUnpacker
                                                 let tx_output = TxOutput {
                                                     tx_hash: tx.hash().to_vec(),
                                                     index: index as u64,
-                                                    address: address.to_vec(),
+                                                    // TODO unpack address properly
+                                                    address: Address {
+                                                        address_type: AddressType::Payment,
+                                                        hash: address.to_vec()
+                                                    },
                                                     value: output.value().coin(),
                                                     // !!! datum
                                                 };

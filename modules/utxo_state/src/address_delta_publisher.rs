@@ -1,9 +1,9 @@
 //! Address delta publisher for the UTXO state Acropolis module
-use caryatid_sdk::{Context};
+use caryatid_sdk::Context;
 use config::Config;
 use acropolis_messages::{
     Message, BlockInfo,
-    AddressDeltasMessage, AddressDelta, AddressType};
+    AddressDeltasMessage, AddressDelta, Address};
 use std::sync::Arc;
 use tracing::error;
 
@@ -25,7 +25,7 @@ impl AddressDeltaPublisher {
     }
 
     /// Observe an address delta and publish messages
-    pub fn observe(&mut self, block: &BlockInfo, address: &Vec<u8>, delta: i64) {
+    pub fn observe(&mut self, block: &BlockInfo, address: &Address, delta: i64) {
         let payment_address_delta_topic = self.config.get_string("payment-address-delta-topic");
 
         if let Ok(topic) = payment_address_delta_topic {
@@ -37,8 +37,7 @@ impl AddressDeltaPublisher {
             };
 
             message.deltas.push(AddressDelta {
-                address_type: AddressType::Payment,
-                address: address.to_vec(),
+                address: address.clone(),
                 delta,
             });
             

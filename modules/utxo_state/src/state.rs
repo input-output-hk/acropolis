@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use acropolis_common::SerialisedMessageHandler;
 use acropolis_messages::{
-    BlockInfo, BlockStatus, TxInput, TxOutput,
-    UTXODelta, UTXODeltasMessage,
+    Address, BlockInfo, BlockStatus, 
+    TxInput, TxOutput, UTXODelta, UTXODeltasMessage
 };
 use tracing::{debug, info, error};
 use hex::encode;
@@ -47,7 +47,7 @@ impl Hash for UTXOKey {
 #[derive(Debug, Clone)]
 pub struct UTXOValue {
     /// Address in binary
-    pub address: Vec<u8>,
+    pub address: Address,
 
     /// Value in Lovelace
     pub value: u64,
@@ -56,7 +56,7 @@ pub struct UTXOValue {
     pub spent_at: Option<u64>,   
 }
 
-type AddressDeltaObserver = dyn FnMut(&BlockInfo, &Vec<u8>, i64) + Sync + Send;
+type AddressDeltaObserver = dyn FnMut(&BlockInfo, &Address, i64) + Sync + Send;
 
 /// Ledger state storage
 pub struct State {
@@ -176,7 +176,7 @@ impl State {
             Some(utxo) => {
                 if tracing::enabled!(tracing::Level::DEBUG) {
                     debug!("        - spent {} from {}",
-                           utxo.value, encode(utxo.address.clone()));
+                           utxo.value, encode(utxo.address.hash.clone()));
                 }
 
                 // Tell the observer it's spent
@@ -210,7 +210,8 @@ impl State {
 
         if tracing::enabled!(tracing::Level::DEBUG) {
             debug!("UTXO >> {}:{}", encode(&output.tx_hash), output.index);
-            debug!("        - adding {} to {}", output.value, encode(&output.address));
+            debug!("        - adding {} to {}", output.value, 
+                encode(&output.address.hash));
         }
 
         // Insert the UTXO, checking if it already existed
@@ -306,6 +307,7 @@ impl SerialisedMessageHandler<UTXODeltasMessage> for State {
 mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};
+    use acropolis_messages::AddressType;
 
     #[test]
     fn new_state_is_empty() {
@@ -322,7 +324,10 @@ mod tests {
         let output = TxOutput {
            tx_hash: vec!(42),
            index: 0,
-           address: vec!(99),
+           address: Address {
+                address_type: AddressType::Payment,
+                hash: vec!(99),
+           },
            value: 42,
         };
 
@@ -340,7 +345,7 @@ mod tests {
         let key = UTXOKey::new(&output.tx_hash, output.index);
         match state.lookup_utxo(&key) {
             Some(value) => {
-                assert_eq!(99, *value.address.get(0).unwrap());
+                assert_eq!(99, *value.address.hash.get(0).unwrap());
                 assert_eq!(42, value.value);
             },
 
@@ -352,10 +357,13 @@ mod tests {
     fn observe_input_spends_utxo() {
         let mut state = State::new();
         let output = TxOutput {
-           tx_hash: vec!(42),
-           index: 0,
-           address: vec!(99),
-           value: 42,
+            tx_hash: vec!(42),
+            index: 0,
+            address: Address {
+                address_type: AddressType::Payment,
+                hash: vec!(99),
+            },
+            value: 42,
         };
 
         let block1 = BlockInfo {
@@ -391,10 +399,13 @@ mod tests {
     fn rollback_removes_future_created_utxos() {
         let mut state = State::new();
         let output = TxOutput {
-           tx_hash: vec!(42),
-           index: 0,
-           address: vec!(99),
-           value: 42,
+            tx_hash: vec!(42),
+            index: 0,
+            address: Address {
+                address_type: AddressType::Payment,
+                hash: vec!(99),
+            },
+            value: 42,
         };
 
         let block10 = BlockInfo {
@@ -428,10 +439,13 @@ mod tests {
 
         // Create the UTXO in block 10
         let output = TxOutput {
-           tx_hash: vec!(42),
-           index: 0,
-           address: vec!(99),
-           value: 42,
+            tx_hash: vec!(42),
+            index: 0,
+            address: Address {
+                address_type: AddressType::Payment,
+                hash: vec!(99),
+            },
+            value: 42,
         };
 
         let block10 = BlockInfo {
@@ -483,10 +497,13 @@ mod tests {
     fn prune_deletes_old_spent_utxos() {
         let mut state = State::new();
         let output = TxOutput {
-           tx_hash: vec!(42),
-           index: 0,
-           address: vec!(99),
-           value: 42,
+            tx_hash: vec!(42),
+            index: 0,
+            address: Address {
+                address_type: AddressType::Payment,
+                hash: vec!(99),
+            },
+            value: 42,
         };
 
         let block1 = BlockInfo {
@@ -544,8 +561,8 @@ mod tests {
 
         let bal = balance.clone();
         state.register_address_delta_observer(Box::new(move |_block, address, delta| {
-            assert_eq!(1, address.len());
-            assert_eq!(99, address[0]);
+            assert_eq!(1, address.hash.len());
+            assert_eq!(99, address.hash[0]);
             assert!(delta == 42 || delta == -42);
 
             let mut bal = bal.lock().unwrap();
@@ -553,10 +570,13 @@ mod tests {
         }));
 
         let output = TxOutput {
-           tx_hash: vec!(42),
-           index: 0,
-           address: vec!(99),
-           value: 42,
+            tx_hash: vec!(42),
+            index: 0,
+            address: Address {
+                address_type: AddressType::Payment,
+                hash: vec!(99),
+            },
+            value: 42,
         };
 
         let block1 = BlockInfo {
@@ -596,8 +616,8 @@ mod tests {
 
         let bal = balance.clone();
         state.register_address_delta_observer(Box::new(move |_block, address, delta| {
-            assert_eq!(1, address.len());
-            assert_eq!(99, address[0]);
+            assert_eq!(1, address.hash.len());
+            assert_eq!(99, address.hash[0]);
             assert!(delta == 42 || delta == -42);
 
             let mut bal = bal.lock().unwrap();
@@ -605,10 +625,13 @@ mod tests {
         }));
 
         let output = TxOutput {
-           tx_hash: vec!(42),
-           index: 0,
-           address: vec!(99),
-           value: 42,
+            tx_hash: vec!(42),
+            index: 0,
+            address: Address {
+                address_type: AddressType::Payment,
+                hash: vec!(99),
+            },
+            value: 42,
         };
 
         let block10 = BlockInfo {
@@ -645,8 +668,8 @@ mod tests {
 
         let bal = balance.clone();
         state.register_address_delta_observer(Box::new(move |_block, address, delta| {
-            assert_eq!(1, address.len());
-            assert_eq!(99, address[0]);
+            assert_eq!(1, address.hash.len());
+            assert_eq!(99, address.hash[0]);
             assert!(delta == 42 || delta == -42);
 
             let mut bal = bal.lock().unwrap();
@@ -655,10 +678,13 @@ mod tests {
 
         // Create the UTXO in block 10
         let output = TxOutput {
-           tx_hash: vec!(42),
-           index: 0,
-           address: vec!(99),
-           value: 42,
+            tx_hash: vec!(42),
+            index: 0,
+            address: Address {
+                address_type: AddressType::Payment,
+                hash: vec!(99),
+            },
+            value: 42,
         };
 
         let block10 = BlockInfo {
