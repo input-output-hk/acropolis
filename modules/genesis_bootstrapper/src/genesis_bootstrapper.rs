@@ -4,7 +4,7 @@
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
 use acropolis_messages::{
     TxOutput, UTXODelta, UTXODeltasMessage, Message,
-    BlockInfo, BlockStatus
+    BlockInfo, BlockStatus, Address, AddressType,
 };
 use std::sync::Arc;
 use anyhow::Result;
@@ -72,7 +72,10 @@ impl GenesisBootstrapper
                         let tx_output = TxOutput {
                             tx_hash: hash.to_vec(),
                             index: 0,
-                            address: address.to_vec(),
+                            address: Address {
+                                address_type: AddressType::Byron,
+                                hash: address.to_vec(),  // We use the whole thing
+                            },
                             value: amount
                         };
 

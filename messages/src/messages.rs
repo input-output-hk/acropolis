@@ -38,6 +38,30 @@ pub struct BlockInfo {
     pub hash: Vec<u8>,
 }
 
+/// Address type
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum AddressType {
+    Payment,
+    Staking,
+    Byron,
+}
+
+impl Default for AddressType {
+    fn default() -> Self {
+        AddressType::Payment
+    }
+}
+
+/// A Cardano address
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Address {
+    /// Address type
+    pub address_type: AddressType,
+
+    /// Hash of address
+    pub hash: Vec<u8>,
+}
+
 /// Block header message
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BlockHeaderMessage {
@@ -84,8 +108,8 @@ pub struct TxOutput {
     /// Output index in tx
     pub index: u64,
 
-    /// Address data (raw)
-    pub address: Vec<u8>,
+    /// Address data
+    pub address: Address,
 
     /// Output value (Lovelace)
     pub value: u64,
@@ -128,27 +152,11 @@ pub struct UTXODeltasMessage {
     pub deltas: Vec<UTXODelta>
 }
 
-/// Address type
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub enum AddressType {
-    Payment,
-    Staking,
-}
-
-impl Default for AddressType {
-    fn default() -> Self {
-        AddressType::Payment
-    }
-}
-
 /// Individual address balance change
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AddressDelta {
-    /// Address type
-    pub address_type: AddressType,
-
-    /// Address - raw bytes
-    pub address: Vec<u8>,
+    /// Address
+    pub address: Address,
 
     /// Balance change
     pub delta: i64,
