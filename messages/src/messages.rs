@@ -17,9 +17,7 @@ pub enum BlockStatus
 }
 
 impl Default for BlockStatus {
-    fn default() -> Self {
-        BlockStatus::Immutable
-    }
+    fn default() -> Self { Self::Immutable }
 }
 
 /// Block info, shared across multiple messages
@@ -38,28 +36,122 @@ pub struct BlockInfo {
     pub hash: Vec<u8>,
 }
 
-/// Address type
+/// a Byron-era address
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub enum AddressType {
-    Payment,
-    Staking,
-    Byron,
+pub struct ByronAddress {
+    /// Raw payload
+    pub payload: Vec<u8>,
 }
 
-impl Default for AddressType {
-    fn default() -> Self {
-        AddressType::Payment
-    }
+/// Address network identifier
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum AddressNetwork {
+    /// Mainnet
+    Main,
+
+    /// Testnet
+    Test,
+}
+
+impl Default for AddressNetwork {
+    fn default() -> Self { Self::Main }
+}
+
+/// A Shelley-era address - payment part
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum ShelleyAddressPaymentPart {
+    /// Payment to a key
+    PaymentKeyHash(Vec<u8>),
+
+    /// Payment to a script
+    ScriptHash(Vec<u8>),
+}
+
+impl Default for ShelleyAddressPaymentPart {
+    fn default() -> Self { Self::PaymentKeyHash(Vec::new()) }
+}
+
+/// Delegation pointer
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ShelleyAddressPointer {
+    /// Slot number
+    pub slot: u64,
+
+    /// Transaction index within the slot
+    pub tx_index: u64,
+
+    /// Certificate index within the transaction
+    pub cert_index: u64,
+}
+
+/// A Shelley-era address - delegation part
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum ShelleyAddressDelegationPart {
+    /// No delegation (enterprise addresses)
+    None,
+
+    /// Delegation to stake key
+    StakeKeyHash(Vec<u8>),
+
+    /// Delegation to script key
+    ScriptHash(Vec<u8>),
+
+    /// Delegation to pointer
+    Pointer(ShelleyAddressPointer),
+}
+
+impl Default for ShelleyAddressDelegationPart {
+    fn default() -> Self { Self::None }
+}
+
+/// A Shelley-era address
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ShelleyAddress {
+    /// Network id
+    pub network: AddressNetwork,
+
+    /// Payment part
+    pub payment: ShelleyAddressPaymentPart,
+
+    /// Delegation part
+    pub delegation: ShelleyAddressDelegationPart,
+}
+
+/// Payload of a stake address
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum StakeAddressPayload {
+    /// Stake key
+    StakeKeyHash(Vec<u8>),
+
+    /// Script hash
+    ScriptHash(Vec<u8>),    
+}
+
+impl Default for StakeAddressPayload {
+    fn default() -> Self { Self::StakeKeyHash(Vec::new()) }
+}
+
+/// A stake address
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StakeAddress {
+    /// Network id
+    pub network: AddressNetwork,
+
+    /// Payload
+    pub payload: StakeAddressPayload,
 }
 
 /// A Cardano address
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
-pub struct Address {
-    /// Address type
-    pub address_type: AddressType,
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum Address {
+    None,
+    Byron(ByronAddress),
+    Shelley(ShelleyAddress),
+    Stake(StakeAddress),
+}
 
-    /// Hash of address
-    pub hash: Vec<u8>,
+impl Default for Address {
+    fn default() -> Self { Self::None }
 }
 
 /// Block header message
@@ -137,9 +229,7 @@ pub enum UTXODelta {
 }
 
 impl Default for UTXODelta {
-    fn default() -> Self {
-        UTXODelta::None(())
-    }
+    fn default() -> Self { Self::None(()) }
 }
 
 /// Message encapsulating multiple UTXO deltas, in order
@@ -195,9 +285,7 @@ pub enum Message {
 }
 
 impl Default for Message {
-    fn default() -> Self {
-        Message::None(())
-    }
+    fn default() -> Self { Self::None(()) }
 }
 
 // Casts from specific messages

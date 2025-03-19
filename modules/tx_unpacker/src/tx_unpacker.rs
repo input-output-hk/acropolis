@@ -3,14 +3,17 @@
 
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
 use acropolis_messages::{
-    TxInput, TxOutput, UTXODelta, UTXODeltasMessage, 
-    Address, AddressType,
-    Message};
+    Address, AddressNetwork, ByronAddress, Message, ShelleyAddress, 
+    ShelleyAddressDelegationPart, ShelleyAddressPaymentPart, ShelleyAddressPointer, 
+    StakeAddress, 
+    TxInput, TxOutput, UTXODelta, UTXODeltasMessage};
 use std::sync::Arc;
 use anyhow::Result;
 use config::Config;
 use tracing::{debug, info, error};
 use pallas::ledger::traverse::MultiEraTx;
+use pallas::ledger::addresses;
+use anyhow::anyhow;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.txs";
 const DEFAULT_PUBLISH_UTXO_DELTAS_TOPIC: &str = "cardano.utxo.deltas";
@@ -26,6 +29,64 @@ pub struct TxUnpacker;
 
 impl TxUnpacker
 {
+    /// Map Pallas Network to our AddressNetwork
+    fn map_network(network: addresses::Network) -> Result<AddressNetwork> {
+        match network {
+            addresses::Network::Mainnet => Ok(AddressNetwork::Main),
+            addresses::Network::Testnet => Ok(AddressNetwork::Test),
+            _ => return Err(anyhow!("Unknown network in address"))
+        }
+    }
+
+    /// Derive our Address from a Pallas address
+    // This is essentially a 1:1 mapping but makes the Message definitions independent
+    // of Pallas
+    fn map_address(address: &addresses::Address) -> Result<Address> {
+        match address {
+            addresses::Address::Byron(byron_address) => Ok(Address::Byron(ByronAddress {
+                payload: byron_address.payload.to_vec(),
+            })),
+
+            addresses::Address::Shelley(shelley_address) => Ok(Address::Shelley(ShelleyAddress {
+                network: Self::map_network(shelley_address.network())?, 
+
+                payment: match shelley_address.payment() {
+                    addresses::ShelleyPaymentPart::Key(hash) => 
+                        ShelleyAddressPaymentPart::PaymentKeyHash(hash.to_vec()),
+                    addresses::ShelleyPaymentPart::Script(hash) => 
+                        ShelleyAddressPaymentPart::ScriptHash(hash.to_vec()),
+
+                },
+
+                delegation: match shelley_address.delegation() {
+                    addresses::ShelleyDelegationPart::Null =>
+                        ShelleyAddressDelegationPart::None,
+                    addresses::ShelleyDelegationPart::Key(hash) =>
+                        ShelleyAddressDelegationPart::StakeKeyHash(hash.to_vec()),
+                    addresses::ShelleyDelegationPart::Script(hash) =>
+                        ShelleyAddressDelegationPart::ScriptHash(hash.to_vec()),
+                    addresses::ShelleyDelegationPart::Pointer(pointer) =>
+                        ShelleyAddressDelegationPart::Pointer(ShelleyAddressPointer {
+                            slot: pointer.slot(),
+                            tx_index: pointer.tx_idx(),
+                            cert_index: pointer.cert_idx()
+                        })
+                }
+            })),
+
+            addresses::Address::Stake(stake_address) => Ok(Address::Stake(StakeAddress {
+                network: Self::map_network(stake_address.network())?,
+                payload: match stake_address.payload() {
+                    addresses::StakePayload::Stake(hash) => 
+                        acropolis_messages::StakeAddressPayload::StakeKeyHash(hash.to_vec()),
+                        addresses::StakePayload::Script(hash) => 
+                        acropolis_messages::StakeAddressPayload::ScriptHash(hash.to_vec()),
+                }
+            })),
+
+        }
+    }
+
     /// Main init function
     pub fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
 
@@ -87,24 +148,29 @@ impl TxUnpacker
                                     for (index, output) in outputs {  // MultiEraOutput
 
                                         match output.address() {
-                                            Ok(address) =>
+                                            Ok(pallas_address) =>
                                             {
-                                                let tx_output = TxOutput {
-                                                    tx_hash: tx.hash().to_vec(),
-                                                    index: index as u64,
-                                                    // TODO unpack address properly
-                                                    address: Address {
-                                                        address_type: AddressType::Payment,
-                                                        hash: address.to_vec()
-                                                    },
-                                                    value: output.value().coin(),
-                                                    // !!! datum
-                                                };
+                                                match Self::map_address(&pallas_address) {
+                                                    Ok(address) => {
+                                                        let tx_output = TxOutput {
+                                                            tx_hash: tx.hash().to_vec(),
+                                                            index: index as u64,
+                                                            address: address,
+                                                            value: output.value().coin(),
+                                                            // !!! datum
+                                                        };
 
-                                                message.deltas.push(UTXODelta::Output(tx_output));
+                                                        message.deltas
+                                                            .push(UTXODelta::Output(tx_output));
+                                                    }
+
+                                                    Err(e) => 
+                                                        error!("Output {index} in tx ignored: {e}")
+                                                }
                                             }
 
-                                            Err(e) => error!("Can't parse output {index} in tx: {e}")
+                                            Err(e) => 
+                                                error!("Can't parse output {index} in tx: {e}")
                                         }
                                     }
                                 },
