@@ -7,29 +7,36 @@ use acropolis_messages::{
 use std::sync::Arc;
 use tracing::error;
 
+use crate::state::AddressDeltaObserver;
+
 /// Address delta publisher
 pub struct AddressDeltaPublisher {
 
     /// Module context
     context: Arc<Context<Message>>,
 
-    /// Module configuration
-    config: Arc<Config>,
+    /// Topic to publish on
+    topic: Option<String>,
 }
 
 impl AddressDeltaPublisher {
 
     /// Create
     pub fn new(context: Arc<Context<Message>>, config: Arc<Config>) -> Self {
-        Self { context, config }
+        Self { 
+            context, 
+            topic: config.get_string("address-delta-topic").ok(),
+        }
     }
+}
+
+impl AddressDeltaObserver for AddressDeltaPublisher {
 
     /// Observe an address delta and publish messages
-    pub fn observe(&mut self, block: &BlockInfo, address: &Address, delta: i64) {
-        let payment_address_delta_topic = self.config.get_string("payment-address-delta-topic");
+    fn observe_delta(&mut self, block: &BlockInfo, address: &Address, delta: i64) {
 
-        if let Ok(topic) = payment_address_delta_topic {
-            // TODO decode address to get payment and staking parts
+        if let Some(topic) = &self.topic {
+
             // TODO accumulate multiple from a single block!
             let mut message = AddressDeltasMessage {
                 block: block.clone(),
@@ -40,7 +47,7 @@ impl AddressDeltaPublisher {
                 address: address.clone(),
                 delta,
             });
-            
+
             let context = self.context.clone();
             let topic = topic.clone();
             tokio::spawn(async move {

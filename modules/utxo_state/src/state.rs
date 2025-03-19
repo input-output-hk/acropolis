@@ -8,6 +8,7 @@ use acropolis_messages::{
 };
 use tracing::{debug, info, error};
 use hex::encode;
+use std::sync::{Arc, Mutex};
 
 use crate::volatile_index::VolatileIndex;
 
@@ -56,7 +57,11 @@ pub struct UTXOValue {
     pub spent_at: Option<u64>,   
 }
 
-type AddressDeltaObserver = dyn FnMut(&BlockInfo, &Address, i64) + Sync + Send;
+/// Address delta observer
+pub trait AddressDeltaObserver: Send + Sync + 'static {
+    /// Observe a delta
+    fn observe_delta(&mut self, block: &BlockInfo, address: &Address, delta: i64);
+}
 
 /// Ledger state storage
 pub struct State {
@@ -76,7 +81,7 @@ pub struct State {
     volatile_spent: VolatileIndex,
 
     /// Address delta observer
-    address_delta_observer: Option<Box<AddressDeltaObserver>>,
+    address_delta_observer: Option<Arc<Mutex<dyn AddressDeltaObserver>>>,
 }
 
 impl State {
@@ -94,7 +99,7 @@ impl State {
 
     /// Register the delta observer
     pub fn register_address_delta_observer(&mut self, 
-        observer: Box<AddressDeltaObserver>) {
+            observer: Arc<Mutex<dyn AddressDeltaObserver>>) {
         self.address_delta_observer = Some(observer);
     }
 
@@ -123,7 +128,8 @@ impl State {
                     if let Some(utxo) = self.utxos.remove(key) {
                         // Tell the observer to debit it
                         if let Some(observer) = self.address_delta_observer.as_mut() {
-                            observer(block, &utxo.address, -(utxo.value as i64));
+                            observer.lock().unwrap().observe_delta(block, 
+                                &utxo.address, -(utxo.value as i64));
                         }                                 
                     }
                 });
@@ -137,7 +143,8 @@ impl State {
 
                         // Tell the observer to recredit it
                         if let Some(observer) = self.address_delta_observer.as_mut() {
-                            observer(block, &utxo.address, utxo.value as i64);
+                            observer.lock().unwrap().observe_delta(block,
+                                &utxo.address, utxo.value as i64);
                         } 
                     }
                 });
@@ -180,7 +187,8 @@ impl State {
 
                 // Tell the observer it's spent
                 if let Some(observer) = self.address_delta_observer.as_mut() {
-                    observer(block, &utxo.address, -(utxo.value as i64));
+                    observer.lock().unwrap().observe_delta(block,
+                        &utxo.address, -(utxo.value as i64));
                 }        
 
                 match block.status {
@@ -236,7 +244,8 @@ impl State {
 
         // Tell the observer
         if let Some(observer) = self.address_delta_observer.as_mut() {
-            observer(block, &output.address, output.value as i64);
+            observer.lock().unwrap().observe_delta(block,
+                &output.address, output.value as i64);
         }        
     }
 
@@ -546,20 +555,31 @@ mod tests {
         assert_eq!(0, state.utxos.len());
     }
 
-    #[test]
-    fn observe_output_then_input_notifies_net_0_balance_change() {
-        let mut state = State::new();
-        let balance = Arc::new(Mutex::new(0));
+    struct TestDeltaObserver {
+        balance: i64,
+    }
 
-        let bal = balance.clone();
-        state.register_address_delta_observer(Box::new(move |_block, address, delta| {
+    impl TestDeltaObserver {
+        fn new() -> Self {
+            Self { balance: 0 }
+        }
+    }
+
+    impl AddressDeltaObserver for TestDeltaObserver {
+        fn observe_delta(&mut self, _block: &BlockInfo, address: &Address, delta: i64) {
             assert!(matches!(&address, Address::Byron(ByronAddress{ payload }) 
                 if payload[0] == 99));
             assert!(delta == 42 || delta == -42);
 
-            let mut bal = bal.lock().unwrap();
-            *bal = *bal + delta;
-        }));
+            self.balance = self.balance + delta;
+        }
+    }
+
+    #[test]
+    fn observe_output_then_input_notifies_net_0_balance_change() {
+        let mut state = State::new();
+        let observer = Arc::new(Mutex::new(TestDeltaObserver::new()));
+        state.register_address_delta_observer(observer.clone());
 
         let output = TxOutput {
             tx_hash: vec!(42),
@@ -578,7 +598,7 @@ mod tests {
         state.observe_output(&output, &block1);
         assert_eq!(1, state.utxos.len());
         assert_eq!(1, state.count_valid_utxos());
-        assert_eq!(42, *balance.lock().unwrap());
+        assert_eq!(42, observer.lock().unwrap().balance);
 
         let input = TxInput {
             tx_hash: output.tx_hash,
@@ -595,23 +615,14 @@ mod tests {
         state.observe_input(&input, &block2);
         assert_eq!(0, state.utxos.len());
         assert_eq!(0, state.count_valid_utxos());
-        assert_eq!(0, *balance.lock().unwrap());
+        assert_eq!(0, observer.lock().unwrap().balance);
     }
 
     #[test]
     fn observe_rollback_notifies_balance_debit_on_future_created_utxos() {
         let mut state = State::new();
-        let balance = Arc::new(Mutex::new(0));
-
-        let bal = balance.clone();
-        state.register_address_delta_observer(Box::new(move |_block, address, delta| {
-            assert!(matches!(&address, Address::Byron(ByronAddress{ payload }) 
-                if payload[0] == 99));
-            assert!(delta == 42 || delta == -42);
-
-            let mut bal = bal.lock().unwrap();
-            *bal = *bal + delta;
-        }));
+        let observer = Arc::new(Mutex::new(TestDeltaObserver::new()));
+        state.register_address_delta_observer(observer.clone());
 
         let output = TxOutput {
             tx_hash: vec!(42),
@@ -631,7 +642,7 @@ mod tests {
         state.observe_output(&output, &block10);
         assert_eq!(1, state.utxos.len());
         assert_eq!(1, state.count_valid_utxos());
-        assert_eq!(42, *balance.lock().unwrap());
+        assert_eq!(42, observer.lock().unwrap().balance);
 
         let block9 = BlockInfo {
             status: BlockStatus::RolledBack,
@@ -644,23 +655,14 @@ mod tests {
 
         assert_eq!(0, state.utxos.len());
         assert_eq!(0, state.count_valid_utxos());
-        assert_eq!(0, *balance.lock().unwrap());
+        assert_eq!(0, observer.lock().unwrap().balance);
     }
 
     #[test]
     fn observe_rollback_notifies_balance_credit_on_future_spent_utxos() {
         let mut state = State::new();
-        let balance = Arc::new(Mutex::new(0));
-
-        let bal = balance.clone();
-        state.register_address_delta_observer(Box::new(move |_block, address, delta| {
-            assert!(matches!(&address, Address::Byron(ByronAddress{ payload }) 
-                if payload[0] == 99));
-            assert!(delta == 42 || delta == -42);
-
-            let mut bal = bal.lock().unwrap();
-            *bal = *bal + delta;
-        }));
+        let observer = Arc::new(Mutex::new(TestDeltaObserver::new()));
+        state.register_address_delta_observer(observer.clone());
 
         // Create the UTXO in block 10
         let output = TxOutput {
@@ -681,7 +683,7 @@ mod tests {
         state.observe_output(&output, &block10);
         assert_eq!(1, state.utxos.len());
         assert_eq!(1, state.count_valid_utxos());
-        assert_eq!(42, *balance.lock().unwrap());
+        assert_eq!(42, observer.lock().unwrap().balance);
 
         // Spend it in block 11
         let input = TxInput {
@@ -700,7 +702,7 @@ mod tests {
         state.observe_input(&input, &block11);
         assert_eq!(1, state.utxos.len());
         assert_eq!(0, state.count_valid_utxos());
-        assert_eq!(0, *balance.lock().unwrap());
+        assert_eq!(0, observer.lock().unwrap().balance);
 
         // Roll back to 11
         let block11_2= BlockInfo {
@@ -715,7 +717,7 @@ mod tests {
         // Should be reinstated
         assert_eq!(1, state.utxos.len());
         assert_eq!(1, state.count_valid_utxos());
-        assert_eq!(42, *balance.lock().unwrap());
+        assert_eq!(42, observer.lock().unwrap().balance);
     }
 
 }
