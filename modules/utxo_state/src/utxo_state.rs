@@ -39,10 +39,8 @@ impl UTXOState
         let mut state = State::new();
 
         // Create address delta publisher and pass it observations
-        let mut publisher = AddressDeltaPublisher::new(context.clone(), config);
-        state.register_address_delta_observer(Box::new(move |block, address, delta| {
-            publisher.observe(block, address, delta);
-        }));
+        let publisher = AddressDeltaPublisher::new(context.clone(), config);
+        state.register_address_delta_observer(Arc::new(Mutex::new(publisher)));
 
         let state = Arc::new(Mutex::new(state));
         let state2 = state.clone();
