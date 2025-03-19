@@ -4,7 +4,7 @@
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
 use acropolis_messages::{
     TxOutput, UTXODelta, UTXODeltasMessage, Message,
-    BlockInfo, BlockStatus, Address, AddressType,
+    BlockInfo, BlockStatus, Address, ByronAddress,
 };
 use std::sync::Arc;
 use anyhow::Result;
@@ -72,18 +72,16 @@ impl GenesisBootstrapper
                         let tx_output = TxOutput {
                             tx_hash: hash.to_vec(),
                             index: 0,
-                            address: Address {
-                                address_type: AddressType::Byron,
-                                hash: address.to_vec(),  // We use the whole thing
-                            },
+                            address: Address::Byron(ByronAddress{
+                                payload: address.payload.to_vec(),
+                            }),
                             value: amount
                         };
 
                         message.deltas.push(UTXODelta::Output(tx_output));
                     }
 
-                    let message_enum: Message = message.into();
-
+                    let message_enum = Message::UTXODeltas(message);
                     context.message_bus.publish(&publish_utxo_deltas_topic,
                                                 Arc::new(message_enum))
                         .await

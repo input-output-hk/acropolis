@@ -175,8 +175,7 @@ impl State {
         match self.utxos.get_mut(&key) {
             Some(utxo) => {
                 if tracing::enabled!(tracing::Level::DEBUG) {
-                    debug!("        - spent {} from {}",
-                           utxo.value, encode(utxo.address.hash.clone()));
+                    debug!("        - spent {} from {:?}", utxo.value, utxo.address);
                 }
 
                 // Tell the observer it's spent
@@ -210,8 +209,7 @@ impl State {
 
         if tracing::enabled!(tracing::Level::DEBUG) {
             debug!("UTXO >> {}:{}", encode(&output.tx_hash), output.index);
-            debug!("        - adding {} to {}", output.value, 
-                encode(&output.address.hash));
+            debug!("        - adding {} to {:?}", output.value, output.address);
         }
 
         // Insert the UTXO, checking if it already existed
@@ -307,7 +305,15 @@ impl SerialisedMessageHandler<UTXODeltasMessage> for State {
 mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};
-    use acropolis_messages::AddressType;
+    use acropolis_messages::{Address, ByronAddress};
+
+    // Create an address for testing - we use Byron just because it's easier to
+    // create and test the payload
+    fn create_address(n: u8) -> Address {
+        Address::Byron(ByronAddress {
+            payload: vec!(n)
+        })
+    }
 
     #[test]
     fn new_state_is_empty() {
@@ -324,10 +330,7 @@ mod tests {
         let output = TxOutput {
            tx_hash: vec!(42),
            index: 0,
-           address: Address {
-                address_type: AddressType::Payment,
-                hash: vec!(99),
-           },
+           address: create_address(99),
            value: 42,
         };
 
@@ -345,7 +348,8 @@ mod tests {
         let key = UTXOKey::new(&output.tx_hash, output.index);
         match state.lookup_utxo(&key) {
             Some(value) => {
-                assert_eq!(99, *value.address.hash.get(0).unwrap());
+                assert!(matches!(&value.address, Address::Byron(ByronAddress{ payload }) 
+                    if payload[0] == 99));
                 assert_eq!(42, value.value);
             },
 
@@ -359,10 +363,7 @@ mod tests {
         let output = TxOutput {
             tx_hash: vec!(42),
             index: 0,
-            address: Address {
-                address_type: AddressType::Payment,
-                hash: vec!(99),
-            },
+            address: create_address(99),
             value: 42,
         };
 
@@ -401,10 +402,7 @@ mod tests {
         let output = TxOutput {
             tx_hash: vec!(42),
             index: 0,
-            address: Address {
-                address_type: AddressType::Payment,
-                hash: vec!(99),
-            },
+            address: create_address(99),
             value: 42,
         };
 
@@ -441,10 +439,7 @@ mod tests {
         let output = TxOutput {
             tx_hash: vec!(42),
             index: 0,
-            address: Address {
-                address_type: AddressType::Payment,
-                hash: vec!(99),
-            },
+            address: create_address(99),
             value: 42,
         };
 
@@ -499,10 +494,7 @@ mod tests {
         let output = TxOutput {
             tx_hash: vec!(42),
             index: 0,
-            address: Address {
-                address_type: AddressType::Payment,
-                hash: vec!(99),
-            },
+            address: create_address(99),
             value: 42,
         };
 
@@ -561,8 +553,8 @@ mod tests {
 
         let bal = balance.clone();
         state.register_address_delta_observer(Box::new(move |_block, address, delta| {
-            assert_eq!(1, address.hash.len());
-            assert_eq!(99, address.hash[0]);
+            assert!(matches!(&address, Address::Byron(ByronAddress{ payload }) 
+                if payload[0] == 99));
             assert!(delta == 42 || delta == -42);
 
             let mut bal = bal.lock().unwrap();
@@ -572,10 +564,7 @@ mod tests {
         let output = TxOutput {
             tx_hash: vec!(42),
             index: 0,
-            address: Address {
-                address_type: AddressType::Payment,
-                hash: vec!(99),
-            },
+            address: create_address(99),
             value: 42,
         };
 
@@ -616,8 +605,8 @@ mod tests {
 
         let bal = balance.clone();
         state.register_address_delta_observer(Box::new(move |_block, address, delta| {
-            assert_eq!(1, address.hash.len());
-            assert_eq!(99, address.hash[0]);
+            assert!(matches!(&address, Address::Byron(ByronAddress{ payload }) 
+                if payload[0] == 99));
             assert!(delta == 42 || delta == -42);
 
             let mut bal = bal.lock().unwrap();
@@ -627,10 +616,7 @@ mod tests {
         let output = TxOutput {
             tx_hash: vec!(42),
             index: 0,
-            address: Address {
-                address_type: AddressType::Payment,
-                hash: vec!(99),
-            },
+            address: create_address(99),
             value: 42,
         };
 
@@ -668,8 +654,8 @@ mod tests {
 
         let bal = balance.clone();
         state.register_address_delta_observer(Box::new(move |_block, address, delta| {
-            assert_eq!(1, address.hash.len());
-            assert_eq!(99, address.hash[0]);
+            assert!(matches!(&address, Address::Byron(ByronAddress{ payload }) 
+                if payload[0] == 99));
             assert!(delta == 42 || delta == -42);
 
             let mut bal = bal.lock().unwrap();
@@ -680,10 +666,7 @@ mod tests {
         let output = TxOutput {
             tx_hash: vec!(42),
             index: 0,
-            address: Address {
-                address_type: AddressType::Payment,
-                hash: vec!(99),
-            },
+            address: create_address(99),
             value: 42,
         };
 
