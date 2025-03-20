@@ -17,6 +17,9 @@ pub struct AddressDeltaPublisher {
 
     /// Topic to publish on
     topic: Option<String>,
+
+    /// Accumulating deltas for the current block
+    deltas: Vec<AddressDelta>,
 }
 
 impl AddressDeltaPublisher {
@@ -26,27 +29,37 @@ impl AddressDeltaPublisher {
         Self { 
             context, 
             topic: config.get_string("address-delta-topic").ok(),
+            deltas: Vec::new(),
         }
     }
 }
 
 impl AddressDeltaObserver for AddressDeltaPublisher {
 
-    /// Observe an address delta and publish messages
-    fn observe_delta(&mut self, block: &BlockInfo, address: &Address, delta: i64) {
+    /// Observe a new block
+    fn start_block(&mut self, _block: &BlockInfo) {
+        // Clear the deltas
+        self.deltas.clear();
+    }
 
+    /// Observe an address delta and publish messages
+    fn observe_delta(&mut self, address: &Address, delta: i64) {
+        // Accumulate the delta
+        self.deltas.push(AddressDelta {
+            address: address.clone(),
+            delta,
+        });
+    }
+
+    fn finalise_block(&mut self, block: &BlockInfo) {
+
+        // Send out the accumulated deltas
         if let Some(topic) = &self.topic {
 
-            // TODO accumulate multiple from a single block!
-            let mut message = AddressDeltasMessage {
+            let message = AddressDeltasMessage {
                 block: block.clone(),
-                deltas: Vec::new(),
+                deltas: std::mem::take(&mut self.deltas),
             };
-
-            message.deltas.push(AddressDelta {
-                address: address.clone(),
-                delta,
-            });
 
             let context = self.context.clone();
             let topic = topic.clone();
@@ -57,6 +70,6 @@ impl AddressDeltaObserver for AddressDeltaPublisher {
                     .await
                     .unwrap_or_else(|e| error!("Failed to publish: {e}")); 
             });
-        }
+        }        
     }
 }
