@@ -3,7 +3,6 @@
 [workspace]
 members = [
     # Global message and common definitions
-    "messages",
     "common",
 
     # Modules

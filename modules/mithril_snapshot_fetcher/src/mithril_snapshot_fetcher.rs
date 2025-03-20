@@ -2,13 +2,15 @@
 //! Fetches a snapshot from Mithril and replays all the blocks in it
 
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
-use acropolis_messages::{
-    BlockHeaderMessage,
-    BlockBodyMessage,
-    SnapshotCompleteMessage,
-    Message,
+use acropolis_common::{
     BlockInfo,
-    BlockStatus
+    BlockStatus,    
+    messages::{
+        BlockHeaderMessage,
+        BlockBodyMessage,
+        SnapshotCompleteMessage,
+        Message,
+    }
 };
 use std::sync::Arc;
 use tokio::{join, sync::Mutex};

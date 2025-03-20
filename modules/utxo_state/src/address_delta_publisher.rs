@@ -1,9 +1,13 @@
 //! Address delta publisher for the UTXO state Acropolis module
 use caryatid_sdk::Context;
 use config::Config;
-use acropolis_messages::{
-    Message, BlockInfo,
-    AddressDeltasMessage, AddressDelta, Address};
+use acropolis_common::{
+    BlockInfo, AddressDelta, Address,
+        messages::{
+        AddressDeltasMessage,
+        Message
+     }, 
+};
 use std::sync::Arc;
 use tracing::error;
 

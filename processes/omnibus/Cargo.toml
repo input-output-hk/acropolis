@@ -13,7 +13,7 @@ caryatid_sdk = "0.2"
 caryatid_module_clock = "0.2"
 
 # Core message definition
-acropolis_messages = { path = "../../messages" }
+acropolis_common = { path = "../../common" }
 
 # Modules we use
 acropolis_module_genesis_bootstrapper = { path = "../../modules/genesis_bootstrapper" }

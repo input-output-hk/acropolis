@@ -2,7 +2,7 @@
 //! Unpacks block bodies into transactions
 
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
-use acropolis_messages::{RawTxsMessage, Message};
+use acropolis_common::messages::{RawTxsMessage, Message};
 use std::sync::Arc;
 use anyhow::Result;
 use config::Config;

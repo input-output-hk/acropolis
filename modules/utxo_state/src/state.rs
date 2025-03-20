@@ -1,10 +1,11 @@
 //! Acropolis UTXOState: State storage
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
-use acropolis_common::SerialisedMessageHandler;
-use acropolis_messages::{
+use acropolis_common::{
+    SerialisedMessageHandler,
     Address, BlockInfo, BlockStatus, 
-    TxInput, TxOutput, UTXODelta, UTXODeltasMessage
+    TxInput, TxOutput, UTXODelta,
+    messages::UTXODeltasMessage
 };
 use tracing::{debug, info, error};
 use hex::encode;
