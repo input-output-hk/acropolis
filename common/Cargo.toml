@@ -2,20 +2,17 @@
 
 [package]
 name = "acropolis_common"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["Paul Clark <paul.clark@iohk.io>"]
-description = "Common helpers for Acropolis"
+description = "Common types, messages and helpers for Acropolis"
 license = "Apache-2.0"
 
 [dependencies]
 caryatid_sdk = "0.2"
-acropolis_messages = { path = "../messages" }
-tracing = "0.1.40"
-
-[dev-dependencies]
 serde = { version = "1.0.214", features = ["derive"] }
 serde_json = "1.0"
+tracing = "0.1.40"
 
 [lib]
 crate-type = ["rlib"]

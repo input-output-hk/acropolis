@@ -2,8 +2,11 @@
 //! Accepts UTXO events and derives the current ledger state in memory
 
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
-use acropolis_messages::Message;
-use acropolis_common::Serialiser;
+use acropolis_common::{
+    Serialiser,
+    messages::Message
+};
+
 use anyhow::Result;
 use config::Config;
 use tracing::{info, error};

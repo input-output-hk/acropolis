@@ -6,7 +6,7 @@ use config::{Config, File, Environment};
 use tracing::info;
 use tracing_subscriber;
 use std::sync::Arc;
-use acropolis_messages::Message;
+use acropolis_common::messages::Message;
 
 // External modules
 use acropolis_module_genesis_bootstrapper::GenesisBootstrapper;

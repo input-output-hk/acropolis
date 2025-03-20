@@ -2,12 +2,14 @@
 //! Multi-connection, multi-protocol client interface to the Cardano node
 
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
-use acropolis_messages::{
-    BlockHeaderMessage,
-    BlockBodyMessage,
-    Message,
+use acropolis_common::{
     BlockInfo,
-    BlockStatus
+    BlockStatus,
+    messages::{
+        Message,
+        BlockHeaderMessage,
+        BlockBodyMessage,
+    },
 };
 use std::sync::Arc;
 use anyhow::{Result, anyhow};

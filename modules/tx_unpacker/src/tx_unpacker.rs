@@ -2,11 +2,13 @@
 //! Unpacks transaction bodies into UTXO events
 
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
-use acropolis_messages::{
-    Address, AddressNetwork, ByronAddress, Message, ShelleyAddress, 
+use acropolis_common::{
+    Address, AddressNetwork, ByronAddress, ShelleyAddress, 
     ShelleyAddressDelegationPart, ShelleyAddressPaymentPart, ShelleyAddressPointer, 
-    StakeAddress, 
-    TxInput, TxOutput, UTXODelta, UTXODeltasMessage};
+    StakeAddress, StakeAddressPayload, 
+    TxInput, TxOutput, UTXODelta, 
+    messages::{Message, UTXODeltasMessage},
+};
 use std::sync::Arc;
 use anyhow::Result;
 use config::Config;
@@ -78,9 +80,9 @@ impl TxUnpacker
                 network: Self::map_network(stake_address.network())?,
                 payload: match stake_address.payload() {
                     addresses::StakePayload::Stake(hash) => 
-                        acropolis_messages::StakeAddressPayload::StakeKeyHash(hash.to_vec()),
-                        addresses::StakePayload::Script(hash) => 
-                        acropolis_messages::StakeAddressPayload::ScriptHash(hash.to_vec()),
+                        StakeAddressPayload::StakeKeyHash(hash.to_vec()),
+                    addresses::StakePayload::Script(hash) => 
+                        StakeAddressPayload::ScriptHash(hash.to_vec()),
                 }
             })),
 

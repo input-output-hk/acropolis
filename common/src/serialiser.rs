@@ -6,7 +6,7 @@ use std::cmp::Ordering;
 use tracing::{debug, info, error};
 use std::sync::{Arc, Mutex};
 
-use acropolis_messages::{BlockStatus, BlockInfo};
+use crate::{BlockStatus, BlockInfo};
 use caryatid_sdk::MessageBounds;
 
 /// Pending queue entry

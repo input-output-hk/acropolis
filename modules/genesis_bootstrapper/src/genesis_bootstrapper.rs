@@ -2,9 +2,12 @@
 //! Reads genesis files and outputs initial UTXO events
 
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
-use acropolis_messages::{
-    TxOutput, UTXODelta, UTXODeltasMessage, Message,
+use acropolis_common::{
     BlockInfo, BlockStatus, Address, ByronAddress,
+    TxOutput, UTXODelta, 
+    messages::{
+        UTXODeltasMessage, Message,
+    }
 };
 use std::sync::Arc;
 use anyhow::Result;
