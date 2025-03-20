@@ -6,15 +6,22 @@ use acropolis_common::{
     Address, AddressNetwork, ByronAddress, ShelleyAddress, 
     ShelleyAddressDelegationPart, ShelleyAddressPaymentPart, ShelleyAddressPointer, 
     StakeAddress, StakeAddressPayload, 
-    TxInput, TxOutput, UTXODelta, 
+    TxInput, TxOutput, UTXODelta,
+    TxCertificate, StakeCredential, StakeDelegation, Ratio,
+    PoolRegistration, PoolRetirement, 
     messages::{Message, UTXODeltasMessage},
 };
 use std::sync::Arc;
 use anyhow::Result;
 use config::Config;
 use tracing::{debug, info, error};
-use pallas::ledger::traverse::MultiEraTx;
+use pallas::ledger::traverse::{MultiEraTx, MultiEraCert};
 use pallas::ledger::addresses;
+use pallas::ledger::primitives::{
+    alonzo,
+    conway,
+    StakeCredential as PallasStakeCredential,
+};
 use anyhow::anyhow;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.txs";
@@ -87,6 +94,107 @@ impl TxUnpacker
             })),
 
         }
+    }
+
+    /// Map a Pallas StakeCredential to ours
+    fn map_stake_credential(cred: &PallasStakeCredential) -> StakeCredential {
+        match cred {
+            PallasStakeCredential::AddrKeyhash(key_hash) =>
+                StakeCredential::AddrKeyHash(key_hash.to_vec()),
+            PallasStakeCredential::ScriptHash(script_hash) =>
+                StakeCredential::ScriptHash(script_hash.to_vec()),
+        }
+    }
+
+    /// Derive our TxCertificate from a Pallas Certificate
+    fn map_certificate(cert: &MultiEraCert) -> Result<TxCertificate> {
+        match cert {
+            MultiEraCert::NotApplicable => Err(anyhow!("Not applicable cert!")),
+
+            MultiEraCert::AlonzoCompatible(cert) => {
+                match cert.as_ref().as_ref() {
+                    alonzo::Certificate::StakeRegistration(cred) =>
+                        Ok(TxCertificate::StakeRegistration(
+                            Self::map_stake_credential(cred))),
+                    alonzo::Certificate::StakeDeregistration(cred) =>
+                            Ok(TxCertificate::StakeDeregistration(
+                                Self::map_stake_credential(cred))),
+                    alonzo::Certificate::StakeDelegation(cred, pool_key_hash) =>
+                                Ok(TxCertificate::StakeDelegation(StakeDelegation {
+                                    credential: Self::map_stake_credential(cred),
+                                    operator: pool_key_hash.to_vec()
+                                })),
+                    alonzo::Certificate::PoolRegistration { 
+                        operator, vrf_keyhash, pledge, cost, margin, 
+                        reward_account, pool_owners, relays, pool_metadata } =>
+                                Ok(TxCertificate::PoolRegistration(PoolRegistration { 
+                                    operator: operator.to_vec(), 
+                                    vrf_key_hash: vrf_keyhash.to_vec(),
+                                    pledge: *pledge,
+                                    cost: *cost,
+                                    margin: Ratio {
+                                        numerator: margin.numerator,
+                                        denominator: margin.denominator,
+                                    },
+                                    reward_account: reward_account.to_vec(),
+                                    pool_owners: pool_owners
+                                        .into_iter()
+                                        .map(|v| v.to_vec())
+                                        .collect()
+                                })),
+                    alonzo::Certificate::PoolRetirement(pool_key_hash, epoch) =>
+                                Ok(TxCertificate::PoolRetirement(PoolRetirement {
+                                    operator: pool_key_hash.to_vec(), 
+                                    epoch: *epoch
+                                })),
+                    _ => Err(anyhow!("Alonzo certificate type {:?} ignored", cert)),
+                }
+            }
+
+            // Now repeated for a different type!
+            MultiEraCert::Conway(cert) => {
+                match cert.as_ref().as_ref() {
+                    conway::Certificate::StakeRegistration(cred) =>
+                        Ok(TxCertificate::StakeRegistration(
+                            Self::map_stake_credential(cred))),
+                    conway::Certificate::StakeDeregistration(cred) =>
+                            Ok(TxCertificate::StakeDeregistration(
+                                Self::map_stake_credential(cred))),
+                    conway::Certificate::StakeDelegation(cred, pool_key_hash) =>
+                                Ok(TxCertificate::StakeDelegation(StakeDelegation {
+                                    credential: Self::map_stake_credential(cred),
+                                    operator: pool_key_hash.to_vec()
+                                })),
+                    conway::Certificate::PoolRegistration { 
+                        operator, vrf_keyhash, pledge, cost, margin, 
+                        reward_account, pool_owners, relays, pool_metadata } =>
+                                Ok(TxCertificate::PoolRegistration(PoolRegistration { 
+                                    operator: operator.to_vec(), 
+                                    vrf_key_hash: vrf_keyhash.to_vec(),
+                                    pledge: *pledge,
+                                    cost: *cost,
+                                    margin: Ratio {
+                                        numerator: margin.numerator,
+                                        denominator: margin.denominator,
+                                    },
+                                    reward_account: reward_account.to_vec(),
+                                    pool_owners: pool_owners
+                                        .into_iter()
+                                        .map(|v| v.to_vec())
+                                        .collect()
+                                })),
+                    conway::Certificate::PoolRetirement(pool_key_hash, epoch) =>
+                                Ok(TxCertificate::PoolRetirement(PoolRetirement {
+                                    operator: pool_key_hash.to_vec(), 
+                                    epoch: *epoch
+                                })),
+                    _ => Err(anyhow!("Conway certificate type {:?} ignored", cert)),
+                }
+            }
+
+            _ => Err(anyhow!("Unknown certificate era {:?} ignored", cert)),
+        }
+
     }
 
     /// Main init function

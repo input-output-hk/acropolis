@@ -1,5 +1,4 @@
 //! Core type definitions for Acropolis
-
 // We don't use these types in the acropolis_common crate itself
 #![allow(dead_code)]
 
@@ -202,4 +201,98 @@ impl Default for UTXODelta {
     fn default() -> Self { Self::None(()) }
 }
 
+/// Key hash used for pool IDs etc.
+pub type KeyHash = Vec<u8>;
 
+/// Amount of Ada, in Lovelace
+pub type Lovelace = u64;
+
+/// Rational number = numerator / denominator
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Ratio {
+    pub numerator: u64,
+    pub denominator: u64,
+}
+
+/// Stake credential
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum StakeCredential {
+    /// Address key hash
+    AddrKeyHash(KeyHash),
+
+    /// Script hash
+    ScriptHash(KeyHash),
+}
+
+impl Default for StakeCredential {
+    fn default() -> Self { Self::AddrKeyHash(Vec::new()) }
+}
+
+/// Pool registration data
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PoolRegistration {
+    /// Operator pool key hash - used as ID
+    pub operator: KeyHash,
+
+    /// VRF key hash
+    pub vrf_key_hash: KeyHash,
+
+    /// Pledged Ada
+    pub pledge: Lovelace,
+
+    /// Fixed cost
+    pub cost: Lovelace,
+
+    /// Marginal cost (fraction)
+    pub margin: Ratio,
+
+    /// Reward account
+    pub reward_account: Vec<u8>,
+
+    /// Pool owners by their key hash
+    pub pool_owners: Vec<KeyHash>,
+
+    // TODO Relays
+}
+
+/// Pool retirement data
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PoolRetirement {
+    /// Operator pool key hash - used as ID
+    pub operator: KeyHash,
+
+    /// Epoch it will retire at the end of
+    pub epoch: u64,
+}
+
+/// Stake delegation data
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StakeDelegation {
+    /// Stake credential
+    pub credential: StakeCredential,
+
+    /// Pool ID to delegate to
+    pub operator: KeyHash,
+}
+
+/// Certificate in a transaction
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum TxCertificate {
+    /// Default
+    None(()),
+
+    /// Stake registration
+    StakeRegistration(StakeCredential),
+
+    /// Stake de-registration
+    StakeDeregistration(StakeCredential),
+
+    /// Stake Delegation to a pool
+    StakeDelegation(StakeDelegation),
+
+    /// Pool registration
+    PoolRegistration(PoolRegistration),
+
+    /// Pool retirement
+    PoolRetirement(PoolRetirement),
+}
