@@ -332,7 +332,7 @@ impl SerialisedMessageHandler<UTXODeltasMessage> for State {
 mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};
-    use acropolis_messages::{Address, ByronAddress};
+    use acropolis_common::ByronAddress;
 
     // Create an address for testing - we use Byron just because it's easier to
     // create and test the payload

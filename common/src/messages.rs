@@ -92,46 +92,9 @@ impl Default for Message {
     fn default() -> Self { Self::None(()) }
 }
 
-// Casts from specific messages
+// Casts from specific Caryatid messages
 impl From<ClockTickMessage> for Message {
     fn from(msg: ClockTickMessage) -> Self {
         Message::Clock(msg)
     }
 }
-
-impl From<BlockHeaderMessage> for Message {
-    fn from(msg: BlockHeaderMessage) -> Self {
-        Message::BlockHeader(msg)
-    }
-}
-
-impl From<BlockBodyMessage> for Message {
-    fn from(msg: BlockBodyMessage) -> Self {
-        Message::BlockBody(msg)
-    }
-}
-
-impl From<SnapshotCompleteMessage> for Message {
-    fn from(msg: SnapshotCompleteMessage) -> Self {
-        Message::SnapshotComplete(msg)
-    }
-}
-
-impl From<RawTxsMessage> for Message {
-    fn from(msg: RawTxsMessage) -> Self {
-        Message::ReceivedTxs(msg)
-    }
-}
-
-impl From<UTXODeltasMessage> for Message {
-    fn from(msg: UTXODeltasMessage) -> Self {
-        Message::UTXODeltas(msg)
-    }
-}
-
-impl From<AddressDeltasMessage> for Message {
-    fn from(msg: AddressDeltasMessage) -> Self {
-        Message::AddressDeltas(msg)
-    }
-}
-

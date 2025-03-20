@@ -68,7 +68,7 @@ impl UpstreamChainFetcher
                     raw: body
                 };
 
-                let message_enum: Message = message.into();
+                let message_enum = Message::BlockBody(message);
                 context.message_bus.publish(&topic, Arc::new(message_enum))
                     .await
                     .unwrap_or_else(|e| error!("Failed to publish: {e}"));
@@ -133,7 +133,7 @@ impl UpstreamChainFetcher
                                 raw: h.cbor
                             };
 
-                            let message_enum: Message = message.into();
+                            let message_enum = Message::BlockHeader(message);
                             context.message_bus.publish(&topic, Arc::new(message_enum))
                                 .await
                                 .unwrap_or_else(|e| error!("Failed to publish: {e}"));
