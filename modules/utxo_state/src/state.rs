@@ -59,8 +59,14 @@ pub struct UTXOValue {
 
 /// Address delta observer
 pub trait AddressDeltaObserver: Send + Sync + 'static {
+    /// Observe a new block
+    fn start_block(&mut self, block: &BlockInfo);
+
     /// Observe a delta
-    fn observe_delta(&mut self, block: &BlockInfo, address: &Address, delta: i64);
+    fn observe_delta(&mut self, address: &Address, delta: i64);
+
+    /// Finalise a block
+    fn finalise_block(&mut self, block: &BlockInfo);
 }
 
 /// Ledger state storage
@@ -128,7 +134,7 @@ impl State {
                     if let Some(utxo) = self.utxos.remove(key) {
                         // Tell the observer to debit it
                         if let Some(observer) = self.address_delta_observer.as_mut() {
-                            observer.lock().unwrap().observe_delta(block, 
+                            observer.lock().unwrap().observe_delta( 
                                 &utxo.address, -(utxo.value as i64));
                         }                                 
                     }
@@ -143,7 +149,7 @@ impl State {
 
                         // Tell the observer to recredit it
                         if let Some(observer) = self.address_delta_observer.as_mut() {
-                            observer.lock().unwrap().observe_delta(block,
+                            observer.lock().unwrap().observe_delta(
                                 &utxo.address, utxo.value as i64);
                         } 
                     }
@@ -187,7 +193,7 @@ impl State {
 
                 // Tell the observer it's spent
                 if let Some(observer) = self.address_delta_observer.as_mut() {
-                    observer.lock().unwrap().observe_delta(block,
+                    observer.lock().unwrap().observe_delta(
                         &utxo.address, -(utxo.value as i64));
                 }        
 
@@ -244,7 +250,7 @@ impl State {
 
         // Tell the observer
         if let Some(observer) = self.address_delta_observer.as_mut() {
-            observer.lock().unwrap().observe_delta(block,
+            observer.lock().unwrap().observe_delta(
                 &output.address, output.value as i64);
         }        
     }
@@ -288,11 +294,16 @@ impl SerialisedMessageHandler<UTXODeltasMessage> for State {
     /// Handle a message
     fn handle(&mut self, deltas: &UTXODeltasMessage) {
 
-       // Observe block for stats and rollbacks
-       self.observe_block(&deltas.block);
+        // Start the block for observer
+        if let Some(observer) = self.address_delta_observer.as_mut() {
+            observer.lock().unwrap().start_block(&deltas.block);
+        }
 
-       // Process the deltas
-       for delta in &deltas.deltas {  // UTXODelta
+        // Observe block for stats and rollbacks
+        self.observe_block(&deltas.block);
+
+        // Process the deltas
+        for delta in &deltas.deltas {  // UTXODelta
 
            match delta {
                UTXODelta::Input(tx_input) => {
@@ -306,6 +317,12 @@ impl SerialisedMessageHandler<UTXODeltasMessage> for State {
                _ => {}
            }
        }
+
+        // End the block for observer
+        if let Some(observer) = self.address_delta_observer.as_mut() {
+            observer.lock().unwrap().finalise_block(&deltas.block);
+        }
+    
     }
 }
 
@@ -566,12 +583,18 @@ mod tests {
     }
 
     impl AddressDeltaObserver for TestDeltaObserver {
-        fn observe_delta(&mut self, _block: &BlockInfo, address: &Address, delta: i64) {
+        fn start_block(&mut self, _block: &BlockInfo) {
+            
+        }
+        fn observe_delta(&mut self, address: &Address, delta: i64) {
             assert!(matches!(&address, Address::Byron(ByronAddress{ payload }) 
                 if payload[0] == 99));
             assert!(delta == 42 || delta == -42);
 
             self.balance = self.balance + delta;
+        }
+        fn finalise_block(&mut self, _block: &BlockInfo) {
+            
         }
     }
 
