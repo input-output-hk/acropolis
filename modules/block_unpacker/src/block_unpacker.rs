@@ -62,7 +62,7 @@ impl BlockUnpacker
                                     block: body_msg.block.clone(), 
                                     txs
                                 };
-                                let message_enum: Message = tx_message.into();
+                                let message_enum = Message::ReceivedTxs(tx_message);
                                 context.message_bus.publish(&publish_topic,
                                                             Arc::new(message_enum))
                                     .await

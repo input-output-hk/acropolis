@@ -68,7 +68,7 @@ impl AddressDeltaObserver for AddressDeltaPublisher {
             let context = self.context.clone();
             let topic = topic.clone();
             tokio::spawn(async move {
-                let message_enum: Message = message.into();
+                let message_enum = Message::AddressDeltas(message);
                 context.message_bus.publish(&topic,
                                             Arc::new(message_enum))
                     .await

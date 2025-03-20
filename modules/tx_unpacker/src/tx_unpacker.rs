@@ -182,7 +182,7 @@ impl TxUnpacker
                             }
                         }
 
-                        let message_enum: Message = message.into();
+                        let message_enum = Message::UTXODeltas(message);
                         context.message_bus.publish(&publish_utxo_deltas_topic,
                                                     Arc::new(message_enum))
                             .await

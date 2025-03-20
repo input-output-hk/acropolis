@@ -218,7 +218,7 @@ impl MithrilSnapshotFetcher
                         raw: header.cbor().to_vec()
                     };
 
-                    let header_message_enum: Message = header_message.into();
+                    let header_message_enum = Message::BlockHeader(header_message);
                     let header_future = context.message_bus.publish(&header_topic,
                         Arc::new(header_message_enum));
 
@@ -228,7 +228,7 @@ impl MithrilSnapshotFetcher
                         raw: raw_block
                     };
 
-                    let body_message_enum: Message = body_message.into();
+                    let body_message_enum = Message::BlockBody(body_message);
                     let body_future = context.message_bus.publish(&body_topic,
                         Arc::new(body_message_enum));
 
@@ -248,7 +248,7 @@ impl MithrilSnapshotFetcher
                 last_block: last_block_info,
             };
 
-            let message_enum: Message = message.into();
+            let message_enum = Message::SnapshotComplete(message);
             context.message_bus.publish(&completion_topic,
                 Arc::new(message_enum))
                 .await
