@@ -215,7 +215,8 @@ pub struct Ratio {
 }
 
 /// Stake credential
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Ord, Eq, PartialEq, PartialOrd, Hash,
+        serde::Serialize, serde::Deserialize)]
 pub enum StakeCredential {
     /// Address key hash
     AddrKeyHash(KeyHash),
@@ -275,6 +276,51 @@ pub struct StakeDelegation {
     pub operator: KeyHash,
 }
 
+/// Genesis key delegation
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct GenesisKeyDelegation {
+    /// Genesis hash
+    pub genesis_hash: KeyHash,
+
+    /// Genesis delegate hash
+    pub genesis_delegate_hash: KeyHash,
+
+    /// VRF key hash
+    pub vrf_key_hash: KeyHash,
+}
+
+/// Source of a MIR
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum InstantaneousRewardSource {
+    Reserves,
+    Treasury,
+}
+
+impl Default for InstantaneousRewardSource {
+    fn default() -> Self { Self::Reserves }
+}
+
+/// Target of a MIR
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum InstantaneousRewardTarget {
+    StakeCredentials(Vec<(StakeCredential, u64)>),
+    OtherAccountingPot(u64),
+}
+
+impl Default for InstantaneousRewardTarget {
+    fn default() -> Self { Self::OtherAccountingPot(0) }
+}
+
+/// Move instantaneous reward
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct MoveInstantaneosReward {
+    /// Source
+    pub source: InstantaneousRewardSource,
+
+    /// Target
+    pub target: InstantaneousRewardTarget,
+}
+
 /// Certificate in a transaction
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum TxCertificate {
@@ -295,4 +341,10 @@ pub enum TxCertificate {
 
     /// Pool retirement
     PoolRetirement(PoolRetirement),
+
+    /// Genesis key delegation
+    GenesisKeyDelegation(GenesisKeyDelegation),
+
+    /// Move instantaneous rewards
+    MoveInstantaneousReward(MoveInstantaneosReward),
 }

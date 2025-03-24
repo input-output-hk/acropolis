@@ -3,11 +3,7 @@
 
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
 use acropolis_common::{
-    messages::{Message, TxCertificatesMessage, UTXODeltasMessage},
-    Address, AddressNetwork, ByronAddress, PoolRegistration, PoolRetirement,
-    Ratio, ShelleyAddress, ShelleyAddressDelegationPart, ShelleyAddressPaymentPart,
-    ShelleyAddressPointer, StakeAddress, StakeAddressPayload, StakeCredential,
-    StakeDelegation, TxCertificate, TxInput, TxOutput, UTXODelta
+    messages::{Message, TxCertificatesMessage, UTXODeltasMessage}, Address, AddressNetwork, ByronAddress, GenesisKeyDelegation, InstantaneousRewardSource, InstantaneousRewardTarget, MoveInstantaneosReward, PoolRegistration, PoolRetirement, Ratio, ShelleyAddress, ShelleyAddressDelegationPart, ShelleyAddressPaymentPart, ShelleyAddressPointer, StakeAddress, StakeAddressPayload, StakeCredential, StakeDelegation, TxCertificate, TxInput, TxOutput, UTXODelta
 };
 use std::sync::Arc;
 use anyhow::Result;
@@ -144,7 +140,32 @@ impl TxUnpacker
                                     operator: pool_key_hash.to_vec(), 
                                     epoch: *epoch
                                 })),
-                    _ => Err(anyhow!("Alonzo certificate type {:?} ignored", cert)),
+                    alonzo::Certificate::GenesisKeyDelegation(
+                        genesis_hash, genesis_delegate_hash, vrf_key_hash) =>
+                                Ok(TxCertificate::GenesisKeyDelegation(GenesisKeyDelegation{
+                                    genesis_hash: genesis_hash.to_vec(),
+                                    genesis_delegate_hash: genesis_delegate_hash.to_vec(),
+                                    vrf_key_hash: vrf_key_hash.to_vec(),
+                        })),
+                    alonzo::Certificate::MoveInstantaneousRewardsCert(mir) =>
+                                Ok(TxCertificate::MoveInstantaneousReward(MoveInstantaneosReward{
+                                    source: match mir.source {
+                                        alonzo::InstantaneousRewardSource::Reserves =>
+                                            InstantaneousRewardSource::Reserves,
+                                        alonzo::InstantaneousRewardSource::Treasury =>
+                                            InstantaneousRewardSource::Treasury,
+                                    },
+                                    target: match &mir.target {
+                                        alonzo::InstantaneousRewardTarget::StakeCredentials(creds) =>
+                                            InstantaneousRewardTarget::StakeCredentials(
+                                                creds.iter()
+                                                .map(|(sc, v)| (Self::map_stake_credential(&sc),
+                                                                *v as u64)) // TODO can be negative?
+                                                .collect()),
+                                        alonzo::InstantaneousRewardTarget::OtherAccountingPot(n) =>
+                                            InstantaneousRewardTarget::OtherAccountingPot(*n),
+                                    }
+                                })),
                 }
             }
 
