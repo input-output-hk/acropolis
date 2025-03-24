@@ -55,12 +55,13 @@ impl AddressDeltaObserver for AddressDeltaPublisher {
         });
     }
 
-    fn finalise_block(&mut self, block: &BlockInfo) {
+    fn finalise_block(&mut self, block: &BlockInfo, sequence: u64) {
 
         // Send out the accumulated deltas
         if let Some(topic) = &self.topic {
 
             let message = AddressDeltasMessage {
+                sequence,
                 block: block.clone(),
                 deltas: std::mem::take(&mut self.deltas),
             };

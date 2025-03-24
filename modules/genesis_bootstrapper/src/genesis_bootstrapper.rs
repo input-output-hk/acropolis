@@ -3,11 +3,9 @@
 
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
 use acropolis_common::{
-    BlockInfo, BlockStatus, Address, ByronAddress,
-    TxOutput, UTXODelta, 
     messages::{
-        UTXODeltasMessage, Message,
-    }
+        GenesisCompleteMessage, Message, UTXODeltasMessage
+    }, Address, BlockInfo, BlockStatus, ByronAddress, TxOutput, UTXODelta
 };
 use std::sync::Arc;
 use anyhow::Result;
@@ -60,6 +58,7 @@ impl GenesisBootstrapper
 
                     // Construct message
                     let mut message = UTXODeltasMessage {
+                        sequence: 0,  // We are always the first
                         block: BlockInfo {
                             status: BlockStatus::Bootstrap,
                             slot: 0,
@@ -91,7 +90,11 @@ impl GenesisBootstrapper
                         .unwrap_or_else(|e| error!("Failed to publish: {e}"));
 
                     // Send completion message
-                    context.message_bus.publish(&completion_topic, Arc::new(Message::None(())))
+                    let completion_message = GenesisCompleteMessage {
+                        next_sequence: 1,
+                    };
+                    let message_enum = Message::GenesisComplete(completion_message);
+                    context.message_bus.publish(&completion_topic, Arc::new(message_enum))
                         .await
                         .unwrap_or_else(|e| error!("Failed to publish: {e}"));
                 });
