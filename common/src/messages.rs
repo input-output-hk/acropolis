@@ -11,6 +11,9 @@ use caryatid_sdk::messages::ClockTickMessage;
 /// Block header message
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BlockHeaderMessage {
+    /// Event sequence number (for serialisation)
+    pub sequence: u64,
+
     /// Block info
     pub block: BlockInfo,
 
@@ -21,6 +24,9 @@ pub struct BlockHeaderMessage {
 /// Block body message
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BlockBodyMessage {
+    /// Event sequence number (for serialisation)
+    pub sequence: u64,
+    
     /// Block info
     pub block: BlockInfo,
 
@@ -31,6 +37,9 @@ pub struct BlockBodyMessage {
 /// Snapshot completion message
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SnapshotCompleteMessage {
+    /// Next event sequence number to use
+    pub next_sequence: u64,
+    
     /// Last block in snapshot data
     pub last_block: BlockInfo,
 }
@@ -38,6 +47,9 @@ pub struct SnapshotCompleteMessage {
 /// Transactions message
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RawTxsMessage {
+    /// Event sequence number (for serialisation)
+    pub sequence: u64,
+    
     /// Block info
     pub block: BlockInfo,
 
@@ -45,10 +57,19 @@ pub struct RawTxsMessage {
     pub txs: Vec<Vec<u8>>,
 }
 
+/// Genesis completion message
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct GenesisCompleteMessage {
+    /// Next event sequence number to use
+    pub next_sequence: u64,
+}
 
 /// Message encapsulating multiple UTXO deltas, in order
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct UTXODeltasMessage {
+    /// Event sequence number (for serialisation)
+    pub sequence: u64,
+    
     /// Block info
     pub block: BlockInfo,
 
@@ -59,6 +80,9 @@ pub struct UTXODeltasMessage {
 /// Message encapsulating multiple transaction certificates, in order
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TxCertificatesMessage {
+    /// Event sequence number (for serialisation)
+    pub sequence: u64,
+    
     /// Block info
     pub block: BlockInfo,
 
@@ -69,6 +93,9 @@ pub struct TxCertificatesMessage {
 /// Address deltas message
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AddressDeltasMessage {
+    /// Event sequence number (for serialisation)
+    pub sequence: u64,
+    
     /// Block info
     pub block: BlockInfo,
 
@@ -94,6 +121,7 @@ pub enum Message {
     BlockBody(BlockBodyMessage),               // Block body available
     SnapshotComplete(SnapshotCompleteMessage), // Mithril snapshot loaded
     ReceivedTxs(RawTxsMessage),                // Transaction available
+    GenesisComplete(GenesisCompleteMessage),   // Genesis UTXOs done
     UTXODeltas(UTXODeltasMessage),             // UTXO deltas received
     TxCertificates(TxCertificatesMessage),     // Transaction certificates received
     AddressDeltas(AddressDeltasMessage),       // Address deltas received

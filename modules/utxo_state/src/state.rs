@@ -66,8 +66,8 @@ pub trait AddressDeltaObserver: Send + Sync + 'static {
     /// Observe a delta
     fn observe_delta(&mut self, address: &Address, delta: i64);
 
-    /// Finalise a block
-    fn finalise_block(&mut self, block: &BlockInfo);
+    /// Finalise a block, with the given event sequence
+    fn finalise_block(&mut self, block: &BlockInfo, sequence: u64);
 }
 
 /// Ledger state storage
@@ -321,7 +321,7 @@ impl SerialisedMessageHandler<UTXODeltasMessage> for State {
 
         // End the block for observer
         if let Some(observer) = self.address_delta_observer.as_mut() {
-            observer.lock().unwrap().finalise_block(&deltas.block);
+            observer.lock().unwrap().finalise_block(&deltas.block, deltas.sequence);
         }
     
     }
@@ -594,7 +594,7 @@ mod tests {
 
             self.balance = self.balance + delta;
         }
-        fn finalise_block(&mut self, _block: &BlockInfo) {
+        fn finalise_block(&mut self, _block: &BlockInfo, _next_sequence: u64) {
             
         }
     }

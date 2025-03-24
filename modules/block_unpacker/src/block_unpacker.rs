@@ -58,7 +58,8 @@ impl BlockUnpacker
                                 let txs: Vec<_> = block.txs().into_iter()
                                     .map(|tx| tx.encode()).collect();
 
-                                let tx_message = RawTxsMessage { 
+                                let tx_message = RawTxsMessage {
+                                    sequence: body_msg.sequence, 
                                     block: body_msg.block.clone(), 
                                     txs
                                 };

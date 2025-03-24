@@ -51,7 +51,8 @@ impl UpstreamChainFetcher
     // TODO fetch in batches
     async fn fetch_block(context: Arc<Context<Message>>, config: Arc<Config>,
                          peer: &mut PeerClient, point: Point,
-                         block_info: BlockInfo) -> Result<()> {
+                         block_info: BlockInfo,
+                         sequence: u64) -> Result<()> {
         let topic = config.get_string("body-topic").unwrap_or(DEFAULT_BODY_TOPIC.to_string());
 
         // Fetch the block body
@@ -64,6 +65,7 @@ impl UpstreamChainFetcher
 
                 // Construct message
                 let message = BlockBodyMessage {
+                    sequence,
                     block: block_info,
                     raw: body
                 };
@@ -83,7 +85,8 @@ impl UpstreamChainFetcher
     /// ChainSync client loop - fetch headers and publish details, plus fetch each block
     async fn sync_to_point(context: Arc<Context<Message>>, config: Arc<Config>,
                            peer: Arc<Mutex<PeerClient>>,
-                           point: Point) -> Result<()> {
+                           point: Point,
+                           next_sequence: u64) -> Result<()> {
 
         let topic = config.get_string("header-topic").unwrap_or(DEFAULT_HEADER_TOPIC.to_string());
 
@@ -96,6 +99,7 @@ impl UpstreamChainFetcher
 
         // Loop fetching messages
         let mut rolled_back = false;
+        let mut sequence = next_sequence;
         loop {
             let next = my_peer.chainsync().request_or_await_next().await?;
 
@@ -129,6 +133,7 @@ impl UpstreamChainFetcher
                                 hash: hash.clone(),
                             };
                             let message = BlockHeaderMessage {
+                                sequence,
                                 block: block_info.clone(),
                                 raw: h.cbor
                             };
@@ -143,8 +148,10 @@ impl UpstreamChainFetcher
                             // in the RollForward is the *tip*, not the next read point
                             let fetch_point = Point::Specific(slot, hash);
                             Self::fetch_block(context.clone(), config.clone(),
-                                              &mut *my_peer, fetch_point, block_info)
+                                              &mut *my_peer, fetch_point, block_info, sequence)
                                 .await?;
+
+                            sequence += 1;
                         }
                         Err(e) => error!("Bad header: {e}"),
                     }
@@ -173,10 +180,10 @@ impl UpstreamChainFetcher
             "tip" => {
                 // Ask for origin but get the tip as well
                 let (_, Tip(point, _)) = my_peer.chainsync().find_intersect(vec![Point::Origin]).await?;
-                Self::sync_to_point(context, config, peer.clone(), point).await?;
+                Self::sync_to_point(context, config, peer.clone(), point, 0).await?;
             }
             "origin" => {
-                Self::sync_to_point(context, config, peer.clone(), Point::Origin).await?;
+                Self::sync_to_point(context, config, peer.clone(), Point::Origin, 0).await?;
             }
             "snapshot" => {
                 // Subscribe to snapshotter and sync to its point
@@ -194,13 +201,13 @@ impl UpstreamChainFetcher
                     tokio::spawn(async move {
                         match message.as_ref() {
                             Message::SnapshotComplete(msg) => {
-                                info!("Notified snapshot complete at slot {} block number {}",
-                                    msg.last_block.slot, msg.last_block.number);
+                                info!("Notified snapshot complete at slot {} block number {}, sequence {}",
+                                    msg.last_block.slot, msg.last_block.number, msg.next_sequence);
                                 let point = Point::Specific(
                                     msg.last_block.slot,
                                     msg.last_block.hash.clone());
 
-                                Self::sync_to_point(context, config, peer, point)
+                                Self::sync_to_point(context, config, peer, point, msg.next_sequence)
                                     .await
                                     .unwrap_or_else(|e| error!("Can't sync: {e}"));
                             }

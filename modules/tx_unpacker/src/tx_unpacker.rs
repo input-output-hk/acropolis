@@ -232,11 +232,13 @@ impl TxUnpacker
 
                         // Construct messages which we batch up
                         let mut utxo_deltas_message = UTXODeltasMessage {
+                            sequence: txs_msg.sequence,
                             block: txs_msg.block.clone(),
                             deltas: Vec::new(),
                         };
 
                         let mut certificates_message = TxCertificatesMessage {
+                            sequence: txs_msg.sequence,
                             block: txs_msg.block.clone(),
                             certificates: Vec::new(),
                         };
