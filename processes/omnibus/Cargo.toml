@@ -11,6 +11,7 @@ license = "Apache-2.0"
 caryatid_process = "0.2.1"
 caryatid_sdk = "0.2"
 caryatid_module_clock = "0.2"
+caryatid_module_spy = "0.1"
 
 # Core message definition
 acropolis_common = { path = "../../common" }
