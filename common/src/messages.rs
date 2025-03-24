@@ -56,6 +56,16 @@ pub struct UTXODeltasMessage {
     pub deltas: Vec<UTXODelta>
 }
 
+/// Message encapsulating multiple transaction certificates, in order
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TxCertificatesMessage {
+    /// Block info
+    pub block: BlockInfo,
+
+    /// Ordered set of certificates
+    pub certificates: Vec<TxCertificate>
+}
+
 /// Address deltas message
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AddressDeltasMessage {
@@ -85,6 +95,7 @@ pub enum Message {
     SnapshotComplete(SnapshotCompleteMessage), // Mithril snapshot loaded
     ReceivedTxs(RawTxsMessage),                // Transaction available
     UTXODeltas(UTXODeltasMessage),             // UTXO deltas received
+    TxCertificates(TxCertificatesMessage),     // Transaction certificates received
     AddressDeltas(AddressDeltasMessage),       // Address deltas received
 }
 
