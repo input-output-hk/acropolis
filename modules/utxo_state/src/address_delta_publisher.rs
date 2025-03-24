@@ -9,6 +9,7 @@ use acropolis_common::{
      }, 
 };
 use std::sync::Arc;
+use async_trait::async_trait;
 use tracing::error;
 
 use crate::state::AddressDeltaObserver;
@@ -38,16 +39,17 @@ impl AddressDeltaPublisher {
     }
 }
 
+#[async_trait]
 impl AddressDeltaObserver for AddressDeltaPublisher {
 
     /// Observe a new block
-    fn start_block(&mut self, _block: &BlockInfo) {
+    async fn start_block(&mut self, _block: &BlockInfo) {
         // Clear the deltas
         self.deltas.clear();
     }
 
     /// Observe an address delta and publish messages
-    fn observe_delta(&mut self, address: &Address, delta: i64) {
+    async fn observe_delta(&mut self, address: &Address, delta: i64) {
         // Accumulate the delta
         self.deltas.push(AddressDelta {
             address: address.clone(),
@@ -55,7 +57,7 @@ impl AddressDeltaObserver for AddressDeltaPublisher {
         });
     }
 
-    fn finalise_block(&mut self, block: &BlockInfo, sequence: u64) {
+    async fn finalise_block(&mut self, block: &BlockInfo, sequence: u64) {
 
         // Send out the accumulated deltas
         if let Some(topic) = &self.topic {

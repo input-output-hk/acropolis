@@ -209,7 +209,7 @@ impl TxUnpacker
 
                     // TODO Governance certs
 
-                    _ => Err(anyhow!("Conway certificate type {:?} ignored", cert)),
+                    _ => Err(anyhow!("Unhandled Conway certificate type {:?}", cert))
                 }
             }
 
@@ -330,9 +330,7 @@ impl TxUnpacker
                                                 Ok(tx_cert) => {
                                                     certificates_message.certificates.push(tx_cert);
                                                 },
-                                                Err(e) => {
-                                                    error!("Can't parse certificate in tx: {e}");
-                                                }
+                                                Err(e) => { error!("{e}"); }
                                             }
                                         }
                                     }

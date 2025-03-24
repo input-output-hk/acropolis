@@ -10,7 +10,8 @@ use acropolis_common::{
 use anyhow::Result;
 use config::Config;
 use tracing::{info, error};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 mod state;
 use state::State;
@@ -56,8 +57,8 @@ impl UTXOState
             async move {
                 match message.as_ref() {
                     Message::UTXODeltas(deltas_msg) => {
-                        let mut serialiser = serialiser.lock().unwrap();
-                        serialiser.handle_message(deltas_msg.sequence, deltas_msg);
+                        let mut serialiser = serialiser.lock().await;
+                        serialiser.handle_message(deltas_msg.sequence, deltas_msg).await;
                     }
 
                     _ => error!("Unexpected message type: {message:?}")
@@ -67,14 +68,17 @@ impl UTXOState
 
         // Ticker to log stats and prune state
         context.clone().message_bus.subscribe("clock.tick", move |message: Arc<Message>| {
-            if let Message::Clock(message) = message.as_ref() {
-                if (message.number % 60) == 0 {
-                    state2.lock().unwrap().tick();
-                    serialiser2.lock().unwrap().tick();
+            let serialiser = serialiser2.clone();
+            let state = state2.clone();
+
+            async move {
+                if let Message::Clock(message) = message.as_ref() {
+                    if (message.number % 60) == 0 {
+                        state.lock().await.tick().await;
+                        serialiser.lock().await.tick();
+                    }
                 }
             }
-
-            async {}
         })?;
 
         Ok(())
