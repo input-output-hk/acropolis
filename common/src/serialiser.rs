@@ -49,7 +49,7 @@ pub trait SerialisedMessageHandler<MSG: MessageBounds>: Send + Sync {
 }
 
 /// Message serialiser
-pub struct Serialiser<MSG: MessageBounds> {
+pub struct Serialiser<'a, MSG: MessageBounds> {
     /// Pending queue, presents messages in order, implemented as a reversed max-heap
     pending: BinaryHeap<PendingEntry<MSG>>,
 
@@ -58,15 +58,20 @@ pub struct Serialiser<MSG: MessageBounds> {
 
     /// Message handler
     handler: Arc<Mutex<dyn SerialisedMessageHandler<MSG>>>,
+
+    /// Module path using it (for logging)
+    module_name: &'a str,
 }
 
-impl <MSG: MessageBounds> Serialiser<MSG> {
+impl <'a, MSG: MessageBounds> Serialiser<'a, MSG> {
     /// Constructor
-    pub fn new(handler: Arc<Mutex<dyn SerialisedMessageHandler<MSG>>>) -> Self {
+    pub fn new(handler: Arc<Mutex<dyn SerialisedMessageHandler<MSG>>>,
+               module_name: &'a str) -> Self {
         Self {
             pending: BinaryHeap::new(),
             next_sequence: 0,
             handler,
+            module_name,
         }
     }
 
@@ -117,7 +122,7 @@ impl <MSG: MessageBounds> Serialiser<MSG> {
     /// Periodic tick for background logging
     pub fn tick(&mut self) {
         if self.pending.len() != 0 {
-            info!(pending = self.pending.len());
+            info!(module = self.module_name, pending = self.pending.len());
         }
     }
 }
@@ -158,7 +163,7 @@ mod tests {
     async fn messages_in_order_pass_through() {
         let handler = Arc::new(Mutex::new(MockMessageHandler::new()));
         let handler2 = handler.clone();
-        let mut serialiser = Serialiser::new(handler);
+        let mut serialiser = Serialiser::new(handler, "test");
 
         let message0 = TestMessage { index: 0 };
         serialiser.handle_message(0, &message0).await;
@@ -181,7 +186,7 @@ mod tests {
     async fn messages_out_of_order_are_reordered() {
         let handler = Arc::new(Mutex::new(MockMessageHandler::new()));
         let handler2 = handler.clone();
-        let mut serialiser = Serialiser::new(handler);
+        let mut serialiser = Serialiser::new(handler, "test");
 
         let message1 = TestMessage { index: 1 };
         serialiser.handle_message(1, &message1).await;
