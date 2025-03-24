@@ -45,43 +45,45 @@ impl VolatileIndex {
         }  
     }
 
-    /// Prune all blocks before the given boundary, calling the provided
-    /// lambda on each UTXO
-    pub fn prune_before<F>(&mut self, boundary: u64, mut callback: F)
-        where F: FnMut(&UTXOKey),
+    /// Prune all blocks before the given boundary, returning a vector of
+    /// UTXOs to delete
+    pub fn prune_before(&mut self, boundary: u64) -> Vec<UTXOKey>
     {
+        let mut utxos = Vec::<UTXOKey>::new();
+
         // Remove blocks before boundary, calling back for all UTXOs in them
         while self.first_block < boundary {
             if let Some(block) = self.blocks.pop_front() {
-                for utxo in block {
-                    callback(&utxo);
-                }
+                for utxo in block { utxos.push(utxo); }
             }
             else { break; }
 
             self.first_block += 1;
         }
+
+        return utxos;
     }
 
-    /// Prune all blocks at or after the given boundary, calling the provided
-    /// lambda on each UTXO
-    pub fn prune_on_or_after<F>(&mut self, boundary: u64, mut callback: F)
-        where F: FnMut(&UTXOKey),
+    /// Prune all blocks at or after the given boundary returning a vector of
+    /// UTXOs to delete
+    pub fn prune_on_or_after(&mut self, boundary: u64) -> Vec<UTXOKey>
     {
-        if self.first_block == 0 { return; }
+        let mut utxos = Vec::<UTXOKey>::new();
+
+        if self.first_block == 0 { return utxos; }
         let mut last_block = self.first_block + self.blocks.len() as u64 - 1;
 
         // Remove blocks before boundary, calling back for all UTXOs in them
         while last_block >= boundary {
             if let Some(block) = self.blocks.pop_back() {
-                for utxo in block {
-                    callback(&utxo);
-                }
+                for utxo in block { utxos.push(utxo); }
             }
             else { break; }
 
             last_block -= 1;
         }
+
+        return utxos;
     }
 
     
@@ -151,8 +153,8 @@ mod tests {
         index.add_utxo(&UTXOKey::new(&[2], 2));
         index.add_block(2);
         index.add_utxo(&UTXOKey::new(&[3], 3));
-        let mut pruned = Vec::<UTXOKey>::new();
-        index.prune_before(2, |utxo| { pruned.push(utxo.clone())});
+
+        let pruned = index.prune_before(2);
         assert_eq!(2, index.first_block);
         assert_eq!(1, index.blocks.len());
         assert_eq!(2, pruned.len());
@@ -168,8 +170,7 @@ mod tests {
         index.add_utxo(&UTXOKey::new(&[2], 2));
         index.add_block(2);
         index.add_utxo(&UTXOKey::new(&[3], 3));
-        let mut pruned = Vec::<UTXOKey>::new();
-        index.prune_on_or_after(1, |utxo| { pruned.push(utxo.clone())});
+        let pruned = index.prune_on_or_after(1);
         assert_eq!(1, index.first_block);
         assert_eq!(0, index.blocks.len());
         assert_eq!(3, pruned.len());

@@ -4,8 +4,9 @@
 use std::collections::BinaryHeap;
 use std::cmp::Ordering;
 use tracing::{debug, info};
-use std::sync::{Arc, Mutex};
-
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use async_trait::async_trait;
 use caryatid_sdk::MessageBounds;
 
 /// Pending queue entry
@@ -38,11 +39,13 @@ impl<MSG: MessageBounds> PartialEq for PendingEntry<MSG> {
     }
 }
 
+
 /// Message handler (once serialised)
+#[async_trait]
 pub trait SerialisedMessageHandler<MSG: MessageBounds>: Send + Sync {
 
     /// Handle a message
-    fn handle(&mut self, message: &MSG);
+    async fn handle(&mut self, message: &MSG);
 }
 
 /// Message serialiser
@@ -68,21 +71,21 @@ impl <MSG: MessageBounds> Serialiser<MSG> {
     }
 
     /// Process a message
-    fn process_message(&mut self, sequence: u64, message: &MSG) {
+    async fn process_message(&mut self, sequence: u64, message: &MSG) {
         // Pass to the handler
-        self.handler.lock().unwrap().handle(message);
+        self.handler.lock().await.handle(message).await;
 
         // Update sequence
         self.next_sequence = sequence + 1;
     }
 
     /// Handle a message
-    pub fn handle_message(&mut self, sequence: u64, message: &MSG) {
+    pub async fn handle_message(&mut self, sequence: u64, message: &MSG) {
 
         // Is it in order?
         if sequence == self.next_sequence {
 
-            self.process_message(sequence, &message);
+            self.process_message(sequence, &message).await;
 
             // See if any pending now work
             while let Some(next) = self.pending.peek() {
@@ -93,7 +96,7 @@ impl <MSG: MessageBounds> Serialiser<MSG> {
                     }
 
                     if let Some(next) = self.pending.pop() {
-                        self.process_message(next.sequence, &next.message);
+                        self.process_message(next.sequence, &next.message).await;
                     }
                 } else {
                     break;
@@ -143,29 +146,30 @@ mod tests {
         index: u64
     }
 
+    #[async_trait]
     impl SerialisedMessageHandler<TestMessage> for MockMessageHandler {
-        fn handle(&mut self, message: &TestMessage) {
+        async fn handle(&mut self, message: &TestMessage) {
             self.received.push(message.index);
         }
     }
 
     // Simple in-order test
-    #[test]
-    fn messages_in_order_pass_through() {
+    #[tokio::test]
+    async fn messages_in_order_pass_through() {
         let handler = Arc::new(Mutex::new(MockMessageHandler::new()));
         let handler2 = handler.clone();
         let mut serialiser = Serialiser::new(handler);
 
         let message0 = TestMessage { index: 0 };
-        serialiser.handle_message(0, &message0);
+        serialiser.handle_message(0, &message0).await;
 
         let message1 = TestMessage { index: 1 };
-        serialiser.handle_message(1, &message1);
+        serialiser.handle_message(1, &message1).await;
 
         let message2 = TestMessage { index: 2 };
-        serialiser.handle_message(2, &message2);
+        serialiser.handle_message(2, &message2).await;
 
-        let handler = handler2.lock().unwrap();
+        let handler = handler2.lock().await;
         assert_eq!(3, handler.received.len());
         assert_eq!(0, handler.received[0]);
         assert_eq!(1, handler.received[1]);
@@ -173,22 +177,22 @@ mod tests {
     }
 
     // Simple out-of-order test
-    #[test]
-    fn messages_out_of_order_are_reordered() {
+    #[tokio::test]
+    async fn messages_out_of_order_are_reordered() {
         let handler = Arc::new(Mutex::new(MockMessageHandler::new()));
         let handler2 = handler.clone();
         let mut serialiser = Serialiser::new(handler);
 
         let message1 = TestMessage { index: 1 };
-        serialiser.handle_message(1, &message1);
+        serialiser.handle_message(1, &message1).await;
 
         let message0 = TestMessage { index: 0 };
-        serialiser.handle_message(0, &message0);
+        serialiser.handle_message(0, &message0).await;
 
         let message2 = TestMessage { index: 2 };
-        serialiser.handle_message(2, &message2);
+        serialiser.handle_message(2, &message2).await;
 
-        let handler = handler2.lock().unwrap();
+        let handler = handler2.lock().await;
         assert_eq!(3, handler.received.len());
         assert_eq!(0, handler.received[0]);
         assert_eq!(1, handler.received[1]);
