@@ -20,7 +20,7 @@ publish-certificates-topic = "cardano.certificates"
 
 [module.utxo-state]
 # Set for on-disk, leave out for in-memory
-database-path = "immutable-utxos"
+# database-path = "immutable-utxos"
 address-delta-topic = "cardano.address.delta"
 
 [module.clock]
