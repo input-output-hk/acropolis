@@ -25,7 +25,7 @@ address-delta-topic = "cardano.address.delta"
 
 [module.spy]
 # Enable for message spying
-#topic = "cardano.certificates"
+#topic = "cardano.address.#"
 
 [startup]
 topic = "cardano.sequence.start"
@@ -37,7 +37,7 @@ exchange = "caryatid"
 
 [message-bus.internal]
 class = "in-memory"
-workers = 20
+workers = 50
 dispatch-queue-size = 1000
 worker-queue-size = 1000
 

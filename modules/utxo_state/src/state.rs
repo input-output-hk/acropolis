@@ -61,16 +61,18 @@ pub struct UTXOValue {
 }
 
 /// Address delta observer
+/// Note all methods are immutable to avoid locking in state - use channels if
+/// required
 #[async_trait]
 pub trait AddressDeltaObserver: Send + Sync + 'static {
     /// Observe a new block
-    async fn start_block(&mut self, block: &BlockInfo);
+    async fn start_block(&self, block: &BlockInfo);
 
     /// Observe a delta
-    async fn observe_delta(&mut self, address: &Address, delta: i64);
+    async fn observe_delta(&self, address: &Address, delta: i64);
 
     /// Finalise a block, with the given event sequence
-    async fn finalise_block(&mut self, block: &BlockInfo, sequence: u64);
+    async fn finalise_block(&self, block: &BlockInfo, sequence: u64);
 }
 
 /// Ledger state storage
@@ -91,7 +93,7 @@ pub struct State {
     volatile_spent: VolatileIndex,
 
     /// Address delta observer
-    address_delta_observer: Option<Arc<Mutex<dyn AddressDeltaObserver>>>,
+    address_delta_observer: Option<Arc<dyn AddressDeltaObserver>>,
 }
 
 impl State {
@@ -109,7 +111,7 @@ impl State {
 
     /// Register the delta observer
     pub fn register_address_delta_observer(&mut self, 
-            observer: Arc<Mutex<dyn AddressDeltaObserver>>) {
+            observer: Arc<dyn AddressDeltaObserver>) {
         self.address_delta_observer = Some(observer);
     }
 
@@ -139,8 +141,7 @@ impl State {
                     if let Some(utxo) = self.utxos.remove(&key) {
                         // Tell the observer to debit it
                         if let Some(observer) = self.address_delta_observer.as_mut() {
-                            observer.lock().await.observe_delta( 
-                                &utxo.address, -(utxo.value as i64)).await;
+                            observer.observe_delta(&utxo.address, -(utxo.value as i64)).await;
                         }                                 
                     }
                 };
@@ -155,8 +156,7 @@ impl State {
 
                         // Tell the observer to recredit it
                         if let Some(observer) = self.address_delta_observer.as_mut() {
-                            observer.lock().await.observe_delta(
-                                &utxo.address, utxo.value as i64).await;
+                            observer.observe_delta(&utxo.address, utxo.value as i64).await;
                         } 
                     }
                 };
@@ -199,8 +199,7 @@ impl State {
 
                 // Tell the observer it's spent
                 if let Some(observer) = self.address_delta_observer.as_mut() {
-                    observer.lock().await.observe_delta(
-                        &utxo.address, -(utxo.value as i64)).await;
+                    observer.observe_delta(&utxo.address, -(utxo.value as i64)).await;
                 }        
 
                 match block.status {
@@ -256,8 +255,7 @@ impl State {
 
         // Tell the observer
         if let Some(observer) = self.address_delta_observer.as_mut() {
-            observer.lock().await.observe_delta(
-                &output.address, output.value as i64).await;
+            observer.observe_delta(&output.address, output.value as i64).await;
         }        
     }
 
@@ -302,7 +300,7 @@ impl SerialisedMessageHandler<UTXODeltasMessage> for State {
 
         // Start the block for observer
         if let Some(observer) = self.address_delta_observer.as_mut() {
-            observer.lock().await.start_block(&deltas.block).await;
+            observer.start_block(&deltas.block).await;
         }
 
         // Observe block for stats and rollbacks
@@ -326,7 +324,7 @@ impl SerialisedMessageHandler<UTXODeltasMessage> for State {
 
         // End the block for observer
         if let Some(observer) = self.address_delta_observer.as_mut() {
-            observer.lock().await.finalise_block(&deltas.block, deltas.sequence).await;
+            observer.finalise_block(&deltas.block, deltas.sequence).await;
         }
     
     }
@@ -578,28 +576,29 @@ mod tests {
     }
 
     struct TestDeltaObserver {
-        balance: i64,
+        balance: Mutex<i64>,
     }
 
     impl TestDeltaObserver {
         fn new() -> Self {
-            Self { balance: 0 }
+            Self { balance: Mutex::new(0) }
         }
     }
 
     #[async_trait]
     impl AddressDeltaObserver for TestDeltaObserver {
-        async fn start_block(&mut self, _block: &BlockInfo) {
+        async fn start_block(&self, _block: &BlockInfo) {
             
         }
-        async fn observe_delta(&mut self, address: &Address, delta: i64) {
+        async fn observe_delta(&self, address: &Address, delta: i64) {
             assert!(matches!(&address, Address::Byron(ByronAddress{ payload }) 
                 if payload[0] == 99));
             assert!(delta == 42 || delta == -42);
 
-            self.balance = self.balance + delta;
+            let mut balance = self.balance.lock().await;
+            *balance += delta;
         }
-        async fn finalise_block(&mut self, _block: &BlockInfo, _next_sequence: u64) {
+        async fn finalise_block(&self, _block: &BlockInfo, _next_sequence: u64) {
             
         }
     }
@@ -607,7 +606,7 @@ mod tests {
     #[tokio::test]
     async fn observe_output_then_input_notifies_net_0_balance_change() {
         let mut state = State::new();
-        let observer = Arc::new(Mutex::new(TestDeltaObserver::new()));
+        let observer = Arc::new(TestDeltaObserver::new());
         state.register_address_delta_observer(observer.clone());
 
         let output = TxOutput {
@@ -627,7 +626,7 @@ mod tests {
         state.observe_output(&output, &block1).await;
         assert_eq!(1, state.utxos.len());
         assert_eq!(1, state.count_valid_utxos());
-        assert_eq!(42, observer.lock().await.balance);
+        assert_eq!(42, *observer.balance.lock().await);
 
         let input = TxInput {
             tx_hash: output.tx_hash,
@@ -644,13 +643,13 @@ mod tests {
         state.observe_input(&input, &block2).await;
         assert_eq!(0, state.utxos.len());
         assert_eq!(0, state.count_valid_utxos());
-        assert_eq!(0, observer.lock().await.balance);
+        assert_eq!(0, *observer.balance.lock().await);
     }
 
     #[tokio::test]
     async fn observe_rollback_notifies_balance_debit_on_future_created_utxos() {
         let mut state = State::new();
-        let observer = Arc::new(Mutex::new(TestDeltaObserver::new()));
+        let observer = Arc::new(TestDeltaObserver::new());
         state.register_address_delta_observer(observer.clone());
 
         let output = TxOutput {
@@ -671,7 +670,7 @@ mod tests {
         state.observe_output(&output, &block10).await;
         assert_eq!(1, state.utxos.len());
         assert_eq!(1, state.count_valid_utxos());
-        assert_eq!(42, observer.lock().await.balance);
+        assert_eq!(42, *observer.balance.lock().await);
 
         let block9 = BlockInfo {
             status: BlockStatus::RolledBack,
@@ -684,13 +683,13 @@ mod tests {
 
         assert_eq!(0, state.utxos.len());
         assert_eq!(0, state.count_valid_utxos());
-        assert_eq!(0, observer.lock().await.balance);
+        assert_eq!(0, *observer.balance.lock().await);
     }
 
     #[tokio::test]
     async fn observe_rollback_notifies_balance_credit_on_future_spent_utxos() {
         let mut state = State::new();
-        let observer = Arc::new(Mutex::new(TestDeltaObserver::new()));
+        let observer = Arc::new(TestDeltaObserver::new());
         state.register_address_delta_observer(observer.clone());
 
         // Create the UTXO in block 10
@@ -712,7 +711,7 @@ mod tests {
         state.observe_output(&output, &block10).await;
         assert_eq!(1, state.utxos.len());
         assert_eq!(1, state.count_valid_utxos());
-        assert_eq!(42, observer.lock().await.balance);
+        assert_eq!(42, *observer.balance.lock().await);
 
         // Spend it in block 11
         let input = TxInput {
@@ -731,7 +730,7 @@ mod tests {
         state.observe_input(&input, &block11).await;
         assert_eq!(1, state.utxos.len());
         assert_eq!(0, state.count_valid_utxos());
-        assert_eq!(0, observer.lock().await.balance);
+        assert_eq!(0, *observer.balance.lock().await);
 
         // Roll back to 11
         let block11_2= BlockInfo {
@@ -746,7 +745,7 @@ mod tests {
         // Should be reinstated
         assert_eq!(1, state.utxos.len());
         assert_eq!(1, state.count_valid_utxos());
-        assert_eq!(42, observer.lock().await.balance);
+        assert_eq!(42, *observer.balance.lock().await);
     }
 
 }

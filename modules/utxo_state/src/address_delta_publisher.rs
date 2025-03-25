@@ -9,6 +9,7 @@ use acropolis_common::{
      }, 
 };
 use std::sync::Arc;
+use tokio::sync::Mutex;
 use async_trait::async_trait;
 use tracing::error;
 
@@ -24,7 +25,7 @@ pub struct AddressDeltaPublisher {
     topic: Option<String>,
 
     /// Accumulating deltas for the current block
-    deltas: Vec<AddressDelta>,
+    deltas: Mutex<Vec<AddressDelta>>,
 }
 
 impl AddressDeltaPublisher {
@@ -34,7 +35,7 @@ impl AddressDeltaPublisher {
         Self { 
             context, 
             topic: config.get_string("address-delta-topic").ok(),
-            deltas: Vec::new(),
+            deltas: Mutex::new(Vec::new()),
         }
     }
 }
@@ -43,29 +44,30 @@ impl AddressDeltaPublisher {
 impl AddressDeltaObserver for AddressDeltaPublisher {
 
     /// Observe a new block
-    async fn start_block(&mut self, _block: &BlockInfo) {
+    async fn start_block(&self, _block: &BlockInfo) {
         // Clear the deltas
-        self.deltas.clear();
+        self.deltas.lock().await.clear();
     }
 
     /// Observe an address delta and publish messages
-    async fn observe_delta(&mut self, address: &Address, delta: i64) {
+    async fn observe_delta(&self, address: &Address, delta: i64) {
         // Accumulate the delta
-        self.deltas.push(AddressDelta {
+        self.deltas.lock().await.push(AddressDelta {
             address: address.clone(),
             delta,
         });
     }
 
-    async fn finalise_block(&mut self, block: &BlockInfo, sequence: u64) {
+    async fn finalise_block(&self, block: &BlockInfo, sequence: u64) {
 
         // Send out the accumulated deltas
         if let Some(topic) = &self.topic {
 
+            let mut deltas = self.deltas.lock().await;
             let message = AddressDeltasMessage {
                 sequence,
                 block: block.clone(),
-                deltas: std::mem::take(&mut self.deltas),
+                deltas: std::mem::take(&mut *deltas),
             };
 
             let context = self.context.clone();
