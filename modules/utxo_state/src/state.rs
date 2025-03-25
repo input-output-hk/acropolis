@@ -255,7 +255,7 @@ impl State {
         }
 
         // Tell the observer
-        if let Some(observer) = self.address_delta_observer.as_mut() {
+        if let Some(observer) = self.address_delta_observer.as_ref() {
             observer.observe_delta(&output.address, output.value as i64).await;
         }        
     }
@@ -270,17 +270,25 @@ impl State {
             // Find all UTXOs in the volatile index spent before this boundary
             // and remove from both maps
             let spent_utxos = self.volatile_spent.prune_before(boundary);
-            for key in spent_utxos { 
-                self.volatile_utxos.remove(&key);
-                self.immutable_utxos.remove(&key);
-            };
+            if !spent_utxos.is_empty() {
+                info!("Removing {} immutably spent UTXOs", spent_utxos.len());
+                for key in spent_utxos { 
+                    // Remove from volatile, and only if not there, from immutable
+                    if self.volatile_utxos.remove(&key).is_none() {
+                        self.immutable_utxos.remove(&key);
+                    }
+                }
+            }   
 
             // Prune the created index too, and transfer the UTXOs to immutable
             let created_utxos = self.volatile_created.prune_before(boundary);
-            for key in created_utxos {
-                let value = self.volatile_utxos.remove(&key);
-                if let Some(value) = value {
-                    self.immutable_utxos.insert(key, value);
+            if !created_utxos.is_empty() {
+                info!("Moving {} volatile UTXOs into immutable", created_utxos.len());
+                for key in created_utxos {
+                    let value = self.volatile_utxos.remove(&key);
+                    if let Some(value) = value {
+                        self.immutable_utxos.insert(key, value);
+                    }
                 }
             }
 
