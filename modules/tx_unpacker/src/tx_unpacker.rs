@@ -118,8 +118,9 @@ impl TxUnpacker
                                     operator: pool_key_hash.to_vec()
                                 })),
                     alonzo::Certificate::PoolRegistration { 
+                        // TODO relays, pool_metadata
                         operator, vrf_keyhash, pledge, cost, margin, 
-                        reward_account, pool_owners, relays, pool_metadata } =>
+                        reward_account, pool_owners, relays: _, pool_metadata: _ } =>
                                 Ok(TxCertificate::PoolRegistration(PoolRegistration { 
                                     operator: operator.to_vec(), 
                                     vrf_key_hash: vrf_keyhash.to_vec(),
@@ -184,8 +185,9 @@ impl TxUnpacker
                                     operator: pool_key_hash.to_vec()
                                 })),
                     conway::Certificate::PoolRegistration { 
+                        // TODO relays, pool_metadata
                         operator, vrf_keyhash, pledge, cost, margin, 
-                        reward_account, pool_owners, relays, pool_metadata } =>
+                        reward_account, pool_owners, relays: _, pool_metadata: _ } =>
                                 Ok(TxCertificate::PoolRegistration(PoolRegistration { 
                                     operator: operator.to_vec(), 
                                     vrf_key_hash: vrf_keyhash.to_vec(),
@@ -330,7 +332,10 @@ impl TxUnpacker
                                                 Ok(tx_cert) => {
                                                     certificates_message.certificates.push(tx_cert);
                                                 },
-                                                Err(e) => { error!("{e}"); }
+                                                Err(_e) => { 
+                                                    // TODO error unexpected
+                                                    //error!("{e}"); 
+                                                }
                                             }
                                         }
                                     }
