@@ -22,6 +22,11 @@ impl VolatileIndex {
         }
     }
 
+    /// Get the number of entries in the index
+    pub fn len(&self) -> usize {
+        return self.blocks.iter().map(|v| v.len()).sum();
+    }
+
     /// Add a new block entry
     pub fn add_block(&mut self, number: u64) {
         // Capture the first volatile block we get
