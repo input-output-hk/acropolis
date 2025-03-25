@@ -14,13 +14,15 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 mod state;
-use state::State;
+use state::{State, ImmutableUTXOStore};
 
 mod volatile_index;
 mod address_delta_publisher;
 use address_delta_publisher::AddressDeltaPublisher;
 mod in_memory_immutable_utxo_store;
 use in_memory_immutable_utxo_store::InMemoryImmutableUTXOStore;
+mod sled_immutable_utxo_store;
+use sled_immutable_utxo_store::SledImmutableUTXOStore;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.utxo.deltas";
 
@@ -39,10 +41,20 @@ impl UTXOState
 
         // Get configuration
         let subscribe_topic = config.get_string("subscribe-topic")
-        .unwrap_or(DEFAULT_SUBSCRIBE_TOPIC.to_string());
+            .unwrap_or(DEFAULT_SUBSCRIBE_TOPIC.to_string());
         info!("Creating subscriber on '{subscribe_topic}'");
 
-        let store = Arc::new(InMemoryImmutableUTXOStore::new());
+        // Create store - Sled on disk if database-path is set, in-memory otherwise
+        let store: Arc<dyn ImmutableUTXOStore> = match config.get_string("database-path") {
+            Ok(path) => {
+                info!("Storing immutable UTXOs on disk ({path})");
+                Arc::new(SledImmutableUTXOStore::new(path)?)
+            }
+            _ => {
+                info!("Storing immutable UTXOs in memory");
+                Arc::new(InMemoryImmutableUTXOStore::new())
+            }
+        };
         let mut state = State::new(store);
 
         // Create address delta publisher and pass it observations
@@ -61,7 +73,10 @@ impl UTXOState
                 match message.as_ref() {
                     Message::UTXODeltas(deltas_msg) => {
                         let mut serialiser = serialiser.lock().await;
-                        serialiser.handle_message(deltas_msg.sequence, deltas_msg).await;
+                        serialiser.handle_message(deltas_msg.sequence, deltas_msg)
+                            .await
+                            .inspect_err(|e| error!("Messaging handling error: {e}"))
+                            .ok();
                     }
 
                     _ => error!("Unexpected message type: {message:?}")
@@ -77,7 +92,10 @@ impl UTXOState
             async move {
                 if let Message::Clock(message) = message.as_ref() {
                     if (message.number % 60) == 0 {
-                        state.lock().await.tick().await;
+                        state.lock().await.tick()
+                            .await
+                            .inspect_err(|e| error!("Tick error: {e}"))
+                            .ok();
                         serialiser.lock().await.tick();
                     }
                 }

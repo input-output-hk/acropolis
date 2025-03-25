@@ -11,7 +11,7 @@ use tracing::{debug, info, error};
 use hex::encode;
 use std::sync::Arc;
 use async_trait::async_trait;
-
+use anyhow::Result;
 use crate::volatile_index::VolatileIndex;
 
 const SECURITY_PARAMETER_K: u64 = 2160;
@@ -31,6 +31,14 @@ impl UTXOKey {
         hash[..len].copy_from_slice(&hash_slice[..len]); // Copy input hash
         Self { hash, index }
     }
+
+    /// Serialise to bytes for KV store
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut key = Vec::with_capacity(40);
+        key.extend_from_slice(&self.hash);
+        key.extend_from_slice(&self.index.to_be_bytes());
+        key
+    }
 }
 
 impl PartialEq for UTXOKey {
@@ -47,7 +55,7 @@ impl Hash for UTXOKey {
 }
 
 /// Value stored in UTXO
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct UTXOValue {
     /// Address in binary
     pub address: Address,
@@ -76,16 +84,16 @@ pub trait AddressDeltaObserver: Send + Sync {
 #[async_trait]
 pub trait ImmutableUTXOStore: Send + Sync {
     /// Add a UTXO
-    async fn add_utxo(&self, key: UTXOKey, value: UTXOValue);
+    async fn add_utxo(&self, key: UTXOKey, value: UTXOValue) -> Result<()>;
 
     /// Delete a UTXO
-    async fn delete_utxo(&self, key: &UTXOKey);
+    async fn delete_utxo(&self, key: &UTXOKey) -> Result<()>;
 
     /// Lookup a UTXO
-    async fn lookup_utxo(&self, key: &UTXOKey) -> Option<UTXOValue>;
+    async fn lookup_utxo(&self, key: &UTXOKey) -> Result<Option<UTXOValue>>;
 
     /// Get the number of UTXOs in the store
-    async fn len(&self) -> usize;
+    async fn len(&self) -> Result<usize>;
 }
 
 /// Ledger state storage
@@ -133,10 +141,10 @@ impl State {
     }
 
     /// Look up a UTXO
-    pub async fn lookup_utxo(&self, key: &UTXOKey) -> Option<UTXOValue> {
+    pub async fn lookup_utxo(&self, key: &UTXOKey) -> Result<Option<UTXOValue>> {
         match self.volatile_utxos.get(key) {
-            Some(key) => Some(key.clone()),
-            None => self.immutable_utxos.lookup_utxo(key).await
+            Some(key) => Ok(Some(key.clone())),
+            None => Ok(self.immutable_utxos.lookup_utxo(key).await?)
         }
     }
 
@@ -144,11 +152,11 @@ impl State {
     /// but no spent_at
     pub async fn count_valid_utxos(&self) -> usize {
         return self.volatile_utxos.len() - self.volatile_spent.len()
-             + self.immutable_utxos.len().await;
+             + self.immutable_utxos.len().await.unwrap_or_default();
     }
 
     /// Observe a block for statistics and handle rollbacks
-    pub async fn observe_block(&mut self, block: &BlockInfo) {
+    pub async fn observe_block(&mut self, block: &BlockInfo) -> Result<()> {
 
         match block.status {
             BlockStatus::RolledBack => {
@@ -196,10 +204,12 @@ impl State {
 
             _ => {}
         }
+
+        Ok(())
     }
 
     /// Observe an input UTXO spend
-    pub async fn observe_input(&mut self, input: &TxInput, block: &BlockInfo) {
+    pub async fn observe_input(&mut self, input: &TxInput, block: &BlockInfo) -> Result<()> {
         let key = UTXOKey::new(&input.tx_hash, input.index);
         
         if tracing::enabled!(tracing::Level::DEBUG) {
@@ -207,7 +217,7 @@ impl State {
         }
 
         // UTXO exists?
-        match self.lookup_utxo(&key).await {
+        match self.lookup_utxo(&key).await? {
             Some(utxo) => {
                 if tracing::enabled!(tracing::Level::DEBUG) {
                     debug!("        - spent {} from {:?}", utxo.value, utxo.address);
@@ -225,7 +235,7 @@ impl State {
                     }
                     BlockStatus::Bootstrap | BlockStatus::Immutable => {
                         // Immutable - we can delete it immediately
-                        self.immutable_utxos.delete_utxo(&key).await;
+                        self.immutable_utxos.delete_utxo(&key).await?;
                     }
                 }
             }
@@ -234,10 +244,13 @@ impl State {
                     encode(&key.hash), key.index, block.number);
             }
         }
+
+        Ok(())
     } 
 
     /// Observe an output UXTO creation
-    pub async fn observe_output(&mut self,  output: &TxOutput, block: &BlockInfo) {
+    pub async fn observe_output(&mut self,  output: &TxOutput, block: &BlockInfo)
+        -> Result<()> {
 
         if tracing::enabled!(tracing::Level::DEBUG) {
             debug!("UTXO >> {}:{}", encode(&output.tx_hash), output.index);
@@ -263,7 +276,7 @@ impl State {
                 }
             }
             BlockStatus::Bootstrap | BlockStatus::Immutable => {
-                self.immutable_utxos.add_utxo(key, value).await;
+                self.immutable_utxos.add_utxo(key, value).await?;
                 // Note we don't check for duplicates in immutable - store
                 // may double check this anyway
             }
@@ -272,11 +285,13 @@ impl State {
         // Tell the observer
         if let Some(observer) = self.address_delta_observer.as_ref() {
             observer.observe_delta(&output.address, output.value as i64).await;
-        }        
+        }
+
+        Ok(())       
     }
 
     /// Background prune
-    async fn prune(&mut self) {
+    async fn prune(&mut self) -> Result<()> {
         // Remove all volatile UTXOs that have now become immutably spent
         // and transfer unspent ones to immutable
         if self.last_number >= SECURITY_PARAMETER_K {
@@ -290,7 +305,7 @@ impl State {
                 for key in spent_utxos { 
                     // Remove from volatile, and only if not there, from immutable
                     if self.volatile_utxos.remove(&key).is_none() {
-                        self.immutable_utxos.delete_utxo(&key).await;
+                        self.immutable_utxos.delete_utxo(&key).await?;
                     }
                 }
             }   
@@ -302,18 +317,20 @@ impl State {
                 for key in created_utxos {
                     let value = self.volatile_utxos.remove(&key);
                     if let Some(value) = value {
-                        self.immutable_utxos.add_utxo(key, value).await;
+                        self.immutable_utxos.add_utxo(key, value).await?;
                     }
                 }
             }
 
             self.volatile_utxos.shrink_to_fit();
         }
+
+        Ok(())
     }
 
     /// Log statistics
     async fn log_stats(&self) {
-        let n_immutable = self.immutable_utxos.len().await;
+        let n_immutable = self.immutable_utxos.len().await.unwrap_or_default();
         let n_valid = self.count_valid_utxos().await;
         info!(slot = self.last_slot,
             number = self.last_number,
@@ -324,9 +341,10 @@ impl State {
     }
 
     /// Tick for pruning and logging
-    pub async fn tick(&mut self) {
-        self.prune().await;
+    pub async fn tick(&mut self) -> Result<()> {
+        self.prune().await?;
         self.log_stats().await;
+        Ok(())
     }
 }
 
@@ -334,7 +352,7 @@ impl State {
 impl SerialisedMessageHandler<UTXODeltasMessage> for State {
 
     /// Handle a message
-    async fn handle(&mut self, deltas: &UTXODeltasMessage) {
+    async fn handle(&mut self, deltas: &UTXODeltasMessage) -> Result<()> {
 
         // Start the block for observer
         if let Some(observer) = self.address_delta_observer.as_mut() {
@@ -342,18 +360,18 @@ impl SerialisedMessageHandler<UTXODeltasMessage> for State {
         }
 
         // Observe block for stats and rollbacks
-        self.observe_block(&deltas.block).await;
+        self.observe_block(&deltas.block).await?;
 
         // Process the deltas
         for delta in &deltas.deltas {  // UTXODelta
 
            match delta {
                UTXODelta::Input(tx_input) => {
-                   self.observe_input(&tx_input, &deltas.block).await;
+                   self.observe_input(&tx_input, &deltas.block).await?;
                }, 
 
                UTXODelta::Output(tx_output) => {
-                   self.observe_output(&tx_output, &deltas.block).await;
+                   self.observe_output(&tx_output, &deltas.block).await?;
                },
 
                _ => {}
@@ -365,6 +383,7 @@ impl SerialisedMessageHandler<UTXODeltasMessage> for State {
             observer.finalise_block(&deltas.block, deltas.sequence).await;
         }
     
+        Ok(())
     }
 }
 
@@ -395,7 +414,7 @@ mod tests {
         assert_eq!(0, state.last_number);
         assert_eq!(0, state.count_valid_utxos().await);
         assert_eq!(0, state.volatile_utxos.len());
-        assert_eq!(0, state.immutable_utxos.len().await);
+        assert_eq!(0, state.immutable_utxos.len().await.unwrap());
     }
 
     #[tokio::test]
@@ -415,12 +434,12 @@ mod tests {
             hash: vec!(),
         };
 
-        state.observe_output(&output, &block).await;
-        assert_eq!(1, state.immutable_utxos.len().await);
+        state.observe_output(&output, &block).await.unwrap();
+        assert_eq!(1, state.immutable_utxos.len().await.unwrap());
         assert_eq!(1, state.count_valid_utxos().await);
 
         let key = UTXOKey::new(&output.tx_hash, output.index);
-        match state.lookup_utxo(&key).await {
+        match state.lookup_utxo(&key).await.unwrap() {
             Some(value) => {
                 assert!(matches!(&value.address, Address::Byron(ByronAddress{ payload }) 
                     if payload[0] == 99));
@@ -448,8 +467,8 @@ mod tests {
             hash: vec!(),
         };
 
-        state.observe_output(&output, &block1).await;
-        assert_eq!(1, state.immutable_utxos.len().await);
+        state.observe_output(&output, &block1).await.unwrap();
+        assert_eq!(1, state.immutable_utxos.len().await.unwrap());
         assert_eq!(1, state.count_valid_utxos().await);
 
         let input = TxInput {
@@ -465,8 +484,8 @@ mod tests {
             hash: vec!(),
         };
 
-        state.observe_input(&input, &block2).await;
-        assert_eq!(0, state.immutable_utxos.len().await);
+        state.observe_input(&input, &block2).await.unwrap();
+        assert_eq!(0, state.immutable_utxos.len().await.unwrap());
         assert_eq!(0, state.count_valid_utxos().await);
     }
 
@@ -487,8 +506,8 @@ mod tests {
             hash: vec!(),
         };
 
-        state.observe_block(&block10).await;
-        state.observe_output(&output, &block10).await;
+        state.observe_block(&block10).await.unwrap();
+        state.observe_output(&output, &block10).await.unwrap();
         assert_eq!(1, state.volatile_utxos.len());
         assert_eq!(1, state.count_valid_utxos().await);
 
@@ -499,7 +518,7 @@ mod tests {
             hash: vec!(),
         };
 
-        state.observe_block(&block9).await;
+        state.observe_block(&block9).await.unwrap();
 
         assert_eq!(0, state.volatile_utxos.len());
         assert_eq!(0, state.count_valid_utxos().await);
@@ -524,8 +543,8 @@ mod tests {
             hash: vec!(),
         };
 
-        state.observe_block(&block10).await;
-        state.observe_output(&output, &block10).await;
+        state.observe_block(&block10).await.unwrap();
+        state.observe_output(&output, &block10).await.unwrap();
         assert_eq!(1, state.volatile_utxos.len());
         assert_eq!(1, state.count_valid_utxos().await);
 
@@ -542,8 +561,8 @@ mod tests {
             hash: vec!(),
         };
 
-        state.observe_block(&block11).await;
-        state.observe_input(&input, &block11).await;
+        state.observe_block(&block11).await.unwrap();
+        state.observe_input(&input, &block11).await.unwrap();
         assert_eq!(1, state.volatile_utxos.len());
         assert_eq!(0, state.count_valid_utxos().await);
 
@@ -555,7 +574,7 @@ mod tests {
             hash: vec!(),
         };
 
-        state.observe_block(&block11_2).await;
+        state.observe_block(&block11_2).await.unwrap();
 
         // Should be reinstated
         assert_eq!(1, state.volatile_utxos.len());
@@ -579,16 +598,16 @@ mod tests {
             hash: vec!(),
         };
 
-        state.observe_block(&block1).await;
-        state.observe_output(&output, &block1).await;
+        state.observe_block(&block1).await.unwrap();
+        state.observe_output(&output, &block1).await.unwrap();
         assert_eq!(1, state.volatile_utxos.len());
-        assert_eq!(0, state.immutable_utxos.len().await);
+        assert_eq!(0, state.immutable_utxos.len().await.unwrap());
         assert_eq!(1, state.count_valid_utxos().await);
 
         // Prune shouldn't do anything yet
-        state.prune().await;
+        state.prune().await.unwrap();
         assert_eq!(1, state.volatile_utxos.len());
-        assert_eq!(0, state.immutable_utxos.len().await);
+        assert_eq!(0, state.immutable_utxos.len().await.unwrap());
 
         // Observe a block much later
         let block = BlockInfo {
@@ -598,12 +617,12 @@ mod tests {
             hash: vec!(),
         };
 
-        state.observe_block(&block).await;
+        state.observe_block(&block).await.unwrap();
         assert_eq!(5483, state.last_number);
 
-        state.prune().await;
+        state.prune().await.unwrap();
         assert_eq!(0, state.volatile_utxos.len());
-        assert_eq!(1, state.immutable_utxos.len().await);
+        assert_eq!(1, state.immutable_utxos.len().await.unwrap());
     }
 
     #[tokio::test]
@@ -623,8 +642,8 @@ mod tests {
             hash: vec!(),
         };
 
-        state.observe_block(&block1).await;
-        state.observe_output(&output, &block1).await;
+        state.observe_block(&block1).await.unwrap();
+        state.observe_output(&output, &block1).await.unwrap();
         assert_eq!(1, state.volatile_utxos.len());
         assert_eq!(1, state.count_valid_utxos().await);
 
@@ -640,13 +659,13 @@ mod tests {
             hash: vec!(),
         };
 
-        state.observe_block(&block2).await;
-        state.observe_input(&input, &block2).await;
+        state.observe_block(&block2).await.unwrap();
+        state.observe_input(&input, &block2).await.unwrap();
         assert_eq!(1, state.volatile_utxos.len());
         assert_eq!(0, state.count_valid_utxos().await);
 
         // Prune shouldn't do anything yet
-        state.prune().await;
+        state.prune().await.unwrap();
         assert_eq!(1, state.volatile_utxos.len());
 
         // Observe a block much later
@@ -657,12 +676,12 @@ mod tests {
             hash: vec!(),
         };
 
-        state.observe_block(&block).await;
+        state.observe_block(&block).await.unwrap();
         assert_eq!(5483, state.last_number);
 
-        state.prune().await;
+        state.prune().await.unwrap();
         assert_eq!(0, state.volatile_utxos.len());
-        assert_eq!(0, state.immutable_utxos.len().await);
+        assert_eq!(0, state.immutable_utxos.len().await.unwrap());
     }
 
     struct TestDeltaObserver {
@@ -713,8 +732,8 @@ mod tests {
             hash: vec!(),
         };
 
-        state.observe_output(&output, &block1).await;
-        assert_eq!(1, state.immutable_utxos.len().await);
+        state.observe_output(&output, &block1).await.unwrap();
+        assert_eq!(1, state.immutable_utxos.len().await.unwrap());
         assert_eq!(1, state.count_valid_utxos().await);
         assert_eq!(42, *observer.balance.lock().await);
 
@@ -730,8 +749,8 @@ mod tests {
             hash: vec!(),
         };
 
-        state.observe_input(&input, &block2).await;
-        assert_eq!(0, state.immutable_utxos.len().await);
+        state.observe_input(&input, &block2).await.unwrap();
+        assert_eq!(0, state.immutable_utxos.len().await.unwrap());
         assert_eq!(0, state.count_valid_utxos().await);
         assert_eq!(0, *observer.balance.lock().await);
     }
@@ -756,8 +775,8 @@ mod tests {
             hash: vec!(),
         };
 
-        state.observe_block(&block10).await;
-        state.observe_output(&output, &block10).await;
+        state.observe_block(&block10).await.unwrap();
+        state.observe_output(&output, &block10).await.unwrap();
         assert_eq!(1, state.volatile_utxos.len());
         assert_eq!(1, state.count_valid_utxos().await);
         assert_eq!(42, *observer.balance.lock().await);
@@ -769,7 +788,7 @@ mod tests {
             hash: vec!(),
         };
 
-        state.observe_block(&block9).await;
+        state.observe_block(&block9).await.unwrap();
 
         assert_eq!(0, state.volatile_utxos.len());
         assert_eq!(0, state.count_valid_utxos().await);
@@ -797,8 +816,8 @@ mod tests {
             hash: vec!(),
         };
 
-        state.observe_block(&block10).await;
-        state.observe_output(&output, &block10).await;
+        state.observe_block(&block10).await.unwrap();
+        state.observe_output(&output, &block10).await.unwrap();
         assert_eq!(1, state.volatile_utxos.len());
         assert_eq!(1, state.count_valid_utxos().await);
         assert_eq!(42, *observer.balance.lock().await);
@@ -816,8 +835,8 @@ mod tests {
             hash: vec!(),
         };
 
-        state.observe_block(&block11).await;
-        state.observe_input(&input, &block11).await;
+        state.observe_block(&block11).await.unwrap();
+        state.observe_input(&input, &block11).await.unwrap();
         assert_eq!(1, state.volatile_utxos.len());
         assert_eq!(0, state.count_valid_utxos().await);
         assert_eq!(0, *observer.balance.lock().await);
@@ -830,7 +849,7 @@ mod tests {
             hash: vec!(),
         };
 
-        state.observe_block(&block11_2).await;
+        state.observe_block(&block11_2).await.unwrap();
 
         // Should be reinstated
         assert_eq!(1, state.volatile_utxos.len());
