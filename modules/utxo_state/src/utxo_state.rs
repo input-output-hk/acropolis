@@ -19,6 +19,8 @@ use state::State;
 mod volatile_index;
 mod address_delta_publisher;
 use address_delta_publisher::AddressDeltaPublisher;
+mod in_memory_immutable_utxo_store;
+use in_memory_immutable_utxo_store::InMemoryImmutableUTXOStore;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.utxo.deltas";
 
@@ -40,7 +42,8 @@ impl UTXOState
         .unwrap_or(DEFAULT_SUBSCRIBE_TOPIC.to_string());
         info!("Creating subscriber on '{subscribe_topic}'");
 
-        let mut state = State::new();
+        let store = Arc::new(InMemoryImmutableUTXOStore::new());
+        let mut state = State::new(store);
 
         // Create address delta publisher and pass it observations
         let publisher = AddressDeltaPublisher::new(context.clone(), config);
