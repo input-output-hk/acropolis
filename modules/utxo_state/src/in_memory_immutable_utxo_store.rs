@@ -3,6 +3,7 @@
 use crate::state::{UTXOKey, UTXOValue, ImmutableUTXOStore};
 use dashmap::DashMap;
 use async_trait::async_trait;
+use anyhow::Result;
 
 pub struct InMemoryImmutableUTXOStore {
     /// Map of UTXOs
@@ -21,23 +22,25 @@ impl InMemoryImmutableUTXOStore {
 impl ImmutableUTXOStore for InMemoryImmutableUTXOStore {
 
     /// Add a UTXO
-    async fn add_utxo(&self, key: UTXOKey, value: UTXOValue) {
+    async fn add_utxo(&self, key: UTXOKey, value: UTXOValue) -> Result<()> {
         self.utxos.insert(key, value);
+        Ok(())
     }
 
     /// Delete a UTXO
-    async fn delete_utxo(&self, key: &UTXOKey) {
+    async fn delete_utxo(&self, key: &UTXOKey) -> Result<()> {
         self.utxos.remove(key);
+        Ok(())
     }
 
     /// Lookup a UTXO
-    async fn lookup_utxo(&self, key: &UTXOKey) -> Option<UTXOValue> {
+    async fn lookup_utxo(&self, key: &UTXOKey) -> Result<Option<UTXOValue>> {
         // Essential to clone here because ref is not async safe
-        return self.utxos.get(key).map(|value| value.clone());
+        Ok(self.utxos.get(key).map(|value| value.clone()))
     }
 
     /// Get the number of UTXOs in the store
-    async fn len(&self) -> usize {
-        return self.utxos.len();
+    async fn len(&self) -> Result<usize> {
+        Ok(self.utxos.len())
     }
 }

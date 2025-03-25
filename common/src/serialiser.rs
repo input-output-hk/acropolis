@@ -8,6 +8,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use async_trait::async_trait;
 use caryatid_sdk::MessageBounds;
+use anyhow::Result;
 
 /// Pending queue entry
 struct PendingEntry<MSG: MessageBounds> {
@@ -45,7 +46,7 @@ impl<MSG: MessageBounds> PartialEq for PendingEntry<MSG> {
 pub trait SerialisedMessageHandler<MSG: MessageBounds>: Send + Sync {
 
     /// Handle a message
-    async fn handle(&mut self, message: &MSG);
+    async fn handle(&mut self, message: &MSG) -> Result<()>;
 }
 
 /// Message serialiser
@@ -76,21 +77,23 @@ impl <'a, MSG: MessageBounds> Serialiser<'a, MSG> {
     }
 
     /// Process a message
-    async fn process_message(&mut self, sequence: u64, message: &MSG) {
+    async fn process_message(&mut self, sequence: u64, message: &MSG) -> Result<()> {
         // Pass to the handler
-        self.handler.lock().await.handle(message).await;
+        self.handler.lock().await.handle(message).await?;
 
         // Update sequence
         self.next_sequence = sequence + 1;
+
+        Ok(())
     }
 
     /// Handle a message
-    pub async fn handle_message(&mut self, sequence: u64, message: &MSG) {
+    pub async fn handle_message(&mut self, sequence: u64, message: &MSG) -> Result<()> {
 
         // Is it in order?
         if sequence == self.next_sequence {
 
-            self.process_message(sequence, &message).await;
+            self.process_message(sequence, &message).await?;
 
             // See if any pending now work
             while let Some(next) = self.pending.peek() {
@@ -101,7 +104,7 @@ impl <'a, MSG: MessageBounds> Serialiser<'a, MSG> {
                     }
 
                     if let Some(next) = self.pending.pop() {
-                        self.process_message(next.sequence, &next.message).await;
+                        self.process_message(next.sequence, &next.message).await?;
                     }
                 } else {
                     break;
@@ -117,6 +120,8 @@ impl <'a, MSG: MessageBounds> Serialiser<'a, MSG> {
                 message: message.clone(),
             });
         }
+
+        Ok(())
     }
 
     /// Periodic tick for background logging
@@ -153,8 +158,9 @@ mod tests {
 
     #[async_trait]
     impl SerialisedMessageHandler<TestMessage> for MockMessageHandler {
-        async fn handle(&mut self, message: &TestMessage) {
+        async fn handle(&mut self, message: &TestMessage) -> Result<()> {
             self.received.push(message.index);
+            Ok(())
         }
     }
 
@@ -166,13 +172,13 @@ mod tests {
         let mut serialiser = Serialiser::new(handler, "test");
 
         let message0 = TestMessage { index: 0 };
-        serialiser.handle_message(0, &message0).await;
+        serialiser.handle_message(0, &message0).await.unwrap();
 
         let message1 = TestMessage { index: 1 };
-        serialiser.handle_message(1, &message1).await;
+        serialiser.handle_message(1, &message1).await.unwrap();
 
         let message2 = TestMessage { index: 2 };
-        serialiser.handle_message(2, &message2).await;
+        serialiser.handle_message(2, &message2).await.unwrap();
 
         let handler = handler2.lock().await;
         assert_eq!(3, handler.received.len());
@@ -189,13 +195,13 @@ mod tests {
         let mut serialiser = Serialiser::new(handler, "test");
 
         let message1 = TestMessage { index: 1 };
-        serialiser.handle_message(1, &message1).await;
+        serialiser.handle_message(1, &message1).await.unwrap();
 
         let message0 = TestMessage { index: 0 };
-        serialiser.handle_message(0, &message0).await;
+        serialiser.handle_message(0, &message0).await.unwrap();
 
         let message2 = TestMessage { index: 2 };
-        serialiser.handle_message(2, &message2).await;
+        serialiser.handle_message(2, &message2).await.unwrap();
 
         let handler = handler2.lock().await;
         assert_eq!(3, handler.received.len());
