@@ -6,7 +6,12 @@
 use crate::types::*;
 
 // Caryatid core messages
-use caryatid_sdk::messages::ClockTickMessage;
+use caryatid_sdk::messages::{
+    ClockTickMessage,
+    RESTRequest,
+    RESTResponse,
+    GetRESTResponse
+};
 
 /// Block header message
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
@@ -115,6 +120,8 @@ pub enum Message {
 
     // Caryatid standard messages
     Clock(ClockTickMessage),                   // Clock tick
+    RESTRequest(RESTRequest),                  // REST request
+    RESTResponse(RESTResponse),                // REST response
 
     // Cardano messages
     BlockHeader(BlockHeaderMessage),           // Block header available
@@ -137,3 +144,28 @@ impl From<ClockTickMessage> for Message {
         Message::Clock(msg)
     }
 }
+
+impl From<RESTRequest> for Message {
+    fn from(msg: RESTRequest) -> Self {
+        Message::RESTRequest(msg)
+    }
+}
+
+impl From<RESTResponse> for Message {
+    fn from(msg: RESTResponse) -> Self {
+        Message::RESTResponse(msg)
+    }
+}
+
+// Casts from platform-wide messages
+impl GetRESTResponse for Message {
+    fn get_rest_response(&self) -> Option<RESTResponse> {
+        if let Message::RESTResponse(result) = self {
+            Some(result.clone())
+        } else {
+            None
+        }
+    }
+}
+
+
