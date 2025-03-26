@@ -7,7 +7,7 @@ use acropolis_common::{
     messages::Message
 };
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use config::Config;
 use tracing::{info, error};
 use std::sync::Arc;
@@ -23,8 +23,12 @@ mod in_memory_immutable_utxo_store;
 use in_memory_immutable_utxo_store::InMemoryImmutableUTXOStore;
 mod sled_immutable_utxo_store;
 use sled_immutable_utxo_store::SledImmutableUTXOStore;
+mod fjall_immutable_utxo_store;
+use fjall_immutable_utxo_store::FjallImmutableUTXOStore;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.utxo.deltas";
+const DEFAULT_STORE: &str = "memory";
+const DEFAULT_DATABASE_PATH: &str = "immutable-utxos";
 
 /// UTXO state module
 #[module(
@@ -44,16 +48,26 @@ impl UTXOState
             .unwrap_or(DEFAULT_SUBSCRIBE_TOPIC.to_string());
         info!("Creating subscriber on '{subscribe_topic}'");
 
-        // Create store - Sled on disk if database-path is set, in-memory otherwise
-        let store: Arc<dyn ImmutableUTXOStore> = match config.get_string("database-path") {
-            Ok(path) => {
-                info!("Storing immutable UTXOs on disk ({path})");
-                Arc::new(SledImmutableUTXOStore::new(path)?)
-            }
-            _ => {
+        let database_path = config.get_string("database-path")
+            .unwrap_or(DEFAULT_DATABASE_PATH.to_string());
+
+        // Create store
+        let store_type = config.get_string("store").unwrap_or(DEFAULT_STORE.to_string());
+        let store: Arc<dyn ImmutableUTXOStore> = match store_type.as_str() {
+            "memory" => {
                 info!("Storing immutable UTXOs in memory");
                 Arc::new(InMemoryImmutableUTXOStore::new())
             }
+            "sled" => {
+                info!("Storing immutable UTXOs with Sled on disk ({database_path})");
+                Arc::new(SledImmutableUTXOStore::new(database_path)?)
+            }
+            "fjall" => {
+                info!("Storing immutable UTXOs with Fjall on disk ({database_path})");
+                Arc::new(FjallImmutableUTXOStore::new(database_path)?)
+                // TODO optionally configure fetch_every
+            }
+            _ => return Err(anyhow!("Unknown store type {store_type}"))
         };
         let mut state = State::new(store);
 
