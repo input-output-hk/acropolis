@@ -1,0 +1,23 @@
+# Acropolis SPO state module
+
+[package]
+name = "acropolis_module_spo_state"
+version = "0.1.0"
+edition = "2021"
+authors = ["Alex Woods <alex.woods@iohk.io>"]
+description = "SPO State Tracker"
+license = "Apache-2.0"
+
+[dependencies]
+caryatid_sdk = "0.2.0"
+acropolis_common = { path = "../../common" }
+anyhow = "1.0"
+tokio = { version = "1", features = ["full"] }
+config = "0.14.0"
+tracing = "0.1.40"
+serde = "1.0.214"
+serde_json = "1.0.132"
+hex = "0.4.3"
+
+[lib]
+path = "src/spo_state.rs"

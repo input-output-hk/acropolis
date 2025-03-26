@@ -22,6 +22,8 @@ publish-certificates-topic = "cardano.certificates"
 store = "memory"  # or "fjall", "sled"
 address-delta-topic = "cardano.address.delta"
 
+[module.spo-state]
+
 [module.clock]
 
 [module.rest-server]
