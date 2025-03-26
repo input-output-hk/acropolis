@@ -24,6 +24,10 @@ address-delta-topic = "cardano.address.delta"
 
 [module.clock]
 
+[module.rest-server]
+address = "127.0.0.1"
+port = 4340
+
 [module.spy]
 # Enable for message spying
 #topic = "cardano.address.#"
