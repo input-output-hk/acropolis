@@ -64,8 +64,13 @@ impl UTXOState
             }
             "fjall" => {
                 info!("Storing immutable UTXOs with Fjall on disk ({database_path})");
-                Arc::new(FjallImmutableUTXOStore::new(database_path)?)
-                // TODO optionally configure fetch_every
+                let store = Arc::new(FjallImmutableUTXOStore::new(database_path)?);
+                // optionally configure flush_every
+                match config.get_int("flush-every") {
+                    Ok(n) => store.set_flush_every(n as usize),
+                    _ => {}
+                }
+                store
             }
             _ => return Err(anyhow!("Unknown store type {store_type}"))
         };
