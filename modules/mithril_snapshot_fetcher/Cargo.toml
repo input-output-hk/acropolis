@@ -14,7 +14,7 @@ acropolis_common = { path = "../../common" }
 pallas = { version = "0.32.0", features = ["hardano"] }
 anyhow = "1.0"
 tokio = { version = "1", features = ["full"] }
-config = "0.14.0"
+config = "0.15.11"
 tracing = "0.1.40"
 serde_json = "1.0.138"
 mithril-client = { version = "0.11.1", features = ["fs"] }
