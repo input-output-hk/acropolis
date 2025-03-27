@@ -3,18 +3,20 @@
 
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
 use acropolis_common::{
-    messages::{Message, TxCertificatesMessage, UTXODeltasMessage}, Address, AddressNetwork, ByronAddress, GenesisKeyDelegation, InstantaneousRewardSource, InstantaneousRewardTarget, MoveInstantaneosReward, PoolRegistration, PoolRetirement, Ratio, ShelleyAddress, ShelleyAddressDelegationPart, ShelleyAddressPaymentPart, ShelleyAddressPointer, StakeAddress, StakeAddressPayload, StakeCredential, StakeDelegation, TxCertificate, TxInput, TxOutput, UTXODelta
+    messages::{Message, TxCertificatesMessage, UTXODeltasMessage}, Address, AddressNetwork, ByronAddress, GenesisKeyDelegation, InstantaneousRewardSource, InstantaneousRewardTarget, MoveInstantaneosReward, MultiHostName, PoolMetadata, PoolRegistration, PoolRetirement, Ratio, Relay, ShelleyAddress, ShelleyAddressDelegationPart, ShelleyAddressPaymentPart, ShelleyAddressPointer, SingleHostAddr, SingleHostName, StakeAddress, StakeAddressPayload, StakeCredential, StakeDelegation, TxCertificate, TxInput, TxOutput, UTXODelta
 };
 use std::sync::Arc;
 use anyhow::Result;
 use config::Config;
 use tracing::{debug, info, error};
-use pallas::ledger::traverse::{MultiEraTx, MultiEraCert};
+use pallas::ledger::traverse::{MultiEraCert, MultiEraTx};
 use pallas::ledger::addresses;
 use pallas::ledger::primitives::{
     alonzo,
     conway,
     StakeCredential as PallasStakeCredential,
+    Relay as PallasRelay,
+    Nullable,
 };
 use anyhow::anyhow;
 
@@ -99,6 +101,39 @@ impl TxUnpacker
         }
     }
 
+    /// Map a Pallas Relay to ours
+    fn map_relay(relay: &PallasRelay) -> Relay {
+        match relay {
+            PallasRelay::SingleHostAddr(port, ipv4, ipv6) =>
+                Relay::SingleHostAddr(SingleHostAddr{
+                    port: match port {
+                        Nullable::Some(port) => Some(*port as u16),
+                        _ => None,
+                    }, 
+                    ipv4: match ipv4 {
+                        Nullable::Some(ipv4) => ipv4.try_into().ok(),
+                        _ => None,
+                    }, 
+                    ipv6: match ipv6 {
+                        Nullable::Some(ipv6) => ipv6.try_into().ok(),
+                        _ => None,
+                    }, 
+                }),
+            PallasRelay::SingleHostName(port, dns_name) =>
+                Relay::SingleHostName(SingleHostName { 
+                    port: match port {
+                        Nullable::Some(port) => Some(*port as u16),
+                        _ => None,
+                    }, 
+                    dns_name: dns_name.clone(),
+                }),
+            PallasRelay::MultiHostName(dns_name) =>
+                Relay::MultiHostName(MultiHostName { 
+                    dns_name: dns_name.clone()
+                }),
+        }
+    }
+
     /// Derive our TxCertificate from a Pallas Certificate
     fn map_certificate(cert: &MultiEraCert) -> Result<TxCertificate> {
         match cert {
@@ -120,7 +155,7 @@ impl TxUnpacker
                     alonzo::Certificate::PoolRegistration { 
                         // TODO relays, pool_metadata
                         operator, vrf_keyhash, pledge, cost, margin, 
-                        reward_account, pool_owners, relays: _, pool_metadata: _ } =>
+                        reward_account, pool_owners, relays, pool_metadata } =>
                                 Ok(TxCertificate::PoolRegistration(PoolRegistration { 
                                     operator: operator.to_vec(), 
                                     vrf_key_hash: vrf_keyhash.to_vec(),
@@ -134,7 +169,18 @@ impl TxUnpacker
                                     pool_owners: pool_owners
                                         .into_iter()
                                         .map(|v| v.to_vec())
-                                        .collect()
+                                        .collect(),
+                                    relays: relays
+                                        .into_iter()
+                                        .map(|relay| Self::map_relay(relay))
+                                        .collect(),
+                                    pool_metadata: match pool_metadata {
+                                        Nullable::Some(md) => Some(PoolMetadata {
+                                            url: md.url.clone(),
+                                            hash: md.hash.to_vec(),
+                                        }),
+                                        _ => None
+                                    }
                                 })),
                     alonzo::Certificate::PoolRetirement(pool_key_hash, epoch) =>
                                 Ok(TxCertificate::PoolRetirement(PoolRetirement {
@@ -187,7 +233,7 @@ impl TxUnpacker
                     conway::Certificate::PoolRegistration { 
                         // TODO relays, pool_metadata
                         operator, vrf_keyhash, pledge, cost, margin, 
-                        reward_account, pool_owners, relays: _, pool_metadata: _ } =>
+                        reward_account, pool_owners, relays, pool_metadata } =>
                                 Ok(TxCertificate::PoolRegistration(PoolRegistration { 
                                     operator: operator.to_vec(), 
                                     vrf_key_hash: vrf_keyhash.to_vec(),
@@ -201,7 +247,18 @@ impl TxUnpacker
                                     pool_owners: pool_owners
                                         .into_iter()
                                         .map(|v| v.to_vec())
-                                        .collect()
+                                        .collect(),
+                                    relays: relays
+                                        .into_iter()
+                                        .map(|relay| Self::map_relay(relay))
+                                        .collect(),
+                                    pool_metadata: match pool_metadata {
+                                        Nullable::Some(md) => Some(PoolMetadata {
+                                            url: md.url.clone(),
+                                            hash: md.hash.to_vec(),
+                                        }),
+                                        _ => None
+                                    }
                                 })),
                     conway::Certificate::PoolRetirement(pool_key_hash, epoch) =>
                                 Ok(TxCertificate::PoolRetirement(PoolRetirement {
