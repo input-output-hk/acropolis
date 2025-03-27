@@ -4,6 +4,7 @@ use crate::state::{UTXOKey, UTXOValue, ImmutableUTXOStore};
 use async_trait::async_trait;
 use sled::Db;
 use std::path::Path;
+use std::fs;
 use tokio::task;
 use anyhow::Result;
 
@@ -14,8 +15,14 @@ pub struct SledAsyncImmutableUTXOStore {
 
 impl SledAsyncImmutableUTXOStore {
     pub fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let path = path.as_ref();
+
+        // Clear down before start
+        if path.exists() {
+            fs::remove_dir_all(path)?;
+        }
+
         let db = sled::open(path)?; 
-        db.clear()?;
         Ok(Self { db })
     }
 }
