@@ -21,10 +21,16 @@ mod address_delta_publisher;
 use address_delta_publisher::AddressDeltaPublisher;
 mod in_memory_immutable_utxo_store;
 use in_memory_immutable_utxo_store::InMemoryImmutableUTXOStore;
+mod dashmap_immutable_utxo_store;
+use dashmap_immutable_utxo_store::DashMapImmutableUTXOStore;
 mod sled_immutable_utxo_store;
 use sled_immutable_utxo_store::SledImmutableUTXOStore;
+mod sled_async_immutable_utxo_store;
+use sled_async_immutable_utxo_store::SledAsyncImmutableUTXOStore;
 mod fjall_immutable_utxo_store;
 use fjall_immutable_utxo_store::FjallImmutableUTXOStore;
+mod fjall_async_immutable_utxo_store;
+use fjall_async_immutable_utxo_store::FjallAsyncImmutableUTXOStore;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.utxo.deltas";
 const DEFAULT_STORE: &str = "memory";
@@ -55,16 +61,34 @@ impl UTXOState
         let store_type = config.get_string("store").unwrap_or(DEFAULT_STORE.to_string());
         let store: Arc<dyn ImmutableUTXOStore> = match store_type.as_str() {
             "memory" => {
-                info!("Storing immutable UTXOs in memory");
+                info!("Storing immutable UTXOs in memory (standard)");
                 Arc::new(InMemoryImmutableUTXOStore::new())
             }
+            "dashmap" => {
+                info!("Storing immutable UTXOs in memory (DashMap)");
+                Arc::new(DashMapImmutableUTXOStore::new())
+            }
             "sled" => {
-                info!("Storing immutable UTXOs with Sled on disk ({database_path})");
+                info!("Storing immutable UTXOs with Sled (sync) on disk ({database_path})");
                 Arc::new(SledImmutableUTXOStore::new(database_path)?)
             }
+            "sled-async" => {
+                info!("Storing immutable UTXOs with Sled (async) on disk ({database_path})");
+                Arc::new(SledAsyncImmutableUTXOStore::new(database_path)?)
+            }
             "fjall" => {
-                info!("Storing immutable UTXOs with Fjall on disk ({database_path})");
+                info!("Storing immutable UTXOs with Fjall (sync) on disk ({database_path})");
                 let store = Arc::new(FjallImmutableUTXOStore::new(database_path)?);
+                // optionally configure flush_every
+                match config.get_int("flush-every") {
+                    Ok(n) => store.set_flush_every(n as usize),
+                    _ => {}
+                }
+                store
+            }
+            "fjall-async" => {
+                info!("Storing immutable UTXOs with Fjall (async) on disk ({database_path})");
+                let store = Arc::new(FjallAsyncImmutableUTXOStore::new(database_path)?);
                 // optionally configure flush_every
                 match config.get_int("flush-every") {
                     Ok(n) => store.set_flush_every(n as usize),

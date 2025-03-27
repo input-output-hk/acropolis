@@ -6,9 +6,10 @@ use fjall::{Config, Keyspace, Partition, PartitionCreateOptions, PersistMode};
 use std::path::Path;
 use std::fs;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use tokio::task;
 use anyhow::Result;
 
-pub struct FjallImmutableUTXOStore {
+pub struct FjallAsyncImmutableUTXOStore {
     keyspace: Keyspace,
     partition: Partition,
     write_counter: AtomicUsize,
@@ -18,7 +19,7 @@ pub struct FjallImmutableUTXOStore {
 const DEFAULT_FLUSH_EVERY: usize = 1000;
 const PARTITION_NAME: &str = "utxos";
 
-impl FjallImmutableUTXOStore {
+impl FjallAsyncImmutableUTXOStore {
     /// Create a new Fjall-backed UTXO store with default flush threshold (1000)
     pub fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
 
@@ -55,40 +56,64 @@ impl FjallImmutableUTXOStore {
 }
 
 #[async_trait]
-impl ImmutableUTXOStore for FjallImmutableUTXOStore {
+impl ImmutableUTXOStore for FjallAsyncImmutableUTXOStore {
     async fn add_utxo(&self, key: UTXOKey, value: UTXOValue) -> Result<()> {
+        let partition = self.partition.clone();
+        let keyspace = self.keyspace.clone();
         let key_bytes = key.to_bytes();
         let value_bytes = serde_cbor::to_vec(&value)?;
         let should_flush = self.should_flush();
 
-        self.partition.insert(key_bytes, value_bytes)?;
-        if should_flush {
-            self.keyspace.persist(PersistMode::Buffer)?;
-        }
+        task::spawn_blocking(move || {
+            partition.insert(key_bytes, value_bytes)?;
+            if should_flush {
+                keyspace.persist(PersistMode::Buffer)?;
+            }
+            Ok::<_, anyhow::Error>(())
+        })
+        .await??;
 
         Ok(())
     }
 
     async fn delete_utxo(&self, key: &UTXOKey) -> Result<()> {
-                let key_bytes = key.to_bytes();
+        let partition = self.partition.clone();
+        let keyspace = self.keyspace.clone();
+        let key_bytes = key.to_bytes();
         let should_flush = self.should_flush();
 
-        self.partition.remove(key_bytes)?;
-        if should_flush {
-            self.keyspace.persist(PersistMode::Buffer)?;
-        }
+        task::spawn_blocking(move || {
+            partition.remove(key_bytes)?;
+            if should_flush {
+                keyspace.persist(PersistMode::Buffer)?;
+            }
+            Ok::<_, anyhow::Error>(())
+        })
+        .await??;
+
         Ok(())
     }
 
     async fn lookup_utxo(&self, key: &UTXOKey) -> Result<Option<UTXOValue>> {
+        let partition = self.partition.clone();
         let key_bytes = key.to_bytes();
-        Ok(match self.partition.get(key_bytes)? {
-            Some(ivec) => Some(serde_cbor::from_slice(&ivec)?),
-            None => None,
+
+        Ok(task::spawn_blocking(move || {
+            let maybe = partition.get(key_bytes)?;
+            let result = match maybe {
+                Some(ivec) => Some(serde_cbor::from_slice(&ivec)?),
+                None => None,
+            };
+            Ok::<_, anyhow::Error>(result)
         })
+        .await??)
     }
 
     async fn len(&self) -> Result<usize> {
-        Ok(self.partition.len()?)
+        let partition = self.partition.clone();
+        Ok(task::spawn_blocking(move || {
+            Ok::<_, anyhow::Error>(partition.len()?)
+        })
+        .await??)
     }
 }

@@ -1,7 +1,7 @@
 //! Acropolis Mithril snapshot fetcher module for Caryatid
 //! Fetches a snapshot from Mithril and replays all the blocks in it
 
-use caryatid_sdk::{Context, Module, module, MessageBusExt};
+use caryatid_sdk::{Context, Module, module, MessageBusExt, message_bus::QoS};
 use acropolis_common::{
     BlockInfo,
     BlockStatus,    
@@ -221,9 +221,11 @@ impl MithrilSnapshotFetcher
                         raw: header.cbor().to_vec()
                     };
 
+                    // We use Qos::Bulk to avoid swamping all the queues and blocking downstream
+                    // modules from sending their own messages
                     let header_message_enum = Message::BlockHeader(header_message);
-                    let header_future = context.message_bus.publish(&header_topic,
-                        Arc::new(header_message_enum));
+                    let header_future = context.message_bus.publish_with_qos(&header_topic,
+                        Arc::new(header_message_enum), QoS::Bulk);
 
                     // Send the block body message
                     let body_message = BlockBodyMessage {
@@ -233,8 +235,8 @@ impl MithrilSnapshotFetcher
                     };
 
                     let body_message_enum = Message::BlockBody(body_message);
-                    let body_future = context.message_bus.publish(&body_topic,
-                        Arc::new(body_message_enum));
+                    let body_future = context.message_bus.publish_with_qos(&body_topic,
+                        Arc::new(body_message_enum), QoS::Bulk);
 
                     let (header_result, body_result) = join!(header_future, body_future);
                     header_result.unwrap_or_else(|e| error!("Failed to publish header: {e}"));
