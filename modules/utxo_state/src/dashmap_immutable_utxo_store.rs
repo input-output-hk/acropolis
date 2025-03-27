@@ -1,47 +1,48 @@
-//! In-memory store for immutable UTXOs using standard HashMap
+//! In-memory store for immutable UTXOs using DashMap
+// Faster and API is simpler because it uses internally sharded locks
+// but it takes a lot more memory than HashMap
 
 use crate::state::{UTXOKey, UTXOValue, ImmutableUTXOStore};
-use std::collections::HashMap;
+use dashmap::DashMap;
 use async_trait::async_trait;
-use tokio::sync::RwLock;
 use anyhow::Result;
 
-pub struct InMemoryImmutableUTXOStore {
+pub struct DashMapImmutableUTXOStore {
     /// Map of UTXOs
-    utxos: RwLock<HashMap<UTXOKey, UTXOValue>>,
+    utxos: DashMap<UTXOKey, UTXOValue>,
 }
 
-impl InMemoryImmutableUTXOStore {
+impl DashMapImmutableUTXOStore {
     pub fn new() -> Self { 
         Self {
-            utxos: RwLock::new(HashMap::new())
+            utxos: DashMap::new()
         }
     }
 }
 
 #[async_trait]
-impl ImmutableUTXOStore for InMemoryImmutableUTXOStore {
+impl ImmutableUTXOStore for DashMapImmutableUTXOStore {
 
     /// Add a UTXO
     async fn add_utxo(&self, key: UTXOKey, value: UTXOValue) -> Result<()> {
-        self.utxos.write().await.insert(key, value);
+        self.utxos.insert(key, value);
         Ok(())
     }
 
     /// Delete a UTXO
     async fn delete_utxo(&self, key: &UTXOKey) -> Result<()> {
-        self.utxos.write().await.remove(key);
+        self.utxos.remove(key);
         Ok(())
     }
 
     /// Lookup a UTXO
     async fn lookup_utxo(&self, key: &UTXOKey) -> Result<Option<UTXOValue>> {
         // Essential to clone here because ref is not async safe
-        Ok(self.utxos.read().await.get(key).cloned())
+        Ok(self.utxos.get(key).map(|value| value.clone()))
     }
 
     /// Get the number of UTXOs in the store
     async fn len(&self) -> Result<usize> {
-        Ok(self.utxos.read().await.len())
+        Ok(self.utxos.len())
     }
 }
