@@ -8,8 +8,8 @@ description = "Acropolis omnibus process containing every module"
 license = "Apache-2.0"
 
 [dependencies]
-caryatid_process = "0.2.4"
-caryatid_sdk = "0.2"
+caryatid_process = "0.2.5"
+caryatid_sdk = "0.2.5"
 caryatid_module_clock = "0.2"
 caryatid_module_rest_server = "0.2"
 caryatid_module_spy = "0.1"
@@ -27,7 +27,7 @@ acropolis_module_utxo_state = { path = "../../modules/utxo_state" }
 acropolis_module_spo_state = { path = "../../modules/spo_state" }
 
 anyhow = "1.0"
-config = "0.14.0"
+config = "0.15.11"
 tracing = "0.1.40"
 tracing-subscriber = "0.3.18"
 tokio = { version = "1", features = ["full"] }

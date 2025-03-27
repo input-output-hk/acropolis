@@ -14,7 +14,7 @@ acropolis_common = { path = "../../common" }
 pallas = "0.32.0"
 anyhow = "1.0"
 tokio = { version = "1", features = ["full"] }
-config = "0.14.0"
+config = "0.15.11"
 tracing = "0.1.40"
 
 [lib]
