@@ -229,6 +229,58 @@ impl Default for StakeCredential {
     fn default() -> Self { Self::AddrKeyHash(Vec::new()) }
 }
 
+/// Relay single host address
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SingleHostAddr {
+    /// Optional port number
+    pub port: Option<u16>,
+
+    /// Optional IPv4 address
+    pub ipv4: Option<[u8; 4]>,
+
+    /// Optional IPv6 address
+    pub ipv6: Option<[u8; 16]>,
+}
+
+/// Relay hostname
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SingleHostName {
+    /// Optional port number
+    pub port: Option<u16>,
+
+    /// DNS name (A or AAAA record)
+    pub dns_name: String,
+}
+
+/// Relay multihost (SRV)
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct MultiHostName {
+    /// DNS name (SRC record)
+    pub dns_name: String,
+}
+
+/// Pool relay
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum Relay {
+    SingleHostAddr(SingleHostAddr),
+    SingleHostName(SingleHostName),
+    MultiHostName(MultiHostName),
+}
+
+impl Default for Relay {
+    fn default() -> Self { Self::SingleHostAddr(SingleHostAddr::default()) }
+}
+
+/// Pool metadata
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PoolMetadata {
+    /// Metadata URL
+    pub url: String,
+
+    /// Metadata hash
+    pub hash: KeyHash,
+}
+
 /// Pool registration data
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PoolRegistration {
@@ -253,7 +305,11 @@ pub struct PoolRegistration {
     /// Pool owners by their key hash
     pub pool_owners: Vec<KeyHash>,
 
-    // TODO Relays
+    // Relays
+    pub relays: Vec<Relay>,
+
+    // Metadata
+    pub pool_metadata: Option<PoolMetadata>,
 }
 
 /// Pool retirement data
