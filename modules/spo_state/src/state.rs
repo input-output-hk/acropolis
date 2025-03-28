@@ -21,6 +21,15 @@ impl State {
             spos: HashMap::<Vec::<u8>, PoolRegistration>::new(),
         }
     }
+
+    async fn log_stats(&self) {
+        info!(number = self.spos.keys().len());
+    }
+
+    pub async fn tick(&self) -> Result<()> {
+        self.log_stats().await;
+        Ok(())
+    }
 }
 
 #[async_trait]

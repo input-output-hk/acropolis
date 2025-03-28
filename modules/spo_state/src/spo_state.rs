@@ -43,8 +43,12 @@ impl SPOState
         info!("Creating request handler on '{handle_topic}'");
 
         let state = Arc::new(Mutex::new(State::new()));
-        let state2 = state.clone();
+        let state_handle = state.clone();
+        let state_tick = state.clone();
+
         let serialiser = Arc::new(Mutex::new(Serialiser::new(state, module_path!(), 1)));
+        let serialiser_tick = serialiser.clone();
+
 
         // Subscribe for certificate messages
         context.clone().message_bus.subscribe(&subscribe_topic, move |message: Arc<Message>| {
@@ -66,7 +70,7 @@ impl SPOState
 
         // Handle requests for SPO state
         context.message_bus.handle(&handle_topic, move |message: Arc<Message>| {
-            let state = state2.clone();
+            let state = state_handle.clone();
             async move {
                 let response = match message.as_ref() {
                     Message::RESTRequest(request) => {
@@ -88,6 +92,24 @@ impl SPOState
                 };
 
                 Arc::new(Message::RESTResponse(response))
+            }
+        })?;
+
+        // Ticker to log stats
+        context.clone().message_bus.subscribe("clock.tick", move |message: Arc<Message>| {
+            let serialiser = serialiser_tick.clone();
+            let state = state_tick.clone();
+
+            async move {
+                if let Message::Clock(message) = message.as_ref() {
+                    if (message.number % 60) == 0 {
+                        state.lock().await.tick()
+                            .await
+                            .inspect_err(|e| error!("Tick error: {e}"))
+                            .ok();
+                        serialiser.lock().await.tick();
+                    }
+                }
             }
         })?;
 
