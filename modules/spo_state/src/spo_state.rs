@@ -19,7 +19,7 @@ mod state;
 use state::State;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.certificates";
-const DEFAULT_HANDLE_TOPIC: &str = "rest.get.spo-state";
+const DEFAULT_HANDLE_TOPIC: &str = "rest.get.spo-state.*";
 
 /// SPO State module
 #[module(
@@ -68,30 +68,44 @@ impl SPOState
             }
         })?;
 
-        // Handle requests for SPO state
+        // Handle requests for single SPO state
         context.message_bus.handle(&handle_topic, move |message: Arc<Message>| {
             let state = state_handle.clone();
             async move {
-                let response = match message.as_ref() {
+                let (code, body) = match message.as_ref() {
                     Message::RESTRequest(request) => {
                         info!("REST received {} {}", request.method, request.path);
                         let lock = state.lock().await;
-                        let body = serde_json::to_string(lock.deref()).expect("something");
-                        RESTResponse {
-                            code: 200,
-                            body: body,
+                        match request.path.rfind('/') {
+                            None => (400, "Poorly formed url".to_string()),
+                            Some(last_slash) => {
+                                let id = &request.path[last_slash + 1..];
+                                match id.len() {
+                                    0 => match serde_json::to_string(lock.deref()) {
+                                        Ok(body) => (200, body),
+                                        Err(error) => (500, format!("{error:?}")),
+                                    },
+                                    _ => match hex::decode(&id) {
+                                        Err(error) => (400, format!("SPO id must be hex encoded vector of bytes: {error:?}")),
+                                        Ok(id) => match lock.deref().get(&id) {
+                                            None => (404, "SPO not found".to_string()),
+                                            Some(spo) => match serde_json::to_string(&spo) {
+                                                Err(error) => (500, format!("{error:?}")),
+                                                Ok(body) => (200, body),
+                                            },
+                                        },
+                                    },
+                                }
+                            },
                         }
                     },
                     _ => {
                         error!("Unexpected message type {:?}", message);
-                        RESTResponse {
-                            code: 500,
-                            body: "Unexpected message in REST request".to_string()
-                        }
+                        ( 500, "Unexpected message in REST request".to_string())
                     }
                 };
 
-                Arc::new(Message::RESTResponse(response))
+                Arc::new(Message::RESTResponse(RESTResponse { code, body }))
             }
         })?;
 
