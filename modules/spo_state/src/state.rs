@@ -7,11 +7,14 @@ use acropolis_common::{
 };
 use anyhow::Result;
 use async_trait::async_trait;
-use serde::{Serialize, Serializer};
 use std::collections::HashMap;
 use tracing::info;
+use serde_with::{serde_as, hex::Hex};
 
+#[serde_as]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct State {
+    #[serde_as(as = "HashMap<Hex, _>")]
     spos: HashMap<Vec::<u8>, PoolRegistration>,
 }
 
@@ -20,6 +23,10 @@ impl State {
         Self {
             spos: HashMap::<Vec::<u8>, PoolRegistration>::new(),
         }
+    }
+
+    pub fn get(&self, operator: &Vec<u8>) -> Option<&PoolRegistration> {
+        self.spos.get(operator)
     }
 
     async fn log_stats(&self) {
@@ -48,19 +55,5 @@ impl SerialisedMessageHandler<TxCertificatesMessage> for State {
         }
 
         Ok(())
-    }
-}
-
-impl Serialize for State {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let serialized_map: HashMap<String, PoolRegistration> = self
-            .spos
-            .iter()
-            .map(|(key, value)| (hex::encode(key), value.clone()))
-            .collect();
-        serialized_map.serialize(serializer)
     }
 }
