@@ -5,21 +5,18 @@ use caryatid_sdk::{Context, Module, module, MessageBusExt};
 use caryatid_sdk::messages::RESTResponse;
 use acropolis_common::{
     messages::Message,
-    PoolRegistration,
-    TxCertificate,
+    Serialiser,
 };
-use std::collections::HashMap;
-use std::future;
 use std::ops::Deref;
 use std::sync::Arc;
 use anyhow::Result;
 use config::Config;
 use tokio::sync::Mutex;
-use tracing::{debug, error, info};
-use serde::{Serialize, Serializer};
+use tracing::{error, info};
 use serde_json;
-use std::process;
-use hex::encode;
+
+mod state;
+use state::State;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.certificates";
 const DEFAULT_HANDLE_TOPIC: &str = "rest.get.spo-state";
@@ -45,23 +42,21 @@ impl SPOState
             .unwrap_or(DEFAULT_HANDLE_TOPIC.to_string());
         info!("Creating request handler on '{handle_topic}'");
 
-        let state = Arc::new(Mutex::new(HashMap::<Vec::<u8>, PoolRegistration>::new()));
+        let state = Arc::new(Mutex::new(State::new()));
         let state2 = state.clone();
+        let serialiser = Arc::new(Mutex::new(Serialiser::new(state, module_path!(), 1)));
 
         // Subscribe for certificate messages
         context.clone().message_bus.subscribe(&subscribe_topic, move |message: Arc<Message>| {
-            let state = state.clone();
+            let serialiser = serialiser.clone();
             async move {
                 match message.as_ref() {
                     Message::TxCertificates(tx_cert_msg) => {
-                        for tx_cert in tx_cert_msg.certificates.iter() {
-                            match tx_cert {
-                                TxCertificate::PoolRegistration(reg) => {
-                                    state.lock().await.insert(reg.operator.clone(), reg.clone());
-                                }
-                                _ => ()
-                            }
-                        }
+                        let mut serialiser = serialiser.lock().await;
+                        serialiser.handle_message(tx_cert_msg.sequence, tx_cert_msg)
+                            .await
+                            .inspect_err(|e| error!("Messaging handling error: {e}"))
+                            .ok();
                     }
 
                     _ => error!("Unexpected message type: {message:?}")
@@ -77,8 +72,7 @@ impl SPOState
                     Message::RESTRequest(request) => {
                         info!("REST received {} {}", request.method, request.path);
                         let lock = state.lock().await;
-                        let map = SPOMapSerializer{ map: lock.deref() };
-                        let body = serde_json::to_string(&map).expect("something");
+                        let body = serde_json::to_string(lock.deref()).expect("something");
                         RESTResponse {
                             code: 200,
                             body: body,
@@ -98,23 +92,5 @@ impl SPOState
         })?;
 
         Ok(())
-    }
-}
-
-struct SPOMapSerializer<'a> {
-    map: &'a HashMap::<Vec::<u8>, PoolRegistration>,
-}
-
-impl<'a> Serialize for SPOMapSerializer<'a> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let serialized_map: HashMap<String, PoolRegistration> = self
-            .map
-            .iter()
-            .map(|(key, value)| (hex::encode(key), value.clone()))
-            .collect();
-        serialized_map.serialize(serializer)
     }
 }
