@@ -12,6 +12,7 @@ license = "Apache-2.0"
 caryatid_sdk = "0.2.0"
 acropolis_common = { path = "../../common" }
 anyhow = "1.0"
+async-trait = "0.1"
 tokio = { version = "1", features = ["full"] }
 config = "0.15.11"
 tracing = "0.1.40"
