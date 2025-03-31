@@ -84,7 +84,7 @@ impl UTXOState
 
         let state = Arc::new(Mutex::new(state));
         let state2 = state.clone();
-        let serialiser = Arc::new(Mutex::new(Serialiser::new(state, module_path!())));
+        let serialiser = Arc::new(Mutex::new(Serialiser::new(state, module_path!(), 0)));
         let serialiser2 = serialiser.clone();
 
         // Subscribe for UTXO messages

@@ -5,24 +5,21 @@ use caryatid_sdk::{Context, Module, module, MessageBusExt};
 use caryatid_sdk::messages::RESTResponse;
 use acropolis_common::{
     messages::Message,
-    PoolRegistration,
-    TxCertificate,
+    Serialiser,
 };
-use std::collections::HashMap;
-use std::future;
 use std::ops::Deref;
 use std::sync::Arc;
 use anyhow::Result;
 use config::Config;
 use tokio::sync::Mutex;
-use tracing::{debug, error, info};
-use serde::{Serialize, Serializer};
+use tracing::{error, info};
 use serde_json;
-use std::process;
-use hex::encode;
+
+mod state;
+use state::State;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.certificates";
-const DEFAULT_HANDLE_TOPIC: &str = "rest.get.spo-state";
+const DEFAULT_HANDLE_TOPIC: &str = "rest.get.spo-state.*";
 
 /// SPO State module
 #[module(
@@ -45,23 +42,25 @@ impl SPOState
             .unwrap_or(DEFAULT_HANDLE_TOPIC.to_string());
         info!("Creating request handler on '{handle_topic}'");
 
-        let state = Arc::new(Mutex::new(HashMap::<Vec::<u8>, PoolRegistration>::new()));
-        let state2 = state.clone();
+        let state = Arc::new(Mutex::new(State::new()));
+        let state_handle = state.clone();
+        let state_tick = state.clone();
+
+        let serialiser = Arc::new(Mutex::new(Serialiser::new(state, module_path!(), 1)));
+        let serialiser_tick = serialiser.clone();
+
 
         // Subscribe for certificate messages
         context.clone().message_bus.subscribe(&subscribe_topic, move |message: Arc<Message>| {
-            let state = state.clone();
+            let serialiser = serialiser.clone();
             async move {
                 match message.as_ref() {
                     Message::TxCertificates(tx_cert_msg) => {
-                        for tx_cert in tx_cert_msg.certificates.iter() {
-                            match tx_cert {
-                                TxCertificate::PoolRegistration(reg) => {
-                                    state.lock().await.insert(reg.operator.clone(), reg.clone());
-                                }
-                                _ => ()
-                            }
-                        }
+                        let mut serialiser = serialiser.lock().await;
+                        serialiser.handle_message(tx_cert_msg.sequence, tx_cert_msg)
+                            .await
+                            .inspect_err(|e| error!("Messaging handling error: {e}"))
+                            .ok();
                     }
 
                     _ => error!("Unexpected message type: {message:?}")
@@ -69,52 +68,65 @@ impl SPOState
             }
         })?;
 
-        // Handle requests for SPO state
+        // Handle requests for single SPO state
         context.message_bus.handle(&handle_topic, move |message: Arc<Message>| {
-            let state = state2.clone();
+            let state = state_handle.clone();
             async move {
-                let response = match message.as_ref() {
+                let (code, body) = match message.as_ref() {
                     Message::RESTRequest(request) => {
                         info!("REST received {} {}", request.method, request.path);
                         let lock = state.lock().await;
-                        let map = SPOMapSerializer{ map: lock.deref() };
-                        let body = serde_json::to_string(&map).expect("something");
-                        RESTResponse {
-                            code: 200,
-                            body: body,
+                        match request.path.rfind('/') {
+                            None => (400, "Poorly formed url".to_string()),
+                            Some(last_slash) => {
+                                let id = &request.path[last_slash + 1..];
+                                match id.len() {
+                                    0 => match serde_json::to_string(lock.deref()) {
+                                        Ok(body) => (200, body),
+                                        Err(error) => (500, format!("{error:?}")),
+                                    },
+                                    _ => match hex::decode(&id) {
+                                        Err(error) => (400, format!("SPO id must be hex encoded vector of bytes: {error:?}")),
+                                        Ok(id) => match lock.deref().get(&id) {
+                                            None => (404, "SPO not found".to_string()),
+                                            Some(spo) => match serde_json::to_string(&spo) {
+                                                Err(error) => (500, format!("{error:?}")),
+                                                Ok(body) => (200, body),
+                                            },
+                                        },
+                                    },
+                                }
+                            },
                         }
                     },
                     _ => {
                         error!("Unexpected message type {:?}", message);
-                        RESTResponse {
-                            code: 500,
-                            body: "Unexpected message in REST request".to_string()
-                        }
+                        ( 500, "Unexpected message in REST request".to_string())
                     }
                 };
 
-                Arc::new(Message::RESTResponse(response))
+                Arc::new(Message::RESTResponse(RESTResponse { code, body }))
+            }
+        })?;
+
+        // Ticker to log stats
+        context.clone().message_bus.subscribe("clock.tick", move |message: Arc<Message>| {
+            let serialiser = serialiser_tick.clone();
+            let state = state_tick.clone();
+
+            async move {
+                if let Message::Clock(message) = message.as_ref() {
+                    if (message.number % 60) == 0 {
+                        state.lock().await.tick()
+                            .await
+                            .inspect_err(|e| error!("Tick error: {e}"))
+                            .ok();
+                        serialiser.lock().await.tick();
+                    }
+                }
             }
         })?;
 
         Ok(())
-    }
-}
-
-struct SPOMapSerializer<'a> {
-    map: &'a HashMap::<Vec::<u8>, PoolRegistration>,
-}
-
-impl<'a> Serialize for SPOMapSerializer<'a> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let serialized_map: HashMap<String, PoolRegistration> = self
-            .map
-            .iter()
-            .map(|(key, value)| (hex::encode(key), value.clone()))
-            .collect();
-        serialized_map.serialize(serializer)
     }
 }
