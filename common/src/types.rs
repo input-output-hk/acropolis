@@ -2,6 +2,8 @@
 // We don't use these types in the acropolis_common crate itself
 #![allow(dead_code)]
 
+use serde_with::{serde_as, hex::Hex};
+
 /// Block status
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum BlockStatus
@@ -272,22 +274,27 @@ impl Default for Relay {
 }
 
 /// Pool metadata
+#[serde_as]
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PoolMetadata {
     /// Metadata URL
     pub url: String,
 
     /// Metadata hash
+    #[serde_as(as = "Hex")]
     pub hash: KeyHash,
 }
 
 /// Pool registration data
+#[serde_as]
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PoolRegistration {
     /// Operator pool key hash - used as ID
+    #[serde_as(as = "Hex")]
     pub operator: KeyHash,
 
     /// VRF key hash
+    #[serde_as(as = "Hex")]
     pub vrf_key_hash: KeyHash,
 
     /// Pledged Ada
@@ -300,9 +307,11 @@ pub struct PoolRegistration {
     pub margin: Ratio,
 
     /// Reward account
+    #[serde_as(as = "Hex")]
     pub reward_account: Vec<u8>,
 
     /// Pool owners by their key hash
+    #[serde_as(as = "Vec<Hex>")]
     pub pool_owners: Vec<KeyHash>,
 
     // Relays

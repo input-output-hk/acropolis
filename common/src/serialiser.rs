@@ -67,10 +67,10 @@ pub struct Serialiser<'a, MSG: MessageBounds> {
 impl <'a, MSG: MessageBounds> Serialiser<'a, MSG> {
     /// Constructor
     pub fn new(handler: Arc<Mutex<dyn SerialisedMessageHandler<MSG>>>,
-               module_name: &'a str) -> Self {
+               module_name: &'a str, first_sequence: u64) -> Self {
         Self {
             pending: BinaryHeap::new(),
-            next_sequence: 0,
+            next_sequence: first_sequence,
             handler,
             module_name,
         }
