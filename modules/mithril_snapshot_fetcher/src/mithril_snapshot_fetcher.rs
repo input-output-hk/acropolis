@@ -61,6 +61,8 @@ impl FeedbackLogger {
 #[async_trait::async_trait]
 impl FeedbackReceiver for FeedbackLogger {
     async fn handle_event(&self, event: MithrilEvent) {
+
+        #[allow(unreachable_patterns)] // To allow _ in cases where we do cover everything
         match event {
             MithrilEvent::SnapshotDownloadStarted { size, .. } => {
                 info!("Started snapshot download - {size} bytes");
@@ -87,7 +89,9 @@ impl FeedbackReceiver for FeedbackLogger {
             }
             MithrilEvent::CertificateFetchedFromCache { certificate_hash, .. } => {
                 info!("Fetched certificate {certificate_hash} from cache");
-             }
+            }
+
+            _ => {} // Catchall for future updates
         }
     }
 }
