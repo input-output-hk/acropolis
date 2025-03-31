@@ -6,6 +6,11 @@ use sled::Db;
 use std::path::Path;
 use std::fs;
 use anyhow::Result;
+use config::Config;
+use tracing::info;
+use std::sync::Arc;
+
+const DEFAULT_DATABASE_PATH: &str = "sled-immutable-utxos";
 
 pub struct SledImmutableUTXOStore {
     /// Sled database instance
@@ -13,8 +18,12 @@ pub struct SledImmutableUTXOStore {
 }
 
 impl SledImmutableUTXOStore {
-    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let path = path.as_ref();
+    pub fn new(config: Arc<Config>) -> Result<Self> {
+        let path = config.get_string("database-path")
+        .unwrap_or(DEFAULT_DATABASE_PATH.to_string());
+        info!("Storing immutable UTXOs with Sled (sync) on disk ({path})");
+
+        let path = Path::new(&path);
 
         // Clear down before start
         if path.exists() {

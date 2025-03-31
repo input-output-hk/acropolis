@@ -2,11 +2,13 @@
 
 use crate::state::{ImmutableUTXOStore, UTXOKey, UTXOValue};
 use async_trait::async_trait;
-use fjall::{Config, Keyspace, Partition, PartitionCreateOptions, PersistMode};
+use fjall::{Keyspace, Partition, PartitionCreateOptions, PersistMode};
 use std::path::Path;
 use std::fs;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
 use anyhow::Result;
+use config::Config;
+use tracing::info;
 
 pub struct FjallImmutableUTXOStore {
     keyspace: Keyspace,
@@ -15,35 +17,37 @@ pub struct FjallImmutableUTXOStore {
     flush_every: AtomicUsize,
 }
 
-const DEFAULT_FLUSH_EVERY: usize = 1000;
+const DEFAULT_FLUSH_EVERY: i64 = 1000;
+const DEFAULT_DATABASE_PATH: &str = "fjall-immutable-utxos";
 const PARTITION_NAME: &str = "utxos";
 
 impl FjallImmutableUTXOStore {
     /// Create a new Fjall-backed UTXO store with default flush threshold (1000)
-    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
+    pub fn new(config: Arc<Config>) -> Result<Self> {
 
-        let path = path.as_ref();
+        let path = config.get_string("database-path")
+            .unwrap_or(DEFAULT_DATABASE_PATH.to_string());
+        info!("Storing immutable UTXOs with Fjall (sync) on disk ({path})");
+        let path = Path::new(&path);
 
         // Clear down before start
         if path.exists() {
             fs::remove_dir_all(path)?;
         }
     
-        let keyspace = Config::new(path).open()?;
+        let keyspace = fjall::Config::new(path).open()?;
         let partition = keyspace.open_partition(PARTITION_NAME,
             PartitionCreateOptions::default())?;
+
+        let flush_every = config.get_int("flush-every")
+            .unwrap_or(DEFAULT_FLUSH_EVERY);
 
         Ok(Self {
             keyspace,
             partition,
             write_counter: AtomicUsize::new(0),
-            flush_every: AtomicUsize::new(DEFAULT_FLUSH_EVERY),
+            flush_every: AtomicUsize::new(flush_every as usize),
         })
-    }
-
-    /// Set the flush frequency (number of writes before flushing to disk)
-    pub fn set_flush_every(&self, n: usize) {
-        self.flush_every.store(n, Ordering::Relaxed);
     }
 
     /// Check if a flush is needed
