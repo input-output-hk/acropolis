@@ -6,6 +6,9 @@ use crate::state::{UTXOKey, UTXOValue, ImmutableUTXOStore};
 use dashmap::DashMap;
 use async_trait::async_trait;
 use anyhow::Result;
+use config::Config;
+use std::sync::Arc;
+use tracing::info;
 
 pub struct DashMapImmutableUTXOStore {
     /// Map of UTXOs
@@ -13,7 +16,8 @@ pub struct DashMapImmutableUTXOStore {
 }
 
 impl DashMapImmutableUTXOStore {
-    pub fn new() -> Self { 
+    pub fn new(_config: Arc<Config>) -> Self { 
+        info!("Storing immutable UTXOs in memory (DashMap)");
         Self {
             utxos: DashMap::new()
         }

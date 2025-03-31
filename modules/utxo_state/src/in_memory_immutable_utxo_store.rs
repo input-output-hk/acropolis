@@ -5,6 +5,9 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use tokio::sync::RwLock;
 use anyhow::Result;
+use config::Config;
+use std::sync::Arc;
+use tracing::info;
 
 pub struct InMemoryImmutableUTXOStore {
     /// Map of UTXOs
@@ -12,7 +15,9 @@ pub struct InMemoryImmutableUTXOStore {
 }
 
 impl InMemoryImmutableUTXOStore {
-    pub fn new() -> Self { 
+    pub fn new(_config: Arc<Config>) -> Self {
+        info!("Storing immutable UTXOs in memory (standard)");
+ 
         Self {
             utxos: RwLock::new(HashMap::new())
         }

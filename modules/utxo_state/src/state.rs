@@ -394,6 +394,7 @@ mod tests {
     use acropolis_common::ByronAddress;
     use tokio::sync::Mutex;
     use crate::InMemoryImmutableUTXOStore;
+    use config::Config;
 
     // Create an address for testing - we use Byron just because it's easier to
     // create and test the payload
@@ -404,7 +405,8 @@ mod tests {
     }
 
     fn new_state() -> State {
-        State::new(Arc::new(InMemoryImmutableUTXOStore::new()))
+        let config = Arc::new(Config::builder().build().unwrap());
+        State::new(Arc::new(InMemoryImmutableUTXOStore::new(config)))
     }
 
     #[tokio::test]
