@@ -37,7 +37,9 @@ impl FjallAsyncImmutableUTXOStore {
             fs::remove_dir_all(path)?;
         }
     
-        let keyspace = fjall::Config::new(path).open()?;
+        let mut fjall_config = fjall::Config::new(path);
+        fjall_config = fjall_config.manual_journal_persist(true); // We're in control of flushing
+        let keyspace = fjall_config.open()?;
         let partition = keyspace.open_partition(PARTITION_NAME,
             PartitionCreateOptions::default())?;
 
