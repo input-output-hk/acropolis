@@ -31,6 +31,8 @@ mod fjall_immutable_utxo_store;
 use fjall_immutable_utxo_store::FjallImmutableUTXOStore;
 mod fjall_async_immutable_utxo_store;
 use fjall_async_immutable_utxo_store::FjallAsyncImmutableUTXOStore;
+mod fake_immutable_utxo_store;
+use fake_immutable_utxo_store::FakeImmutableUTXOStore;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.utxo.deltas";
 const DEFAULT_STORE: &str = "memory";
@@ -73,6 +75,9 @@ impl UTXOState
             }
             "fjall-async" => {
                 Arc::new(FjallAsyncImmutableUTXOStore::new(config.clone())?)
+            }
+            "fake" => {
+                Arc::new(FakeImmutableUTXOStore::new(config.clone()))
             }
             _ => return Err(anyhow!("Unknown store type {store_type}"))
         };
