@@ -169,7 +169,7 @@ mod tests {
     async fn messages_in_order_pass_through() {
         let handler = Arc::new(Mutex::new(MockMessageHandler::new()));
         let handler2 = handler.clone();
-        let mut serialiser = Serialiser::new(handler, "test");
+        let mut serialiser = Serialiser::new(handler, "test", 0);
 
         let message0 = TestMessage { index: 0 };
         serialiser.handle_message(0, &message0).await.unwrap();
@@ -192,16 +192,16 @@ mod tests {
     async fn messages_out_of_order_are_reordered() {
         let handler = Arc::new(Mutex::new(MockMessageHandler::new()));
         let handler2 = handler.clone();
-        let mut serialiser = Serialiser::new(handler, "test");
+        let mut serialiser = Serialiser::new(handler, "test", 42);
 
         let message1 = TestMessage { index: 1 };
-        serialiser.handle_message(1, &message1).await.unwrap();
+        serialiser.handle_message(43, &message1).await.unwrap();
 
         let message0 = TestMessage { index: 0 };
-        serialiser.handle_message(0, &message0).await.unwrap();
+        serialiser.handle_message(42, &message0).await.unwrap();
 
         let message2 = TestMessage { index: 2 };
-        serialiser.handle_message(2, &message2).await.unwrap();
+        serialiser.handle_message(44, &message2).await.unwrap();
 
         let handler = handler2.lock().await;
         assert_eq!(3, handler.received.len());
