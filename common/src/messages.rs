@@ -5,9 +5,9 @@
 
 use crate::types::*;
 
-// Caryatid core messages
-use caryatid_sdk::messages::{
-    ClockTickMessage,
+// Caryatid core messages which we re-export
+pub use caryatid_module_clock::messages::ClockTickMessage;
+pub use caryatid_module_rest_server::messages::{
     RESTRequest,
     RESTResponse,
     GetRESTResponse

@@ -2,9 +2,8 @@
 //! Accepts certificate events and derives the SPO state in memory
 
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
-use caryatid_sdk::messages::RESTResponse;
 use acropolis_common::{
-    messages::Message,
+    messages::{Message, RESTResponse},
     Serialiser,
 };
 use std::ops::Deref;
@@ -105,7 +104,8 @@ impl SPOState
                     }
                 };
 
-                Arc::new(Message::RESTResponse(RESTResponse { code, body }))
+                Arc::new(Message::RESTResponse(RESTResponse { code, body,
+                                                              content_type: None }))
             }
         })?;
 
