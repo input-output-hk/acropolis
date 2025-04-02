@@ -3,8 +3,9 @@
 
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
 use acropolis_common::{
-    messages::{Message, TxCertificatesMessage, UTXODeltasMessage}, Address, AddressNetwork, ByronAddress, GenesisKeyDelegation, InstantaneousRewardSource, InstantaneousRewardTarget, MoveInstantaneosReward, MultiHostName, PoolMetadata, PoolRegistration, PoolRetirement, Ratio, Relay, ShelleyAddress, ShelleyAddressDelegationPart, ShelleyAddressPaymentPart, ShelleyAddressPointer, SingleHostAddr, SingleHostName, StakeAddress, StakeAddressPayload, StakeCredential, StakeDelegation, TxCertificate, TxInput, TxOutput, UTXODelta
+    messages::{Message, TxCertificatesMessage, UTXODeltasMessage}, *
 };
+
 use std::sync::Arc;
 use anyhow::Result;
 use config::Config;
@@ -266,7 +267,55 @@ impl TxUnpacker
                                     epoch: *epoch
                                 })),
 
-                    // TODO Governance certs
+                    conway::Certificate::Reg(cred, coin) =>
+                                Ok(TxCertificate::Registration(Registration {
+                                    credential: Self::map_stake_credential(cred),
+                                    deposit: *coin,
+                                })),
+
+                    conway::Certificate::UnReg(cred, coin) =>
+                                Ok(TxCertificate::Deregistration(Deregistration {
+                                    credential: Self::map_stake_credential(cred),
+                                    refund: *coin,
+                                })),
+
+                    // TODO VoteDeleg
+                    // TODO StakeVoteDeleg
+                    // TODO VoteRegDeleg
+                    // TODO StakeVoteRegDeleg
+                    // TODO AuthCommitteeHot
+                    // TODO ResignCommitteeCold
+
+                    conway::Certificate::RegDRepCert(cred, coin, anchor) =>
+                                Ok(TxCertificate::DRepRegistration(DRepRegistration {
+                                    credential: Self::map_stake_credential(cred),
+                                    deposit: *coin,
+                                    anchor: match anchor {
+                                        Nullable::Some(a) => Some(Anchor {
+                                            url: a.url.clone(),
+                                            data_hash: a.content_hash.to_vec(),
+                                        }),
+                                        _ => None
+                                    }
+                                })),
+
+                    conway::Certificate::UnRegDRepCert(cred, coin) =>
+                                Ok(TxCertificate::DRepDeregistration(DRepDeregistration {
+                                    credential: Self::map_stake_credential(cred),
+                                    refund: *coin,
+                                })),
+
+                    conway::Certificate::UpdateDRepCert(cred, anchor) =>
+                                Ok(TxCertificate::DRepUpdate(DRepUpdate {
+                                    credential: Self::map_stake_credential(cred),
+                                    anchor: match anchor {
+                                        Nullable::Some(a) => Some(Anchor {
+                                            url: a.url.clone(),
+                                            data_hash: a.content_hash.to_vec(),
+                                        }),
+                                        _ => None
+                                    }
+                                })),
 
                     _ => Err(anyhow!("Unhandled Conway certificate type {:?}", cert))
                 }
