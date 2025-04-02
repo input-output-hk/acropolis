@@ -87,7 +87,7 @@ impl SPOState
                     }
                 };
 
-                Arc::new(Message::RESTResponse(RESTResponse { code, body, content_type: Some(content_type.to_string()) }))
+                Arc::new(Message::RESTResponse(RESTResponse::new(code, &body, content_type)))
             }
         })?;
 
@@ -126,7 +126,7 @@ impl SPOState
                     }
                 };
 
-                Arc::new(Message::RESTResponse(RESTResponse { code, body, content_type: Some(content_type.to_string()) }))
+                Arc::new(Message::RESTResponse(RESTResponse::new(code, &body, content_type)))
             }
         })?;
 
