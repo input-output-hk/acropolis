@@ -72,22 +72,22 @@ impl SPOState
         context.message_bus.handle(&handle_topic, move |message: Arc<Message>| {
             let state = state_handle_full.clone();
             async move {
-                let (code, body, content_type) = match message.as_ref() {
+                let response = match message.as_ref() {
                     Message::RESTRequest(request) => {
                         info!("REST received {} {}", request.method, request.path);
                         let lock = state.lock().await;
                         match serde_json::to_string(lock.deref()) {
-                            Ok(body) => (200, body, "application/json"),
-                            Err(error) => (500, format!("{error:?}"), "text"),
+                            Ok(body) => RESTResponse::with_json(200, &body),
+                            Err(error) => RESTResponse::with_text(500, &format!("{error:?}").to_string()),
                         }
                     },
                     _ => {
                         error!("Unexpected message type {:?}", message);
-                        (500, "Unexpected message in REST request".to_string(), "text")
+                        RESTResponse::with_text(500, "Unexpected message in REST request")
                     }
                 };
 
-                Arc::new(Message::RESTResponse(RESTResponse::new(code, &body, content_type)))
+                Arc::new(Message::RESTResponse(response))
             }
         })?;
 
@@ -97,36 +97,33 @@ impl SPOState
         context.message_bus.handle(&handle_topic_single, move |message: Arc<Message>| {
             let state = state_handle_single.clone();
             async move {
-                let (code, body, content_type) = match message.as_ref() {
+                let response = match message.as_ref() {
                     Message::RESTRequest(request) => {
                         info!("REST received {} {}", request.method, request.path);
-                        match request.path_elements.len() {
-                            2 => {
-                                let id = &request.path_elements[1];
-                                match hex::decode(&id) {
-                                    Ok(id) => {
-                                        let lock = state.lock().await;
-                                        match lock.deref().get(&id) {
-                                            Some(spo) => match serde_json::to_string(&spo) {
-                                                Ok(body) => (200, body, "application/json"),
-                                                Err(error) => (500, format!("{error:?}"), "text"),
-                                            },
-                                            None => (404, "SPO not found".to_string(), "text"),
-                                        }
-                                    },
-                                    Err(error) => (400, format!("SPO id must be hex encoded vector of bytes: {error:?}"), "text"),
-                                }
+                        match request.path_elements.get(1) {
+                            Some(id) => match hex::decode(&id) {
+                                Ok(id) => {
+                                    let lock = state.lock().await;
+                                    match lock.deref().get(&id) {
+                                        Some(spo) => match serde_json::to_string(&spo) {
+                                            Ok(body) => RESTResponse::with_json(200, &body),
+                                            Err(error) => RESTResponse::with_text(500, &format!("{error:?}").to_string()),
+                                        },
+                                        None => RESTResponse::with_text(404, "SPO not found"),
+                                    }
+                                },
+                                Err(error) => RESTResponse::with_text(400, &format!("SPO operator id must be hex encoded vector of bytes: {error:?}").to_string()),
                             },
-                            _ => (400, "Bad request".to_string(), "text"),
+                            None => RESTResponse::with_text(400, "SPO operator id must be provided"),
                         }
                     },
                     _ => {
                         error!("Unexpected message type {:?}", message);
-                        (500, "Unexpected message in REST request".to_string(), "text")
+                        RESTResponse::with_text(500, "Unexpected message in REST request")
                     }
                 };
 
-                Arc::new(Message::RESTResponse(RESTResponse::new(code, &body, content_type)))
+                Arc::new(Message::RESTResponse(response))
             }
         })?;
 
