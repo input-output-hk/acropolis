@@ -11,7 +11,7 @@ license = "Apache-2.0"
 caryatid_process = "0.4"
 caryatid_sdk = "0.4"
 caryatid_module_clock = "0.4"
-caryatid_module_rest_server = "0.4"
+caryatid_module_rest_server = "0.5"
 caryatid_module_spy = "0.4"
 
 # Core message definition
