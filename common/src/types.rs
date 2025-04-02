@@ -206,6 +206,9 @@ impl Default for UTXODelta {
 /// Key hash used for pool IDs etc.
 pub type KeyHash = Vec<u8>;
 
+/// Data hash used for metadata, anchors (SHA256)
+pub type DataHash = Vec<u8>;
+
 /// Amount of Ada, in Lovelace
 pub type Lovelace = u64;
 
@@ -216,10 +219,10 @@ pub struct Ratio {
     pub denominator: u64,
 }
 
-/// Stake credential
+/// General credential
 #[derive(Debug, Clone, Ord, Eq, PartialEq, PartialOrd, Hash,
         serde::Serialize, serde::Deserialize)]
-pub enum StakeCredential {
+pub enum Credential {
     /// Address key hash
     AddrKeyHash(KeyHash),
 
@@ -230,6 +233,8 @@ pub enum StakeCredential {
 impl Default for StakeCredential {
     fn default() -> Self { Self::AddrKeyHash(Vec::new()) }
 }
+
+pub type StakeCredential = Credential;
 
 /// Relay single host address
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
@@ -282,7 +287,7 @@ pub struct PoolMetadata {
 
     /// Metadata hash
     #[serde_as(as = "Hex")]
-    pub hash: KeyHash,
+    pub hash: DataHash,
 }
 
 /// Pool registration data
@@ -386,6 +391,160 @@ pub struct MoveInstantaneosReward {
     pub target: InstantaneousRewardTarget,
 }
 
+/// Register stake (Conway version) = 'reg_cert'
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Registration {
+    /// Stake credential
+    pub credential: StakeCredential,
+
+    /// Deposit paid
+    pub deposit: Lovelace,
+}
+
+/// Deregister stake (Conway version) = 'unreg_cert'
+ #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Deregistration {
+    /// Stake credential
+    pub credential: StakeCredential,
+
+    /// Deposit to be refunded
+    pub refund: Lovelace,
+}
+
+/// DRepChoice (=CDDL drep, badly named)
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum DRepChoice {
+    /// Address key
+    Key(KeyHash),
+
+    /// Script key
+    Script(KeyHash),
+
+    /// Abstain
+    Abstain,
+
+    /// No confidence
+    NoConfidence,
+}
+
+impl Default for DRepChoice {
+    fn default() -> Self { Self::Abstain }
+}
+
+/// Vote delegation (simple, existing registration) = vote_deleg_cert
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct VoteDelegation {
+    /// Stake credential
+    credential: StakeCredential,
+
+    // DRep choice
+    drep: DRepChoice,
+}
+
+/// Stake+vote delegation (to SPO and DRep) = stake_vote_deleg_cert
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StakeAndVoteDelegation {
+    /// Stake credential
+    credential: StakeCredential,
+
+    /// Pool
+    pub operator: KeyHash,
+   
+    // DRep vote
+    drep: DRepChoice,
+}
+
+/// Stake delegation to SPO + registration = stake_reg_deleg_cert
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StakeRegistrationAndDelegation {
+    /// Stake credential
+    credential: StakeCredential,
+
+    /// Pool
+    pub operator: KeyHash,
+   
+    // Deposit paid
+    pub deposit: Lovelace,
+}
+
+/// Vote delegation to DRep + registration = vote_reg_deleg_cert
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StakeRegistrationAndVoteDelegation {
+    /// Stake credential
+    credential: StakeCredential,
+
+    /// DRep choice
+    pub drep: DRepChoice,
+   
+    // Deposit paid
+    pub deposit: Lovelace,
+}
+
+/// All the trimmings: 
+/// Vote delegation to DRep + Stake delegation to SPO + registration
+/// = stake_vote_reg_deleg_cert
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StakeRegistrationAndStakeAndVoteDelegation {
+    /// Stake credential
+    credential: StakeCredential,
+
+    /// Pool
+    pub operator: KeyHash,
+   
+    /// DRep choice
+    pub drep: DRepChoice,
+   
+    // Deposit paid
+    pub deposit: Lovelace,
+}
+
+/// Anchor
+#[serde_as]
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Anchor {
+    /// Metadata URL
+    pub url: String,
+
+    /// Metadata hash
+    #[serde_as(as = "Hex")]
+    pub data_hash: DataHash,
+}
+
+pub type DRepCredential = Credential;
+
+/// DRep Registration = reg_drep_cert
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DRepRegistration {
+    /// DRep credential
+    pub credential: DRepCredential,
+
+    /// Deposit paid
+    pub deposit: Lovelace,
+
+    /// Optional anchor
+    pub anchor: Option<Anchor>,
+}
+
+/// DRep Deregistration = unreg_drep_cert
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DRepDeregistration {
+    /// DRep credential
+    pub credential: DRepCredential,
+
+    /// Deposit to refund
+    pub refund: Lovelace,
+}
+
+/// DRep Update = update_drep_cert
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DRepUpdate {
+    /// DRep credential
+    pub credential: DRepCredential,
+
+    /// Optional anchor
+    pub anchor: Option<Anchor>,
+}
+
 /// Certificate in a transaction
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum TxCertificate {
@@ -412,4 +571,20 @@ pub enum TxCertificate {
 
     /// Move instantaneous rewards
     MoveInstantaneousReward(MoveInstantaneosReward),
+
+    /// New stake registration
+    Registration(Registration),
+
+    /// New stake deregistration
+    Deregistration(Deregistration),
+
+    /// DRep registration
+    DRepRegistration(DRepRegistration),
+
+    /// DRep deregistration
+    DRepDeregistration(DRepDeregistration),
+
+    /// DRep update
+    DRepUpdate(DRepUpdate),
+
 }
