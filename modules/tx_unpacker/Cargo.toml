@@ -9,7 +9,7 @@ description = "Transaction unpacker Caryatid module for Acropolis"
 license = "Apache-2.0"
 
 [dependencies]
-caryatid_sdk = "0.2.0"
+caryatid_sdk = "0.4.0"
 acropolis_common = { path = "../../common" }
 pallas = "0.32.0"
 anyhow = "1.0"

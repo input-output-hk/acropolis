@@ -19,7 +19,8 @@ publish-utxo-deltas-topic = "cardano.utxo.deltas"
 publish-certificates-topic = "cardano.certificates"
 
 [module.utxo-state]
-store = "memory"  # or "dashmap", "fjall", "fjall-async", "sled", "sled-async"
+store = "fake" # "memory", "dashmap", "fjall", "fjall-async", "sled", "sled-async", "fake"
+# delay = 10
 address-delta-topic = "cardano.address.delta"
 
 [module.spo-state]
@@ -45,8 +46,8 @@ exchange = "caryatid"
 [message-bus.internal]
 class = "in-memory"
 workers = 50
-dispatch-queue-size = 10000
-worker-queue-size = 1000
+dispatch-queue-size = 1000
+worker-queue-size = 100
 bulk-block-capacity = 50
 bulk-resume-capacity = 75
 
