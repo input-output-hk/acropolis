@@ -8,7 +8,7 @@ use acropolis_common::{
 use anyhow::Result;
 use async_trait::async_trait;
 use std::collections::HashMap;
-use tracing::info;
+use tracing::{error, info};
 use serde_with::{serde_as, hex::Hex};
 
 #[serde_as]
@@ -47,8 +47,11 @@ impl SerialisedMessageHandler<TxCertificatesMessage> for State {
                 TxCertificate::PoolRegistration(reg) => {
                     self.spos.insert(reg.operator.clone(), reg.clone());
                 }
-                TxCertificate::PoolRetirement(reg) => {
-                    self.spos.remove(&reg.operator);
+                TxCertificate::PoolRetirement(ret) => {
+                    match self.spos.remove(&ret.operator) {
+                        None => error!("Retirement requested for unregistered SPO {}", hex::encode(&ret.operator)),
+                        _ => (),
+                    };
                 }
                 _ => ()
             }
