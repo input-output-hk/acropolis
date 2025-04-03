@@ -112,6 +112,16 @@ impl TxUnpacker
         }
     }
 
+    /// Map an Anchor to ours
+    fn map_anchor(anchor: &Nullable<conway::Anchor>) -> Option<Anchor> {
+        match anchor {
+            Nullable::Some(a) => Some(Anchor {
+                url: a.url.clone(),
+                data_hash: a.content_hash.to_vec(),
+            }),
+            _ => None 
+        }
+    }
     /// Map a Pallas Relay to ours
     fn map_relay(relay: &PallasRelay) -> Relay {
         match relay {
@@ -327,20 +337,23 @@ impl TxUnpacker
                                         deposit: *coin,
                                 })),
 
-                    // TODO AuthCommitteeHot
-                    // TODO ResignCommitteeCold
+                    conway::Certificate::AuthCommitteeHot(cold_cred, hot_cred) =>
+                                Ok(TxCertificate::AuthCommitteeHot(AuthCommitteeHot { 
+                                    cold_credential: Self::map_stake_credential(cold_cred), 
+                                    hot_credential: Self::map_stake_credential(hot_cred), 
+                                })),
+
+                    conway::Certificate::ResignCommitteeCold(cold_cred, anchor) =>
+                                Ok(TxCertificate::ResignCommitteeCold(ResignCommitteeCold { 
+                                    cold_credential: Self::map_stake_credential(cold_cred), 
+                                    anchor: Self::map_anchor(&anchor)
+                                })),
 
                     conway::Certificate::RegDRepCert(cred, coin, anchor) =>
                                 Ok(TxCertificate::DRepRegistration(DRepRegistration {
                                     credential: Self::map_stake_credential(cred),
                                     deposit: *coin,
-                                    anchor: match anchor {
-                                        Nullable::Some(a) => Some(Anchor {
-                                            url: a.url.clone(),
-                                            data_hash: a.content_hash.to_vec(),
-                                        }),
-                                        _ => None
-                                    }
+                                    anchor: Self::map_anchor(&anchor),
                                 })),
 
                     conway::Certificate::UnRegDRepCert(cred, coin) =>
@@ -352,16 +365,8 @@ impl TxUnpacker
                     conway::Certificate::UpdateDRepCert(cred, anchor) =>
                                 Ok(TxCertificate::DRepUpdate(DRepUpdate {
                                     credential: Self::map_stake_credential(cred),
-                                    anchor: match anchor {
-                                        Nullable::Some(a) => Some(Anchor {
-                                            url: a.url.clone(),
-                                            data_hash: a.content_hash.to_vec(),
-                                        }),
-                                        _ => None
-                                    }
+                                    anchor: Self::map_anchor(&anchor),
                                 })),
-
-                    _ => Err(anyhow!("Unhandled Conway certificate type {:?}", cert))
                 }
             }
 

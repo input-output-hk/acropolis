@@ -551,6 +551,28 @@ pub struct DRepUpdate {
     pub anchor: Option<Anchor>,
 }
 
+type CommitteeCredential = Credential;
+
+/// Authorise a committee hot credential
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AuthCommitteeHot {
+    /// Cold credential
+    pub cold_credential: CommitteeCredential,
+
+    /// Hot credential
+    pub hot_credential: CommitteeCredential,
+}
+
+/// Resign a committee cold credential
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ResignCommitteeCold {
+    /// Cold credential
+    pub cold_credential: CommitteeCredential,
+
+    /// Associated anchor (reasoning?)
+    pub anchor: Option<Anchor>,
+}
+
 /// Certificate in a transaction
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum TxCertificate {
@@ -599,6 +621,12 @@ pub enum TxCertificate {
     /// Stake registration and combined SPO and vote delegation
     StakeRegistrationAndStakeAndVoteDelegation(StakeRegistrationAndStakeAndVoteDelegation),
 
+    /// Authorise a committee hot credential
+    AuthCommitteeHot(AuthCommitteeHot),
+
+    /// Resign a committee cold credential
+    ResignCommitteeCold(ResignCommitteeCold),
+
     /// DRep registration
     DRepRegistration(DRepRegistration),
 
@@ -607,5 +635,4 @@ pub enum TxCertificate {
 
     /// DRep update
     DRepUpdate(DRepUpdate),
-
 }
