@@ -441,30 +441,30 @@ impl Default for DRepChoice {
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct VoteDelegation {
     /// Stake credential
-    credential: StakeCredential,
+    pub credential: StakeCredential,
 
     // DRep choice
-    drep: DRepChoice,
+    pub drep: DRepChoice,
 }
 
 /// Stake+vote delegation (to SPO and DRep) = stake_vote_deleg_cert
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StakeAndVoteDelegation {
     /// Stake credential
-    credential: StakeCredential,
+    pub credential: StakeCredential,
 
     /// Pool
     pub operator: KeyHash,
    
     // DRep vote
-    drep: DRepChoice,
+    pub drep: DRepChoice,
 }
 
 /// Stake delegation to SPO + registration = stake_reg_deleg_cert
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StakeRegistrationAndDelegation {
     /// Stake credential
-    credential: StakeCredential,
+    pub credential: StakeCredential,
 
     /// Pool
     pub operator: KeyHash,
@@ -477,7 +477,7 @@ pub struct StakeRegistrationAndDelegation {
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StakeRegistrationAndVoteDelegation {
     /// Stake credential
-    credential: StakeCredential,
+    pub credential: StakeCredential,
 
     /// DRep choice
     pub drep: DRepChoice,
@@ -492,7 +492,7 @@ pub struct StakeRegistrationAndVoteDelegation {
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StakeRegistrationAndStakeAndVoteDelegation {
     /// Stake credential
-    credential: StakeCredential,
+    pub credential: StakeCredential,
 
     /// Pool
     pub operator: KeyHash,
@@ -581,8 +581,23 @@ pub enum TxCertificate {
     /// New stake registration
     Registration(Registration),
 
-    /// New stake deregistration
+    /// Stake deregistration
     Deregistration(Deregistration),
+
+    /// Vote delegation
+    VoteDelegation(VoteDelegation),
+
+    /// Combined stake and vote delegation
+    StakeAndVoteDelegation(StakeAndVoteDelegation),
+
+    /// Stake registration and SPO delegation
+    StakeRegistrationAndDelegation(StakeRegistrationAndDelegation),
+
+    /// Stake registration and vote delegation
+    StakeRegistrationAndVoteDelegation(StakeRegistrationAndVoteDelegation),
+
+    /// Stake registration and combined SPO and vote delegation
+    StakeRegistrationAndStakeAndVoteDelegation(StakeRegistrationAndStakeAndVoteDelegation),
 
     /// DRep registration
     DRepRegistration(DRepRegistration),
