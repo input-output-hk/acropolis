@@ -2,9 +2,12 @@ name: Run test coverage report on push to main
 
 on:
   push:
-    branches: [ $default-branch ]
+    branches:
+      - main
+
   pull_request:
-    branches: [ $default-branch ]
+    branches:
+      - main
 
 env:
   CARGO_TERM_COLOR: always
