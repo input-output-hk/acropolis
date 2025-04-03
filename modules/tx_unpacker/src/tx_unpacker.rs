@@ -102,6 +102,16 @@ impl TxUnpacker
         }
     }
 
+    /// Map a Pallas DRep to our DRepChoice
+    fn map_drep(drep: &conway::DRep) -> DRepChoice {
+        match drep {
+            conway::DRep::Key(key_hash) => DRepChoice::Key(key_hash.to_vec()),
+            conway::DRep::Script(script_hash) => DRepChoice::Script(script_hash.to_vec()),
+            conway::DRep::Abstain => DRepChoice::Abstain,
+            conway::DRep::NoConfidence => DRepChoice::NoConfidence,
+        }
+    }
+
     /// Map a Pallas Relay to ours
     fn map_relay(relay: &PallasRelay) -> Relay {
         match relay {
@@ -279,10 +289,44 @@ impl TxUnpacker
                                     refund: *coin,
                                 })),
 
-                    // TODO VoteDeleg
-                    // TODO StakeVoteDeleg
-                    // TODO VoteRegDeleg
-                    // TODO StakeVoteRegDeleg
+                    conway::Certificate::VoteDeleg(cred, drep) =>
+                                Ok(TxCertificate::VoteDelegation(VoteDelegation {
+                                    credential: Self::map_stake_credential(cred),
+                                    drep: Self::map_drep(drep),
+                                })),
+
+                    conway::Certificate::StakeVoteDeleg(cred, pool_key_hash, drep) =>
+                                Ok(TxCertificate::StakeAndVoteDelegation(StakeAndVoteDelegation {
+                                    credential: Self::map_stake_credential(cred),
+                                    operator: pool_key_hash.to_vec(),
+                                    drep: Self::map_drep(drep),
+                                })),
+
+                    conway::Certificate::StakeRegDeleg(cred, pool_key_hash, coin) =>
+                                Ok(TxCertificate::StakeRegistrationAndDelegation(
+                                    StakeRegistrationAndDelegation {
+                                        credential: Self::map_stake_credential(cred),
+                                        operator: pool_key_hash.to_vec(),
+                                        deposit: *coin,
+                                })),
+
+                    conway::Certificate::VoteRegDeleg(cred, drep, coin) =>
+                                Ok(TxCertificate::StakeRegistrationAndVoteDelegation(
+                                    StakeRegistrationAndVoteDelegation {
+                                        credential: Self::map_stake_credential(cred),
+                                        drep: Self::map_drep(drep),
+                                        deposit: *coin,
+                                })),
+
+                    conway::Certificate::StakeVoteRegDeleg(cred, pool_key_hash, drep, coin) =>
+                                Ok(TxCertificate::StakeRegistrationAndStakeAndVoteDelegation(
+                                    StakeRegistrationAndStakeAndVoteDelegation {
+                                        credential: Self::map_stake_credential(cred),
+                                        operator: pool_key_hash.to_vec(),
+                                        drep: Self::map_drep(drep),
+                                        deposit: *coin,
+                                })),
+
                     // TODO AuthCommitteeHot
                     // TODO ResignCommitteeCold
 
