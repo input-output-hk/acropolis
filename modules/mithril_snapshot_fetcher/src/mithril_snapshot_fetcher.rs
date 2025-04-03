@@ -3,14 +3,9 @@
 
 use caryatid_sdk::{Context, Module, module, MessageBusExt, message_bus::QoS};
 use acropolis_common::{
-    BlockInfo,
-    BlockStatus,    
-    messages::{
-        BlockHeaderMessage,
-        BlockBodyMessage,
-        SnapshotCompleteMessage,
-        Message,
-    }
+    calculations::slot_to_epoch, messages::{
+        BlockBodyMessage, BlockHeaderMessage, Message, SnapshotCompleteMessage
+    }, BlockInfo, BlockStatus
 };
 use std::sync::Arc;
 use tokio::{join, sync::Mutex};
@@ -184,6 +179,7 @@ impl MithrilSnapshotFetcher
 
         let blocks = hardano::immutable::read_blocks(&path)?;
         let mut last_block_number: u64 = 0;
+        let mut last_epoch: Option<u64> = None;
         let mut sequence = start_sequence;
         for raw_block in blocks {
             match raw_block {
@@ -206,15 +202,24 @@ impl MithrilSnapshotFetcher
                     }
                     last_block_number = number;
 
-                    if number % 100000 == 0 {
-                        info!("Read block number {}, slot {}", number, slot);
+                    let epoch = slot_to_epoch(slot);
+                    let new_epoch = match last_epoch {
+                        Some(last_epoch) => epoch != last_epoch,
+                        None => true
+                    };
+                    last_epoch = Some(epoch);
+
+                    if new_epoch {
+                        info!(epoch, number, slot, "New epoch");
                     }
 
                     let block_info = BlockInfo {
                         status: BlockStatus::Immutable,
                         slot,
                         number,
-                        hash: block.hash().to_vec()
+                        hash: block.hash().to_vec(),
+                        epoch,
+                        new_epoch,
                     };
 
                     // Send the block header message

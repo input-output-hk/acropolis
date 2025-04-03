@@ -404,6 +404,16 @@ mod tests {
         })
     }
 
+    // Create a block for testing
+    fn create_block(status: BlockStatus, slot: u64, number: u64) -> BlockInfo {
+        BlockInfo {
+            status, slot, number,
+            hash: vec!(),
+            epoch: 99,
+            new_epoch: false,
+        }
+    }
+
     fn new_state() -> State {
         let config = Arc::new(Config::builder().build().unwrap());
         State::new(Arc::new(InMemoryImmutableUTXOStore::new(config)))
@@ -429,13 +439,7 @@ mod tests {
            value: 42,
         };
 
-        let block = BlockInfo {
-            status: BlockStatus::Immutable,
-            slot: 1,
-            number: 1,
-            hash: vec!(),
-        };
-
+        let block = create_block(BlockStatus::Immutable, 1, 1);
         state.observe_output(&output, &block).await.unwrap();
         assert_eq!(1, state.immutable_utxos.len().await.unwrap());
         assert_eq!(1, state.count_valid_utxos().await);
@@ -462,13 +466,7 @@ mod tests {
             value: 42,
         };
 
-        let block1 = BlockInfo {
-            status: BlockStatus::Immutable,
-            slot: 1,
-            number: 1,
-            hash: vec!(),
-        };
-
+        let block1 = create_block(BlockStatus::Immutable, 1, 1);
         state.observe_output(&output, &block1).await.unwrap();
         assert_eq!(1, state.immutable_utxos.len().await.unwrap());
         assert_eq!(1, state.count_valid_utxos().await);
@@ -479,13 +477,7 @@ mod tests {
         };
 
 
-        let block2 = BlockInfo {
-            status: BlockStatus::Immutable,
-            slot: 2,
-            number: 2,
-            hash: vec!(),
-        };
-
+        let block2 = create_block(BlockStatus::Immutable, 2, 2);
         state.observe_input(&input, &block2).await.unwrap();
         assert_eq!(0, state.immutable_utxos.len().await.unwrap());
         assert_eq!(0, state.count_valid_utxos().await);
@@ -501,25 +493,13 @@ mod tests {
             value: 42,
         };
 
-        let block10 = BlockInfo {
-            status: BlockStatus::Volatile,
-            slot: 10,
-            number: 10,
-            hash: vec!(),
-        };
-
+        let block10 = create_block(BlockStatus::Volatile, 10, 10);
         state.observe_block(&block10).await.unwrap();
         state.observe_output(&output, &block10).await.unwrap();
         assert_eq!(1, state.volatile_utxos.len());
         assert_eq!(1, state.count_valid_utxos().await);
 
-        let block9 = BlockInfo {
-            status: BlockStatus::RolledBack,
-            slot: 200,
-            number: 9,
-            hash: vec!(),
-        };
-
+        let block9 = create_block(BlockStatus::RolledBack, 9, 9);
         state.observe_block(&block9).await.unwrap();
 
         assert_eq!(0, state.volatile_utxos.len());
@@ -538,13 +518,7 @@ mod tests {
             value: 42,
         };
 
-        let block10 = BlockInfo {
-            status: BlockStatus::Volatile,
-            slot: 10,
-            number: 10,
-            hash: vec!(),
-        };
-
+        let block10 = create_block(BlockStatus::Volatile, 10, 10);
         state.observe_block(&block10).await.unwrap();
         state.observe_output(&output, &block10).await.unwrap();
         assert_eq!(1, state.volatile_utxos.len());
@@ -556,26 +530,14 @@ mod tests {
             index: output.index,
         };
 
-        let block11 = BlockInfo {
-            status: BlockStatus::Volatile,
-            slot: 11,
-            number: 11,
-            hash: vec!(),
-        };
-
+        let block11 = create_block(BlockStatus::Volatile, 11, 11);
         state.observe_block(&block11).await.unwrap();
         state.observe_input(&input, &block11).await.unwrap();
         assert_eq!(1, state.volatile_utxos.len());
         assert_eq!(0, state.count_valid_utxos().await);
 
         // Roll back to 11
-        let block11_2= BlockInfo {
-            status: BlockStatus::RolledBack,
-            slot: 200,
-            number: 11,
-            hash: vec!(),
-        };
-
+        let block11_2 = create_block(BlockStatus::RolledBack, 11, 11);
         state.observe_block(&block11_2).await.unwrap();
 
         // Should be reinstated
@@ -593,13 +555,7 @@ mod tests {
             value: 42,
         };
 
-        let block1 = BlockInfo {
-            status: BlockStatus::Volatile,
-            slot: 1,
-            number: 1,
-            hash: vec!(),
-        };
-
+        let block1 = create_block(BlockStatus::Volatile, 1, 1);
         state.observe_block(&block1).await.unwrap();
         state.observe_output(&output, &block1).await.unwrap();
         assert_eq!(1, state.volatile_utxos.len());
@@ -612,13 +568,7 @@ mod tests {
         assert_eq!(0, state.immutable_utxos.len().await.unwrap());
 
         // Observe a block much later
-        let block = BlockInfo {
-            status: BlockStatus::Volatile,
-            slot: 23492,
-            number: 5483,
-            hash: vec!(),
-        };
-
+        let block = create_block(BlockStatus::Volatile, 23492, 5483);
         state.observe_block(&block).await.unwrap();
         assert_eq!(5483, state.last_number);
 
@@ -637,13 +587,7 @@ mod tests {
             value: 42,
         };
 
-        let block1 = BlockInfo {
-            status: BlockStatus::Volatile,
-            slot: 1,
-            number: 1,
-            hash: vec!(),
-        };
-
+        let block1 = create_block(BlockStatus::Volatile, 1, 1);
         state.observe_block(&block1).await.unwrap();
         state.observe_output(&output, &block1).await.unwrap();
         assert_eq!(1, state.volatile_utxos.len());
@@ -654,13 +598,7 @@ mod tests {
             index: output.index,
         };
 
-        let block2 = BlockInfo {
-            status: BlockStatus::Volatile,
-            slot: 2,
-            number: 2,
-            hash: vec!(),
-        };
-
+        let block2 = create_block(BlockStatus::Volatile, 2, 2);
         state.observe_block(&block2).await.unwrap();
         state.observe_input(&input, &block2).await.unwrap();
         assert_eq!(1, state.volatile_utxos.len());
@@ -671,13 +609,7 @@ mod tests {
         assert_eq!(1, state.volatile_utxos.len());
 
         // Observe a block much later
-        let block = BlockInfo {
-            status: BlockStatus::Volatile,
-            slot: 23492,
-            number: 5483,
-            hash: vec!(),
-        };
-
+        let block = create_block(BlockStatus::Volatile, 23492, 5483);
         state.observe_block(&block).await.unwrap();
         assert_eq!(5483, state.last_number);
 
@@ -727,13 +659,7 @@ mod tests {
             value: 42,
         };
 
-        let block1 = BlockInfo {
-            status: BlockStatus::Immutable,
-            slot: 1,
-            number: 1,
-            hash: vec!(),
-        };
-
+        let block1 = create_block(BlockStatus::Immutable, 1, 1);
         state.observe_output(&output, &block1).await.unwrap();
         assert_eq!(1, state.immutable_utxos.len().await.unwrap());
         assert_eq!(1, state.count_valid_utxos().await);
@@ -744,13 +670,7 @@ mod tests {
             index: output.index,
         };
 
-        let block2 = BlockInfo {
-            status: BlockStatus::Immutable,
-            slot: 2,
-            number: 2,
-            hash: vec!(),
-        };
-
+        let block2 = create_block(BlockStatus::Immutable, 2, 2);
         state.observe_input(&input, &block2).await.unwrap();
         assert_eq!(0, state.immutable_utxos.len().await.unwrap());
         assert_eq!(0, state.count_valid_utxos().await);
@@ -770,26 +690,14 @@ mod tests {
             value: 42,
         };
 
-        let block10 = BlockInfo {
-            status: BlockStatus::Volatile,
-            slot: 10,
-            number: 10,
-            hash: vec!(),
-        };
-
+        let block10 = create_block(BlockStatus::Volatile, 10, 10);
         state.observe_block(&block10).await.unwrap();
         state.observe_output(&output, &block10).await.unwrap();
         assert_eq!(1, state.volatile_utxos.len());
         assert_eq!(1, state.count_valid_utxos().await);
         assert_eq!(42, *observer.balance.lock().await);
 
-        let block9 = BlockInfo {
-            status: BlockStatus::RolledBack,
-            slot: 200,
-            number: 9,
-            hash: vec!(),
-        };
-
+        let block9 = create_block(BlockStatus::RolledBack, 200, 9);
         state.observe_block(&block9).await.unwrap();
 
         assert_eq!(0, state.volatile_utxos.len());
@@ -811,13 +719,7 @@ mod tests {
             value: 42,
         };
 
-        let block10 = BlockInfo {
-            status: BlockStatus::Volatile,
-            slot: 10,
-            number: 10,
-            hash: vec!(),
-        };
-
+        let block10 = create_block(BlockStatus::Volatile, 10, 10);
         state.observe_block(&block10).await.unwrap();
         state.observe_output(&output, &block10).await.unwrap();
         assert_eq!(1, state.volatile_utxos.len());
@@ -830,13 +732,7 @@ mod tests {
             index: output.index,
         };
 
-        let block11 = BlockInfo {
-            status: BlockStatus::Volatile,
-            slot: 11,
-            number: 11,
-            hash: vec!(),
-        };
-
+        let block11 = create_block(BlockStatus::Volatile, 11, 11);
         state.observe_block(&block11).await.unwrap();
         state.observe_input(&input, &block11).await.unwrap();
         assert_eq!(1, state.volatile_utxos.len());
@@ -844,13 +740,7 @@ mod tests {
         assert_eq!(0, *observer.balance.lock().await);
 
         // Roll back to 11
-        let block11_2= BlockInfo {
-            status: BlockStatus::RolledBack,
-            slot: 200,
-            number: 11,
-            hash: vec!(),
-        };
-
+        let block11_2 = create_block(BlockStatus::RolledBack, 200, 11);
         state.observe_block(&block11_2).await.unwrap();
 
         // Should be reinstated

@@ -64,6 +64,8 @@ impl GenesisBootstrapper
                             slot: 0,
                             number: 0,
                             hash: Vec::new(),
+                            epoch: 0,
+                            new_epoch: false
                         },
                         deltas: Vec::new(),
                     };

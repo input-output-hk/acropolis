@@ -32,6 +32,12 @@ pub struct BlockInfo {
 
     /// Block hash
     pub hash: Vec<u8>,
+
+    /// Epoch number
+    pub epoch: u64,
+
+    /// Does this block start a new epoch?
+    pub new_epoch: bool,
 }
 
 /// a Byron-era address
@@ -230,7 +236,7 @@ pub enum Credential {
     ScriptHash(KeyHash),
 }
 
-impl Default for StakeCredential {
+impl Default for Credential {
     fn default() -> Self { Self::AddrKeyHash(Vec::new()) }
 }
 

@@ -3,13 +3,9 @@
 
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
 use acropolis_common::{
-    BlockInfo,
-    BlockStatus,
-    messages::{
-        Message,
-        BlockHeaderMessage,
-        BlockBodyMessage,
-    },
+    calculations::slot_to_epoch, messages::{
+        BlockBodyMessage, BlockHeaderMessage, Message
+    }, BlockInfo, BlockStatus
 };
 use std::sync::Arc;
 use anyhow::{Result, anyhow};
@@ -56,12 +52,12 @@ impl UpstreamChainFetcher
         let topic = config.get_string("body-topic").unwrap_or(DEFAULT_BODY_TOPIC.to_string());
 
         // Fetch the block body
-        info!("Requesting single block {point:?}");
+        debug!("Requesting single block {point:?}");
         let body = peer.blockfetch().fetch_single(point.clone()).await;
 
         match body {
             Ok(body) => {
-                info!("Got block {point:?} body size {}", body.len());
+                info!(number=block_info.number, size=body.len(), "Fetched block");
 
                 // Construct message
                 let message = BlockBodyMessage {
@@ -100,6 +96,11 @@ impl UpstreamChainFetcher
         // Loop fetching messages
         let mut rolled_back = false;
         let mut sequence = next_sequence;
+        let mut last_epoch: Option<u64> = match slot {
+            0 => None,  // If we're starting from origin
+            _ => Some(slot_to_epoch(slot)), // From slot of last block
+        };
+
         loop {
             let next = my_peer.chainsync().request_or_await_next().await?;
 
@@ -120,9 +121,19 @@ impl UpstreamChainFetcher
                             let slot = header.slot();
                             let number = header.number();
                             let hash = header.hash().to_vec();
-                            info!("Header for slot {slot} number {number}");
+                            debug!("Header for slot {slot} number {number}");
 
-                            // Construct message
+                            let epoch = slot_to_epoch(slot);
+                            let new_epoch = match last_epoch {
+                                Some(last_epoch) => epoch != last_epoch,
+                                None => true
+                            };
+                            last_epoch = Some(epoch);
+        
+                            if new_epoch {
+                                info!(epoch, number, slot, "New epoch");
+                            }
+                                    // Construct message
                             let block_info = BlockInfo {
                                 status: if rolled_back 
                                             { BlockStatus::RolledBack }
@@ -131,6 +142,8 @@ impl UpstreamChainFetcher
                                 slot,
                                 number,
                                 hash: hash.clone(),
+                                epoch,
+                                new_epoch,
                             };
                             let message = BlockHeaderMessage {
                                 sequence,
