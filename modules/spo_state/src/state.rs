@@ -30,7 +30,7 @@ impl State {
     }
 
     async fn log_stats(&self) {
-        info!(number = self.spos.keys().len());
+        info!(num_spos = self.spos.keys().len());
     }
 
     pub async fn tick(&self) -> Result<()> {
