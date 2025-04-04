@@ -25,6 +25,7 @@ acropolis_module_block_unpacker = { path = "../../modules/block_unpacker" }
 acropolis_module_tx_unpacker = { path = "../../modules/tx_unpacker" }
 acropolis_module_utxo_state = { path = "../../modules/utxo_state" }
 acropolis_module_spo_state = { path = "../../modules/spo_state" }
+acropolis_module_drep_state = { path = "../../modules/drep_state" }
 
 anyhow = "1.0"
 config = "0.15.11"
@@ -34,4 +35,3 @@ tokio = { version = "1", features = ["full"] }
 serde = { version = "1.0.214", features = ["derive"] }
 serde_json = "1.0.132"
 chrono = "0.4.38"
-

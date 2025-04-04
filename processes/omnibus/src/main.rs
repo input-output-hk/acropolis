@@ -16,6 +16,7 @@ use acropolis_module_block_unpacker::BlockUnpacker;
 use acropolis_module_tx_unpacker::TxUnpacker;
 use acropolis_module_utxo_state::UTXOState;
 use acropolis_module_spo_state::SPOState;
+use acropolis_module_drep_state::DRepState;
 use caryatid_module_clock::Clock;
 use caryatid_module_rest_server::RESTServer;
 use caryatid_module_spy::Spy;
@@ -47,6 +48,7 @@ pub async fn main() -> Result<()> {
     TxUnpacker::register(&mut process);
     UTXOState::register(&mut process);
     SPOState::register(&mut process);
+    DRepState::register(&mut process);
 
     Clock::<Message>::register(&mut process);
     RESTServer::<Message>::register(&mut process);
