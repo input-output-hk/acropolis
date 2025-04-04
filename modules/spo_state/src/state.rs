@@ -11,17 +11,26 @@ use std::collections::HashMap;
 use tracing::{error, info};
 use serde_with::{serde_as, hex::Hex};
 
+const TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH: u64 = 18;
+
 #[serde_as]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct State {
+    epoch: u64,
+
     #[serde_as(as = "HashMap<Hex, _>")]
     spos: HashMap<Vec::<u8>, PoolRegistration>,
+
+    #[serde_as(as = "HashMap<_, Vec<Hex>>")]
+    pending_deregistrations: HashMap<u64, Vec<Vec<u8>>>,
 }
 
 impl State {
     pub fn new() -> Self {
         Self {
+            epoch: 0,
             spos: HashMap::<Vec::<u8>, PoolRegistration>::new(),
+            pending_deregistrations: HashMap::<u64, Vec::<Vec::<u8>>>::new(),
         }
     }
 
@@ -30,7 +39,10 @@ impl State {
     }
 
     async fn log_stats(&self) {
-        info!(num_spos = self.spos.keys().len());
+        info!(
+            num_spos = self.spos.keys().len(),
+            num_pending_deregistrations = self.pending_deregistrations.values().map(|d| d.len()).sum::<usize>(),
+        );
     }
 
     pub async fn tick(&self) -> Result<()> {
@@ -42,16 +54,42 @@ impl State {
 #[async_trait]
 impl SerialisedMessageHandler<TxCertificatesMessage> for State {
     async fn handle(&mut self, tx_cert_msg: &TxCertificatesMessage) -> Result<()> {
+        if tx_cert_msg.block.epoch > self.epoch {
+            self.epoch = tx_cert_msg.block.epoch;
+            let deregistrations = self.pending_deregistrations.remove(&self.epoch);
+            match deregistrations {
+                Some(deregistrations) => {
+                    for dr in deregistrations {
+                        match self.spos.remove(&dr) {
+                        None => error!("Retirement requested for unregistered SPO {}", hex::encode(&dr)),
+                        _ => (),
+                    };
+                    }
+                },
+                None => (),
+            };
+        }
         for tx_cert in tx_cert_msg.certificates.iter() {
             match tx_cert {
                 TxCertificate::PoolRegistration(reg) => {
                     self.spos.insert(reg.operator.clone(), reg.clone());
                 }
                 TxCertificate::PoolRetirement(ret) => {
-                    match self.spos.remove(&ret.operator) {
-                        None => error!("Retirement requested for unregistered SPO {}", hex::encode(&ret.operator)),
-                        _ => (),
-                    };
+                    if ret.epoch <= self.epoch {
+                        error!("SPO retirement received for current or past epoch {} for SPO {}", ret.epoch, hex::encode(&ret.operator));
+                    } else if ret.epoch > self.epoch + TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH {
+                        error!("SPO retirement received for epoch {} that exceeds future limit for SPO {}", ret.epoch, hex::encode(&ret.operator));
+                    } else {
+                        // Replace any existing queued deregistrations
+                        for (epoch, deregistrations) in &mut self.pending_deregistrations {
+                            let len = deregistrations.len();
+                            deregistrations.retain(|d| *d != ret.operator);
+                            if deregistrations.len() < len {
+                                info!("Removed pending deregistration of SPO {} from epoch {}", hex::encode(&ret.operator), epoch);
+                            }
+                        }
+                        self.pending_deregistrations.entry(ret.epoch).or_default().push(ret.operator.clone());
+                    }
                 }
                 _ => ()
             }
