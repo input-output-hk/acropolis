@@ -1,6 +1,7 @@
 //! Acropolis transaction unpacker module for Caryatid
 //! Unpacks transaction bodies into UTXO events
 
+use std::collections::HashMap;
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
 use acropolis_common::{
     messages::{Message, TxCertificatesMessage, UTXODeltasMessage}, *
@@ -19,7 +20,9 @@ use pallas::ledger::primitives::{
     Relay as PallasRelay,
     Nullable,
 };
+
 use anyhow::anyhow;
+use acropolis_common::messages::GovernanceProceduresMessage;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.txs";
 
@@ -372,9 +375,67 @@ impl TxUnpacker
 
             _ => Err(anyhow!("Unknown certificate era {:?} ignored", cert)),
         }
-
     }
 
+
+    fn map_governance_proposals_procedures(_prop: &conway::ProposalProcedure) -> Result<ProposalProcedure> {
+        /*
+        ProposalProcedure {
+            deposit: prop.deposit,
+            reward_account: vec![],
+            gov_action: prop.gov_action,
+            anchor: Self::map_anchor(&prop.anchor),
+        }
+         */
+        Err(anyhow!("Not implemented yet"))
+    }
+
+    fn map_voter(voter: &conway::Voter) -> Voter {
+        match voter {
+            conway::Voter::ConstitutionalCommitteeKey(key_hash) => Voter::ConstitutionalCommitteeKey(key_hash.to_vec()),
+            conway::Voter::ConstitutionalCommitteeScript(script_hash) => Voter::ConstitutionalCommitteeScript(script_hash.to_vec()),
+            conway::Voter::DRepKey(addr_key_hash) => Voter::DRepKey(addr_key_hash.to_vec()),
+            conway::Voter::DRepScript(script_hash) => Voter::DRepScript(script_hash.to_vec()),
+            conway::Voter::StakePoolKey(key_hash) => Voter::StakePoolKey(key_hash.to_vec())
+        }
+    }
+
+    fn map_gov_action_id(pallas_action_id: &conway::GovActionId) -> GovActionId {
+        GovActionId {
+            transaction_id: pallas_action_id.transaction_id.to_vec(),
+            action_index: pallas_action_id.action_index,
+        }
+    }
+
+    fn map_single_governance_voting_procedure(_proc: &conway::VotingProcedure) -> Result<VotingProcedure> {
+        Err(anyhow!("Not implemented yet"))
+    }
+
+    fn map_all_governance_voting_procedures(vote_procs: &conway::VotingProcedures) -> Result<VotingProcedures> {
+        let mut procs = VotingProcedures { votes: HashMap::new() };
+
+        for (pallas_voter,pallas_pair) in vote_procs.iter() {
+            let voter = Self::map_voter(pallas_voter);
+
+            if let Some(_x) = procs.votes.insert(voter.clone(), HashMap::new()) {
+                return Err(anyhow!("Duplicate voter {:?} in governance voting procedures: {:?}", voter, vote_procs));
+            }
+
+            let single_voter = procs.votes.get_mut(&voter)
+                .ok_or_else(|| anyhow!("Cannot find voter {:?}, which must present", voter))?;
+
+            for (pallas_action_id, voting_procedure) in pallas_pair.iter() {
+                let action_id = Self::map_gov_action_id(pallas_action_id);
+
+                match Self::map_single_governance_voting_procedure(&voting_procedure) {
+                    Ok(vp) => { single_voter.insert(action_id, vp); },
+                    Err(e) => return Err(e)
+                }
+            }
+        }
+
+        Ok(procs)
+    }
     /// Main init function
     pub fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
 
@@ -394,11 +455,17 @@ impl TxUnpacker
             info!("Publishing certificates on '{topic}'");
         }
 
+        let publish_governance_procedures_topic = config.get_string("publish-governance-topic").ok();
+        if let Some(ref topic) = publish_governance_procedures_topic {
+            info!("Publishing governance procedures on '{topic}'");
+        }
+
         context.clone().message_bus.subscribe(&subscribe_topic, move |message: Arc<Message>| {
 
             let context = context.clone();
             let publish_utxo_deltas_topic = publish_utxo_deltas_topic.clone();
             let publish_certificates_topic = publish_certificates_topic.clone();
+            let publish_governance_procedures_topic = publish_governance_procedures_topic.clone();
 
             async move {
                 match message.as_ref() {
@@ -421,6 +488,13 @@ impl TxUnpacker
                             certificates: Vec::new(),
                         };
 
+                        let mut governance_message = GovernanceProceduresMessage {
+                            sequence: txs_msg.sequence,
+                            block: txs_msg.block.clone(),
+                            voting_procedures: Vec::new(),
+                            proposal_procedures: Vec::new(),
+                        };
+
                         for raw_tx in &txs_msg.txs {
                             // Parse the tx
                             match MultiEraTx::decode(&raw_tx) {
@@ -428,6 +502,21 @@ impl TxUnpacker
                                     let inputs = tx.consumes();
                                     let outputs = tx.produces();
                                     let certs = tx.certs();
+                                    let mut props = None;
+                                    let mut votes = None;
+
+                                    if let Some(conway) = tx.as_conway() {
+                                        info!("Conway block");
+                                        if let Some(ref v) = conway.transaction_body.voting_procedures {
+                                            info!("Voting procedures: {:?}", v);
+                                            votes = Some(v);
+                                        }
+
+                                        if let Some(ref p) = conway.transaction_body.proposal_procedures {
+                                            info!("Voting procedures: {:?}", p);
+                                            props = Some(p);
+                                        }
+                                    }
 
                                     if tracing::enabled!(tracing::Level::DEBUG) {
                                         debug!("Decoded tx with {} inputs, {} outputs, {} certs",
@@ -494,6 +583,24 @@ impl TxUnpacker
                                             }
                                         }
                                     }
+
+                                    if publish_governance_procedures_topic.is_some() {
+                                        if let Some(pp) = props {
+                                            for pallas_governance_proposals in pp.iter() {
+                                                match Self::map_governance_proposals_procedures(&pallas_governance_proposals) {
+                                                    Ok(g) => governance_message.proposal_procedures.push(g),
+                                                    Err(_e) => {}
+                                                }
+                                            }
+                                        }
+
+                                        if let Some(pallas_vp) = votes {
+                                            match Self::map_all_governance_voting_procedures(pallas_vp) {
+                                                Ok(vp) => governance_message.voting_procedures.push(vp),
+                                                Err(e) => error!("Cannot decode governance voting procedures in slot {}: {e}", txs_msg.block.slot)
+                                            }
+                                        }
+                                    }
                                 },
 
                                 Err(e) => error!("Can't decode transaction in slot {}: {e}",
@@ -511,6 +618,13 @@ impl TxUnpacker
                         if let Some(topic) = publish_certificates_topic {
                             let certificates_message = Message::TxCertificates(certificates_message);
                             context.message_bus.publish(&topic, Arc::new(certificates_message))
+                                .await
+                                .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+                        }
+
+                        if let Some(topic) = publish_governance_procedures_topic {
+                            let gov_message = Message::GovernanceProcedures(governance_message);
+                            context.message_bus.publish(&topic, Arc::new(gov_message))
                                 .await
                                 .unwrap_or_else(|e| error!("Failed to publish: {e}"));
                         }
