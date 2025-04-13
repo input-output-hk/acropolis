@@ -95,6 +95,19 @@ pub struct TxCertificatesMessage {
     pub certificates: Vec<TxCertificate>
 }
 
+/// Message encapsulating multiple governance events: voting procedures and proposal procedures
+pub struct GovernanceMessage {
+    /// Event sequence number (for serialisation)
+    pub sequence: u64,
+
+    /// Block info
+    pub block: BlockInfo,
+
+    /// Ordered sequence of voting procedures and proposal procedures
+    pub voting_procedures: Vec<VotingProcedure>,
+    pub proposal_procedures: Vec<ProposalProcedure>,
+}
+
 /// Address deltas message
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AddressDeltasMessage {
@@ -108,6 +121,16 @@ pub struct AddressDeltasMessage {
     pub deltas: Vec<AddressDelta>
 }
 
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct GovernanceProceduresMessage {
+    pub sequence: u64,
+
+    pub block: BlockInfo,
+
+    pub proposal_procedures: Vec<ProposalProcedure>,
+
+    pub voting_procedures: Vec<VotingProcedures>
+}
 
 // === Global message enum ===
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -132,6 +155,7 @@ pub enum Message {
     UTXODeltas(UTXODeltasMessage),             // UTXO deltas received
     TxCertificates(TxCertificatesMessage),     // Transaction certificates received
     AddressDeltas(AddressDeltasMessage),       // Address deltas received
+    GovernanceProcedures(GovernanceProceduresMessage) // Governance procedures received
 }
 
 impl Default for Message {
