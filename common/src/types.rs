@@ -2,6 +2,8 @@
 // We don't use these types in the acropolis_common crate itself
 #![allow(dead_code)]
 
+use std::collections::{HashMap, HashSet};
+use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, hex::Hex};
 
 /// Block status
@@ -61,14 +63,17 @@ impl Default for AddressNetwork {
     fn default() -> Self { Self::Main }
 }
 
+type ScriptHash = KeyHash;
+type AddrKeyhash = KeyHash;
+
 /// A Shelley-era address - payment part
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum ShelleyAddressPaymentPart {
     /// Payment to a key
-    PaymentKeyHash(Vec<u8>),
+    PaymentKeyHash(KeyHash),
 
     /// Payment to a script
-    ScriptHash(Vec<u8>),
+    ScriptHash(ScriptHash),
 }
 
 impl Default for ShelleyAddressPaymentPart {
@@ -296,6 +301,8 @@ pub struct PoolMetadata {
     pub hash: DataHash,
 }
 
+type RewardAccount = Vec<u8>;
+
 /// Pool registration data
 #[serde_as]
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
@@ -506,7 +513,7 @@ pub struct StakeRegistrationAndStakeAndVoteDelegation {
 
 /// Anchor
 #[serde_as]
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Default, Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Anchor {
     /// Metadata URL
     pub url: String,
@@ -571,6 +578,149 @@ pub struct ResignCommitteeCold {
 
     /// Associated anchor (reasoning?)
     pub anchor: Option<Anchor>,
+}
+
+/// Governance actions data structures
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Copy)]
+pub struct ExUnits {
+    pub mem: u64,
+    pub steps: u64,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
+pub struct RationalNumber {
+    pub numerator: u64,
+    pub denominator: u64,
+}
+
+pub type UnitInterval = RationalNumber;
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct GovActionId {
+    pub transaction_id: DataHash,
+    pub action_index: u32,
+}
+
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ProtocolParamUpdate {
+    pub minfee_a: Option<u64>,
+    pub minfee_b: Option<u64>,
+    pub max_block_body_size: Option<u64>,
+    pub max_transaction_size: Option<u64>,
+    pub max_block_header_size: Option<u64>,
+    pub key_deposit: Option<Lovelace>,
+    pub pool_deposit: Option<Lovelace>,
+    pub maximum_epoch: Option<u64>,
+    pub desired_number_of_stake_pools: Option<u64>,
+    pub pool_pledge_influence: Option<RationalNumber>,
+    pub expansion_rate: Option<UnitInterval>,
+    pub treasury_growth_rate: Option<UnitInterval>,
+
+    pub min_pool_cost: Option<Lovelace>,
+    pub ada_per_utxo_byte: Option<Lovelace>,
+//    pub cost_models_for_script_languages: Option<CostModels>,
+//    pub execution_costs: Option<ExUnitPrices>,
+    pub max_tx_ex_units: Option<ExUnits>,
+    pub max_block_ex_units: Option<ExUnits>,
+    pub max_value_size: Option<u64>,
+    pub collateral_percentage: Option<u64>,
+    pub max_collateral_inputs: Option<u64>,
+
+//    pub pool_voting_thresholds: Option<PoolVotingThresholds>,
+//    pub drep_voting_thresholds: Option<DRepVotingThresholds>,
+    pub min_committee_size: Option<u64>,
+    pub committee_term_limit: Option<u64>,
+    pub governance_action_validity_period: Option<u64>,
+    pub governance_action_deposit: Option<Lovelace>,
+    pub drep_deposit: Option<Lovelace>,
+    pub drep_inactivity_period: Option<u64>,
+    pub minfee_refscript_cost_per_byte: Option<UnitInterval>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Constitution {
+    pub anchor: Anchor,
+    pub guardrail_script: Option<ScriptHash>,
+}
+
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ParameterChangeAction {
+    pub action_id: Option<GovActionId>,
+    pub protocol_param_update: Box<ProtocolParamUpdate>,
+    pub script_hash: Vec<u8>
+}
+
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct HardForkInitiationAction {
+    pub action_id: Option<GovActionId>,
+    pub protocol_version: (u64, u64),
+}
+
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TreasuryWithdrawalsAction {
+    pub rewards: HashMap<Vec<u8>, Lovelace>,
+    pub script_hash: Vec<u8>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct UpdateCommitteeAction {
+    pub action_id: Option<GovActionId>,
+    pub committee: HashSet<CommitteeCredential>,
+    pub committee_thresold: HashMap<CommitteeCredential, u64>,
+    pub terms: UnitInterval,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct NewConstitutionAction {
+    pub action_id: Option<GovActionId>,
+    pub new_constitution: Constitution
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum GovernanceAction {
+    ParameterChange(ParameterChangeAction),
+    HardForkInitiation(HardForkInitiationAction),
+    TreasuryWithdrawals(TreasuryWithdrawalsAction),
+    NoConfidence(Option<GovActionId>),
+    UpdateCommittee(UpdateCommitteeAction),
+    NewConstitution(NewConstitutionAction),
+    Information
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, PartialOrd, Eq, Ord, Clone, Hash)]
+pub enum Voter {
+    ConstitutionalCommitteeKey(AddrKeyhash),
+    ConstitutionalCommitteeScript(ScriptHash),
+    DRepKey(AddrKeyhash),
+    DRepScript(ScriptHash),
+    StakePoolKey(AddrKeyhash),
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Clone)]
+pub enum Vote {
+    No,
+    Yes,
+    Abstain,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct VotingProcedure {
+    pub vote: Vote,
+    pub anchor: Option<Anchor>
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct VotingProcedures {
+    pub votes: HashMap <Voter, HashMap<GovActionId, VotingProcedure>>
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ProposalProcedure {
+    pub deposit: Lovelace,
+    pub reward_account: RewardAccount,
+    pub gov_action: GovernanceAction,
+    pub anchor: Anchor,
 }
 
 /// Certificate in a transaction
