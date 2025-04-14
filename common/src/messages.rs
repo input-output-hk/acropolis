@@ -132,6 +132,12 @@ pub struct GovernanceProceduresMessage {
     pub voting_procedures: Vec<VotingProcedures>
 }
 
+impl GovernanceProceduresMessage {
+    pub fn is_empty(&self) -> bool {
+        self.proposal_procedures.is_empty() && self.voting_procedures.is_empty()
+    }
+}
+
 // === Global message enum ===
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum Message {
