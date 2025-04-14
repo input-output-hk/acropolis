@@ -772,8 +772,6 @@ impl TxUnpacker
 
                         if let Some(topic) = publish_governance_procedures_topic {
                             if !governance_message.is_empty() {
-                                info!("Publishing governance procs: {:?}", governance_message);
-
                                 let gov_message = Message::GovernanceProcedures(governance_message);
                                 context.message_bus.publish(&topic, Arc::new(gov_message))
                                     .await
