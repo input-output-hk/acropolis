@@ -582,13 +582,19 @@ pub struct ResignCommitteeCold {
 
 /// Governance actions data structures
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Clone, Copy)]
 pub struct ExUnits {
     pub mem: u64,
     pub steps: u64,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Clone)]
+pub struct ExUnitPrices {
+    pub mem_price: RationalNumber,
+    pub step_price: RationalNumber,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct RationalNumber {
     pub numerator: u64,
     pub denominator: u64,
@@ -600,6 +606,38 @@ pub type UnitInterval = RationalNumber;
 pub struct GovActionId {
     pub transaction_id: DataHash,
     pub action_index: u32,
+}
+
+type CostModel = Vec<i64>;
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
+pub struct CostModels {
+    pub plutus_v1: Option<CostModel>,
+    pub plutus_v2: Option<CostModel>,
+    pub plutus_v3: Option<CostModel>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Clone)]
+pub struct PoolVotingThresholds {
+    pub motion_no_confidence: UnitInterval,
+    pub committee_normal: UnitInterval,
+    pub committee_no_confidence: UnitInterval,
+    pub hard_fork_initiation: UnitInterval,
+    pub security_voting_threshold: UnitInterval,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Clone)]
+pub struct DRepVotingThresholds {
+    pub motion_no_confidence: UnitInterval,
+    pub committee_normal: UnitInterval,
+    pub committee_no_confidence: UnitInterval,
+    pub update_constitution: UnitInterval,
+    pub hard_fork_initiation: UnitInterval,
+    pub pp_network_group: UnitInterval,
+    pub pp_economic_group: UnitInterval,
+    pub pp_technical_group: UnitInterval,
+    pub pp_governance_group: UnitInterval,
+    pub treasury_withdrawal: UnitInterval,
 }
 
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
@@ -619,16 +657,16 @@ pub struct ProtocolParamUpdate {
 
     pub min_pool_cost: Option<Lovelace>,
     pub ada_per_utxo_byte: Option<Lovelace>,
-//    pub cost_models_for_script_languages: Option<CostModels>,
-//    pub execution_costs: Option<ExUnitPrices>,
+    pub cost_models_for_script_languages: Option<CostModels>,
+    pub execution_costs: Option<ExUnitPrices>,
     pub max_tx_ex_units: Option<ExUnits>,
     pub max_block_ex_units: Option<ExUnits>,
     pub max_value_size: Option<u64>,
     pub collateral_percentage: Option<u64>,
     pub max_collateral_inputs: Option<u64>,
 
-//    pub pool_voting_thresholds: Option<PoolVotingThresholds>,
-//    pub drep_voting_thresholds: Option<DRepVotingThresholds>,
+    pub pool_voting_thresholds: Option<PoolVotingThresholds>,
+    pub drep_voting_thresholds: Option<DRepVotingThresholds>,
     pub min_committee_size: Option<u64>,
     pub committee_term_limit: Option<u64>,
     pub governance_action_validity_period: Option<u64>,
@@ -660,7 +698,7 @@ pub struct HardForkInitiationAction {
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TreasuryWithdrawalsAction {
     pub rewards: HashMap<Vec<u8>, Lovelace>,
-    pub script_hash: Vec<u8>,
+    pub script_hash: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
