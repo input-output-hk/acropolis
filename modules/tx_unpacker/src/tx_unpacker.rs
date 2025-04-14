@@ -1,28 +1,25 @@
 //! Acropolis transaction unpacker module for Caryatid
 //! Unpacks transaction bodies into UTXO events
 
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
 use acropolis_common::{
-    messages::{Message, TxCertificatesMessage, UTXODeltasMessage}, *
+    messages::{GovernanceProceduresMessage, Message, TxCertificatesMessage, UTXODeltasMessage}, *
 };
 
-use std::sync::Arc;
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use config::Config;
 use tracing::{debug, info, error};
-use pallas::ledger::traverse::{MultiEraCert, MultiEraTx};
-use pallas::ledger::addresses;
-use pallas::ledger::primitives::{
-    alonzo,
-    conway,
-    StakeCredential as PallasStakeCredential,
-    Relay as PallasRelay,
-    Nullable,
+use pallas::{
+    ledger::*,
+    ledger::{
+        primitives::{
+            alonzo, conway, Nullable, Relay as PallasRelay, StakeCredential as PallasStakeCredential,
+            ScriptHash
+        },
+        traverse::{MultiEraCert, MultiEraTx},
+    }
 };
-
-use anyhow::anyhow;
-use acropolis_common::messages::GovernanceProceduresMessage;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.txs";
 
@@ -124,10 +121,7 @@ impl TxUnpacker
 
     /// Map a Nullable Anchor to ours
     fn map_nullable_anchor(anchor: &Nullable<conway::Anchor>) -> Option<Anchor> {
-        match anchor {
-            Nullable::Some(a) => Some(Self::map_anchor(a)),
-            _ => None 
-        }
+        Self::map_nullable(&Self::map_anchor, anchor)
     }
 
     /// Map a Pallas Relay to ours
@@ -382,12 +376,109 @@ impl TxUnpacker
         }
     }
 
+    fn map_nullable<Src: Clone,Dst>(f: impl FnOnce(&Src) -> Dst, nullable_src: &Nullable<Src>) -> Option<Dst> {
+        match nullable_src {
+            Nullable::Some(src) => Some(f(src)),
+            _ => None
+        }
+    }
+
+    fn map_gov_action_id(pallas_action_id: &conway::GovActionId) -> GovActionId {
+        GovActionId {
+            transaction_id: pallas_action_id.transaction_id.to_vec(),
+            action_index: pallas_action_id.action_index,
+        }
+    }
+
+    fn map_unit_interval(pallas_interval: &conway::UnitInterval) -> UnitInterval {
+        UnitInterval {
+            numerator: pallas_interval.numerator,
+            denominator: pallas_interval.denominator,
+        }
+    }
+
+    fn map_ex_units(pallas_units: &conway::ExUnits) -> ExUnits {
+        ExUnits {
+            mem: pallas_units.mem,
+            steps: pallas_units.steps,
+        }
+    }
+
+    fn map_protocol_param_update(p: &conway::ProtocolParamUpdate) -> Box<ProtocolParamUpdate> {
+        Box::new (ProtocolParamUpdate {
+            minfee_a: p.minfee_a.clone(),
+            minfee_b: p.minfee_b.clone(),
+            max_block_body_size: p.max_block_body_size.clone(),
+            max_transaction_size: p.max_transaction_size.clone(),
+            max_block_header_size: p.max_block_header_size.clone(),
+            key_deposit: p.key_deposit.clone(),
+            pool_deposit: p.pool_deposit.clone(),
+            maximum_epoch: p.maximum_epoch.clone(),
+            desired_number_of_stake_pools: p.desired_number_of_stake_pools.clone(),
+            pool_pledge_influence: p.pool_pledge_influence.as_ref().map(&Self::map_unit_interval),
+            expansion_rate: p.expansion_rate.as_ref().map(&Self::map_unit_interval),
+            treasury_growth_rate: p.expansion_rate.as_ref().map(&Self::map_unit_interval),
+            min_pool_cost: p.min_pool_cost.clone(),
+            ada_per_utxo_byte: p.ada_per_utxo_byte.clone(),
+            max_tx_ex_units: p.max_tx_ex_units.as_ref().map(&Self::map_ex_units),
+            max_block_ex_units: p.max_block_ex_units.as_ref().map(&Self::map_ex_units),
+            max_value_size: p.max_value_size.clone(),
+            collateral_percentage: p.collateral_percentage.clone(),
+            max_collateral_inputs: p.max_collateral_inputs.clone(),
+            min_committee_size: p.min_committee_size.clone(),
+            committee_term_limit: p.committee_term_limit.clone(),
+            governance_action_validity_period: p.governance_action_validity_period.clone(),
+            governance_action_deposit: p.governance_action_deposit.clone(),
+            drep_deposit: p.drep_deposit.clone(),
+            drep_inactivity_period: p.drep_inactivity_period.clone(),
+            minfee_refscript_cost_per_byte: p.minfee_refscript_cost_per_byte.as_ref().map(&Self::map_unit_interval),
+        })
+    }
+
+    fn map_governance_action(action: &conway::GovAction) -> GovernanceAction {
+        match action {
+            conway::GovAction::ParameterChange(id, protocol_update, script) =>
+                GovernanceAction::ParameterChange(ParameterChangeAction {
+                    action_id: Self::map_nullable(&Self::map_gov_action_id, id),
+                    protocol_param_update: Self::map_protocol_param_update(protocol_update),
+                    script_hash: Self::map_nullable(&|x: &ScriptHash| x.to_vec(), &script),
+                }),
+
+            conway::GovAction::HardForkInitiation(id, version) =>
+                GovernanceAction::HardForkInitiation(HardForkInitiationAction {
+                    action_id: Self::map_nullable(&Self::map_gov_action_id, id),
+                    protocol_version: *version,
+                }),
+
+            conway::GovAction::TreasuryWithdrawals(withdrawals, script) =>
+                unimplemented!(""),
+
+            conway::GovAction::NoConfidence(id) =>
+                GovernanceAction::NoConfidence(Self::map_nullable(&Self::map_gov_action_id, id)),
+
+            conway::GovAction::UpdateCommittee(_, _, _, _) =>
+                GovernanceAction::UpdateCommittee(
+                    unimplemented!("")
+                ),
+
+            conway::GovAction::NewConstitution(id, constitution) =>
+                GovernanceAction::NewConstitution(NewConstitutionAction {
+                    action_id: Self::map_nullable(&Self::map_gov_action_id, id),
+                    new_constitution: Constitution {
+                        anchor: Self::map_anchor(&constitution.anchor),
+                        guardrail_script: Self::map_nullable(&|x: &ScriptHash| x.to_vec(), &constitution.guardrail_script)
+                    },
+                }),
+
+            conway::GovAction::Information => GovernanceAction::Information
+        }
+    }
 
     fn map_governance_proposals_procedures(prop: &conway::ProposalProcedure) -> Result<ProposalProcedure> {
         Ok(ProposalProcedure {
             deposit: prop.deposit,
-            reward_account: prop.reward_account.to_vec(), // not implemented
-            gov_action: GovernanceAction::Information, // not implemented
+            reward_account: prop.reward_account.to_vec(),
+            gov_action: Self::map_governance_action(&prop.gov_action),
             anchor: Self::map_anchor(&prop.anchor),
         })
     }
@@ -399,13 +490,6 @@ impl TxUnpacker
             conway::Voter::DRepKey(addr_key_hash) => Voter::DRepKey(addr_key_hash.to_vec()),
             conway::Voter::DRepScript(script_hash) => Voter::DRepScript(script_hash.to_vec()),
             conway::Voter::StakePoolKey(key_hash) => Voter::StakePoolKey(key_hash.to_vec())
-        }
-    }
-
-    fn map_gov_action_id(pallas_action_id: &conway::GovActionId) -> GovActionId {
-        GovActionId {
-            transaction_id: pallas_action_id.transaction_id.to_vec(),
-            action_index: pallas_action_id.action_index,
         }
     }
 
