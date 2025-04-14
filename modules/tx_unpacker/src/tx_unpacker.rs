@@ -115,16 +115,21 @@ impl TxUnpacker
         }
     }
 
-    /// Map an Anchor to ours
-    fn map_anchor(anchor: &Nullable<conway::Anchor>) -> Option<Anchor> {
+    fn map_anchor(anchor: &conway::Anchor) -> Anchor {
+        Anchor {
+            url: anchor.url.clone(),
+            data_hash: anchor.content_hash.to_vec(),
+        }
+    }
+
+    /// Map a Nullable Anchor to ours
+    fn map_nullable_anchor(anchor: &Nullable<conway::Anchor>) -> Option<Anchor> {
         match anchor {
-            Nullable::Some(a) => Some(Anchor {
-                url: a.url.clone(),
-                data_hash: a.content_hash.to_vec(),
-            }),
+            Nullable::Some(a) => Some(Self::map_anchor(a)),
             _ => None 
         }
     }
+
     /// Map a Pallas Relay to ours
     fn map_relay(relay: &PallasRelay) -> Relay {
         match relay {
@@ -349,14 +354,14 @@ impl TxUnpacker
                     conway::Certificate::ResignCommitteeCold(cold_cred, anchor) =>
                                 Ok(TxCertificate::ResignCommitteeCold(ResignCommitteeCold { 
                                     cold_credential: Self::map_stake_credential(cold_cred), 
-                                    anchor: Self::map_anchor(&anchor)
+                                    anchor: Self::map_nullable_anchor(&anchor)
                                 })),
 
                     conway::Certificate::RegDRepCert(cred, coin, anchor) =>
                                 Ok(TxCertificate::DRepRegistration(DRepRegistration {
                                     credential: Self::map_stake_credential(cred),
                                     deposit: *coin,
-                                    anchor: Self::map_anchor(&anchor),
+                                    anchor: Self::map_nullable_anchor(&anchor),
                                 })),
 
                     conway::Certificate::UnRegDRepCert(cred, coin) =>
@@ -368,7 +373,7 @@ impl TxUnpacker
                     conway::Certificate::UpdateDRepCert(cred, anchor) =>
                                 Ok(TxCertificate::DRepUpdate(DRepUpdate {
                                     credential: Self::map_stake_credential(cred),
-                                    anchor: Self::map_anchor(&anchor),
+                                    anchor: Self::map_nullable_anchor(&anchor),
                                 })),
                 }
             }
@@ -378,16 +383,13 @@ impl TxUnpacker
     }
 
 
-    fn map_governance_proposals_procedures(_prop: &conway::ProposalProcedure) -> Result<ProposalProcedure> {
-        /*
-        ProposalProcedure {
+    fn map_governance_proposals_procedures(prop: &conway::ProposalProcedure) -> Result<ProposalProcedure> {
+        Ok(ProposalProcedure {
             deposit: prop.deposit,
-            reward_account: vec![],
-            gov_action: prop.gov_action,
+            reward_account: prop.reward_account.to_vec(), // not implemented
+            gov_action: GovernanceAction::Information, // not implemented
             anchor: Self::map_anchor(&prop.anchor),
-        }
-         */
-        Err(anyhow!("Not implemented yet"))
+        })
     }
 
     fn map_voter(voter: &conway::Voter) -> Voter {
@@ -407,8 +409,19 @@ impl TxUnpacker
         }
     }
 
-    fn map_single_governance_voting_procedure(_proc: &conway::VotingProcedure) -> Result<VotingProcedure> {
-        Err(anyhow!("Not implemented yet"))
+    fn map_vote(vote: &conway::Vote) -> Vote {
+        match vote {
+            conway::Vote::No => Vote::No,
+            conway::Vote::Yes => Vote::Yes,
+            conway::Vote::Abstain => Vote::Abstain
+        }
+    }
+
+    fn map_single_governance_voting_procedure(proc: &conway::VotingProcedure) -> VotingProcedure {
+        VotingProcedure {
+            vote: Self::map_vote(&proc.vote),
+            anchor: Self::map_nullable_anchor(&proc.anchor),
+        }
     }
 
     fn map_all_governance_voting_procedures(vote_procs: &conway::VotingProcedures) -> Result<VotingProcedures> {
@@ -424,13 +437,10 @@ impl TxUnpacker
             let single_voter = procs.votes.get_mut(&voter)
                 .ok_or_else(|| anyhow!("Cannot find voter {:?}, which must present", voter))?;
 
-            for (pallas_action_id, voting_procedure) in pallas_pair.iter() {
+            for (pallas_action_id, pallas_voting_procedure) in pallas_pair.iter() {
                 let action_id = Self::map_gov_action_id(pallas_action_id);
-
-                match Self::map_single_governance_voting_procedure(&voting_procedure) {
-                    Ok(vp) => { single_voter.insert(action_id, vp); },
-                    Err(e) => return Err(e)
-                }
+                let vp = Self::map_single_governance_voting_procedure(&pallas_voting_procedure);
+                single_voter.insert(action_id, vp);
             }
         }
 
@@ -506,14 +516,11 @@ impl TxUnpacker
                                     let mut votes = None;
 
                                     if let Some(conway) = tx.as_conway() {
-                                        info!("Conway block");
                                         if let Some(ref v) = conway.transaction_body.voting_procedures {
-                                            info!("Voting procedures: {:?}", v);
                                             votes = Some(v);
                                         }
 
                                         if let Some(ref p) = conway.transaction_body.proposal_procedures {
-                                            info!("Voting procedures: {:?}", p);
                                             props = Some(p);
                                         }
                                     }
@@ -586,6 +593,7 @@ impl TxUnpacker
 
                                     if publish_governance_procedures_topic.is_some() {
                                         if let Some(pp) = props {
+                                            // Nonempty set -- governance_message.proposal_procedures will not be empty
                                             for pallas_governance_proposals in pp.iter() {
                                                 match Self::map_governance_proposals_procedures(&pallas_governance_proposals) {
                                                     Ok(g) => governance_message.proposal_procedures.push(g),
@@ -595,6 +603,7 @@ impl TxUnpacker
                                         }
 
                                         if let Some(pallas_vp) = votes {
+                                            // Nonempty set -- governance_message.voting_procedures will not be empty
                                             match Self::map_all_governance_voting_procedures(pallas_vp) {
                                                 Ok(vp) => governance_message.voting_procedures.push(vp),
                                                 Err(e) => error!("Cannot decode governance voting procedures in slot {}: {e}", txs_msg.block.slot)
@@ -623,10 +632,14 @@ impl TxUnpacker
                         }
 
                         if let Some(topic) = publish_governance_procedures_topic {
-                            let gov_message = Message::GovernanceProcedures(governance_message);
-                            context.message_bus.publish(&topic, Arc::new(gov_message))
-                                .await
-                                .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+                            if !governance_message.is_empty() {
+                                info!("Publishing governance procs: {:?}", governance_message);
+
+                                let gov_message = Message::GovernanceProcedures(governance_message);
+                                context.message_bus.publish(&topic, Arc::new(gov_message))
+                                    .await
+                                    .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+                            }
                         }
                     }
 
