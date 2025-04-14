@@ -2,6 +2,7 @@
 //! Unpacks transaction bodies into UTXO events
 
 use std::{collections::HashMap, sync::Arc};
+use std::collections::HashSet;
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
 use acropolis_common::{
     messages::{GovernanceProceduresMessage, Message, TxCertificatesMessage, UTXODeltasMessage}, *
@@ -404,6 +405,46 @@ impl TxUnpacker
         }
     }
 
+    fn map_execution_costs(pallas_ex_costs: &conway::ExUnitPrices) -> ExUnitPrices {
+        ExUnitPrices {
+            mem_price: Self::map_unit_interval(&pallas_ex_costs.mem_price),
+            step_price: Self::map_unit_interval(&pallas_ex_costs.step_price),
+        }
+    }
+
+    fn map_cost_models(pallas_cost_models: &conway::CostModels) -> CostModels {
+        CostModels {
+            plutus_v1: pallas_cost_models.plutus_v1.clone(),
+            plutus_v2: pallas_cost_models.plutus_v2.clone(),
+            plutus_v3: pallas_cost_models.plutus_v3.clone()
+        }
+    }
+
+    fn map_pool_voting_thresholds(ts: &conway::PoolVotingThresholds) -> PoolVotingThresholds {
+        PoolVotingThresholds {
+            motion_no_confidence: Self::map_unit_interval(&ts.motion_no_confidence),
+            committee_normal: Self::map_unit_interval(&ts.committee_normal),
+            committee_no_confidence: Self::map_unit_interval(&ts.committee_no_confidence),
+            hard_fork_initiation: Self::map_unit_interval(&ts.hard_fork_initiation),
+            security_voting_threshold: Self::map_unit_interval(&ts.security_voting_threshold),
+        }
+    }
+
+    fn map_drep_voting_thresholds(ts: &conway::DRepVotingThresholds) -> DRepVotingThresholds {
+        DRepVotingThresholds {
+            motion_no_confidence: Self::map_unit_interval(&ts.motion_no_confidence),
+            committee_normal: Self::map_unit_interval(&ts.committee_normal),
+            committee_no_confidence: Self::map_unit_interval(&ts.committee_no_confidence),
+            update_constitution: Self::map_unit_interval(&ts.update_constitution),
+            hard_fork_initiation: Self::map_unit_interval(&ts.hard_fork_initiation),
+            pp_network_group: Self::map_unit_interval(&ts.pp_network_group),
+            pp_economic_group: Self::map_unit_interval(&ts.pp_economic_group),
+            pp_technical_group: Self::map_unit_interval(&ts.pp_technical_group),
+            pp_governance_group: Self::map_unit_interval(&ts.pp_governance_group),
+            treasury_withdrawal: Self::map_unit_interval(&ts.treasury_withdrawal),
+        }
+    }
+
     fn map_protocol_param_update(p: &conway::ProtocolParamUpdate) -> Box<ProtocolParamUpdate> {
         Box::new (ProtocolParamUpdate {
             minfee_a: p.minfee_a.clone(),
@@ -420,11 +461,15 @@ impl TxUnpacker
             treasury_growth_rate: p.expansion_rate.as_ref().map(&Self::map_unit_interval),
             min_pool_cost: p.min_pool_cost.clone(),
             ada_per_utxo_byte: p.ada_per_utxo_byte.clone(),
+            cost_models_for_script_languages: p.cost_models_for_script_languages.as_ref().map(&Self::map_cost_models),
+            execution_costs: p.execution_costs.as_ref().map(&Self::map_execution_costs),
             max_tx_ex_units: p.max_tx_ex_units.as_ref().map(&Self::map_ex_units),
             max_block_ex_units: p.max_block_ex_units.as_ref().map(&Self::map_ex_units),
             max_value_size: p.max_value_size.clone(),
             collateral_percentage: p.collateral_percentage.clone(),
             max_collateral_inputs: p.max_collateral_inputs.clone(),
+            pool_voting_thresholds: p.pool_voting_thresholds.as_ref().map(&Self::map_pool_voting_thresholds),
+            drep_voting_thresholds: p.drep_voting_thresholds.as_ref().map(&Self::map_drep_voting_thresholds),
             min_committee_size: p.min_committee_size.clone(),
             committee_term_limit: p.committee_term_limit.clone(),
             governance_action_validity_period: p.governance_action_validity_period.clone(),
@@ -451,15 +496,25 @@ impl TxUnpacker
                 }),
 
             conway::GovAction::TreasuryWithdrawals(withdrawals, script) =>
-                unimplemented!(""),
+                GovernanceAction::TreasuryWithdrawals(TreasuryWithdrawalsAction{
+                    rewards: HashMap::from_iter(withdrawals.iter().map(|(account,coin)| (account.to_vec(), *coin))),
+                    script_hash: Self::map_nullable(&|x: &ScriptHash| x.to_vec(), script),
+                }),
 
             conway::GovAction::NoConfidence(id) =>
                 GovernanceAction::NoConfidence(Self::map_nullable(&Self::map_gov_action_id, id)),
 
-            conway::GovAction::UpdateCommittee(_, _, _, _) =>
-                GovernanceAction::UpdateCommittee(
-                    unimplemented!("")
-                ),
+            conway::GovAction::UpdateCommittee(id, committee, threshold, terms) =>
+                GovernanceAction::UpdateCommittee(UpdateCommitteeAction {
+                    action_id: Self::map_nullable(&Self::map_gov_action_id, id),
+                    committee: HashSet::from_iter(
+                        committee.iter().map(Self::map_stake_credential)
+                    ),
+                    committee_thresold: HashMap::from_iter(
+                        threshold.iter().map(|(k,v)| (Self::map_stake_credential(k), *v))
+                    ),
+                    terms: Self::map_unit_interval(terms),
+                }),
 
             conway::GovAction::NewConstitution(id, constitution) =>
                 GovernanceAction::NewConstitution(NewConstitutionAction {
