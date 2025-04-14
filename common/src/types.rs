@@ -648,7 +648,7 @@ pub struct Constitution {
 pub struct ParameterChangeAction {
     pub action_id: Option<GovActionId>,
     pub protocol_param_update: Box<ProtocolParamUpdate>,
-    pub script_hash: Vec<u8>
+    pub script_hash: Option<Vec<u8>>
 }
 
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
