@@ -734,6 +734,7 @@ impl TxUnpacker
                                         if let Some(pp) = props {
                                             // Nonempty set -- governance_message.proposal_procedures will not be empty
                                             for pallas_governance_proposals in pp.iter() {
+                                                info!("ProposalProcedure: {:?}", pallas_governance_proposals);
                                                 match Self::map_governance_proposals_procedures(&pallas_governance_proposals) {
                                                     Ok(g) => governance_message.proposal_procedures.push(g),
                                                     Err(_e) => {}

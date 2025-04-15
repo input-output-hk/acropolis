@@ -726,6 +726,20 @@ pub enum GovernanceAction {
     Information
 }
 
+impl GovernanceAction {
+    pub fn get_gov_action_id(&self) -> Option<&GovActionId> {
+        match &self {
+            GovernanceAction::ParameterChange(p) => p.action_id.as_ref(),
+            GovernanceAction::HardForkInitiation(h) => h.action_id.as_ref(),
+            GovernanceAction::TreasuryWithdrawals(_t) => None,
+            GovernanceAction::NoConfidence(n) => n.as_ref(),
+            GovernanceAction::UpdateCommittee(u) => u.action_id.as_ref(),
+            GovernanceAction::NewConstitution(n) => n.action_id.as_ref(),
+            GovernanceAction::Information => None
+        }
+    }
+}
+
 #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, PartialOrd, Eq, Ord, Clone, Hash)]
 pub enum Voter {
     ConstitutionalCommitteeKey(AddrKeyhash),
