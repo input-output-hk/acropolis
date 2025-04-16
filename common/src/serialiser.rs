@@ -9,11 +9,12 @@ use tokio::sync::Mutex;
 use async_trait::async_trait;
 use caryatid_sdk::MessageBounds;
 use anyhow::Result;
+use crate::messages::Sequence;
 
 /// Pending queue entry
 struct PendingEntry<MSG: MessageBounds> {
-    /// Sequence number
-    sequence: u64,
+    /// Sequence
+    sequence: Sequence,
 
     /// Message
     message: MSG,
@@ -22,7 +23,7 @@ struct PendingEntry<MSG: MessageBounds> {
 // Ord and Eq implementations to make it a min-heap on block number
 impl<MSG: MessageBounds> Ord for PendingEntry<MSG> {
     fn cmp(&self, other: &Self) -> Ordering {
-        other.sequence.cmp(&self.sequence)  // Note reverse order
+        other.sequence.number.cmp(&self.sequence.number)  // Note reverse order
     }
 }
 
@@ -36,7 +37,7 @@ impl<MSG: MessageBounds> Eq for PendingEntry<MSG> {}
 
 impl<MSG: MessageBounds> PartialEq for PendingEntry<MSG> {
     fn eq(&self, other: &Self) -> bool {
-        self.sequence == other.sequence
+        self.sequence.number == other.sequence.number
     }
 }
 
@@ -55,7 +56,7 @@ pub struct Serialiser<'a, MSG: MessageBounds> {
     pending: BinaryHeap<PendingEntry<MSG>>,
 
     /// Next sequence expected
-    next_sequence: u64,
+    prev_sequence: Option<u64>,
 
     /// Message handler
     handler: Arc<Mutex<dyn SerialisedMessageHandler<MSG>>>,
@@ -67,40 +68,40 @@ pub struct Serialiser<'a, MSG: MessageBounds> {
 impl <'a, MSG: MessageBounds> Serialiser<'a, MSG> {
     /// Constructor
     pub fn new(handler: Arc<Mutex<dyn SerialisedMessageHandler<MSG>>>,
-               module_name: &'a str, first_sequence: u64) -> Self {
+               module_name: &'a str) -> Self {
         Self {
             pending: BinaryHeap::new(),
-            next_sequence: first_sequence,
+            prev_sequence: None,
             handler,
             module_name,
         }
     }
 
     /// Process a message
-    async fn process_message(&mut self, sequence: u64, message: &MSG) -> Result<()> {
+    async fn process_message(&mut self, sequence: Sequence, message: &MSG) -> Result<()> {
         // Pass to the handler
         self.handler.lock().await.handle(message).await?;
 
         // Update sequence
-        self.next_sequence = sequence + 1;
+        self.prev_sequence = Some(sequence.number);
 
         Ok(())
     }
 
     /// Handle a message
-    pub async fn handle_message(&mut self, sequence: u64, message: &MSG) -> Result<()> {
+    pub async fn handle_message(&mut self, sequence: Sequence, message: &MSG) -> Result<()> {
 
         // Is it in order?
-        if sequence == self.next_sequence {
+        if sequence.previous == self.prev_sequence {
 
             self.process_message(sequence, &message).await?;
 
             // See if any pending now work
             while let Some(next) = self.pending.peek() {
-                if next.sequence == self.next_sequence {
+                if next.sequence.previous == self.prev_sequence {
 
                     if tracing::enabled!(tracing::Level::DEBUG) {
-                        debug!("Now accepted event {}", next.sequence);
+                        debug!("Now accepted event {:?}", next.sequence);
                     }
 
                     if let Some(next) = self.pending.pop() {
@@ -113,7 +114,7 @@ impl <'a, MSG: MessageBounds> Serialiser<'a, MSG> {
         } else {
             // Not accepted, it's out of order, queue it
             if tracing::enabled!(tracing::Level::DEBUG) {
-                debug!("Queueing out-of-order event {}", sequence);
+                debug!("Queueing out-of-order event {:?}", sequence);
             }
             self.pending.push(PendingEntry {
                 sequence,
@@ -169,16 +170,16 @@ mod tests {
     async fn messages_in_order_pass_through() {
         let handler = Arc::new(Mutex::new(MockMessageHandler::new()));
         let handler2 = handler.clone();
-        let mut serialiser = Serialiser::new(handler, "test", 0);
+        let mut serialiser = Serialiser::new(handler, "test");
 
         let message0 = TestMessage { index: 0 };
-        serialiser.handle_message(0, &message0).await.unwrap();
+        serialiser.handle_message(Sequence::new(0, None), &message0).await.unwrap();
 
         let message1 = TestMessage { index: 1 };
-        serialiser.handle_message(1, &message1).await.unwrap();
+        serialiser.handle_message(Sequence::new(1, Some(0)), &message1).await.unwrap();
 
         let message2 = TestMessage { index: 2 };
-        serialiser.handle_message(2, &message2).await.unwrap();
+        serialiser.handle_message(Sequence::new(2, Some(1)), &message2).await.unwrap();
 
         let handler = handler2.lock().await;
         assert_eq!(3, handler.received.len());
@@ -192,16 +193,16 @@ mod tests {
     async fn messages_out_of_order_are_reordered() {
         let handler = Arc::new(Mutex::new(MockMessageHandler::new()));
         let handler2 = handler.clone();
-        let mut serialiser = Serialiser::new(handler, "test", 42);
+        let mut serialiser = Serialiser::new(handler, "test");
 
         let message1 = TestMessage { index: 1 };
-        serialiser.handle_message(43, &message1).await.unwrap();
+        serialiser.handle_message(Sequence::new(43, Some(42)), &message1).await.unwrap();
 
         let message0 = TestMessage { index: 0 };
-        serialiser.handle_message(42, &message0).await.unwrap();
+        serialiser.handle_message(Sequence::new(42, None), &message0).await.unwrap();
 
         let message2 = TestMessage { index: 2 };
-        serialiser.handle_message(44, &message2).await.unwrap();
+        serialiser.handle_message(Sequence::new(44, Some(43)), &message2).await.unwrap();
 
         let handler = handler2.lock().await;
         assert_eq!(3, handler.received.len());

@@ -3,7 +3,7 @@
 
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
 use acropolis_common::{
-    messages::{Message, TxCertificatesMessage, UTXODeltasMessage}, *
+    messages::{Message, Sequence, TxCertificatesMessage, UTXODeltasMessage}, *
 };
 
 use std::sync::Arc;
@@ -53,12 +53,12 @@ impl TxUnpacker
             })),
 
             addresses::Address::Shelley(shelley_address) => Ok(Address::Shelley(ShelleyAddress {
-                network: Self::map_network(shelley_address.network())?, 
+                network: Self::map_network(shelley_address.network())?,
 
                 payment: match shelley_address.payment() {
-                    addresses::ShelleyPaymentPart::Key(hash) => 
+                    addresses::ShelleyPaymentPart::Key(hash) =>
                         ShelleyAddressPaymentPart::PaymentKeyHash(hash.to_vec()),
-                    addresses::ShelleyPaymentPart::Script(hash) => 
+                    addresses::ShelleyPaymentPart::Script(hash) =>
                         ShelleyAddressPaymentPart::ScriptHash(hash.to_vec()),
 
                 },
@@ -82,9 +82,9 @@ impl TxUnpacker
             addresses::Address::Stake(stake_address) => Ok(Address::Stake(StakeAddress {
                 network: Self::map_network(stake_address.network())?,
                 payload: match stake_address.payload() {
-                    addresses::StakePayload::Stake(hash) => 
+                    addresses::StakePayload::Stake(hash) =>
                         StakeAddressPayload::StakeKeyHash(hash.to_vec()),
-                    addresses::StakePayload::Script(hash) => 
+                    addresses::StakePayload::Script(hash) =>
                         StakeAddressPayload::ScriptHash(hash.to_vec()),
                 }
             })),
@@ -119,7 +119,7 @@ impl TxUnpacker
                 url: a.url.clone(),
                 data_hash: a.content_hash.to_vec(),
             }),
-            _ => None 
+            _ => None
         }
     }
     /// Map a Pallas Relay to ours
@@ -130,22 +130,22 @@ impl TxUnpacker
                     port: match port {
                         Nullable::Some(port) => Some(*port as u16),
                         _ => None,
-                    }, 
+                    },
                     ipv4: match ipv4 {
                         Nullable::Some(ipv4) => ipv4.try_into().ok(),
                         _ => None,
-                    }, 
+                    },
                     ipv6: match ipv6 {
                         Nullable::Some(ipv6) => ipv6.try_into().ok(),
                         _ => None,
-                    }, 
+                    },
                 }),
             PallasRelay::SingleHostName(port, dns_name) =>
-                Relay::SingleHostName(SingleHostName { 
+                Relay::SingleHostName(SingleHostName {
                     port: match port {
                         Nullable::Some(port) => Some(*port as u16),
                         _ => None,
-                    }, 
+                    },
                     dns_name: dns_name.clone(),
                 }),
             PallasRelay::MultiHostName(dns_name) =>
@@ -173,12 +173,12 @@ impl TxUnpacker
                                     credential: Self::map_stake_credential(cred),
                                     operator: pool_key_hash.to_vec()
                                 })),
-                    alonzo::Certificate::PoolRegistration { 
+                    alonzo::Certificate::PoolRegistration {
                         // TODO relays, pool_metadata
-                        operator, vrf_keyhash, pledge, cost, margin, 
+                        operator, vrf_keyhash, pledge, cost, margin,
                         reward_account, pool_owners, relays, pool_metadata } =>
                                 Ok(TxCertificate::PoolRegistration(PoolRegistration { 
-                                    operator: operator.to_vec(), 
+                                    operator: operator.to_vec(),
                                     vrf_key_hash: vrf_keyhash.to_vec(),
                                     pledge: *pledge,
                                     cost: *cost,
@@ -205,7 +205,7 @@ impl TxUnpacker
                                 })),
                     alonzo::Certificate::PoolRetirement(pool_key_hash, epoch) =>
                                 Ok(TxCertificate::PoolRetirement(PoolRetirement {
-                                    operator: pool_key_hash.to_vec(), 
+                                    operator: pool_key_hash.to_vec(),
                                     epoch: *epoch
                                 })),
                     alonzo::Certificate::GenesisKeyDelegation(
@@ -251,12 +251,12 @@ impl TxUnpacker
                                     credential: Self::map_stake_credential(cred),
                                     operator: pool_key_hash.to_vec()
                                 })),
-                    conway::Certificate::PoolRegistration { 
+                    conway::Certificate::PoolRegistration {
                         // TODO relays, pool_metadata
-                        operator, vrf_keyhash, pledge, cost, margin, 
+                        operator, vrf_keyhash, pledge, cost, margin,
                         reward_account, pool_owners, relays, pool_metadata } =>
                                 Ok(TxCertificate::PoolRegistration(PoolRegistration { 
-                                    operator: operator.to_vec(), 
+                                    operator: operator.to_vec(),
                                     vrf_key_hash: vrf_keyhash.to_vec(),
                                     pledge: *pledge,
                                     cost: *cost,
@@ -283,7 +283,7 @@ impl TxUnpacker
                                 })),
                     conway::Certificate::PoolRetirement(pool_key_hash, epoch) =>
                                 Ok(TxCertificate::PoolRetirement(PoolRetirement {
-                                    operator: pool_key_hash.to_vec(), 
+                                    operator: pool_key_hash.to_vec(),
                                     epoch: *epoch
                                 })),
 
@@ -416,7 +416,13 @@ impl TxUnpacker
                         };
 
                         let mut certificates_message = TxCertificatesMessage {
-                            sequence: txs_msg.sequence,
+                            sequence: Sequence {
+                            number: txs_msg.sequence.number,
+                                previous: match txs_msg.sequence.number {
+                                    1 => None,
+                                    _ => txs_msg.sequence.previous,
+                                },
+                            },
                             block: txs_msg.block.clone(),
                             certificates: Vec::new(),
                         };
