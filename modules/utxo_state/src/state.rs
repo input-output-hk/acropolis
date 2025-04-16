@@ -3,9 +3,9 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use acropolis_common::{
     SerialisedMessageHandler,
-    Address, BlockInfo, BlockStatus, 
+    Address, BlockInfo, BlockStatus,
     TxInput, TxOutput, UTXODelta,
-    messages::UTXODeltasMessage
+    messages::{Sequence, UTXODeltasMessage},
 };
 use tracing::{debug, info, error};
 use hex::encode;
@@ -76,7 +76,7 @@ pub trait AddressDeltaObserver: Send + Sync {
     async fn observe_delta(&self, address: &Address, delta: i64);
 
     /// Finalise a block, with the given event sequence
-    async fn finalise_block(&self, block: &BlockInfo, sequence: u64);
+    async fn finalise_block(&self, block: &BlockInfo, sequence: Sequence);
 }
 
 /// Immutable UTXO store
@@ -382,7 +382,7 @@ impl SerialisedMessageHandler<UTXODeltasMessage> for State {
         if let Some(observer) = self.address_delta_observer.as_mut() {
             observer.finalise_block(&deltas.block, deltas.sequence).await;
         }
-    
+
         Ok(())
     }
 }
@@ -631,18 +631,18 @@ mod tests {
     #[async_trait]
     impl AddressDeltaObserver for TestDeltaObserver {
         async fn start_block(&self, _block: &BlockInfo) {
-            
+
         }
         async fn observe_delta(&self, address: &Address, delta: i64) {
-            assert!(matches!(&address, Address::Byron(ByronAddress{ payload }) 
+            assert!(matches!(&address, Address::Byron(ByronAddress{ payload })
                 if payload[0] == 99));
             assert!(delta == 42 || delta == -42);
 
             let mut balance = self.balance.lock().await;
             *balance += delta;
         }
-        async fn finalise_block(&self, _block: &BlockInfo, _next_sequence: u64) {
-            
+        async fn finalise_block(&self, _block: &BlockInfo, _next_sequence: Sequence) {
+
         }
     }
 

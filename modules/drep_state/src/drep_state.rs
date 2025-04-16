@@ -46,7 +46,7 @@ impl DRepState
         let state_handle = state.clone();
         let state_tick = state.clone();
 
-        let serialiser = Arc::new(Mutex::new(Serialiser::new(state, module_path!(), 1)));
+        let serialiser = Arc::new(Mutex::new(Serialiser::new(state, module_path!())));
         let serialiser_tick = serialiser.clone();
 
 
