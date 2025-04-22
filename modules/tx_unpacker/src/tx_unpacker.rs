@@ -1,7 +1,7 @@
 //! Acropolis transaction unpacker module for Caryatid
 //! Unpacks transaction bodies into UTXO events
 
-use std::{collections::HashMap, fs, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 use std::collections::HashSet;
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
 use acropolis_common::{
@@ -21,7 +21,6 @@ use pallas::{
         traverse::{MultiEraCert, MultiEraTx},
     }
 };
-use serde_json::Value::Null;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.txs";
 

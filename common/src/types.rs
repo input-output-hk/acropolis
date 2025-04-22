@@ -616,8 +616,8 @@ impl GovActionId {
         let mut buf = self.transaction_id.clone();
         buf.push(self.action_index);
 
-        let GovActionHrp: Hrp = Hrp::parse("gov_action").unwrap();
-        bech32::encode::<Bech32>(GovActionHrp, &buf)
+        let gov_action_hrp: Hrp = Hrp::parse("gov_action").unwrap();
+        bech32::encode::<Bech32>(gov_action_hrp, &buf)
             .unwrap_or_else(|e| format!("Cannot convert {:?} to bech32: {e}", self.transaction_id))
     }
 
@@ -766,8 +766,8 @@ pub enum Voter {
 
 impl Voter {
     pub fn to_bech32(&self, hrp: &str, buf: &[u8]) -> String {
-        let VoterHrp: Hrp = Hrp::parse(hrp).unwrap();
-        bech32::encode::<Bech32>(VoterHrp, &buf)
+        let voter_hrp: Hrp = Hrp::parse(hrp).unwrap();
+        bech32::encode::<Bech32>(voter_hrp, &buf)
             .unwrap_or_else(|e| format!("Cannot convert {:?} to bech32: {e}", self))
     }
 }
