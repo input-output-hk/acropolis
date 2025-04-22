@@ -1,7 +1,7 @@
 //! Acropolis transaction unpacker module for Caryatid
 //! Unpacks transaction bodies into UTXO events
 
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, fs, sync::Arc};
 use std::collections::HashSet;
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
 use acropolis_common::{
@@ -21,6 +21,7 @@ use pallas::{
         traverse::{MultiEraCert, MultiEraTx},
     }
 };
+use serde_json::Value::Null;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.txs";
 
@@ -113,6 +114,20 @@ impl TxUnpacker
         }
     }
 
+    fn map_nullable<Src: Clone,Dst>(f: impl FnOnce(&Src) -> Dst, nullable_src: &Nullable<Src>) -> Option<Dst> {
+        match nullable_src {
+            Nullable::Some(src) => Some(f(src)),
+            _ => None
+        }
+    }
+
+    fn map_nullable_result<Src: Clone,Dst>(f: impl FnOnce(&Src) -> Result<Dst>, nullable_src: &Nullable<Src>) -> Result<Option<Dst>> {
+        match nullable_src {
+            Nullable::Some(src) => { let res = f(src)?; Ok(Some(res)) }
+            _ => Ok(None)
+        }
+    }
+
     fn map_anchor(anchor: &conway::Anchor) -> Anchor {
         Anchor {
             url: anchor.url.clone(),
@@ -123,6 +138,22 @@ impl TxUnpacker
     /// Map a Nullable Anchor to ours
     fn map_nullable_anchor(anchor: &Nullable<conway::Anchor>) -> Option<Anchor> {
         Self::map_nullable(&Self::map_anchor, anchor)
+    }
+
+    fn map_gov_action_id(pallas_action_id: &conway::GovActionId) -> Result<GovActionId> {
+        let act_idx_u8: u8 = match pallas_action_id.action_index.try_into() {
+            Ok(v) => v,
+            Err(e) => return Err(anyhow!("Invalid action index {e}"))
+        };
+
+        Ok(GovActionId {
+            transaction_id: pallas_action_id.transaction_id.to_vec(),
+            action_index: act_idx_u8,
+        })
+    }
+
+    fn map_nullable_gov_action_id(id: &Nullable<conway::GovActionId>) -> Result<Option<GovActionId>> {
+        Self::map_nullable_result(&Self::map_gov_action_id, id)
     }
 
     /// Map a Pallas Relay to ours
@@ -377,20 +408,6 @@ impl TxUnpacker
         }
     }
 
-    fn map_nullable<Src: Clone,Dst>(f: impl FnOnce(&Src) -> Dst, nullable_src: &Nullable<Src>) -> Option<Dst> {
-        match nullable_src {
-            Nullable::Some(src) => Some(f(src)),
-            _ => None
-        }
-    }
-
-    fn map_gov_action_id(pallas_action_id: &conway::GovActionId) -> GovActionId {
-        GovActionId {
-            transaction_id: pallas_action_id.transaction_id.to_vec(),
-            action_index: pallas_action_id.action_index,
-        }
-    }
-
     fn map_unit_interval(pallas_interval: &conway::UnitInterval) -> UnitInterval {
         UnitInterval {
             numerator: pallas_interval.numerator,
@@ -480,33 +497,33 @@ impl TxUnpacker
         })
     }
 
-    fn map_governance_action(action: &conway::GovAction) -> GovernanceAction {
+    fn map_governance_action(action: &conway::GovAction) -> Result<GovernanceAction> {
         match action {
             conway::GovAction::ParameterChange(id, protocol_update, script) =>
-                GovernanceAction::ParameterChange(ParameterChangeAction {
-                    action_id: Self::map_nullable(&Self::map_gov_action_id, id),
+                Ok(GovernanceAction::ParameterChange(ParameterChangeAction {
+                    previous_action_id: Self::map_nullable_gov_action_id(id)?,
                     protocol_param_update: Self::map_protocol_param_update(protocol_update),
                     script_hash: Self::map_nullable(&|x: &ScriptHash| x.to_vec(), &script),
-                }),
+                })),
 
             conway::GovAction::HardForkInitiation(id, version) =>
-                GovernanceAction::HardForkInitiation(HardForkInitiationAction {
-                    action_id: Self::map_nullable(&Self::map_gov_action_id, id),
+                Ok(GovernanceAction::HardForkInitiation(HardForkInitiationAction {
+                    previous_action_id: Self::map_nullable_gov_action_id(id)?,
                     protocol_version: *version,
-                }),
+                })),
 
             conway::GovAction::TreasuryWithdrawals(withdrawals, script) =>
-                GovernanceAction::TreasuryWithdrawals(TreasuryWithdrawalsAction{
+                Ok(GovernanceAction::TreasuryWithdrawals(TreasuryWithdrawalsAction{
                     rewards: HashMap::from_iter(withdrawals.iter().map(|(account,coin)| (account.to_vec(), *coin))),
                     script_hash: Self::map_nullable(&|x: &ScriptHash| x.to_vec(), script),
-                }),
+                })),
 
             conway::GovAction::NoConfidence(id) =>
-                GovernanceAction::NoConfidence(Self::map_nullable(&Self::map_gov_action_id, id)),
+                Ok(GovernanceAction::NoConfidence(Self::map_nullable_gov_action_id(id)?)),
 
             conway::GovAction::UpdateCommittee(id, committee, threshold, terms) =>
-                GovernanceAction::UpdateCommittee(UpdateCommitteeAction {
-                    action_id: Self::map_nullable(&Self::map_gov_action_id, id),
+                Ok(GovernanceAction::UpdateCommittee(UpdateCommitteeAction {
+                    previous_action_id: Self::map_nullable_gov_action_id(id)?,
                     committee: HashSet::from_iter(
                         committee.iter().map(Self::map_stake_credential)
                     ),
@@ -514,26 +531,27 @@ impl TxUnpacker
                         threshold.iter().map(|(k,v)| (Self::map_stake_credential(k), *v))
                     ),
                     terms: Self::map_unit_interval(terms),
-                }),
+                })),
 
             conway::GovAction::NewConstitution(id, constitution) =>
-                GovernanceAction::NewConstitution(NewConstitutionAction {
-                    action_id: Self::map_nullable(&Self::map_gov_action_id, id),
+                Ok(GovernanceAction::NewConstitution(NewConstitutionAction {
+                    previous_action_id: Self::map_nullable_gov_action_id(id)?,
                     new_constitution: Constitution {
                         anchor: Self::map_anchor(&constitution.anchor),
                         guardrail_script: Self::map_nullable(&|x: &ScriptHash| x.to_vec(), &constitution.guardrail_script)
                     },
-                }),
+                })),
 
-            conway::GovAction::Information => GovernanceAction::Information
+            conway::GovAction::Information => Ok(GovernanceAction::Information)
         }
     }
 
-    fn map_governance_proposals_procedures(prop: &conway::ProposalProcedure) -> Result<ProposalProcedure> {
+    fn map_governance_proposals_procedures(gov_action_id: &GovActionId, prop: &conway::ProposalProcedure) -> Result<ProposalProcedure> {
         Ok(ProposalProcedure {
             deposit: prop.deposit,
             reward_account: prop.reward_account.to_vec(),
-            gov_action: Self::map_governance_action(&prop.gov_action),
+            gov_action_id: gov_action_id.clone(),
+            gov_action: Self::map_governance_action(&prop.gov_action)?,
             anchor: Self::map_anchor(&prop.anchor),
         })
     }
@@ -577,7 +595,7 @@ impl TxUnpacker
                 .ok_or_else(|| anyhow!("Cannot find voter {:?}, which must present", voter))?;
 
             for (pallas_action_id, pallas_voting_procedure) in pallas_pair.iter() {
-                let action_id = Self::map_gov_action_id(pallas_action_id);
+                let action_id = Self::map_gov_action_id(pallas_action_id)?;
                 let vp = Self::map_single_governance_voting_procedure(&pallas_voting_procedure);
                 single_voter.insert(action_id, vp);
             }
@@ -610,7 +628,6 @@ impl TxUnpacker
         }
 
         context.clone().message_bus.subscribe(&subscribe_topic, move |message: Arc<Message>| {
-
             let context = context.clone();
             let publish_utxo_deltas_topic = publish_utxo_deltas_topic.clone();
             let publish_certificates_topic = publish_certificates_topic.clone();
@@ -662,6 +679,18 @@ impl TxUnpacker
                                         if let Some(ref p) = conway.transaction_body.proposal_procedures {
                                             props = Some(p);
                                         }
+/*
+                                        if votes.is_some() || props.is_some() {
+                                            let filename = format!("governance-logs/{:012}.json", txs_msg.sequence);
+                                            let data = match serde_json::to_string(&message) {
+                                                Ok(data) => data,
+                                                Err(e) => format!("Error serializing message to json: {e}")
+                                            };
+                                            if let Err(e) = fs::write(filename, data) {
+                                                error!("Error writing to file: {}", e);
+                                            }
+                                        }
+ */
                                     }
 
                                     if tracing::enabled!(tracing::Level::DEBUG) {
@@ -733,19 +762,23 @@ impl TxUnpacker
                                     if publish_governance_procedures_topic.is_some() {
                                         if let Some(pp) = props {
                                             // Nonempty set -- governance_message.proposal_procedures will not be empty
+                                            let mut proc_id = GovActionId { transaction_id: tx.hash().to_vec(), action_index: 0 };
+                                            let mut action_index: usize = 0;
                                             for pallas_governance_proposals in pp.iter() {
-                                                info!("ProposalProcedure: {:?}", pallas_governance_proposals);
-                                                match Self::map_governance_proposals_procedures(&pallas_governance_proposals) {
+                                                match proc_id.set_action_index(action_index)
+                                                    .and_then (|proc_id| Self::map_governance_proposals_procedures(&proc_id, &pallas_governance_proposals))
+                                                {
                                                     Ok(g) => governance_message.proposal_procedures.push(g),
-                                                    Err(_e) => {}
+                                                    Err(e) => error!("Cannot decode governance proposal procedure {} idx {} in slot {}: {e}", proc_id, action_index, txs_msg.block.slot)
                                                 }
+                                                action_index += 1;
                                             }
                                         }
 
                                         if let Some(pallas_vp) = votes {
                                             // Nonempty set -- governance_message.voting_procedures will not be empty
                                             match Self::map_all_governance_voting_procedures(pallas_vp) {
-                                                Ok(vp) => governance_message.voting_procedures.push(vp),
+                                                Ok(vp) => governance_message.voting_procedures.push((tx.hash().to_vec(), vp)),
                                                 Err(e) => error!("Cannot decode governance voting procedures in slot {}: {e}", txs_msg.block.slot)
                                             }
                                         }

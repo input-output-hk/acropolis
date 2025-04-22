@@ -3,8 +3,11 @@
 #![allow(dead_code)]
 
 use std::collections::{HashMap, HashSet};
+use std::fmt::{Display, Formatter};
+use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, hex::Hex};
+use bech32::{Hrp, Bech32};
 
 /// Block status
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -605,7 +608,33 @@ pub type UnitInterval = RationalNumber;
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct GovActionId {
     pub transaction_id: DataHash,
-    pub action_index: u32,
+    pub action_index: u8,
+}
+
+impl GovActionId {
+    pub fn to_bech32(&self) -> String {
+        let mut buf = self.transaction_id.clone();
+        buf.push(self.action_index);
+
+        let GovActionHrp: Hrp = Hrp::parse("gov_action").unwrap();
+        bech32::encode::<Bech32>(GovActionHrp, &buf)
+            .unwrap_or_else(|e| format!("Cannot convert {:?} to bech32: {e}", self.transaction_id))
+    }
+
+    pub fn set_action_index(&mut self, action_index: usize) -> Result<&Self, anyhow::Error> {
+        if action_index >= 256 {
+            return Err(anyhow!("Action_index {action_index} >= 256"))
+        }
+
+        self.action_index = action_index as u8;
+        Ok(self)
+    }
+}
+
+impl Display for GovActionId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.to_bech32())
+    }
 }
 
 type CostModel = Vec<i64>;
@@ -684,14 +713,14 @@ pub struct Constitution {
 
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ParameterChangeAction {
-    pub action_id: Option<GovActionId>,
+    pub previous_action_id: Option<GovActionId>,
     pub protocol_param_update: Box<ProtocolParamUpdate>,
     pub script_hash: Option<Vec<u8>>
 }
 
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct HardForkInitiationAction {
-    pub action_id: Option<GovActionId>,
+    pub previous_action_id: Option<GovActionId>,
     pub protocol_version: (u64, u64),
 }
 
@@ -703,7 +732,7 @@ pub struct TreasuryWithdrawalsAction {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct UpdateCommitteeAction {
-    pub action_id: Option<GovActionId>,
+    pub previous_action_id: Option<GovActionId>,
     pub committee: HashSet<CommitteeCredential>,
     pub committee_thresold: HashMap<CommitteeCredential, u64>,
     pub terms: UnitInterval,
@@ -711,7 +740,7 @@ pub struct UpdateCommitteeAction {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct NewConstitutionAction {
-    pub action_id: Option<GovActionId>,
+    pub previous_action_id: Option<GovActionId>,
     pub new_constitution: Constitution
 }
 
@@ -726,20 +755,6 @@ pub enum GovernanceAction {
     Information
 }
 
-impl GovernanceAction {
-    pub fn get_gov_action_id(&self) -> Option<&GovActionId> {
-        match &self {
-            GovernanceAction::ParameterChange(p) => p.action_id.as_ref(),
-            GovernanceAction::HardForkInitiation(h) => h.action_id.as_ref(),
-            GovernanceAction::TreasuryWithdrawals(_t) => None,
-            GovernanceAction::NoConfidence(n) => n.as_ref(),
-            GovernanceAction::UpdateCommittee(u) => u.action_id.as_ref(),
-            GovernanceAction::NewConstitution(n) => n.action_id.as_ref(),
-            GovernanceAction::Information => None
-        }
-    }
-}
-
 #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, PartialOrd, Eq, Ord, Clone, Hash)]
 pub enum Voter {
     ConstitutionalCommitteeKey(AddrKeyhash),
@@ -747,6 +762,26 @@ pub enum Voter {
     DRepKey(AddrKeyhash),
     DRepScript(ScriptHash),
     StakePoolKey(AddrKeyhash),
+}
+
+impl Voter {
+    pub fn to_bech32(&self, hrp: &str, buf: &[u8]) -> String {
+        let VoterHrp: Hrp = Hrp::parse(hrp).unwrap();
+        bech32::encode::<Bech32>(VoterHrp, &buf)
+            .unwrap_or_else(|e| format!("Cannot convert {:?} to bech32: {e}", self))
+    }
+}
+
+impl Display for Voter {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Voter::ConstitutionalCommitteeKey(h) => write!(f, "{}", self.to_bech32("cc_hot", &h)),
+            Voter::ConstitutionalCommitteeScript(s) => write!(f, "{}", self.to_bech32("cc_hot_script", &s)),
+            Voter::DRepKey(k) => write!(f, "{}", self.to_bech32("drep", &k)),
+            Voter::DRepScript(s) => write!(f, "{}", self.to_bech32("drep_script", &s)),
+            Voter::StakePoolKey(k) => write!(f, "{}", self.to_bech32("pool", &k)),
+        }
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Clone)]
@@ -771,6 +806,7 @@ pub struct VotingProcedures {
 pub struct ProposalProcedure {
     pub deposit: Lovelace,
     pub reward_account: RewardAccount,
+    pub gov_action_id: GovActionId,
     pub gov_action: GovernanceAction,
     pub anchor: Anchor,
 }

@@ -1,5 +1,11 @@
 # Acropolis architecture workspace root
 
+[patch.crates-io]
+caryatid_sdk = { path = "../caryatid/sdk" }
+caryatid_module_clock = { path = "../caryatid/modules/clock" }
+caryatid_module_rest_server = { path = "../caryatid/modules/rest_server" }
+caryatid_module_spy = { path = "../caryatid/modules/spy" }
+
 [workspace]
 members = [
     # Global message and common definitions
@@ -18,6 +24,7 @@ members = [
 
     # Process builds
     "processes/omnibus",               # All-inclusive omnibus process
+    "processes/replayer",              # All-inclusive process to replay messages
 ]
 
 resolver = "2"
