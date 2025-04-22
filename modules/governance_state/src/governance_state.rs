@@ -37,7 +37,7 @@ impl GovernanceState
         info!("Creating request handler on '{handle_topic}'");
 
         let state = Arc::new(Mutex::new(State::new()));
-        let state_handle = state.clone();
+        let _state_handle = state.clone();
         let state_tick = state.clone();
 
         let serialiser = Arc::new(Mutex::new(Serialiser::new(state, module_path!(), 1)));
