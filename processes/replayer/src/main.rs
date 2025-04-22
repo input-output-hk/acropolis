@@ -56,6 +56,7 @@ pub async fn main() -> Result<()> {
     SPOState::register(&mut process);
     DRepState::register(&mut process);
     GovernanceState::register(&mut process);
+
     Playback::<Message>::register(&mut process);
 
     Clock::<Message>::register(&mut process);
