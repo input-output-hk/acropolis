@@ -129,7 +129,7 @@ pub struct GovernanceProceduresMessage {
 
     pub proposal_procedures: Vec<ProposalProcedure>,
 
-    pub voting_procedures: Vec<VotingProcedures>
+    pub voting_procedures: Vec<(DataHash, VotingProcedures)>
 }
 
 impl GovernanceProceduresMessage {

@@ -1,0 +1,39 @@
+# Acropolis omnibus process
+[package]
+name = "acropolis_process_replayer"
+version = "0.1.0"
+edition = "2021"
+authors = ["Dmitry Shtukenberg <dmitry.shtukenberg@gmail.com>"]
+description = "Acropolis replayer process, allowing to debug any module"
+license = "Apache-2.0"
+
+[dependencies]
+caryatid_process = { path = "../../../caryatid/process" }
+caryatid_sdk = { path = "../../../caryatid/sdk" }
+caryatid_module_playback = { path = "../../../caryatid/modules/playback" }
+caryatid_module_clock = { path = "../../../caryatid/modules/clock" }
+caryatid_module_rest_server = { path = "../../../caryatid/modules/rest_server" }
+caryatid_module_spy = { path = "../../../caryatid/modules/spy" }
+
+# Core message definition
+acropolis_common = { path = "../../common" }
+
+# Modules we use
+acropolis_module_genesis_bootstrapper = { path = "../../modules/genesis_bootstrapper" }
+acropolis_module_mithril_snapshot_fetcher = { path = "../../modules/mithril_snapshot_fetcher" }
+acropolis_module_upstream_chain_fetcher = { path = "../../modules/upstream_chain_fetcher" }
+acropolis_module_block_unpacker = { path = "../../modules/block_unpacker" }
+acropolis_module_tx_unpacker = { path = "../../modules/tx_unpacker" }
+acropolis_module_utxo_state = { path = "../../modules/utxo_state" }
+acropolis_module_spo_state = { path = "../../modules/spo_state" }
+acropolis_module_drep_state = { path = "../../modules/drep_state" }
+acropolis_module_governance_state = { path = "../../modules/governance_state" }
+
+anyhow = "1.0"
+config = "0.15.11"
+tracing = "0.1.40"
+tracing-subscriber = "0.3.18"
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1.0.214", features = ["derive"] }
+serde_json = "1.0.132"
+chrono = "0.4.38"
