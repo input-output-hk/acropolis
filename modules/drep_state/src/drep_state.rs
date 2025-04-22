@@ -8,7 +8,6 @@ use anyhow::{anyhow, Result};
 use config::Config;
 use tokio::sync::Mutex;
 use tracing::{error, info};
-//use acropolis_common::messages::Message::RESTResponse;
 use acropolis_common::messages::RESTResponse;
 
 mod state;
