@@ -1,22 +1,44 @@
 //! Acropolis SPOState: State storage
 
-use std::collections::HashMap;
+use std::{cmp::max, collections::HashMap};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use hex::ToHex;
 use tracing::{debug, error, info};
-use acropolis_common::messages::{GovernanceProceduresMessage};
-use acropolis_common::{DataHash, GovActionId, ProposalProcedure, SerialisedMessageHandler, Voter, VotingProcedure};
+use acropolis_common::{
+    messages::GovernanceProceduresMessage,
+    rational_number::RationalNumber,
+    ConwayGenesisParams, DataHash, GovActionId, GovernanceAction,
+    KeyHash, ProposalProcedure, ProtocolParamType, ProtocolParamUpdate,
+    ScriptHash, SerialisedMessageHandler, Voter, VotingProcedure
+};
+
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct VotingRegistrationState {
+    total_spos: u64,
+    registered_spos: u64,
+    registered_dpres: u64,
+    committee_size: u64
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct State {
-    pub prev_sequence: u64,
-    pub proposal_count: usize,
+    prev_sequence: u64,
+    proposal_count: usize,
+
     pub action_proposal_count: usize,
     pub votes_count: usize,
 
+    pub conway: Option<ConwayGenesisParams>,
+    pub have_committee: bool,
+
     pub proposals: HashMap<GovActionId, ProposalProcedure>,
     pub votes: HashMap<GovActionId, HashMap<Voter, (DataHash, VotingProcedure)>>,
+    pub voting_state: VotingRegistrationState,
+
+    pub drep_key_stake: HashMap<KeyHash, u64>,
+    pub drep_script_stake: HashMap<ScriptHash, u64>,
+    pub sco_stake: HashMap<KeyHash, u64>
 }
 
 #[async_trait]
@@ -34,11 +56,20 @@ impl State {
     pub fn new() -> Self {
         Self {
             prev_sequence: 0,
-            proposals: HashMap::new(),
-            votes: HashMap::new(),
             proposal_count: 0,
             action_proposal_count: 0,
             votes_count: 0,
+
+            conway: None,
+            have_committee: false,
+
+            proposals: HashMap::new(),
+            votes: HashMap::new(),
+            voting_state: VotingRegistrationState::default(),
+
+            drep_key_stake: HashMap::new(),
+            drep_script_stake: HashMap::new(),
+            sco_stake: HashMap::new(),
         }
     }
 
@@ -68,6 +99,206 @@ impl State {
         Ok(())
     }
 
+    fn proportional_count_drep_comm(&self, drep: &RationalNumber, comm: &RationalNumber) -> Result<(u64, u64)> {
+        let d = drep.proportion_of(self.voting_state.registered_dpres)?.round_up();
+        let c = comm.proportion_of(self.voting_state.committee_size)?.round_up();
+        Ok((d, c))
+    }
+
+    fn proportional_count(&self, pool: &RationalNumber, drep: &RationalNumber, comm: &RationalNumber) -> Result<(u64, u64, u64)> {
+        let p = pool.proportion_of(self.voting_state.registered_spos)?.round_up();
+        let (d,c) = self.proportional_count_drep_comm(drep, comm)?;
+        Ok((p, d, c))
+    }
+
+    fn full_count(&self, pool: &RationalNumber, drep: &RationalNumber, comm: &RationalNumber) -> Result<(u64, u64, u64)> {
+        let p = pool.proportion_of(self.voting_state.total_spos)?.round_up();
+        let (d,c) = self.proportional_count_drep_comm(drep, comm)?;
+        Ok((p, d, c))
+    }
+
+    fn upd<T: Clone>(dst: &mut T, u: &Option<T>) {
+        if let Some(u) = u { *dst = (*u).clone(); }
+    }
+
+    fn _update_conway_params(c: &mut ConwayGenesisParams, p: &ProtocolParamUpdate) {
+        Self::upd(&mut c.pool_voting_thresholds, &p.pool_voting_thresholds);
+        Self::upd(&mut c.d_rep_voting_thresholds, &p.drep_voting_thresholds);
+        Self::upd(&mut c.committee_min_size, &p.min_committee_size);
+        Self::upd(&mut c.committee_max_term_length, &p.committee_term_limit.map(|x| x as u32));
+        Self::upd(&mut c.d_rep_activity, &p.drep_inactivity_period.map(|x| x as u32));
+        Self::upd(&mut c.d_rep_deposit, &p.drep_deposit);
+        Self::upd(&mut c.gov_action_deposit, &p.governance_action_deposit);
+        Self::upd(&mut c.gov_action_lifetime, &p.governance_action_validity_period.map(|x| x as u32));
+        Self::upd(&mut c.min_fee_ref_script_cost_per_byte, &p.minfee_refscript_cost_per_byte)
+    }
+
+    fn get_protocol_param_types(&self, p: &ProtocolParamUpdate) -> ProtocolParamType {
+        let mut result = ProtocolParamType::none();
+
+        if p.max_block_body_size.is_some() ||
+            p.max_block_header_size.is_some() ||
+            p.max_transaction_size.is_some() ||
+            p.max_value_size.is_some() ||
+            p.max_block_ex_units.is_some() ||
+            p.governance_action_deposit.is_some() ||
+            p.ada_per_utxo_byte.is_some() ||
+            p.minfee_refscript_cost_per_byte.is_some() ||
+            p.minfee_a.is_some() ||
+            p.minfee_b.is_some()
+        {
+            result |= ProtocolParamType::SecurityProperty;
+        }
+
+        if p.max_block_body_size.is_some() ||
+            p.max_transaction_size.is_some() ||
+            p.max_block_header_size.is_some() ||
+            p.max_value_size.is_some() ||
+            p.max_tx_ex_units.is_some() ||
+            p.max_block_ex_units.is_some() ||
+            p.max_collateral_inputs.is_some()
+        {
+            result |= ProtocolParamType::NetworkGroup;
+        }
+
+        if p.minfee_a.is_some() ||
+            p.minfee_b.is_some() ||
+            p.key_deposit.is_some() ||
+            p.pool_deposit.is_some() ||
+            p.expansion_rate.is_some() ||
+            p.treasury_growth_rate.is_some() ||
+            p.min_pool_cost.is_some() ||
+            p.ada_per_utxo_byte.is_some() ||
+            p.execution_costs.is_some() ||
+            p.minfee_refscript_cost_per_byte.is_some()
+        {
+            result |= ProtocolParamType::EconomicGroup;
+        }
+
+        if p.pool_pledge_influence.is_some() ||
+            p.maximum_epoch.is_some() ||
+            p.desired_number_of_stake_pools.is_some() ||
+            p.execution_costs.is_some() ||
+            p.collateral_percentage.is_some()
+        {
+            result |= ProtocolParamType::TechnicalGroup;
+        }
+
+        if p.pool_voting_thresholds.is_some() ||
+            p.drep_voting_thresholds.is_some() ||
+            p.governance_action_validity_period.is_some() ||
+            p.governance_action_deposit.is_some() ||
+            p.drep_deposit.is_some() ||
+            p.drep_inactivity_period.is_some() ||
+            p.min_committee_size.is_some() ||
+            p.committee_term_limit.is_some()
+        {
+            result |= ProtocolParamType::GovernanceGroup;
+        }
+
+        result
+    }
+
+    fn get_action_thresholds(&self, pp: &ProposalProcedure, thresholds: &ConwayGenesisParams, have_committee: bool) -> Result<(u64, u64, u64)> {
+        let d = &thresholds.d_rep_voting_thresholds;
+        let p = &thresholds.pool_voting_thresholds;
+        let c = &thresholds.committee;
+        let zero = &RationalNumber::ZERO;
+        let one = &RationalNumber::ONE;
+
+        match &pp.gov_action {
+            GovernanceAction::ParameterChange(action) => {
+                let param_types = self.get_protocol_param_types(&action.protocol_param_update);
+
+                let mut p_th = zero;
+                let mut d_th = zero;
+
+                if param_types.contains(ProtocolParamType::SecurityProperty) { p_th = &p.security_voting_threshold; }
+                if param_types.contains(ProtocolParamType::EconomicGroup) { d_th = max(d_th, &d.pp_economic_group); }
+                if param_types.contains(ProtocolParamType::NetworkGroup) { d_th = max(d_th, &d.pp_network_group); }
+                if param_types.contains(ProtocolParamType::TechnicalGroup) { d_th = max(d_th, &d.pp_technical_group); }
+                if param_types.contains(ProtocolParamType::GovernanceGroup) { d_th = max(d_th, &d.pp_governance_group); }
+
+                self.proportional_count(p_th, d_th, &c.threshold)
+            },
+            GovernanceAction::HardForkInitiation(_) => self.full_count(&p.hard_fork_initiation, &d.hard_fork_initiation, &c.threshold),
+            GovernanceAction::TreasuryWithdrawals(_) => self.proportional_count(zero, &d.treasury_withdrawal, &c.threshold),
+            GovernanceAction::NoConfidence(_) => self.proportional_count(&p.motion_no_confidence.clone(), &d.motion_no_confidence.clone(), zero),
+            GovernanceAction::UpdateCommittee(_) => if have_committee {
+                    self.proportional_count(&p.committee_normal, &d.committee_normal, zero)
+                }
+                else {
+                    self.proportional_count(&p.committee_no_confidence, &d.committee_no_confidence, zero)
+                }
+            GovernanceAction::NewConstitution(_) => self.proportional_count(zero, &d.update_constitution, &c.threshold),
+            GovernanceAction::Information => self.proportional_count(one, one, zero)
+        }
+    }
+
+    fn is_finally_accepted(&self, action_id: &GovActionId) -> Result<bool> {
+        let proposal = self.proposals.get(action_id).ok_or_else(|| anyhow!("action {} not found", action_id))?;
+
+        let conway_params = match &self.conway {
+            None => return Err(anyhow!("Conway params are not known, cannot count votes")),
+            Some(conway_params) => conway_params
+        };
+
+        let (d,p,c) = self.get_action_thresholds(proposal, conway_params, self.have_committee)?;
+        let (d_act, p_act, c_act) = self.get_actual_votes(action_id);
+        Ok(d_act >= d && p_act >= p && c_act >= c)
+    }
+
+    fn return_rewards(&self, _votes: Option<&HashMap<Voter, (DataHash, VotingProcedure)>>) {
+    }
+
+    fn end_voting(&mut self, action_id: &GovActionId) {
+        self.return_rewards(self.votes.get(&action_id));
+        self.votes.remove(&action_id);
+        self.proposals.remove(&action_id);
+    }
+
+    fn get_actual_votes(&self, action_id: &GovActionId) -> (u64, u64, u64) {
+        let (mut p, mut d, mut c) = (0, 0, 0);
+        if let Some(all_votes) = self.votes.get(&action_id) {
+            for voter in all_votes.keys() {
+                match voter {
+                    Voter::ConstitutionalCommitteeKey(_) => c += 1,
+                    Voter::ConstitutionalCommitteeScript(_) => c += 1,
+                    Voter::DRepKey(key) => { self.drep_key_stake.get(key).map(|v| d += v); }
+                    Voter::DRepScript(script) => { self.drep_script_stake.get(script).map(|v| d += v); }
+                    Voter::StakePoolKey(pool) => { self.sco_stake.get(pool).map(|v| p += v); }
+                }
+            }
+        }
+        (p, d, c)
+    }
+
+    fn is_expired(&self, _action_id: &GovActionId) -> bool {
+        return false;
+    }
+
+    fn process_one_proposal(&mut self, action_id: &GovActionId) -> Result<()> {
+        if self.is_finally_accepted(&action_id)? {
+            self.end_voting(&action_id);
+        }
+
+        if self.is_expired(&action_id) {
+            self.end_voting(&action_id);
+        }
+
+        Ok(())
+    }
+
+    fn process_new_epoch(&mut self, _new_epoch: u64) {
+        let actions = self.proposals.keys().map(|a| a.clone()).collect::<Vec<_>>();
+
+        for action_id in actions.iter() {
+            if let Err(e) = self.process_one_proposal(&action_id) {
+                error!("Error processing governance {action_id}: {e}");
+            }
+        }
+    }
+
     async fn log_stats(&self) {
         info!("props: {}, props_with_id: {}, votes: {}, stored proposal procedures: {}",
             self.proposal_count, self.action_proposal_count, self.votes_count, self.proposals.len()
@@ -82,6 +313,24 @@ impl State {
         }
     }
 
+    pub fn list_proposals(&self) -> Result<Vec<(GovActionId, ProposalProcedure)>> {
+        let mut result = Vec::new();
+        for (action, prop) in self.proposals.iter() {
+            result.push((action.clone(), prop.clone()))
+        }
+        Ok(result)
+    }
+
+    pub fn list_votes(&self) -> Result<Vec<(GovActionId, Voter, DataHash, VotingProcedure)>> {
+        let mut result = Vec::new();
+        for (action, all_votes) in self.votes.iter() {
+            for (voter, (transaction, voting_proc)) in all_votes.iter() {
+                result.push((action.clone(), voter.clone(), transaction.clone(), voting_proc.clone()));
+            }
+        }
+        Ok(result)
+    }
+
     pub async fn tick(&self) -> Result<()> {
         self.log_stats().await;
         Ok(())
@@ -94,6 +343,10 @@ impl State {
             );
         }
         self.prev_sequence = governance_message.sequence;
+
+        if governance_message.block.new_epoch {
+            self.process_new_epoch(governance_message.block.epoch);
+        }
 
         for pproc in &governance_message.proposal_procedures {
             self.proposal_count += 1;

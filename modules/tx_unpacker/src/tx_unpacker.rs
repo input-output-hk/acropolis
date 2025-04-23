@@ -5,7 +5,8 @@ use std::{collections::HashMap, sync::Arc};
 use std::collections::HashSet;
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
 use acropolis_common::{
-    messages::{GovernanceProceduresMessage, Message, TxCertificatesMessage, UTXODeltasMessage}, *
+    messages::{GovernanceProceduresMessage, Message, TxCertificatesMessage, UTXODeltasMessage},
+    *
 };
 
 use anyhow::{anyhow, Result};
@@ -153,6 +154,13 @@ impl TxUnpacker
 
     fn map_nullable_gov_action_id(id: &Nullable<conway::GovActionId>) -> Result<Option<GovActionId>> {
         Self::map_nullable_result(&Self::map_gov_action_id, id)
+    }
+
+    fn map_constitution(constitution: &conway::Constitution) -> Constitution {
+        Constitution {
+            anchor: Self::map_anchor(&constitution.anchor),
+            guardrail_script: Self::map_nullable(|x| x.to_vec(), &constitution.guardrail_script)
+        }
     }
 
     /// Map a Pallas Relay to ours
@@ -523,10 +531,10 @@ impl TxUnpacker
             conway::GovAction::UpdateCommittee(id, committee, threshold, terms) =>
                 Ok(GovernanceAction::UpdateCommittee(UpdateCommitteeAction {
                     previous_action_id: Self::map_nullable_gov_action_id(id)?,
-                    committee: HashSet::from_iter(
+                    removed_committee_members: HashSet::from_iter(
                         committee.iter().map(Self::map_stake_credential)
                     ),
-                    committee_thresold: HashMap::from_iter(
+                    new_committee_members: HashMap::from_iter(
                         threshold.iter().map(|(k,v)| (Self::map_stake_credential(k), *v))
                     ),
                     terms: Self::map_unit_interval(terms),
@@ -535,10 +543,7 @@ impl TxUnpacker
             conway::GovAction::NewConstitution(id, constitution) =>
                 Ok(GovernanceAction::NewConstitution(NewConstitutionAction {
                     previous_action_id: Self::map_nullable_gov_action_id(id)?,
-                    new_constitution: Constitution {
-                        anchor: Self::map_anchor(&constitution.anchor),
-                        guardrail_script: Self::map_nullable(&|x: &ScriptHash| x.to_vec(), &constitution.guardrail_script)
-                    },
+                    new_constitution: Self::map_constitution(&constitution),
                 })),
 
             conway::GovAction::Information => Ok(GovernanceAction::Information)

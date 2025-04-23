@@ -26,4 +26,6 @@ fn main() {
 
     download("https://book.world.dev.cardano.org/environments/mainnet/byron-genesis.json",
              "mainnet-byron-genesis.json");
+    download("https://book.world.dev.cardano.org/environments/mainnet/conway-genesis.json",
+             "mainnet-conway-genesis.json");
 }

@@ -67,6 +67,7 @@ pub struct RawTxsMessage {
 pub struct GenesisCompleteMessage {
     /// Next event sequence number to use
     pub next_sequence: u64,
+    pub conway_genesis: Option<ConwayGenesisParams>
 }
 
 /// Message encapsulating multiple UTXO deltas, in order
@@ -121,7 +122,7 @@ pub struct GovernanceProceduresMessage {
 
 impl GovernanceProceduresMessage {
     pub fn is_empty(&self) -> bool {
-        self.proposal_procedures.is_empty() && self.voting_procedures.is_empty()
+        self.proposal_procedures.is_empty() && self.voting_procedures.is_empty() && !self.block.new_epoch
     }
 }
 
@@ -144,7 +145,7 @@ pub enum Message {
     BlockBody(BlockBodyMessage),               // Block body available
     SnapshotComplete(SnapshotCompleteMessage), // Mithril snapshot loaded
     ReceivedTxs(RawTxsMessage),                // Transaction available
-    GenesisComplete(GenesisCompleteMessage),   // Genesis UTXOs done
+    GenesisComplete(GenesisCompleteMessage),   // Genesis UTXOs done + genesis params
     UTXODeltas(UTXODeltasMessage),             // UTXO deltas received
     TxCertificates(TxCertificatesMessage),     // Transaction certificates received
     AddressDeltas(AddressDeltasMessage),       // Address deltas received

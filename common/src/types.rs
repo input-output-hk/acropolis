@@ -6,8 +6,11 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
-use serde_with::{serde_as, hex::Hex};
-use bech32::{Hrp, Bech32};
+use serde_with::{hex::Hex, serde_as};
+use bech32::{Bech32, Hrp};
+use hex::decode;
+use bitmask_enum::bitmask;
+use crate::rational_number::RationalNumber;
 
 /// Block status
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -66,8 +69,8 @@ impl Default for AddressNetwork {
     fn default() -> Self { Self::Main }
 }
 
-type ScriptHash = KeyHash;
-type AddrKeyhash = KeyHash;
+pub type ScriptHash = KeyHash;
+pub type AddrKeyhash = KeyHash;
 
 /// A Shelley-era address - payment part
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -242,6 +245,30 @@ pub enum Credential {
 
     /// Script hash
     ScriptHash(KeyHash),
+}
+
+impl Credential {
+    fn hex_string_to_hash(hex_str: &str) -> anyhow::Result<KeyHash> {
+        let key_hash = decode(hex_str.to_owned().into_bytes())?;
+        if key_hash.len() != 28 {
+            Err(anyhow!("Invalid hash length for {:?}, expected 28 bytes", hex_str))
+        }
+        else {
+            Ok(key_hash)
+        }
+    }
+
+    pub fn from_json_string (credential: &str) -> anyhow::Result<Self> {
+        if let Some(hash) = credential.strip_prefix("scriptHash-") {
+            Ok(Credential::ScriptHash(Self::hex_string_to_hash(hash)?))
+        }
+        else if let Some(hash) = credential.strip_prefix("keyHash-") {
+            Ok(Credential::AddrKeyHash(Self::hex_string_to_hash(hash)?))
+        }
+        else {
+            Err(anyhow!("Incorrect credential {}, expected scriptHash- or keyHash- prefix", credential).into())
+        }
+    }
 }
 
 impl Default for Credential {
@@ -597,12 +624,6 @@ pub struct ExUnitPrices {
     pub step_price: RationalNumber,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Clone)]
-pub struct RationalNumber {
-    pub numerator: u64,
-    pub denominator: u64,
-}
-
 pub type UnitInterval = RationalNumber;
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -669,6 +690,32 @@ pub struct DRepVotingThresholds {
     pub treasury_withdrawal: UnitInterval,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ConwayGenesisParams {
+    pub pool_voting_thresholds: PoolVotingThresholds,
+    pub d_rep_voting_thresholds: DRepVotingThresholds,
+    pub committee_min_size: u64,
+    pub committee_max_term_length: u32,
+    pub gov_action_lifetime: u32,
+    pub gov_action_deposit: u64,
+    pub d_rep_deposit: u64,
+    pub d_rep_activity: u32,
+    pub min_fee_ref_script_cost_per_byte: RationalNumber,
+    pub plutus_v3_cost_model: Vec<i64>,
+    pub constitution: Constitution,
+    pub committee: Committee,
+}
+
+#[bitmask(u8)]
+#[derive(serde::Serialize, serde::Deserialize)]
+pub enum ProtocolParamType {
+    NetworkGroup,
+    EconomicGroup,
+    TechnicalGroup,
+    GovernanceGroup,
+    SecurityProperty
+}
+
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtocolParamUpdate {
     pub minfee_a: Option<u64>,
@@ -711,6 +758,12 @@ pub struct Constitution {
     pub guardrail_script: Option<ScriptHash>,
 }
 
+#[derive(Serialize, Debug, Deserialize, Clone)]
+pub struct Committee {
+    pub members: HashMap<CommitteeCredential, u64>,
+    pub threshold: RationalNumber,
+}
+
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ParameterChangeAction {
     pub previous_action_id: Option<GovActionId>,
@@ -733,8 +786,8 @@ pub struct TreasuryWithdrawalsAction {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct UpdateCommitteeAction {
     pub previous_action_id: Option<GovActionId>,
-    pub committee: HashSet<CommitteeCredential>,
-    pub committee_thresold: HashMap<CommitteeCredential, u64>,
+    pub removed_committee_members: HashSet<CommitteeCredential>,
+    pub new_committee_members: HashMap<CommitteeCredential, u64>,
     pub terms: UnitInterval,
 }
 
