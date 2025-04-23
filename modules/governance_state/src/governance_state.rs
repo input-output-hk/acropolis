@@ -4,16 +4,18 @@
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
 use acropolis_common::{messages::Message, Serialiser};
 use std::sync::Arc;
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use config::Config;
+use hex::ToHex;
 use tokio::sync::Mutex;
 use tracing::{error, info};
+use acropolis_common::messages::RESTResponse;
 
 mod state;
 use state::State;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.governance";
-const DEFAULT_HANDLE_TOPIC: &str = "rest.get.governance-state";
+const DEFAULT_HANDLE_TOPIC: &str = "rest.get.governance-state.*";
 
 /// SPO State module
 #[module(
@@ -22,6 +24,33 @@ const DEFAULT_HANDLE_TOPIC: &str = "rest.get.governance-state";
     description = "In-memory Governance State from events"
 )]
 pub struct GovernanceState;
+
+fn perform_rest_request(state: &State, path: &str) -> Result<String> {
+    let request = match path.rfind('/') {
+        None => return Err(anyhow!("Poorly formed url, '/' expected.")),
+        Some(suffix_start) => &path[suffix_start+1..]
+    };
+
+    if request == "list" {
+        let mut list_votes = Vec::new();
+        let mut list_props = Vec::new();
+
+        for (a,p) in state.list_proposals()?.into_iter() {
+            list_props.push(format!("{}: {:?}", a, p));
+        }
+
+        for (a,v,tx,vp) in state.list_votes()?.into_iter() {
+            list_votes.push(format!("{}: {} at {} voted as {:?}", a, v, tx.encode_hex::<String>(), vp));
+        }
+
+        Ok(format!("Governance proposals list: {:?}\nGovernance votes list: {:?}",
+            list_props, list_votes
+        ))
+    }
+    else {
+        Err(anyhow!("Invalid action specified."))
+    }
+}
 
 impl GovernanceState
 {
@@ -37,7 +66,7 @@ impl GovernanceState
         info!("Creating request handler on '{handle_topic}'");
 
         let state = Arc::new(Mutex::new(State::new()));
-        let _state_handle = state.clone();
+        let state_handle = state.clone();
         let state_tick = state.clone();
 
         let serialiser = Arc::new(Mutex::new(Serialiser::new(state, module_path!(), 1)));
@@ -60,6 +89,33 @@ impl GovernanceState
 
                     _ => error!("Unexpected message type: {message:?}")
                 }
+            }
+        })?;
+
+        // REST requests handling
+        context.message_bus.handle(&handle_topic, move |message: Arc<Message>| {
+            let state = state_handle.clone();
+            async move {
+                let response = match message.as_ref() {
+                    Message::RESTRequest(request) => {
+                        info!("REST received {} {}", request.method, request.path);
+                        let lock = state.lock().await;
+
+                        match perform_rest_request(&lock, &request.path) {
+                            Ok(response) => RESTResponse::with_text(200, &response),
+                            Err(error) => {
+                                error!("Governance State REST request error: {error:?}");
+                                RESTResponse::with_text(400, &format!("{error:?}"))
+                            }
+                        }
+                    },
+                    _ => {
+                        error!("Unexpected message type: {message:?}");
+                        RESTResponse::with_text(500, &format!("Unexpected message type"))
+                    }
+                };
+
+                Arc::new(Message::RESTResponse(response))
             }
         })?;
 
