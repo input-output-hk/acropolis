@@ -11,10 +11,14 @@ use tracing::{error, info};
 use acropolis_common::messages::RESTResponse;
 
 mod state;
+mod drep_voting_stake_publisher;
+
 use state::State;
+use crate::drep_voting_stake_publisher::DrepVotingStakePublisher;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.certificates";
 const DEFAULT_HANDLE_TOPIC: &str = "rest.get.drep-state.*";
+const DEFAULT_VOTING_STAKE_TOPIC: &str = "stake.voting.drep";
 
 /// SPO State module
 #[module(
@@ -67,13 +71,18 @@ impl DRepState
             .unwrap_or(DEFAULT_HANDLE_TOPIC.to_string());
         info!("Creating request handler on '{handle_topic}'");
 
-        let state = Arc::new(Mutex::new(State::new()));
+        let drep_voting_stake_topic = config.get_string("publish-stake-voting-drep-topic")
+            .unwrap_or(DEFAULT_VOTING_STAKE_TOPIC.to_string());
+        info!("Creating request handler on '{drep_voting_stake_topic}'");
+
+        let publisher = DrepVotingStakePublisher::new(context.clone(), drep_voting_stake_topic);
+
+        let state = Arc::new(Mutex::new(State::new(publisher)));
         let state_handle = state.clone();
         let state_tick = state.clone();
 
         let serialiser = Arc::new(Mutex::new(Serialiser::new(state, module_path!(), 1)));
         let serialiser_tick = serialiser.clone();
-
 
         // Subscribe for certificate messages
         context.clone().message_bus.subscribe(&subscribe_topic, move |message: Arc<Message>| {
