@@ -58,6 +58,9 @@ blockchain).
 
 * Check: voted/expired/continuing
 
+* Need to get actual balance of registered DReps/all SPOs at the end of each
+epoch. Special message? 
+
 * If voted/expired: generate money transfer (add transactions for rewards)
 
 * Each epoch boundary governance state tracker issues a "rewards update" message.

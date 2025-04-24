@@ -126,6 +126,12 @@ impl GovernanceProceduresMessage {
     }
 }
 
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DrepStakeDistributionMessage {
+    pub sequence: u64,
+    pub data: Vec<(DRepCredential, Lovelace)>
+}
+
 // === Global message enum ===
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum Message {
@@ -149,7 +155,10 @@ pub enum Message {
     UTXODeltas(UTXODeltasMessage),             // UTXO deltas received
     TxCertificates(TxCertificatesMessage),     // Transaction certificates received
     AddressDeltas(AddressDeltasMessage),       // Address deltas received
-    GovernanceProcedures(GovernanceProceduresMessage) // Governance procedures received
+    GovernanceProcedures(GovernanceProceduresMessage), // Governance procedures received
+
+    // Stake distribution info
+    DrepStakeDistribution(DrepStakeDistributionMessage) // Info about drep stake
 }
 
 impl Default for Message {

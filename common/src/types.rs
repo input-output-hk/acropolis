@@ -588,7 +588,7 @@ pub struct DRepUpdate {
     pub anchor: Option<Anchor>,
 }
 
-type CommitteeCredential = Credential;
+pub type CommitteeCredential = Credential;
 
 /// Authorise a committee hot credential
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
@@ -762,6 +762,10 @@ pub struct Constitution {
 pub struct Committee {
     pub members: HashMap<CommitteeCredential, u64>,
     pub threshold: RationalNumber,
+}
+
+impl Committee {
+    pub fn is_empty(&self) -> bool { return self.members.len() == 0; }
 }
 
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]

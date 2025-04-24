@@ -1,17 +1,13 @@
 //! Acropolis SPOState: State storage
 
 use std::{cmp::max, collections::HashMap};
+use std::sync::{Arc, Mutex};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use hex::ToHex;
 use tracing::{debug, error, info};
-use acropolis_common::{
-    messages::GovernanceProceduresMessage,
-    rational_number::RationalNumber,
-    ConwayGenesisParams, DataHash, GovActionId, GovernanceAction,
-    KeyHash, ProposalProcedure, ProtocolParamType, ProtocolParamUpdate,
-    ScriptHash, SerialisedMessageHandler, Voter, VotingProcedure
-};
+use acropolis_common::{messages::GovernanceProceduresMessage, rational_number::RationalNumber, Committee, CommitteeCredential, ConwayGenesisParams, DRepCredential, DataHash, GovActionId, GovernanceAction, KeyHash, Lovelace, ProposalProcedure, ProtocolParamType, ProtocolParamUpdate, ScriptHash, SerialisedMessageHandler, Voter, VotingProcedure};
+use acropolis_common::messages::DrepStakeDistributionMessage;
 
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct VotingRegistrationState {
@@ -21,23 +17,22 @@ pub struct VotingRegistrationState {
     committee_size: u64
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct State {
     prev_sequence: u64,
     proposal_count: usize,
 
     pub action_proposal_count: usize,
     pub votes_count: usize,
+    pub drep_stake_messages_count: usize,
 
     pub conway: Option<ConwayGenesisParams>,
-    pub have_committee: bool,
 
     pub proposals: HashMap<GovActionId, ProposalProcedure>,
     pub votes: HashMap<GovActionId, HashMap<Voter, (DataHash, VotingProcedure)>>,
     pub voting_state: VotingRegistrationState,
 
-    pub drep_key_stake: HashMap<KeyHash, u64>,
-    pub drep_script_stake: HashMap<ScriptHash, u64>,
+    drep_stake: HashMap<DRepCredential, Lovelace>,
     pub sco_stake: HashMap<KeyHash, u64>
 }
 
@@ -52,6 +47,16 @@ impl SerialisedMessageHandler<GovernanceProceduresMessage> for State {
     }
 }
 
+#[async_trait]
+impl SerialisedMessageHandler<DrepStakeDistributionMessage> for State {
+    async fn handle(&mut self, message: &DrepStakeDistributionMessage) -> Result<()> {
+        info!("Received drep stake distribution message: {} dreps", message.data.len());
+        self.drep_stake_messages_count += 1;
+        self.drep_stake = HashMap::from_iter(message.data.iter().cloned());
+        Ok(())
+    }
+}
+
 impl State {
     pub fn new() -> Self {
         Self {
@@ -59,18 +64,21 @@ impl State {
             proposal_count: 0,
             action_proposal_count: 0,
             votes_count: 0,
+            drep_stake_messages_count: 0,
 
             conway: None,
-            have_committee: false,
 
             proposals: HashMap::new(),
             votes: HashMap::new(),
             voting_state: VotingRegistrationState::default(),
 
-            drep_key_stake: HashMap::new(),
-            drep_script_stake: HashMap::new(),
+            drep_stake: HashMap::new(),
             sco_stake: HashMap::new(),
         }
+    }
+
+    fn have_committee(&self) -> bool {
+        !self.conway.iter().any(|c| c.committee.is_empty())
     }
 
     fn insert_proposal_procedure(&mut self, proc: &ProposalProcedure) -> Result<()> {
@@ -199,7 +207,7 @@ impl State {
         result
     }
 
-    fn get_action_thresholds(&self, pp: &ProposalProcedure, thresholds: &ConwayGenesisParams, have_committee: bool) -> Result<(u64, u64, u64)> {
+    fn get_action_thresholds(&self, pp: &ProposalProcedure, thresholds: &ConwayGenesisParams) -> Result<(u64, u64, u64)> {
         let d = &thresholds.d_rep_voting_thresholds;
         let p = &thresholds.pool_voting_thresholds;
         let c = &thresholds.committee;
@@ -224,12 +232,12 @@ impl State {
             GovernanceAction::HardForkInitiation(_) => self.full_count(&p.hard_fork_initiation, &d.hard_fork_initiation, &c.threshold),
             GovernanceAction::TreasuryWithdrawals(_) => self.proportional_count(zero, &d.treasury_withdrawal, &c.threshold),
             GovernanceAction::NoConfidence(_) => self.proportional_count(&p.motion_no_confidence.clone(), &d.motion_no_confidence.clone(), zero),
-            GovernanceAction::UpdateCommittee(_) => if have_committee {
-                    self.proportional_count(&p.committee_normal, &d.committee_normal, zero)
-                }
-                else {
-                    self.proportional_count(&p.committee_no_confidence, &d.committee_no_confidence, zero)
-                }
+            GovernanceAction::UpdateCommittee(_) => if thresholds.committee.is_empty() {
+                self.proportional_count(&p.committee_no_confidence, &d.committee_no_confidence, zero)
+            }
+            else {
+                self.proportional_count(&p.committee_normal, &d.committee_normal, zero)
+            }
             GovernanceAction::NewConstitution(_) => self.proportional_count(zero, &d.update_constitution, &c.threshold),
             GovernanceAction::Information => self.proportional_count(one, one, zero)
         }
@@ -243,7 +251,7 @@ impl State {
             Some(conway_params) => conway_params
         };
 
-        let (d,p,c) = self.get_action_thresholds(proposal, conway_params, self.have_committee)?;
+        let (d,p,c) = self.get_action_thresholds(proposal, conway_params)?;
         let (d_act, p_act, c_act) = self.get_actual_votes(action_id);
         Ok(d_act >= d && p_act >= p && c_act >= c)
     }
@@ -264,9 +272,9 @@ impl State {
                 match voter {
                     Voter::ConstitutionalCommitteeKey(_) => c += 1,
                     Voter::ConstitutionalCommitteeScript(_) => c += 1,
-                    Voter::DRepKey(key) => { self.drep_key_stake.get(key).map(|v| d += v); }
-                    Voter::DRepScript(script) => { self.drep_script_stake.get(script).map(|v| d += v); }
-                    Voter::StakePoolKey(pool) => { self.sco_stake.get(pool).map(|v| p += v); }
+                    Voter::DRepKey(key) => { self.drep_stake.get(&DRepCredential::AddrKeyHash(key.clone())).inspect(|v| d += *v); }
+                    Voter::DRepScript(script) => { self.drep_stake.get(&DRepCredential::ScriptHash(script.clone())).inspect(|v| d += *v); }
+                    Voter::StakePoolKey(pool) => { self.sco_stake.get(pool).inspect(|v| p += *v); }
                 }
             }
         }
@@ -300,8 +308,9 @@ impl State {
     }
 
     async fn log_stats(&self) {
-        info!("props: {}, props_with_id: {}, votes: {}, stored proposal procedures: {}",
-            self.proposal_count, self.action_proposal_count, self.votes_count, self.proposals.len()
+        info!("props: {}, props_with_id: {}, votes: {}, stored proposal procedures: {}, drep stake msgs,size: {},{}",
+            self.proposal_count, self.action_proposal_count, self.votes_count, self.proposals.len(),
+            self.drep_stake_messages_count, self.drep_stake.len()
         );
 
         for (action_id, procedure) in self.votes.iter() {

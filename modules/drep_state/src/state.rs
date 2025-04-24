@@ -1,14 +1,17 @@
 //! Acropolis DRepState: State storage
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use acropolis_common::{
     messages::TxCertificatesMessage,
     Anchor, DRepCredential, Lovelace, SerialisedMessageHandler, TxCertificate
 };
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use tracing::info;
+use tracing::{error, info};
 use serde_with::serde_as;
+use acropolis_common::messages::Message;
+use crate::drep_voting_stake_publisher::DrepVotingStakePublisher;
 
 #[serde_as]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -23,16 +26,19 @@ impl DRepRecord {
     }
 }
 
-#[serde_as]
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct State {
-    dreps: HashMap::<DRepCredential, DRepRecord>
+    certificate_info_update_slot: u64,
+    dreps: HashMap::<DRepCredential, DRepRecord>,
+
+    drep_voting_stake_publisher: DrepVotingStakePublisher
 }
 
 impl State {
-    pub fn new() -> Self {
+    pub fn new(drep_voting_stake_publisher: DrepVotingStakePublisher) -> Self {
         Self {
-            dreps: HashMap::new()
+            certificate_info_update_slot: 1,
+            dreps: HashMap::new(),
+            drep_voting_stake_publisher
         }
     }
 
@@ -60,7 +66,7 @@ impl State {
 }
 
 impl State {
-    fn process_one_certificate(&mut self, tx_cert: &TxCertificate) -> Result<()> {
+    fn process_one_certificate(&mut self, tx_cert: &TxCertificate, tx_slot: u64) -> Result<()> {
         match tx_cert {
             TxCertificate::DRepRegistration(reg) => {
                 match self.dreps.get_mut(&reg.credential) {
@@ -87,21 +93,45 @@ impl State {
                     None => { return Err(anyhow!("DRep registartion {:?}: internal error, credential not found", reg.credential)); }
                 }
             },
-            _ => ()
+            _ => return Ok(())
         }
 
+        // Fall through for all branches, where votes distribution had changed
+        self.certificate_info_update_slot = tx_slot;
         Ok(())
+    }
+
+    pub fn new_vote_distribution(&self) -> Vec<(DRepCredential, Lovelace)> {
+        let mut distribution = Vec::new();
+        for (drep, drep_info) in self.dreps.iter() {
+            distribution.push((drep.clone(), drep_info.deposit));
+        }
+        distribution
     }
 }
 
 #[async_trait]
 impl SerialisedMessageHandler<TxCertificatesMessage> for State {
     async fn handle(&mut self, tx_cert_msg: &TxCertificatesMessage) -> Result<()> {
+        let tx_slot = tx_cert_msg.block.slot;
+
         for tx_cert in tx_cert_msg.certificates.iter() {
-            if let Err(e) = self.process_one_certificate(tx_cert) {
+            if let Err(e) = self.process_one_certificate(tx_cert, tx_slot) {
                 tracing::error!("Error processing tx_cert {}", e);
             }
         }
+
+        if self.certificate_info_update_slot == tx_slot {
+            let d = self.new_vote_distribution();
+            info!("New vote distribution at slot = {}: len = {}, body = {:?}", tx_slot, d.len(), d);
+            if let Err(e) = self.drep_voting_stake_publisher.publish_stake(d).await {
+                tracing::error!("Error publishing drep voting stake distribution: {e}");
+            }
+        }
+
+        //self..message_bus.publish(&topic, Arc::new(gov_message))
+        //    .await
+        //    .unwrap_or_else(|e| error!("Failed to publish: {e}"));
 
         Ok(())
     }
