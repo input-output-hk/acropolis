@@ -106,7 +106,7 @@ impl UTXOState
                 match message.as_ref() {
                     Message::UTXODeltas(deltas_msg) => {
                         let mut serialiser = serialiser.lock().await;
-                        serialiser.handle_message(deltas_msg.sequence, deltas_msg)
+                        serialiser.handle(deltas_msg.sequence, deltas_msg)
                             .await
                             .inspect_err(|e| error!("Messaging handling error: {e}"))
                             .ok();

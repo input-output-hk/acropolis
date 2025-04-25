@@ -1,7 +1,7 @@
 //! Acropolis DRepState: State storage
 use acropolis_common::{
     messages::TxCertificatesMessage,
-    SerialisedMessageHandler,
+    SerialisedHandler,
     TxCertificate,
 };
 use anyhow::Result;
@@ -38,8 +38,8 @@ impl State {
 }
 
 #[async_trait]
-impl SerialisedMessageHandler<TxCertificatesMessage> for State {
-    async fn handle(&mut self, tx_cert_msg: &TxCertificatesMessage) -> Result<()> {
+impl SerialisedHandler<TxCertificatesMessage> for State {
+    async fn handle(&mut self, _sequence: u64, tx_cert_msg: &TxCertificatesMessage) -> Result<()> {
         for tx_cert in tx_cert_msg.certificates.iter() {
             match tx_cert {
                 TxCertificate::DRepRegistration(_reg) => {
