@@ -16,6 +16,7 @@ anyhow = "1.0"
 tokio = { version = "1", features = ["full"] }
 config = "0.15.11"
 tracing = "0.1.40"
+async-trait = "0.1"
 
 [lib]
 path = "src/tx_unpacker.rs"

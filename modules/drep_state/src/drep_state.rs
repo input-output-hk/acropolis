@@ -57,7 +57,7 @@ impl DRepState
                 match message.as_ref() {
                     Message::TxCertificates(tx_cert_msg) => {
                         let mut serialiser = serialiser.lock().await;
-                        serialiser.handle_message(tx_cert_msg.sequence, tx_cert_msg)
+                        serialiser.handle(tx_cert_msg.sequence, tx_cert_msg)
                             .await
                             .inspect_err(|e| error!("Messaging handling error: {e}"))
                             .ok();

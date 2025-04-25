@@ -3,7 +3,7 @@
 
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
 use acropolis_common::{
-    messages::{Message, Sequence, TxCertificatesMessage, UTXODeltasMessage}, *
+    messages::{Message, Sequence, TxCertificatesMessage, UTXODeltasMessage}, *,
 };
 
 use std::sync::Arc;
@@ -20,6 +20,10 @@ use pallas::ledger::primitives::{
     Nullable,
 };
 use anyhow::anyhow;
+use tokio::sync::Mutex;
+
+mod sender;
+use sender::Sender;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.txs";
 
@@ -338,14 +342,14 @@ impl TxUnpacker
                                 })),
 
                     conway::Certificate::AuthCommitteeHot(cold_cred, hot_cred) =>
-                                Ok(TxCertificate::AuthCommitteeHot(AuthCommitteeHot { 
-                                    cold_credential: Self::map_stake_credential(cold_cred), 
-                                    hot_credential: Self::map_stake_credential(hot_cred), 
+                                Ok(TxCertificate::AuthCommitteeHot(AuthCommitteeHot {
+                                    cold_credential: Self::map_stake_credential(cold_cred),
+                                    hot_credential: Self::map_stake_credential(hot_cred),
                                 })),
 
                     conway::Certificate::ResignCommitteeCold(cold_cred, anchor) =>
-                                Ok(TxCertificate::ResignCommitteeCold(ResignCommitteeCold { 
-                                    cold_credential: Self::map_stake_credential(cold_cred), 
+                                Ok(TxCertificate::ResignCommitteeCold(ResignCommitteeCold {
+                                    cold_credential: Self::map_stake_credential(cold_cred),
                                     anchor: Self::map_anchor(&anchor)
                                 })),
 
@@ -394,11 +398,28 @@ impl TxUnpacker
             info!("Publishing certificates on '{topic}'");
         }
 
+        let utxo_sender = match publish_utxo_deltas_topic {
+            Some(topic) => Some(Arc::new(Mutex::new(Serialiser::new_from(Arc::new(Mutex::new(Sender::new(context.clone(), topic.clone(), Some(0), |sequence: &Sequence, data: &UTXODeltasMessage| {
+                let mut data = data.clone();
+                data.sequence = *sequence;
+                Message::UTXODeltas(data)
+            }))), module_path!(), Some(0))))),
+            None => None,
+        };
+
+        let cert_sender = match publish_certificates_topic {
+            Some(topic) => Some(Arc::new(Mutex::new(Serialiser::new_from(Arc::new(Mutex::new(Sender::new(context.clone(), topic.clone(), None, |sequence: &Sequence, data: &TxCertificatesMessage| {
+                let mut data = data.clone();
+                data.sequence = *sequence;
+                Message::TxCertificates(data)
+            }))), module_path!(), Some(0))))),
+            None => None,
+        };
+
         context.clone().message_bus.subscribe(&subscribe_topic, move |message: Arc<Message>| {
 
-            let context = context.clone();
-            let publish_utxo_deltas_topic = publish_utxo_deltas_topic.clone();
-            let publish_certificates_topic = publish_certificates_topic.clone();
+            let utxo_sender = utxo_sender.clone();
+            let cert_sender = cert_sender.clone();
 
             async move {
                 match message.as_ref() {
@@ -408,24 +429,8 @@ impl TxUnpacker
                                 txs_msg.txs.len(), txs_msg.block.slot);
                         }
 
-                        // Construct messages which we batch up
-                        let mut utxo_deltas_message = UTXODeltasMessage {
-                            sequence: txs_msg.sequence,
-                            block: txs_msg.block.clone(),
-                            deltas: Vec::new(),
-                        };
-
-                        let mut certificates_message = TxCertificatesMessage {
-                            sequence: Sequence {
-                            number: txs_msg.sequence.number,
-                                previous: match txs_msg.sequence.number {
-                                    1 => None,
-                                    _ => txs_msg.sequence.previous,
-                                },
-                            },
-                            block: txs_msg.block.clone(),
-                            certificates: Vec::new(),
-                        };
+                        let mut deltas = Vec::new();
+                        let mut certificates = Vec::new();
 
                         for raw_tx in &txs_msg.txs {
                             // Parse the tx
@@ -440,7 +445,7 @@ impl TxUnpacker
                                            inputs.len(), outputs.len(), certs.len());
                                     }
 
-                                    if publish_utxo_deltas_topic.is_some() {
+                                    if utxo_sender.is_some() {
                                         // Add all the inputs
                                         for input in inputs {  // MultiEraInput
 
@@ -452,8 +457,7 @@ impl TxUnpacker
                                                 index: oref.index(),
                                             };
 
-                                            utxo_deltas_message.deltas
-                                                .push(UTXODelta::Input(tx_input));
+                                            deltas.push(UTXODelta::Input(tx_input));
                                         }
 
                                         // Add all the outputs
@@ -472,8 +476,7 @@ impl TxUnpacker
                                                                 // !!! datum
                                                             };
 
-                                                            utxo_deltas_message.deltas
-                                                                .push(UTXODelta::Output(tx_output));
+                                                            deltas.push(UTXODelta::Output(tx_output));
                                                         }
 
                                                         Err(e) => 
@@ -487,15 +490,15 @@ impl TxUnpacker
                                         }
                                     }
 
-                                    if publish_certificates_topic.is_some() {
+                                    if cert_sender.is_some() {
                                         for cert in certs {
                                             match Self::map_certificate(&cert) {
                                                 Ok(tx_cert) => {
-                                                    certificates_message.certificates.push(tx_cert);
+                                                    certificates.push(tx_cert);
                                                 },
-                                                Err(_e) => { 
+                                                Err(_e) => {
                                                     // TODO error unexpected
-                                                    //error!("{e}"); 
+                                                    //error!("{e}");
                                                 }
                                             }
                                         }
@@ -507,19 +510,43 @@ impl TxUnpacker
                             }
                         }
 
-                        if let Some(topic) = publish_utxo_deltas_topic {
-                            let utxo_deltas_message = Message::UTXODeltas(utxo_deltas_message);
-                            context.message_bus.publish(&topic, Arc::new(utxo_deltas_message))
-                                .await
-                                .unwrap_or_else(|e| error!("Failed to publish: {e}"));
-                        }
+                        match utxo_sender {
+                            Some(ref utxo_sender) => {
+                                if txs_msg.block.new_epoch || !deltas.is_empty() {
+                                    let data = UTXODeltasMessage {
+                                        sequence: txs_msg.sequence,
+                                        block: txs_msg.block.clone(),
+                                        deltas,
+                                    };
+                                    let _ = utxo_sender.lock().await.handle(txs_msg.sequence, &Some(data)).await;
+                                } else {
+                                    let _ = utxo_sender.lock().await.handle(txs_msg.sequence, &None).await;
+                                }
+                            },
+                            _ => (),
+                        };
 
-                        if let Some(topic) = publish_certificates_topic {
-                            let certificates_message = Message::TxCertificates(certificates_message);
-                            context.message_bus.publish(&topic, Arc::new(certificates_message))
-                                .await
-                                .unwrap_or_else(|e| error!("Failed to publish: {e}"));
-                        }
+                        match cert_sender {
+                            Some(ref cert_sender) => {
+                                if txs_msg.block.new_epoch || !certificates.is_empty() {
+                                    let data = TxCertificatesMessage {
+                                        sequence: Sequence {
+                                            number: txs_msg.sequence.number,
+                                            previous: match txs_msg.sequence.number {
+                                                1 => None,
+                                                _ => txs_msg.sequence.previous,
+                                            },
+                                        },
+                                        block: txs_msg.block.clone(),
+                                        certificates,
+                                    };
+                                    let _ = cert_sender.lock().await.handle(txs_msg.sequence, &Some(data)).await;
+                                } else {
+                                    let _ = cert_sender.lock().await.handle(txs_msg.sequence, &None).await;
+                                }
+                            },
+                            _ => (),
+                        };
                     }
 
                     _ => error!("Unexpected message type: {message:?}")

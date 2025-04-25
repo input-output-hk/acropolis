@@ -1,5 +1,5 @@
-//! Acropolis common library - message serialiser
-//! Serialises messages based on block number
+//! Acropolis common library - serialiser
+//! Serialises based on a gapless sequence number
 
 use std::collections::BinaryHeap;
 use std::cmp::Ordering;
@@ -7,67 +7,68 @@ use tracing::{debug, info};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use async_trait::async_trait;
-use caryatid_sdk::MessageBounds;
 use anyhow::Result;
 use crate::messages::Sequence;
 
+pub trait Serialisable: Clone + Sync {}
+impl<T: Clone + Sync> Serialisable for T {}
+
 /// Pending queue entry
-struct PendingEntry<MSG: MessageBounds> {
+struct PendingEntry<T: Serialisable> {
     /// Sequence
     sequence: Sequence,
 
-    /// Message
-    message: MSG,
+    /// Data
+    data: T,
 }
 
-// Ord and Eq implementations to make it a min-heap on block number
-impl<MSG: MessageBounds> Ord for PendingEntry<MSG> {
+// Ord and Eq implementations to make it a min-heap on sequence number
+impl<T: Serialisable> Ord for PendingEntry<T> {
     fn cmp(&self, other: &Self) -> Ordering {
         other.sequence.number.cmp(&self.sequence.number)  // Note reverse order
     }
 }
 
-impl<MSG: MessageBounds> PartialOrd for PendingEntry<MSG> {
+impl<T: Serialisable> PartialOrd for PendingEntry<T> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<MSG: MessageBounds> Eq for PendingEntry<MSG> {}
+impl<T: Serialisable> Eq for PendingEntry<T> {}
 
-impl<MSG: MessageBounds> PartialEq for PendingEntry<MSG> {
+impl<T: Serialisable> PartialEq for PendingEntry<T> {
     fn eq(&self, other: &Self) -> bool {
         self.sequence.number == other.sequence.number
     }
 }
 
 
-/// Message handler (once serialised)
+/// Data handler (once serialised)
 #[async_trait]
-pub trait SerialisedMessageHandler<MSG: MessageBounds>: Send + Sync {
-
+pub trait SerialisedHandler<T: Serialisable>: Send {
     /// Handle a message
-    async fn handle(&mut self, message: &MSG) -> Result<()>;
+    async fn handle(&mut self, sequence: u64, data: &T) -> Result<()>;
 }
 
-/// Message serialiser
-pub struct Serialiser<'a, MSG: MessageBounds> {
-    /// Pending queue, presents messages in order, implemented as a reversed max-heap
-    pending: BinaryHeap<PendingEntry<MSG>>,
+/// Serialiser
+pub struct Serialiser<'a, T: Serialisable> {
+    /// Pending queue, presents data in order, implemented as a reversed max-heap
+    pending: BinaryHeap<PendingEntry<T>>,
 
-    /// Next sequence expected
+    /// Previous sequence expected
     prev_sequence: Option<u64>,
 
     /// Message handler
-    handler: Arc<Mutex<dyn SerialisedMessageHandler<MSG>>>,
+    handler: Arc<Mutex<dyn SerialisedHandler<T>>>,
 
     /// Module path using it (for logging)
     module_name: &'a str,
 }
 
-impl <'a, MSG: MessageBounds> Serialiser<'a, MSG> {
+impl <'a, T: Serialisable> Serialiser<'a, T> {
     /// Constructor
-    pub fn new(handler: Arc<Mutex<dyn SerialisedMessageHandler<MSG>>>,
+    pub fn new(handler: Arc<Mutex<dyn SerialisedHandler<T>>>,
                module_name: &'a str) -> Self {
         Self {
             pending: BinaryHeap::new(),
@@ -76,11 +77,21 @@ impl <'a, MSG: MessageBounds> Serialiser<'a, MSG> {
             module_name,
         }
     }
+    pub fn new_from(handler: Arc<Mutex<dyn SerialisedHandler<T>>>,
+                    module_name: &'a str,
+                    prev_sequence: Option<u64>) -> Self {
+        Self {
+            pending: BinaryHeap::new(),
+            prev_sequence,
+            handler,
+            module_name,
+        }
+    }
 
-    /// Process a message
-    async fn process_message(&mut self, sequence: Sequence, message: &MSG) -> Result<()> {
+    /// Process data
+    async fn process(&mut self, sequence: Sequence, data: &T) -> Result<()> {
         // Pass to the handler
-        self.handler.lock().await.handle(message).await?;
+        self.handler.lock().await.handle(sequence.number, data).await?;
 
         // Update sequence
         self.prev_sequence = Some(sequence.number);
@@ -88,13 +99,13 @@ impl <'a, MSG: MessageBounds> Serialiser<'a, MSG> {
         Ok(())
     }
 
-    /// Handle a message
-    pub async fn handle_message(&mut self, sequence: Sequence, message: &MSG) -> Result<()> {
+    /// Handle data
+    pub async fn handle(&mut self, sequence: Sequence, data: &T) -> Result<()> {
 
         // Is it in order?
         if sequence.previous == self.prev_sequence {
 
-            self.process_message(sequence, &message).await?;
+            self.process(sequence, &data).await?;
 
             // See if any pending now work
             while let Some(next) = self.pending.peek() {
@@ -105,7 +116,7 @@ impl <'a, MSG: MessageBounds> Serialiser<'a, MSG> {
                     }
 
                     if let Some(next) = self.pending.pop() {
-                        self.process_message(next.sequence, &next.message).await?;
+                        self.process(next.sequence, &next.data).await?;
                     }
                 } else {
                     break;
@@ -118,7 +129,7 @@ impl <'a, MSG: MessageBounds> Serialiser<'a, MSG> {
             }
             self.pending.push(PendingEntry {
                 sequence,
-                message: message.clone(),
+                data: data.clone(),
             });
         }
 
@@ -139,11 +150,11 @@ mod tests {
     use super::*;
 
     // Mock message handler to track received messages
-    struct MockMessageHandler {
+    struct MockHandler {
         received: Vec<u64>,
     }
 
-    impl MockMessageHandler {
+    impl MockHandler {
         pub fn new() -> Self {
             Self {
                 received: Vec::new()
@@ -151,16 +162,16 @@ mod tests {
         }
     }
 
-    // Test message
-    #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
-    pub struct TestMessage {
+    // Test data
+    #[derive(Clone)]
+    pub struct TestData {
         index: u64
     }
 
     #[async_trait]
-    impl SerialisedMessageHandler<TestMessage> for MockMessageHandler {
-        async fn handle(&mut self, message: &TestMessage) -> Result<()> {
-            self.received.push(message.index);
+    impl SerialisedHandler<TestData> for MockHandler {
+        async fn handle(&mut self, _sequence: u64, data: & TestData) -> Result<()> {
+            self.received.push(data.index);
             Ok(())
         }
     }
@@ -168,18 +179,18 @@ mod tests {
     // Simple in-order test
     #[tokio::test]
     async fn messages_in_order_pass_through() {
-        let handler = Arc::new(Mutex::new(MockMessageHandler::new()));
+        let handler = Arc::new(Mutex::new(MockHandler::new()));
         let handler2 = handler.clone();
         let mut serialiser = Serialiser::new(handler, "test");
 
-        let message0 = TestMessage { index: 0 };
-        serialiser.handle_message(Sequence::new(0, None), &message0).await.unwrap();
+        let message0 = TestData { index: 0 };
+        serialiser.handle(Sequence::new(0, None), &message0).await.unwrap();
 
-        let message1 = TestMessage { index: 1 };
-        serialiser.handle_message(Sequence::new(1, Some(0)), &message1).await.unwrap();
+        let message1 = TestData { index: 1 };
+        serialiser.handle(Sequence::new(1, Some(0)), &message1).await.unwrap();
 
-        let message2 = TestMessage { index: 2 };
-        serialiser.handle_message(Sequence::new(2, Some(1)), &message2).await.unwrap();
+        let message2 = TestData { index: 2 };
+        serialiser.handle(Sequence::new(2, Some(1)), &message2).await.unwrap();
 
         let handler = handler2.lock().await;
         assert_eq!(3, handler.received.len());
@@ -191,18 +202,18 @@ mod tests {
     // Simple out-of-order test
     #[tokio::test]
     async fn messages_out_of_order_are_reordered() {
-        let handler = Arc::new(Mutex::new(MockMessageHandler::new()));
+        let handler = Arc::new(Mutex::new(MockHandler::new()));
         let handler2 = handler.clone();
         let mut serialiser = Serialiser::new(handler, "test");
 
-        let message1 = TestMessage { index: 1 };
-        serialiser.handle_message(Sequence::new(43, Some(42)), &message1).await.unwrap();
+        let message1 = TestData { index: 1 };
+        serialiser.handle(Sequence::new(43, Some(42)), &message1).await.unwrap();
 
-        let message0 = TestMessage { index: 0 };
-        serialiser.handle_message(Sequence::new(42, None), &message0).await.unwrap();
+        let message0 = TestData { index: 0 };
+        serialiser.handle(Sequence::new(42, None), &message0).await.unwrap();
 
-        let message2 = TestMessage { index: 2 };
-        serialiser.handle_message(Sequence::new(44, Some(43)), &message2).await.unwrap();
+        let message2 = TestData { index: 2 };
+        serialiser.handle(Sequence::new(44, Some(43)), &message2).await.unwrap();
 
         let handler = handler2.lock().await;
         assert_eq!(3, handler.received.len());

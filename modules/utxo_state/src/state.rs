@@ -2,7 +2,7 @@
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use acropolis_common::{
-    SerialisedMessageHandler,
+    SerialisedHandler,
     Address, BlockInfo, BlockStatus,
     TxInput, TxOutput, UTXODelta,
     messages::{Sequence, UTXODeltasMessage},
@@ -169,7 +169,7 @@ impl State {
                         // Tell the observer to debit it
                         if let Some(observer) = self.address_delta_observer.as_ref() {
                             observer.observe_delta(&utxo.address, -(utxo.value as i64)).await;
-                        }                                 
+                        }
                     }
                 };
 
@@ -211,7 +211,7 @@ impl State {
     /// Observe an input UTXO spend
     pub async fn observe_input(&mut self, input: &TxInput, block: &BlockInfo) -> Result<()> {
         let key = UTXOKey::new(&input.tx_hash, input.index);
-        
+
         if tracing::enabled!(tracing::Level::DEBUG) {
             debug!("UTXO << {}:{}", encode(&key.hash), key.index);
         }
@@ -226,7 +226,7 @@ impl State {
                 // Tell the observer it's spent
                 if let Some(observer) = self.address_delta_observer.as_ref() {
                     observer.observe_delta(&utxo.address, -(utxo.value as i64)).await;
-                }        
+                }
 
                 match block.status {
                     BlockStatus::Volatile | BlockStatus::RolledBack => {
@@ -287,7 +287,7 @@ impl State {
             observer.observe_delta(&output.address, output.value as i64).await;
         }
 
-        Ok(())       
+        Ok(())
     }
 
     /// Background prune
@@ -308,7 +308,7 @@ impl State {
                         self.immutable_utxos.delete_utxo(&key).await?;
                     }
                 }
-            }   
+            }
 
             // Prune the created index too, and transfer the UTXOs to immutable
             let created_utxos = self.volatile_created.prune_before(boundary);
@@ -349,10 +349,10 @@ impl State {
 }
 
 #[async_trait]
-impl SerialisedMessageHandler<UTXODeltasMessage> for State {
+impl SerialisedHandler<UTXODeltasMessage> for State {
 
     /// Handle a message
-    async fn handle(&mut self, deltas: &UTXODeltasMessage) -> Result<()> {
+    async fn handle(&mut self, _sequence: u64, deltas: &UTXODeltasMessage) -> Result<()> {
 
         // Start the block for observer
         if let Some(observer) = self.address_delta_observer.as_mut() {

@@ -39,11 +39,8 @@ impl Sequence {
     }
 
     pub fn inc(&mut self) {
+        self.previous = Some(self.number);
         self.number += 1;
-        self.previous = match self.previous {
-            None => Some(0),
-            Some(i) => Some(i + 1),
-        };
     }
 }
 
