@@ -1,7 +1,6 @@
 //! Acropolis DRepState: State storage
 
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 use acropolis_common::{
     messages::TxCertificatesMessage,
     Anchor, DRepCredential, Lovelace, SerialisedMessageHandler, TxCertificate
