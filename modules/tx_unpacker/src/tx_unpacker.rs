@@ -694,7 +694,6 @@ impl TxUnpacker
                                                 error!("Error writing to file: {}", e);
                                             }
                                         }
-
                                     }
 
                                     if tracing::enabled!(tracing::Level::DEBUG) {
