@@ -66,7 +66,7 @@ impl GovernanceState
             .unwrap_or(DEFAULT_HANDLE_TOPIC.to_string());
         info!("Creating request handler on '{handle_topic}'");
 
-        let drep_voting_stake_topic = config.get_string("publishstake-voting-drep-topic")
+        let drep_voting_stake_topic = config.get_string("stake-voting-drep-topic")
             .unwrap_or(DEFAULT_VOTING_STAKE_TOPIC.to_string());
         info!("Creating request handler on '{drep_voting_stake_topic}'");
 

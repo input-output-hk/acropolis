@@ -56,7 +56,7 @@ blockchain).
 
 * At each epoch boundary current storage checked for expiring/voted actions.
 
-* Check: voted/expired/continuing
+* Check: accepted/expired/continuing, voting details see CIP-1694
 
 * Need to get actual balance of registered DReps/all SPOs at the end of each
 epoch. Special message? 

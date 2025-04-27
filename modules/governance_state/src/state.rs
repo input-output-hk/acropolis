@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use hex::ToHex;
 use tracing::{debug, error, info};
 use acropolis_common::{messages::GovernanceProceduresMessage, rational_number::RationalNumber, Committee, CommitteeCredential, ConwayGenesisParams, DRepCredential, DataHash, GovActionId, GovernanceAction, KeyHash, Lovelace, ProposalProcedure, ProtocolParamType, ProtocolParamUpdate, ScriptHash, SerialisedMessageHandler, Voter, VotingProcedure};
-use acropolis_common::messages::DrepStakeDistributionMessage;
+use acropolis_common::messages::{DrepStakeDistributionMessage, GenesisCompleteMessage};
 
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct VotingRegistrationState {
@@ -28,12 +28,21 @@ pub struct State {
 
     pub conway: Option<ConwayGenesisParams>,
 
-    pub proposals: HashMap<GovActionId, ProposalProcedure>,
+    // epoch and procedure
+    pub proposals: HashMap<GovActionId, (u64, ProposalProcedure)>,
+
     pub votes: HashMap<GovActionId, HashMap<Voter, (DataHash, VotingProcedure)>>,
     pub voting_state: VotingRegistrationState,
 
     drep_stake: HashMap<DRepCredential, Lovelace>,
     pub sco_stake: HashMap<KeyHash, u64>
+}
+
+impl SerialisedMessageHandler<GenesisCompleteMessage> for State {
+    async fn handle(&mut self, message: &GenesisCompleteMessage) -> Result<()> {
+        
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -42,7 +51,6 @@ impl SerialisedMessageHandler<GovernanceProceduresMessage> for State {
         if let Err(e) = self.handle_impl(msg).await {
             error!("Error processing message {:?}: {}", msg, e)
         }
-
         Ok(())
     }
 }
@@ -77,16 +85,20 @@ impl State {
         }
     }
 
+    pub fn get_conway_params(&self) -> Result<&ConwayGenesisParams> {
+        self.conway.as_ref().ok_or_else(|| anyhow!("Conway parameters not available"))
+    }
+
     fn have_committee(&self) -> bool {
         !self.conway.iter().any(|c| c.committee.is_empty())
     }
 
-    fn insert_proposal_procedure(&mut self, proc: &ProposalProcedure) -> Result<()> {
+    fn insert_proposal_procedure(&mut self, epoch: u64, proc: &ProposalProcedure) -> Result<()> {
         self.action_proposal_count += 1;
-        let prev = self.proposals.insert(proc.gov_action_id.clone(), proc.clone());
+        let prev = self.proposals.insert(proc.gov_action_id.clone(), (epoch, proc.clone()));
         if let Some(prev) = prev {
             return Err(anyhow!("Governance procedure {} already exists! New: {:?}, old: {:?}",
-                proc.gov_action_id, proc, prev
+                proc.gov_action_id, (epoch, proc), prev
             ));
         }
         Ok(())
@@ -244,7 +256,7 @@ impl State {
     }
 
     fn is_finally_accepted(&self, action_id: &GovActionId) -> Result<bool> {
-        let proposal = self.proposals.get(action_id).ok_or_else(|| anyhow!("action {} not found", action_id))?;
+        let (_epoch, proposal) = self.proposals.get(action_id).ok_or_else(|| anyhow!("action {} not found", action_id))?;
 
         let conway_params = match &self.conway {
             None => return Err(anyhow!("Conway params are not known, cannot count votes")),
@@ -281,27 +293,31 @@ impl State {
         (p, d, c)
     }
 
-    fn is_expired(&self, _action_id: &GovActionId) -> bool {
-        return false;
+    fn is_expired(&self, new_epoch: u64, action_id: &GovActionId) -> Result<bool> {
+        let (proposal_epoch, proposal) = self.proposals.get(action_id)
+            .ok_or_else(|| anyhow!("action {} not found", action_id))?;
+
+        Ok(proposal_epoch + self.get_conway_params()?.gov_action_lifetime as u64 <= new_epoch)
     }
 
-    fn process_one_proposal(&mut self, action_id: &GovActionId) -> Result<()> {
+    fn process_one_proposal(&mut self, new_epoch: u64, action_id: &GovActionId) -> Result<()> {
         if self.is_finally_accepted(&action_id)? {
             self.end_voting(&action_id);
         }
 
-        if self.is_expired(&action_id) {
+        if self.is_expired(new_epoch, &action_id)? {
             self.end_voting(&action_id);
+            info!("New epoch {new_epoch}: voting for {action_id} is expired");
         }
 
         Ok(())
     }
 
-    fn process_new_epoch(&mut self, _new_epoch: u64) {
+    fn process_new_epoch(&mut self, new_epoch: u64) {
         let actions = self.proposals.keys().map(|a| a.clone()).collect::<Vec<_>>();
 
         for action_id in actions.iter() {
-            if let Err(e) = self.process_one_proposal(&action_id) {
+            if let Err(e) = self.process_one_proposal(new_epoch, &action_id) {
                 error!("Error processing governance {action_id}: {e}");
             }
         }
@@ -324,7 +340,7 @@ impl State {
 
     pub fn list_proposals(&self) -> Result<Vec<(GovActionId, ProposalProcedure)>> {
         let mut result = Vec::new();
-        for (action, prop) in self.proposals.iter() {
+        for (action, (_epoch, prop)) in self.proposals.iter() {
             result.push((action.clone(), prop.clone()))
         }
         Ok(result)
@@ -359,7 +375,7 @@ impl State {
 
         for pproc in &governance_message.proposal_procedures {
             self.proposal_count += 1;
-            if let Err(e) = self.insert_proposal_procedure(pproc) {
+            if let Err(e) = self.insert_proposal_procedure(governance_message.block.epoch, pproc) {
                 error!("Error handling governance_message {}: '{}'", governance_message.sequence, e);
             }
         }
