@@ -9,7 +9,7 @@ use std::sync::Arc;
 use acropolis_common::messages::Message;
 
 // External modules
-//use acropolis_module_genesis_bootstrapper::GenesisBootstrapper;
+use acropolis_module_genesis_bootstrapper::GenesisBootstrapper;
 //use acropolis_module_mithril_snapshot_fetcher::MithrilSnapshotFetcher;
 //use acropolis_module_upstream_chain_fetcher::UpstreamChainFetcher;
 //use acropolis_module_block_unpacker::BlockUnpacker;
@@ -44,15 +44,16 @@ pub async fn main() -> Result<()> {
     let mut process = Process::<Message>::create(config).await;
 
     // Register modules
-/*
+
     GenesisBootstrapper::register(&mut process);
+/*
     MithrilSnapshotFetcher::register(&mut process);
     UpstreamChainFetcher::register(&mut process);
     BlockUnpacker::register(&mut process);
  */
 
     TxUnpacker::register(&mut process);
-    UTXOState::register(&mut process);
+    //UTXOState::register(&mut process);
     SPOState::register(&mut process);
     DRepState::register(&mut process);
     GovernanceState::register(&mut process);

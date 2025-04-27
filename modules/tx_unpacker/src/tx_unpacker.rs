@@ -1,7 +1,7 @@
 //! Acropolis transaction unpacker module for Caryatid
 //! Unpacks transaction bodies into UTXO events
 
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, fs};
 use std::collections::HashSet;
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
 use acropolis_common::{
@@ -683,8 +683,8 @@ impl TxUnpacker
                                         if let Some(ref p) = conway.transaction_body.proposal_procedures {
                                             props = Some(p);
                                         }
-/*
-                                        if votes.is_some() || props.is_some() {
+
+                                        if votes.is_some() || props.is_some() || txs_msg.block.new_epoch {
                                             let filename = format!("governance-logs/{:012}.json", txs_msg.sequence);
                                             let data = match serde_json::to_string(&message) {
                                                 Ok(data) => data,
@@ -694,7 +694,7 @@ impl TxUnpacker
                                                 error!("Error writing to file: {}", e);
                                             }
                                         }
- */
+
                                     }
 
                                     if tracing::enabled!(tracing::Level::DEBUG) {

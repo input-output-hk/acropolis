@@ -30,11 +30,11 @@ pub struct State {
     certificate_info_update_slot: u64,
     dreps: HashMap::<DRepCredential, DRepRecord>,
 
-    drep_voting_stake_publisher: DrepVotingStakePublisher
+    drep_voting_stake_publisher: Option<DrepVotingStakePublisher>
 }
 
 impl State {
-    pub fn new(drep_voting_stake_publisher: DrepVotingStakePublisher) -> Self {
+    pub fn new(drep_voting_stake_publisher: Option<DrepVotingStakePublisher>) -> Self {
         Self {
             certificate_info_update_slot: 1,
             dreps: HashMap::new(),
@@ -121,17 +121,15 @@ impl SerialisedMessageHandler<TxCertificatesMessage> for State {
             }
         }
 
-        if self.certificate_info_update_slot == tx_slot {
+        if self.certificate_info_update_slot == tx_slot && self.drep_voting_stake_publisher.is_some() {
             let d = self.new_vote_distribution();
-            info!("New vote distribution at slot = {}: len = {}, body = {:?}", tx_slot, d.len(), d);
-            if let Err(e) = self.drep_voting_stake_publisher.publish_stake(d).await {
-                tracing::error!("Error publishing drep voting stake distribution: {e}");
+            info!("New vote distribution at slot = {}: len = {}", tx_slot, d.len());
+            if let Some(ref mut publisher) = self.drep_voting_stake_publisher {
+                if let Err(e) = publisher.publish_stake(d).await {
+                    tracing::error!("Error publishing drep voting stake distribution: {e}");
+                }
             }
         }
-
-        //self..message_bus.publish(&topic, Arc::new(gov_message))
-        //    .await
-        //    .unwrap_or_else(|e| error!("Failed to publish: {e}"));
 
         Ok(())
     }
@@ -150,8 +148,8 @@ mod tests {
             deposit: 500000000,
             anchor: None
         });
-        let mut state = State::new();
-        state.process_one_certificate(&tx_cert).unwrap();
+        let mut state = State::new(None);
+        state.process_one_certificate(&tx_cert, 1).unwrap();
         assert_eq!(state.get_count(), 1);
         let tx_cert_record = DRepRecord{ deposit: 500000000, anchor: None };
         assert_eq!(state.get_drep(&tx_cred).unwrap().deposit, tx_cert_record.deposit);

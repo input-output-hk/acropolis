@@ -51,7 +51,7 @@ fn perform_rest_request(state: &State, path: &str) -> Result<String> {
     }
     else {
         let cred = decode_rest_drep_credential(request)?;
-        match state.get_drep( &cred) {
+        match state.get_drep(&cred) {
             Some(drep) => Ok(format!("DRep {:?}: deposit={}, anchor={:?}", cred, drep.deposit, drep.anchor)),
             None => Ok(format!("No DRep {:?}", cred))
         }
@@ -77,7 +77,7 @@ impl DRepState
 
         let publisher = DrepVotingStakePublisher::new(context.clone(), drep_voting_stake_topic);
 
-        let state = Arc::new(Mutex::new(State::new(publisher)));
+        let state = Arc::new(Mutex::new(State::new(Some(publisher))));
         let state_handle = state.clone();
         let state_tick = state.clone();
 
