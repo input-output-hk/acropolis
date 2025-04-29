@@ -19,20 +19,23 @@ maxcount=180
 count=0
 snapshot_complete=
 
-# check for 'snapshot complete' message
+# loop until runtime is reached or message found
 while [ $count -lt $maxcount -a "$snapshot_complete" = "" -a "$cargopid" ]
 do
+  # check for 'snapshot complete' message
   set +e
   snapshot_complete=$(since $logfile | egrep "Notified snapshot complete at slot ")
   set -e
 
-  if [ -z "$complete" ]; then
+  if [ -z "$snapshot_complete" ]; then
     count=$(( $count + 1 ))
     # show any new epochs/errors
     set +e
+    # show errors, and new epochs for progress
     since -s .new_epoch_since $logfile | egrep "(ERROR|acropolis_module_mithril_snapshot_fetcher.*:.* New epoch)"
     set -e
     sleep $sleeptime
+    # periodic log as lifetest
     if [ $(( $count % 2 )) -eq 0 ]; then
       date
     fi

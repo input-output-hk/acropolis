@@ -16,5 +16,5 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Run coverage script
+      - name: Run bootstrap test
         run: ./scripts/omnibus-bootstrap-test.sh
