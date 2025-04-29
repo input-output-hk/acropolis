@@ -6,8 +6,8 @@ use acropolis_common::{messages::Message, DRepCredential, Serialiser};
 use std::sync::Arc;
 use anyhow::{anyhow, Result};
 use config::Config;
-use tokio::sync::Mutex;
 use tracing::{error, info};
+use tokio::sync::Mutex;
 use acropolis_common::messages::RESTResponse;
 
 mod state;

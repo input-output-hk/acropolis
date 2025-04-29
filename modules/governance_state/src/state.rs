@@ -38,9 +38,11 @@ pub struct State {
     pub sco_stake: HashMap<KeyHash, u64>
 }
 
+#[async_trait]
 impl SerialisedMessageHandler<GenesisCompleteMessage> for State {
     async fn handle(&mut self, message: &GenesisCompleteMessage) -> Result<()> {
-        
+        info!("Received genesis complete message; conway present = {}", message.conway_genesis.is_some());
+        self.conway = message.conway_genesis.clone();
         Ok(())
     }
 }
@@ -95,6 +97,7 @@ impl State {
 
     fn insert_proposal_procedure(&mut self, epoch: u64, proc: &ProposalProcedure) -> Result<()> {
         self.action_proposal_count += 1;
+        info!("Inserting proposal procedure: {:?}", proc);
         let prev = self.proposals.insert(proc.gov_action_id.clone(), (epoch, proc.clone()));
         if let Some(prev) = prev {
             return Err(anyhow!("Governance procedure {} already exists! New: {:?}, old: {:?}",
@@ -294,6 +297,7 @@ impl State {
     }
 
     fn is_expired(&self, new_epoch: u64, action_id: &GovActionId) -> Result<bool> {
+        info!("Checking whether {} is expired at new epoch {}", action_id, new_epoch);
         let (proposal_epoch, proposal) = self.proposals.get(action_id)
             .ok_or_else(|| anyhow!("action {} not found", action_id))?;
 
@@ -317,6 +321,7 @@ impl State {
         let actions = self.proposals.keys().map(|a| a.clone()).collect::<Vec<_>>();
 
         for action_id in actions.iter() {
+            info!("Epoch {}: processing action {}", new_epoch, action_id);
             if let Err(e) = self.process_one_proposal(new_epoch, &action_id) {
                 error!("Error processing governance {action_id}: {e}");
             }
@@ -369,7 +374,9 @@ impl State {
         }
         self.prev_sequence = governance_message.sequence;
 
+        info!("Handling block {:?}", governance_message.block);
         if governance_message.block.new_epoch {
+            info!("Processing new epoch {}", governance_message.block.epoch);
             self.process_new_epoch(governance_message.block.epoch);
         }
 

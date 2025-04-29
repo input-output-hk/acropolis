@@ -9,7 +9,7 @@ use config::Config;
 use hex::ToHex;
 use tokio::sync::Mutex;
 use tracing::{error, info};
-use acropolis_common::messages::{DrepStakeDistributionMessage, GovernanceProceduresMessage, RESTResponse};
+use acropolis_common::messages::{DrepStakeDistributionMessage, GovernanceProceduresMessage, GenesisCompleteMessage, RESTResponse};
 
 mod state;
 use state::State;
@@ -17,6 +17,7 @@ use state::State;
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.governance";
 const DEFAULT_HANDLE_TOPIC: &str = "rest.get.governance-state.*";
 const DEFAULT_VOTING_STAKE_TOPIC: &str = "stake.voting.drep";
+const DEFAULT_GENESIS_COMPLETE_TOPIC: &str = "cardano.sequence.bootstrapped";
 
 /// SPO State module
 #[module(
@@ -56,7 +57,6 @@ fn perform_rest_request(state: &State, path: &str) -> Result<String> {
 impl GovernanceState
 {
     pub fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
-
         // Get configuration
         let subscribe_topic = config.get_string("subscribe-topic")
             .unwrap_or(DEFAULT_SUBSCRIBE_TOPIC.to_string());
@@ -70,6 +70,10 @@ impl GovernanceState
             .unwrap_or(DEFAULT_VOTING_STAKE_TOPIC.to_string());
         info!("Creating request handler on '{drep_voting_stake_topic}'");
 
+        let genesis_complete_topic = config.get_string("genesis-complete-topic")
+            .unwrap_or(DEFAULT_GENESIS_COMPLETE_TOPIC.to_string());
+        info!("Creating request handler on '{genesis_complete_topic}'");
+
         let state = Arc::new(Mutex::new(State::new()));
         let state_handle = state.clone();
         let state_tick = state.clone();
@@ -82,7 +86,11 @@ impl GovernanceState
         let drep_serialiser_handle = drep_serialiser.clone();
         let drep_serialiser_tick = drep_serialiser.clone();
 
-        // Subscribe to serializer
+        let genesis_complete_serialiser: Arc<Mutex<Serialiser<GenesisCompleteMessage>>> = Arc::new(Mutex::new(Serialiser::new(state.clone(), module_path!(), 1)));
+        let genesis_complete_serialiser_handle = genesis_complete_serialiser.clone();
+        let genesis_complete_serialiser_tick = genesis_complete_serialiser.clone();
+
+        // Subscribe to governance procedures serializer
         context.clone().message_bus.subscribe(&subscribe_topic, move |message: Arc<Message>| {
             let serialiser = serialiser_handle.clone();
 
@@ -101,13 +109,32 @@ impl GovernanceState
             }
         })?;
 
-        // Subscribe to serializer
+        // Subscribe to drep stake distribution serializer
         context.clone().message_bus.subscribe(&drep_voting_stake_topic, move |message: Arc<Message>| {
             let serialiser = drep_serialiser_handle.clone();
 
             async move {
                 match message.as_ref() {
                     Message::DrepStakeDistribution(msg) => {
+                        let mut serialiser = serialiser.lock().await;
+                        serialiser.handle_message(msg.sequence, msg)
+                            .await
+                            .inspect_err(|e| error!("Messaging handling error: {e}"))
+                            .ok();
+                    }
+
+                    _ => error!("Unexpected message type: {message:?}")
+                }
+            }
+        })?;
+
+        // Subscribe to bootstrap completion serializer
+        context.clone().message_bus.subscribe(&genesis_complete_topic, move |message: Arc<Message>| {
+            let serialiser = genesis_complete_serialiser_handle.clone();
+
+            async move {
+                match message.as_ref() {
+                    Message::GenesisComplete(msg) => {
                         let mut serialiser = serialiser.lock().await;
                         serialiser.handle_message(msg.sequence, msg)
                             .await
@@ -151,6 +178,7 @@ impl GovernanceState
         context.clone().message_bus.subscribe("clock.tick", move |message: Arc<Message>| {
             let serialiser = serialiser_tick.clone();
             let drep_serialiser = drep_serialiser_tick.clone();
+            let genesis_complete_serialiser = genesis_complete_serialiser_tick.clone();
             let state = state_tick.clone();
 
             async move {

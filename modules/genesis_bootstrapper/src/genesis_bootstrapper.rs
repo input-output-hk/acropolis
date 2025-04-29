@@ -47,14 +47,6 @@ fn decode_hex_string(s: &str, len: usize) -> Result<Vec<u8>> {
     }
 }
 
-/*
-fn decode_prefixed_hex_string(s: &str, prefix: &str, len: usize) -> Option<Vec<u8>> {
-    if let Some(h) = s.starts_with(prefix) {
-    }
-    None
-}
- */
-
 fn map_anchor(anchor: &conway::Anchor) -> Result<Anchor> {
     Ok(Anchor {
         url: anchor.url.clone(),
@@ -215,7 +207,7 @@ impl GenesisBootstrapper
 
                     // Send completion message
                     let completion_message = GenesisCompleteMessage {
-                        next_sequence: 1,
+                        sequence: 1,
                         conway_genesis: conway_genesis
                             .map(|g| map_conway_genesis(&g))
                             .transpose().unwrap_or_else(|e| {

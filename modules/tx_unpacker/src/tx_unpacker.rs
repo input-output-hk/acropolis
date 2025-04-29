@@ -9,6 +9,7 @@ use acropolis_common::{
     *
 };
 
+use tokio::sync::Mutex;
 use anyhow::{anyhow, Result};
 use config::Config;
 use tracing::{debug, info, error};
@@ -631,11 +632,14 @@ impl TxUnpacker
             info!("Publishing governance procedures on '{topic}'");
         }
 
+        let governance_sequence = Arc::new(Mutex::<u64>::new(1));
+
         context.clone().message_bus.subscribe(&subscribe_topic, move |message: Arc<Message>| {
             let context = context.clone();
             let publish_utxo_deltas_topic = publish_utxo_deltas_topic.clone();
             let publish_certificates_topic = publish_certificates_topic.clone();
             let publish_governance_procedures_topic = publish_governance_procedures_topic.clone();
+            let governance_sequence = governance_sequence.clone();
 
             async move {
                 match message.as_ref() {
@@ -659,7 +663,7 @@ impl TxUnpacker
                         };
 
                         let mut governance_message = GovernanceProceduresMessage {
-                            sequence: txs_msg.sequence,
+                            sequence: 0, // placeholder
                             block: txs_msg.block.clone(),
                             voting_procedures: Vec::new(),
                             proposal_procedures: Vec::new(),
@@ -809,10 +813,16 @@ impl TxUnpacker
 
                         if let Some(topic) = publish_governance_procedures_topic {
                             if !governance_message.is_empty() {
+                                let mut gov_seq = governance_sequence.lock().await;
+                                governance_message.sequence = *gov_seq;
+
                                 let gov_message = Message::GovernanceProcedures(governance_message);
-                                context.message_bus.publish(&topic, Arc::new(gov_message))
-                                    .await
-                                    .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+                                if let Err(e) = context.message_bus.publish(&topic, Arc::new(gov_message)).await {
+                                    error!("Failed to publish: {e}");
+                                }
+                                else {
+                                    *gov_seq += 1;
+                                }
                             }
                         }
                     }
