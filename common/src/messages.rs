@@ -66,7 +66,7 @@ pub struct RawTxsMessage {
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenesisCompleteMessage {
     /// Next event sequence number to use
-    pub next_sequence: u64,
+    pub sequence: u64,
     pub conway_genesis: Option<ConwayGenesisParams>
 }
 

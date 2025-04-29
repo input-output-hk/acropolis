@@ -287,7 +287,7 @@ impl MithrilSnapshotFetcher
                 let config = config.clone();
 
                 let sequence = match message.as_ref() {
-                    Message::GenesisComplete(message) => message.next_sequence,
+                    Message::GenesisComplete(message) => message.sequence,
                     _ => 0
                 };
                 info!("Received startup message, sequence {sequence}");
