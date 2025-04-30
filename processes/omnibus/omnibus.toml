@@ -26,6 +26,8 @@ address-delta-topic = "cardano.address.delta"
 
 [module.drep-state]
 
+[module.stake-delta-filter]
+
 [module.clock]
 
 [module.rest-server]

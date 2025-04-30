@@ -14,6 +14,7 @@ members = [
     "modules/utxo_state",              # UTXO state
     "modules/spo_state",               # SPO state
     "modules/drep_state",              # DRep state
+    "modules/stake_delta_filter",      # Filters address deltas
 
     # Process builds
     "processes/omnibus",               # All-inclusive omnibus process
