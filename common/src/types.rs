@@ -81,7 +81,7 @@ impl Default for ShelleyAddressPaymentPart {
 }
 
 /// Delegation pointer
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Default, Clone, Hash, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ShelleyAddressPointer {
     /// Slot number
     pub slot: u64,
@@ -723,6 +723,13 @@ pub struct ProposalProcedure {
     pub anchor: Anchor,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StakeCredentialWithPos {
+    pub stake_credential: StakeCredential,
+    pub tx_index: u64,
+    pub cert_index: u64
+}
+
 /// Certificate in a transaction
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum TxCertificate {
@@ -730,7 +737,7 @@ pub enum TxCertificate {
     None(()),
 
     /// Stake registration
-    StakeRegistration(StakeCredential),
+    StakeRegistration(StakeCredentialWithPos),
 
     /// Stake de-registration
     StakeDeregistration(StakeCredential),
