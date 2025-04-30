@@ -5,13 +5,14 @@ use std::collections::BinaryHeap;
 use std::cmp::Ordering;
 use tracing::{debug, info};
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify};
 use async_trait::async_trait;
 use anyhow::Result;
 use crate::messages::Sequence;
+use lf_queue::Queue;
 
-pub trait Serialisable: Clone + Sync {}
-impl<T: Clone + Sync> Serialisable for T {}
+pub trait Serialisable: Clone + Sync + Send + 'static {}
+impl<T: Clone + Sync + Send + 'static> Serialisable for T {}
 
 /// Pending queue entry
 struct PendingEntry<T: Serialisable> {
@@ -56,47 +57,49 @@ pub struct Serialiser<'a, T: Serialisable> {
     /// Pending queue, presents data in order, implemented as a reversed max-heap
     pending: BinaryHeap<PendingEntry<T>>,
 
+    /// Process queue, data that is ready to process in serial
+    processing: Arc<Queue<PendingEntry<T>>>,
+
     /// Previous sequence expected
     prev_sequence: Option<u64>,
 
-    /// Message handler
-    handler: Arc<Mutex<dyn SerialisedHandler<T>>>,
-
     /// Module path using it (for logging)
     module_name: &'a str,
+
+    /// Notification for new processing entries
+    new_processing: Arc<Notify>,
 }
 
 impl <'a, T: Serialisable> Serialiser<'a, T> {
     /// Constructor
     pub fn new(handler: Arc<Mutex<dyn SerialisedHandler<T>>>,
                module_name: &'a str) -> Self {
-        Self {
-            pending: BinaryHeap::new(),
-            prev_sequence: None,
-            handler,
-            module_name,
-        }
+        Self::new_from(handler, module_name, None)
     }
     pub fn new_from(handler: Arc<Mutex<dyn SerialisedHandler<T>>>,
                     module_name: &'a str,
                     prev_sequence: Option<u64>) -> Self {
+        let new_processing = Arc::new(Notify::new());
+        let processing = Arc::new(Queue::<PendingEntry<T>>::new());
+        tokio::spawn({
+            let new_processing = new_processing.clone();
+            let processing = processing.clone();
+            async move {
+                loop {
+                    new_processing.notified().await;
+                    while let Some(entry) = processing.pop() {
+                        let _ = handler.lock().await.handle(entry.sequence.number, &entry.data).await;
+                    }
+                }
+            }
+        });
         Self {
             pending: BinaryHeap::new(),
+            processing,
             prev_sequence,
-            handler,
             module_name,
+            new_processing,
         }
-    }
-
-    /// Process data
-    async fn process(&mut self, sequence: Sequence, data: &T) -> Result<()> {
-        // Pass to the handler
-        self.handler.lock().await.handle(sequence.number, data).await?;
-
-        // Update sequence
-        self.prev_sequence = Some(sequence.number);
-
-        Ok(())
     }
 
     /// Handle data
@@ -105,7 +108,13 @@ impl <'a, T: Serialisable> Serialiser<'a, T> {
         // Is it in order?
         if sequence.previous == self.prev_sequence {
 
-            self.process(sequence, &data).await?;
+            // Add processable items to processing queue
+
+            self.processing.push(PendingEntry {
+                sequence,
+                data: data.clone(),
+            });
+            self.prev_sequence = Some(sequence.number);
 
             // See if any pending now work
             while let Some(next) = self.pending.peek() {
@@ -116,12 +125,15 @@ impl <'a, T: Serialisable> Serialiser<'a, T> {
                     }
 
                     if let Some(next) = self.pending.pop() {
-                        self.process(next.sequence, &next.data).await?;
+                        self.prev_sequence = Some(next.sequence.number);
+                        self.processing.push(next);
                     }
                 } else {
                     break;
                 }
             }
+
+            self.new_processing.notify_one();
         } else {
             // Not accepted, it's out of order, queue it
             if tracing::enabled!(tracing::Level::DEBUG) {
