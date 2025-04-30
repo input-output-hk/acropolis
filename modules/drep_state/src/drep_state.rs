@@ -1,5 +1,5 @@
-//! Acropolis SPO state module for Caryatid
-//! Accepts certificate events and derives the SPO state in memory
+//! Acropolis DRep State module for Caryatid
+//! Accepts certificate events and derives the DRep State in memory
 
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
 use acropolis_common::{messages::Message, DRepCredential, Serialiser};
@@ -16,7 +16,7 @@ use state::State;
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.certificates";
 const DEFAULT_HANDLE_TOPIC: &str = "rest.get.drep-state.*";
 
-/// SPO State module
+/// DRep State module
 #[module(
     message_type(Message),
     name = "drep-state",
