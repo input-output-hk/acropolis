@@ -2,17 +2,12 @@
 //! Accepts certificate events and derives the SPO state in memory
 
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
-use acropolis_common::{
-    messages::Message,
-    Serialiser,
-};
-use std::ops::Deref;
+use acropolis_common::{messages::Message, DRepCredential, Serialiser};
 use std::sync::Arc;
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use config::Config;
 use tokio::sync::Mutex;
 use tracing::{error, info};
-use serde_json;
 use acropolis_common::messages::RESTResponse;
 
 mod state;
@@ -28,6 +23,36 @@ const DEFAULT_HANDLE_TOPIC: &str = "rest.get.drep-state.*";
     description = "In-memory DRep State from certificate events"
 )]
 pub struct DRepState;
+
+fn decode_rest_drep_credential(id: &str) -> Result<DRepCredential> {
+    if let Some(stripped) = id.strip_prefix("script=") {
+        Ok(DRepCredential::ScriptHash(hex::decode(stripped)?))
+    }
+    else if let Some(stripped) = id.strip_prefix("address=") {
+        Ok(DRepCredential::AddrKeyHash(hex::decode(stripped)?))
+    }
+    else {
+        Err(anyhow!("Poorly formed url, 'script=<hex key hash>' or 'address=<hex key hash>' DRep credential should be provided"))
+    }
+}
+
+fn perform_rest_request(state: &State, path: &str) -> Result<String> {
+    let request = match path.rfind('/') {
+        None => return Err(anyhow!("Poorly formed url, '/' expected.")),
+        Some(suffix_start) => &path[suffix_start+1..]
+    };
+
+    if request == "list" {
+        Ok(format!("DRep list: {:?}", state.list()))
+    }
+    else {
+        let cred = decode_rest_drep_credential(request)?;
+        match state.get_drep( &cred) {
+            Some(drep) => Ok(format!("DRep {:?}: deposit={}, anchor={:?}", cred, drep.deposit, drep.anchor)),
+            None => Ok(format!("No DRep {:?}", cred))
+        }
+    }
+}
 
 impl DRepState
 {
@@ -76,26 +101,18 @@ impl DRepState
                     Message::RESTRequest(request) => {
                         info!("REST received {} {}", request.method, request.path);
                         let lock = state.lock().await;
-                        match request.path.rfind('/') {
-                            None => RESTResponse::with_text(400, "Poorly formed url"),
-                            Some(last_slash) => {
-                                let id = &request.path[last_slash + 1..];
-                                match id.len() {
-                                    0 => match serde_json::to_string(lock.deref()) {
-                                        Ok(body) => RESTResponse::with_text(200, &body),
-                                        Err(error) => RESTResponse::with_text(500, &format!("{error:?}")),
-                                    },
-                                    _ => match hex::decode(&id) {
-                                        Err(error) => RESTResponse::with_text(400, &format!("DRep id must be hex encoded vector of bytes: {error:?}")),
-                                        Ok(_id) => RESTResponse::with_text(200, &format!("DReps caching: total number of entries {}", lock.deref().get_count())),
-                                    },
-                                }
-                            },
+
+                        match perform_rest_request(&lock, &request.path) {
+                            Ok(response) => RESTResponse::with_text(200, &response),
+                            Err(error) => {
+                                error!("DRep REST request error: {error:?}");
+                                RESTResponse::with_text(400, &format!("{error:?}"))
+                            }
                         }
                     },
                     _ => {
-                        error!("Unexpected message type {:?}", message);
-                        RESTResponse::with_text( 500, "Unexpected message in REST request")
+                        error!("Unexpected message type: {message:?}");
+                        RESTResponse::with_text(500, &format!("Unexpected message type"))
                     }
                 };
 
