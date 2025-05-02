@@ -160,6 +160,7 @@ impl <'a, T: Serialisable> Serialiser<'a, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::time::{sleep, Duration};
 
     // Mock message handler to track received messages
     struct MockHandler {
@@ -204,6 +205,7 @@ mod tests {
         let message2 = TestData { index: 2 };
         serialiser.handle(Sequence::new(2, Some(1)), &message2).await.unwrap();
 
+        sleep(Duration::from_millis(100)).await;
         let handler = handler2.lock().await;
         assert_eq!(3, handler.received.len());
         assert_eq!(0, handler.received[0]);
@@ -227,6 +229,7 @@ mod tests {
         let message2 = TestData { index: 2 };
         serialiser.handle(Sequence::new(44, Some(43)), &message2).await.unwrap();
 
+        sleep(Duration::from_millis(100)).await;
         let handler = handler2.lock().await;
         assert_eq!(3, handler.received.len());
         assert_eq!(0, handler.received[0]);
