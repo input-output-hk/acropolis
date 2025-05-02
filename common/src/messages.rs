@@ -139,6 +139,22 @@ pub struct AddressDeltasMessage {
     pub deltas: Vec<AddressDelta>
 }
 
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct GovernanceProceduresMessage {
+    pub sequence: Sequence,
+
+    pub block: BlockInfo,
+
+    pub proposal_procedures: Vec<ProposalProcedure>,
+
+    pub voting_procedures: Vec<VotingProcedures>
+}
+
+impl GovernanceProceduresMessage {
+    pub fn is_empty(&self) -> bool {
+        self.proposal_procedures.is_empty() && self.voting_procedures.is_empty()
+    }
+}
 
 // === Global message enum ===
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -163,6 +179,7 @@ pub enum Message {
     UTXODeltas(UTXODeltasMessage),             // UTXO deltas received
     TxCertificates(TxCertificatesMessage),     // Transaction certificates received
     AddressDeltas(AddressDeltasMessage),       // Address deltas received
+    GovernanceProcedures(GovernanceProceduresMessage) // Governance procedures received
 }
 
 impl Default for Message {

@@ -1,9 +1,10 @@
 //! Acropolis transaction unpacker module for Caryatid
 //! Unpacks transaction bodies into UTXO events
 
+use std::collections::HashMap;
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
 use acropolis_common::{
-    messages::{Message, Sequence, TxCertificatesMessage, UTXODeltasMessage}, *,
+    messages::{GovernanceProceduresMessage, Message, Sequence, TxCertificatesMessage, UTXODeltasMessage}, *,
 };
 
 use std::sync::Arc;
@@ -19,6 +20,7 @@ use pallas::ledger::primitives::{
     Relay as PallasRelay,
     Nullable,
 };
+
 use anyhow::anyhow;
 use tokio::sync::Mutex;
 
@@ -116,16 +118,21 @@ impl TxUnpacker
         }
     }
 
-    /// Map an Anchor to ours
-    fn map_anchor(anchor: &Nullable<conway::Anchor>) -> Option<Anchor> {
+    fn map_anchor(anchor: &conway::Anchor) -> Anchor {
+        Anchor {
+            url: anchor.url.clone(),
+            data_hash: anchor.content_hash.to_vec(),
+        }
+    }
+
+    /// Map a Nullable Anchor to ours
+    fn map_nullable_anchor(anchor: &Nullable<conway::Anchor>) -> Option<Anchor> {
         match anchor {
-            Nullable::Some(a) => Some(Anchor {
-                url: a.url.clone(),
-                data_hash: a.content_hash.to_vec(),
-            }),
+            Nullable::Some(a) => Some(Self::map_anchor(a)),
             _ => None
         }
     }
+
     /// Map a Pallas Relay to ours
     fn map_relay(relay: &PallasRelay) -> Relay {
         match relay {
@@ -350,14 +357,14 @@ impl TxUnpacker
                     conway::Certificate::ResignCommitteeCold(cold_cred, anchor) =>
                                 Ok(TxCertificate::ResignCommitteeCold(ResignCommitteeCold {
                                     cold_credential: Self::map_stake_credential(cold_cred),
-                                    anchor: Self::map_anchor(&anchor)
+                                    anchor: Self::map_nullable_anchor(&anchor)
                                 })),
 
                     conway::Certificate::RegDRepCert(cred, coin, anchor) =>
                                 Ok(TxCertificate::DRepRegistration(DRepRegistration {
                                     credential: Self::map_stake_credential(cred),
                                     deposit: *coin,
-                                    anchor: Self::map_anchor(&anchor),
+                                    anchor: Self::map_nullable_anchor(&anchor),
                                 })),
 
                     conway::Certificate::UnRegDRepCert(cred, coin) =>
@@ -369,16 +376,79 @@ impl TxUnpacker
                     conway::Certificate::UpdateDRepCert(cred, anchor) =>
                                 Ok(TxCertificate::DRepUpdate(DRepUpdate {
                                     credential: Self::map_stake_credential(cred),
-                                    anchor: Self::map_anchor(&anchor),
+                                    anchor: Self::map_nullable_anchor(&anchor),
                                 })),
                 }
             }
 
             _ => Err(anyhow!("Unknown certificate era {:?} ignored", cert)),
         }
-
     }
 
+
+    fn map_governance_proposals_procedures(prop: &conway::ProposalProcedure) -> Result<ProposalProcedure> {
+        Ok(ProposalProcedure {
+            deposit: prop.deposit,
+            reward_account: prop.reward_account.to_vec(), // not implemented
+            gov_action: GovernanceAction::Information, // not implemented
+            anchor: Self::map_anchor(&prop.anchor),
+        })
+    }
+
+    fn map_voter(voter: &conway::Voter) -> Voter {
+        match voter {
+            conway::Voter::ConstitutionalCommitteeKey(key_hash) => Voter::ConstitutionalCommitteeKey(key_hash.to_vec()),
+            conway::Voter::ConstitutionalCommitteeScript(script_hash) => Voter::ConstitutionalCommitteeScript(script_hash.to_vec()),
+            conway::Voter::DRepKey(addr_key_hash) => Voter::DRepKey(addr_key_hash.to_vec()),
+            conway::Voter::DRepScript(script_hash) => Voter::DRepScript(script_hash.to_vec()),
+            conway::Voter::StakePoolKey(key_hash) => Voter::StakePoolKey(key_hash.to_vec())
+        }
+    }
+
+    fn map_gov_action_id(pallas_action_id: &conway::GovActionId) -> GovActionId {
+        GovActionId {
+            transaction_id: pallas_action_id.transaction_id.to_vec(),
+            action_index: pallas_action_id.action_index,
+        }
+    }
+
+    fn map_vote(vote: &conway::Vote) -> Vote {
+        match vote {
+            conway::Vote::No => Vote::No,
+            conway::Vote::Yes => Vote::Yes,
+            conway::Vote::Abstain => Vote::Abstain
+        }
+    }
+
+    fn map_single_governance_voting_procedure(proc: &conway::VotingProcedure) -> VotingProcedure {
+        VotingProcedure {
+            vote: Self::map_vote(&proc.vote),
+            anchor: Self::map_nullable_anchor(&proc.anchor),
+        }
+    }
+
+    fn map_all_governance_voting_procedures(vote_procs: &conway::VotingProcedures) -> Result<VotingProcedures> {
+        let mut procs = VotingProcedures { votes: HashMap::new() };
+
+        for (pallas_voter,pallas_pair) in vote_procs.iter() {
+            let voter = Self::map_voter(pallas_voter);
+
+            if let Some(_x) = procs.votes.insert(voter.clone(), HashMap::new()) {
+                return Err(anyhow!("Duplicate voter {:?} in governance voting procedures: {:?}", voter, vote_procs));
+            }
+
+            let single_voter = procs.votes.get_mut(&voter)
+                .ok_or_else(|| anyhow!("Cannot find voter {:?}, which must present", voter))?;
+
+            for (pallas_action_id, pallas_voting_procedure) in pallas_pair.iter() {
+                let action_id = Self::map_gov_action_id(pallas_action_id);
+                let vp = Self::map_single_governance_voting_procedure(&pallas_voting_procedure);
+                single_voter.insert(action_id, vp);
+            }
+        }
+
+        Ok(procs)
+    }
     /// Main init function
     pub fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
 
@@ -396,6 +466,11 @@ impl TxUnpacker
         let publish_certificates_topic = config.get_string("publish-certificates-topic").ok();
         if let Some(ref topic) = publish_certificates_topic {
             info!("Publishing certificates on '{topic}'");
+        }
+
+        let publish_governance_procedures_topic = config.get_string("publish-governance-topic").ok();
+        if let Some(ref topic) = publish_governance_procedures_topic {
+            info!("Publishing governance procedures on '{topic}'");
         }
 
         let utxo_sender = match publish_utxo_deltas_topic {
@@ -416,10 +491,20 @@ impl TxUnpacker
             None => None,
         };
 
+        let gov_sender = match publish_governance_procedures_topic {
+            Some(topic) => Some(Arc::new(Mutex::new(Serialiser::new_from(Arc::new(Mutex::new(Sender::new(context.clone(), topic.clone(), None, |sequence: &Sequence, data: &GovernanceProceduresMessage| {
+                let mut data = data.clone();
+                data.sequence = *sequence;
+                Message::GovernanceProcedures(data)
+            }))), module_path!(), Some(0))))),
+            None => None,
+        };
+
         context.clone().message_bus.subscribe(&subscribe_topic, move |message: Arc<Message>| {
 
             let utxo_sender = utxo_sender.clone();
             let cert_sender = cert_sender.clone();
+            let gov_sender = gov_sender.clone();
 
             async move {
                 match message.as_ref() {
@@ -431,6 +516,8 @@ impl TxUnpacker
 
                         let mut deltas = Vec::new();
                         let mut certificates = Vec::new();
+                        let mut voting_procedures = Vec::new();
+                        let mut proposal_procedures = Vec::new();
 
                         for raw_tx in &txs_msg.txs {
                             // Parse the tx
@@ -439,6 +526,18 @@ impl TxUnpacker
                                     let inputs = tx.consumes();
                                     let outputs = tx.produces();
                                     let certs = tx.certs();
+                                    let mut props = None;
+                                    let mut votes = None;
+
+                                    if let Some(conway) = tx.as_conway() {
+                                        if let Some(ref v) = conway.transaction_body.voting_procedures {
+                                            votes = Some(v);
+                                        }
+
+                                        if let Some(ref p) = conway.transaction_body.proposal_procedures {
+                                            props = Some(p);
+                                        }
+                                    }
 
                                     if tracing::enabled!(tracing::Level::DEBUG) {
                                         debug!("Decoded tx with {} inputs, {} outputs, {} certs",
@@ -503,6 +602,26 @@ impl TxUnpacker
                                             }
                                         }
                                     }
+
+                                    if gov_sender.is_some() {
+                                        if let Some(pp) = props {
+                                            // Nonempty set -- governance_message.proposal_procedures will not be empty
+                                            for pallas_governance_proposals in pp.iter() {
+                                                match Self::map_governance_proposals_procedures(&pallas_governance_proposals) {
+                                                    Ok(g) => proposal_procedures.push(g),
+                                                    Err(_e) => {}
+                                                }
+                                            }
+                                        }
+
+                                        if let Some(pallas_vp) = votes {
+                                            // Nonempty set -- governance_message.voting_procedures will not be empty
+                                            match Self::map_all_governance_voting_procedures(pallas_vp) {
+                                                Ok(vp) => voting_procedures.push(vp),
+                                                Err(e) => error!("Cannot decode governance voting procedures in slot {}: {e}", txs_msg.block.slot)
+                                            }
+                                        }
+                                    }
                                 },
 
                                 Err(e) => error!("Can't decode transaction in slot {}: {e}",
@@ -543,6 +662,29 @@ impl TxUnpacker
                                     let _ = cert_sender.lock().await.handle(txs_msg.sequence, &Some(data)).await;
                                 } else {
                                     let _ = cert_sender.lock().await.handle(txs_msg.sequence, &None).await;
+                                }
+                            },
+                            _ => (),
+                        };
+
+                        match gov_sender {
+                            Some(ref gov_sender) => {
+                                if txs_msg.block.new_epoch || !voting_procedures.is_empty() || !proposal_procedures.is_empty() {
+                                    let data = GovernanceProceduresMessage {
+                                        sequence: Sequence {
+                                            number: txs_msg.sequence.number,
+                                            previous: match txs_msg.sequence.number {
+                                                1 => None,
+                                                _ => txs_msg.sequence.previous,
+                                            },
+                                        },
+                                        block: txs_msg.block.clone(),
+                                        voting_procedures,
+                                        proposal_procedures,
+                                    };
+                                    let _ = gov_sender.lock().await.handle(txs_msg.sequence, &Some(data)).await;
+                                } else {
+                                    let _ = gov_sender.lock().await.handle(txs_msg.sequence, &None).await;
                                 }
                             },
                             _ => (),
