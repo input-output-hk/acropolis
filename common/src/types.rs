@@ -43,14 +43,14 @@ pub struct BlockInfo {
 }
 
 /// a Byron-era address
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ByronAddress {
     /// Raw payload
     pub payload: Vec<u8>,
 }
 
 /// Address network identifier
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum AddressNetwork {
     /// Mainnet
     Main,
@@ -67,7 +67,7 @@ type ScriptHash = KeyHash;
 type AddrKeyhash = KeyHash;
 
 /// A Shelley-era address - payment part
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ShelleyAddressPaymentPart {
     /// Payment to a key
     PaymentKeyHash(KeyHash),
@@ -94,7 +94,7 @@ pub struct ShelleyAddressPointer {
 }
 
 /// A Shelley-era address - delegation part
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ShelleyAddressDelegationPart {
     /// No delegation (enterprise addresses)
     None,
@@ -114,7 +114,7 @@ impl Default for ShelleyAddressDelegationPart {
 }
 
 /// A Shelley-era address
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ShelleyAddress {
     /// Network id
     pub network: AddressNetwork,
@@ -127,7 +127,7 @@ pub struct ShelleyAddress {
 }
 
 /// Payload of a stake address
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum StakeAddressPayload {
     /// Stake key
     StakeKeyHash(Vec<u8>),
@@ -141,7 +141,7 @@ impl Default for StakeAddressPayload {
 }
 
 /// A stake address
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct StakeAddress {
     /// Network id
     pub network: AddressNetwork,
@@ -151,7 +151,7 @@ pub struct StakeAddress {
 }
 
 /// A Cardano address
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Address {
     None,
     Byron(ByronAddress),
@@ -163,6 +163,17 @@ impl Default for Address {
     fn default() -> Self { Self::None }
 }
 
+impl Address {
+    pub fn get_pointer(&self) -> Option<ShelleyAddressPointer> {
+        if let Address::Shelley(shelley) = self {
+            if let ShelleyAddressDelegationPart::Pointer(ptr) = &shelley.delegation {
+                return Some(ptr.clone())
+            }
+        }
+        return None
+    }
+}
+
 /// Individual address balance change
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AddressDelta {
@@ -171,6 +182,13 @@ pub struct AddressDelta {
 
     /// Balance change
     pub delta: i64,
+}
+
+/// Stake balance change
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StakeAddressDelta {
+    pub address: StakeAddress,
+    pub delta: i64
 }
 
 /// Transaction output (UTXO)

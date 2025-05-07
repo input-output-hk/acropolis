@@ -22,7 +22,6 @@ use pallas::ledger::primitives::{
 };
 
 use anyhow::anyhow;
-use pallas::ledger::addresses::CertIdx;
 use acropolis_common::messages::GovernanceProceduresMessage;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.txs";
