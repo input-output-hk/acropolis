@@ -5,8 +5,9 @@ use acropolis_common::{
     BlockInfo, AddressDelta, Address,
         messages::{
         AddressDeltasMessage,
-        Message
-     }, 
+        Message,
+        Sequence,
+     },
 };
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -32,8 +33,8 @@ impl AddressDeltaPublisher {
 
     /// Create
     pub fn new(context: Arc<Context<Message>>, config: Arc<Config>) -> Self {
-        Self { 
-            context, 
+        Self {
+            context,
             topic: config.get_string("address-delta-topic").ok(),
             deltas: Mutex::new(Vec::new()),
         }
@@ -58,7 +59,7 @@ impl AddressDeltaObserver for AddressDeltaPublisher {
         });
     }
 
-    async fn finalise_block(&self, block: &BlockInfo, sequence: u64) {
+    async fn finalise_block(&self, block: &BlockInfo, sequence: Sequence) {
 
         // Send out the accumulated deltas
         if let Some(topic) = &self.topic {
@@ -79,6 +80,6 @@ impl AddressDeltaObserver for AddressDeltaPublisher {
                     .await
                     .unwrap_or_else(|e| error!("Failed to publish: {e}")); 
             });
-        }        
+        }
     }
 }

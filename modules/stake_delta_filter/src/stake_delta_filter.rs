@@ -146,10 +146,10 @@ impl StakeDeltaFilter {
         // State
         let state = Arc::new(Mutex::new(State::new(params.clone())));
 
-        let serialiser = Arc::new(Mutex::new(Serialiser::new(state.clone(), module_path!(), 1)));
+        let serialiser = Arc::new(Mutex::new(Serialiser::new(state.clone(), module_path!())));
         let serialiser_tick = serialiser.clone();
 
-        let serialiser_delta = Arc::new(Mutex::new(Serialiser::new(state.clone(), module_path!(), 1)));
+        let serialiser_delta = Arc::new(Mutex::new(Serialiser::new(state.clone(), module_path!())));
         let serialiser_delta_tick = serialiser_delta.clone();
         let state_t = state.clone();
         let params_d = params.clone();
@@ -161,7 +161,7 @@ impl StakeDeltaFilter {
                 match message.as_ref() {
                     Message::TxCertificates(tx_cert_msg) => {
                         let mut serialiser = serialiser.lock().await;
-                        serialiser.handle_message(tx_cert_msg.sequence, tx_cert_msg)
+                        serialiser.handle(tx_cert_msg.sequence, tx_cert_msg)
                             .await
                             .inspect_err(|e| error!("Messaging handling error: {e}"))
                             .ok();
@@ -179,9 +179,8 @@ impl StakeDeltaFilter {
             async move {
                 match message.as_ref() {
                     Message::AddressDeltas(delta) => {
-                        info!("Delta: {}", delta.sequence);
                         let mut serialiser = serialiser.lock().await;
-                        serialiser.handle_message(delta.sequence, delta)
+                        serialiser.handle(delta.sequence, delta)
                             .await
                             .inspect_err(|e| error!("Messaging handling error: {e}"))
                             .ok();
@@ -205,9 +204,10 @@ impl StakeDeltaFilter {
                             .await
                             .inspect_err(|e| error!("Tick error: {e}"))
                             .ok();
+
+                        serialiser.lock().await.tick();
+                        serialiser_delta.lock().await.tick();
                     }
-                    serialiser.lock().await.tick();
-                    serialiser_delta.lock().await.tick();
                 }
             }
         })?;
