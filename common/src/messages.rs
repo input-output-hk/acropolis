@@ -108,6 +108,19 @@ pub struct AddressDeltasMessage {
     pub deltas: Vec<AddressDelta>
 }
 
+/// Stake address part of address deltas message
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StakeAddressDeltasMessage {
+    /// Event sequence number (for serialisation)
+    pub sequence: u64,
+
+    /// Block info
+    pub block: BlockInfo,
+
+    /// Set of deltas
+    pub deltas: Vec<StakeAddressDelta>
+}
+
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GovernanceProceduresMessage {
     pub sequence: u64,
@@ -148,6 +161,7 @@ pub enum Message {
     UTXODeltas(UTXODeltasMessage),             // UTXO deltas received
     TxCertificates(TxCertificatesMessage),     // Transaction certificates received
     AddressDeltas(AddressDeltasMessage),       // Address deltas received
+    StakeAddressDeltas(StakeAddressDeltasMessage),    // Stake part of address deltas
     GovernanceProcedures(GovernanceProceduresMessage) // Governance procedures received
 }
 

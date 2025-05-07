@@ -1,25 +1,21 @@
 //! Acropolis Stake Delta Filter module
 //! Reads address deltas and filters out only stake addresses from it; also resolves pointer addresses.
 
-use std::cmp::max;
-use std::collections::HashMap;
-use std::fs::File;
-use std::io::BufReader;
 use std::path::Path;
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
-use acropolis_common::{messages::Message, Address, AddressNetwork, ShelleyAddressDelegationPart, ShelleyAddressPointer, StakeAddress, StakeCredential, TxCertificate};
+use acropolis_common::{messages::Message, AddressNetwork, Serialiser};
 use std::sync::Arc;
 use anyhow::{anyhow, Result};
 use config::Config;
+use tokio::sync::Mutex;
 use tracing::{error, info};
-use acropolis_common::Credential::AddrKeyHash;
-use acropolis_common::messages::TxCertificatesMessage;
-use acropolis_common::StakeAddressPayload::{ScriptHash, StakeKeyHash};
 
-const DEFAULT_ADDRESS_DELTA_TOPIC: &str = "cardano.address.delta";
-const DEFAULT_CERTIFICATE_TOPIC: &str = "cardano.certificates";
-const DEFAULT_BUILD_POINTER_ADDRESS_CACHE: CacheMode = CacheMode::Always;
-const DEFAULT_ADDRESS_CACHE_DIR: &str = "downloads";
+const DEFAULT_ADDRESS_DELTA_TOPIC: (&str,&str) = ("subscription-address-delta-topic", "cardano.address.delta");
+const DEFAULT_STAKE_ADDRESS_DELTA_TOPIC: (&str,&str) = ("publishing-stake-delta-topic", "cardano.stake.delta");
+const DEFAULT_CERTIFICATES_TOPIC: (&str,&str) = ("subscription-certificates-topic", "cardano.certificates");
+const DEFAULT_ADDRESS_CACHE_DIR: (&str,&str) = ("pointer-address-cache-dir", "downloads");
+const DEFAULT_BUILD_POINTER_ADDRESS_CACHE_MODE: (&str,CacheMode) = ("build-pointer-address-cache", CacheMode::Always);
+const DEFAULT_NETWORK: (&str,AddressNetwork) = ("network", AddressNetwork::Main);
 
 /// Stake Delta Filter module
 #[module(
@@ -29,92 +25,31 @@ const DEFAULT_ADDRESS_CACHE_DIR: &str = "downloads";
 )]
 pub struct StakeDeltaFilter;
 
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
-struct PointerCache {
-    pub pointer_map: HashMap<ShelleyAddressPointer, Address>,
-    pub max_slot: u64
-}
+mod state;
+mod utils;
 
-impl PointerCache {
-    pub fn new() -> Self {
-        Self {
-            pointer_map: HashMap::new(),
-            max_slot: 0
-        }
-    }
-
-    pub fn update_max_slot(&mut self, processed_slot: u64) {
-        self.max_slot = max(self.max_slot, processed_slot);
-    }
-
-    pub fn decode_pointer(&self, pointer: &ShelleyAddressPointer) -> Result<&Address> {
-        match self.pointer_map.get(pointer) {
-            Some(address) => Ok(address),
-            None => Err(anyhow!("Pointer {:?} missing from cache", pointer)),
-        }
-    }
-
-    pub fn decode_address(&self, address: &Address) -> Result<Address> {
-        if let Address::Shelley(shelley_address) = address {
-            if let ShelleyAddressDelegationPart::Pointer(ptr) = &shelley_address.delegation {
-                if ptr.slot > self.max_slot {
-                    return Err(anyhow!("Pointer {:?} is too recent, cache reflects slots up to {}", ptr, self.max_slot));
-                }
-                return self.decode_pointer(ptr).cloned();
-            }
-        }
-        Ok(address.clone())
-    }
-
-    pub fn try_load(file_path: &str) -> Result<Arc<Self>> {
-        let file = File::open(file_path)?;
-        let reader = BufReader::new(file);
-        match serde_json::from_reader::<BufReader<std::fs::File>, PointerCache>(reader) {
-            Ok(res) => Ok(Arc::new(res)),
-            Err(err) => Err(anyhow!("Error reading json for {}: '{}'", file_path, err))
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub enum CacheMode {
-    Never, IfAbsent, Always
-}
+use state::{DeltaPublisher, State};
+use utils::{CacheMode, PointerCache, process_message};
 
 #[derive(Clone, Debug)]
 struct StakeDeltaFilterParams {
     address_delta_topic: String,
+    stake_address_delta_topic: String,
     tx_certificates_topic: String,
     pointer_address_cache_dir: String,
-    genesis_hash: String,
     network: AddressNetwork,
     build_pointer_cache: CacheMode,
     context: Arc<Context<Message>>
 }
 
 impl StakeDeltaFilterParams {
-    fn new(context: Arc<Context<Message>>) -> Self {
-        Self {
-            address_delta_topic: "".to_string(),
-            tx_certificates_topic: "".to_string(),
-            pointer_address_cache_dir: "".to_string(),
-            genesis_hash: "".to_string(),
-            network: Default::default(),
-            build_pointer_cache: CacheMode::Always,
-            context,
-        }
-    }
-
     fn get_cache_file(&self) -> Result<String> {
         let path = Path::new(&self.pointer_address_cache_dir);
-        let full = path.join(&self.genesis_hash);
+        let full = path.join(format!("{:?}", &self.network));
         let str = full.to_str().ok_or_else(|| anyhow!("Cannot produce cache file name".to_string()))?;
         Ok(str.to_string())
     }
-}
 
-impl StakeDeltaFilter
-{
     fn decode_build_cache_mode(mode: &str) -> Result<CacheMode> {
         match mode {
             "never" => Ok(CacheMode::Never),
@@ -124,36 +59,45 @@ impl StakeDeltaFilter
         }
     }
 
-    fn prepare_params(context: Arc<Context<Message>>, config: Arc<Config>) -> Result<Arc<StakeDeltaFilterParams>> {
-        let mut params = StakeDeltaFilterParams::new(context);
+    fn decode_network(network: &str) -> Result<AddressNetwork> {
+        match network {
+            "main" => Ok(AddressNetwork::Main),
+            "test" => Ok(AddressNetwork::Test),
+            m => Err(anyhow!("Unknown network '{m}': 'mainnet' or 'testnet' expected"))
+        }
+    }
 
-        // Get configuration
-        params.address_delta_topic = config.get_string("address-delta-topic")
-            .unwrap_or(DEFAULT_ADDRESS_DELTA_TOPIC.to_string());
+    fn conf(config: &Arc<Config>, keydef: (&str, &str)) -> String {
+        config.get_string(keydef.0).unwrap_or(keydef.1.to_string())
+    }
 
-        params.tx_certificates_topic = config.get_string("certificates-topic")
-            .unwrap_or(DEFAULT_ADDRESS_DELTA_TOPIC.to_string());
-
-        params.pointer_address_cache_dir = config.get_string("pointer-address-cache-dir")
-            .unwrap_or(DEFAULT_ADDRESS_CACHE_DIR.to_string());
-        info!("Reading caches from '{}...'", params.pointer_address_cache_dir);
-
-        params.build_pointer_cache = match config.get_string("build-pointer-address-cache") {
-            Ok(c) => Self::decode_build_cache_mode(&c)?,
-            Err(_) => DEFAULT_BUILD_POINTER_ADDRESS_CACHE
+    fn init(context: Arc<Context<Message>>, cfg: Arc<Config>) -> Result<Arc<Self>> {
+        let params = Self {
+            address_delta_topic: Self::conf(&cfg, DEFAULT_ADDRESS_DELTA_TOPIC),
+            tx_certificates_topic: Self::conf(&cfg, DEFAULT_CERTIFICATES_TOPIC),
+            stake_address_delta_topic: Self::conf(&cfg, DEFAULT_STAKE_ADDRESS_DELTA_TOPIC),
+            pointer_address_cache_dir: Self::conf(&cfg, DEFAULT_ADDRESS_CACHE_DIR),
+            build_pointer_cache: { match cfg.get_string(DEFAULT_BUILD_POINTER_ADDRESS_CACHE_MODE.0) {
+                Ok(c) => Self::decode_build_cache_mode(&c)?,
+                Err(_) => DEFAULT_BUILD_POINTER_ADDRESS_CACHE_MODE.1
+            }},
+            context,
+            network: { match cfg.get_string(DEFAULT_NETWORK.0) {
+                Ok(c) => Self::decode_network(&c)?,
+                Err(_) => DEFAULT_NETWORK.1
+            }}
         };
-        info!("Pointer cache mode: {:?}", params.build_pointer_cache);
 
-        params.genesis_hash = match config.get_string("genesis-hash") {
-            Ok(h) => h,
-            Err(e) => return Err(anyhow!("Reading 'genesis-hash' parameter error: {e}. The parameter is mandatory!"))
-        };
+        info!("Reading caches from {}", params.pointer_address_cache_dir);
+        info!("Pointer cache mode {:?}", params.build_pointer_cache);
 
         Ok(Arc::new(params))
     }
+}
 
+impl StakeDeltaFilter {
     pub fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
-        let params = Self::prepare_params(context, config.clone())?;
+        let params = StakeDeltaFilterParams::init(context, config.clone())?;
         let cache_path = params.get_cache_file()?;
 
         match params.build_pointer_cache {
@@ -172,21 +116,23 @@ impl StakeDeltaFilter
     }
 
     fn stateless_init(cache: Arc<PointerCache>, params: Arc<StakeDeltaFilterParams>) -> Result<()> {
-    // Subscribe for certificate messages
+        info!("Stateless init: using stake pointer cache");
+
+        // Subscribe for certificate messages
         info!("Creating subscriber on '{}'", params.address_delta_topic);
+        let cache = cache.clone();
         params.context.clone().message_bus.subscribe(&params.clone().address_delta_topic, move |message: Arc<Message>| {
             let params_copy = params.clone();
             let cache_copy = cache.clone();
+            let publisher = DeltaPublisher::new(params.clone());
 
             async move {
                 match message.as_ref() {
-                    Message::AddressDeltas(delta) => {
-                        for d in delta.deltas.iter() {
-                            info!("Address {:?} => {:?}", d.address, cache_copy.decode_address(&d.address))
-                        }
-                    }
+                    Message::AddressDeltas(delta) => 
+                        process_message(&cache_copy, &publisher, delta).await
+                            .unwrap_or_else(|e| error!("Cannot process delta {delta:?}: {e}")),
 
-                    _ => error!("Unexpected message type for {}: {message:?}", &params_copy.address_delta_topic)
+                    msg => error!("Unexpected message type for {}: {msg:?}", &params_copy.address_delta_topic)
                 }
             }
         })?;
@@ -195,55 +141,73 @@ impl StakeDeltaFilter
     }
 
     fn stateful_init(params: Arc<StakeDeltaFilterParams>) -> Result<()> {
-        info!("Creating subscriber on '{}'", params.tx_certificates_topic);
-        let params_c = params.clone();
+        info!("Stateful init: creating stake pointer cache");
+
+        // State
+        let state = Arc::new(Mutex::new(State::new(params.clone())));
+
+        let serialiser = Arc::new(Mutex::new(Serialiser::new(state.clone(), module_path!(), 1)));
+        let serialiser_tick = serialiser.clone();
+
+        let serialiser_delta = Arc::new(Mutex::new(Serialiser::new(state.clone(), module_path!(), 1)));
+        let serialiser_delta_tick = serialiser_delta.clone();
+        let state_t = state.clone();
         let params_d = params.clone();
 
-        params.context.clone().message_bus.subscribe(&params.clone().tx_certificates_topic, move |message: Arc<Message>| {
-            let params_c = params_c.clone();
+        info!("Creating subscriber on '{}'", params.tx_certificates_topic);
+        params.context.clone().message_bus.subscribe(&params.tx_certificates_topic, move |message: Arc<Message>| {
+            let serialiser = serialiser.clone();
             async move {
-                let mut pc = PointerCache::new();
                 match message.as_ref() {
-                    Message::TxCertificates(msg) => {
-                        for cert in msg.certificates.iter() {
-                            match cert {
-                                TxCertificate::StakeRegistration(reg) => {
-                                    let ptr = ShelleyAddressPointer {
-                                        slot: msg.block.slot,
-                                        tx_index: reg.tx_index,
-                                        cert_index: reg.cert_index,
-                                    };
-                                    pc.pointer_map.insert(ptr, Address::Stake(StakeAddress{
-                                        network: params_c.network.clone(),
-                                        payload: match &reg.stake_credential {
-                                            StakeCredential::ScriptHash(h) => ScriptHash(h.clone()),
-                                            StakeCredential::AddrKeyHash(k) => StakeKeyHash(k.clone())
-                                        }
-                                    }));
-                                    pc.update_max_slot(msg.block.slot);
-                                },
-                                _ => ()
-                            }
-                        }
+                    Message::TxCertificates(tx_cert_msg) => {
+                        let mut serialiser = serialiser.lock().await;
+                        serialiser.handle_message(tx_cert_msg.sequence, tx_cert_msg)
+                            .await
+                            .inspect_err(|e| error!("Messaging handling error: {e}"))
+                            .ok();
                     }
-                    _ => error!("Unexpected message type for {}: {message:?}", &params_c.tx_certificates_topic)
+
+                    _ => error!("Unexpected message type: {message:?}")
                 }
             }
         })?;
 
         info!("Creating subscriber on '{}'", params.address_delta_topic);
         params.context.clone().message_bus.subscribe(&params.clone().address_delta_topic, move |message: Arc<Message>| {
-            let params_d = params_d.clone();
+            let serialiser = serialiser_delta.clone();
+            let params = params_d.clone();
             async move {
-                let pc = PointerCache::new();
                 match message.as_ref() {
                     Message::AddressDeltas(delta) => {
-                        for d in delta.deltas.iter() {
-                            info!("Address {:?} => {:?}", d.address, pc.decode_address(&d.address))
-                        }
+                        info!("Delta: {}", delta.sequence);
+                        let mut serialiser = serialiser.lock().await;
+                        serialiser.handle_message(delta.sequence, delta)
+                            .await
+                            .inspect_err(|e| error!("Messaging handling error: {e}"))
+                            .ok();
                     }
 
-                    _ => error!("Unexpected message type for {}: {message:?}", &params_d.address_delta_topic)
+                    _ => error!("Unexpected message type for {}: {message:?}", &params.address_delta_topic)
+                }
+            }
+        })?;
+
+        // Ticker to log stats
+        params.context.clone().message_bus.subscribe("clock.tick", move |message: Arc<Message>| {
+            let serialiser = serialiser_tick.clone();
+            let serialiser_delta = serialiser_delta_tick.clone();
+            let state = state_t.clone();
+
+            async move {
+                if let Message::Clock(message) = message.as_ref() {
+                    if (message.number % 60) == 0 {
+                        state.lock().await.tick()
+                            .await
+                            .inspect_err(|e| error!("Tick error: {e}"))
+                            .ok();
+                    }
+                    serialiser.lock().await.tick();
+                    serialiser_delta.lock().await.tick();
                 }
             }
         })?;
