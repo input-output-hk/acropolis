@@ -4,7 +4,7 @@
 use std::collections::BinaryHeap;
 use std::cmp::Ordering;
 use tracing::{debug, info};
-use std::sync::Arc;
+use std::sync::{Arc, atomic::{AtomicI64, Ordering as AtomicOrdering}};
 use tokio::sync::{Mutex, Notify};
 use async_trait::async_trait;
 use anyhow::Result;
@@ -60,6 +60,9 @@ pub struct Serialiser<'a, T: Serialisable> {
     /// Process queue, data that is ready to process in serial
     processing: Arc<Queue<PendingEntry<T>>>,
 
+    /// Length of process queue
+    processing_len: Arc<AtomicI64>,
+
     /// Previous sequence expected
     prev_sequence: Option<u64>,
 
@@ -81,14 +84,17 @@ impl <'a, T: Serialisable> Serialiser<'a, T> {
                     prev_sequence: Option<u64>) -> Self {
         let new_processing = Arc::new(Notify::new());
         let processing = Arc::new(Queue::<PendingEntry<T>>::new());
+        let processing_len = Arc::new(AtomicI64::new(0));
         tokio::spawn({
             let new_processing = new_processing.clone();
             let processing = processing.clone();
+            let processing_len = processing_len.clone();
             async move {
                 loop {
                     new_processing.notified().await;
                     while let Some(entry) = processing.pop() {
                         let _ = handler.lock().await.handle(entry.sequence.number, &entry.data).await;
+                        processing_len.fetch_sub(1, AtomicOrdering::Relaxed);
                     }
                 }
             }
@@ -96,6 +102,7 @@ impl <'a, T: Serialisable> Serialiser<'a, T> {
         Self {
             pending: BinaryHeap::new(),
             processing,
+            processing_len,
             prev_sequence,
             module_name,
             new_processing,
@@ -110,6 +117,7 @@ impl <'a, T: Serialisable> Serialiser<'a, T> {
 
             // Add processable items to processing queue
 
+            self.processing_len.fetch_add(1, AtomicOrdering::Relaxed);
             self.processing.push(PendingEntry {
                 sequence,
                 data: data.clone(),
@@ -126,6 +134,7 @@ impl <'a, T: Serialisable> Serialiser<'a, T> {
 
                     if let Some(next) = self.pending.pop() {
                         self.prev_sequence = Some(next.sequence.number);
+                        self.processing_len.fetch_add(1, AtomicOrdering::Relaxed);
                         self.processing.push(next);
                     }
                 } else {
@@ -150,9 +159,7 @@ impl <'a, T: Serialisable> Serialiser<'a, T> {
 
     /// Periodic tick for background logging
     pub fn tick(&mut self) {
-        if self.pending.len() != 0 {
-            info!(module = self.module_name, pending = self.pending.len());
-        }
+        info!(module = self.module_name, pending = self.pending.len(), processing = self.processing_len.load(AtomicOrdering::Relaxed));
     }
 }
 
