@@ -2,7 +2,7 @@
 use acropolis_common::{
     messages::TxCertificatesMessage,
     PoolRegistration,
-    SerialisedMessageHandler,
+    SerialisedHandler,
     TxCertificate,
 };
 use anyhow::Result;
@@ -52,8 +52,8 @@ impl State {
 }
 
 #[async_trait]
-impl SerialisedMessageHandler<TxCertificatesMessage> for State {
-    async fn handle(&mut self, tx_cert_msg: &TxCertificatesMessage) -> Result<()> {
+impl SerialisedHandler<TxCertificatesMessage> for State {
+    async fn handle(&mut self, _sequence: u64, tx_cert_msg: &TxCertificatesMessage) -> Result<()> {
         if tx_cert_msg.block.epoch > self.epoch {
             self.epoch = tx_cert_msg.block.epoch;
             let deregistrations = self.pending_deregistrations.remove(&self.epoch);

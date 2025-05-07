@@ -3,7 +3,7 @@
 use std::{collections::{HashMap, VecDeque}, fs, io::Write, sync::Arc};
 use acropolis_common::{
     messages::{AddressDeltasMessage, Message, StakeAddressDeltasMessage, TxCertificatesMessage}, 
-    Address, BlockInfo, SerialisedMessageHandler, ShelleyAddressPointer, StakeAddress, 
+    Address, BlockInfo, SerialisedHandler, ShelleyAddressPointer, StakeAddress, 
     StakeAddressPayload, StakeCredential, TxCertificate
 };
 use anyhow::{anyhow, Result};
@@ -87,8 +87,8 @@ pub struct State {
 }
 
 #[async_trait]
-impl SerialisedMessageHandler<AddressDeltasMessage> for State {
-    async fn handle(&mut self, most_recent_delta: &AddressDeltasMessage) -> Result<()> {
+impl SerialisedHandler<AddressDeltasMessage> for State {
+    async fn handle(&mut self, _sequence: u64, most_recent_delta: &AddressDeltasMessage) -> Result<()> {
         //info!("New address delta message: {:?}", most_recent_delta);
         if most_recent_delta.block.slot % 10000 == 0 {
             info!("New address delta message: {}", most_recent_delta.block.slot);
@@ -108,8 +108,8 @@ impl SerialisedMessageHandler<AddressDeltasMessage> for State {
 //params.context.clone().message_bus.subscribe(&params.clone().tx_certificates_topic, move |message: Arc<Message>| {
 
 #[async_trait]
-impl SerialisedMessageHandler<TxCertificatesMessage> for State {
-    async fn handle(&mut self, msg: &TxCertificatesMessage) -> Result<()> {
+impl SerialisedHandler<TxCertificatesMessage> for State {
+    async fn handle(&mut self, _sequence: u64, msg: &TxCertificatesMessage) -> Result<()> {
         if msg.block.slot % 10000 == 0 {
             info!("New certificate message: {}", msg.block.slot);
         }

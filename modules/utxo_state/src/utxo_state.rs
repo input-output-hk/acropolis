@@ -96,7 +96,7 @@ impl UTXOState
         let state = Arc::new(Mutex::new(state));
         let state2 = state.clone();
         let state3 = state.clone();
-        let serialiser = Arc::new(Mutex::new(Serialiser::new(state, module_path!(), 0)));
+        let serialiser = Arc::new(Mutex::new(Serialiser::new(state, module_path!())));
         let serialiser2 = serialiser.clone();
 
         // Subscribe for UTXO messages
@@ -106,7 +106,7 @@ impl UTXOState
                 match message.as_ref() {
                     Message::UTXODeltas(deltas_msg) => {
                         let mut serialiser = serialiser.lock().await;
-                        serialiser.handle_message(deltas_msg.sequence, deltas_msg)
+                        serialiser.handle(deltas_msg.sequence, deltas_msg)
                             .await
                             .inspect_err(|e| error!("Messaging handling error: {e}"))
                             .ok();
