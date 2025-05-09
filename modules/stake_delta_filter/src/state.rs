@@ -110,9 +110,6 @@ impl SerialisedHandler<AddressDeltasMessage> for State {
 #[async_trait]
 impl SerialisedHandler<TxCertificatesMessage> for State {
     async fn handle(&mut self, _sequence: u64, msg: &TxCertificatesMessage) -> Result<()> {
-        if msg.block.slot % 10000 == 0 {
-            info!("New certificate message: {}", msg.block.slot);
-        }
         for cert in msg.certificates.iter() {
             match cert {
                 TxCertificate::StakeRegistration(reg) => {
@@ -135,9 +132,6 @@ impl SerialisedHandler<TxCertificatesMessage> for State {
                 },
                 _ => ()
             }
-        }
-        if msg.block.slot % 10000 == 0 {
-            info!("Certificate message processed: {}", msg.block.slot);
         }
         Ok(())
     }
@@ -175,18 +169,20 @@ impl State {
         self.incorrect_ptrs.info();
     }
 
-    pub fn save(&self, filename: &str) -> Result<()> {
+    pub fn save(&self) -> Result<()> {
 
         //let mut file = fs::File::create(filename)?;
         //file.write_all(serde_json::to_string(&self.pointer_cache)?.as_bytes())?;
         //file.write_all("\n".as_bytes())?;
 
-        let mut file = fs::File::create(format!("{}-correct.json", filename))?;
+        self.pointer_cache.try_save(&self.params.get_cache_file_name("")?)?;
+
+        let mut file = fs::File::create(self.params.get_cache_file_name(".correct")?)?;
         file.write_all(self.correct_ptrs.display_nice()?.as_bytes())?;
         file.write_all(serde_json::to_string(&self.correct_ptrs)?.as_bytes())?;
         file.write_all("\n".to_string().as_bytes())?;
 
-        let mut file = fs::File::create(format!("{}-incorrect.json", filename))?;
+        let mut file = fs::File::create(self.params.get_cache_file_name(".incorrect")?)?;
         file.write_all(serde_json::to_string(&self.incorrect_ptrs)?.as_bytes())?;
         file.write_all("\n".as_bytes())?;
 
@@ -195,7 +191,7 @@ impl State {
 
     pub async fn tick(&self) -> Result<()> {
         self.info();
-        self.save("pointers")?;
+        self.save()?;
         Ok(())
     }
 }
