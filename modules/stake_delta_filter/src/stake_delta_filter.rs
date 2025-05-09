@@ -1,10 +1,9 @@
 //! Acropolis Stake Delta Filter module
 //! Reads address deltas and filters out only stake addresses from it; also resolves pointer addresses.
 
-use std::path::Path;
+use std::{path::Path, sync::Arc};
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
 use acropolis_common::{messages::Message, AddressNetwork, Serialiser};
-use std::sync::Arc;
 use anyhow::{anyhow, Result};
 use config::Config;
 use tokio::sync::Mutex;
@@ -13,7 +12,7 @@ use tracing::{error, info};
 const DEFAULT_ADDRESS_DELTA_TOPIC: (&str,&str) = ("subscription-address-delta-topic", "cardano.address.delta");
 const DEFAULT_STAKE_ADDRESS_DELTA_TOPIC: (&str,&str) = ("publishing-stake-delta-topic", "cardano.stake.delta");
 const DEFAULT_CERTIFICATES_TOPIC: (&str,&str) = ("subscription-certificates-topic", "cardano.certificates");
-const DEFAULT_ADDRESS_CACHE_DIR: (&str,&str) = ("pointer-address-cache-dir", "downloads");
+const DEFAULT_ADDRESS_CACHE_DIR: (&str,&str) = ("pointer-address-cache-dir", "cache");
 const DEFAULT_BUILD_POINTER_ADDRESS_CACHE_MODE: (&str,CacheMode) = ("build-pointer-address-cache", CacheMode::Always);
 const DEFAULT_NETWORK: (&str,AddressNetwork) = ("network", AddressNetwork::Main);
 
@@ -43,9 +42,9 @@ struct StakeDeltaFilterParams {
 }
 
 impl StakeDeltaFilterParams {
-    fn get_cache_file(&self) -> Result<String> {
+    fn get_cache_file_name(&self, modifier: &str) -> Result<String> {
         let path = Path::new(&self.pointer_address_cache_dir);
-        let full = path.join(format!("{:?}", &self.network));
+        let full = path.join(format!("{:?}{}.json", &self.network, modifier).to_lowercase());
         let str = full.to_str().ok_or_else(|| anyhow!("Cannot produce cache file name".to_string()))?;
         Ok(str.to_string())
     }
@@ -98,7 +97,7 @@ impl StakeDeltaFilterParams {
 impl StakeDeltaFilter {
     pub fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         let params = StakeDeltaFilterParams::init(context, config.clone())?;
-        let cache_path = params.get_cache_file()?;
+        let cache_path = params.get_cache_file_name("")?;
 
         match params.build_pointer_cache {
             CacheMode::Never => Self::stateless_init(PointerCache::try_load(&cache_path)?, params),
@@ -139,7 +138,31 @@ impl StakeDeltaFilter {
 
         Ok(())
     }
+/*
+    fn subscriber_init<MessageType> (
+        s: &MessageSubscriber<MessageType>, 
+        ctx: Arc<Context<Message>>,
+        serialiser: Arc<Mutex<Serialiser<MessageType>>>,
+        topic: String,
+        unpacker: Fn (x: &Message) -> Option<MessageType>
+    ) -> Result<()> {
+        ctx.subscribe(&topic, move |message: Arc<Message>| {
+            let serialiser = serialiser.clone();
+            async move {
+                if let Some(message_body) = unpacker(message.as_ref()) {
+                    let mut serialiser = serialiser.lock().await;
+                        serialiser.handle(message_body.sequence, message_body)
+                            .await
+                            .inspect_err(|e| error!("Messaging handling error: {e}"))
+                            .ok();
+                    }
 
+                    _ => error!("Unexpected message type: {message:?}")
+                }
+            }
+        })
+    }
+*/
     fn stateful_init(params: Arc<StakeDeltaFilterParams>) -> Result<()> {
         info!("Stateful init: creating stake pointer cache");
 

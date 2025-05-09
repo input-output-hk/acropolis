@@ -1,8 +1,4 @@
-use std::cmp::max;
-use std::sync::Arc;
-use std::fs::File;
-use std::collections::HashMap;
-use std::io::BufReader;
+use std::{cmp::max, collections::HashMap, fs::File, io::BufReader, io::Write, sync::Arc};
 use anyhow::{anyhow, Result};
 use acropolis_common::{Address, ShelleyAddressDelegationPart, ShelleyAddressPointer, StakeAddress, StakeAddressDelta};
 use acropolis_common::messages::{AddressDeltasMessage, StakeAddressDeltasMessage};
@@ -86,6 +82,12 @@ impl PointerCache {
             Err(err) => Err(anyhow!("Error reading json for {}: '{}'", file_path, err))
         }
     }
+
+    pub fn try_save(&self, file_path: &str) -> Result<()> {
+        let mut file = File::create(file_path)?;
+        file.write_all(serde_json::to_string(&self)?.as_bytes())?;
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -93,7 +95,12 @@ pub enum CacheMode {
     Never, IfAbsent, Always
 }
 
-pub async fn process_message(cache: &PointerCache, publisher: &DeltaPublisher, delta: &AddressDeltasMessage) -> Result<()> {
+pub trait PointerTracker {
+    fn correct(&mut self, b: Block, d: AddressDelta, s: StakeAddressDelta);
+    fn incorrect(&mut self, b: Block, d: AddressDelta, e: String);
+}
+
+pub async fn process_message(cache: &PointerCache, delta: &AddressDeltasMessage, tracker: Option<&mut dyn PointerTracker>) -> Result<StakeAddressDeltasMessage> {
     let mut result = StakeAddressDeltasMessage {
         sequence: delta.sequence,
         block: delta.block.clone(),
@@ -109,12 +116,14 @@ pub async fn process_message(cache: &PointerCache, publisher: &DeltaPublisher, d
                     address: stake_address,
                     delta: d.delta
                 };
+                tracker.inspect(|&mut t| t.correct(delta.block.clone(), d.clone(), stake_delta.clone()));
                 result.deltas.push(stake_delta);
             },
             Ok(None) => (),
-            Err(e) => tracing::warn!("Skipping address delta {:?}, error decoding: {e}", d)
+            Err(e) => tracker.inspect(|&mut t| t.incorrect(delta.block.clone(), d.clone(), format!("{e}")));
+            //tracing::warn!("Skipping address delta {:?}, error decoding: {e}", d)
         }
     }
 
-    publisher.publish(result).await
+    result
 }
