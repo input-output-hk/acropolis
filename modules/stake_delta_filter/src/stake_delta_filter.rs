@@ -128,8 +128,10 @@ impl StakeDeltaFilter {
             async move {
                 match message.as_ref() {
                     Message::AddressDeltas(delta) => 
-                        process_message(&cache_copy, &publisher, delta).await
-                            .unwrap_or_else(|e| error!("Cannot process delta {delta:?}: {e}")),
+                        match process_message(&cache_copy, delta).await {
+                            Err(e) => tracing::error!("Cannot decode and convert stake key for {delta:?}: {e}"),
+                            Ok(r) => publisher.publish(r).await.unwrap_or_else(|e| error!("Publish error: {e}"))
+                        }
 
                     msg => error!("Unexpected message type for {}: {msg:?}", &params_copy.address_delta_topic)
                 }
@@ -138,31 +140,7 @@ impl StakeDeltaFilter {
 
         Ok(())
     }
-/*
-    fn subscriber_init<MessageType> (
-        s: &MessageSubscriber<MessageType>, 
-        ctx: Arc<Context<Message>>,
-        serialiser: Arc<Mutex<Serialiser<MessageType>>>,
-        topic: String,
-        unpacker: Fn (x: &Message) -> Option<MessageType>
-    ) -> Result<()> {
-        ctx.subscribe(&topic, move |message: Arc<Message>| {
-            let serialiser = serialiser.clone();
-            async move {
-                if let Some(message_body) = unpacker(message.as_ref()) {
-                    let mut serialiser = serialiser.lock().await;
-                        serialiser.handle(message_body.sequence, message_body)
-                            .await
-                            .inspect_err(|e| error!("Messaging handling error: {e}"))
-                            .ok();
-                    }
 
-                    _ => error!("Unexpected message type: {message:?}")
-                }
-            }
-        })
-    }
-*/
     fn stateful_init(params: Arc<StakeDeltaFilterParams>) -> Result<()> {
         info!("Stateful init: creating stake pointer cache");
 

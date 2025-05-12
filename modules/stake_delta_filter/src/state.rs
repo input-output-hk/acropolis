@@ -96,8 +96,9 @@ impl SerialisedHandler<AddressDeltasMessage> for State {
         self.request_queue.push_back(most_recent_delta.clone());
 
         while let Some(delta) = self.request_queue.get(0) {
-            if let Err(e) = process_message(&self.pointer_cache, &self.delta_publisher, delta).await {
-                tracing::error!("Cannot process {most_recent_delta:?}: {e}")
+            match process_message(&self.pointer_cache, delta).await {
+                Err(e) => tracing::error!("Cannot decode and convert stake key for {most_recent_delta:?}: {e}"),
+                Ok(r) => self.delta_publisher.publish(r).await?
             }
             self.request_queue.pop_front();
         }
@@ -139,7 +140,7 @@ impl SerialisedHandler<TxCertificatesMessage> for State {
 
 impl State {
     pub fn new(params: Arc<StakeDeltaFilterParams>) -> Self { Self {
-        pointer_cache: PointerCache::default(),
+        pointer_cache: PointerCache::new(),
         correct_ptrs: PointerOccurrence::default(),
         incorrect_ptrs: PointerOccurrence::default(),
         request_queue: VecDeque::default(),
