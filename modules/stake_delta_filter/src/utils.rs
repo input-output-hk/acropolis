@@ -3,7 +3,6 @@ use anyhow::{anyhow, Result};
 use acropolis_common::{Address, ShelleyAddressDelegationPart, ShelleyAddressPointer, StakeAddress, StakeAddressDelta};
 use acropolis_common::messages::{AddressDeltasMessage, StakeAddressDeltasMessage};
 use serde_with::serde_as;
-use crate::DeltaPublisher;
 
 #[serde_as]
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
@@ -95,12 +94,13 @@ pub enum CacheMode {
     Never, IfAbsent, Always
 }
 
-pub trait PointerTracker {
-    fn correct(&mut self, b: Block, d: AddressDelta, s: StakeAddressDelta);
-    fn incorrect(&mut self, b: Block, d: AddressDelta, e: String);
-}
+//pub trait PointerTracker {
+//    fn correct(&mut self, b: Block, d: AddressDelta, s: StakeAddressDelta);
+//    fn incorrect(&mut self, b: Block, d: AddressDelta, e: String);
+//}
 
-pub async fn process_message(cache: &PointerCache, delta: &AddressDeltasMessage, tracker: Option<&mut dyn PointerTracker>) -> Result<StakeAddressDeltasMessage> {
+//pub async fn process_message(cache: &PointerCache, delta: &AddressDeltasMessage, tracker: Option<&mut dyn PointerTracker>) -> Result<StakeAddressDeltasMessage> {
+pub async fn process_message(cache: &PointerCache, delta: &AddressDeltasMessage) -> Result<StakeAddressDeltasMessage> {
     let mut result = StakeAddressDeltasMessage {
         sequence: delta.sequence,
         block: delta.block.clone(),
@@ -116,14 +116,14 @@ pub async fn process_message(cache: &PointerCache, delta: &AddressDeltasMessage,
                     address: stake_address,
                     delta: d.delta
                 };
-                tracker.inspect(|&mut t| t.correct(delta.block.clone(), d.clone(), stake_delta.clone()));
+                //tracker.inspect(|&mut t| t.correct(delta.block.clone(), d.clone(), stake_delta.clone()));
                 result.deltas.push(stake_delta);
             },
             Ok(None) => (),
-            Err(e) => tracker.inspect(|&mut t| t.incorrect(delta.block.clone(), d.clone(), format!("{e}")));
-            //tracing::warn!("Skipping address delta {:?}, error decoding: {e}", d)
+            Err(e) => //tracker.inspect(|&mut t| t.incorrect(delta.block.clone(), d.clone(), format!("{e}")));
+                tracing::warn!("Skipping address delta {:?}, error decoding: {e}", d)
         }
     }
 
-    result
+    Ok(result)
 }
