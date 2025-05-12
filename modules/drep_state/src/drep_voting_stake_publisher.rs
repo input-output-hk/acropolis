@@ -1,8 +1,7 @@
 use std::sync::Arc;
 use caryatid_sdk::Context;
-use tokio::sync::Mutex;
 use acropolis_common::{AddressDelta, DRepCredential, Lovelace};
-use acropolis_common::messages::{DrepStakeDistributionMessage, Message};
+use acropolis_common::messages::{DrepStakeDistributionMessage, Message, Sequence};
 
 pub struct DrepVotingStakePublisher {
     /// Module context
@@ -11,12 +10,12 @@ pub struct DrepVotingStakePublisher {
     /// Topic to publish on
     topic: String,
 
-    sequence: u64,
+    sequence: Sequence,
 }
 
 impl DrepVotingStakePublisher {
     pub fn new(context: Arc<Context<Message>>, topic: String) -> Self {
-        Self { context, topic, sequence: 1 }
+        Self { context, topic, sequence: Sequence::new(1, None) }
     }
 
     pub async fn publish_stake(&mut self, s: Vec<(DRepCredential, Lovelace)>) -> anyhow::Result<()> {
@@ -27,7 +26,7 @@ impl DrepVotingStakePublisher {
                 data: s
             }))
         ).await {
-            Ok(()) => { self.sequence += 1; Ok(()) },
+            Ok(()) => { self.sequence.inc(); Ok(()) },
             err => err
         }
     }

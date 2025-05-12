@@ -5,8 +5,7 @@ use std::{collections::HashMap, sync::Arc, fs};
 use std::collections::HashSet;
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
 use acropolis_common::{
-    messages::{GovernanceProceduresMessage, Message, TxCertificatesMessage, UTXODeltasMessage},
-    *
+    messages::{GovernanceProceduresMessage, Message, Sequence, TxCertificatesMessage, UTXODeltasMessage}, *,
 };
 
 use tokio::sync::Mutex;
@@ -23,6 +22,9 @@ use pallas::{
         traverse::{MultiEraCert, MultiEraTx},
     }
 };
+
+mod sender;
+use sender::Sender;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.txs";
 
@@ -56,12 +58,12 @@ impl TxUnpacker
             })),
 
             addresses::Address::Shelley(shelley_address) => Ok(Address::Shelley(ShelleyAddress {
-                network: Self::map_network(shelley_address.network())?, 
+                network: Self::map_network(shelley_address.network())?,
 
                 payment: match shelley_address.payment() {
-                    addresses::ShelleyPaymentPart::Key(hash) => 
+                    addresses::ShelleyPaymentPart::Key(hash) =>
                         ShelleyAddressPaymentPart::PaymentKeyHash(hash.to_vec()),
-                    addresses::ShelleyPaymentPart::Script(hash) => 
+                    addresses::ShelleyPaymentPart::Script(hash) =>
                         ShelleyAddressPaymentPart::ScriptHash(hash.to_vec()),
 
                 },
@@ -85,9 +87,9 @@ impl TxUnpacker
             addresses::Address::Stake(stake_address) => Ok(Address::Stake(StakeAddress {
                 network: Self::map_network(stake_address.network())?,
                 payload: match stake_address.payload() {
-                    addresses::StakePayload::Stake(hash) => 
+                    addresses::StakePayload::Stake(hash) =>
                         StakeAddressPayload::StakeKeyHash(hash.to_vec()),
-                    addresses::StakePayload::Script(hash) => 
+                    addresses::StakePayload::Script(hash) =>
                         StakeAddressPayload::ScriptHash(hash.to_vec()),
                 }
             })),
@@ -172,22 +174,22 @@ impl TxUnpacker
                     port: match port {
                         Nullable::Some(port) => Some(*port as u16),
                         _ => None,
-                    }, 
+                    },
                     ipv4: match ipv4 {
                         Nullable::Some(ipv4) => ipv4.try_into().ok(),
                         _ => None,
-                    }, 
+                    },
                     ipv6: match ipv6 {
                         Nullable::Some(ipv6) => ipv6.try_into().ok(),
                         _ => None,
-                    }, 
+                    },
                 }),
             PallasRelay::SingleHostName(port, dns_name) =>
-                Relay::SingleHostName(SingleHostName { 
+                Relay::SingleHostName(SingleHostName {
                     port: match port {
                         Nullable::Some(port) => Some(*port as u16),
                         _ => None,
-                    }, 
+                    },
                     dns_name: dns_name.clone(),
                 }),
             PallasRelay::MultiHostName(dns_name) =>
@@ -215,12 +217,12 @@ impl TxUnpacker
                                     credential: Self::map_stake_credential(cred),
                                     operator: pool_key_hash.to_vec()
                                 })),
-                    alonzo::Certificate::PoolRegistration { 
+                    alonzo::Certificate::PoolRegistration {
                         // TODO relays, pool_metadata
-                        operator, vrf_keyhash, pledge, cost, margin, 
+                        operator, vrf_keyhash, pledge, cost, margin,
                         reward_account, pool_owners, relays, pool_metadata } =>
                                 Ok(TxCertificate::PoolRegistration(PoolRegistration { 
-                                    operator: operator.to_vec(), 
+                                    operator: operator.to_vec(),
                                     vrf_key_hash: vrf_keyhash.to_vec(),
                                     pledge: *pledge,
                                     cost: *cost,
@@ -247,7 +249,7 @@ impl TxUnpacker
                                 })),
                     alonzo::Certificate::PoolRetirement(pool_key_hash, epoch) =>
                                 Ok(TxCertificate::PoolRetirement(PoolRetirement {
-                                    operator: pool_key_hash.to_vec(), 
+                                    operator: pool_key_hash.to_vec(),
                                     epoch: *epoch
                                 })),
                     alonzo::Certificate::GenesisKeyDelegation(
@@ -293,12 +295,12 @@ impl TxUnpacker
                                     credential: Self::map_stake_credential(cred),
                                     operator: pool_key_hash.to_vec()
                                 })),
-                    conway::Certificate::PoolRegistration { 
+                    conway::Certificate::PoolRegistration {
                         // TODO relays, pool_metadata
-                        operator, vrf_keyhash, pledge, cost, margin, 
+                        operator, vrf_keyhash, pledge, cost, margin,
                         reward_account, pool_owners, relays, pool_metadata } =>
                                 Ok(TxCertificate::PoolRegistration(PoolRegistration { 
-                                    operator: operator.to_vec(), 
+                                    operator: operator.to_vec(),
                                     vrf_key_hash: vrf_keyhash.to_vec(),
                                     pledge: *pledge,
                                     cost: *cost,
@@ -325,7 +327,7 @@ impl TxUnpacker
                                 })),
                     conway::Certificate::PoolRetirement(pool_key_hash, epoch) =>
                                 Ok(TxCertificate::PoolRetirement(PoolRetirement {
-                                    operator: pool_key_hash.to_vec(), 
+                                    operator: pool_key_hash.to_vec(),
                                     epoch: *epoch
                                 })),
 
@@ -380,14 +382,14 @@ impl TxUnpacker
                                 })),
 
                     conway::Certificate::AuthCommitteeHot(cold_cred, hot_cred) =>
-                                Ok(TxCertificate::AuthCommitteeHot(AuthCommitteeHot { 
-                                    cold_credential: Self::map_stake_credential(cold_cred), 
-                                    hot_credential: Self::map_stake_credential(hot_cred), 
+                                Ok(TxCertificate::AuthCommitteeHot(AuthCommitteeHot {
+                                    cold_credential: Self::map_stake_credential(cold_cred),
+                                    hot_credential: Self::map_stake_credential(hot_cred),
                                 })),
 
                     conway::Certificate::ResignCommitteeCold(cold_cred, anchor) =>
-                                Ok(TxCertificate::ResignCommitteeCold(ResignCommitteeCold { 
-                                    cold_credential: Self::map_stake_credential(cold_cred), 
+                                Ok(TxCertificate::ResignCommitteeCold(ResignCommitteeCold {
+                                    cold_credential: Self::map_stake_credential(cold_cred),
                                     anchor: Self::map_nullable_anchor(&anchor)
                                 })),
 
@@ -608,6 +610,11 @@ impl TxUnpacker
 
         Ok(procs)
     }
+
+    fn sequence_with_prev_limit(s: &Sequence) -> Sequence {
+        Sequence { number: s.number, previous: if s.number > 1 { s.previous } else { None } }
+    }
+
     /// Main init function
     pub fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
 
@@ -632,14 +639,43 @@ impl TxUnpacker
             info!("Publishing governance procedures on '{topic}'");
         }
 
-        let governance_sequence = Arc::new(Mutex::<u64>::new(1));
+//        context.clone().message_bus.subscribe(&subscribe_topic, move |message: Arc<Message>| {
+//            let context = context.clone();
+//            let publish_utxo_deltas_topic = publish_utxo_deltas_topic.clone();
+//            let publish_certificates_topic = publish_certificates_topic.clone();
+//            let publish_governance_procedures_topic = publish_governance_procedures_topic.clone();
+
+        let utxo_sender = match publish_utxo_deltas_topic {
+            Some(topic) => Some(Arc::new(Mutex::new(Serialiser::new_from(Arc::new(Mutex::new(Sender::new(context.clone(), topic.clone(), Some(0), |sequence: &Sequence, data: &UTXODeltasMessage| {
+                let mut data = data.clone();
+                data.sequence = *sequence;
+                Message::UTXODeltas(data)
+            }))), module_path!(), Some(0))))),
+            None => None,
+        };
+
+        let cert_sender = match publish_certificates_topic {
+            Some(topic) => Some(Arc::new(Mutex::new(Serialiser::new_from(Arc::new(Mutex::new(Sender::new(context.clone(), topic.clone(), None, |sequence: &Sequence, data: &TxCertificatesMessage| {
+                let mut data = data.clone();
+                data.sequence = *sequence;
+                Message::TxCertificates(data)
+            }))), module_path!(), Some(0))))),
+            None => None,
+        };
+
+        let gov_sender = match publish_governance_procedures_topic {
+            Some(topic) => Some(Arc::new(Mutex::new(Serialiser::new_from(Arc::new(Mutex::new(Sender::new(context.clone(), topic.clone(), None, |sequence: &Sequence, data: &GovernanceProceduresMessage| {
+                let mut data = data.clone();
+                data.sequence = *sequence;
+                Message::GovernanceProcedures(data)
+            }))), module_path!(), Some(0))))),
+            None => None,
+        };
 
         context.clone().message_bus.subscribe(&subscribe_topic, move |message: Arc<Message>| {
-            let context = context.clone();
-            let publish_utxo_deltas_topic = publish_utxo_deltas_topic.clone();
-            let publish_certificates_topic = publish_certificates_topic.clone();
-            let publish_governance_procedures_topic = publish_governance_procedures_topic.clone();
-            let governance_sequence = governance_sequence.clone();
+            let utxo_sender = utxo_sender.clone();
+            let cert_sender = cert_sender.clone();
+            let gov_sender = gov_sender.clone();
 
             async move {
                 match message.as_ref() {
@@ -649,25 +685,15 @@ impl TxUnpacker
                                 txs_msg.txs.len(), txs_msg.block.slot);
                         }
 
-                        // Construct messages which we batch up
-                        let mut utxo_deltas_message = UTXODeltasMessage {
-                            sequence: txs_msg.sequence,
-                            block: txs_msg.block.clone(),
-                            deltas: Vec::new(),
-                        };
-
-                        let mut certificates_message = TxCertificatesMessage {
-                            sequence: txs_msg.sequence,
-                            block: txs_msg.block.clone(),
-                            certificates: Vec::new(),
-                        };
-
                         let mut governance_message = GovernanceProceduresMessage {
-                            sequence: 0, // placeholder
+                            sequence: Self::sequence_with_prev_limit(&txs_msg.sequence),
                             block: txs_msg.block.clone(),
                             voting_procedures: Vec::new(),
                             proposal_procedures: Vec::new(),
                         };
+
+                        let mut deltas = Vec::new();
+                        let mut certificates = Vec::new();
 
                         for raw_tx in &txs_msg.txs {
                             // Parse the tx
@@ -689,7 +715,7 @@ impl TxUnpacker
                                         }
 
                                         if votes.is_some() || props.is_some() || txs_msg.block.new_epoch {
-                                            let filename = format!("governance-logs/{:012}.json", txs_msg.sequence);
+                                            let filename = format!("governance-logs/{:012}.json", txs_msg.sequence.number);
                                             let data = match serde_json::to_string(&message) {
                                                 Ok(data) => data,
                                                 Err(e) => format!("Error serializing message to json: {e}")
@@ -705,7 +731,7 @@ impl TxUnpacker
                                            inputs.len(), outputs.len(), certs.len());
                                     }
 
-                                    if publish_utxo_deltas_topic.is_some() {
+                                    if utxo_sender.is_some() {
                                         // Add all the inputs
                                         for input in inputs {  // MultiEraInput
 
@@ -717,8 +743,7 @@ impl TxUnpacker
                                                 index: oref.index(),
                                             };
 
-                                            utxo_deltas_message.deltas
-                                                .push(UTXODelta::Input(tx_input));
+                                            deltas.push(UTXODelta::Input(tx_input));
                                         }
 
                                         // Add all the outputs
@@ -737,8 +762,7 @@ impl TxUnpacker
                                                                 // !!! datum
                                                             };
 
-                                                            utxo_deltas_message.deltas
-                                                                .push(UTXODelta::Output(tx_output));
+                                                            deltas.push(UTXODelta::Output(tx_output));
                                                         }
 
                                                         Err(e) => 
@@ -752,21 +776,21 @@ impl TxUnpacker
                                         }
                                     }
 
-                                    if publish_certificates_topic.is_some() {
+                                    if cert_sender.is_some() {
                                         for cert in certs {
                                             match Self::map_certificate(&cert) {
                                                 Ok(tx_cert) => {
-                                                    certificates_message.certificates.push(tx_cert);
+                                                    certificates.push(tx_cert);
                                                 },
-                                                Err(_e) => { 
+                                                Err(_e) => {
                                                     // TODO error unexpected
-                                                    //error!("{e}"); 
+                                                    //error!("{e}");
                                                 }
                                             }
                                         }
                                     }
 
-                                    if publish_governance_procedures_topic.is_some() {
+                                    if gov_sender.is_some() {
                                         if let Some(pp) = props {
                                             // Nonempty set -- governance_message.proposal_procedures will not be empty
                                             let mut proc_id = GovActionId { transaction_id: tx.hash().to_vec(), action_index: 0 };
@@ -797,34 +821,55 @@ impl TxUnpacker
                             }
                         }
 
-                        if let Some(topic) = publish_utxo_deltas_topic {
-                            let utxo_deltas_message = Message::UTXODeltas(utxo_deltas_message);
-                            context.message_bus.publish(&topic, Arc::new(utxo_deltas_message))
-                                .await
-                                .unwrap_or_else(|e| error!("Failed to publish: {e}"));
-                        }
-
-                        if let Some(topic) = publish_certificates_topic {
-                            let certificates_message = Message::TxCertificates(certificates_message);
-                            context.message_bus.publish(&topic, Arc::new(certificates_message))
-                                .await
-                                .unwrap_or_else(|e| error!("Failed to publish: {e}"));
-                        }
-
-                        if let Some(topic) = publish_governance_procedures_topic {
-                            if !governance_message.is_empty() {
-                                let mut gov_seq = governance_sequence.lock().await;
-                                governance_message.sequence = *gov_seq;
-
-                                let gov_message = Message::GovernanceProcedures(governance_message);
-                                if let Err(e) = context.message_bus.publish(&topic, Arc::new(gov_message)).await {
-                                    error!("Failed to publish: {e}");
+                        match utxo_sender {
+                            Some(ref utxo_sender) => {
+                                if txs_msg.block.new_epoch || !deltas.is_empty() {
+                                    let data = UTXODeltasMessage {
+                                        sequence: txs_msg.sequence,
+                                        block: txs_msg.block.clone(),
+                                        deltas,
+                                    };
+                                    let _ = utxo_sender.lock().await.handle(txs_msg.sequence, &Some(data)).await;
+                                } else {
+                                    let _ = utxo_sender.lock().await.handle(txs_msg.sequence, &None).await;
                                 }
-                                else {
-                                    *gov_seq += 1;
+                            },
+                            _ => (),
+                        };
+
+                        match cert_sender {
+                            Some(ref cert_sender) => {
+                                if txs_msg.block.new_epoch || !certificates.is_empty() {
+                                    let data = TxCertificatesMessage {
+                                        sequence: Sequence {
+                                            number: txs_msg.sequence.number,
+                                            previous: match txs_msg.sequence.number {
+                                                1 => None,
+                                                _ => txs_msg.sequence.previous,
+                                            },
+                                        },
+                                        block: txs_msg.block.clone(),
+                                        certificates,
+                                    };
+                                    let _ = cert_sender.lock().await.handle(txs_msg.sequence, &Some(data)).await;
+                                } else {
+                                    let _ = cert_sender.lock().await.handle(txs_msg.sequence, &None).await;
                                 }
-                            }
-                        }
+                            },
+                            _ => (),
+                        };
+
+                        match gov_sender {
+                            Some(ref gov_sender) => {
+                                let message = if !governance_message.is_empty() { 
+                                    Some(governance_message)
+                                } else { 
+                                    None
+                                };
+                                let _ = gov_sender.lock().await.handle(txs_msg.sequence, &message).await;
+                            },
+                            _ => (),
+                        };
                     }
 
                     _ => error!("Unexpected message type: {message:?}")

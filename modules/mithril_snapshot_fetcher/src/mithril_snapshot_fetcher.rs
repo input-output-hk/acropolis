@@ -4,7 +4,8 @@
 use caryatid_sdk::{Context, Module, module, MessageBusExt, message_bus::QoS};
 use acropolis_common::{
     calculations::slot_to_epoch, messages::{
-        BlockBodyMessage, BlockHeaderMessage, Message, SnapshotCompleteMessage
+        BlockBodyMessage, BlockHeaderMessage, Message, Sequence,
+        SnapshotCompleteMessage
     }, BlockInfo, BlockStatus
 };
 use std::sync::Arc;
@@ -157,7 +158,7 @@ impl MithrilSnapshotFetcher
     /// Process the snapshot
     async fn process_snapshot(context: Arc<Context<Message>>,
                               config: Arc<Config>,
-                              start_sequence: u64) -> Result<()> {
+                              previous_sequence: Option<u64>) -> Result<()> {
         let header_topic = config.get_string("header-topic")
             .unwrap_or(DEFAULT_HEADER_TOPIC.to_string());
         let body_topic = config.get_string("body-topic")
@@ -180,7 +181,7 @@ impl MithrilSnapshotFetcher
         let blocks = hardano::immutable::read_blocks(&path)?;
         let mut last_block_number: u64 = 0;
         let mut last_epoch: Option<u64> = None;
-        let mut sequence = start_sequence;
+        let mut sequence = Sequence::following(previous_sequence);
         for raw_block in blocks {
             match raw_block {
                 Ok(raw_block) => {
@@ -194,11 +195,11 @@ impl MithrilSnapshotFetcher
                     if tracing::enabled!(tracing::Level::DEBUG) {
                         debug!(number, slot);
                     }
-       
+
                     if number <= last_block_number && last_block_number != 0 {
                         error!(number, last_block_number,
                             "Rewind of block number in Mithril! Skipped...");
-                        continue;    
+                        continue;
                     }
                     last_block_number = number;
 
@@ -252,7 +253,7 @@ impl MithrilSnapshotFetcher
                     body_result.unwrap_or_else(|e| error!("Failed to publish body: {e}"));
 
                     last_block_info = Some(block_info);
-                    sequence += 1;
+                    sequence.inc();
                 }
                 Err(e) => error!("Error reading block: {e}")
             }
@@ -261,7 +262,7 @@ impl MithrilSnapshotFetcher
         // Send completion message
         if let Some(last_block_info) = last_block_info {
             let message = SnapshotCompleteMessage {
-                next_sequence: sequence,
+                final_sequence: sequence.previous,
                 last_block: last_block_info,
             };
 
@@ -287,10 +288,10 @@ impl MithrilSnapshotFetcher
                 let config = config.clone();
 
                 let sequence = match message.as_ref() {
-                    Message::GenesisComplete(message) => message.sequence,
-                    _ => 0
+                    Message::GenesisComplete(message) => message.final_sequence,
+                    _ => None
                 };
-                info!("Received startup message, sequence {sequence}");
+                info!("Received startup message, sequence {sequence:?}");
 
                 tokio::spawn(async move {
 

@@ -10,8 +10,8 @@ use tracing::{error, info};
 use tokio::sync::Mutex;
 use acropolis_common::messages::RESTResponse;
 
-mod state;
 mod drep_voting_stake_publisher;
+mod state;
 
 use state::State;
 use crate::drep_voting_stake_publisher::DrepVotingStakePublisher;
@@ -81,7 +81,7 @@ impl DRepState
         let state_handle = state.clone();
         let state_tick = state.clone();
 
-        let serialiser = Arc::new(Mutex::new(Serialiser::new(state, module_path!(), 1)));
+        let serialiser = Arc::new(Mutex::new(Serialiser::new(state, module_path!())));
         let serialiser_tick = serialiser.clone();
 
         // Subscribe for certificate messages
@@ -91,7 +91,7 @@ impl DRepState
                 match message.as_ref() {
                     Message::TxCertificates(tx_cert_msg) => {
                         let mut serialiser = serialiser.lock().await;
-                        serialiser.handle_message(tx_cert_msg.sequence, tx_cert_msg)
+                        serialiser.handle(tx_cert_msg.sequence, tx_cert_msg)
                             .await
                             .inspect_err(|e| error!("Messaging handling error: {e}"))
                             .ok();

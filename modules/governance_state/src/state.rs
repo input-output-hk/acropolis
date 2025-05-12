@@ -6,7 +6,7 @@ use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use hex::ToHex;
 use tracing::{debug, error, info};
-use acropolis_common::{messages::GovernanceProceduresMessage, rational_number::RationalNumber, Committee, CommitteeCredential, ConwayGenesisParams, DRepCredential, DataHash, GovActionId, GovernanceAction, KeyHash, Lovelace, ProposalProcedure, ProtocolParamType, ProtocolParamUpdate, ScriptHash, SerialisedMessageHandler, Voter, VotingProcedure};
+use acropolis_common::{messages::GovernanceProceduresMessage, rational_number::RationalNumber, Committee, CommitteeCredential, ConwayGenesisParams, DRepCredential, DataHash, GovActionId, GovernanceAction, KeyHash, Lovelace, ProposalProcedure, ProtocolParamType, ProtocolParamUpdate, ScriptHash, SerialisedHandler, Voter, VotingProcedure};
 use acropolis_common::messages::{DrepStakeDistributionMessage, GenesisCompleteMessage};
 
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
@@ -39,8 +39,8 @@ pub struct State {
 }
 
 #[async_trait]
-impl SerialisedMessageHandler<GenesisCompleteMessage> for State {
-    async fn handle(&mut self, message: &GenesisCompleteMessage) -> Result<()> {
+impl SerialisedHandler<GenesisCompleteMessage> for State {
+    async fn handle(&mut self, _sequence: u64, message: &GenesisCompleteMessage) -> Result<()> {
         info!("Received genesis complete message; conway present = {}", message.conway_genesis.is_some());
         self.conway = message.conway_genesis.clone();
         Ok(())
@@ -48,8 +48,8 @@ impl SerialisedMessageHandler<GenesisCompleteMessage> for State {
 }
 
 #[async_trait]
-impl SerialisedMessageHandler<GovernanceProceduresMessage> for State {
-    async fn handle(&mut self, msg: &GovernanceProceduresMessage) -> Result<()> {
+impl SerialisedHandler<GovernanceProceduresMessage> for State {
+    async fn handle(&mut self, _sequence: u64, msg: &GovernanceProceduresMessage) -> Result<()> {
         if let Err(e) = self.handle_impl(msg).await {
             error!("Error processing message {:?}: {}", msg, e)
         }
@@ -58,8 +58,8 @@ impl SerialisedMessageHandler<GovernanceProceduresMessage> for State {
 }
 
 #[async_trait]
-impl SerialisedMessageHandler<DrepStakeDistributionMessage> for State {
-    async fn handle(&mut self, message: &DrepStakeDistributionMessage) -> Result<()> {
+impl SerialisedHandler<DrepStakeDistributionMessage> for State {
+    async fn handle(&mut self, _sequence: u64, message: &DrepStakeDistributionMessage) -> Result<()> {
         info!("Received drep stake distribution message: {} dreps", message.data.len());
         self.drep_stake_messages_count += 1;
         self.drep_stake = HashMap::from_iter(message.data.iter().cloned());
@@ -367,13 +367,6 @@ impl State {
     }
 
     pub async fn handle_impl(&mut self, governance_message: &GovernanceProceduresMessage) -> Result<()> {
-        if self.prev_sequence >= governance_message.sequence {
-            error!("Governance message sequence number {} going backwards: prev {}",
-                governance_message.sequence, self.prev_sequence
-            );
-        }
-        self.prev_sequence = governance_message.sequence;
-
         info!("Handling block {:?}", governance_message.block);
         if governance_message.block.new_epoch {
             info!("Processing new epoch {}", governance_message.block.epoch);
@@ -383,7 +376,7 @@ impl State {
         for pproc in &governance_message.proposal_procedures {
             self.proposal_count += 1;
             if let Err(e) = self.insert_proposal_procedure(governance_message.block.epoch, pproc) {
-                error!("Error handling governance_message {}: '{}'", governance_message.sequence, e);
+                error!("Error handling governance_message {:?}: '{}'", governance_message.sequence, e);
             }
         }
         for (trans, vproc) in &governance_message.voting_procedures {
