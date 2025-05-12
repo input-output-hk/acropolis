@@ -10,3 +10,9 @@ valid addresses for money tracking purposes: not for staking purposes.
 understand) that only staking addresses (and their deltas) are interesting here. So,
 probably, if address cannot be converted into real one, it may not be used for staking
 purposes and should be skipped.
+
+Open questions
+--------------
+
+1. How a network ID could be retrieved? (Main/Test for the beginning, full network ID 
+at most).
