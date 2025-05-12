@@ -3,14 +3,17 @@
 use std::{collections::HashMap, sync::Arc};
 use acropolis_common::{
     messages::TxCertificatesMessage,
-    Anchor, DRepCredential, Lovelace, SerialisedMessageHandler, TxCertificate
+    Serialiser, SerialisedHandler,
+    TxCertificate,
+    Anchor, DRepCredential, Lovelace,
 };
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use tracing::{error, info};
 use serde_with::serde_as;
+use tokio::sync::Mutex;
 use acropolis_common::messages::Message;
-use crate::drep_voting_stake_publisher::DrepVotingStakePublisher;
+use crate::{drep_voting_stake_publisher::DrepVotingStakePublisher};
 
 #[serde_as]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -110,10 +113,9 @@ impl State {
 }
 
 #[async_trait]
-impl SerialisedMessageHandler<TxCertificatesMessage> for State {
-    async fn handle(&mut self, tx_cert_msg: &TxCertificatesMessage) -> Result<()> {
+impl SerialisedHandler<TxCertificatesMessage> for State {
+    async fn handle(&mut self, _sequence: u64, tx_cert_msg: &TxCertificatesMessage) -> Result<()> {
         let tx_slot = tx_cert_msg.block.slot;
-
         for tx_cert in tx_cert_msg.certificates.iter() {
             if let Err(e) = self.process_one_certificate(tx_cert, tx_slot) {
                 tracing::error!("Error processing tx_cert {}", e);
