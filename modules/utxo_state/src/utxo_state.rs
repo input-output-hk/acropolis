@@ -12,9 +12,10 @@ use config::Config;
 use tracing::{info, error};
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use serde::Serialize;
 
 mod state;
-use state::{State, ImmutableUTXOStore};
+use state::{State, ImmutableUTXOStore, UTXOValue};
 
 mod volatile_index;
 mod address_delta_publisher;
@@ -36,8 +37,17 @@ use fake_immutable_utxo_store::FakeImmutableUTXOStore;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.utxo.deltas";
 const DEFAULT_REST_TOPIC: &str = "rest.get.utxo.*";
+const DEFAULT_GENESIS_REST_TOPIC: &str = "rest.get.genesis-utxos";
 
 const DEFAULT_STORE: &str = "memory";
+
+/// Genesis utxos return structure
+#[derive(Serialize)]
+struct GenesisUTXOsResponse {
+    count: usize,
+    total: u64,
+    utxos: Vec<UTXOValue>,
+}
 
 /// UTXO state module
 #[module(
@@ -60,6 +70,10 @@ impl UTXOState
         let rest_topic = config.get_string("rest-topic")
             .unwrap_or(DEFAULT_REST_TOPIC.to_string());
         info!("Creating REST handler on '{rest_topic}'");
+
+        let genesis_rest_topic = config.get_string("genesis-rest-topic")
+            .unwrap_or(DEFAULT_GENESIS_REST_TOPIC.to_string());
+        info!("Creating REST handler on '{genesis_rest_topic}'");
 
         // Create store
         let store_type = config.get_string("store").unwrap_or(DEFAULT_STORE.to_string());
@@ -96,6 +110,7 @@ impl UTXOState
         let state = Arc::new(Mutex::new(state));
         let state2 = state.clone();
         let state3 = state.clone();
+        let state4 = state.clone();
         let serialiser = Arc::new(Mutex::new(Serialiser::new(state, module_path!())));
         let serialiser2 = serialiser.clone();
 
@@ -173,6 +188,39 @@ impl UTXOState
             }
         })?;
 
+
+        // Handle REST requests for genesis-utxos
+        context.message_bus.handle(&genesis_rest_topic, move |message: Arc<Message>| {
+            let state = state4.clone();
+
+            async move {
+                let response = match message.as_ref() {
+                    Message::RESTRequest(request) => {
+                        info!("REST received {} {}", request.method, request.path);
+                        match state.lock().await.get_byron_genesis_utxos().await {
+                            Ok(utxos) => {
+                                let total = utxos.iter().map(|v| v.value).sum();
+                                let count = utxos.len();
+                                let response = GenesisUTXOsResponse{ count, total, utxos };
+
+                                match serde_json::to_string_pretty(&response) {
+                                    Ok(body) => RESTResponse::with_json(200, &body),
+                                    Err(error) => RESTResponse::with_text(500,
+                                                  &format!("{error:?}").to_string()),
+                                }
+                            },
+                            _ => RESTResponse::with_text(404, "UTXOs not found"),
+                        }
+                    },
+                    _ => {
+                        error!("Unexpected message type {:?}", message);
+                        RESTResponse::with_text(500, "Unexpected message in REST request")
+                    }
+                };
+
+                Arc::new(Message::RESTResponse(response))
+            }
+        })?;
 
         Ok(())
     }

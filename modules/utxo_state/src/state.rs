@@ -11,7 +11,7 @@ use tracing::{debug, info, error};
 use hex::encode;
 use std::sync::Arc;
 use async_trait::async_trait;
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use crate::volatile_index::VolatileIndex;
 
 const SECURITY_PARAMETER_K: u64 = 2160;
@@ -94,6 +94,12 @@ pub trait ImmutableUTXOStore: Send + Sync {
 
     /// Get the number of UTXOs in the store
     async fn len(&self) -> Result<usize>;
+
+    /// Get all Byron genesis UTXOs in the store
+    async fn get_byron_genesis_utxos(&self) -> Result<Vec<UTXOValue>>
+    {
+        Err(anyhow!("Not implemented"))
+    }
 }
 
 /// Ledger state storage
@@ -153,6 +159,11 @@ impl State {
     pub async fn count_valid_utxos(&self) -> usize {
         return self.volatile_utxos.len() - self.volatile_spent.len()
              + self.immutable_utxos.len().await.unwrap_or_default();
+    }
+
+    /// Get all still valid Byron-era genesis UTXOs
+    pub async fn get_byron_genesis_utxos(&self) -> Result<Vec<UTXOValue>> {
+        return self.immutable_utxos.get_byron_genesis_utxos().await;
     }
 
     /// Observe a block for statistics and handle rollbacks

@@ -8,6 +8,7 @@ use anyhow::Result;
 use config::Config;
 use std::sync::Arc;
 use tracing::info;
+use acropolis_common::{Address, ByronAddress};
 
 pub struct InMemoryImmutableUTXOStore {
     /// Map of UTXOs
@@ -49,4 +50,16 @@ impl ImmutableUTXOStore for InMemoryImmutableUTXOStore {
     async fn len(&self) -> Result<usize> {
         Ok(self.utxos.read().await.len())
     }
+
+    /// Get all Byron genesis UTXOs in the store
+    async fn get_byron_genesis_utxos(&self) -> Result<Vec<UTXOValue>>
+    {
+        Ok(self.utxos.read().await
+            .values()
+            .filter(|v| matches!(v.address,
+                                 Address::Byron(ByronAddress { genesis: true, .. })))
+            .cloned()
+            .collect())
+    }
+
 }
