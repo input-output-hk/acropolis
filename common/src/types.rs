@@ -47,6 +47,9 @@ pub struct BlockInfo {
 pub struct ByronAddress {
     /// Raw payload
     pub payload: Vec<u8>,
+
+    /// Whether it came from genesis bootstrap
+    pub genesis: bool,
 }
 
 /// Address network identifier

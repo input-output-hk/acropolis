@@ -56,6 +56,7 @@ impl TxUnpacker
         match address {
             addresses::Address::Byron(byron_address) => Ok(Address::Byron(ByronAddress {
                 payload: byron_address.payload.to_vec(),
+                genesis: false,
             })),
 
             addresses::Address::Shelley(shelley_address) => Ok(Address::Shelley(ShelleyAddress {

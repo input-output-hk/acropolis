@@ -81,6 +81,7 @@ impl GenesisBootstrapper
                             index: 0,
                             address: Address::Byron(ByronAddress{
                                 payload: address.payload.to_vec(),
+                                genesis: true,
                             }),
                             value: amount
                         };
