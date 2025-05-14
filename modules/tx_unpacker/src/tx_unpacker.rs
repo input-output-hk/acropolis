@@ -600,44 +600,37 @@ impl TxUnpacker
                         }
 
                         if let Some(topic) = publish_utxo_deltas_topic {
-                            if txs_msg.block.new_epoch || !deltas.is_empty() {
-                                let msg = Message::UTXODeltas(UTXODeltasMessage {
-                                    block: txs_msg.block.clone(),
-                                    deltas,
-                                });
+                            let msg = Message::UTXODeltas(UTXODeltasMessage {
+                                block: txs_msg.block.clone(),
+                                deltas,
+                            });
 
-                                context.message_bus.publish(&topic, Arc::new(msg))
-                                    .await
-                                    .unwrap_or_else(|e| error!("Failed to publish: {e}"));
-                            }
+                            context.message_bus.publish(&topic, Arc::new(msg))
+                                .await
+                                .unwrap_or_else(|e| error!("Failed to publish: {e}"));
                         }
 
                         if let Some(topic) = publish_certificates_topic {
-                            if txs_msg.block.new_epoch || !certificates.is_empty() {
-                                let msg = Message::TxCertificates(TxCertificatesMessage {
-                                    block: txs_msg.block.clone(),
-                                    certificates,
-                                });
+                            let msg = Message::TxCertificates(TxCertificatesMessage {
+                                block: txs_msg.block.clone(),
+                                certificates,
+                            });
 
-                                context.message_bus.publish(&topic, Arc::new(msg))
-                                    .await
-                                    .unwrap_or_else(|e| error!("Failed to publish: {e}"));
-                            }
+                            context.message_bus.publish(&topic, Arc::new(msg))
+                                .await
+                                .unwrap_or_else(|e| error!("Failed to publish: {e}"));
                         }
 
                         if let Some(topic) = publish_governance_procedures_topic {
-                            if txs_msg.block.new_epoch || !voting_procedures.is_empty()
-                                || !proposal_procedures.is_empty() {
-                                    let msg = Message::GovernanceProcedures(
-                                        GovernanceProceduresMessage {
-                                            block: txs_msg.block.clone(),
-                                            voting_procedures,
-                                            proposal_procedures,
-                                        });
-                                    context.message_bus.publish(&topic, Arc::new(msg))
-                                        .await
-                                        .unwrap_or_else(|e| error!("Failed to publish: {e}"));
-                                }
+                            let msg = Message::GovernanceProcedures(
+                                GovernanceProceduresMessage {
+                                    block: txs_msg.block.clone(),
+                                    voting_procedures,
+                                    proposal_procedures,
+                                });
+                            context.message_bus.publish(&topic, Arc::new(msg))
+                                .await
+                                .unwrap_or_else(|e| error!("Failed to publish: {e}"));
                         }
                     }
 
