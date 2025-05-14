@@ -59,7 +59,6 @@ impl BlockUnpacker
                                     .map(|tx| tx.encode()).collect();
 
                                 let tx_message = RawTxsMessage {
-                                    sequence: body_msg.sequence,
                                     block: body_msg.block.clone(),
                                     txs
                                 };

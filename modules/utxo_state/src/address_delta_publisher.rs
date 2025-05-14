@@ -6,7 +6,6 @@ use acropolis_common::{
         messages::{
         AddressDeltasMessage,
         Message,
-        Sequence,
      },
 };
 use std::sync::Arc;
@@ -59,14 +58,13 @@ impl AddressDeltaObserver for AddressDeltaPublisher {
         });
     }
 
-    async fn finalise_block(&self, block: &BlockInfo, sequence: Sequence) {
+    async fn finalise_block(&self, block: &BlockInfo) {
 
         // Send out the accumulated deltas
         if let Some(topic) = &self.topic {
 
             let mut deltas = self.deltas.lock().await;
             let message = AddressDeltasMessage {
-                sequence,
                 block: block.clone(),
                 deltas: std::mem::take(&mut *deltas),
             };
@@ -78,7 +76,7 @@ impl AddressDeltaObserver for AddressDeltaPublisher {
                 context.message_bus.publish(&topic,
                                             Arc::new(message_enum))
                     .await
-                    .unwrap_or_else(|e| error!("Failed to publish: {e}")); 
+                    .unwrap_or_else(|e| error!("Failed to publish: {e}"));
             });
         }
     }

@@ -13,43 +13,9 @@ pub use caryatid_module_rest_server::messages::{
     GetRESTResponse
 };
 
-/// Sequence information (for serialisation)
-#[derive(Debug, Default, Clone, Copy, serde::Serialize, serde::Deserialize)]
-pub struct Sequence {
-    /// Event sequence number
-    pub number: u64,
-
-    /// Preceding event sequence number
-    pub previous: Option<u64>,
-}
-
-impl Sequence {
-    pub fn new(number: u64, previous: Option<u64>) -> Self {
-        Sequence { number, previous }
-    }
-
-    pub fn following(previous_sequence: Option<u64>) -> Self {
-        Sequence {
-            number: match previous_sequence {
-                None => 0,
-                Some(s) => s + 1,
-            },
-            previous: previous_sequence,
-        }
-    }
-
-    pub fn inc(&mut self) {
-        self.previous = Some(self.number);
-        self.number += 1;
-    }
-}
-
 /// Block header message
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BlockHeaderMessage {
-    /// Event sequence
-    pub sequence: Sequence,
-
     /// Block info
     pub block: BlockInfo,
 
@@ -60,9 +26,6 @@ pub struct BlockHeaderMessage {
 /// Block body message
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BlockBodyMessage {
-    /// Event sequence
-    pub sequence: Sequence,
-
     /// Block info
     pub block: BlockInfo,
 
@@ -73,9 +36,6 @@ pub struct BlockBodyMessage {
 /// Snapshot completion message
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SnapshotCompleteMessage {
-    /// Final event sequence number of snapshots
-    pub final_sequence: Option<u64>,
-
     /// Last block in snapshot data
     pub last_block: BlockInfo,
 }
@@ -83,9 +43,6 @@ pub struct SnapshotCompleteMessage {
 /// Transactions message
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RawTxsMessage {
-    /// Event sequence
-    pub sequence: Sequence,
-
     /// Block info
     pub block: BlockInfo,
 
@@ -96,16 +53,11 @@ pub struct RawTxsMessage {
 /// Genesis completion message
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenesisCompleteMessage {
-    /// Final event sequence number of genesis
-    pub final_sequence: Option<u64>,
 }
 
 /// Message encapsulating multiple UTXO deltas, in order
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct UTXODeltasMessage {
-    /// Event sequence
-    pub sequence: Sequence,
-
     /// Block info
     pub block: BlockInfo,
 
@@ -116,9 +68,6 @@ pub struct UTXODeltasMessage {
 /// Message encapsulating multiple transaction certificates, in order
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TxCertificatesMessage {
-    /// Event sequence
-    pub sequence: Sequence,
-
     /// Block info
     pub block: BlockInfo,
 
@@ -129,9 +78,6 @@ pub struct TxCertificatesMessage {
 /// Address deltas message
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AddressDeltasMessage {
-    /// Event sequence
-    pub sequence: Sequence,
-
     /// Block info
     pub block: BlockInfo,
 
@@ -141,8 +87,6 @@ pub struct AddressDeltasMessage {
 
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GovernanceProceduresMessage {
-    pub sequence: Sequence,
-
     pub block: BlockInfo,
 
     pub proposal_procedures: Vec<ProposalProcedure>,
