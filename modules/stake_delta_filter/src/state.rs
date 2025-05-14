@@ -30,6 +30,7 @@ impl PointerOccurrence {
         );
     }
 
+    #[allow(unused)]
     pub fn add(&mut self, destination: Option<&Address>, full_address: &Address, block_info: &BlockInfo) -> Result<()> {
         let shelley = full_address.get_pointer().ok_or_else(
             || anyhow!("pointer not present in {:?}", full_address)
