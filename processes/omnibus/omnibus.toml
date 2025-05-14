@@ -19,7 +19,7 @@ publish-utxo-deltas-topic = "cardano.utxo.deltas"
 publish-certificates-topic = "cardano.certificates"
 
 [module.utxo-state]
-store = "memory" # "memory", "dashmap", "fjall", "fjall-async", "sled", "sled-async", "fake"
+store = "fjall" # "memory", "dashmap", "fjall", "fjall-async", "sled", "sled-async", "fake"
 address-delta-topic = "cardano.address.delta"
 
 [module.spo-state]

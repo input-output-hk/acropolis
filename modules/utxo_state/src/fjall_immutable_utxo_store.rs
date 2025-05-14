@@ -95,6 +95,6 @@ impl ImmutableUTXOStore for FjallImmutableUTXOStore {
     }
 
     async fn len(&self) -> Result<usize> {
-        Ok(self.partition.len()?)
+        Ok(self.partition.approximate_len())
     }
 }
