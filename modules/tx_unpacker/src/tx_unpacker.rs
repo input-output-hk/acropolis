@@ -639,6 +639,11 @@ impl TxUnpacker
             info!("Publishing governance procedures on '{topic}'");
         }
 
+        let governance_logs_dir = config.get_string("governance-logs-dir").ok();
+        if let Some(ref gov_log_dir) = governance_logs_dir {
+            info!("Logging governance messages to '{gov_log_dir}'")
+        }
+
 //        context.clone().message_bus.subscribe(&subscribe_topic, move |message: Arc<Message>| {
 //            let context = context.clone();
 //            let publish_utxo_deltas_topic = publish_utxo_deltas_topic.clone();
@@ -676,6 +681,7 @@ impl TxUnpacker
             let utxo_sender = utxo_sender.clone();
             let cert_sender = cert_sender.clone();
             let gov_sender = gov_sender.clone();
+            let governance_logs_dir = governance_logs_dir.clone();
 
             async move {
                 match message.as_ref() {
@@ -715,13 +721,15 @@ impl TxUnpacker
                                         }
 
                                         if votes.is_some() || props.is_some() || txs_msg.block.new_epoch {
-                                            let filename = format!("governance-logs/{:012}.json", txs_msg.sequence.number);
-                                            let data = match serde_json::to_string(&message) {
-                                                Ok(data) => data,
-                                                Err(e) => format!("Error serializing message to json: {e}")
-                                            };
-                                            if let Err(e) = fs::write(filename, data) {
-                                                error!("Error writing to file: {}", e);
+                                            if let Some(ref dir) = governance_logs_dir {
+                                                let filename = format!("{dir}/{:012}.json", txs_msg.sequence.number);
+                                                let data = match serde_json::to_string(&message) {
+                                                    Ok(data) => data,
+                                                    Err(e) => format!("Error serializing message to json: {e}")
+                                                };
+                                                if let Err(e) = fs::write(filename, data) {
+                                                    error!("Error writing to file: {}", e);
+                                                }
                                             }
                                         }
                                     }
