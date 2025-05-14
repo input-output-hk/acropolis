@@ -91,13 +91,13 @@ impl GovernanceState
 
         // Subscribe to governance procedures serializer
         context.clone().message_bus.subscribe(&subscribe_topic, move |message: Arc<Message>| {
-            let serialiser = serialiser_handle.clone();
+            let sh = serialiser_handle.clone();
 
             async move {
                 match message.as_ref() {
                     Message::GovernanceProcedures(msg) => {
-                        let mut serialiser = serialiser.lock().await;
-                        serialiser.handle(msg.sequence, msg)
+                        let mut sh = sh.lock().await;
+                        sh.handle(msg.sequence, msg)
                             .await
                             .inspect_err(|e| error!("Messaging handling error: {e}"))
                             .ok();

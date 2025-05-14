@@ -681,7 +681,7 @@ impl TxUnpacker
                 let mut data = data.clone();
                 data.sequence = *sequence;
                 Message::GovernanceProcedures(data)
-            }))), module_path!(), Some(0))))),
+            }))), module_path!(), None)))),
             None => None,
         };
 
@@ -876,7 +876,7 @@ impl TxUnpacker
                         };
 
                         match gov_sender {
-                            Some(ref gov_sender) => {
+                            Some(ref gov_sender) if txs_msg.sequence.number > 0 => {
                                 let message = if !governance_message.is_empty() { 
                                     Some(governance_message)
                                 } else { 
