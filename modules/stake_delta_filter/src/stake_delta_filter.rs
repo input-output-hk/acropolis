@@ -10,10 +10,19 @@ use tokio::sync::Mutex;
 use tracing::{error, info};
 
 const DEFAULT_ADDRESS_DELTA_TOPIC: (&str,&str) = ("subscription-address-delta-topic", "cardano.address.delta");
-const DEFAULT_STAKE_ADDRESS_DELTA_TOPIC: (&str,&str) = ("publishing-stake-delta-topic", "cardano.stake.delta");
 const DEFAULT_CERTIFICATES_TOPIC: (&str,&str) = ("subscription-certificates-topic", "cardano.certificates");
-const DEFAULT_ADDRESS_CACHE_DIR: (&str,&str) = ("pointer-address-cache-dir", "cache");
-const DEFAULT_BUILD_POINTER_ADDRESS_CACHE_MODE: (&str,CacheMode) = ("build-pointer-address-cache", CacheMode::Always);
+const DEFAULT_STAKE_ADDRESS_DELTA_TOPIC: (&str,&str) = ("publishing-stake-delta-topic", "cardano.stake.delta");
+
+/// Directory to put cached shelley address pointers into. Depending on the address 
+/// cache mode, these cached pointers can be used instead of tracking current pointer
+/// values in blockchain (which can be quite resource-consuming).
+const DEFAULT_CACHE_DIR: (&str,&str) = ("cache-dir", "cache");
+
+/// Cache mode, three options: always build cache; always read cache (error if missing); build if missing,
+/// read otherwise.
+const DEFAULT_CACHE_MODE: (&str,CacheMode) = ("cache-mode", CacheMode::WriteIfAbsent);
+
+/// Network: currently only Main/Test. Parameter is necessary to distinguish caches.
 const DEFAULT_NETWORK: (&str,AddressNetwork) = ("network", AddressNetwork::Main);
 
 /// Stake Delta Filter module
@@ -35,35 +44,18 @@ struct StakeDeltaFilterParams {
     address_delta_topic: String,
     stake_address_delta_topic: String,
     tx_certificates_topic: String,
-    pointer_address_cache_dir: String,
+    cache_dir: String,
     network: AddressNetwork,
-    build_pointer_cache: CacheMode,
+    cache_mode: CacheMode,
     context: Arc<Context<Message>>
 }
 
 impl StakeDeltaFilterParams {
     fn get_cache_file_name(&self, modifier: &str) -> Result<String> {
-        let path = Path::new(&self.pointer_address_cache_dir);
+        let path = Path::new(&self.cache_dir);
         let full = path.join(format!("{:?}{}.json", &self.network, modifier).to_lowercase());
         let str = full.to_str().ok_or_else(|| anyhow!("Cannot produce cache file name".to_string()))?;
         Ok(str.to_string())
-    }
-
-    fn decode_build_cache_mode(mode: &str) -> Result<CacheMode> {
-        match mode {
-            "never" => Ok(CacheMode::Never),
-            "if_absent" => Ok(CacheMode::IfAbsent),
-            "always" => Ok(CacheMode::Always),
-            m => Err(anyhow!("Unknown option value '{}': 'never', 'if_absent' or 'always' expected", m))
-        }
-    }
-
-    fn decode_network(network: &str) -> Result<AddressNetwork> {
-        match network {
-            "main" => Ok(AddressNetwork::Main),
-            "test" => Ok(AddressNetwork::Test),
-            m => Err(anyhow!("Unknown network '{m}': 'mainnet' or 'testnet' expected"))
-        }
     }
 
     fn conf(config: &Arc<Config>, keydef: (&str, &str)) -> String {
@@ -75,20 +67,14 @@ impl StakeDeltaFilterParams {
             address_delta_topic: Self::conf(&cfg, DEFAULT_ADDRESS_DELTA_TOPIC),
             tx_certificates_topic: Self::conf(&cfg, DEFAULT_CERTIFICATES_TOPIC),
             stake_address_delta_topic: Self::conf(&cfg, DEFAULT_STAKE_ADDRESS_DELTA_TOPIC),
-            pointer_address_cache_dir: Self::conf(&cfg, DEFAULT_ADDRESS_CACHE_DIR),
-            build_pointer_cache: { match cfg.get_string(DEFAULT_BUILD_POINTER_ADDRESS_CACHE_MODE.0) {
-                Ok(c) => Self::decode_build_cache_mode(&c)?,
-                Err(_) => DEFAULT_BUILD_POINTER_ADDRESS_CACHE_MODE.1
-            }},
+            cache_dir: Self::conf(&cfg, DEFAULT_CACHE_DIR),
+            cache_mode: cfg.get::<CacheMode>(DEFAULT_CACHE_MODE.0).unwrap_or(DEFAULT_CACHE_MODE.1),
             context,
-            network: { match cfg.get_string(DEFAULT_NETWORK.0) {
-                Ok(c) => Self::decode_network(&c)?,
-                Err(_) => DEFAULT_NETWORK.1
-            }}
+            network: cfg.get::<AddressNetwork>(DEFAULT_NETWORK.0).unwrap_or(DEFAULT_NETWORK.1)
         };
 
-        info!("Reading caches from {}", params.pointer_address_cache_dir);
-        info!("Pointer cache mode {:?}", params.build_pointer_cache);
+        info!("Reading caches from {}", params.cache_dir);
+        info!("Cache mode {:?}", params.cache_mode);
 
         Ok(Arc::new(params))
     }
@@ -99,10 +85,10 @@ impl StakeDeltaFilter {
         let params = StakeDeltaFilterParams::init(context, config.clone())?;
         let cache_path = params.get_cache_file_name("")?;
 
-        match params.build_pointer_cache {
-            CacheMode::Never => Self::stateless_init(PointerCache::try_load(&cache_path)?, params),
+        match params.cache_mode {
+            CacheMode::Read => Self::stateless_init(PointerCache::try_load(&cache_path)?, params),
 
-            CacheMode::IfAbsent => match PointerCache::try_load(&cache_path) {
+            CacheMode::WriteIfAbsent => match PointerCache::try_load(&cache_path) {
                 Ok(cache) => Self::stateless_init(cache, params),
                 Err(e) => {
                     info!("Cannot load cache: {}, building from scratch", e);
@@ -110,7 +96,7 @@ impl StakeDeltaFilter {
                 }
             }
 
-            CacheMode::Always => Self::stateful_init(params)
+            CacheMode::Write => Self::stateful_init(params)
         }
     }
 

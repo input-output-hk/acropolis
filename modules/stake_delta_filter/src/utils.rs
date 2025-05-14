@@ -89,9 +89,15 @@ impl PointerCache {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Deserialize)]
+#[serde(rename_all = "PascalCase")]
 pub enum CacheMode {
-    Never, IfAbsent, Always
+    /// Read cache, fail if it is not found on disk.
+    Read, 
+    /// Create and write cache, ignoring anything pre-existing cache on disk.
+    Write, 
+    /// Create and write cache only if it is absent, otherwise use existing one.
+    WriteIfAbsent
 }
 
 //pub trait PointerTracker {
