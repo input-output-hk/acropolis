@@ -1,18 +1,18 @@
 //! Acropolis DRepState: State storage
 
-use std::{collections::HashMap, sync::Arc};
-use acropolis_common::{
-    messages::TxCertificatesMessage,
-    Serialiser, SerialisedHandler,
-    TxCertificate,
-    Anchor, DRepCredential, Lovelace,
-};
+use std::collections::HashMap;
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use tracing::{error, info};
+use tracing::info;
 use serde_with::serde_as;
-use tokio::sync::Mutex;
-use acropolis_common::messages::Message;
+
+use acropolis_common::{
+    messages::TxCertificatesMessage,
+    Anchor, DRepCredential, Lovelace,
+    SerialisedHandler,
+    TxCertificate,
+};
+
 use crate::{drep_voting_stake_publisher::DrepVotingStakePublisher};
 
 #[serde_as]

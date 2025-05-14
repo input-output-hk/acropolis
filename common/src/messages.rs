@@ -142,6 +142,19 @@ pub struct AddressDeltasMessage {
     pub deltas: Vec<AddressDelta>
 }
 
+/// Stake address part of address deltas message
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StakeAddressDeltasMessage {
+    /// Event sequence number (for serialisation)
+    pub sequence: Sequence,
+
+    /// Block info
+    pub block: BlockInfo,
+
+    /// Set of deltas
+    pub deltas: Vec<StakeAddressDelta>
+}
+
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GovernanceProceduresMessage {
     pub sequence: Sequence,
@@ -191,7 +204,8 @@ pub enum Message {
     GovernanceProcedures(GovernanceProceduresMessage), // Governance procedures received
 
     // Stake distribution info
-    DrepStakeDistribution(DrepStakeDistributionMessage) // Info about drep stake
+    DrepStakeDistribution(DrepStakeDistributionMessage), // Info about drep stake
+    StakeAddressDeltas(StakeAddressDeltasMessage),       // Stake part of address deltas
 }
 
 impl Default for Message {

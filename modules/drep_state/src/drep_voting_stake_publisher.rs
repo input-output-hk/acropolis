@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use caryatid_sdk::Context;
-use acropolis_common::{AddressDelta, DRepCredential, Lovelace};
+use acropolis_common::{DRepCredential, Lovelace};
 use acropolis_common::messages::{DrepStakeDistributionMessage, Message, Sequence};
 
 pub struct DrepVotingStakePublisher {

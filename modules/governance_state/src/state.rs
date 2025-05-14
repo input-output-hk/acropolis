@@ -1,13 +1,17 @@
 //! Acropolis SPOState: State storage
 
 use std::{cmp::max, collections::HashMap};
-use std::sync::{Arc, Mutex};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use hex::ToHex;
 use tracing::{debug, error, info};
-use acropolis_common::{messages::GovernanceProceduresMessage, rational_number::RationalNumber, Committee, CommitteeCredential, ConwayGenesisParams, DRepCredential, DataHash, GovActionId, GovernanceAction, KeyHash, Lovelace, ProposalProcedure, ProtocolParamType, ProtocolParamUpdate, ScriptHash, SerialisedHandler, Voter, VotingProcedure};
-use acropolis_common::messages::{DrepStakeDistributionMessage, GenesisCompleteMessage};
+use acropolis_common::{
+    messages::{GovernanceProceduresMessage, DrepStakeDistributionMessage, GenesisCompleteMessage},
+    rational_number::RationalNumber, 
+    ConwayGenesisParams, DRepCredential, DataHash, GovActionId, GovernanceAction, 
+    KeyHash, Lovelace, ProposalProcedure, ProtocolParamType, ProtocolParamUpdate, 
+    SerialisedHandler, Voter, VotingProcedure
+};
 
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct VotingRegistrationState {
@@ -91,6 +95,7 @@ impl State {
         self.conway.as_ref().ok_or_else(|| anyhow!("Conway parameters not available"))
     }
 
+    #[allow(dead_code)]
     fn have_committee(&self) -> bool {
         !self.conway.iter().any(|c| c.committee.is_empty())
     }
@@ -140,6 +145,7 @@ impl State {
         Ok((p, d, c))
     }
 
+    #[allow(dead_code)]
     fn upd<T: Clone>(dst: &mut T, u: &Option<T>) {
         if let Some(u) = u { *dst = (*u).clone(); }
     }
@@ -298,7 +304,7 @@ impl State {
 
     fn is_expired(&self, new_epoch: u64, action_id: &GovActionId) -> Result<bool> {
         info!("Checking whether {} is expired at new epoch {}", action_id, new_epoch);
-        let (proposal_epoch, proposal) = self.proposals.get(action_id)
+        let (proposal_epoch, _proposal) = self.proposals.get(action_id)
             .ok_or_else(|| anyhow!("action {} not found", action_id))?;
 
         Ok(proposal_epoch + self.get_conway_params()?.gov_action_lifetime as u64 <= new_epoch)

@@ -18,6 +18,8 @@ use acropolis_module_utxo_state::UTXOState;
 use acropolis_module_spo_state::SPOState;
 use acropolis_module_drep_state::DRepState;
 use acropolis_module_governance_state::GovernanceState;
+use acropolis_module_stake_delta_filter::StakeDeltaFilter;
+
 use caryatid_module_clock::Clock;
 use caryatid_module_rest_server::RESTServer;
 use caryatid_module_spy::Spy;
@@ -51,6 +53,7 @@ pub async fn main() -> Result<()> {
     SPOState::register(&mut process);
     DRepState::register(&mut process);
     GovernanceState::register(&mut process);
+    StakeDeltaFilter::register(&mut process);
 
     Clock::<Message>::register(&mut process);
     RESTServer::<Message>::register(&mut process);
