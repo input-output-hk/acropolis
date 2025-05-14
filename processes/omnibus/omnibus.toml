@@ -28,6 +28,8 @@ address-delta-topic = "cardano.address.delta"
 
 [module.governance-state]
 
+[module.stake-delta-filter]
+
 [module.clock]
 
 [module.rest-server]

@@ -200,7 +200,7 @@ impl TxUnpacker
     }
 
     /// Derive our TxCertificate from a Pallas Certificate
-    fn map_certificate(cert: &MultiEraCert) -> Result<TxCertificate> {
+    fn map_certificate(cert: &MultiEraCert, tx_index: usize, cert_index: usize) -> Result<TxCertificate> {
         match cert {
             MultiEraCert::NotApplicable => Err(anyhow!("Not applicable cert!")),
 
@@ -208,7 +208,11 @@ impl TxUnpacker
                 match cert.as_ref().as_ref() {
                     alonzo::Certificate::StakeRegistration(cred) =>
                         Ok(TxCertificate::StakeRegistration(
-                            Self::map_stake_credential(cred))),
+                            StakeCredentialWithPos {
+                                stake_credential: Self::map_stake_credential(cred),
+                                tx_index: tx_index.try_into().unwrap(),
+                                cert_index: cert_index.try_into().unwrap(),
+                            })),
                     alonzo::Certificate::StakeDeregistration(cred) =>
                             Ok(TxCertificate::StakeDeregistration(
                                 Self::map_stake_credential(cred))),
@@ -286,7 +290,11 @@ impl TxUnpacker
                 match cert.as_ref().as_ref() {
                     conway::Certificate::StakeRegistration(cred) =>
                         Ok(TxCertificate::StakeRegistration(
-                            Self::map_stake_credential(cred))),
+                            StakeCredentialWithPos {
+                                stake_credential: Self::map_stake_credential(cred),
+                                tx_index: tx_index.try_into().unwrap(),
+                                cert_index: cert_index.try_into().unwrap(),
+                            })),
                     conway::Certificate::StakeDeregistration(cred) =>
                             Ok(TxCertificate::StakeDeregistration(
                                 Self::map_stake_credential(cred))),
@@ -701,7 +709,7 @@ impl TxUnpacker
                         let mut deltas = Vec::new();
                         let mut certificates = Vec::new();
 
-                        for raw_tx in &txs_msg.txs {
+                        for (tx_index, raw_tx) in txs_msg.txs.iter().enumerate() {
                             // Parse the tx
                             match MultiEraTx::decode(&raw_tx) {
                                 Ok(tx) => {
@@ -785,8 +793,8 @@ impl TxUnpacker
                                     }
 
                                     if cert_sender.is_some() {
-                                        for cert in certs {
-                                            match Self::map_certificate(&cert) {
+                                        for ( cert_index, cert) in certs.iter().enumerate() {
+                                            match Self::map_certificate(&cert, tx_index, cert_index) {
                                                 Ok(tx_cert) => {
                                                     certificates.push(tx_cert);
                                                 },
