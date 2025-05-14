@@ -4,7 +4,7 @@
 use caryatid_sdk::{Context, Module, module, MessageBusExt, message_bus::QoS};
 use acropolis_common::{
     calculations::slot_to_epoch, messages::{
-        BlockBodyMessage, BlockHeaderMessage, Message, Sequence,
+        BlockBodyMessage, BlockHeaderMessage, Message,
         SnapshotCompleteMessage
     }, BlockInfo, BlockStatus
 };
@@ -157,8 +157,7 @@ impl MithrilSnapshotFetcher
 
     /// Process the snapshot
     async fn process_snapshot(context: Arc<Context<Message>>,
-                              config: Arc<Config>,
-                              previous_sequence: Option<u64>) -> Result<()> {
+                              config: Arc<Config>) -> Result<()> {
         let header_topic = config.get_string("header-topic")
             .unwrap_or(DEFAULT_HEADER_TOPIC.to_string());
         let body_topic = config.get_string("body-topic")
@@ -181,7 +180,6 @@ impl MithrilSnapshotFetcher
         let blocks = hardano::immutable::read_blocks(&path)?;
         let mut last_block_number: u64 = 0;
         let mut last_epoch: Option<u64> = None;
-        let mut sequence = Sequence::following(previous_sequence);
         for raw_block in blocks {
             match raw_block {
                 Ok(raw_block) => {
@@ -226,7 +224,6 @@ impl MithrilSnapshotFetcher
                     // Send the block header message
                     let header = block.header();
                     let header_message = BlockHeaderMessage {
-                        sequence,
                         block: block_info.clone(),
                         raw: header.cbor().to_vec()
                     };
@@ -239,7 +236,6 @@ impl MithrilSnapshotFetcher
 
                     // Send the block body message
                     let body_message = BlockBodyMessage {
-                        sequence,
                         block: block_info.clone(),
                         raw: raw_block
                     };
@@ -253,7 +249,6 @@ impl MithrilSnapshotFetcher
                     body_result.unwrap_or_else(|e| error!("Failed to publish body: {e}"));
 
                     last_block_info = Some(block_info);
-                    sequence.inc();
                 }
                 Err(e) => error!("Error reading block: {e}")
             }
@@ -262,7 +257,6 @@ impl MithrilSnapshotFetcher
         // Send completion message
         if let Some(last_block_info) = last_block_info {
             let message = SnapshotCompleteMessage {
-                final_sequence: sequence.previous,
                 last_block: last_block_info,
             };
 
@@ -287,11 +281,7 @@ impl MithrilSnapshotFetcher
                 let context = context.clone();
                 let config = config.clone();
 
-                let sequence = match message.as_ref() {
-                    Message::GenesisComplete(message) => message.final_sequence,
-                    _ => None
-                };
-                info!("Received startup message, sequence {sequence:?}");
+                info!("Received startup message");
 
                 tokio::spawn(async move {
 
@@ -309,7 +299,7 @@ impl MithrilSnapshotFetcher
                         }
                     }
 
-                    match Self::process_snapshot(context, config, sequence).await {
+                    match Self::process_snapshot(context, config).await {
                         Err(e) => error!("Failed to process Mithril snapshot: {e}"),
                         _ => {}
                     }

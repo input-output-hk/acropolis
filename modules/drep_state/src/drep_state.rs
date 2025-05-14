@@ -2,7 +2,7 @@
 //! Accepts certificate events and derives the SPO state in memory
 
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
-use acropolis_common::{messages::Message, DRepCredential, Serialiser};
+use acropolis_common::{messages::Message, DRepCredential};
 use std::sync::Arc;
 use anyhow::{anyhow, Result};
 use config::Config;
@@ -68,22 +68,18 @@ impl DRepState
         info!("Creating request handler on '{handle_topic}'");
 
         let state = Arc::new(Mutex::new(State::new()));
-        let state_handle = state.clone();
-        let state_tick = state.clone();
-
-        let serialiser = Arc::new(Mutex::new(Serialiser::new(state, module_path!())));
-        let serialiser_tick = serialiser.clone();
-
+        let state1 = state.clone();
+        let state2 = state.clone();
+        let state3 = state.clone();
 
         // Subscribe for certificate messages
         context.clone().message_bus.subscribe(&subscribe_topic, move |message: Arc<Message>| {
-            let serialiser = serialiser.clone();
+            let state = state1.clone();
             async move {
                 match message.as_ref() {
                     Message::TxCertificates(tx_cert_msg) => {
-                        let mut serialiser = serialiser.lock().await;
-                        serialiser.handle(tx_cert_msg.sequence, tx_cert_msg)
-                            .await
+                        let mut state = state.lock().await;
+                        state.handle(tx_cert_msg)
                             .inspect_err(|e| error!("Messaging handling error: {e}"))
                             .ok();
                     }
@@ -95,14 +91,14 @@ impl DRepState
 
         // Handle requests for single DRep state
         context.message_bus.handle(&handle_topic, move |message: Arc<Message>| {
-            let state = state_handle.clone();
+            let state = state2.clone();
             async move {
                 let response = match message.as_ref() {
                     Message::RESTRequest(request) => {
                         info!("REST received {} {}", request.method, request.path);
-                        let lock = state.lock().await;
+                        let state = state.lock().await;
 
-                        match perform_rest_request(&lock, &request.path) {
+                        match perform_rest_request(&state, &request.path) {
                             Ok(response) => RESTResponse::with_text(200, &response),
                             Err(error) => {
                                 error!("DRep REST request error: {error:?}");
@@ -122,8 +118,7 @@ impl DRepState
 
         // Ticker to log stats
         context.clone().message_bus.subscribe("clock.tick", move |message: Arc<Message>| {
-            let serialiser = serialiser_tick.clone();
-            let state = state_tick.clone();
+            let state = state3.clone();
 
             async move {
                 if let Message::Clock(message) = message.as_ref() {
@@ -132,7 +127,6 @@ impl DRepState
                             .await
                             .inspect_err(|e| error!("Tick error: {e}"))
                             .ok();
-                        serialiser.lock().await.tick();
                     }
                 }
             }

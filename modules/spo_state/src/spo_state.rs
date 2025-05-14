@@ -4,7 +4,6 @@
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
 use acropolis_common::{
     messages::{Message, RESTResponse},
-    Serialiser,
 };
 use std::ops::Deref;
 use std::sync::Arc;
@@ -42,23 +41,19 @@ impl SPOState
         info!("Creating request handler on '{handle_topic}'");
 
         let state = Arc::new(Mutex::new(State::new()));
+        let state_subscribe = state.clone();
         let state_handle_full = state.clone();
         let state_handle_single = state.clone();
         let state_tick = state.clone();
 
-        let serialiser = Arc::new(Mutex::new(Serialiser::new(state, module_path!())));
-        let serialiser_tick = serialiser.clone();
-
-
         // Subscribe for certificate messages
         context.clone().message_bus.subscribe(&subscribe_topic, move |message: Arc<Message>| {
-            let serialiser = serialiser.clone();
+            let state = state_subscribe.clone();
             async move {
                 match message.as_ref() {
                     Message::TxCertificates(tx_cert_msg) => {
-                        let mut serialiser = serialiser.lock().await;
-                        serialiser.handle(tx_cert_msg.sequence, tx_cert_msg)
-                            .await
+                        let mut state = state.lock().await;
+                        state.handle(tx_cert_msg)
                             .inspect_err(|e| error!("Messaging handling error: {e}"))
                             .ok();
                     }
@@ -75,8 +70,8 @@ impl SPOState
                 let response = match message.as_ref() {
                     Message::RESTRequest(request) => {
                         info!("REST received {} {}", request.method, request.path);
-                        let lock = state.lock().await;
-                        match serde_json::to_string(lock.deref()) {
+                        let state = state.lock().await;
+                        match serde_json::to_string(state.deref()) {
                             Ok(body) => RESTResponse::with_json(200, &body),
                             Err(error) => RESTResponse::with_text(500, &format!("{error:?}").to_string()),
                         }
@@ -103,8 +98,8 @@ impl SPOState
                         match request.path_elements.get(1) {
                             Some(id) => match hex::decode(&id) {
                                 Ok(id) => {
-                                    let lock = state.lock().await;
-                                    match lock.deref().get(&id) {
+                                    let state = state.lock().await;
+                                    match state.get(&id) {
                                         Some(spo) => match serde_json::to_string(&spo) {
                                             Ok(body) => RESTResponse::with_json(200, &body),
                                             Err(error) => RESTResponse::with_text(500, &format!("{error:?}").to_string()),
@@ -129,7 +124,6 @@ impl SPOState
 
         // Ticker to log stats
         context.clone().message_bus.subscribe("clock.tick", move |message: Arc<Message>| {
-            let serialiser = serialiser_tick.clone();
             let state = state_tick.clone();
 
             async move {
@@ -139,7 +133,6 @@ impl SPOState
                             .await
                             .inspect_err(|e| error!("Tick error: {e}"))
                             .ok();
-                        serialiser.lock().await.tick();
                     }
                 }
             }

@@ -3,12 +3,10 @@
 use std::collections::HashMap;
 use acropolis_common::{
     messages::TxCertificatesMessage,
-    SerialisedHandler,
     TxCertificate,
     Anchor, DRepCredential, Lovelace,
 };
 use anyhow::{anyhow, Result};
-use async_trait::async_trait;
 use tracing::info;
 use serde_with::serde_as;
 
@@ -94,11 +92,8 @@ impl State {
 
         Ok(())
     }
-}
 
-#[async_trait]
-impl SerialisedHandler<TxCertificatesMessage> for State {
-    async fn handle(&mut self, _sequence: u64, tx_cert_msg: &TxCertificatesMessage) -> Result<()> {
+    pub fn handle(&mut self, tx_cert_msg: &TxCertificatesMessage) -> Result<()> {
         for tx_cert in tx_cert_msg.certificates.iter() {
             if let Err(e) = self.process_one_certificate(tx_cert) {
                 tracing::error!("Error processing tx_cert {}", e);

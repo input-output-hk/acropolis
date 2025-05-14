@@ -8,11 +8,11 @@ description = "Acropolis omnibus process containing every module"
 license = "Apache-2.0"
 
 [dependencies]
-caryatid_process = "0.4.1"
-caryatid_sdk = "0.4"
-caryatid_module_clock = "0.4"
-caryatid_module_rest_server = "0.5"
-caryatid_module_spy = "0.4"
+caryatid_process = "0.5"
+caryatid_sdk = "0.5"
+caryatid_module_clock = "0.5"
+caryatid_module_rest_server = "0.6"
+caryatid_module_spy = "0.5"
 
 # Core message definition
 acropolis_common = { path = "../../common" }
