@@ -2,15 +2,14 @@
 
 use std::{cmp::max, collections::HashMap};
 use anyhow::{anyhow, Result};
-use async_trait::async_trait;
 use hex::ToHex;
 use tracing::{debug, error, info};
 use acropolis_common::{
     messages::{GovernanceProceduresMessage, DrepStakeDistributionMessage, GenesisCompleteMessage},
-    rational_number::RationalNumber, 
-    ConwayGenesisParams, DRepCredential, DataHash, GovActionId, GovernanceAction, 
-    KeyHash, Lovelace, ProposalProcedure, ProtocolParamType, ProtocolParamUpdate, 
-    SerialisedHandler, Voter, VotingProcedure
+    rational_number::RationalNumber,
+    ConwayGenesisParams, DRepCredential, DataHash, GovActionId, GovernanceAction,
+    KeyHash, Lovelace, ProposalProcedure, ProtocolParamType, ProtocolParamUpdate,
+    Voter, VotingProcedure
 };
 
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
@@ -23,7 +22,6 @@ pub struct VotingRegistrationState {
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct State {
-    prev_sequence: u64,
     proposal_count: usize,
 
     pub action_proposal_count: usize,
@@ -42,39 +40,29 @@ pub struct State {
     pub sco_stake: HashMap<KeyHash, u64>
 }
 
-#[async_trait]
-impl SerialisedHandler<GenesisCompleteMessage> for State {
-    async fn handle(&mut self, _sequence: u64, message: &GenesisCompleteMessage) -> Result<()> {
+impl State {
+    pub async fn handle_genesis(&mut self, message: &GenesisCompleteMessage) -> Result<()> {
         info!("Received genesis complete message; conway present = {}", message.conway_genesis.is_some());
         self.conway = message.conway_genesis.clone();
         Ok(())
     }
-}
 
-#[async_trait]
-impl SerialisedHandler<GovernanceProceduresMessage> for State {
-    async fn handle(&mut self, _sequence: u64, msg: &GovernanceProceduresMessage) -> Result<()> {
+    pub async fn handle_governance(&mut self, msg: &GovernanceProceduresMessage) -> Result<()> {
         if let Err(e) = self.handle_impl(msg).await {
             error!("Error processing message {:?}: {}", msg, e)
         }
         Ok(())
     }
-}
 
-#[async_trait]
-impl SerialisedHandler<DrepStakeDistributionMessage> for State {
-    async fn handle(&mut self, _sequence: u64, message: &DrepStakeDistributionMessage) -> Result<()> {
+    pub async fn handle_drep_stake(&mut self, message: &DrepStakeDistributionMessage) -> Result<()> {
         info!("Received drep stake distribution message: {} dreps", message.data.len());
         self.drep_stake_messages_count += 1;
         self.drep_stake = HashMap::from_iter(message.data.iter().cloned());
         Ok(())
     }
-}
 
-impl State {
     pub fn new() -> Self {
         Self {
-            prev_sequence: 0,
             proposal_count: 0,
             action_proposal_count: 0,
             votes_count: 0,
@@ -381,7 +369,7 @@ impl State {
         for pproc in &governance_message.proposal_procedures {
             self.proposal_count += 1;
             if let Err(e) = self.insert_proposal_procedure(governance_message.block.epoch, pproc) {
-                error!("Error handling governance_message {:?}: '{}'", governance_message.sequence, e);
+                error!("Error handling governance_message: '{}'", e);
             }
         }
         for (trans, vproc) in &governance_message.voting_procedures {

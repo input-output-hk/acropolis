@@ -1,18 +1,14 @@
 //! Acropolis DRepState: State storage
 
 use std::collections::HashMap;
-use anyhow::{anyhow, Result};
-use async_trait::async_trait;
-use tracing::info;
-use serde_with::serde_as;
-
 use acropolis_common::{
     messages::TxCertificatesMessage,
-    Anchor, DRepCredential, Lovelace,
-    SerialisedHandler,
     TxCertificate,
+    Anchor, DRepCredential, Lovelace,
 };
-
+use anyhow::{anyhow, Result};
+use tracing::info;
+use serde_with::serde_as;
 use crate::{drep_voting_stake_publisher::DrepVotingStakePublisher};
 
 #[serde_as]
@@ -110,19 +106,18 @@ impl State {
         }
         distribution
     }
-}
 
-#[async_trait]
-impl SerialisedHandler<TxCertificatesMessage> for State {
-    async fn handle(&mut self, _sequence: u64, tx_cert_msg: &TxCertificatesMessage) -> Result<()> {
+    pub async fn handle(&mut self, tx_cert_msg: &TxCertificatesMessage) -> Result<()> {
         let tx_slot = tx_cert_msg.block.slot;
+
         for tx_cert in tx_cert_msg.certificates.iter() {
             if let Err(e) = self.process_one_certificate(tx_cert, tx_slot) {
                 tracing::error!("Error processing tx_cert {}", e);
             }
         }
 
-        if self.certificate_info_update_slot == tx_slot && self.drep_voting_stake_publisher.is_some() {
+        if self.certificate_info_update_slot == tx_slot
+            && self.drep_voting_stake_publisher.is_some() {
             let d = self.new_vote_distribution();
             info!("New vote distribution at slot = {}: len = {}", tx_slot, d.len());
             if let Some(ref mut publisher) = self.drep_voting_stake_publisher {

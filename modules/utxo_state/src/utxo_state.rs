@@ -3,7 +3,6 @@
 
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
 use acropolis_common::{
-    Serialiser,
     messages::{Message, RESTResponse},
 };
 
@@ -94,19 +93,18 @@ impl UTXOState
         state.register_address_delta_observer(Arc::new(publisher));
 
         let state = Arc::new(Mutex::new(state));
+        let state1 = state.clone();
         let state2 = state.clone();
         let state3 = state.clone();
-        let serialiser = Arc::new(Mutex::new(Serialiser::new(state, module_path!())));
-        let serialiser2 = serialiser.clone();
 
         // Subscribe for UTXO messages
         context.clone().message_bus.subscribe(&subscribe_topic, move |message: Arc<Message>| {
-            let serialiser = serialiser.clone();
+            let state = state1.clone();
             async move {
                 match message.as_ref() {
                     Message::UTXODeltas(deltas_msg) => {
-                        let mut serialiser = serialiser.lock().await;
-                        serialiser.handle(deltas_msg.sequence, deltas_msg)
+                        let mut state = state.lock().await;
+                        state.handle(deltas_msg)
                             .await
                             .inspect_err(|e| error!("Messaging handling error: {e}"))
                             .ok();
@@ -119,7 +117,6 @@ impl UTXOState
 
         // Ticker to log stats and prune state
         context.clone().message_bus.subscribe("clock.tick", move |message: Arc<Message>| {
-            let serialiser = serialiser2.clone();
             let state = state2.clone();
 
             async move {
@@ -129,7 +126,6 @@ impl UTXOState
                             .await
                             .inspect_err(|e| error!("Tick error: {e}"))
                             .ok();
-                        serialiser.lock().await.tick();
                     }
                 }
             }

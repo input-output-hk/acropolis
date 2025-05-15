@@ -5,12 +5,12 @@ use std::collections::HashMap;
 use caryatid_sdk::{module, Context, MessageBusExt, Module};
 use acropolis_common::{
     messages::{
-        GenesisCompleteMessage, Message, Sequence, UTXODeltasMessage
+        GenesisCompleteMessage, Message, UTXODeltasMessage
     },
     Address, Anchor, BlockInfo, BlockStatus, ByronAddress,
     Committee, Constitution, ConwayGenesisParams, Credential,
     DRepVotingThresholds, PoolVotingThresholds,
-    TxOutput, UTXODelta
+    TxOutput, UTXODelta,
 };
 use hex::decode;
 use fraction::Fraction;
@@ -172,10 +172,6 @@ impl GenesisBootstrapper
 
                     // Construct message
                     let mut message = UTXODeltasMessage {
-                        sequence: Sequence {
-                            number: 0,      // We are always the first
-                            previous: None,
-                        },
                         block: BlockInfo {
                             status: BlockStatus::Bootstrap,
                             slot: 0,
@@ -210,7 +206,6 @@ impl GenesisBootstrapper
 
                     // Send completion message
                     let completion_message = GenesisCompleteMessage {
-                        final_sequence: Some(0),
                         conway_genesis: conway_genesis
                             .map(|g| map_conway_genesis(&g))
                             .transpose().unwrap_or_else(|e| {

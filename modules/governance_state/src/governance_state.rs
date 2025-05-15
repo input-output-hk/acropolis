@@ -2,14 +2,13 @@
 //! Accepts certificate events and derives the SPO state in memory
 
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
-use acropolis_common::{messages::Message, Serialiser};
+use acropolis_common::messages::{Message, RESTResponse};
 use std::sync::Arc;
 use anyhow::{anyhow, Result};
 use config::Config;
 use hex::ToHex;
 use tokio::sync::Mutex;
 use tracing::{error, info};
-use acropolis_common::messages::{DrepStakeDistributionMessage, GovernanceProceduresMessage, GenesisCompleteMessage, RESTResponse, Sequence};
 
 mod state;
 use state::State;
@@ -75,29 +74,21 @@ impl GovernanceState
         info!("Creating request handler on '{genesis_complete_topic}'");
 
         let state = Arc::new(Mutex::new(State::new()));
+        let state_gov = state.clone();
+        let state_drep = state.clone();
+        let state_genesis = state.clone();
         let state_handle = state.clone();
         let state_tick = state.clone();
 
-        let serialiser: Arc<Mutex<Serialiser<GovernanceProceduresMessage>>> = Arc::new(Mutex::new(Serialiser::new(state.clone(), module_path!())));
-        let serialiser_handle = serialiser.clone();
-        let serialiser_tick = serialiser.clone();
-
-        let drep_serialiser: Arc<Mutex<Serialiser<DrepStakeDistributionMessage>>> = Arc::new(Mutex::new(Serialiser::new(state.clone(), module_path!())));
-        let drep_serialiser_handle = drep_serialiser.clone();
-        let drep_serialiser_tick = drep_serialiser.clone();
-
-        let genesis_complete_serialiser: Arc<Mutex<Serialiser<GenesisCompleteMessage>>> = Arc::new(Mutex::new(Serialiser::new(state.clone(), module_path!())));
-        let genesis_complete_serialiser_handle = genesis_complete_serialiser.clone();
-
         // Subscribe to governance procedures serializer
         context.clone().message_bus.subscribe(&subscribe_topic, move |message: Arc<Message>| {
-            let sh = serialiser_handle.clone();
+            let state = state_gov.clone();
 
             async move {
                 match message.as_ref() {
                     Message::GovernanceProcedures(msg) => {
-                        let mut sh = sh.lock().await;
-                        sh.handle(msg.sequence, msg)
+                        let mut state = state.lock().await;
+                        state.handle_governance(msg)
                             .await
                             .inspect_err(|e| error!("Messaging handling error: {e}"))
                             .ok();
@@ -110,13 +101,13 @@ impl GovernanceState
 
         // Subscribe to drep stake distribution serializer
         context.clone().message_bus.subscribe(&drep_voting_stake_topic, move |message: Arc<Message>| {
-            let serialiser = drep_serialiser_handle.clone();
+            let state = state_drep.clone();
 
             async move {
                 match message.as_ref() {
                     Message::DrepStakeDistribution(msg) => {
-                        let mut serialiser = serialiser.lock().await;
-                        serialiser.handle(msg.sequence, msg)
+                        let mut state = state.lock().await;
+                        state.handle_drep_stake(msg)
                             .await
                             .inspect_err(|e| error!("Messaging handling error: {e}"))
                             .ok();
@@ -129,21 +120,16 @@ impl GovernanceState
 
         // Subscribe to bootstrap completion serializer
         context.clone().message_bus.subscribe(&genesis_complete_topic, move |message: Arc<Message>| {
-            let serialiser = genesis_complete_serialiser_handle.clone();
+            let state = state_genesis.clone();
 
             async move {
                 match message.as_ref() {
                     Message::GenesisComplete(msg) => {
-                        if let Some(final_sequence) = msg.final_sequence {
-                            let mut serialiser = serialiser.lock().await;
-                            serialiser.handle(Sequence::new(final_sequence, None), msg)
-                                .await
-                                .inspect_err(|e| error!("Messaging handling error: {e}"))
-                                 .ok();
-                        }
-                        else {
-                            error!("Genesis message without final_sequence field: {msg:?}")
-                        }
+                        let mut state = state.lock().await;
+                        state.handle_genesis(msg)
+                            .await
+                            .inspect_err(|e| error!("Messaging handling error: {e}"))
+                            .ok();
                     }
 
                     _ => error!("Unexpected message type: {message:?}")
@@ -180,8 +166,6 @@ impl GovernanceState
 
         // Ticker to log stats
         context.clone().message_bus.subscribe("clock.tick", move |message: Arc<Message>| {
-            let serialiser = serialiser_tick.clone();
-            let drep_serialiser = drep_serialiser_tick.clone();
             let state = state_tick.clone();
 
             async move {
@@ -191,8 +175,6 @@ impl GovernanceState
                             .await
                             .inspect_err(|e| error!("Tick error: {e}"))
                             .ok();
-                        serialiser.lock().await.tick();
-                        drep_serialiser.lock().await.tick();
                     }
                 }
             }

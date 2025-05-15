@@ -2,12 +2,11 @@
 
 use std::{collections::{HashMap, VecDeque}, fs, io::Write, sync::Arc};
 use acropolis_common::{
-    messages::{AddressDeltasMessage, Message, StakeAddressDeltasMessage, TxCertificatesMessage}, 
-    Address, BlockInfo, SerialisedHandler, ShelleyAddressPointer, StakeAddress, 
+    messages::{AddressDeltasMessage, Message, StakeAddressDeltasMessage, TxCertificatesMessage},
+    Address, BlockInfo, ShelleyAddressPointer, StakeAddress,
     StakeAddressPayload, StakeCredential, TxCertificate
 };
 use anyhow::{anyhow, Result};
-use async_trait::async_trait;
 use serde_with::serde_as;
 use tracing::info;
 use crate::StakeDeltaFilterParams;
@@ -87,9 +86,8 @@ pub struct State {
     pub delta_publisher: DeltaPublisher
 }
 
-#[async_trait]
-impl SerialisedHandler<AddressDeltasMessage> for State {
-    async fn handle(&mut self, _sequence: u64, most_recent_delta: &AddressDeltasMessage) -> Result<()> {
+impl State {
+    pub async fn handle_deltas(&mut self, most_recent_delta: &AddressDeltasMessage) -> Result<()> {
         //info!("New address delta message: {:?}", most_recent_delta);
         if most_recent_delta.block.slot % 10000 == 0 {
             info!("New address delta message: {}", most_recent_delta.block.slot);
@@ -105,13 +103,8 @@ impl SerialisedHandler<AddressDeltasMessage> for State {
         }
         Ok(())
     }
-}
 
-//params.context.clone().message_bus.subscribe(&params.clone().tx_certificates_topic, move |message: Arc<Message>| {
-
-#[async_trait]
-impl SerialisedHandler<TxCertificatesMessage> for State {
-    async fn handle(&mut self, _sequence: u64, msg: &TxCertificatesMessage) -> Result<()> {
+    pub async fn handle_certs(&mut self, msg: &TxCertificatesMessage) -> Result<()> {
         for cert in msg.certificates.iter() {
             match cert {
                 TxCertificate::StakeRegistration(reg) => {
@@ -137,9 +130,7 @@ impl SerialisedHandler<TxCertificatesMessage> for State {
         }
         Ok(())
     }
-}
 
-impl State {
     pub fn new(params: Arc<StakeDeltaFilterParams>) -> Self { Self {
         pointer_cache: PointerCache::new(),
         correct_ptrs: PointerOccurrence::default(),

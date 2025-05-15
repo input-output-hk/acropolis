@@ -2,11 +2,9 @@
 use acropolis_common::{
     messages::TxCertificatesMessage,
     PoolRegistration,
-    SerialisedHandler,
     TxCertificate,
 };
 use anyhow::Result;
-use async_trait::async_trait;
 use std::collections::HashMap;
 use tracing::{error, info};
 use serde_with::{serde_as, hex::Hex};
@@ -49,11 +47,8 @@ impl State {
         self.log_stats().await;
         Ok(())
     }
-}
 
-#[async_trait]
-impl SerialisedHandler<TxCertificatesMessage> for State {
-    async fn handle(&mut self, _sequence: u64, tx_cert_msg: &TxCertificatesMessage) -> Result<()> {
+    pub fn handle(&mut self, tx_cert_msg: &TxCertificatesMessage) -> Result<()> {
         if tx_cert_msg.block.epoch > self.epoch {
             self.epoch = tx_cert_msg.block.epoch;
             let deregistrations = self.pending_deregistrations.remove(&self.epoch);

@@ -9,7 +9,7 @@ description = "UTXO state Caryatid module for Acropolis"
 license = "Apache-2.0"
 
 [dependencies]
-caryatid_sdk = "0.4"
+caryatid_sdk = "0.5"
 acropolis_common = { path = "../../common" }
 anyhow = "1.0"
 async-trait = "0.1"
