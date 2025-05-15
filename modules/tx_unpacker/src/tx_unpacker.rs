@@ -817,15 +817,17 @@ impl TxUnpacker
                         }
 
                         if let Some(topic) = publish_governance_procedures_topic {
-                            let msg = Message::GovernanceProcedures(
-                                GovernanceProceduresMessage {
-                                    block: txs_msg.block.clone(),
-                                    voting_procedures,
-                                    proposal_procedures,
-                                });
-                            context.message_bus.publish(&topic, Arc::new(msg))
-                                .await
-                                .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+                            if !voting_procedures.is_empty() || !proposal_procedures.is_empty() || txs_msg.block.new_epoch {
+                                let msg = Message::GovernanceProcedures(
+                                    GovernanceProceduresMessage {
+                                        block: txs_msg.block.clone(),
+                                        voting_procedures,
+                                        proposal_procedures,
+                                    });
+                                context.message_bus.publish(&topic, Arc::new(msg))
+                                    .await
+                                    .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+                            }
                         }
                     }
 
