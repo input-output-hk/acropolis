@@ -117,10 +117,10 @@ impl MithrilSnapshotFetcher
             .build()?;
 
         // Find the latest snapshot
-        let snapshots = client.snapshot().list().await?;
+        let snapshots = client.cardano_database().list().await?;
         let latest_snapshot = snapshots.first()
             .ok_or(anyhow!("No snapshots available"))?;
-        let snapshot = client.snapshot().get(&latest_snapshot.digest)
+        let snapshot = client.cardano_database().get(&latest_snapshot.digest)
             .await?
             .ok_or(anyhow!("No snapshot for digest {}", latest_snapshot.digest))?;
         info!("Using Mithril snapshot {snapshot:?}");
@@ -134,11 +134,11 @@ impl MithrilSnapshotFetcher
         // Download the snapshot
         fs::create_dir_all(&directory)?;
         let dir = Path::new(&directory);
-        client.snapshot().download_unpack(&snapshot, &dir)
+        client.cardano_database().download_unpack(&snapshot, &dir)
             .await?;
 
         // Register download
-        if let Err(e) = client.snapshot().add_statistics(&snapshot).await {
+        if let Err(e) = client.cardano_database().add_statistics(&snapshot).await {
             error!("Could not increment snapshot download statistics: {:?}", e);
             // But that doesn't affect us...
         }

@@ -8,7 +8,6 @@ use acropolis_common::{
     messages::{GovernanceProceduresMessage, Message, TxCertificatesMessage, UTXODeltasMessage}, *,
 };
 
-use tokio::sync::Mutex;
 use anyhow::{anyhow, Result};
 use config::Config;
 use tracing::{debug, info, error};
