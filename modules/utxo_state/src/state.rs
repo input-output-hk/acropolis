@@ -636,7 +636,8 @@ mod tests {
             let mut balance = self.balance.lock().await;
             *balance += delta;
         }
-        async fn finalise_block(&self, _block: &BlockInfo, _next_sequence: Sequence) {
+
+        async fn finalise_block(&self, _block: &BlockInfo) {
 
         }
     }
