@@ -17,7 +17,7 @@ tokio = { version = "1", features = ["full"] }
 config = "0.15.11"
 tracing = "0.1.40"
 serde_json = "1.0.138"
-mithril-client = { version = "0.11.1", features = ["fs"] }
+mithril-client = { version = "0.12", features = ["fs"] }
 async-trait = "0.1.86"
 
 [build-dependencies]
