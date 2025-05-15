@@ -1,11 +1,5 @@
 # Acropolis architecture workspace root
 
-[patch.crates-io]
-caryatid_sdk = { path = "../caryatid/sdk" }
-caryatid_module_clock = { path = "../caryatid/modules/clock" }
-caryatid_module_rest_server = { path = "../caryatid/modules/rest_server" }
-caryatid_module_spy = { path = "../caryatid/modules/spy" }
-
 [workspace]
 members = [
     # Global message and common definitions
