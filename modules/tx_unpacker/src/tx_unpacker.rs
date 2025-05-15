@@ -5,7 +5,7 @@ use std::{collections::HashMap, sync::Arc, fs};
 use std::collections::HashSet;
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
 use acropolis_common::{
-    messages::{GovernanceProceduresMessage, Message, Sequence, TxCertificatesMessage, UTXODeltasMessage}, *,
+    messages::{GovernanceProceduresMessage, Message, TxCertificatesMessage, UTXODeltasMessage}, *,
 };
 
 use tokio::sync::Mutex;
@@ -22,9 +22,6 @@ use pallas::{
         traverse::{MultiEraCert, MultiEraTx},
     }
 };
-
-mod sender;
-use sender::Sender;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.txs";
 
@@ -619,10 +616,6 @@ impl TxUnpacker
         Ok(procs)
     }
 
-    fn sequence_with_prev_limit(s: &Sequence) -> Sequence {
-        Sequence { number: s.number, previous: if s.number > 1 { s.previous } else { None } }
-    }
-
     /// Main init function
     pub fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
 
@@ -652,43 +645,12 @@ impl TxUnpacker
             info!("Logging governance messages to '{gov_log_dir}'")
         }
 
-//        context.clone().message_bus.subscribe(&subscribe_topic, move |message: Arc<Message>| {
-//            let context = context.clone();
-//            let publish_utxo_deltas_topic = publish_utxo_deltas_topic.clone();
-//            let publish_certificates_topic = publish_certificates_topic.clone();
-//            let publish_governance_procedures_topic = publish_governance_procedures_topic.clone();
-
-        let utxo_sender = match publish_utxo_deltas_topic {
-            Some(topic) => Some(Arc::new(Mutex::new(Serialiser::new_from(Arc::new(Mutex::new(Sender::new(context.clone(), topic.clone(), Some(0), |sequence: &Sequence, data: &UTXODeltasMessage| {
-                let mut data = data.clone();
-                data.sequence = *sequence;
-                Message::UTXODeltas(data)
-            }))), module_path!(), Some(0))))),
-            None => None,
-        };
-
-        let cert_sender = match publish_certificates_topic {
-            Some(topic) => Some(Arc::new(Mutex::new(Serialiser::new_from(Arc::new(Mutex::new(Sender::new(context.clone(), topic.clone(), None, |sequence: &Sequence, data: &TxCertificatesMessage| {
-                let mut data = data.clone();
-                data.sequence = *sequence;
-                Message::TxCertificates(data)
-            }))), module_path!(), Some(0))))),
-            None => None,
-        };
-
-        let gov_sender = match publish_governance_procedures_topic {
-            Some(topic) => Some(Arc::new(Mutex::new(Serialiser::new_from(Arc::new(Mutex::new(Sender::new(context.clone(), topic.clone(), None, |sequence: &Sequence, data: &GovernanceProceduresMessage| {
-                let mut data = data.clone();
-                data.sequence = *sequence;
-                Message::GovernanceProcedures(data)
-            }))), module_path!(), None)))),
-            None => None,
-        };
-
         context.clone().message_bus.subscribe(&subscribe_topic, move |message: Arc<Message>| {
-            let utxo_sender = utxo_sender.clone();
-            let cert_sender = cert_sender.clone();
-            let gov_sender = gov_sender.clone();
+
+            let context = context.clone();
+            let publish_utxo_deltas_topic = publish_utxo_deltas_topic.clone();
+            let publish_certificates_topic = publish_certificates_topic.clone();
+            let publish_governance_procedures_topic = publish_governance_procedures_topic.clone();
             let governance_logs_dir = governance_logs_dir.clone();
 
             async move {
@@ -699,15 +661,10 @@ impl TxUnpacker
                                 txs_msg.txs.len(), txs_msg.block.slot);
                         }
 
-                        let mut governance_message = GovernanceProceduresMessage {
-                            sequence: Self::sequence_with_prev_limit(&txs_msg.sequence),
-                            block: txs_msg.block.clone(),
-                            voting_procedures: Vec::new(),
-                            proposal_procedures: Vec::new(),
-                        };
-
                         let mut deltas = Vec::new();
                         let mut certificates = Vec::new();
+                        let mut voting_procedures = Vec::new();
+                        let mut proposal_procedures = Vec::new();
 
                         for (tx_index, raw_tx) in txs_msg.txs.iter().enumerate() {
                             // Parse the tx
@@ -730,7 +687,7 @@ impl TxUnpacker
 
                                         if votes.is_some() || props.is_some() || txs_msg.block.new_epoch {
                                             if let Some(ref dir) = governance_logs_dir {
-                                                let filename = format!("{dir}/{:012}.json", txs_msg.sequence.number);
+                                                let filename = format!("{dir}/{:012}.json", txs_msg.block.epoch);
                                                 let data = match serde_json::to_string(&message) {
                                                     Ok(data) => data,
                                                     Err(e) => format!("Error serializing message to json: {e}")
@@ -747,7 +704,7 @@ impl TxUnpacker
                                            inputs.len(), outputs.len(), certs.len());
                                     }
 
-                                    if utxo_sender.is_some() {
+                                    if publish_utxo_deltas_topic.is_some() {
                                         // Add all the inputs
                                         for input in inputs {  // MultiEraInput
 
@@ -781,18 +738,18 @@ impl TxUnpacker
                                                             deltas.push(UTXODelta::Output(tx_output));
                                                         }
 
-                                                        Err(e) => 
+                                                        Err(e) =>
                                                             error!("Output {index} in tx ignored: {e}")
                                                     }
                                                 }
 
-                                                Err(e) => 
+                                                Err(e) =>
                                                     error!("Can't parse output {index} in tx: {e}")
                                             }
                                         }
                                     }
 
-                                    if cert_sender.is_some() {
+                                    if publish_certificates_topic.is_some() {
                                         for ( cert_index, cert) in certs.iter().enumerate() {
                                             match Self::map_certificate(&cert, tx_index, cert_index) {
                                                 Ok(tx_cert) => {
@@ -806,7 +763,7 @@ impl TxUnpacker
                                         }
                                     }
 
-                                    if gov_sender.is_some() {
+                                    if publish_governance_procedures_topic.is_some() {
                                         if let Some(pp) = props {
                                             // Nonempty set -- governance_message.proposal_procedures will not be empty
                                             let mut proc_id = GovActionId { transaction_id: tx.hash().to_vec(), action_index: 0 };
@@ -815,7 +772,7 @@ impl TxUnpacker
                                                 match proc_id.set_action_index(action_index)
                                                     .and_then (|proc_id| Self::map_governance_proposals_procedures(&proc_id, &pallas_governance_proposals))
                                                 {
-                                                    Ok(g) => governance_message.proposal_procedures.push(g),
+                                                    Ok(g) => proposal_procedures.push(g),
                                                     Err(e) => error!("Cannot decode governance proposal procedure {} idx {} in slot {}: {e}", proc_id, action_index, txs_msg.block.slot)
                                                 }
                                                 action_index += 1;
@@ -825,7 +782,7 @@ impl TxUnpacker
                                         if let Some(pallas_vp) = votes {
                                             // Nonempty set -- governance_message.voting_procedures will not be empty
                                             match Self::map_all_governance_voting_procedures(pallas_vp) {
-                                                Ok(vp) => governance_message.voting_procedures.push((tx.hash().to_vec(), vp)),
+                                                Ok(vp) => voting_procedures.push((tx.hash().to_vec(), vp)),
                                                 Err(e) => error!("Cannot decode governance voting procedures in slot {}: {e}", txs_msg.block.slot)
                                             }
                                         }
@@ -837,55 +794,39 @@ impl TxUnpacker
                             }
                         }
 
-                        match utxo_sender {
-                            Some(ref utxo_sender) => {
-                                if txs_msg.block.new_epoch || !deltas.is_empty() {
-                                    let data = UTXODeltasMessage {
-                                        sequence: txs_msg.sequence,
-                                        block: txs_msg.block.clone(),
-                                        deltas,
-                                    };
-                                    let _ = utxo_sender.lock().await.handle(txs_msg.sequence, &Some(data)).await;
-                                } else {
-                                    let _ = utxo_sender.lock().await.handle(txs_msg.sequence, &None).await;
-                                }
-                            },
-                            _ => (),
-                        };
+                        if let Some(topic) = publish_utxo_deltas_topic {
+                            let msg = Message::UTXODeltas(UTXODeltasMessage {
+                                block: txs_msg.block.clone(),
+                                deltas,
+                            });
 
-                        match cert_sender {
-                            Some(ref cert_sender) => {
-                                if txs_msg.block.new_epoch || !certificates.is_empty() {
-                                    let data = TxCertificatesMessage {
-                                        sequence: Sequence {
-                                            number: txs_msg.sequence.number,
-                                            previous: match txs_msg.sequence.number {
-                                                1 => None,
-                                                _ => txs_msg.sequence.previous,
-                                            },
-                                        },
-                                        block: txs_msg.block.clone(),
-                                        certificates,
-                                    };
-                                    let _ = cert_sender.lock().await.handle(txs_msg.sequence, &Some(data)).await;
-                                } else {
-                                    let _ = cert_sender.lock().await.handle(txs_msg.sequence, &None).await;
-                                }
-                            },
-                            _ => (),
-                        };
+                            context.message_bus.publish(&topic, Arc::new(msg))
+                                .await
+                                .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+                        }
 
-                        match gov_sender {
-                            Some(ref gov_sender) if txs_msg.sequence.number > 0 => {
-                                let message = if !governance_message.is_empty() { 
-                                    Some(governance_message)
-                                } else { 
-                                    None
-                                };
-                                let _ = gov_sender.lock().await.handle(txs_msg.sequence, &message).await;
-                            },
-                            _ => (),
-                        };
+                        if let Some(topic) = publish_certificates_topic {
+                            let msg = Message::TxCertificates(TxCertificatesMessage {
+                                block: txs_msg.block.clone(),
+                                certificates,
+                            });
+
+                            context.message_bus.publish(&topic, Arc::new(msg))
+                                .await
+                                .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+                        }
+
+                        if let Some(topic) = publish_governance_procedures_topic {
+                            let msg = Message::GovernanceProcedures(
+                                GovernanceProceduresMessage {
+                                    block: txs_msg.block.clone(),
+                                    voting_procedures,
+                                    proposal_procedures,
+                                });
+                            context.message_bus.publish(&topic, Arc::new(msg))
+                                .await
+                                .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+                        }
                     }
 
                     _ => error!("Unexpected message type: {message:?}")

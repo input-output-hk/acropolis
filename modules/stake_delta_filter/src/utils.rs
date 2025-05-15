@@ -108,7 +108,6 @@ pub enum CacheMode {
 //pub async fn process_message(cache: &PointerCache, delta: &AddressDeltasMessage, tracker: Option<&mut dyn PointerTracker>) -> Result<StakeAddressDeltasMessage> {
 pub async fn process_message(cache: &PointerCache, delta: &AddressDeltasMessage) -> Result<StakeAddressDeltasMessage> {
     let mut result = StakeAddressDeltasMessage {
-        sequence: delta.sequence,
         block: delta.block.clone(),
         deltas: Vec::new()
     };

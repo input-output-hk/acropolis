@@ -2,10 +2,9 @@
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use acropolis_common::{
-    SerialisedHandler,
     Address, BlockInfo, BlockStatus,
     TxInput, TxOutput, UTXODelta,
-    messages::{Sequence, UTXODeltasMessage},
+    messages::UTXODeltasMessage,
 };
 use tracing::{debug, info, error};
 use hex::encode;
@@ -75,8 +74,8 @@ pub trait AddressDeltaObserver: Send + Sync {
     /// Observe a delta
     async fn observe_delta(&self, address: &Address, delta: i64);
 
-    /// Finalise a block, with the given event sequence
-    async fn finalise_block(&self, block: &BlockInfo, sequence: Sequence);
+    /// Finalise a block
+    async fn finalise_block(&self, block: &BlockInfo);
 }
 
 /// Immutable UTXO store
@@ -181,7 +180,7 @@ impl State {
                         // Tell the observer to recredit it
                         if let Some(observer) = self.address_delta_observer.as_ref() {
                             observer.observe_delta(&utxo.address, utxo.value as i64).await;
-                        } 
+                        }
                     }
                 };
 
@@ -246,7 +245,7 @@ impl State {
         }
 
         Ok(())
-    } 
+    }
 
     /// Observe an output UXTO creation
     pub async fn observe_output(&mut self,  output: &TxOutput, block: &BlockInfo)
@@ -346,13 +345,9 @@ impl State {
         self.log_stats().await;
         Ok(())
     }
-}
-
-#[async_trait]
-impl SerialisedHandler<UTXODeltasMessage> for State {
 
     /// Handle a message
-    async fn handle(&mut self, _sequence: u64, deltas: &UTXODeltasMessage) -> Result<()> {
+    pub async fn handle(&mut self, deltas: &UTXODeltasMessage) -> Result<()> {
 
         // Start the block for observer
         if let Some(observer) = self.address_delta_observer.as_mut() {
@@ -368,7 +363,7 @@ impl SerialisedHandler<UTXODeltasMessage> for State {
            match delta {
                UTXODelta::Input(tx_input) => {
                    self.observe_input(&tx_input, &deltas.block).await?;
-               }, 
+               },
 
                UTXODelta::Output(tx_output) => {
                    self.observe_output(&tx_output, &deltas.block).await?;
@@ -380,7 +375,7 @@ impl SerialisedHandler<UTXODeltasMessage> for State {
 
         // End the block for observer
         if let Some(observer) = self.address_delta_observer.as_mut() {
-            observer.finalise_block(&deltas.block, deltas.sequence).await;
+            observer.finalise_block(&deltas.block).await;
         }
 
         Ok(())

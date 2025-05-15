@@ -3,7 +3,7 @@
 
 use std::{path::Path, sync::Arc};
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
-use acropolis_common::{messages::Message, AddressNetwork, Serialiser};
+use acropolis_common::{messages::Message, AddressNetwork};
 use anyhow::{anyhow, Result};
 use config::Config;
 use tokio::sync::Mutex;
@@ -132,23 +132,19 @@ impl StakeDeltaFilter {
 
         // State
         let state = Arc::new(Mutex::new(State::new(params.clone())));
-
-        let serialiser = Arc::new(Mutex::new(Serialiser::new(state.clone(), module_path!())));
-        let serialiser_tick = serialiser.clone();
-
-        let serialiser_delta = Arc::new(Mutex::new(Serialiser::new(state.clone(), module_path!())));
-        let serialiser_delta_tick = serialiser_delta.clone();
-        let state_t = state.clone();
+        let state_certs = state.clone();
+        let state_deltas = state.clone();
+        let state_tick = state.clone();
         let params_d = params.clone();
 
         info!("Creating subscriber on '{}'", params.tx_certificates_topic);
         params.context.clone().message_bus.subscribe(&params.tx_certificates_topic, move |message: Arc<Message>| {
-            let serialiser = serialiser.clone();
+            let state = state_certs.clone();
             async move {
                 match message.as_ref() {
                     Message::TxCertificates(tx_cert_msg) => {
-                        let mut serialiser = serialiser.lock().await;
-                        serialiser.handle(tx_cert_msg.sequence, tx_cert_msg)
+                        let mut state = state.lock().await;
+                        state.handle_certs(tx_cert_msg)
                             .await
                             .inspect_err(|e| error!("Messaging handling error: {e}"))
                             .ok();
@@ -161,13 +157,13 @@ impl StakeDeltaFilter {
 
         info!("Creating subscriber on '{}'", params.address_delta_topic);
         params.context.clone().message_bus.subscribe(&params.clone().address_delta_topic, move |message: Arc<Message>| {
-            let serialiser = serialiser_delta.clone();
+            let state = state_deltas.clone();
             let params = params_d.clone();
             async move {
                 match message.as_ref() {
-                    Message::AddressDeltas(delta) => {
-                        let mut serialiser = serialiser.lock().await;
-                        serialiser.handle(delta.sequence, delta)
+                    Message::AddressDeltas(deltas) => {
+                        let mut state = state.lock().await;
+                        state.handle_deltas(deltas)
                             .await
                             .inspect_err(|e| error!("Messaging handling error: {e}"))
                             .ok();
@@ -180,9 +176,7 @@ impl StakeDeltaFilter {
 
         // Ticker to log stats
         params.context.clone().message_bus.subscribe("clock.tick", move |message: Arc<Message>| {
-            let serialiser = serialiser_tick.clone();
-            let serialiser_delta = serialiser_delta_tick.clone();
-            let state = state_t.clone();
+            let state = state_tick.clone();
 
             async move {
                 if let Message::Clock(message) = message.as_ref() {
@@ -191,9 +185,6 @@ impl StakeDeltaFilter {
                             .await
                             .inspect_err(|e| error!("Tick error: {e}"))
                             .ok();
-
-                        serialiser.lock().await.tick();
-                        serialiser_delta.lock().await.tick();
                     }
                 }
             }
