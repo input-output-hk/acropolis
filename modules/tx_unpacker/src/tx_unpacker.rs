@@ -9,6 +9,7 @@ use acropolis_common::{
 };
 
 use anyhow::{anyhow, Result};
+use futures::future::join_all;
 use config::Config;
 use tracing::{debug, info, error};
 use pallas::{
@@ -793,15 +794,15 @@ impl TxUnpacker
                             }
                         }
 
+                        // Publish messages in parallel
+                        let mut futures = Vec::new();
                         if let Some(topic) = publish_utxo_deltas_topic {
                             let msg = Message::UTXODeltas(UTXODeltasMessage {
                                 block: txs_msg.block.clone(),
                                 deltas,
                             });
 
-                            context.message_bus.publish(&topic, Arc::new(msg))
-                                .await
-                                .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+                            futures.push(context.message_bus.publish(&topic, Arc::new(msg)));
                         }
 
                         if let Some(topic) = publish_certificates_topic {
@@ -810,24 +811,25 @@ impl TxUnpacker
                                 certificates,
                             });
 
-                            context.message_bus.publish(&topic, Arc::new(msg))
-                                .await
-                                .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+                            futures.push(context.message_bus.publish(&topic, Arc::new(msg)));
                         }
 
                         if let Some(topic) = publish_governance_procedures_topic {
-                            if !voting_procedures.is_empty() || !proposal_procedures.is_empty() || txs_msg.block.new_epoch {
-                                let msg = Message::GovernanceProcedures(
-                                    GovernanceProceduresMessage {
-                                        block: txs_msg.block.clone(),
-                                        voting_procedures,
-                                        proposal_procedures,
-                                    });
-                                context.message_bus.publish(&topic, Arc::new(msg))
-                                    .await
-                                    .unwrap_or_else(|e| error!("Failed to publish: {e}"));
-                            }
+                            let msg = Message::GovernanceProcedures(
+                                GovernanceProceduresMessage {
+                                    block: txs_msg.block.clone(),
+                                    voting_procedures,
+                                    proposal_procedures,
+                                });
+
+                            futures.push(context.message_bus.publish(&topic, Arc::new(msg)));
                         }
+
+                        join_all(futures)
+                            .await
+                            .into_iter()
+                            .filter_map(Result::err)
+                            .for_each(|e| error!("Failed to publish: {e}"));
                     }
 
                     _ => error!("Unexpected message type: {message:?}")
