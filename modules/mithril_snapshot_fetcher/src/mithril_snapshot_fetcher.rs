@@ -194,6 +194,13 @@ impl MithrilSnapshotFetcher
                         debug!(number, slot);
                     }
 
+                    // Skip EBBs
+                    match block {
+                        MultiEraBlock::EpochBoundary(_) => continue,
+                        _ => {}
+                    }
+
+                    // Error and ignore any out of sequence
                     if number <= last_block_number && last_block_number != 0 {
                         error!(number, last_block_number,
                             "Rewind of block number in Mithril! Skipped...");
