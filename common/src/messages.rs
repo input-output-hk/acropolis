@@ -109,12 +109,6 @@ pub struct GovernanceProceduresMessage {
     pub voting_procedures: Vec<(DataHash, VotingProcedures)>
 }
 
-impl GovernanceProceduresMessage {
-    pub fn is_empty(&self) -> bool {
-        self.proposal_procedures.is_empty() && self.voting_procedures.is_empty() && !self.block.new_epoch
-    }
-}
-
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DrepStakeDistributionMessage {
     // DRep stake distribution by ID
