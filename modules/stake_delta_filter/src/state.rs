@@ -88,15 +88,11 @@ pub struct State {
 
 impl State {
     pub async fn handle_deltas(&mut self, most_recent_delta: &AddressDeltasMessage) -> Result<()> {
-        //info!("New address delta message: {:?}", most_recent_delta);
-        if most_recent_delta.block.slot % 10000 == 0 {
-            info!("New address delta message: {}", most_recent_delta.block.slot);
-        }
         self.request_queue.push_back(most_recent_delta.clone());
 
         while let Some(delta) = self.request_queue.get(0) {
             match process_message(&self.pointer_cache, delta).await {
-                Err(e) => tracing::error!("Cannot decode and convert stake key for {most_recent_delta:?}: {e}"),
+                Err(e) => tracing::debug!("Cannot decode and convert stake key for {most_recent_delta:?}: {e}"),
                 Ok(r) => self.delta_publisher.publish(r).await?
             }
             self.request_queue.pop_front();

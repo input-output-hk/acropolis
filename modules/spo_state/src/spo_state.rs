@@ -5,7 +5,6 @@ use caryatid_sdk::{Context, Module, module, MessageBusExt};
 use acropolis_common::{
     messages::{Message, RESTResponse},
 };
-use std::ops::Deref;
 use std::sync::Arc;
 use anyhow::Result;
 use config::Config;
@@ -70,10 +69,13 @@ impl SPOState
                 let response = match message.as_ref() {
                     Message::RESTRequest(request) => {
                         info!("REST received {} {}", request.method, request.path);
-                        let state = state.lock().await;
-                        match serde_json::to_string(state.deref()) {
-                            Ok(body) => RESTResponse::with_json(200, &body),
-                            Err(error) => RESTResponse::with_text(500, &format!("{error:?}").to_string()),
+                        if let Some(state) = state.lock().await.current().clone() {
+                            match serde_json::to_string(state) {
+                                Ok(body) => RESTResponse::with_json(200, &body),
+                                Err(error) => RESTResponse::with_text(500, &format!("{error:?}").to_string()),
+                            }
+                        } else {
+                            RESTResponse::with_json(200, "{}")
                         }
                     },
                     _ => {

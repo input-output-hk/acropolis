@@ -5,6 +5,7 @@ use acropolis_common::{
     Address, BlockInfo, BlockStatus,
     TxInput, TxOutput, UTXODelta,
     messages::UTXODeltasMessage,
+    params::SECURITY_PARAMETER_K,
 };
 use tracing::{debug, info, error};
 use hex::encode;
@@ -12,8 +13,6 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use anyhow::Result;
 use crate::volatile_index::VolatileIndex;
-
-const SECURITY_PARAMETER_K: u64 = 2160;
 
 /// Key of ledger state store
 #[derive(Debug, Clone, Eq)]
