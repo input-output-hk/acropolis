@@ -5,6 +5,7 @@ use std::{collections::HashMap, sync::Arc, fs};
 use std::collections::HashSet;
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
 use acropolis_common::{
+    SingleVoterVotes,
     messages::{GovernanceProceduresMessage, Message, TxCertificatesMessage, UTXODeltasMessage}, *,
 };
 
@@ -598,8 +599,8 @@ impl TxUnpacker
         for (pallas_voter,pallas_pair) in vote_procs.iter() {
             let voter = Self::map_voter(pallas_voter);
 
-            if let Some(_x) = procs.votes.insert(voter.clone(), HashMap::new()) {
-                return Err(anyhow!("Duplicate voter {:?} in governance voting procedures: {:?}", voter, vote_procs));
+            if let Some(existing) = procs.votes.insert(voter.clone(), SingleVoterVotes::default()) {
+                return Err(anyhow!("Duplicate voter {:?} in governance voting procedures: {:?}, existing {existing:?}", voter, vote_procs));
             }
 
             let single_voter = procs.votes.get_mut(&voter)
@@ -608,7 +609,7 @@ impl TxUnpacker
             for (pallas_action_id, pallas_voting_procedure) in pallas_pair.iter() {
                 let action_id = Self::map_gov_action_id(pallas_action_id)?;
                 let vp = Self::map_single_governance_voting_procedure(&pallas_voting_procedure);
-                single_voter.insert(action_id, vp);
+                single_voter.voting_procedures.insert(action_id, vp);
             }
         }
 
@@ -766,15 +767,13 @@ impl TxUnpacker
                                         if let Some(pp) = props {
                                             // Nonempty set -- governance_message.proposal_procedures will not be empty
                                             let mut proc_id = GovActionId { transaction_id: tx.hash().to_vec(), action_index: 0 };
-                                            let mut action_index: usize = 0;
-                                            for pallas_governance_proposals in pp.iter() {
+                                            for (action_index, pallas_governance_proposals) in pp.iter().enumerate() {
                                                 match proc_id.set_action_index(action_index)
                                                     .and_then (|proc_id| Self::map_governance_proposals_procedures(&proc_id, &pallas_governance_proposals))
                                                 {
                                                     Ok(g) => proposal_procedures.push(g),
                                                     Err(e) => error!("Cannot decode governance proposal procedure {} idx {} in slot {}: {e}", proc_id, action_index, txs_msg.block.slot)
                                                 }
-                                                action_index += 1;
                                             }
                                         }
 
@@ -816,16 +815,39 @@ impl TxUnpacker
                         }
 
                         if let Some(topic) = publish_governance_procedures_topic {
-                            if !voting_procedures.is_empty() || !proposal_procedures.is_empty() || txs_msg.block.new_epoch {
-                                let msg = Message::GovernanceProcedures(
-                                    GovernanceProceduresMessage {
-                                        block: txs_msg.block.clone(),
-                                        voting_procedures,
-                                        proposal_procedures,
-                                    });
-                                context.message_bus.publish(&topic, Arc::new(msg))
-                                    .await
-                                    .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+                            let governance_empty = voting_procedures.is_empty() && proposal_procedures.is_empty() && !txs_msg.block.new_epoch;
+
+                            let governance_msg = Arc::new(Message::GovernanceProcedures(
+                                GovernanceProceduresMessage {
+                                    block: txs_msg.block.clone(),
+                                    voting_procedures,
+                                    proposal_procedures,
+                                }));
+
+                            context.message_bus.publish(&topic, governance_msg.clone())
+                                .await
+                                .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+
+                            if governance_empty {
+                                if let Some(ref dir) = governance_logs_dir {
+                                    let filename = format!("{dir}/gov_{:012}.json", txs_msg.block.number);
+                                    let data = match serde_json::to_string(&governance_msg) {
+                                        Ok(data) => data,
+                                        Err(e) => format!("Error serializing message to json: {e}")
+                                    };
+                                    if let Err(e) = fs::write(filename, data) {
+                                        error!("Error writing to file: {}", e);
+                                    }
+
+                                    let filename = format!("{dir}/src_{:012}.json", txs_msg.block.number);
+                                    let data = match serde_json::to_string(&message) {
+                                        Ok(data) => data,
+                                        Err(e) => format!("Error serializing message to json: {e}")
+                                    };
+                                    if let Err(e) = fs::write(filename, data) {
+                                        error!("Error writing to file: {}", e);
+                                    }
+                                }
                             }
                         }
                     }

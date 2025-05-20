@@ -62,6 +62,4 @@ mod tests {
         // Slot 98_272_003 maps to epoch 425
         assert_eq!(slot_to_epoch(98_272_003), 425);
     }
-  
-
 }

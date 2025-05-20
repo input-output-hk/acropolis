@@ -1,7 +1,7 @@
 # Top-level configuration for Acropolis omnibus process
 
 [module.playback]
-topic = "cardano.txs"
+topic = "cardano.governance"
 path = "governance-logs"
 
 [module.genesis-bootstrapper]

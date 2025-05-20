@@ -1,6 +1,6 @@
 //! Acropolis SPOState: State storage
 
-use std::{cmp::max, collections::HashMap};
+use std::{cmp::max, collections::{HashMap, VecDeque}};
 use anyhow::{anyhow, Result};
 use hex::ToHex;
 use tracing::{debug, error, info};
@@ -9,7 +9,7 @@ use acropolis_common::{
     rational_number::RationalNumber,
     ConwayGenesisParams, DRepCredential, DataHash, GovActionId, GovernanceAction,
     KeyHash, Lovelace, ProposalProcedure, ProtocolParamType, ProtocolParamUpdate,
-    Voter, VotingProcedure
+    SingleVoterVotes, Voter, VotingProcedure
 };
 
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
@@ -37,30 +37,13 @@ pub struct State {
     pub voting_state: VotingRegistrationState,
 
     drep_stake: HashMap<DRepCredential, Lovelace>,
-    pub sco_stake: HashMap<KeyHash, u64>
+    pub sco_stake: HashMap<KeyHash, u64>,
+
+    // governance waiting
+    pending_governance_actions: VecDeque<GovernanceProceduresMessage>
 }
 
 impl State {
-    pub async fn handle_genesis(&mut self, message: &GenesisCompleteMessage) -> Result<()> {
-        info!("Received genesis complete message; conway present = {}", message.conway_genesis.is_some());
-        self.conway = message.conway_genesis.clone();
-        Ok(())
-    }
-
-    pub async fn handle_governance(&mut self, msg: &GovernanceProceduresMessage) -> Result<()> {
-        if let Err(e) = self.handle_impl(msg).await {
-            error!("Error processing message {:?}: {}", msg, e)
-        }
-        Ok(())
-    }
-
-    pub async fn handle_drep_stake(&mut self, message: &DrepStakeDistributionMessage) -> Result<()> {
-        info!("Received drep stake distribution message: {} dreps", message.data.len());
-        self.drep_stake_messages_count += 1;
-        self.drep_stake = HashMap::from_iter(message.data.iter().cloned());
-        Ok(())
-    }
-
     pub fn new() -> Self {
         Self {
             proposal_count: 0,
@@ -76,11 +59,49 @@ impl State {
 
             drep_stake: HashMap::new(),
             sco_stake: HashMap::new(),
+            pending_governance_actions: VecDeque::new()
         }
+    }
+
+    pub async fn handle_genesis(&mut self, message: &GenesisCompleteMessage) -> Result<()> {
+        info!("Received genesis complete message; conway present = {}", message.conway_genesis.is_some());
+        self.conway = message.conway_genesis.clone();
+        self.replay_queue().await
+    }
+
+    pub async fn handle_governance(&mut self, new_msg: &GovernanceProceduresMessage) -> Result<()> {
+        self.pending_governance_actions.push_back(new_msg.clone());
+        if !self.is_initalized() {
+            tracing::warn!("Postponing message {:?}, module is not initalized yet", new_msg);
+            Ok(())
+        }
+        else {
+            self.replay_queue().await
+        }
+    }
+
+    async fn replay_queue(&mut self) -> Result<()> {
+        while let Some(pending_msg) = self.pending_governance_actions.pop_front() {
+            if let Err(e) = self.handle_impl(&pending_msg).await {
+                error!("Error processing message {:?}: {}", pending_msg, e)
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn handle_drep_stake(&mut self, message: &DrepStakeDistributionMessage) -> Result<()> {
+        info!("Received drep stake distribution message: {} dreps", message.data.len());
+        self.drep_stake_messages_count += 1;
+        self.drep_stake = HashMap::from_iter(message.data.iter().cloned());
+        Ok(())
     }
 
     pub fn get_conway_params(&self) -> Result<&ConwayGenesisParams> {
         self.conway.as_ref().ok_or_else(|| anyhow!("Conway parameters not available"))
+    }
+
+    fn is_initalized(&self) -> bool {
+        self.conway.is_some()
     }
 
     #[allow(dead_code)]
@@ -100,8 +121,8 @@ impl State {
         Ok(())
     }
 
-    fn insert_voting_procedure(&mut self, voter: &Voter, transaction: &DataHash, elementary_votes: &HashMap<GovActionId, VotingProcedure>) -> Result<()> {
-        for (action_id, procedure) in elementary_votes.iter() {
+    fn insert_voting_procedure(&mut self, voter: &Voter, transaction: &DataHash, voter_votes: &SingleVoterVotes) -> Result<()> {
+        for (action_id, procedure) in voter_votes.voting_procedures.iter() {
             let votes = self.votes.entry(action_id.clone()).or_insert_with(|| HashMap::new());
             if let Some((prev_trans, prev_vote)) = votes.insert(voter.clone(), (transaction.clone(), procedure.clone())) {
                 // Re-voting is allowed; new vote must be treated as the proper one, older is to be discarded.
@@ -360,7 +381,7 @@ impl State {
         Ok(())
     }
 
-    pub async fn handle_impl(&mut self, governance_message: &GovernanceProceduresMessage) -> Result<()> {
+    async fn handle_impl(&mut self, governance_message: &GovernanceProceduresMessage) -> Result<()> {
         if governance_message.block.new_epoch {
             debug!("Processing new epoch {}", governance_message.block.epoch);
             self.process_new_epoch(governance_message.block.epoch);
@@ -373,13 +394,13 @@ impl State {
             }
         }
         for (trans, vproc) in &governance_message.voting_procedures {
-            for (voter, elementary_votes) in vproc.votes.iter() {
-                if let Err(e) = self.insert_voting_procedure(voter, trans, elementary_votes) {
+            for (voter, voter_votes) in vproc.votes.iter() {
+                if let Err(e) = self.insert_voting_procedure(voter, trans, voter_votes) {
                     error!("Error handling governance voting block {}, trans {}: '{}'",
                         governance_message.block.number, trans.encode_hex::<String>(), e
                     );
                 }
-                self.votes_count += elementary_votes.len();
+                self.votes_count += voter_votes.voting_procedures.len();
             }
         }
         Ok(())
