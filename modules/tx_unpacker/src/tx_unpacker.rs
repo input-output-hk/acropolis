@@ -10,6 +10,7 @@ use acropolis_common::{
 };
 
 use anyhow::{anyhow, Result};
+use futures::future::join_all;
 use config::Config;
 use tracing::{debug, info, error};
 use pallas::{
@@ -684,19 +685,6 @@ impl TxUnpacker
                                         if let Some(ref p) = conway.transaction_body.proposal_procedures {
                                             props = Some(p);
                                         }
-
-                                        if votes.is_some() || props.is_some() || txs_msg.block.new_epoch {
-                                            if let Some(ref dir) = governance_logs_dir {
-                                                let filename = format!("{dir}/{:012}.json", txs_msg.block.epoch);
-                                                let data = match serde_json::to_string(&message) {
-                                                    Ok(data) => data,
-                                                    Err(e) => format!("Error serializing message to json: {e}")
-                                                };
-                                                if let Err(e) = fs::write(filename, data) {
-                                                    error!("Error writing to file: {}", e);
-                                                }
-                                            }
-                                        }
                                     }
 
                                     if tracing::enabled!(tracing::Level::DEBUG) {
@@ -792,15 +780,15 @@ impl TxUnpacker
                             }
                         }
 
+                        // Publish messages in parallel
+                        let mut futures = Vec::new();
                         if let Some(topic) = publish_utxo_deltas_topic {
                             let msg = Message::UTXODeltas(UTXODeltasMessage {
                                 block: txs_msg.block.clone(),
                                 deltas,
                             });
 
-                            context.message_bus.publish(&topic, Arc::new(msg))
-                                .await
-                                .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+                            futures.push(context.message_bus.publish(&topic, Arc::new(msg)));
                         }
 
                         if let Some(topic) = publish_certificates_topic {
@@ -809,9 +797,7 @@ impl TxUnpacker
                                 certificates,
                             });
 
-                            context.message_bus.publish(&topic, Arc::new(msg))
-                                .await
-                                .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+                            futures.push(context.message_bus.publish(&topic, Arc::new(msg)));
                         }
 
                         if let Some(topic) = publish_governance_procedures_topic {
@@ -824,11 +810,9 @@ impl TxUnpacker
                                     proposal_procedures,
                                 }));
 
-                            context.message_bus.publish(&topic, governance_msg.clone())
-                                .await
-                                .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+                            futures.push(context.message_bus.publish(&topic, governance_msg.clone()));
 
-                            if governance_empty {
+                            if !governance_empty {
                                 if let Some(ref dir) = governance_logs_dir {
                                     let filename = format!("{dir}/gov_{:012}.json", txs_msg.block.number);
                                     let data = match serde_json::to_string(&governance_msg) {
@@ -850,6 +834,12 @@ impl TxUnpacker
                                 }
                             }
                         }
+
+                        join_all(futures)
+                            .await
+                            .into_iter()
+                            .filter_map(Result::err)
+                            .for_each(|e| error!("Failed to publish: {e}"));
                     }
 
                     _ => error!("Unexpected message type: {message:?}")
