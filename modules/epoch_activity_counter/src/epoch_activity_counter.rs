@@ -54,9 +54,13 @@ impl EpochActivityCounter
         // TODO!  Handling rollbacks - delay by 'k' is an option
 
         // Handle block headers
+        let context_headers = context.clone();
         context.clone().message_bus.subscribe(&subscribe_headers_topic,
                                               move |message: Arc<Message>| {
             let state = state_headers.clone();
+            let publish_topic = publish_topic.clone();
+            let context = context_headers.clone();
+
             async move {
                 match message.as_ref() {
                     Message::BlockHeader(header_msg) => {
@@ -64,7 +68,10 @@ impl EpochActivityCounter
                         // End of epoch?
                         if header_msg.block.new_epoch {
                             let mut state = state.lock().await;
-                            state.end_epoch(&header_msg.block);
+                            let msg = state.end_epoch(&header_msg.block);
+                            context.message_bus.publish(&publish_topic, msg)
+                                .await
+                                .unwrap_or_else(|e| error!("Failed to publish: {e}"));
                         }
 
                         // Derive the variant from the era - just enough to make
