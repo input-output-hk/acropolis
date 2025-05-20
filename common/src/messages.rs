@@ -14,7 +14,7 @@ pub use caryatid_module_rest_server::messages::{
 };
 
 /// Block header message
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BlockHeaderMessage {
     /// Block info
     pub block: BlockInfo,
@@ -24,7 +24,7 @@ pub struct BlockHeaderMessage {
 }
 
 /// Block body message
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BlockBodyMessage {
     /// Block info
     pub block: BlockInfo,
@@ -34,14 +34,14 @@ pub struct BlockBodyMessage {
 }
 
 /// Snapshot completion message
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SnapshotCompleteMessage {
     /// Last block in snapshot data
     pub last_block: BlockInfo,
 }
 
 /// Transactions message
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RawTxsMessage {
     /// Block info
     pub block: BlockInfo,
@@ -51,14 +51,14 @@ pub struct RawTxsMessage {
 }
 
 /// Genesis completion message
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenesisCompleteMessage {
     // Conway genesis block
     pub conway_genesis: Option<ConwayGenesisParams>,
 }
 
 /// Message encapsulating multiple UTXO deltas, in order
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct UTXODeltasMessage {
     /// Block info
     pub block: BlockInfo,
@@ -68,7 +68,7 @@ pub struct UTXODeltasMessage {
 }
 
 /// Message encapsulating multiple transaction certificates, in order
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TxCertificatesMessage {
     /// Block info
     pub block: BlockInfo,
@@ -78,7 +78,7 @@ pub struct TxCertificatesMessage {
 }
 
 /// Address deltas message
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AddressDeltasMessage {
     /// Block info
     pub block: BlockInfo,
@@ -88,7 +88,7 @@ pub struct AddressDeltasMessage {
 }
 
 /// Stake address part of address deltas message
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StakeAddressDeltasMessage {
     /// Block info
     pub block: BlockInfo,
@@ -97,7 +97,7 @@ pub struct StakeAddressDeltasMessage {
     pub deltas: Vec<StakeAddressDelta>
 }
 
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GovernanceProceduresMessage {
     /// Block info
     pub block: BlockInfo,
@@ -109,7 +109,7 @@ pub struct GovernanceProceduresMessage {
     pub voting_procedures: Vec<(DataHash, VotingProcedures)>
 }
 
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DrepStakeDistributionMessage {
     // DRep stake distribution by ID
     pub data: Vec<(DRepCredential, Lovelace)>

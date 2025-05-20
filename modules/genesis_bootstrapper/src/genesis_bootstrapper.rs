@@ -9,7 +9,7 @@ use acropolis_common::{
     },
     Address, Anchor, BlockInfo, BlockStatus, ByronAddress,
     Committee, Constitution, ConwayGenesisParams, Credential,
-    DRepVotingThresholds, PoolVotingThresholds,
+    DRepVotingThresholds, Era, PoolVotingThresholds,
     TxOutput, UTXODelta,
 };
 use hex::decode;
@@ -178,7 +178,8 @@ impl GenesisBootstrapper
                             number: 0,
                             hash: Vec::new(),
                             epoch: 0,
-                            new_epoch: false
+                            new_epoch: false,
+                            era: Era::Byron,
                         },
                         deltas: Vec::new(),
                     };

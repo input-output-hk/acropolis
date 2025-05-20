@@ -6,7 +6,7 @@ use acropolis_common::{
     calculations::slot_to_epoch, messages::{
         BlockBodyMessage, BlockHeaderMessage, Message,
         SnapshotCompleteMessage
-    }, BlockInfo, BlockStatus
+    }, Era, BlockInfo, BlockStatus
 };
 use std::sync::Arc;
 use tokio::{join, sync::Mutex};
@@ -26,7 +26,7 @@ use std::path::Path;
 use std::thread::sleep;
 use std::time::Duration;
 use pallas::{
-    ledger::traverse::MultiEraBlock,
+    ledger::traverse::{Era as PallasEra, MultiEraBlock},
     storage::hardano,
 };
 
@@ -219,6 +219,16 @@ impl MithrilSnapshotFetcher
                         info!(epoch, number, slot, "New epoch");
                     }
 
+                    let era = match block.era() {
+                        PallasEra::Byron => Era::Byron,
+                        PallasEra::Shelley => Era::Shelley,
+                        PallasEra::Allegra => Era::Allegra,
+                        PallasEra::Mary => Era::Mary,
+                        PallasEra::Alonzo => Era::Alonzo,
+                        PallasEra::Babbage => Era::Babbage,
+                        _ => Era::Conway,
+                    };
+
                     let block_info = BlockInfo {
                         status: BlockStatus::Immutable,
                         slot,
@@ -226,6 +236,7 @@ impl MithrilSnapshotFetcher
                         hash: block.hash().to_vec(),
                         epoch,
                         new_epoch,
+                        era,
                     };
 
                     // Send the block header message

@@ -1,0 +1,96 @@
+//! Acropolis epoch activity counter module for Caryatid
+//! Unpacks block bodies to get transaction fees
+
+use caryatid_sdk::{Context, Module, module, MessageBusExt};
+use acropolis_common::{Era, messages::Message};
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use anyhow::Result;
+use config::Config;
+use tracing::{info, error};
+use pallas::ledger::traverse::MultiEraHeader;
+
+mod state;
+use state::State;
+
+const DEFAULT_SUBSCRIBE_HEADERS_TOPIC: &str = "cardano.block.header";
+const DEFAULT_SUBSCRIBE_FEES_TOPIC: &str = "cardano.fees";
+const DEFAULT_PUBLISH_TOPIC: &str = "cardano.epoch.activity";
+
+/// Epoch activity counter module
+#[module(
+    message_type(Message),
+    name = "epoch-activity-counter",
+    description = "Epoch activity counter"
+)]
+pub struct EpochActivityCounter;
+
+impl EpochActivityCounter
+{
+    /// Main init function
+    pub fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
+
+        // Get configuration
+        let subscribe_headers_topic = config.get_string("subscribe-headers-topic")
+            .unwrap_or(DEFAULT_SUBSCRIBE_HEADERS_TOPIC.to_string());
+        info!("Creating subscriber for headers on '{subscribe_headers_topic}'");
+
+        let subscribe_fees_topic = config.get_string("subscribe-fees-topic")
+            .unwrap_or(DEFAULT_SUBSCRIBE_FEES_TOPIC.to_string());
+        info!("Creating subscriber for fees on '{subscribe_fees_topic}'");
+
+        let publish_topic = config.get_string("publish-topic")
+            .unwrap_or(DEFAULT_PUBLISH_TOPIC.to_string());
+        info!("Publishing on '{publish_topic}'");
+
+        // Create state
+        let state = Arc::new(Mutex::new(State::new()));
+        let state_headers = state.clone();
+
+        // Handle block headers
+        context.clone().message_bus.subscribe(&subscribe_headers_topic,
+                                              move |message: Arc<Message>| {
+            let state = state_headers.clone();
+            async move {
+                match message.as_ref() {
+                    Message::BlockHeader(header_msg) => {
+
+                        // End of epoch?
+                        if header_msg.block.new_epoch {
+                            let mut state = state.lock().await;
+                            state.end_epoch(&header_msg.block);
+                        }
+
+                        // Derive the variant from the era - just enough to make
+                        // MultiEraHeader::decode() work.
+                        let variant = match header_msg.block.era {
+                            Era::Byron => 0,
+                            Era::Shelley => 1,
+                            Era::Allegra => 2,
+                            Era::Mary => 3,
+                            Era::Alonzo => 4,
+                            _ => 5,
+                        };
+
+                        // Parse the header - note we ignore the subtag because EBBs
+                        // are suppressed upstream
+                        match MultiEraHeader::decode(variant, None, &header_msg.raw) {
+                            Ok(header) => {
+                                if let Some(vrf_vkey) = header.vrf_vkey() {
+                                    let mut state = state.lock().await;
+                                    state.handle_mint(&header_msg.block, vrf_vkey);
+                                }
+                            }
+
+                            Err(e) => error!("Can't decode header {}: {e}", header_msg.block.slot)
+                        }
+                    }
+
+                    _ => error!("Unexpected message type: {message:?}")
+                }
+            }
+        })?;
+
+        Ok(())
+    }
+}
