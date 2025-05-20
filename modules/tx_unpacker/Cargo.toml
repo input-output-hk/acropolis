@@ -2,7 +2,7 @@
 
 [package]
 name = "acropolis_module_tx_unpacker"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 authors = ["Paul Clark <paul.clark@iohk.io>"]
 description = "Transaction unpacker Caryatid module for Acropolis"
