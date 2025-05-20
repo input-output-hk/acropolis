@@ -98,6 +98,15 @@ pub struct StakeAddressDeltasMessage {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BlockFeesMessage {
+    /// Block info
+    pub block: BlockInfo,
+
+    /// Total fees
+    pub total_fees: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GovernanceProceduresMessage {
     /// Block info
     pub block: BlockInfo,
@@ -138,6 +147,7 @@ pub enum Message {
     UTXODeltas(UTXODeltasMessage),             // UTXO deltas received
     TxCertificates(TxCertificatesMessage),     // Transaction certificates received
     AddressDeltas(AddressDeltasMessage),       // Address deltas received
+    BlockFees(BlockFeesMessage),               // Total fees for a block
     GovernanceProcedures(GovernanceProceduresMessage), // Governance procedures received
 
     // Stake distribution info

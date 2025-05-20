@@ -5,7 +5,9 @@ use std::{collections::HashMap, sync::Arc, fs};
 use std::collections::HashSet;
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
 use acropolis_common::{
-    messages::{GovernanceProceduresMessage, Message, TxCertificatesMessage, UTXODeltasMessage}, *,
+    messages::{GovernanceProceduresMessage, Message, TxCertificatesMessage, BlockFeesMessage,
+               UTXODeltasMessage},
+    *,
 };
 
 use anyhow::{anyhow, Result};
@@ -640,6 +642,11 @@ impl TxUnpacker
             info!("Publishing governance procedures on '{topic}'");
         }
 
+        let publish_fees_topic = config.get_string("publish-fees-topic").ok();
+        if let Some(ref topic) = publish_fees_topic {
+            info!("Publishing block fees on '{topic}'");
+        }
+
         let governance_logs_dir = config.get_string("governance-logs-dir").ok();
         if let Some(ref gov_log_dir) = governance_logs_dir {
             info!("Logging governance messages to '{gov_log_dir}'")
@@ -651,6 +658,7 @@ impl TxUnpacker
             let publish_utxo_deltas_topic = publish_utxo_deltas_topic.clone();
             let publish_certificates_topic = publish_certificates_topic.clone();
             let publish_governance_procedures_topic = publish_governance_procedures_topic.clone();
+            let publish_fees_topic = publish_fees_topic.clone();
             let governance_logs_dir = governance_logs_dir.clone();
 
             async move {
@@ -665,6 +673,7 @@ impl TxUnpacker
                         let mut certificates = Vec::new();
                         let mut voting_procedures = Vec::new();
                         let mut proposal_procedures = Vec::new();
+                        let mut total_fees: u64 = 0;
 
                         for (tx_index, raw_tx) in txs_msg.txs.iter().enumerate() {
                             // Parse the tx
@@ -787,6 +796,11 @@ impl TxUnpacker
                                             }
                                         }
                                     }
+
+                                    // Capture the fees
+                                    if let Some(fee) = tx.fee() {
+                                        total_fees += fee;
+                                    }
                                 },
 
                                 Err(e) => error!("Can't decode transaction in slot {}: {e}",
@@ -821,6 +835,15 @@ impl TxUnpacker
                                     voting_procedures,
                                     proposal_procedures,
                                 });
+
+                            futures.push(context.message_bus.publish(&topic, Arc::new(msg)));
+                        }
+
+                        if let Some(topic) = publish_fees_topic {
+                            let msg = Message::BlockFees(BlockFeesMessage {
+                                block: txs_msg.block.clone(),
+                                total_fees,
+                            });
 
                             futures.push(context.message_bus.publish(&topic, Arc::new(msg)));
                         }

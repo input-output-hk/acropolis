@@ -14,7 +14,7 @@ mod state;
 use state::State;
 
 const DEFAULT_SUBSCRIBE_HEADERS_TOPIC: &str = "cardano.block.header";
-const DEFAULT_SUBSCRIBE_FEES_TOPIC: &str = "cardano.fees";
+const DEFAULT_SUBSCRIBE_FEES_TOPIC: &str = "cardano.block.fees";
 const DEFAULT_PUBLISH_TOPIC: &str = "cardano.epoch.activity";
 
 /// Epoch activity counter module
@@ -46,6 +46,12 @@ impl EpochActivityCounter
         // Create state
         let state = Arc::new(Mutex::new(State::new()));
         let state_headers = state.clone();
+        let state_fees = state.clone();
+
+        // TODO!  Synchronisation between these two subscriptions - fees may be wrongly
+        // accounted to the next epoch if the order is wrong
+
+        // TODO!  Handling rollbacks - delay by 'k' is an option
 
         // Handle block headers
         context.clone().message_bus.subscribe(&subscribe_headers_topic,
@@ -84,6 +90,22 @@ impl EpochActivityCounter
 
                             Err(e) => error!("Can't decode header {}: {e}", header_msg.block.slot)
                         }
+                    }
+
+                    _ => error!("Unexpected message type: {message:?}")
+                }
+            }
+        })?;
+
+        // Handle block fees
+        context.clone().message_bus.subscribe(&subscribe_fees_topic,
+                                              move |message: Arc<Message>| {
+            let state = state_fees.clone();
+            async move {
+                match message.as_ref() {
+                    Message::BlockFees(fees_msg) => {
+                        let mut state = state.lock().await;
+                        state.handle_fees(&fees_msg.block, fees_msg.total_fees);
                     }
 
                     _ => error!("Unexpected message type: {message:?}")
