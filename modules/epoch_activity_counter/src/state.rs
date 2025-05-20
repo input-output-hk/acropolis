@@ -40,7 +40,7 @@ impl State {
 
     // Handle end of epoch, returns message to be published
     pub fn end_epoch(&mut self, block: &BlockInfo) -> Arc<Message> {
-        info!("End of epoch {} - {} total blocks, {} unique SPOs, total fees {}",
+        info!("End of epoch {} - {} total blocks, {} unique VRF keys, total fees {}",
               block.epoch-1, self.total_blocks, self.vrf_vkeys.len(),
               self.total_fees);
 
