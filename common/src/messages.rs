@@ -107,6 +107,22 @@ pub struct BlockFeesMessage {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct EpochActivityMessage {
+    /// Block info (first block in next epoch)
+    pub block: BlockInfo,
+
+    /// Total blocks in this epoch
+    pub total_blocks: usize,
+
+    /// Total fees in this epoch
+    pub total_fees: u64,
+
+    /// List of all VRF vkeys used on blocks (SPO indicator) and
+    /// number of blocks produced
+    pub vrf_vkeys: Vec<(Vec<u8>, usize)>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GovernanceProceduresMessage {
     /// Block info
     pub block: BlockInfo,
@@ -148,6 +164,7 @@ pub enum Message {
     TxCertificates(TxCertificatesMessage),     // Transaction certificates received
     AddressDeltas(AddressDeltasMessage),       // Address deltas received
     BlockFees(BlockFeesMessage),               // Total fees for a block
+    EpochActivity(EpochActivityMessage),       // Total fees and VRF keys for an epoch
     GovernanceProcedures(GovernanceProceduresMessage), // Governance procedures received
 
     // Stake distribution info
