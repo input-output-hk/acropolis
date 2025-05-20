@@ -30,6 +30,8 @@ address-delta-topic = "cardano.address.delta"
 
 [module.stake-delta-filter]
 
+[module.epoch-activity-counter]
+
 [module.clock]
 
 [module.rest-server]
