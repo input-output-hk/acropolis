@@ -6,7 +6,7 @@ use hex::ToHex;
 use tracing::{debug, error, info};
 use acropolis_common::{
     messages::{GovernanceProceduresMessage, DRepStakeDistributionMessage, GenesisCompleteMessage},
-    rational_number::RationalNumber,
+    rational_number::RationalNumber, BlockInfo,
     ConwayGenesisParams, DRepCredential, DataHash, GovActionId, GovernanceAction,
     KeyHash, Lovelace, ProposalProcedure, ProtocolParamType, ProtocolParamUpdate,
     SingleVoterVotes, Voter, VotingProcedure
@@ -40,7 +40,7 @@ pub struct State {
     pub spo_stake: HashMap<KeyHash, u64>,
 
     // governance actions arrived before blockchain parameters are known
-    pending_governance_actions: VecDeque<GovernanceProceduresMessage>
+    pending_governance_actions: VecDeque<(BlockInfo, GovernanceProceduresMessage)>
 }
 
 impl State {
@@ -71,8 +71,9 @@ impl State {
         self.replay_queue().await
     }
 
-    pub async fn handle_governance(&mut self, new_msg: &GovernanceProceduresMessage) -> Result<()> {
-        self.pending_governance_actions.push_back(new_msg.clone());
+    pub async fn handle_governance(&mut self, block: &BlockInfo,
+                                   new_msg: &GovernanceProceduresMessage) -> Result<()> {
+        self.pending_governance_actions.push_back((block.clone(), new_msg.clone()));
         if !self.is_initalized() {
             tracing::warn!("Postponing message {:?}, module is not initalized yet", new_msg);
             Ok(())
@@ -83,8 +84,8 @@ impl State {
     }
 
     async fn replay_queue(&mut self) -> Result<()> {
-        while let Some(pending_msg) = self.pending_governance_actions.pop_front() {
-            if let Err(e) = self.handle_impl(&pending_msg).await {
+        while let Some((block_info, pending_msg)) = self.pending_governance_actions.pop_front() {
+            if let Err(e) = self.handle_impl(&block_info, &pending_msg).await {
                 error!("Error processing message {:?}: {}", pending_msg, e)
             }
         }
@@ -420,15 +421,16 @@ impl State {
     }
 
     /// Implementation of new governance message processing handle
-    async fn handle_impl(&mut self, governance_message: &GovernanceProceduresMessage) -> Result<()> {
-        if governance_message.block.new_epoch {
-            debug!("Processing new epoch {}", governance_message.block.epoch);
-            self.process_new_epoch(governance_message.block.epoch);
+    async fn handle_impl(&mut self, block: &BlockInfo,
+                         governance_message: &GovernanceProceduresMessage) -> Result<()> {
+        if block.new_epoch {
+            debug!("Processing new epoch {}", block.epoch);
+            self.process_new_epoch(block.epoch);
         }
 
         for pproc in &governance_message.proposal_procedures {
             self.proposal_count += 1;
-            if let Err(e) = self.insert_proposal_procedure(governance_message.block.epoch, pproc) {
+            if let Err(e) = self.insert_proposal_procedure(block.epoch, pproc) {
                 error!("Error handling governance_message: '{}'", e);
             }
         }
@@ -436,7 +438,7 @@ impl State {
             for (voter, voter_votes) in vproc.votes.iter() {
                 if let Err(e) = self.insert_voting_procedure(voter, trans, voter_votes) {
                     error!("Error handling governance voting block {}, trans {}: '{}'",
-                        governance_message.block.number, trans.encode_hex::<String>(), e
+                        block.number, trans.encode_hex::<String>(), e
                     );
                 }
                 self.votes_count += voter_votes.voting_procedures.len();

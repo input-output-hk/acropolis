@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use caryatid_sdk::Context;
-use acropolis_common::{DRepCredential, Lovelace};
-use acropolis_common::messages::{DRepStakeDistributionMessage, Message};
+use acropolis_common::{DRepCredential, Lovelace, BlockInfo};
+use acropolis_common::messages::{DRepStakeDistributionMessage, Message, CardanoMessage};
 
 pub struct DRepVotingStakePublisher {
     /// Module context
@@ -16,11 +16,16 @@ impl DRepVotingStakePublisher {
         Self { context, topic }
     }
 
-    pub async fn publish_stake(&mut self, s: Vec<(DRepCredential, Lovelace)>) -> anyhow::Result<()> {
+    pub async fn publish_stake(&mut self, block: &BlockInfo,
+                               s: Vec<(DRepCredential, Lovelace)>) -> anyhow::Result<()> {
         self.context.message_bus.publish(
             &self.topic,
-            Arc::new(Message::DRepStakeDistribution(DRepStakeDistributionMessage {
-                data: s
-            }))).await
+            Arc::new(Message::Cardano((
+                block.clone(),
+                CardanoMessage::DRepStakeDistribution(DRepStakeDistributionMessage {
+                    data: s
+                })
+            )))
+        ).await
     }
 }
