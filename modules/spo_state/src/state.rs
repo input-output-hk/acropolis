@@ -197,15 +197,18 @@ mod tests {
 
     fn new_msg() -> TxCertificatesMessage {
         TxCertificatesMessage {
-            block: BlockInfo {
-                status: BlockStatus::Immutable,
-                slot: 0,
-                number: 0,
-                hash: Vec::<u8>::new(),
-                epoch: 0,
-                new_epoch: true,
-            },
             certificates: Vec::<TxCertificate>::new(),
+        }
+    }
+
+    fn new_block() -> BlockInfo {
+        BlockInfo {
+            status: BlockStatus::Immutable,
+            slot: 0,
+            number: 0,
+            hash: Vec::<u8>::new(),
+            epoch: 0,
+            new_epoch: true,
         }
     }
 
@@ -213,7 +216,8 @@ mod tests {
     async fn state_is_not_empty_after_handle() {
         let mut state = State::new();
         let msg = new_msg();
-        assert!(state.handle(&msg).is_ok());
+        let block = new_block();
+        assert!(state.handle(&block, &msg).is_ok());
         assert_eq!(1, state.history.len());
     }
 
@@ -235,7 +239,8 @@ mod tests {
             relays: vec![],
             pool_metadata: None,
         }));
-        assert!(state.handle(&msg).is_ok());
+        let block = new_block();
+        assert!(state.handle(&block, &msg).is_ok());
         let current = state.current();
         assert!(!current.is_none());
         if let Some(current) = current {
@@ -253,7 +258,8 @@ mod tests {
             operator: vec![0],
             epoch: 1,
         }));
-        assert!(state.handle(&msg).is_ok());
+        let block = new_block();
+        assert!(state.handle(&block, &msg).is_ok());
         let current = state.current();
         assert!(!current.is_none());
         if let Some(current) = current {
@@ -275,14 +281,15 @@ mod tests {
             operator: vec![0],
             epoch: 2,
         }));
-        assert!(state.handle(&msg).is_ok());
+        let mut block = new_block();
+        assert!(state.handle(&block, &msg).is_ok());
         let mut msg = new_msg();
-        msg.block.number = 1;
+        block.number = 1;
         msg.certificates.push(TxCertificate::PoolRetirement(PoolRetirement {
             operator: vec![1],
             epoch: 2,
         }));
-        assert!(state.handle(&msg).is_ok());
+        assert!(state.handle(&block, &msg).is_ok());
         let current = state.current();
         assert!(!current.is_none());
         if let Some(current) = current {
@@ -305,17 +312,18 @@ mod tests {
             operator: vec![0],
             epoch: 2,
         }));
-        assert!(state.handle(&msg).is_ok());
+        let mut block = new_block();
+        assert!(state.handle(&block, &msg).is_ok());
         let mut msg = new_msg();
-        msg.block.number = 1;
+        block.number = 1;
         msg.certificates.push(TxCertificate::PoolRetirement(PoolRetirement {
             operator: vec![1],
             epoch: 2,
         }));
-        assert!(state.handle(&msg).is_ok());
-        let mut msg = new_msg();
-        msg.block.number = 1;
-        assert!(state.handle(&msg).is_ok());
+        assert!(state.handle(&block, &msg).is_ok());
+        let msg = new_msg();
+        block.number = 1;
+        assert!(state.handle(&block, &msg).is_ok());
         let current = state.current();
         assert!(!current.is_none());
         if let Some(current) = current {
@@ -347,7 +355,8 @@ mod tests {
             relays: vec![],
             pool_metadata: None,
         }));
-        assert!(state.handle(&msg).is_ok());
+        let mut block = new_block();
+        assert!(state.handle(&block, &msg).is_ok());
         let current = state.current();
         assert!(!current.is_none());
         if let Some(current) = current {
@@ -356,16 +365,16 @@ mod tests {
             assert!(!spo.is_none());
         };
         let mut msg = new_msg();
-        msg.block.number = 1;
+        block.number = 1;
         msg.certificates.push(TxCertificate::PoolRetirement(PoolRetirement {
             operator: vec![0],
             epoch: 1,
         }));
-        assert!(state.handle(&msg).is_ok());
-        let mut msg = new_msg();
-        msg.block.number = 2;
-        msg.block.epoch = 1;
-        assert!(state.handle(&msg).is_ok());
+        assert!(state.handle(&block, &msg).is_ok());
+        let msg = new_msg();
+        block.number = 2;
+        block.epoch = 1;
+        assert!(state.handle(&block, &msg).is_ok());
         let current = state.current();
         assert!(!current.is_none());
         if let Some(current) = current {
@@ -391,7 +400,8 @@ mod tests {
             relays: vec![],
             pool_metadata: None,
         }));
-        assert!(state.handle(&msg).is_ok());
+        let mut block = new_block();
+        assert!(state.handle(&block, &msg).is_ok());
         println!("{}", serde_json::to_string_pretty(&state.history).unwrap());
         let current = state.current();
         assert!(!current.is_none());
@@ -401,26 +411,26 @@ mod tests {
             assert!(!spo.is_none());
         };
         let mut msg = new_msg();
-        msg.block.number = 1;
+        block.number = 1;
         msg.certificates.push(TxCertificate::PoolRetirement(PoolRetirement {
             operator: vec![0],
             epoch: 1,
         }));
-        assert!(state.handle(&msg).is_ok());
+        assert!(state.handle(&block, &msg).is_ok());
         println!("{}", serde_json::to_string_pretty(&state.history).unwrap());
-        let mut msg = new_msg();
-        msg.block.number = 2;
-        msg.block.epoch = 1;
-        assert!(state.handle(&msg).is_ok());
+        let msg = new_msg();
+        block.number = 2;
+        block.epoch = 1;
+        assert!(state.handle(&block, &msg).is_ok());
         println!("{}", serde_json::to_string_pretty(&state.history).unwrap());
         let current = state.current();
         assert!(!current.is_none());
         if let Some(current) = current {
             assert!(current.spos.is_empty());
         };
-        let mut msg = new_msg();
-        msg.block.number = 2;
-        assert!(state.handle(&msg).is_ok());
+        let msg = new_msg();
+        block.number = 2;
+        assert!(state.handle(&block, &msg).is_ok());
         println!("{}", serde_json::to_string_pretty(&state.history).unwrap());
         let current = state.current();
         assert!(!current.is_none());
