@@ -16,6 +16,7 @@ compose the Acropolis Architecture
   changes
 * [UTXO State](utxo_state) - watches UTXO changes and maintains a basic in-memory UTXO state
 * [SPO State](spo_state) - matches SPO registrations and retirements
+* [Epoch Activity Counter](epoch_activity_couinter) - counts fees and block production for rewards
 
 ## How to add a new module
 

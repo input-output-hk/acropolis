@@ -5,7 +5,7 @@ use caryatid_sdk::{Context, Module, module, MessageBusExt};
 use acropolis_common::{
     calculations::slot_to_epoch, messages::{
         BlockBodyMessage, BlockHeaderMessage, Message, CardanoMessage,
-    }, BlockInfo, BlockStatus
+    }, BlockInfo, BlockStatus, Era
 };
 use std::sync::Arc;
 use anyhow::{Result, anyhow};
@@ -131,7 +131,19 @@ impl UpstreamChainFetcher
                             if new_epoch {
                                 info!(epoch, number, slot, "New epoch");
                             }
-                                    // Construct message
+
+                            // Derive era from header - not complete but enough to drive
+                            // MultiEraHeader::decode() again at the receiver
+                            // TODO do this properly once we understand the values of the 'variant'
+                            // byte
+                            let era = match header {
+                                MultiEraHeader::EpochBoundary(_) => continue,  // Ignore EBBs
+                                MultiEraHeader::Byron(_) => Era::Byron,
+                                MultiEraHeader::ShelleyCompatible(_) => Era::Shelley,
+                                MultiEraHeader::BabbageCompatible(_) => Era::Babbage,
+                            };
+
+                            // Construct message
                             let block_info = BlockInfo {
                                 status: if rolled_back
                                             { BlockStatus::RolledBack }
@@ -142,6 +154,7 @@ impl UpstreamChainFetcher
                                 hash: hash.clone(),
                                 epoch,
                                 new_epoch,
+                                era,
                             };
                             let message = BlockHeaderMessage {
                                 raw: h.cbor

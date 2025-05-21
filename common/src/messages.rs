@@ -14,69 +14,88 @@ pub use caryatid_module_rest_server::messages::{
 };
 
 /// Block header message
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BlockHeaderMessage {
     /// Raw Data
     pub raw: Vec<u8>,
 }
 
 /// Block body message
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BlockBodyMessage {
     /// Raw Data
     pub raw: Vec<u8>,
 }
 
 /// Snapshot completion message
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SnapshotCompleteMessage {
     /// Last block in snapshot data
     pub last_block: BlockInfo,
 }
 
 /// Transactions message
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RawTxsMessage {
     /// Raw Data for each transaction
     pub txs: Vec<Vec<u8>>,
 }
 
 /// Genesis completion message
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenesisCompleteMessage {
     // Conway genesis block
     pub conway_genesis: Option<ConwayGenesisParams>,
 }
 
 /// Message encapsulating multiple UTXO deltas, in order
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct UTXODeltasMessage {
     /// Ordered set of deltas
     pub deltas: Vec<UTXODelta>
 }
 
 /// Message encapsulating multiple transaction certificates, in order
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TxCertificatesMessage {
     /// Ordered set of certificates
     pub certificates: Vec<TxCertificate>
 }
 
 /// Address deltas message
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AddressDeltasMessage {
     /// Set of deltas
     pub deltas: Vec<AddressDelta>
 }
 
 /// Stake address part of address deltas message
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StakeAddressDeltasMessage {
     /// Set of deltas
     pub deltas: Vec<StakeAddressDelta>
 }
 
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BlockFeesMessage {
+    /// Total fees
+    pub total_fees: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct EpochActivityMessage {
+    /// Total blocks in this epoch
+    pub total_blocks: usize,
+
+    /// Total fees in this epoch
+    pub total_fees: u64,
+
+    /// List of all VRF vkeys used on blocks (SPO indicator) and
+    /// number of blocks produced
+    pub vrf_vkeys: Vec<(Vec<u8>, usize)>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GovernanceProceduresMessage {
     /// Proposals
     pub proposal_procedures: Vec<ProposalProcedure>,
@@ -85,7 +104,7 @@ pub struct GovernanceProceduresMessage {
     pub voting_procedures: Vec<(DataHash, VotingProcedures)>
 }
 
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DRepStakeDistributionMessage {
     // DRep stake distribution by ID
     pub data: Vec<(DRepCredential, Lovelace)>
@@ -102,6 +121,8 @@ pub enum CardanoMessage {
     UTXODeltas(UTXODeltasMessage),             // UTXO deltas received
     TxCertificates(TxCertificatesMessage),     // Transaction certificates received
     AddressDeltas(AddressDeltasMessage),       // Address deltas received
+    BlockFees(BlockFeesMessage),               // Total fees in a block
+    EpochActivity(EpochActivityMessage),       // Total fees and VRF keys for an epoch
     GovernanceProcedures(GovernanceProceduresMessage), // Governance procedures received
 
     // Stake distribution info
