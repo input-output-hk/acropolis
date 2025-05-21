@@ -1,6 +1,7 @@
 //! Acropolis SPOState: State storage
 use acropolis_common::{
     messages::TxCertificatesMessage,
+    BlockInfo,
     PoolRegistration,
     TxCertificate,
     params::{SECURITY_PARAMETER_K, TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH,},
@@ -118,11 +119,12 @@ impl State {
         }
     }
 
-    pub fn handle(&mut self, tx_cert_msg: &TxCertificatesMessage) -> Result<()> {
-        let mut current = self.get_previous_state(tx_cert_msg.block.number);
-        current.block = tx_cert_msg.block.number;
-        if tx_cert_msg.block.epoch > current.epoch {
-            current.epoch = tx_cert_msg.block.epoch;
+    pub fn handle(&mut self, block: &BlockInfo,
+                  tx_cert_msg: &TxCertificatesMessage) -> Result<()> {
+        let mut current = self.get_previous_state(block.number);
+        current.block = block.number;
+        if block.epoch > current.epoch {
+            current.epoch = block.epoch;
             let deregistrations = current.pending_deregistrations.remove(&current.epoch);
             match deregistrations {
                 Some(deregistrations) => {

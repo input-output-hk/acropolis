@@ -5,8 +5,9 @@ use std::{collections::HashMap, sync::Arc, fs};
 use std::collections::HashSet;
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
 use acropolis_common::{
-    SingleVoterVotes,
-    messages::{GovernanceProceduresMessage, Message, TxCertificatesMessage, UTXODeltasMessage}, *,
+    messages::{GovernanceProceduresMessage, Message, CardanoMessage,
+               TxCertificatesMessage, UTXODeltasMessage},
+    *,
 };
 
 use anyhow::{anyhow, Result};
@@ -656,10 +657,10 @@ impl TxUnpacker
 
             async move {
                 match message.as_ref() {
-                    Message::ReceivedTxs(txs_msg) => {
+                    Message::Cardano((block, CardanoMessage::ReceivedTxs(txs_msg))) => {
                         if tracing::enabled!(tracing::Level::DEBUG) {
                             debug!("Received {} txs for slot {}",
-                                txs_msg.txs.len(), txs_msg.block.slot);
+                                txs_msg.txs.len(), block.slot);
                         }
 
                         let mut deltas = Vec::new();
@@ -760,7 +761,7 @@ impl TxUnpacker
                                                     .and_then (|proc_id| Self::map_governance_proposals_procedures(&proc_id, &pallas_governance_proposals))
                                                 {
                                                     Ok(g) => proposal_procedures.push(g),
-                                                    Err(e) => error!("Cannot decode governance proposal procedure {} idx {} in slot {}: {e}", proc_id, action_index, txs_msg.block.slot)
+                                                    Err(e) => error!("Cannot decode governance proposal procedure {} idx {} in slot {}: {e}", proc_id, action_index, block.slot)
                                                 }
                                             }
                                         }
@@ -769,53 +770,60 @@ impl TxUnpacker
                                             // Nonempty set -- governance_message.voting_procedures will not be empty
                                             match Self::map_all_governance_voting_procedures(pallas_vp) {
                                                 Ok(vp) => voting_procedures.push((tx.hash().to_vec(), vp)),
-                                                Err(e) => error!("Cannot decode governance voting procedures in slot {}: {e}", txs_msg.block.slot)
+                                                Err(e) => error!("Cannot decode governance voting procedures in slot {}: {e}", block.slot)
                                             }
                                         }
                                     }
                                 },
 
                                 Err(e) => error!("Can't decode transaction in slot {}: {e}",
-                                                 txs_msg.block.slot)
+                                                 block.slot)
                             }
                         }
 
                         // Publish messages in parallel
                         let mut futures = Vec::new();
                         if let Some(topic) = publish_utxo_deltas_topic {
-                            let msg = Message::UTXODeltas(UTXODeltasMessage {
-                                block: txs_msg.block.clone(),
-                                deltas,
-                            });
+                            let msg = Message::Cardano((
+                                block.clone(),
+                                CardanoMessage::UTXODeltas(UTXODeltasMessage {
+                                    deltas,
+                                })
+                            ));
 
                             futures.push(context.message_bus.publish(&topic, Arc::new(msg)));
                         }
 
                         if let Some(topic) = publish_certificates_topic {
-                            let msg = Message::TxCertificates(TxCertificatesMessage {
-                                block: txs_msg.block.clone(),
-                                certificates,
-                            });
+                            let msg = Message::Cardano((
+                                block.clone(),
+                                CardanoMessage::TxCertificates(TxCertificatesMessage {
+                                    certificates,
+                                })
+                            ));
 
                             futures.push(context.message_bus.publish(&topic, Arc::new(msg)));
                         }
 
                         if let Some(topic) = publish_governance_procedures_topic {
-                            let governance_empty = voting_procedures.is_empty() && proposal_procedures.is_empty() && !txs_msg.block.new_epoch;
+                            let governance_empty = voting_procedures.is_empty() && proposal_procedures.is_empty() && !block.new_epoch;
 
-                            let governance_msg = Arc::new(Message::GovernanceProcedures(
-                                GovernanceProceduresMessage {
-                                    block: txs_msg.block.clone(),
-                                    voting_procedures,
-                                    proposal_procedures,
-                                }));
+                            let governance_msg = Arc::new(Message::Cardano((
+                                block.clone(),
+                                CardanoMessage::GovernanceProcedures(
+                                    GovernanceProceduresMessage {
+                                        voting_procedures,
+                                        proposal_procedures,
+                                    })
+                            )));
 
-                            futures.push(context.message_bus.publish(&topic, governance_msg.clone()));
+                            futures.push(context.message_bus.publish(&topic,
+                                                                     governance_msg.clone()));
 
                             if !governance_empty {
                                 if let Some(ref dir) = governance_logs_dir {
-                                    let filename = format!("{dir}/gov_{:012}.json", txs_msg.block.number);
-                                    let data = match serde_json::to_string(&governance_msg) {
+                                    let filename = format!("{dir}/gov_{:012}.json", block.number);
+                                    let data = match serde_json::to_string(&*governance_msg) {
                                         Ok(data) => data,
                                         Err(e) => format!("Error serializing message to json: {e}")
                                     };
@@ -823,8 +831,8 @@ impl TxUnpacker
                                         error!("Error writing to file: {}", e);
                                     }
 
-                                    let filename = format!("{dir}/src_{:012}.json", txs_msg.block.number);
-                                    let data = match serde_json::to_string(&message) {
+                                    let filename = format!("{dir}/src_{:012}.json", block.number);
+                                    let data = match serde_json::to_string(&*message) {
                                         Ok(data) => data,
                                         Err(e) => format!("Error serializing message to json: {e}")
                                     };

@@ -2,7 +2,7 @@
 //! Accepts certificate events and derives the Governance State in memory
 
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
-use acropolis_common::messages::{Message, RESTResponse};
+use acropolis_common::messages::{Message, RESTResponse, CardanoMessage};
 use std::sync::Arc;
 use anyhow::{anyhow, Result};
 use config::Config;
@@ -86,9 +86,9 @@ impl GovernanceState
 
             async move {
                 match message.as_ref() {
-                    Message::GovernanceProcedures(msg) => {
+                    Message::Cardano((block_info, CardanoMessage::GovernanceProcedures(msg))) => {
                         let mut state = state.lock().await;
-                        state.handle_governance(msg)
+                        state.handle_governance(block_info, msg)
                             .await
                             .inspect_err(|e| error!("Messaging handling error: {e}"))
                             .ok();
@@ -105,7 +105,7 @@ impl GovernanceState
 
             async move {
                 match message.as_ref() {
-                    Message::DRepStakeDistribution(msg) => {
+                    Message::Cardano((_block_info, CardanoMessage::DRepStakeDistribution(msg))) => {
                         let mut state = state.lock().await;
                         state.handle_drep_stake(msg)
                             .await
@@ -124,7 +124,7 @@ impl GovernanceState
 
             async move {
                 match message.as_ref() {
-                    Message::GenesisComplete(msg) => {
+                    Message::Cardano((_block_info, CardanoMessage::GenesisComplete(msg))) => {
                         let mut state = state.lock().await;
                         state.handle_genesis(msg)
                             .await

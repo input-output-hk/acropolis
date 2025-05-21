@@ -2,7 +2,7 @@
 //! Unpacks block bodies into transactions
 
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
-use acropolis_common::messages::{RawTxsMessage, Message};
+use acropolis_common::messages::{RawTxsMessage, CardanoMessage, Message};
 use std::sync::Arc;
 use anyhow::Result;
 use config::Config;
@@ -42,7 +42,7 @@ impl BlockUnpacker
 
             async move {
                 match message.as_ref() {
-                    Message::BlockBody(body_msg) => {
+                    Message::Cardano((block_info, CardanoMessage::BlockBody(body_msg))) => {
                         // Parse the body
                         match MultiEraBlock::decode(&body_msg.raw) {
                             Ok(block) => {
@@ -59,17 +59,18 @@ impl BlockUnpacker
                                     .map(|tx| tx.encode()).collect();
 
                                 let tx_message = RawTxsMessage {
-                                    block: body_msg.block.clone(),
                                     txs
                                 };
-                                let message_enum = Message::ReceivedTxs(tx_message);
+                                let message_enum = Message::Cardano((
+                                    block_info.clone(),
+                                    CardanoMessage::ReceivedTxs(tx_message)));
                                 context.message_bus.publish(&publish_topic,
                                                             Arc::new(message_enum))
                                     .await
                                     .unwrap_or_else(|e| error!("Failed to publish: {e}"));
                             },
 
-                            Err(e) => error!("Can't decode block {}: {e}", body_msg.block.slot)
+                            Err(e) => error!("Can't decode block {}: {e}", block_info.number)
                         }
                     }
 

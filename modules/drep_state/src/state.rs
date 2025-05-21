@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use acropolis_common::{
     messages::TxCertificatesMessage,
-    TxCertificate,
+    TxCertificate, BlockInfo,
     Anchor, DRepCredential, Lovelace,
 };
 use anyhow::{anyhow, Result};
@@ -104,9 +104,10 @@ impl State {
         distribution
     }
 
-    pub async fn handle(&mut self, tx_cert_msg: &TxCertificatesMessage) -> Result<()> {
+    pub async fn handle(&mut self, block: &BlockInfo,
+                        tx_cert_msg: &TxCertificatesMessage) -> Result<()> {
         let mut changed = false;
-        let tx_slot = tx_cert_msg.block.slot;
+        let tx_slot = block.slot;
 
         for tx_cert in tx_cert_msg.certificates.iter() {
             match self.process_one_certificate(tx_cert) {
@@ -120,7 +121,7 @@ impl State {
             let d = self.new_drep_distribution();
             info!("New vote distribution at slot = {}: len = {}", tx_slot, d.len());
             if let Some(ref mut publisher) = self.drep_distribution_publisher {
-                if let Err(e) = publisher.publish_stake(d).await {
+                if let Err(e) = publisher.publish_stake(block, d).await {
                     tracing::error!("Error publishing drep voting stake distribution: {e}");
                 }
             }
