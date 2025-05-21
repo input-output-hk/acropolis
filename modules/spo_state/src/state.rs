@@ -177,6 +177,7 @@ mod tests {
     use super::*;
     use acropolis_common::{
         BlockInfo,
+        Era,
         BlockStatus,
         PoolRetirement,
         Ratio,
@@ -209,6 +210,7 @@ mod tests {
             hash: Vec::<u8>::new(),
             epoch: 0,
             new_epoch: true,
+            era: Era::Byron,
         }
     }
 

@@ -17,6 +17,7 @@ magic-number = 764824073
 [module.tx-unpacker]
 publish-utxo-deltas-topic = "cardano.utxo.deltas"
 publish-certificates-topic = "cardano.certificates"
+publish-fees-topic = "cardano.block.fees"
 
 [module.utxo-state]
 store = "memory" # "memory", "dashmap", "fjall", "fjall-async", "sled", "sled-async", "fake"
@@ -29,6 +30,8 @@ address-delta-topic = "cardano.address.delta"
 [module.governance-state]
 
 [module.stake-delta-filter]
+
+[module.epoch-activity-counter]
 
 [module.clock]
 

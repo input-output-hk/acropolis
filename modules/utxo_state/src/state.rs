@@ -385,7 +385,7 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acropolis_common::ByronAddress;
+    use acropolis_common::{ByronAddress, Era};
     use tokio::sync::Mutex;
     use crate::InMemoryImmutableUTXOStore;
     use config::Config;
@@ -405,6 +405,7 @@ mod tests {
             hash: vec!(),
             epoch: 99,
             new_epoch: false,
+            era: Era::Byron,
         }
     }
 
