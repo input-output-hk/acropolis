@@ -110,7 +110,7 @@ pub struct GovernanceProceduresMessage {
 }
 
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
-pub struct DrepStakeDistributionMessage {
+pub struct DRepStakeDistributionMessage {
     // DRep stake distribution by ID
     pub data: Vec<(DRepCredential, Lovelace)>
 }
@@ -141,7 +141,7 @@ pub enum Message {
     GovernanceProcedures(GovernanceProceduresMessage), // Governance procedures received
 
     // Stake distribution info
-    DrepStakeDistribution(DrepStakeDistributionMessage), // Info about drep stake
+    DRepStakeDistribution(DRepStakeDistributionMessage), // Info about drep stake
     StakeAddressDeltas(StakeAddressDeltasMessage),       // Stake part of address deltas
 }
 

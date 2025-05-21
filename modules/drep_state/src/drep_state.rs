@@ -10,15 +10,15 @@ use tracing::{error, info};
 use tokio::sync::Mutex;
 use acropolis_common::messages::RESTResponse;
 
-mod drep_voting_stake_publisher;
+mod drep_distribution_publisher;
 mod state;
 
 use state::State;
-use crate::drep_voting_stake_publisher::DrepVotingStakePublisher;
+use crate::drep_distribution_publisher::DRepDistributionPublisher;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.certificates";
 const DEFAULT_HANDLE_TOPIC: &str = "rest.get.drep-state.*";
-const DEFAULT_VOTING_STAKE_TOPIC: &str = "stake.voting.drep";
+const DEFAULT_DREP_DISTRIBUTION_TOPIC: &str = "cardano.drep.distribution";
 
 /// DRep State module
 #[module(
@@ -71,11 +71,11 @@ impl DRepState
             .unwrap_or(DEFAULT_HANDLE_TOPIC.to_string());
         info!("Creating request handler on '{handle_topic}'");
 
-        let drep_voting_stake_topic = config.get_string("publish-stake-voting-drep-topic")
-            .unwrap_or(DEFAULT_VOTING_STAKE_TOPIC.to_string());
-        info!("Creating request handler on '{drep_voting_stake_topic}'");
+        let drep_distribution_topic = config.get_string("publish-drep-distribution-topic")
+            .unwrap_or(DEFAULT_DREP_DISTRIBUTION_TOPIC.to_string());
+        info!("Creating request handler on '{drep_distribution_topic}'");
 
-        let publisher = DrepVotingStakePublisher::new(context.clone(), drep_voting_stake_topic);
+        let publisher = DRepDistributionPublisher::new(context.clone(), drep_distribution_topic);
         let state = Arc::new(Mutex::new(State::new(Some(publisher))));
         let state1 = state.clone();
         let state2 = state.clone();
