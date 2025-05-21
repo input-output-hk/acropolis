@@ -432,6 +432,7 @@ mod tests {
         };
         let msg = new_msg();
         block.number = 2;
+        block.epoch = 0;
         assert!(state.handle(&block, &msg).is_ok());
         println!("{}", serde_json::to_string_pretty(&state.history).unwrap());
         let current = state.current();
