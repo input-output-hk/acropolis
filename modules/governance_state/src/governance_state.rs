@@ -1,5 +1,5 @@
-//! Acropolis SPO state module for Caryatid
-//! Accepts certificate events and derives the SPO state in memory
+//! Acropolis Governance State module for Caryatid
+//! Accepts certificate events and derives the Governance State in memory
 
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
 use acropolis_common::messages::{Message, RESTResponse};
@@ -105,7 +105,7 @@ impl GovernanceState
 
             async move {
                 match message.as_ref() {
-                    Message::DrepStakeDistribution(msg) => {
+                    Message::DRepStakeDistribution(msg) => {
                         let mut state = state.lock().await;
                         state.handle_drep_stake(msg)
                             .await

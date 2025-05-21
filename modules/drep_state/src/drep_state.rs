@@ -14,7 +14,7 @@ mod drep_voting_stake_publisher;
 mod state;
 
 use state::State;
-use crate::drep_voting_stake_publisher::DrepVotingStakePublisher;
+use crate::drep_voting_stake_publisher::DRepVotingStakePublisher;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.certificates";
 const DEFAULT_HANDLE_TOPIC: &str = "rest.get.drep-state.*";
@@ -75,7 +75,7 @@ impl DRepState
             .unwrap_or(DEFAULT_VOTING_STAKE_TOPIC.to_string());
         info!("Creating request handler on '{drep_voting_stake_topic}'");
 
-        let publisher = DrepVotingStakePublisher::new(context.clone(), drep_voting_stake_topic);
+        let publisher = DRepVotingStakePublisher::new(context.clone(), drep_voting_stake_topic);
         let state = Arc::new(Mutex::new(State::new(Some(publisher))));
         let state1 = state.clone();
         let state2 = state.clone();
