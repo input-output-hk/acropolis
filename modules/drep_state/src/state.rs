@@ -9,7 +9,7 @@ use acropolis_common::{
 use anyhow::{anyhow, Result};
 use tracing::info;
 use serde_with::serde_as;
-use crate::{drep_voting_stake_publisher::DRepVotingStakePublisher};
+use crate::{drep_distribution_publisher::DRepDistributionPublisher};
 
 #[serde_as]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -28,15 +28,15 @@ pub struct State {
     certificate_info_update_slot: u64,
     dreps: HashMap::<DRepCredential, DRepRecord>,
 
-    drep_voting_stake_publisher: Option<DRepVotingStakePublisher>
+    drep_distribution_publisher: Option<DRepDistributionPublisher>
 }
 
 impl State {
-    pub fn new(drep_voting_stake_publisher: Option<DRepVotingStakePublisher>) -> Self {
+    pub fn new(drep_distribution_publisher: Option<DRepDistributionPublisher>) -> Self {
         Self {
             certificate_info_update_slot: 1,
             dreps: HashMap::new(),
-            drep_voting_stake_publisher
+            drep_distribution_publisher
         }
     }
 
@@ -99,7 +99,7 @@ impl State {
         Ok(())
     }
 
-    pub fn new_vote_distribution(&self) -> Vec<(DRepCredential, Lovelace)> {
+    pub fn new_drep_distribution(&self) -> Vec<(DRepCredential, Lovelace)> {
         let mut distribution = Vec::new();
         for (drep, drep_info) in self.dreps.iter() {
             distribution.push((drep.clone(), drep_info.deposit));
@@ -116,11 +116,12 @@ impl State {
             }
         }
 
-        if self.certificate_info_update_slot == tx_slot
-            && self.drep_voting_stake_publisher.is_some() {
-            let d = self.new_vote_distribution();
+        if self.certificate_info_update_slot == tx_slot && 
+            self.drep_distribution_publisher.is_some() 
+        {
+            let d = self.new_drep_distribution();
             info!("New vote distribution at slot = {}: len = {}", tx_slot, d.len());
-            if let Some(ref mut publisher) = self.drep_voting_stake_publisher {
+            if let Some(ref mut publisher) = self.drep_distribution_publisher {
                 if let Err(e) = publisher.publish_stake(d).await {
                     tracing::error!("Error publishing drep voting stake distribution: {e}");
                 }

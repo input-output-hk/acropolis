@@ -15,7 +15,7 @@ use state::State;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.governance";
 const DEFAULT_HANDLE_TOPIC: &str = "rest.get.governance-state.*";
-const DEFAULT_VOTING_STAKE_TOPIC: &str = "stake.voting.drep";
+const DEFAULT_VOTING_STAKE_TOPIC: &str = "cardano.voting.stake";
 const DEFAULT_GENESIS_COMPLETE_TOPIC: &str = "cardano.sequence.bootstrapped";
 
 /// SPO State module
