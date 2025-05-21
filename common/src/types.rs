@@ -788,8 +788,10 @@ pub struct Constitution {
     pub guardrail_script: Option<ScriptHash>,
 }
 
+#[serde_as]
 #[derive(Serialize, Debug, Deserialize, Clone)]
 pub struct Committee {
+    #[serde_as(as = "Vec<(_, _)>")]
     pub members: HashMap<CommitteeCredential, u64>,
     pub threshold: RationalNumber,
 }
@@ -811,16 +813,20 @@ pub struct HardForkInitiationAction {
     pub protocol_version: (u64, u64),
 }
 
+#[serde_as]
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TreasuryWithdrawalsAction {
+    #[serde_as(as = "Vec<(_, _)>")]
     pub rewards: HashMap<Vec<u8>, Lovelace>,
     pub script_hash: Option<Vec<u8>>,
 }
 
+#[serde_as]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct UpdateCommitteeAction {
     pub previous_action_id: Option<GovActionId>,
     pub removed_committee_members: HashSet<CommitteeCredential>,
+    #[serde_as(as = "Vec<(_, _)>")]
     pub new_committee_members: HashMap<CommitteeCredential, u64>,
     pub terms: UnitInterval,
 }
@@ -884,9 +890,18 @@ pub struct VotingProcedure {
     pub anchor: Option<Anchor>
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde_as]
+#[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SingleVoterVotes {
+    #[serde_as(as = "Vec<(_, _)>")]
+    pub voting_procedures: HashMap<GovActionId, VotingProcedure>
+}
+
+#[serde_as]
+#[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct VotingProcedures {
-    pub votes: HashMap <Voter, HashMap<GovActionId, VotingProcedure>>
+    #[serde_as(as = "Vec<(_, _)>")]
+    pub votes: HashMap <Voter, SingleVoterVotes>
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -967,4 +982,50 @@ pub enum TxCertificate {
 
     /// DRep update
     DRepUpdate(DRepUpdate),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use anyhow::Result;
+
+    fn make_committee_credential(addr_key_hash: bool, val: u8) -> CommitteeCredential {
+        if addr_key_hash {
+            Credential::AddrKeyHash(vec!(val))
+        }
+        else {
+            Credential::ScriptHash(vec!(val))
+        }
+    }
+
+    #[test]
+    fn governance_serialization_test() -> Result<()> {
+        let gov_action_id = GovActionId::default();
+
+        let mut voting = VotingProcedures::default();
+        voting.votes.insert(Voter::StakePoolKey(vec![1,2,3,4]), SingleVoterVotes::default());
+
+        let mut single_voter = SingleVoterVotes::default();
+        single_voter.voting_procedures.insert(gov_action_id.clone(), VotingProcedure { anchor: None, vote: Vote::Abstain });
+        voting.votes.insert(Voter::StakePoolKey(vec![1,2,3,4]), SingleVoterVotes::default());
+        println!("Json: {}", serde_json::to_string(&voting)?);
+
+        let gov_action = GovernanceAction::UpdateCommittee(UpdateCommitteeAction {
+            previous_action_id: None,
+            removed_committee_members: HashSet::from_iter(vec![make_committee_credential(true, 48), make_committee_credential(false, 12)].into_iter()),
+            new_committee_members: HashMap::from_iter(vec![(make_committee_credential(false, 87), 1234)].into_iter()),
+            terms: RationalNumber::from(1),
+        });
+
+        let proposal = ProposalProcedure {
+            deposit: 9876,
+            reward_account: vec![7,4,6,7],
+            gov_action_id,
+            gov_action,
+            anchor: Anchor { url: "some.url".to_owned(), data_hash: vec![2,3,4,5] }
+        };
+        println!("Json: {}", serde_json::to_string(&proposal)?);
+
+        Ok(())
+    }
 }

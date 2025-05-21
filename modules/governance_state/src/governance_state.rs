@@ -1,8 +1,8 @@
-//! Acropolis SPO state module for Caryatid
-//! Accepts certificate events and derives the SPO state in memory
+//! Acropolis Governance State module for Caryatid
+//! Accepts certificate events and derives the Governance State in memory
 
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
-use acropolis_common::messages::{Message, RESTResponse};
+use acropolis_common::messages::{Message, RESTResponse, CardanoMessage};
 use std::sync::Arc;
 use anyhow::{anyhow, Result};
 use config::Config;
@@ -15,7 +15,7 @@ use state::State;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.governance";
 const DEFAULT_HANDLE_TOPIC: &str = "rest.get.governance-state.*";
-const DEFAULT_VOTING_STAKE_TOPIC: &str = "stake.voting.drep";
+const DEFAULT_DREP_DISTRIBUTION_TOPIC: &str = "cardano.drep.distribution";
 const DEFAULT_GENESIS_COMPLETE_TOPIC: &str = "cardano.sequence.bootstrapped";
 
 /// SPO State module
@@ -65,9 +65,9 @@ impl GovernanceState
             .unwrap_or(DEFAULT_HANDLE_TOPIC.to_string());
         info!("Creating request handler on '{handle_topic}'");
 
-        let drep_voting_stake_topic = config.get_string("stake-voting-drep-topic")
-            .unwrap_or(DEFAULT_VOTING_STAKE_TOPIC.to_string());
-        info!("Creating request handler on '{drep_voting_stake_topic}'");
+        let drep_distribution_topic = config.get_string("stake-drep-distribution-topic")
+            .unwrap_or(DEFAULT_DREP_DISTRIBUTION_TOPIC.to_string());
+        info!("Creating request handler on '{drep_distribution_topic}'");
 
         let genesis_complete_topic = config.get_string("genesis-complete-topic")
             .unwrap_or(DEFAULT_GENESIS_COMPLETE_TOPIC.to_string());
@@ -86,9 +86,9 @@ impl GovernanceState
 
             async move {
                 match message.as_ref() {
-                    Message::GovernanceProcedures(msg) => {
+                    Message::Cardano((block_info, CardanoMessage::GovernanceProcedures(msg))) => {
                         let mut state = state.lock().await;
-                        state.handle_governance(msg)
+                        state.handle_governance(block_info, msg)
                             .await
                             .inspect_err(|e| error!("Messaging handling error: {e}"))
                             .ok();
@@ -100,12 +100,12 @@ impl GovernanceState
         })?;
 
         // Subscribe to drep stake distribution serializer
-        context.clone().message_bus.subscribe(&drep_voting_stake_topic, move |message: Arc<Message>| {
+        context.clone().message_bus.subscribe(&drep_distribution_topic, move |message: Arc<Message>| {
             let state = state_drep.clone();
 
             async move {
                 match message.as_ref() {
-                    Message::DrepStakeDistribution(msg) => {
+                    Message::Cardano((_block_info, CardanoMessage::DRepStakeDistribution(msg))) => {
                         let mut state = state.lock().await;
                         state.handle_drep_stake(msg)
                             .await
@@ -124,7 +124,7 @@ impl GovernanceState
 
             async move {
                 match message.as_ref() {
-                    Message::GenesisComplete(msg) => {
+                    Message::Cardano((_block_info, CardanoMessage::GenesisComplete(msg))) => {
                         let mut state = state.lock().await;
                         state.handle_genesis(msg)
                             .await
