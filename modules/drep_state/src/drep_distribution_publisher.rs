@@ -3,7 +3,7 @@ use caryatid_sdk::Context;
 use acropolis_common::{DRepCredential, Lovelace};
 use acropolis_common::messages::{DRepStakeDistributionMessage, Message};
 
-pub struct DRepVotingStakePublisher {
+pub struct DRepDistributionPublisher {
     /// Module context
     context: Arc<Context<Message>>,
 
@@ -11,7 +11,7 @@ pub struct DRepVotingStakePublisher {
     topic: String,
 }
 
-impl DRepVotingStakePublisher {
+impl DRepDistributionPublisher {
     pub fn new(context: Arc<Context<Message>>, topic: String) -> Self {
         Self { context, topic }
     }
