@@ -3,7 +3,7 @@
 
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
 use acropolis_common::{
-    messages::{Message, RESTResponse},
+    messages::{Message, CardanoMessage, RESTResponse},
 };
 
 use anyhow::{Result, anyhow};
@@ -102,9 +102,9 @@ impl UTXOState
             let state = state1.clone();
             async move {
                 match message.as_ref() {
-                    Message::UTXODeltas(deltas_msg) => {
+                    Message::Cardano((block, CardanoMessage::UTXODeltas(deltas_msg))) => {
                         let mut state = state.lock().await;
-                        state.handle(deltas_msg)
+                        state.handle(block, deltas_msg)
                             .await
                             .inspect_err(|e| error!("Messaging handling error: {e}"))
                             .ok();
