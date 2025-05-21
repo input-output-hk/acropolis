@@ -1,6 +1,6 @@
 //! Acropolis epoch activity counter: state storage
 
-use acropolis_common::{BlockInfo, messages::{Message, EpochActivityMessage}};
+use acropolis_common::{BlockInfo, messages::{Message, CardanoMessage, EpochActivityMessage}};
 use std::sync::Arc;
 use tracing::info;
 use std::collections::HashMap;
@@ -44,12 +44,14 @@ impl State {
               block.epoch-1, self.total_blocks, self.vrf_vkeys.len(),
               self.total_fees);
 
-        let message = Arc::new(Message::EpochActivity(EpochActivityMessage {
-            block: block.clone(),
-            total_blocks: self.total_blocks,
-            total_fees: self.total_fees,
-            vrf_vkeys: self.vrf_vkeys.drain().collect(),
-        }));
+        let message = Arc::new(Message::Cardano((
+            block.clone(),
+            CardanoMessage::EpochActivity(EpochActivityMessage {
+                total_blocks: self.total_blocks,
+                total_fees: self.total_fees,
+                vrf_vkeys: self.vrf_vkeys.drain().collect(),
+            }))
+        ));
 
         self.total_blocks = 0;
         self.total_fees = 0;
@@ -61,7 +63,7 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acropolis_common::{BlockStatus, Era, BlockInfo, messages::Message};
+    use acropolis_common::{BlockStatus, Era, BlockInfo, messages::{Message, CardanoMessage}};
 
     fn make_block(epoch: u64) -> BlockInfo {
         BlockInfo {
@@ -136,8 +138,8 @@ mod tests {
         // Check the message returned
         let msg = state.end_epoch(&block);
         match msg.as_ref() {
-            Message::EpochActivity(ea) => {
-                assert_eq!(ea.block.epoch, 101);
+            Message::Cardano((block, CardanoMessage::EpochActivity(ea))) => {
+                assert_eq!(block.epoch, 101);
                 assert_eq!(ea.total_blocks, 1);
                 assert_eq!(ea.total_fees, 123);
                 assert_eq!(ea.vrf_vkeys.len(), 1);

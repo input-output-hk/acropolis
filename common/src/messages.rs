@@ -16,9 +16,6 @@ pub use caryatid_module_rest_server::messages::{
 /// Block header message
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BlockHeaderMessage {
-    /// Block info
-    pub block: BlockInfo,
-
     /// Raw Data
     pub raw: Vec<u8>,
 }
@@ -26,9 +23,6 @@ pub struct BlockHeaderMessage {
 /// Block body message
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BlockBodyMessage {
-    /// Block info
-    pub block: BlockInfo,
-
     /// Raw Data
     pub raw: Vec<u8>,
 }
@@ -43,9 +37,6 @@ pub struct SnapshotCompleteMessage {
 /// Transactions message
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RawTxsMessage {
-    /// Block info
-    pub block: BlockInfo,
-
     /// Raw Data for each transaction
     pub txs: Vec<Vec<u8>>,
 }
@@ -60,9 +51,6 @@ pub struct GenesisCompleteMessage {
 /// Message encapsulating multiple UTXO deltas, in order
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct UTXODeltasMessage {
-    /// Block info
-    pub block: BlockInfo,
-
     /// Ordered set of deltas
     pub deltas: Vec<UTXODelta>
 }
@@ -70,9 +58,6 @@ pub struct UTXODeltasMessage {
 /// Message encapsulating multiple transaction certificates, in order
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TxCertificatesMessage {
-    /// Block info
-    pub block: BlockInfo,
-
     /// Ordered set of certificates
     pub certificates: Vec<TxCertificate>
 }
@@ -80,9 +65,6 @@ pub struct TxCertificatesMessage {
 /// Address deltas message
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AddressDeltasMessage {
-    /// Block info
-    pub block: BlockInfo,
-
     /// Set of deltas
     pub deltas: Vec<AddressDelta>
 }
@@ -90,27 +72,18 @@ pub struct AddressDeltasMessage {
 /// Stake address part of address deltas message
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StakeAddressDeltasMessage {
-    /// Block info
-    pub block: BlockInfo,
-
     /// Set of deltas
     pub deltas: Vec<StakeAddressDelta>
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BlockFeesMessage {
-    /// Block info
-    pub block: BlockInfo,
-
     /// Total fees
     pub total_fees: u64,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EpochActivityMessage {
-    /// Block info (first block in next epoch)
-    pub block: BlockInfo,
-
     /// Total blocks in this epoch
     pub total_blocks: usize,
 
@@ -124,9 +97,6 @@ pub struct EpochActivityMessage {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GovernanceProceduresMessage {
-    /// Block info
-    pub block: BlockInfo,
-
     /// Proposals
     pub proposal_procedures: Vec<ProposalProcedure>,
 
@@ -135,9 +105,29 @@ pub struct GovernanceProceduresMessage {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct DrepStakeDistributionMessage {
+pub struct DRepStakeDistributionMessage {
     // DRep stake distribution by ID
     pub data: Vec<(DRepCredential, Lovelace)>
+}
+
+/// Cardano message enum
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum CardanoMessage {
+    BlockHeader(BlockHeaderMessage),           // Block header available
+    BlockBody(BlockBodyMessage),               // Block body available
+    SnapshotComplete,                          // Mithril snapshot loaded
+    ReceivedTxs(RawTxsMessage),                // Transaction available
+    GenesisComplete(GenesisCompleteMessage),   // Genesis UTXOs done + genesis params
+    UTXODeltas(UTXODeltasMessage),             // UTXO deltas received
+    TxCertificates(TxCertificatesMessage),     // Transaction certificates received
+    AddressDeltas(AddressDeltasMessage),       // Address deltas received
+    BlockFees(BlockFeesMessage),               // Total fees in a block
+    EpochActivity(EpochActivityMessage),       // Total fees and VRF keys for an epoch
+    GovernanceProcedures(GovernanceProceduresMessage), // Governance procedures received
+
+    // Stake distribution info
+    DRepStakeDistribution(DRepStakeDistributionMessage), // Info about drep stake
+    StakeAddressDeltas(StakeAddressDeltasMessage),       // Stake part of address deltas
 }
 
 // === Global message enum ===
@@ -154,22 +144,8 @@ pub enum Message {
     RESTRequest(RESTRequest),                  // REST request
     RESTResponse(RESTResponse),                // REST response
 
-    // Cardano messages
-    BlockHeader(BlockHeaderMessage),           // Block header available
-    BlockBody(BlockBodyMessage),               // Block body available
-    SnapshotComplete(SnapshotCompleteMessage), // Mithril snapshot loaded
-    ReceivedTxs(RawTxsMessage),                // Transaction available
-    GenesisComplete(GenesisCompleteMessage),   // Genesis UTXOs done + genesis params
-    UTXODeltas(UTXODeltasMessage),             // UTXO deltas received
-    TxCertificates(TxCertificatesMessage),     // Transaction certificates received
-    AddressDeltas(AddressDeltasMessage),       // Address deltas received
-    BlockFees(BlockFeesMessage),               // Total fees for a block
-    EpochActivity(EpochActivityMessage),       // Total fees and VRF keys for an epoch
-    GovernanceProcedures(GovernanceProceduresMessage), // Governance procedures received
-
-    // Stake distribution info
-    DrepStakeDistribution(DrepStakeDistributionMessage), // Info about drep stake
-    StakeAddressDeltas(StakeAddressDeltasMessage),       // Stake part of address deltas
+    // Cardano messages with attached BlockInfo
+    Cardano((BlockInfo, CardanoMessage)),
 }
 
 impl Default for Message {

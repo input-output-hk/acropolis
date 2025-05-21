@@ -1,6 +1,7 @@
 use std::{cmp::max, collections::HashMap, fs::File, io::BufReader, io::Write, sync::Arc};
 use anyhow::{anyhow, Result};
-use acropolis_common::{Address, ShelleyAddressDelegationPart, ShelleyAddressPointer, StakeAddress, StakeAddressDelta};
+use acropolis_common::{Address, ShelleyAddressDelegationPart, ShelleyAddressPointer,
+                       StakeAddress, StakeAddressDelta};
 use acropolis_common::messages::{AddressDeltasMessage, StakeAddressDeltasMessage};
 use serde_with::serde_as;
 
@@ -106,9 +107,9 @@ pub enum CacheMode {
 //}
 
 //pub async fn process_message(cache: &PointerCache, delta: &AddressDeltasMessage, tracker: Option<&mut dyn PointerTracker>) -> Result<StakeAddressDeltasMessage> {
-pub async fn process_message(cache: &PointerCache, delta: &AddressDeltasMessage) -> Result<StakeAddressDeltasMessage> {
+pub async fn process_message(cache: &PointerCache, delta: &AddressDeltasMessage)
+                             -> Result<StakeAddressDeltasMessage> {
     let mut result = StakeAddressDeltasMessage {
-        block: delta.block.clone(),
         deltas: Vec::new()
     };
 

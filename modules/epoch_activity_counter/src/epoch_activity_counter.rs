@@ -2,7 +2,7 @@
 //! Unpacks block bodies to get transaction fees
 
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
-use acropolis_common::{Era, messages::Message};
+use acropolis_common::{Era, messages::{Message, CardanoMessage}};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use anyhow::Result;
@@ -63,12 +63,12 @@ impl EpochActivityCounter
 
             async move {
                 match message.as_ref() {
-                    Message::BlockHeader(header_msg) => {
+                    Message::Cardano((block, CardanoMessage::BlockHeader(header_msg))) => {
 
                         // End of epoch?
-                        if header_msg.block.new_epoch {
+                        if block.new_epoch {
                             let mut state = state.lock().await;
-                            let msg = state.end_epoch(&header_msg.block);
+                            let msg = state.end_epoch(&block);
                             context.message_bus.publish(&publish_topic, msg)
                                 .await
                                 .unwrap_or_else(|e| error!("Failed to publish: {e}"));
@@ -76,7 +76,7 @@ impl EpochActivityCounter
 
                         // Derive the variant from the era - just enough to make
                         // MultiEraHeader::decode() work.
-                        let variant = match header_msg.block.era {
+                        let variant = match block.era {
                             Era::Byron => 0,
                             Era::Shelley => 1,
                             Era::Allegra => 2,
@@ -91,11 +91,11 @@ impl EpochActivityCounter
                             Ok(header) => {
                                 if let Some(vrf_vkey) = header.vrf_vkey() {
                                     let mut state = state.lock().await;
-                                    state.handle_mint(&header_msg.block, vrf_vkey);
+                                    state.handle_mint(&block, vrf_vkey);
                                 }
                             }
 
-                            Err(e) => error!("Can't decode header {}: {e}", header_msg.block.slot)
+                            Err(e) => error!("Can't decode header {}: {e}", block.slot)
                         }
                     }
 
@@ -110,9 +110,9 @@ impl EpochActivityCounter
             let state = state_fees.clone();
             async move {
                 match message.as_ref() {
-                    Message::BlockFees(fees_msg) => {
+                    Message::Cardano((block, CardanoMessage::BlockFees(fees_msg))) => {
                         let mut state = state.lock().await;
-                        state.handle_fees(&fees_msg.block, fees_msg.total_fees);
+                        state.handle_fees(&block, fees_msg.total_fees);
                     }
 
                     _ => error!("Unexpected message type: {message:?}")

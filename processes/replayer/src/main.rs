@@ -54,11 +54,13 @@ fn setup_governance_replay(process: &mut dyn ModuleRegistry::<Message>) {
 
 #[tokio::main]
 pub async fn main() -> Result<()> {
-
     // Initialise tracing
     tracing_subscriber::fmt::init();
 
     info!("Acropolis omnibus process");
+
+    let mut args = env::args();
+    let _executable_name = args.next();
 
     // Read the config
     let config = Arc::new(Config::builder()
@@ -70,8 +72,6 @@ pub async fn main() -> Result<()> {
     // Create the process
     let mut process = Process::<Message>::create(config).await;
 
-    let mut args = env::args();
-    let _executable_name = args.next();
     if let Some(key) = args.next() {
         match key.as_str() {
             "--governance-collect" => setup_governance_collect(&mut process),

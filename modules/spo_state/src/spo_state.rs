@@ -3,7 +3,7 @@
 
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
 use acropolis_common::{
-    messages::{Message, RESTResponse},
+    messages::{Message, RESTResponse, CardanoMessage},
 };
 use std::sync::Arc;
 use anyhow::Result;
@@ -50,9 +50,9 @@ impl SPOState
             let state = state_subscribe.clone();
             async move {
                 match message.as_ref() {
-                    Message::TxCertificates(tx_cert_msg) => {
+                    Message::Cardano((block_info, CardanoMessage::TxCertificates(tx_cert_msg))) => {
                         let mut state = state.lock().await;
-                        state.handle(tx_cert_msg)
+                        state.handle(block_info, tx_cert_msg)
                             .inspect_err(|e| error!("Messaging handling error: {e}"))
                             .ok();
                     }
