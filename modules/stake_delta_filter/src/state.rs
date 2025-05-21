@@ -2,7 +2,8 @@
 
 use std::{collections::{HashMap, VecDeque}, fs, io::Write, sync::Arc};
 use acropolis_common::{
-    messages::{AddressDeltasMessage, Message, StakeAddressDeltasMessage, TxCertificatesMessage},
+    messages::{AddressDeltasMessage, Message, CardanoMessage,
+               StakeAddressDeltasMessage, TxCertificatesMessage},
     Address, BlockInfo, ShelleyAddressPointer, StakeAddress,
     StakeAddressPayload, StakeCredential, TxCertificate
 };
@@ -63,8 +64,12 @@ pub struct DeltaPublisher {
 impl DeltaPublisher {
     pub fn new (params: Arc<StakeDeltaFilterParams>) -> Self { Self { params } }
 
-    pub async fn publish(&self, message: StakeAddressDeltasMessage) -> Result<()> {
-        let packed_message = Arc::new(Message::StakeAddressDeltas(message));
+    pub async fn publish(&self, block: &BlockInfo, message: StakeAddressDeltasMessage)
+                         -> Result<()> {
+        let packed_message = Arc::new(Message::Cardano((
+            block.clone(),
+            CardanoMessage::StakeAddressDeltas(message)
+        )));
         let params = self.params.clone();
 
         tokio::spawn(async move {
@@ -81,31 +86,33 @@ pub struct State {
     pub correct_ptrs: PointerOccurrence,
     pub incorrect_ptrs: PointerOccurrence,
 
-    pub request_queue: VecDeque<AddressDeltasMessage>,
+    pub request_queue: VecDeque<(BlockInfo, AddressDeltasMessage)>,
     pub params: Arc<StakeDeltaFilterParams>,
     pub delta_publisher: DeltaPublisher
 }
 
 impl State {
-    pub async fn handle_deltas(&mut self, most_recent_delta: &AddressDeltasMessage) -> Result<()> {
-        self.request_queue.push_back(most_recent_delta.clone());
+    pub async fn handle_deltas(&mut self, block: &BlockInfo,
+                               most_recent_delta: &AddressDeltasMessage) -> Result<()> {
+        self.request_queue.push_back((block.clone(), most_recent_delta.clone()));
 
-        while let Some(delta) = self.request_queue.get(0) {
+        while let Some((block, delta)) = self.request_queue.get(0) {
             match process_message(&self.pointer_cache, delta).await {
                 Err(e) => tracing::debug!("Cannot decode and convert stake key for {most_recent_delta:?}: {e}"),
-                Ok(r) => self.delta_publisher.publish(r).await?
+                Ok(r) => self.delta_publisher.publish(block, r).await?
             }
             self.request_queue.pop_front();
         }
         Ok(())
     }
 
-    pub async fn handle_certs(&mut self, msg: &TxCertificatesMessage) -> Result<()> {
+    pub async fn handle_certs(&mut self, block: &BlockInfo, msg: &TxCertificatesMessage)
+                              -> Result<()> {
         for cert in msg.certificates.iter() {
             match cert {
                 TxCertificate::StakeRegistration(reg) => {
                     let ptr = ShelleyAddressPointer {
-                        slot: msg.block.slot,
+                        slot: block.slot,
                         tx_index: reg.tx_index,
                         cert_index: reg.cert_index,
                     };
@@ -119,7 +126,7 @@ impl State {
                     //info!("New pointer {:?}: points to stake {:?}", ptr, stake_address);
 
                     self.pointer_cache.pointer_map.insert(ptr, Address::Stake(stake_address));
-                    self.pointer_cache.update_max_slot(msg.block.slot);
+                    self.pointer_cache.update_max_slot(block.slot);
                 },
                 _ => ()
             }
