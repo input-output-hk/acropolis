@@ -9,7 +9,7 @@ use acropolis_common::{
 use anyhow::{anyhow, Result};
 use tracing::info;
 use serde_with::serde_as;
-use crate::{drep_voting_stake_publisher::DrepVotingStakePublisher};
+use crate::{drep_voting_stake_publisher::DRepVotingStakePublisher};
 
 #[serde_as]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -28,11 +28,11 @@ pub struct State {
     certificate_info_update_slot: u64,
     dreps: HashMap::<DRepCredential, DRepRecord>,
 
-    drep_voting_stake_publisher: Option<DrepVotingStakePublisher>
+    drep_voting_stake_publisher: Option<DRepVotingStakePublisher>
 }
 
 impl State {
-    pub fn new(drep_voting_stake_publisher: Option<DrepVotingStakePublisher>) -> Self {
+    pub fn new(drep_voting_stake_publisher: Option<DRepVotingStakePublisher>) -> Self {
         Self {
             certificate_info_update_slot: 1,
             dreps: HashMap::new(),

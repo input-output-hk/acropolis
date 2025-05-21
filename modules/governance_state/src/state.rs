@@ -5,7 +5,7 @@ use anyhow::{anyhow, Result};
 use hex::ToHex;
 use tracing::{debug, error, info};
 use acropolis_common::{
-    messages::{GovernanceProceduresMessage, DrepStakeDistributionMessage, GenesisCompleteMessage},
+    messages::{GovernanceProceduresMessage, DRepStakeDistributionMessage, GenesisCompleteMessage},
     rational_number::RationalNumber,
     ConwayGenesisParams, DRepCredential, DataHash, GovActionId, GovernanceAction,
     KeyHash, Lovelace, ProposalProcedure, ProtocolParamType, ProtocolParamUpdate,
@@ -37,9 +37,9 @@ pub struct State {
     pub voting_state: VotingRegistrationState,
 
     drep_stake: HashMap<DRepCredential, Lovelace>,
-    pub sco_stake: HashMap<KeyHash, u64>,
+    pub spo_stake: HashMap<KeyHash, u64>,
 
-    // governance waiting
+    // governance actions arrived before blockchain parameters are known
     pending_governance_actions: VecDeque<GovernanceProceduresMessage>
 }
 
@@ -58,13 +58,15 @@ impl State {
             voting_state: VotingRegistrationState::default(),
 
             drep_stake: HashMap::new(),
-            sco_stake: HashMap::new(),
+            spo_stake: HashMap::new(),
             pending_governance_actions: VecDeque::new()
         }
     }
 
     pub async fn handle_genesis(&mut self, message: &GenesisCompleteMessage) -> Result<()> {
-        info!("Received genesis complete message; conway present = {}", message.conway_genesis.is_some());
+        info!("Received genesis complete message; conway present = {}", 
+            message.conway_genesis.is_some()
+        );
         self.conway = message.conway_genesis.clone();
         self.replay_queue().await
     }
@@ -89,7 +91,7 @@ impl State {
         Ok(())
     }
 
-    pub async fn handle_drep_stake(&mut self, message: &DrepStakeDistributionMessage) -> Result<()> {
+    pub async fn handle_drep_stake(&mut self, message: &DRepStakeDistributionMessage) -> Result<()> {
         info!("Received drep stake distribution message: {} dreps", message.data.len());
         self.drep_stake_messages_count += 1;
         self.drep_stake = HashMap::from_iter(message.data.iter().cloned());
@@ -109,6 +111,7 @@ impl State {
         !self.conway.iter().any(|c| c.committee.is_empty())
     }
 
+    /// Update proposals memory cache
     fn insert_proposal_procedure(&mut self, epoch: u64, proc: &ProposalProcedure) -> Result<()> {
         self.action_proposal_count += 1;
         info!("Inserting proposal procedure: {:?}", proc);
@@ -121,11 +124,17 @@ impl State {
         Ok(())
     }
 
-    fn insert_voting_procedure(&mut self, voter: &Voter, transaction: &DataHash, voter_votes: &SingleVoterVotes) -> Result<()> {
+    /// Update votes memory cache
+    fn insert_voting_procedure(
+        &mut self, voter: &Voter, transaction: &DataHash, voter_votes: &SingleVoterVotes
+    ) -> Result<()> {
         for (action_id, procedure) in voter_votes.voting_procedures.iter() {
             let votes = self.votes.entry(action_id.clone()).or_insert_with(|| HashMap::new());
-            if let Some((prev_trans, prev_vote)) = votes.insert(voter.clone(), (transaction.clone(), procedure.clone())) {
-                // Re-voting is allowed; new vote must be treated as the proper one, older is to be discarded.
+            if let Some((prev_trans, prev_vote)) = 
+                votes.insert(voter.clone(), (transaction.clone(), procedure.clone())) 
+            {
+                // Re-voting is allowed; new vote must be treated as the proper one,
+                // older is to be discarded.
                 if tracing::enabled!(tracing::Level::DEBUG) {
                     debug!("Governance vote by {} for {} already registered! New: {:?}, old: {:?} from {}",
                         voter, action_id, procedure, prev_vote, prev_trans.encode_hex::<String>()
@@ -142,13 +151,17 @@ impl State {
         Ok((d, c))
     }
 
-    fn proportional_count(&self, pool: &RationalNumber, drep: &RationalNumber, comm: &RationalNumber) -> Result<(u64, u64, u64)> {
+    fn proportional_count(&self, pool: &RationalNumber, drep: &RationalNumber, comm: &RationalNumber) 
+        -> Result<(u64, u64, u64)> 
+    {
         let p = pool.proportion_of(self.voting_state.registered_spos)?.round_up();
         let (d,c) = self.proportional_count_drep_comm(drep, comm)?;
         Ok((p, d, c))
     }
 
-    fn full_count(&self, pool: &RationalNumber, drep: &RationalNumber, comm: &RationalNumber) -> Result<(u64, u64, u64)> {
+    fn full_count(&self, pool: &RationalNumber, drep: &RationalNumber, comm: &RationalNumber) 
+        -> Result<(u64, u64, u64)> 
+    {
         let p = pool.proportion_of(self.voting_state.total_spos)?.round_up();
         let (d,c) = self.proportional_count_drep_comm(drep, comm)?;
         Ok((p, d, c))
@@ -171,6 +184,8 @@ impl State {
         Self::upd(&mut c.min_fee_ref_script_cost_per_byte, &p.minfee_refscript_cost_per_byte)
     }
 
+    /// Returns protocol parameter types, needed to determine voting thresholds for
+    /// the parameter(s) updates.
     fn get_protocol_param_types(&self, p: &ProtocolParamUpdate) -> ProtocolParamType {
         let mut result = ProtocolParamType::none();
 
@@ -237,6 +252,9 @@ impl State {
         result
     }
 
+    /// Computes necessary votes count to accept proposal `pp`, according to
+    /// actual parameters. The result is triple of votes' thresholds (as fraction of the
+    /// total corresponding votes count): (Pool, DRep, Committee)
     fn get_action_thresholds(&self, pp: &ProposalProcedure, thresholds: &ConwayGenesisParams) -> Result<(u64, u64, u64)> {
         let d = &thresholds.d_rep_voting_thresholds;
         let p = &thresholds.pool_voting_thresholds;
@@ -259,9 +277,12 @@ impl State {
 
                 self.proportional_count(p_th, d_th, &c.threshold)
             },
-            GovernanceAction::HardForkInitiation(_) => self.full_count(&p.hard_fork_initiation, &d.hard_fork_initiation, &c.threshold),
-            GovernanceAction::TreasuryWithdrawals(_) => self.proportional_count(zero, &d.treasury_withdrawal, &c.threshold),
-            GovernanceAction::NoConfidence(_) => self.proportional_count(&p.motion_no_confidence.clone(), &d.motion_no_confidence.clone(), zero),
+            GovernanceAction::HardForkInitiation(_) => 
+                self.full_count(&p.hard_fork_initiation, &d.hard_fork_initiation, &c.threshold),
+            GovernanceAction::TreasuryWithdrawals(_) => 
+                self.proportional_count(zero, &d.treasury_withdrawal, &c.threshold),
+            GovernanceAction::NoConfidence(_) => 
+                self.proportional_count(&p.motion_no_confidence.clone(), &d.motion_no_confidence.clone(), zero),
             GovernanceAction::UpdateCommittee(_) => if thresholds.committee.is_empty() {
                 self.proportional_count(&p.committee_no_confidence, &d.committee_no_confidence, zero)
             }
@@ -273,8 +294,11 @@ impl State {
         }
     }
 
+    /// Checks whether action_id can be considered finally accepted
     fn is_finally_accepted(&self, action_id: &GovActionId) -> Result<bool> {
-        let (_epoch, proposal) = self.proposals.get(action_id).ok_or_else(|| anyhow!("action {} not found", action_id))?;
+        let (_epoch, proposal) = self.proposals.get(action_id).ok_or_else(
+            || anyhow!("action {} not found", action_id)
+        )?;
 
         let conway_params = match &self.conway {
             None => return Err(anyhow!("Conway params are not known, cannot count votes")),
@@ -286,15 +310,18 @@ impl State {
         Ok(d_act >= d && p_act >= p && c_act >= c)
     }
 
+    /// Distribute and return all rewards for cast votes (government action is expired/voted)
     fn return_rewards(&self, _votes: Option<&HashMap<Voter, (DataHash, VotingProcedure)>>) {
     }
 
+    /// Should be called when voting is over
     fn end_voting(&mut self, action_id: &GovActionId) {
         self.return_rewards(self.votes.get(&action_id));
         self.votes.remove(&action_id);
         self.proposals.remove(&action_id);
     }
 
+    /// Returns actual votes: (Pool votes, DRep votes, committee votes)
     fn get_actual_votes(&self, action_id: &GovActionId) -> (u64, u64, u64) {
         let (mut p, mut d, mut c) = (0, 0, 0);
         if let Some(all_votes) = self.votes.get(&action_id) {
@@ -302,15 +329,22 @@ impl State {
                 match voter {
                     Voter::ConstitutionalCommitteeKey(_) => c += 1,
                     Voter::ConstitutionalCommitteeScript(_) => c += 1,
-                    Voter::DRepKey(key) => { self.drep_stake.get(&DRepCredential::AddrKeyHash(key.clone())).inspect(|v| d += *v); }
-                    Voter::DRepScript(script) => { self.drep_stake.get(&DRepCredential::ScriptHash(script.clone())).inspect(|v| d += *v); }
-                    Voter::StakePoolKey(pool) => { self.sco_stake.get(pool).inspect(|v| p += *v); }
+                    Voter::DRepKey(key) => {
+                        self.drep_stake.get(&DRepCredential::AddrKeyHash(key.clone())).inspect(|v| d += *v);
+                    }
+                    Voter::DRepScript(script) => {
+                        self.drep_stake.get(&DRepCredential::ScriptHash(script.clone())).inspect(|v| d += *v);
+                    }
+                    Voter::StakePoolKey(pool) => {
+                        self.spo_stake.get(pool).inspect(|v| p += *v);
+                    }
                 }
             }
         }
         (p, d, c)
     }
 
+    /// Checks whether action is expired at the beginning of new_epoch
     fn is_expired(&self, new_epoch: u64, action_id: &GovActionId) -> Result<bool> {
         info!("Checking whether {} is expired at new epoch {}", action_id, new_epoch);
         let (proposal_epoch, _proposal) = self.proposals.get(action_id)
@@ -319,6 +353,7 @@ impl State {
         Ok(proposal_epoch + self.get_conway_params()?.gov_action_lifetime as u64 <= new_epoch)
     }
 
+    /// Checks and updates action_id state at the start of new_epoch
     fn process_one_proposal(&mut self, new_epoch: u64, action_id: &GovActionId) -> Result<()> {
         if self.is_finally_accepted(&action_id)? {
             self.end_voting(&action_id);
@@ -332,6 +367,7 @@ impl State {
         Ok(())
     }
 
+    /// Loops through all actions and checks their status for the new_epoch
     fn process_new_epoch(&mut self, new_epoch: u64) {
         let actions = self.proposals.keys().map(|a| a.clone()).collect::<Vec<_>>();
 
@@ -358,6 +394,7 @@ impl State {
         }
     }
 
+    /// Get list of actual voting proposals
     pub fn list_proposals(&self) -> Result<Vec<(GovActionId, ProposalProcedure)>> {
         let mut result = Vec::new();
         for (action, (_epoch, prop)) in self.proposals.iter() {
@@ -366,6 +403,7 @@ impl State {
         Ok(result)
     }
 
+    /// Get list of casted votes
     pub fn list_votes(&self) -> Result<Vec<(GovActionId, Voter, DataHash, VotingProcedure)>> {
         let mut result = Vec::new();
         for (action, all_votes) in self.votes.iter() {
@@ -381,6 +419,7 @@ impl State {
         Ok(())
     }
 
+    /// Implementation of new governance message processing handle
     async fn handle_impl(&mut self, governance_message: &GovernanceProceduresMessage) -> Result<()> {
         if governance_message.block.new_epoch {
             debug!("Processing new epoch {}", governance_message.block.epoch);
