@@ -52,7 +52,7 @@ impl State {
     }
 
     async fn log_stats(&self) {
-        info!(count = self.dreps.len(), "count");
+        info!(count = self.dreps.len());
     }
 
     pub async fn tick(&self) -> Result<()> {
@@ -68,7 +68,7 @@ impl State {
                 match self.dreps.get_mut(&reg.credential) {
                     Some(ref mut drep) => {
                         if reg.deposit != 0 {
-                            return Err(anyhow!("DRep registartion {:?}: replacement requires deposit = 0, instead of {}",
+                            return Err(anyhow!("DRep registration {:?}: replacement requires deposit = 0, instead of {}",
                                 reg.credential, reg.deposit
                             ));
                         } else {
@@ -80,13 +80,13 @@ impl State {
             },
             TxCertificate::DRepDeregistration(reg) => {
                 if self.dreps.remove(&reg.credential).is_none() {
-                    return Err(anyhow!("DRep registartion {:?}: internal error, credential not found", reg.credential))
+                    return Err(anyhow!("DRep registration {:?}: internal error, credential not found", reg.credential))
                 }
             },
             TxCertificate::DRepUpdate(reg) => {
                 match self.dreps.get_mut(&reg.credential) {
                     Some(ref mut drep) => drep.anchor = reg.anchor.clone(),
-                    None => { return Err(anyhow!("DRep registartion {:?}: internal error, credential not found", reg.credential)); }
+                    None => { return Err(anyhow!("DRep registration {:?}: internal error, credential not found", reg.credential)); }
                 }
             },
             _ => return Ok(false)
