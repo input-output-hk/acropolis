@@ -25,7 +25,6 @@ impl DRepRecord {
 }
 
 pub struct State {
-    certificate_info_update_slot: u64,
     dreps: HashMap::<DRepCredential, DRepRecord>,
 
     drep_distribution_publisher: Option<DRepDistributionPublisher>
@@ -34,7 +33,6 @@ pub struct State {
 impl State {
     pub fn new(drep_distribution_publisher: Option<DRepDistributionPublisher>) -> Self {
         Self {
-            certificate_info_update_slot: 1,
             dreps: HashMap::new(),
             drep_distribution_publisher
         }
@@ -64,15 +62,15 @@ impl State {
 }
 
 impl State {
-    fn process_one_certificate(&mut self, tx_cert: &TxCertificate, tx_slot: u64) -> Result<()> {
+    fn process_one_certificate(&mut self, tx_cert: &TxCertificate) -> Result<bool> {
         match tx_cert {
             TxCertificate::DRepRegistration(reg) => {
                 match self.dreps.get_mut(&reg.credential) {
                     Some(ref mut drep) => {
                         if reg.deposit != 0 {
                             return Err(anyhow!("DRep registartion {:?}: replacement requires deposit = 0, instead of {}",
-                                    reg.credential, reg.deposit
-                                ));
+                                reg.credential, reg.deposit
+                            ));
                         } else {
                             drep.anchor = reg.anchor.clone();
                         }
@@ -91,12 +89,11 @@ impl State {
                     None => { return Err(anyhow!("DRep registartion {:?}: internal error, credential not found", reg.credential)); }
                 }
             },
-            _ => return Ok(())
+            _ => return Ok(false)
         }
 
         // Fall through for all branches, where votes distribution had changed
-        self.certificate_info_update_slot = tx_slot;
-        Ok(())
+        Ok(true)
     }
 
     pub fn new_drep_distribution(&self) -> Vec<(DRepCredential, Lovelace)> {
@@ -108,16 +105,17 @@ impl State {
     }
 
     pub async fn handle(&mut self, tx_cert_msg: &TxCertificatesMessage) -> Result<()> {
+        let mut changed = false;
         let tx_slot = tx_cert_msg.block.slot;
 
         for tx_cert in tx_cert_msg.certificates.iter() {
-            if let Err(e) = self.process_one_certificate(tx_cert, tx_slot) {
-                tracing::error!("Error processing tx_cert {}", e);
+            match self.process_one_certificate(tx_cert) {
+                Err(e) => tracing::error!("Error processing tx_cert {}", e),
+                Ok(chg) => changed |= chg
             }
         }
 
-        if self.certificate_info_update_slot == tx_slot && 
-            self.drep_distribution_publisher.is_some() 
+        if changed && self.drep_distribution_publisher.is_some() 
         {
             let d = self.new_drep_distribution();
             info!("New vote distribution at slot = {}: len = {}", tx_slot, d.len());
@@ -146,7 +144,7 @@ mod tests {
             anchor: None
         });
         let mut state = State::new(None);
-        state.process_one_certificate(&tx_cert, 1).unwrap();
+        assert!(state.process_one_certificate(&tx_cert).unwrap());
         assert_eq!(state.get_count(), 1);
         let tx_cert_record = DRepRecord{ deposit: 500000000, anchor: None };
         assert_eq!(state.get_drep(&tx_cred).unwrap().deposit, tx_cert_record.deposit);
