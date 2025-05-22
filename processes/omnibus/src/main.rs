@@ -20,6 +20,7 @@ use acropolis_module_drep_state::DRepState;
 use acropolis_module_governance_state::GovernanceState;
 use acropolis_module_stake_delta_filter::StakeDeltaFilter;
 use acropolis_module_epoch_activity_counter::EpochActivityCounter;
+use acropolis_module_reward_state::RewardState;
 
 use caryatid_module_clock::Clock;
 use caryatid_module_rest_server::RESTServer;
@@ -56,6 +57,7 @@ pub async fn main() -> Result<()> {
     GovernanceState::register(&mut process);
     StakeDeltaFilter::register(&mut process);
     EpochActivityCounter::register(&mut process);
+    RewardState::register(&mut process);
 
     Clock::<Message>::register(&mut process);
     RESTServer::<Message>::register(&mut process);
