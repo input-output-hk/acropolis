@@ -1,12 +1,13 @@
 //! Acropolis SPOState: State storage
 use acropolis_common::{
-    messages::TxCertificatesMessage,
+    messages::{Message, CardanoMessage, TxCertificatesMessage, SPOStateMessage},
     BlockInfo,
     PoolRegistration,
     TxCertificate,
     params::{SECURITY_PARAMETER_K, TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH,},
 };
 use anyhow::Result;
+use std::sync::Arc;
 use imbl::HashMap;
 use tracing::{error, info};
 use serde::{Serializer, ser::SerializeMap};
@@ -61,11 +62,14 @@ impl BlockState {
     }
 }
 
+/// Overall module state
 pub struct State {
+    /// Volatile states, one per volatile block
     history: VecDeque<BlockState>,
 }
 
 impl State {
+    // Construct with optional publisher
     pub fn new() -> Self {
         Self {
             history: VecDeque::<BlockState>::new(),
@@ -119,12 +123,36 @@ impl State {
         }
     }
 
-    pub fn handle(&mut self, block: &BlockInfo,
-                  tx_cert_msg: &TxCertificatesMessage) -> Result<()> {
+    // Handle end of epoch, returns message to be published
+    pub fn end_epoch(&mut self, block: &BlockInfo) -> Arc<Message> {
+        let current = self.get_previous_state(block.number);
+        info!(epoch = block.epoch-1, spos = current.spos.len(), "End of epoch");
+
+        // Flatten into vector of registrations
+        let spos = current.spos.values().cloned().collect();
+
+        let message = Arc::new(Message::Cardano((
+            block.clone(),
+            CardanoMessage::SPOState(SPOStateMessage {
+                epoch: block.epoch-1,
+                spos,
+            })
+        )));
+
+        message
+    }
+
+    /// Handle TxCertificates with SPO registrations / de-registrations
+    pub fn handle_tx_certs(&mut self, block: &BlockInfo,
+                           tx_certs_msg: &TxCertificatesMessage) -> Result<()> {
         let mut current = self.get_previous_state(block.number);
         current.block = block.number;
+
+        // Handle end of epoch
         if block.epoch > current.epoch {
             current.epoch = block.epoch;
+
+            // Deregister any pending
             let deregistrations = current.pending_deregistrations.remove(&current.epoch);
             match deregistrations {
                 Some(deregistrations) => {
@@ -138,7 +166,9 @@ impl State {
                 None => (),
             };
         }
-        for tx_cert in tx_cert_msg.certificates.iter() {
+
+        // Handle certificates
+        for tx_cert in tx_certs_msg.certificates.iter() {
             match tx_cert {
                 TxCertificate::PoolRegistration(reg) => {
                     current.spos.insert(reg.operator.clone(), reg.clone());
@@ -162,6 +192,8 @@ impl State {
                 _ => ()
             }
         }
+
+        // Prune and add to state history
         if self.history.len() >= SECURITY_PARAMETER_K as usize {
             self.history.pop_front();
         }
@@ -219,7 +251,7 @@ mod tests {
         let mut state = State::new();
         let msg = new_msg();
         let block = new_block();
-        assert!(state.handle(&block, &msg).is_ok());
+        assert!(state.handle_tx_certs(&block, &msg).is_ok());
         assert_eq!(1, state.history.len());
     }
 
@@ -242,7 +274,7 @@ mod tests {
             pool_metadata: None,
         }));
         let block = new_block();
-        assert!(state.handle(&block, &msg).is_ok());
+        assert!(state.handle_tx_certs(&block, &msg).is_ok());
         let current = state.current();
         assert!(!current.is_none());
         if let Some(current) = current {
@@ -261,7 +293,7 @@ mod tests {
             epoch: 1,
         }));
         let block = new_block();
-        assert!(state.handle(&block, &msg).is_ok());
+        assert!(state.handle_tx_certs(&block, &msg).is_ok());
         let current = state.current();
         assert!(!current.is_none());
         if let Some(current) = current {
@@ -284,14 +316,14 @@ mod tests {
             epoch: 2,
         }));
         let mut block = new_block();
-        assert!(state.handle(&block, &msg).is_ok());
+        assert!(state.handle_tx_certs(&block, &msg).is_ok());
         let mut msg = new_msg();
         block.number = 1;
         msg.certificates.push(TxCertificate::PoolRetirement(PoolRetirement {
             operator: vec![1],
             epoch: 2,
         }));
-        assert!(state.handle(&block, &msg).is_ok());
+        assert!(state.handle_tx_certs(&block, &msg).is_ok());
         let current = state.current();
         assert!(!current.is_none());
         if let Some(current) = current {
@@ -315,17 +347,17 @@ mod tests {
             epoch: 2,
         }));
         let mut block = new_block();
-        assert!(state.handle(&block, &msg).is_ok());
+        assert!(state.handle_tx_certs(&block, &msg).is_ok());
         let mut msg = new_msg();
         block.number = 1;
         msg.certificates.push(TxCertificate::PoolRetirement(PoolRetirement {
             operator: vec![1],
             epoch: 2,
         }));
-        assert!(state.handle(&block, &msg).is_ok());
+        assert!(state.handle_tx_certs(&block, &msg).is_ok());
         let msg = new_msg();
         block.number = 1;
-        assert!(state.handle(&block, &msg).is_ok());
+        assert!(state.handle_tx_certs(&block, &msg).is_ok());
         let current = state.current();
         assert!(!current.is_none());
         if let Some(current) = current {
@@ -358,7 +390,7 @@ mod tests {
             pool_metadata: None,
         }));
         let mut block = new_block();
-        assert!(state.handle(&block, &msg).is_ok());
+        assert!(state.handle_tx_certs(&block, &msg).is_ok());
         let current = state.current();
         assert!(!current.is_none());
         if let Some(current) = current {
@@ -372,11 +404,11 @@ mod tests {
             operator: vec![0],
             epoch: 1,
         }));
-        assert!(state.handle(&block, &msg).is_ok());
+        assert!(state.handle_tx_certs(&block, &msg).is_ok());
         let msg = new_msg();
         block.number = 2;
         block.epoch = 1;
-        assert!(state.handle(&block, &msg).is_ok());
+        assert!(state.handle_tx_certs(&block, &msg).is_ok());
         let current = state.current();
         assert!(!current.is_none());
         if let Some(current) = current {
@@ -403,7 +435,7 @@ mod tests {
             pool_metadata: None,
         }));
         let mut block = new_block();
-        assert!(state.handle(&block, &msg).is_ok());
+        assert!(state.handle_tx_certs(&block, &msg).is_ok());
         println!("{}", serde_json::to_string_pretty(&state.history).unwrap());
         let current = state.current();
         assert!(!current.is_none());
@@ -418,12 +450,12 @@ mod tests {
             operator: vec![0],
             epoch: 1,
         }));
-        assert!(state.handle(&block, &msg).is_ok());
+        assert!(state.handle_tx_certs(&block, &msg).is_ok());
         println!("{}", serde_json::to_string_pretty(&state.history).unwrap());
         let msg = new_msg();
         block.number = 2;
         block.epoch = 1;
-        assert!(state.handle(&block, &msg).is_ok());
+        assert!(state.handle_tx_certs(&block, &msg).is_ok());
         println!("{}", serde_json::to_string_pretty(&state.history).unwrap());
         let current = state.current();
         assert!(!current.is_none());
@@ -433,7 +465,7 @@ mod tests {
         let msg = new_msg();
         block.number = 2;
         block.epoch = 0;
-        assert!(state.handle(&block, &msg).is_ok());
+        assert!(state.handle_tx_certs(&block, &msg).is_ok());
         println!("{}", serde_json::to_string_pretty(&state.history).unwrap());
         let current = state.current();
         assert!(!current.is_none());

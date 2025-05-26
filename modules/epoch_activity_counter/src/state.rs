@@ -47,6 +47,7 @@ impl State {
         let message = Arc::new(Message::Cardano((
             block.clone(),
             CardanoMessage::EpochActivity(EpochActivityMessage {
+                epoch: block.epoch-1,
                 total_blocks: self.total_blocks,
                 total_fees: self.total_fees,
                 vrf_vkeys: self.vrf_vkeys.drain().collect(),
@@ -140,6 +141,7 @@ mod tests {
         match msg.as_ref() {
             Message::Cardano((block, CardanoMessage::EpochActivity(ea))) => {
                 assert_eq!(block.epoch, 101);
+                assert_eq!(ea.epoch, 100);
                 assert_eq!(ea.total_blocks, 1);
                 assert_eq!(ea.total_fees, 123);
                 assert_eq!(ea.vrf_vkeys.len(), 1);
