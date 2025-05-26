@@ -82,8 +82,12 @@ pub struct BlockFeesMessage {
     pub total_fees: u64,
 }
 
+/// Epoch activity - sent at end of epoch
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EpochActivityMessage {
+    /// Epoch which has ended
+    pub epoch: u64,
+
     /// Total blocks in this epoch
     pub total_blocks: usize,
 
@@ -110,6 +114,16 @@ pub struct DRepStakeDistributionMessage {
     pub data: Vec<(DRepCredential, Lovelace)>
 }
 
+/// SPO state message
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SPOStateMessage {
+    /// Epoch which has ended
+    pub epoch: u64,
+
+    /// All active SPOs
+    pub spos: Vec<PoolRegistration>
+}
+
 /// Cardano message enum
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum CardanoMessage {
@@ -123,6 +137,7 @@ pub enum CardanoMessage {
     AddressDeltas(AddressDeltasMessage),       // Address deltas received
     BlockFees(BlockFeesMessage),               // Total fees in a block
     EpochActivity(EpochActivityMessage),       // Total fees and VRF keys for an epoch
+    SPOState(SPOStateMessage),                 // Active SPOs at epoch end
     GovernanceProcedures(GovernanceProceduresMessage), // Governance procedures received
 
     // Stake distribution info

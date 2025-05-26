@@ -73,7 +73,7 @@ impl DRepState
 
         let drep_distribution_topic = config.get_string("publish-drep-distribution-topic")
             .unwrap_or(DEFAULT_DREP_DISTRIBUTION_TOPIC.to_string());
-        info!("Creating request handler on '{drep_distribution_topic}'");
+        info!("Creating DRep distribution publisher on '{drep_distribution_topic}'");
 
         let publisher = DRepDistributionPublisher::new(context.clone(), drep_distribution_topic);
         let state = Arc::new(Mutex::new(State::new(Some(publisher))));
