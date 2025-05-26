@@ -2,14 +2,13 @@
 use acropolis_common::{
     messages::{EpochActivityMessage, SPOStateMessage, TxCertificatesMessage},
     BlockInfo, PoolRegistration, TxCertificate,
-    params::SECURITY_PARAMETER_K,
+    state_history::StateHistory,
 };
 use anyhow::Result;
 use imbl::HashMap;
 use tracing::{error, info};
 use serde::{Serializer, ser::SerializeMap};
 use serde_with::{serde_as, hex::Hex, SerializeAs, ser::SerializeAsWrap};
-use std::collections::VecDeque;
 
 struct HashMapSerial<KAs, VAs>(std::marker::PhantomData<(KAs, VAs)>);
 
@@ -35,11 +34,8 @@ where
 }
 
 #[serde_as]
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Default, Clone, serde::Serialize)]
 pub struct BlockState {
-    /// Block this state is for
-    block: u64,
-
     /// Epoch this state is for
     epoch: u64,
 
@@ -52,34 +48,23 @@ pub struct BlockState {
     rewards: HashMap<Vec::<u8>, u64>,
 }
 
-impl BlockState {
-    pub fn new() -> Self {
-        Self {
-            block: 0,
-            epoch: 0,
-            spos_by_vrf_key: HashMap::new(),
-            rewards: HashMap::new(),
-        }
-    }
-}
-
 pub struct State {
-    history: VecDeque<BlockState>,
+    history: StateHistory<BlockState>,
 }
 
 impl State {
     pub fn new() -> Self {
         Self {
-            history: VecDeque::<BlockState>::new(),
+            history: StateHistory::new(),
         }
     }
 
     pub fn current(&self) -> Option<&BlockState> {
-        self.history.back()
+        self.history.current()
     }
 
     pub fn get(&self, stake_key: &Vec<u8>) -> Option<&u64> {
-        if let Some(current) = self.current() {
+        if let Some(current) = self.history.current() {
             current.rewards.get(stake_key)
         } else {
             None
@@ -87,7 +72,7 @@ impl State {
     }
 
     async fn log_stats(&self) {
-        if let Some(current) = self.current() {
+        if let Some(current) = self.history.current() {
             info!(
                 num_rewards = current.rewards.keys().len(),
             );
@@ -101,32 +86,11 @@ impl State {
         Ok(())
     }
 
-    fn get_previous_state(&mut self, block_number: u64) -> BlockState {
-        loop {
-            match self.history.back() {
-                Some(state) => if state.block >= block_number {
-                    info!("Rolling back state for block {}", state.block);
-                    self.history.pop_back();
-                } else {
-                    break
-                },
-                _ => break
-            }
-        }
-        if let Some(current) = self.history.back() {
-            current.clone()
-        } else {
-            BlockState::new()
-        }
-    }
-
     /// Handle an EpochActivityMessage giving total fees and block counts by VRF key for
     /// the just-ended epoch
     pub fn handle_epoch_activity(&mut self, block: &BlockInfo,
                                  ea_msg: &EpochActivityMessage) -> Result<()> {
-        let mut current = self.get_previous_state(block.number);
-        // !TODO how do we manage rollbacks from two different sources!
-        //current.block = block.number;
+        let mut current = self.history.get_current_state();
         current.epoch = ea_msg.epoch;
 
         // Look up every VRF key in the SPO map
@@ -140,10 +104,7 @@ impl State {
             }
         }
 
-        if self.history.len() >= SECURITY_PARAMETER_K as usize {
-            self.history.pop_front();
-        }
-        self.history.push_back(current);
+        self.history.commit(block, current);
 
         Ok(())
     }
@@ -152,8 +113,7 @@ impl State {
     /// epoch
     pub fn handle_spo_state(&mut self, block: &BlockInfo,
                             spo_msg: &SPOStateMessage) -> Result<()> {
-        let mut current = self.get_previous_state(block.number);
-        // !TODO current.block = block.number;
+        let mut current = self.history.get_current_state();
         current.epoch = spo_msg.epoch;
 
         // Capture current SPOs, mapped by VRF vkey hash
@@ -162,10 +122,7 @@ impl State {
             .map(|spo| (spo.vrf_key_hash.clone(), spo))
             .collect();
 
-        if self.history.len() >= SECURITY_PARAMETER_K as usize {
-            self.history.pop_front();
-        }
-        self.history.push_back(current);
+        self.history.commit(block, current);
 
         Ok(())
     }
@@ -173,8 +130,8 @@ impl State {
     /// Handle TxCertificates with stake delegations
     pub fn handle_tx_certificates(&mut self, block: &BlockInfo,
                                   tx_certs_msg: &TxCertificatesMessage) -> Result<()> {
-        let mut current = self.get_previous_state(block.number);
-        current.block = block.number;
+        // Handle rollback here
+        let mut current = self.history.get_rolled_back_state(block);
 
         // Handle certificates
         for tx_cert in tx_certs_msg.certificates.iter() {
@@ -189,11 +146,7 @@ impl State {
             }
         }
 
-        // Prune and add to state history
-        if self.history.len() >= SECURITY_PARAMETER_K as usize {
-            self.history.pop_front();
-        }
-        self.history.push_back(current);
+        self.history.commit(block, current);
 
         Ok(())
     }
