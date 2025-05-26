@@ -1,7 +1,7 @@
 //! Acropolis RewardState: State storage
 use acropolis_common::{
-    messages::EpochActivityMessage,
-    BlockInfo,
+    messages::{EpochActivityMessage, SPOStateMessage, TxCertificatesMessage},
+    BlockInfo, PoolRegistration, TxCertificate,
     params::SECURITY_PARAMETER_K,
 };
 use anyhow::Result;
@@ -37,20 +37,28 @@ where
 #[serde_as]
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct BlockState {
+    /// Block this state is for
     block: u64,
 
+    /// Epoch this state is for
     epoch: u64,
 
+    /// Map of active SPOs by VRF vkey
+    #[serde_as(as = "HashMapSerial<Hex, _>")]
+    spos_by_vrf_key: HashMap<Vec::<u8>, PoolRegistration>,
+
+    /// Map of reward values by staking address
     #[serde_as(as = "HashMapSerial<Hex, _>")]
     rewards: HashMap<Vec::<u8>, u64>,
 }
 
 impl BlockState {
-    pub fn new(block: u64, epoch: u64, rewards: HashMap<Vec::<u8>, u64>) -> Self {
+    pub fn new() -> Self {
         Self {
-            block,
-            epoch,
-            rewards,
+            block: 0,
+            epoch: 0,
+            spos_by_vrf_key: HashMap::new(),
+            rewards: HashMap::new(),
         }
     }
 }
@@ -108,18 +116,80 @@ impl State {
         if let Some(current) = self.history.back() {
             current.clone()
         } else {
-            BlockState::new(0, 0, HashMap::new())
+            BlockState::new()
         }
     }
 
+    /// Handle an EpochActivityMessage giving total fees and block counts by VRF key for
+    /// the just-ended epoch
     pub fn handle_epoch_activity(&mut self, block: &BlockInfo,
-                                ea_msg: &EpochActivityMessage) -> Result<()> {
+                                 ea_msg: &EpochActivityMessage) -> Result<()> {
         let mut current = self.get_previous_state(block.number);
-        current.block = block.number;
-        if block.epoch > current.epoch {
-            current.epoch = block.epoch;
+        // !TODO how do we manage rollbacks from two different sources!
+        //current.block = block.number;
+        current.epoch = ea_msg.epoch;
+
+        // Look up every VRF key in the SPO map
+        for (vrf_vkey_hash, count) in ea_msg.vrf_vkey_hashes.iter() {
+            match current.spos_by_vrf_key.get(vrf_vkey_hash) {
+                Some(spo) => {
+                    // !TODO count rewards for this block
+                }
+
+                None => error!("VRF vkey {} not found in SPO map", hex::encode(vrf_vkey_hash))
+            }
         }
 
+        if self.history.len() >= SECURITY_PARAMETER_K as usize {
+            self.history.pop_front();
+        }
+        self.history.push_back(current);
+
+        Ok(())
+    }
+
+    /// Handle an SPOStateMessage with the full set of SPOs valid at the end of the last
+    /// epoch
+    pub fn handle_spo_state(&mut self, block: &BlockInfo,
+                            spo_msg: &SPOStateMessage) -> Result<()> {
+        let mut current = self.get_previous_state(block.number);
+        // !TODO current.block = block.number;
+        current.epoch = spo_msg.epoch;
+
+        // Capture current SPOs, mapped by VRF vkey hash
+        current.spos_by_vrf_key = spo_msg.spos.iter()
+            .cloned()
+            .map(|spo| (spo.vrf_key_hash.clone(), spo))
+            .collect();
+
+        if self.history.len() >= SECURITY_PARAMETER_K as usize {
+            self.history.pop_front();
+        }
+        self.history.push_back(current);
+
+        Ok(())
+    }
+
+    /// Handle TxCertificates with stake delegations
+    pub fn handle_tx_certificates(&mut self, block: &BlockInfo,
+                                  tx_certs_msg: &TxCertificatesMessage) -> Result<()> {
+        let mut current = self.get_previous_state(block.number);
+        current.block = block.number;
+
+        // Handle certificates
+        for tx_cert in tx_certs_msg.certificates.iter() {
+            match tx_cert {
+                TxCertificate::StakeDelegation(delegation) => {
+                    // !TODO record delegation
+                }
+
+                // !TODO Conway delegation varieties
+
+                _ => ()
+            }
+        }
+
+        // Prune and add to state history
         if self.history.len() >= SECURITY_PARAMETER_K as usize {
             self.history.pop_front();
         }
@@ -156,7 +226,7 @@ mod tests {
             epoch: 0,
             total_blocks: 0,
             total_fees: 0,
-            vrf_vkeys: Vec::new(),
+            vrf_vkey_hashes: Vec::new(),
         }
     }
 

@@ -33,6 +33,8 @@ address-delta-topic = "cardano.address.delta"
 
 [module.epoch-activity-counter]
 
+[module.reward-state]
+
 [module.clock]
 
 [module.rest-server]
