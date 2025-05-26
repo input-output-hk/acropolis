@@ -15,7 +15,9 @@ use serde_json;
 mod state;
 use state::State;
 
+const DEFAULT_SPO_STATE_TOPIC: &str = "cardano.spo.state";
 const DEFAULT_EPOCH_ACTIVITY_TOPIC: &str = "cardano.epoch.activity";
+const DEFAULT_TX_CERTIFICATES_TOPIC: &str = "cardano.certificates";
 const DEFAULT_HANDLE_TOPIC: &str = "rest.get.rewards";
 
 /// Reward State module
@@ -31,19 +33,48 @@ impl RewardState
     pub fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
 
         // Get configuration
+        let spo_state_topic = config.get_string("spo-state-topic")
+            .unwrap_or(DEFAULT_SPO_STATE_TOPIC.to_string());
+        info!("Creating SPO state subscriber on '{spo_state_topic}'");
+
         let epoch_activity_topic = config.get_string("epoch-activity-topic")
             .unwrap_or(DEFAULT_EPOCH_ACTIVITY_TOPIC.to_string());
         info!("Creating epoch activity subscriber on '{epoch_activity_topic}'");
+
+        let tx_certificates_topic = config.get_string("tx-certificates-topic")
+            .unwrap_or(DEFAULT_TX_CERTIFICATES_TOPIC.to_string());
+        info!("Creating Tx certificate subscriber on '{tx_certificates_topic}'");
 
         let handle_topic = config.get_string("handle-topic")
             .unwrap_or(DEFAULT_HANDLE_TOPIC.to_string());
         info!("Creating request handler on '{handle_topic}'");
 
         let state = Arc::new(Mutex::new(State::new()));
+        let state_spo_state = state.clone();
         let state_epoch_activity = state.clone();
+        let state_tx_certificates = state.clone();
         let state_handle_full = state.clone();
         let state_handle_single = state.clone();
         let state_tick = state.clone();
+
+        // !TODO These need to be synchronised and handled alternately - SPO state first
+
+        // Subscribe for SPO state messages
+        context.clone().message_bus.subscribe(&spo_state_topic, move |message: Arc<Message>| {
+            let state = state_spo_state.clone();
+            async move {
+                match message.as_ref() {
+                    Message::Cardano((block_info, CardanoMessage::SPOState(spo_msg))) => {
+                        let mut state = state.lock().await;
+                        state.handle_spo_state(block_info, spo_msg)
+                            .inspect_err(|e| error!("Messaging handling error: {e}"))
+                            .ok();
+                    }
+
+                    _ => error!("Unexpected message type: {message:?}")
+                }
+            }
+        })?;
 
         // Subscribe for epoch activity messages
         context.clone().message_bus.subscribe(&epoch_activity_topic, move |message: Arc<Message>| {
@@ -53,6 +84,23 @@ impl RewardState
                     Message::Cardano((block_info, CardanoMessage::EpochActivity(ea_msg))) => {
                         let mut state = state.lock().await;
                         state.handle_epoch_activity(block_info, ea_msg)
+                            .inspect_err(|e| error!("Messaging handling error: {e}"))
+                            .ok();
+                    }
+
+                    _ => error!("Unexpected message type: {message:?}")
+                }
+            }
+        })?;
+
+        // Subscribe for certificate messages (delegations)
+        context.clone().message_bus.subscribe(&tx_certificates_topic, move |message: Arc<Message>| {
+            let state = state_tx_certificates.clone();
+            async move {
+                match message.as_ref() {
+                    Message::Cardano((block_info, CardanoMessage::TxCertificates(tx_certs_msg))) => {
+                        let mut state = state.lock().await;
+                        state.handle_tx_certificates(block_info, tx_certs_msg)
                             .inspect_err(|e| error!("Messaging handling error: {e}"))
                             .ok();
                     }

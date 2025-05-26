@@ -94,9 +94,9 @@ pub struct EpochActivityMessage {
     /// Total fees in this epoch
     pub total_fees: u64,
 
-    /// List of all VRF vkeys used on blocks (SPO indicator) and
+    /// List of all VRF vkey hashes used on blocks (SPO indicator) and
     /// number of blocks produced
-    pub vrf_vkeys: Vec<(Vec<u8>, usize)>,
+    pub vrf_vkey_hashes: Vec<(KeyHash, usize)>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
