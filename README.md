@@ -55,6 +55,9 @@ structure is highly subject to change:
   changes
 * [UTXO State](modules/utxo_state) - watches UTXO changes and maintains a basic in-memory UTXO state
 * [SPO State](modules/spo_state) - matches SPO registrations and retirements
+* [DRep State](modules/drep_state) - tracks DRep registrations
+* [Governance State](modules/governance_state) - tracks Governance Actions and voting
+* [Stake Delta Filter](modules/stake_delta_filter) - filters out stake address changes and handles stake pointer references
 * [Epoch Activity Counter](modules/epoch_activity_counter) - counts fees and block production for rewards
 * [Reward State](modules/reward_state) - calculates block rewards
 
@@ -66,7 +69,11 @@ graph LR
    MithrilSnapshotFetcher(Mithril Snapshot Fetcher)
    BlockUnpacker(Block Unpacker)
    TxUnpacker(Transaction Unpacker)
-   UTXOState(UTXOState)
+   UTXOState(UTXO State)
+   SPOState(SPO State)
+   DRepState(DRep State)
+   GovernanceState(Governance State)
+   StakeDeltaFilter(Stake Delta Filter)
    EpochActivityCounter(Epoch Activity Counter)
    RewardState(Reward State)
 
@@ -77,6 +84,10 @@ graph LR
    TxUnpacker --> UTXOState
    TxUnpacker --> EpochActivityCounter
    TxUnpacker --> RewardState
+   TxUnpacker --> SPOState
+   TxUnpacker --> DRepState
+   TxUnpacker --> GovernanceState
+   UTXOState --> StakeDeltaFilter
    UpstreamChainFetcher --> EpochActivityCounter
    MithrilSnapshotFetcher --> EpochActivityCounter
    EpochActivityCounter --> RewardState
