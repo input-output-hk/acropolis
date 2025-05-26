@@ -39,15 +39,14 @@ impl State {
     }
 
     // Handle end of epoch, returns message to be published
-    pub fn end_epoch(&mut self, block: &BlockInfo) -> Arc<Message> {
-        info!("End of epoch {} - {} total blocks, {} unique VRF keys, total fees {}",
-              block.epoch-1, self.total_blocks, self.vrf_vkeys.len(),
-              self.total_fees);
+    pub fn end_epoch(&mut self, block: &BlockInfo, epoch: u64) -> Arc<Message> {
+        info!(epoch, total_blocks = self.total_blocks, unique_vrf_keys = self.vrf_vkeys.len(),
+              total_fees = self.total_fees, "End of epoch");
 
         let message = Arc::new(Message::Cardano((
             block.clone(),
             CardanoMessage::EpochActivity(EpochActivityMessage {
-                epoch: block.epoch-1,
+                epoch: epoch,
                 total_blocks: self.total_blocks,
                 total_fees: self.total_fees,
                 vrf_vkeys: self.vrf_vkeys.drain().collect(),
@@ -137,7 +136,7 @@ mod tests {
         state.handle_fees(&block, 123);
 
         // Check the message returned
-        let msg = state.end_epoch(&block);
+        let msg = state.end_epoch(&block, 100);
         match msg.as_ref() {
             Message::Cardano((block, CardanoMessage::EpochActivity(ea))) => {
                 assert_eq!(block.epoch, 101);

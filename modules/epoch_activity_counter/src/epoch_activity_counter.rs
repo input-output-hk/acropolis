@@ -68,7 +68,7 @@ impl EpochActivityCounter
                         // End of epoch?
                         if block.new_epoch {
                             let mut state = state.lock().await;
-                            let msg = state.end_epoch(&block);
+                            let msg = state.end_epoch(&block, block.epoch-1);
                             context.message_bus.publish(&publish_topic, msg)
                                 .await
                                 .unwrap_or_else(|e| error!("Failed to publish: {e}"));

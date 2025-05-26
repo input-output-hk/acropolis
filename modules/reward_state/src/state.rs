@@ -153,6 +153,7 @@ mod tests {
 
     fn new_msg() -> EpochActivityMessage {
         EpochActivityMessage {
+            epoch: 0,
             total_blocks: 0,
             total_fees: 0,
             vrf_vkeys: Vec::new(),
