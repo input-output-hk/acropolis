@@ -1,15 +1,8 @@
-use std::{cmp::max, collections::{HashMap, HashSet}, fs::File, io::BufReader, io::Write, sync::Arc};
 use anyhow::{anyhow, Result};
-<<<<<<< HEAD
-=======
-use acropolis_common::{Address, ShelleyAddressDelegationPart, ShelleyAddressPointer,
-                       StakeAddress, StakeAddressDelta};
-use acropolis_common::messages::{AddressDeltasMessage, StakeAddressDeltasMessage};
->>>>>>> cbf26d40606bf4bec8c7fd9bf08d829efd58abfb
 use serde_with::serde_as;
+use std::{cmp::max, collections::{HashMap, HashSet}, fs::File, io::BufReader, io::Write, sync::Arc};
 use acropolis_common::{
-    Address, AddressDelta, BlockInfo, 
-    ShelleyAddressPointer, StakeAddress, StakeAddressDelta,
+    Address, AddressDelta, BlockInfo, ShelleyAddressPointer, StakeAddress, StakeAddressDelta,
     messages::{AddressDeltasMessage, StakeAddressDeltasMessage}
 };
 
@@ -124,7 +117,6 @@ pub struct OccurrenceInfo {
     stake_address_delta: Option<StakeAddressDelta>
 }
 
-<<<<<<< HEAD
 #[derive(Debug)]
 enum OccurrenceInfoKind {
     Valid,
@@ -252,6 +244,7 @@ impl Tracker {
 pub async fn process_message(
    cache: &PointerCache, 
    delta: &AddressDeltasMessage, 
+   block: &BlockInfo,
    mut tracker: Option<&mut Tracker>
 ) -> Result<StakeAddressDeltasMessage> {
     let mut result = StakeAddressDeltasMessage {
@@ -279,16 +272,16 @@ pub async fn process_message(
             Some(ptr) => match cache.decode_pointer(&ptr) {
                 None => {
                     tracing::warn!("Pointer {ptr:?} is not registered in cache");
-                    tracker.as_mut().map(|t| t.track(&ptr, &delta.block, &d, None));
+                    tracker.as_mut().map(|t| t.track(&ptr, block, &d, None));
                 },
 
                 Some(None) => {
-                    tracker.as_mut().map(|t| t.track(&ptr, &delta.block, &d, None));
+                    tracker.as_mut().map(|t| t.track(&ptr, block, &d, None));
                 },
 
                 Some(Some(stake_address)) => {
                     let stake_delta = StakeAddressDelta { address: stake_address.clone(), delta: d.delta };
-                    tracker.as_mut().map(|t| t.track(&ptr, &delta.block, &d, Some(&stake_delta)));
+                    tracker.as_mut().map(|t| t.track(&ptr, block, &d, Some(&stake_delta)));
                     result.deltas.push (stake_delta);
                 }
             }
