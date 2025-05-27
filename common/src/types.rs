@@ -212,8 +212,6 @@ pub struct AddressDelta {
 
     /// Balance change
     pub delta: i64,
-
-    pub tx_hash: Vec<u8>,
 }
 
 /// Stake balance change
