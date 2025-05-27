@@ -28,3 +28,4 @@ Open questions
 
 1. How a network ID could be retrieved? (Main/Test for the beginning, full network ID 
 at most).
+
