@@ -1,7 +1,8 @@
 //! Acropolis AccountsState: State storage
 use acropolis_common::{
-    messages::{EpochActivityMessage, SPOStateMessage, TxCertificatesMessage},
-    BlockInfo, PoolRegistration, TxCertificate,
+    messages::{EpochActivityMessage, SPOStateMessage, TxCertificatesMessage,
+               StakeAddressDeltasMessage},
+    BlockInfo, PoolRegistration, TxCertificate, KeyHash, StakeAddressPayload,
     state_history::StateHistory,
 };
 use anyhow::Result;
@@ -33,6 +34,21 @@ where
     }
 }
 
+/// State of an individual stake address
+#[derive(Debug, Default, Clone, serde::Serialize)]
+pub struct StakeAddressState {
+
+    /// Total value in UTXO addresses
+    utxo_value: u64,
+
+    /// Value in reward account
+    rewards: u64,
+
+    /// SPO ID they are delegated to ("operator" ID)
+    delegated_spo: Option<KeyHash>,
+}
+
+/// Per-block state
 #[serde_as]
 #[derive(Debug, Default, Clone, serde::Serialize)]
 pub struct BlockState {
@@ -43,11 +59,12 @@ pub struct BlockState {
     #[serde_as(as = "HashMapSerial<Hex, _>")]
     spos_by_vrf_key: HashMap<Vec::<u8>, PoolRegistration>,
 
-    /// Map of reward values by staking address
+    /// Map of staking address values
     #[serde_as(as = "HashMapSerial<Hex, _>")]
-    rewards: HashMap<Vec::<u8>, u64>,
+    stake_addresses: HashMap<Vec::<u8>, StakeAddressState>,
 }
 
+/// Overall state
 pub struct State {
     history: StateHistory<BlockState>,
 }
@@ -63,9 +80,9 @@ impl State {
         self.history.current()
     }
 
-    pub fn get(&self, stake_key: &Vec<u8>) -> Option<&u64> {
+    pub fn get_rewards(&self, stake_key: &Vec<u8>) -> Option<u64> {
         if let Some(current) = self.history.current() {
-            current.rewards.get(stake_key)
+            current.stake_addresses.get(stake_key).map(|sa| sa.rewards)
         } else {
             None
         }
@@ -74,10 +91,10 @@ impl State {
     async fn log_stats(&self) {
         if let Some(current) = self.history.current() {
             info!(
-                num_rewards = current.rewards.keys().len(),
+                num_stake_addresses = current.stake_addresses.keys().len(),
             );
         } else {
-            info!(num_rewards = 0);
+            info!(num_stake_addresses = 0);
         }
     }
 
@@ -143,6 +160,43 @@ impl State {
                 // !TODO Conway delegation varieties
 
                 _ => ()
+            }
+        }
+
+        self.history.commit(block, current);
+
+        Ok(())
+    }
+
+    /// Handle stake deltas
+    pub fn handle_stake_deltas(&mut self, block: &BlockInfo,
+                               deltas_msg: &StakeAddressDeltasMessage) -> Result<()> {
+        // Handle rollback here
+        let mut current = self.history.get_current_state();
+
+        // Handle deltas
+        for delta in deltas_msg.deltas.iter() {
+            match &delta.address.payload {
+                StakeAddressPayload::StakeKeyHash(hash) => {
+                    let state = current.stake_addresses
+                        .entry(hash.to_vec())
+                        .or_insert(StakeAddressState::default());
+
+                    if delta.delta >= 0 {
+                        state.utxo_value = state.utxo_value.saturating_add(delta.delta as u64);
+                    } else {
+                        let abs = (-delta.delta) as u64;
+                        if abs > state.utxo_value {
+                            error!("Stake address went negative in delta {:?}", delta);
+                            state.utxo_value = 0;
+                        } else {
+                            state.utxo_value -= abs;
+                        }
+                    }
+                }
+
+                StakeAddressPayload::ScriptHash(_hash) =>
+                    error!("ScriptHashes not handled")
             }
         }
 

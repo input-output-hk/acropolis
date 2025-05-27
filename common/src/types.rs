@@ -205,7 +205,10 @@ pub struct AddressDelta {
 /// Stake balance change
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StakeAddressDelta {
+    /// Address
     pub address: StakeAddress,
+
+    /// Balance change
     pub delta: i64
 }
 
