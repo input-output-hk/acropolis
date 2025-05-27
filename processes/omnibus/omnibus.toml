@@ -30,6 +30,8 @@ address-delta-topic = "cardano.address.delta"
 [module.governance-state]
 
 [module.stake-delta-filter]
+cache-mode = "predefined" # "predefined", "read", "write", "write-if-absent"
+write-full-cache = "false"
 
 [module.epoch-activity-counter]
 

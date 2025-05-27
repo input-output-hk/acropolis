@@ -52,10 +52,12 @@ struct StakeDeltaFilterParams {
     address_delta_topic: String,
     stake_address_delta_topic: String,
     tx_certificates_topic: String,
-    cache_dir: String,
     network: AddressNetwork,
+
+    cache_dir: String,
     cache_mode: CacheMode,
     write_full_cache: bool,
+
     context: Arc<Context<Message>>
 }
 
@@ -96,8 +98,13 @@ impl StakeDeltaFilterParams {
             network: Self::conf_enum::<AddressNetwork>(&cfg, DEFAULT_NETWORK)?
         };
 
-        info!("Reading caches from {}", params.cache_dir);
         info!("Cache mode {:?}", params.cache_mode);
+        if params.cache_mode != CacheMode::Predefined {
+            if !Path::new(&params.cache_dir).try_exists()? {
+                return Err(anyhow!("Pointer cache directory '{}' does not exist.", params.cache_dir))
+            }
+        }
+        info!("Reading caches from {}", params.cache_dir);
 
         Ok(Arc::new(params))
     }

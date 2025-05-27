@@ -94,7 +94,7 @@ impl PointerCache {
     }
 }
 
-#[derive(Clone, Debug, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Deserialize, PartialEq)]
 pub enum CacheMode {
     /// Built-in cache (see builit-in.rs, Address::network is taken as cache name), fails if none.
     #[serde(rename="predefined")]
