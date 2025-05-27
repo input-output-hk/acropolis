@@ -1,4 +1,4 @@
-//! Acropolis RewardState: State storage
+//! Acropolis AccountsState: State storage
 use acropolis_common::{
     messages::{EpochActivityMessage, SPOStateMessage, TxCertificatesMessage},
     BlockInfo, PoolRegistration, TxCertificate,

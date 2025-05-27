@@ -1,5 +1,5 @@
-//! Acropolis reward state module for Caryatid
-//! Accepts epoch data and SPD to calculate block rewards
+//! Acropolis accounts state module for Caryatid
+//! Manages stake and reward accounts state
 
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
 use acropolis_common::{
@@ -20,15 +20,15 @@ const DEFAULT_EPOCH_ACTIVITY_TOPIC: &str = "cardano.epoch.activity";
 const DEFAULT_TX_CERTIFICATES_TOPIC: &str = "cardano.certificates";
 const DEFAULT_HANDLE_TOPIC: &str = "rest.get.rewards";
 
-/// Reward State module
+/// Accounts State module
 #[module(
     message_type(Message),
-    name = "reward-state",
-    description = "Block reward calculator"
+    name = "accounts-state",
+    description = "Stake and reward accounts state"
 )]
-pub struct RewardState;
+pub struct AccountsState;
 
-impl RewardState
+impl AccountsState
 {
     pub fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
 
@@ -110,7 +110,7 @@ impl RewardState
             }
         })?;
 
-        // Handle requests for full reward state
+        // Handle requests for full state
         context.message_bus.handle(&handle_topic, move |message: Arc<Message>| {
             let state = state_handle_full.clone();
             async move {

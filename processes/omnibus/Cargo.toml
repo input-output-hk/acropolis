@@ -29,7 +29,7 @@ acropolis_module_drep_state = { path = "../../modules/drep_state" }
 acropolis_module_governance_state = { path = "../../modules/governance_state" }
 acropolis_module_stake_delta_filter = { path = "../../modules/stake_delta_filter" }
 acropolis_module_epoch_activity_counter = { path = "../../modules/epoch_activity_counter" }
-acropolis_module_reward_state = { path = "../../modules/reward_state" }
+acropolis_module_accounts_state = { path = "../../modules/accounts_state" }
 
 anyhow = "1.0"
 config = "0.15.11"
