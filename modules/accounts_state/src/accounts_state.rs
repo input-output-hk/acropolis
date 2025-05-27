@@ -18,6 +18,7 @@ use state::State;
 const DEFAULT_SPO_STATE_TOPIC: &str = "cardano.spo.state";
 const DEFAULT_EPOCH_ACTIVITY_TOPIC: &str = "cardano.epoch.activity";
 const DEFAULT_TX_CERTIFICATES_TOPIC: &str = "cardano.certificates";
+const DEFAULT_STAKE_DELTAS_TOPIC: &str = "cardano.stake.deltas";
 const DEFAULT_HANDLE_TOPIC: &str = "rest.get.rewards";
 
 /// Accounts State module
@@ -43,7 +44,11 @@ impl AccountsState
 
         let tx_certificates_topic = config.get_string("tx-certificates-topic")
             .unwrap_or(DEFAULT_TX_CERTIFICATES_TOPIC.to_string());
-        info!("Creating Tx certificate subscriber on '{tx_certificates_topic}'");
+        info!("Creating Tx certificates subscriber on '{tx_certificates_topic}'");
+
+        let stake_deltas_topic = config.get_string("stake-deltas-topic")
+            .unwrap_or(DEFAULT_STAKE_DELTAS_TOPIC.to_string());
+        info!("Creating stake deltas subscriber on '{stake_deltas_topic}'");
 
         let handle_topic = config.get_string("handle-topic")
             .unwrap_or(DEFAULT_HANDLE_TOPIC.to_string());
@@ -53,6 +58,7 @@ impl AccountsState
         let state_spo_state = state.clone();
         let state_epoch_activity = state.clone();
         let state_tx_certificates = state.clone();
+        let state_stake_deltas = state.clone();
         let state_handle_full = state.clone();
         let state_handle_single = state.clone();
         let state_tick = state.clone();
@@ -110,6 +116,24 @@ impl AccountsState
             }
         })?;
 
+        // Subscribe for stake address deltas
+        context.clone().message_bus.subscribe(&stake_deltas_topic, move |message: Arc<Message>| {
+            let state = state_stake_deltas.clone();
+            async move {
+                match message.as_ref() {
+                    Message::Cardano((block_info,
+                                      CardanoMessage::StakeAddressDeltas(deltas_msg))) => {
+                        let mut state = state.lock().await;
+                        state.handle_stake_deltas(block_info, deltas_msg)
+                            .inspect_err(|e| error!("Messaging handling error: {e}"))
+                            .ok();
+                    }
+
+                    _ => error!("Unexpected message type: {message:?}")
+                }
+            }
+        })?;
+
         // Handle requests for full state
         context.message_bus.handle(&handle_topic, move |message: Arc<Message>| {
             let state = state_handle_full.clone();
@@ -150,7 +174,7 @@ impl AccountsState
                             Some(id) => match hex::decode(&id) {
                                 Ok(id) => {
                                     let state = state.lock().await;
-                                    match state.get(&id) {
+                                    match state.get_rewards(&id) {
                                         Some(reward) => match serde_json::to_string(&reward) {
                                             Ok(body) => RESTResponse::with_json(200, &body),
                                             Err(error) => RESTResponse::with_text(500, &format!("{error:?}").to_string()),
