@@ -1,7 +1,7 @@
 use std::{cmp::max, collections::HashMap, fs::File, io::BufReader, io::Write, sync::Arc};
 use anyhow::{anyhow, Result};
 use acropolis_common::{Address, ShelleyAddressDelegationPart, ShelleyAddressPointer,
-                       StakeAddress, StakeAddressDelta};
+                       StakeAddress, StakeAddressPayload, StakeAddressDelta};
 use acropolis_common::messages::{AddressDeltasMessage, StakeAddressDeltasMessage};
 use serde_with::serde_as;
 
@@ -63,11 +63,16 @@ impl PointerCache {
             Address::Byron(_) => Ok(None),
             Address::Shelley(shelley_address) => {
                 self.ensure_up_to_date(address)?;
-                if let ShelleyAddressDelegationPart::Pointer(ptr) = &shelley_address.delegation {
-                    self.decode_stake_address(self.decode_pointer(ptr)?)
-                }
-                else {
-                    Ok(None)
+                match &shelley_address.delegation {
+                    ShelleyAddressDelegationPart::StakeKeyHash(keyhash) =>
+                        Ok(Some(StakeAddress {
+                            network: shelley_address.network.clone(),
+                            payload:
+                              StakeAddressPayload::StakeKeyHash(keyhash.clone())
+                        })),
+                    ShelleyAddressDelegationPart::Pointer(ptr) =>
+                        self.decode_stake_address(self.decode_pointer(ptr)?),
+                    _ => Ok(None)
                 }
             },
             Address::Stake(s) => Ok(Some(s.clone()))
