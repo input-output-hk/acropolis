@@ -88,10 +88,13 @@ graph LR
    TxUnpacker --> DRepState
    TxUnpacker --> GovernanceState
    UTXOState --> StakeDeltaFilter
+   StakeDeltaFilter --> AccountsState
    UpstreamChainFetcher --> EpochActivityCounter
    MithrilSnapshotFetcher --> EpochActivityCounter
    EpochActivityCounter --> AccountsState
    SPOState --> AccountsState
+   DRepState --> GovernanceState
+   GovernanceState --> AccountsState
 ```
 
 ## Messages
