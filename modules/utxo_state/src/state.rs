@@ -346,26 +346,26 @@ impl State {
     }
 
     /// Handle a message
-    pub async fn handle(&mut self, deltas: &UTXODeltasMessage) -> Result<()> {
+    pub async fn handle(&mut self, block: &BlockInfo, deltas: &UTXODeltasMessage) -> Result<()> {
 
         // Start the block for observer
         if let Some(observer) = self.address_delta_observer.as_mut() {
-            observer.start_block(&deltas.block).await;
+            observer.start_block(&block).await;
         }
 
         // Observe block for stats and rollbacks
-        self.observe_block(&deltas.block).await?;
+        self.observe_block(&block).await?;
 
         // Process the deltas
         for delta in &deltas.deltas {  // UTXODelta
 
            match delta {
                UTXODelta::Input(tx_input) => {
-                   self.observe_input(&tx_input, &deltas.block).await?;
+                   self.observe_input(&tx_input, &block).await?;
                },
 
                UTXODelta::Output(tx_output) => {
-                   self.observe_output(&tx_output, &deltas.block).await?;
+                   self.observe_output(&tx_output, &block).await?;
                },
 
                _ => {}
@@ -374,7 +374,7 @@ impl State {
 
         // End the block for observer
         if let Some(observer) = self.address_delta_observer.as_mut() {
-            observer.finalise_block(&deltas.block).await;
+            observer.finalise_block(&block).await;
         }
 
         Ok(())
@@ -385,7 +385,7 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acropolis_common::ByronAddress;
+    use acropolis_common::{ByronAddress, Era};
     use tokio::sync::Mutex;
     use crate::InMemoryImmutableUTXOStore;
     use config::Config;
@@ -405,6 +405,7 @@ mod tests {
             hash: vec!(),
             epoch: 99,
             new_epoch: false,
+            era: Era::Byron,
         }
     }
 

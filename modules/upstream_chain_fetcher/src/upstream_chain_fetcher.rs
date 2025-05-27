@@ -4,8 +4,8 @@
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
 use acropolis_common::{
     calculations::slot_to_epoch, messages::{
-        BlockBodyMessage, BlockHeaderMessage, Message,
-    }, BlockInfo, BlockStatus
+        BlockBodyMessage, BlockHeaderMessage, Message, CardanoMessage,
+    }, BlockInfo, BlockStatus, Era
 };
 use std::sync::Arc;
 use anyhow::{Result, anyhow};
@@ -60,11 +60,13 @@ impl UpstreamChainFetcher
 
                 // Construct message
                 let message = BlockBodyMessage {
-                    block: block_info,
                     raw: body
                 };
 
-                let message_enum = Message::BlockBody(message);
+                let message_enum = Message::Cardano((
+                    block_info,
+                    CardanoMessage::BlockBody(message)
+                ));
                 context.message_bus.publish(&topic, Arc::new(message_enum))
                     .await
                     .unwrap_or_else(|e| error!("Failed to publish: {e}"));
@@ -129,7 +131,19 @@ impl UpstreamChainFetcher
                             if new_epoch {
                                 info!(epoch, number, slot, "New epoch");
                             }
-                                    // Construct message
+
+                            // Derive era from header - not complete but enough to drive
+                            // MultiEraHeader::decode() again at the receiver
+                            // TODO do this properly once we understand the values of the 'variant'
+                            // byte
+                            let era = match header {
+                                MultiEraHeader::EpochBoundary(_) => continue,  // Ignore EBBs
+                                MultiEraHeader::Byron(_) => Era::Byron,
+                                MultiEraHeader::ShelleyCompatible(_) => Era::Shelley,
+                                MultiEraHeader::BabbageCompatible(_) => Era::Babbage,
+                            };
+
+                            // Construct message
                             let block_info = BlockInfo {
                                 status: if rolled_back
                                             { BlockStatus::RolledBack }
@@ -140,13 +154,16 @@ impl UpstreamChainFetcher
                                 hash: hash.clone(),
                                 epoch,
                                 new_epoch,
+                                era,
                             };
                             let message = BlockHeaderMessage {
-                                block: block_info.clone(),
                                 raw: h.cbor
                             };
 
-                            let message_enum = Message::BlockHeader(message);
+                            let message_enum = Message::Cardano((
+                                block_info.clone(),
+                                CardanoMessage::BlockHeader(message)
+                            ));
                             context.message_bus.publish(&topic, Arc::new(message_enum))
                                 .await
                                 .unwrap_or_else(|e| error!("Failed to publish: {e}"));
@@ -206,12 +223,10 @@ impl UpstreamChainFetcher
 
                     tokio::spawn(async move {
                         match message.as_ref() {
-                            Message::SnapshotComplete(msg) => {
+                            Message::Cardano((block, CardanoMessage::SnapshotComplete)) => {
                                 info!("Notified snapshot complete at slot {} block number {}",
-                                    msg.last_block.slot, msg.last_block.number);
-                                let point = Point::Specific(
-                                    msg.last_block.slot,
-                                    msg.last_block.hash.clone());
+                                    block.slot, block.number);
+                                let point = Point::Specific(block.slot, block.hash.clone());
 
                                 Self::sync_to_point(context, config, peer, point)
                                     .await

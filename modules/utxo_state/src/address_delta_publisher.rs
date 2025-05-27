@@ -3,10 +3,10 @@ use caryatid_sdk::Context;
 use config::Config;
 use acropolis_common::{
     BlockInfo, AddressDelta, Address,
-        messages::{
+    messages::{
         AddressDeltasMessage,
-        Message,
-     },
+        Message, CardanoMessage,
+    },
 };
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -66,14 +66,17 @@ impl AddressDeltaObserver for AddressDeltaPublisher {
 
             let mut deltas = self.deltas.lock().await;
             let message = AddressDeltasMessage {
-                block: block.clone(),
                 deltas: std::mem::take(&mut *deltas),
             };
 
             let context = self.context.clone();
             let topic = topic.clone();
+            let block = block.clone();
             tokio::spawn(async move {
-                let message_enum = Message::AddressDeltas(message);
+                let message_enum = Message::Cardano((
+                    block,
+                    CardanoMessage::AddressDeltas(message)
+                ));
                 context.message_bus.publish(&topic,
                                             Arc::new(message_enum))
                     .await

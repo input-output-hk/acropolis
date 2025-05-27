@@ -4,7 +4,7 @@
 use std::{path::Path, sync::Arc};
 use serde::Deserialize;
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
-use acropolis_common::{messages::Message, AddressNetwork};
+use acropolis_common::{messages::{Message, CardanoMessage}, AddressNetwork};
 use anyhow::{anyhow, Result};
 use config::Config;
 use tokio::sync::Mutex;
@@ -140,10 +140,11 @@ impl StakeDeltaFilter {
 
             async move {
                 match message.as_ref() {
-                    Message::AddressDeltas(delta) => 
+                    Message::Cardano((block_info, CardanoMessage::AddressDeltas(delta))) =>
                         match process_message(&cache_copy, delta, None).await {
                             Err(e) => tracing::error!("Cannot decode and convert stake key for {delta:?}: {e}"),
-                            Ok(r) => publisher.publish(r).await.unwrap_or_else(|e| error!("Publish error: {e}"))
+                            Ok(r) => publisher.publish(block_info, r)
+                                .await.unwrap_or_else(|e| error!("Publish error: {e}"))
                         }
 
                     msg => error!("Unexpected message type for {}: {msg:?}", &params_copy.address_delta_topic)
@@ -169,9 +170,9 @@ impl StakeDeltaFilter {
             let state = state_certs.clone();
             async move {
                 match message.as_ref() {
-                    Message::TxCertificates(tx_cert_msg) => {
+                    Message::Cardano((block_info, CardanoMessage::TxCertificates(tx_cert_msg))) => {
                         let mut state = state.lock().await;
-                        state.handle_certs(tx_cert_msg)
+                        state.handle_certs(block_info, tx_cert_msg)
                             .await
                             .inspect_err(|e| error!("Messaging handling error: {e}"))
                             .ok();
@@ -188,9 +189,9 @@ impl StakeDeltaFilter {
             let params = params_d.clone();
             async move {
                 match message.as_ref() {
-                    Message::AddressDeltas(deltas) => {
+                    Message::Cardano((block_info, CardanoMessage::AddressDeltas(deltas))) => {
                         let mut state = state.lock().await;
-                        state.handle_deltas(deltas)
+                        state.handle_deltas(block_info, deltas)
                             .await
                             .inspect_err(|e| error!("Messaging handling error: {e}"))
                             .ok();

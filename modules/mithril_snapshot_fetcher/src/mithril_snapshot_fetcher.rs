@@ -4,9 +4,8 @@
 use caryatid_sdk::{Context, Module, module, MessageBusExt, message_bus::QoS};
 use acropolis_common::{
     calculations::slot_to_epoch, messages::{
-        BlockBodyMessage, BlockHeaderMessage, Message,
-        SnapshotCompleteMessage
-    }, BlockInfo, BlockStatus
+        BlockBodyMessage, BlockHeaderMessage, Message, CardanoMessage,
+    }, BlockInfo, BlockStatus, Era,
 };
 use std::sync::Arc;
 use tokio::{join, sync::Mutex};
@@ -26,7 +25,7 @@ use std::path::Path;
 use std::thread::sleep;
 use std::time::Duration;
 use pallas::{
-    ledger::traverse::MultiEraBlock,
+    ledger::traverse::{Era as PallasEra, MultiEraBlock},
     storage::hardano,
 };
 
@@ -219,6 +218,16 @@ impl MithrilSnapshotFetcher
                         info!(epoch, number, slot, "New epoch");
                     }
 
+                    let era = match block.era() {
+                        PallasEra::Byron => Era::Byron,
+                        PallasEra::Shelley => Era::Shelley,
+                        PallasEra::Allegra => Era::Allegra,
+                        PallasEra::Mary => Era::Mary,
+                        PallasEra::Alonzo => Era::Alonzo,
+                        PallasEra::Babbage => Era::Babbage,
+                        _ => Era::Conway,
+                    };
+
                     let block_info = BlockInfo {
                         status: BlockStatus::Immutable,
                         slot,
@@ -226,28 +235,33 @@ impl MithrilSnapshotFetcher
                         hash: block.hash().to_vec(),
                         epoch,
                         new_epoch,
+                        era,
                     };
 
                     // Send the block header message
                     let header = block.header();
                     let header_message = BlockHeaderMessage {
-                        block: block_info.clone(),
                         raw: header.cbor().to_vec()
                     };
 
                     // We use Qos::Bulk to avoid swamping all the queues and blocking downstream
                     // modules from sending their own messages
-                    let header_message_enum = Message::BlockHeader(header_message);
+                    let header_message_enum = Message::Cardano((
+                        block_info.clone(),
+                        CardanoMessage::BlockHeader(header_message)
+                    ));
                     let header_future = context.message_bus.publish_with_qos(&header_topic,
                         Arc::new(header_message_enum), QoS::Bulk);
 
                     // Send the block body message
                     let body_message = BlockBodyMessage {
-                        block: block_info.clone(),
                         raw: raw_block
                     };
 
-                    let body_message_enum = Message::BlockBody(body_message);
+                    let body_message_enum = Message::Cardano((
+                        block_info.clone(),
+                        CardanoMessage::BlockBody(body_message)
+                    ));
                     let body_future = context.message_bus.publish_with_qos(&body_topic,
                         Arc::new(body_message_enum), QoS::Bulk);
 
@@ -263,11 +277,10 @@ impl MithrilSnapshotFetcher
 
         // Send completion message
         if let Some(last_block_info) = last_block_info {
-            let message = SnapshotCompleteMessage {
-                last_block: last_block_info,
-            };
-
-            let message_enum = Message::SnapshotComplete(message);
+            let message_enum = Message::Cardano((
+                last_block_info,
+                CardanoMessage::SnapshotComplete
+            ));
             context.message_bus.publish(&completion_topic,
                 Arc::new(message_enum))
                 .await
