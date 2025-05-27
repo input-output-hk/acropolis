@@ -141,13 +141,17 @@ impl StakeDeltaFilter {
             async move {
                 match message.as_ref() {
                     Message::Cardano((block_info, CardanoMessage::AddressDeltas(delta))) =>
-                        match process_message(&cache_copy, delta, None).await {
-                            Err(e) => tracing::error!("Cannot decode and convert stake key for {delta:?}: {e}"),
+                        match process_message(&cache_copy, delta, block_info, None).await {
+                            Err(e) => tracing::error!(
+                                "Cannot decode and convert stake key for {block_info:?}, {delta:?}: {e}"
+                            ),
                             Ok(r) => publisher.publish(block_info, r)
                                 .await.unwrap_or_else(|e| error!("Publish error: {e}"))
                         }
 
-                    msg => error!("Unexpected message type for {}: {msg:?}", &params_copy.address_delta_topic)
+                    msg => error!("Unexpected message type for {}: {msg:?}", 
+                        &params_copy.address_delta_topic
+                    )
                 }
             }
         })?;

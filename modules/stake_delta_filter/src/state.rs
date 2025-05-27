@@ -56,13 +56,17 @@ pub struct State {
 }
 
 impl State {
-    pub async fn handle_deltas(&mut self, block: &BlockInfo,
-                               most_recent_delta: &AddressDeltasMessage) -> Result<()> {
+    pub async fn handle_deltas(&mut self,
+        block: &BlockInfo,
+        most_recent_delta: &AddressDeltasMessage
+    ) -> Result<()> {
         self.request_queue.push_back((block.clone(), most_recent_delta.clone()));
 
         while let Some((block, delta)) = self.request_queue.get(0) {
-            match process_message(&self.pointer_cache, delta, Some(&mut self.tracker)).await {
-                Err(e) => tracing::debug!("Cannot decode and convert stake key for {most_recent_delta:?}: {e}"),
+            match process_message(&self.pointer_cache, delta, block, Some(&mut self.tracker)).await {
+                Err(e) => tracing::debug!(
+                    "Cannot decode and convert stake key for {most_recent_delta:?}: {e}"
+                ),
                 Ok(r) => self.delta_publisher.publish(block, r).await?
             }
             self.request_queue.pop_front();
@@ -84,8 +88,10 @@ impl State {
                     let stake_address = StakeAddress{
                         network: self.params.network.clone(),
                         payload: match &reg.stake_credential {
-                            StakeCredential::ScriptHash(h) => StakeAddressPayload::ScriptHash(h.clone()),
-                            StakeCredential::AddrKeyHash(k) => StakeAddressPayload::StakeKeyHash(k.clone())
+                            StakeCredential::ScriptHash(h) => 
+                                StakeAddressPayload::ScriptHash(h.clone()),
+                            StakeCredential::AddrKeyHash(k) => 
+                                StakeAddressPayload::StakeKeyHash(k.clone())
                         }
                     };
 
