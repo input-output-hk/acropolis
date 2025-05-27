@@ -2,6 +2,7 @@
 //! Reads address deltas and filters out only stake addresses from it; also resolves pointer addresses.
 
 use std::{path::Path, sync::Arc};
+use serde::Deserialize;
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
 use acropolis_common::{messages::Message, AddressNetwork};
 use anyhow::{anyhow, Result};
@@ -18,9 +19,15 @@ const DEFAULT_STAKE_ADDRESS_DELTA_TOPIC: (&str,&str) = ("publishing-stake-delta-
 /// values in blockchain (which can be quite resource-consuming).
 const DEFAULT_CACHE_DIR: (&str,&str) = ("cache-dir", "cache");
 
-/// Cache mode, three options: always build cache; always read cache (error if missing); build if missing,
-/// read otherwise.
-const DEFAULT_CACHE_MODE: (&str,CacheMode) = ("cache-mode", CacheMode::WriteIfAbsent);
+/// Cache mode: use built-in; always build cache; always read cache (error if missing); 
+/// build if missing, read otherwise.
+const DEFAULT_CACHE_MODE: (&str,CacheMode) = ("cache-mode", CacheMode::Predefined);
+
+/// Cache remembers all stake addresses that could potentially be referenced by pointers. However
+/// only a few addressed are actually referenced by pointers in real blockchain.
+/// `true` means that all possible addresses should be written to disk (as potential pointers).
+/// `false` means that only addresses used in actual pointers should be written to disk.
+const DEFAULT_WRITE_FULL_CACHE: (&str,bool) = ("write-full-cache", false);
 
 /// Network: currently only Main/Test. Parameter is necessary to distinguish caches.
 const DEFAULT_NETWORK: (&str,AddressNetwork) = ("network", AddressNetwork::Main);
@@ -35,9 +42,10 @@ pub struct StakeDeltaFilter;
 
 mod state;
 mod utils;
+mod predefined;
 
 use state::{DeltaPublisher, State};
-use utils::{CacheMode, PointerCache, process_message};
+use utils::{CacheMode, PointerCache, process_message, Tracker};
 
 #[derive(Clone, Debug)]
 struct StakeDeltaFilterParams {
@@ -47,19 +55,33 @@ struct StakeDeltaFilterParams {
     cache_dir: String,
     network: AddressNetwork,
     cache_mode: CacheMode,
+    write_full_cache: bool,
     context: Arc<Context<Message>>
 }
 
 impl StakeDeltaFilterParams {
     fn get_cache_file_name(&self, modifier: &str) -> Result<String> {
         let path = Path::new(&self.cache_dir);
-        let full = path.join(format!("{:?}{}.json", &self.network, modifier).to_lowercase());
+        let full = path.join(format!("{}{}", self.get_network_name(), modifier).to_lowercase());
         let str = full.to_str().ok_or_else(|| anyhow!("Cannot produce cache file name".to_string()))?;
         Ok(str.to_string())
     }
 
+    fn get_network_name(&self) -> String {
+        format!("{:?}", self.network)
+    }
+
     fn conf(config: &Arc<Config>, keydef: (&str, &str)) -> String {
         config.get_string(keydef.0).unwrap_or(keydef.1.to_string())
+    }
+
+    fn conf_enum<'a, T: Deserialize<'a>>(config: &Arc<Config>, keydef: (&str, T)) -> Result<T> {
+        if config.get_string(keydef.0).is_ok() {
+            config.get::<T>(keydef.0).or_else(|e| Err(anyhow!("cannot parse {} value: {e}", keydef.0)))
+        }
+        else {
+            Ok(keydef.1)
+        }
     }
 
     fn init(context: Arc<Context<Message>>, cfg: Arc<Config>) -> Result<Arc<Self>> {
@@ -68,9 +90,10 @@ impl StakeDeltaFilterParams {
             tx_certificates_topic: Self::conf(&cfg, DEFAULT_CERTIFICATES_TOPIC),
             stake_address_delta_topic: Self::conf(&cfg, DEFAULT_STAKE_ADDRESS_DELTA_TOPIC),
             cache_dir: Self::conf(&cfg, DEFAULT_CACHE_DIR),
-            cache_mode: cfg.get::<CacheMode>(DEFAULT_CACHE_MODE.0).unwrap_or(DEFAULT_CACHE_MODE.1),
+            cache_mode: Self::conf_enum::<CacheMode>(&cfg, DEFAULT_CACHE_MODE)?,
+            write_full_cache: Self::conf_enum::<bool>(&cfg, DEFAULT_WRITE_FULL_CACHE)?,
             context,
-            network: cfg.get::<AddressNetwork>(DEFAULT_NETWORK.0).unwrap_or(DEFAULT_NETWORK.1)
+            network: Self::conf_enum::<AddressNetwork>(&cfg, DEFAULT_NETWORK)?
         };
 
         info!("Reading caches from {}", params.cache_dir);
@@ -83,9 +106,13 @@ impl StakeDeltaFilterParams {
 impl StakeDeltaFilter {
     pub fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         let params = StakeDeltaFilterParams::init(context, config.clone())?;
-        let cache_path = params.get_cache_file_name("")?;
+        let cache_path = params.get_cache_file_name(".json")?;
 
         match params.cache_mode {
+            CacheMode::Predefined => Self::stateless_init(
+                PointerCache::try_load_predefined(&params.get_network_name())?, params
+            ),
+
             CacheMode::Read => Self::stateless_init(PointerCache::try_load(&cache_path)?, params),
 
             CacheMode::WriteIfAbsent => match PointerCache::try_load(&cache_path) {
@@ -114,7 +141,7 @@ impl StakeDeltaFilter {
             async move {
                 match message.as_ref() {
                     Message::AddressDeltas(delta) => 
-                        match process_message(&cache_copy, delta).await {
+                        match process_message(&cache_copy, delta, None).await {
                             Err(e) => tracing::error!("Cannot decode and convert stake key for {delta:?}: {e}"),
                             Ok(r) => publisher.publish(r).await.unwrap_or_else(|e| error!("Publish error: {e}"))
                         }
