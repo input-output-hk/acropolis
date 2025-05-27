@@ -71,7 +71,7 @@ pub trait AddressDeltaObserver: Send + Sync {
     async fn start_block(&self, block: &BlockInfo);
 
     /// Observe a delta
-    async fn observe_delta(&self, address: &Address, delta: i64, tx_hash: &Vec<u8>);
+    async fn observe_delta(&self, address: &Address, delta: i64);
 
     /// Finalise a block
     async fn finalise_block(&self, block: &BlockInfo);
@@ -166,7 +166,7 @@ impl State {
                     if let Some(utxo) = self.volatile_utxos.remove(&key) {
                         // Tell the observer to debit it
                         if let Some(observer) = self.address_delta_observer.as_ref() {
-                            observer.observe_delta(&utxo.address, -(utxo.value as i64), &key.hash.to_vec()).await;
+                            observer.observe_delta(&utxo.address, -(utxo.value as i64)).await;
                         }
                     }
                 };
@@ -178,7 +178,7 @@ impl State {
                     if let Some(utxo) = self.volatile_utxos.get(&key) {
                         // Tell the observer to recredit it
                         if let Some(observer) = self.address_delta_observer.as_ref() {
-                            observer.observe_delta(&utxo.address, utxo.value as i64, &key.hash.to_vec()).await;
+                            observer.observe_delta(&utxo.address, utxo.value as i64).await;
                         }
                     }
                 };
@@ -223,7 +223,7 @@ impl State {
 
                 // Tell the observer it's spent
                 if let Some(observer) = self.address_delta_observer.as_ref() {
-                    observer.observe_delta(&utxo.address, -(utxo.value as i64), &key.hash.to_vec()).await;
+                    observer.observe_delta(&utxo.address, -(utxo.value as i64)).await;
                 }
 
                 match block.status {
@@ -282,7 +282,7 @@ impl State {
 
         // Tell the observer
         if let Some(observer) = self.address_delta_observer.as_ref() {
-            observer.observe_delta(&output.address, output.value as i64, &key.hash.to_vec()).await;
+            observer.observe_delta(&output.address, output.value as i64).await;
         }
 
         Ok(())
@@ -628,7 +628,7 @@ mod tests {
         async fn start_block(&self, _block: &BlockInfo) {
 
         }
-        async fn observe_delta(&self, address: &Address, delta: i64, _tx_hash: &Vec<u8>) {
+        async fn observe_delta(&self, address: &Address, delta: i64) {
             assert!(matches!(&address, Address::Byron(ByronAddress{ payload })
                 if payload[0] == 99));
             assert!(delta == 42 || delta == -42);

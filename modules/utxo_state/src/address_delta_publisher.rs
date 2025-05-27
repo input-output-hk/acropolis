@@ -50,12 +50,11 @@ impl AddressDeltaObserver for AddressDeltaPublisher {
     }
 
     /// Observe an address delta and publish messages
-    async fn observe_delta(&self, address: &Address, delta: i64, tx_hash: &Vec<u8>) {
+    async fn observe_delta(&self, address: &Address, delta: i64) {
         // Accumulate the delta
         self.deltas.lock().await.push(AddressDelta {
             address: address.clone(),
-            delta,
-            tx_hash: tx_hash.clone()
+            delta
         });
     }
 

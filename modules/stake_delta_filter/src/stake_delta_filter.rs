@@ -103,8 +103,8 @@ impl StakeDeltaFilterParams {
             if !Path::new(&params.cache_dir).try_exists()? {
                 return Err(anyhow!("Pointer cache directory '{}' does not exist.", params.cache_dir))
             }
+            info!("Reading (writing) caches from (to) {}", params.cache_dir);
         }
-        info!("Reading caches from {}", params.cache_dir);
 
         Ok(Arc::new(params))
     }

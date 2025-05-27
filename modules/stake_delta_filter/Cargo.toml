@@ -12,9 +12,12 @@ license = "Apache-2.0"
 acropolis_common = { path = "../../common" }
 anyhow = "1.0"
 async-trait = "0.1"
+bech32 = "0.11"
 caryatid_sdk = "0.5.0"
 config = "0.15.11"
 hex = "0.4.3"
+pallas-addresses = "0.32.0"
+pallas-crypto = "0.32.0"
 serde = { version = "1.0.214", features = ["derive"] }
 serde_json = "1.0.132"
 serde_json_any_key = "2.0.0"

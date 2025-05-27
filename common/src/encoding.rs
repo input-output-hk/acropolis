@@ -92,6 +92,23 @@ fn addr_to_bech32(name: &str, buf: &Vec<u8>) -> String {
         .unwrap_or_else(|e| format!("Cannot convert address to bech32: {e}"))
 }
 
+impl StakeAddressPayload {
+    fn to_bech32(&self) -> String {
+        let mut e = Encoder::default();
+
+        return match &self {
+            StakeAddressPayload::StakeKeyHash(k) => { e.append(&k); addr_to_bech32("stake_vkh", &k.to_vec()) }
+            StakeAddressPayload::ScriptHash(k) => { e.append(&k); addr_to_bech32("script", &k.to_vec()) }
+        }
+    }
+}
+
+impl Display for StakeAddressPayload {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+         write!(f, "{}", self.to_bech32())
+    }
+}
+
 impl ShelleyAddress {
     pub fn to_bech32(&self) -> String {
         match &encode_shelley_address(&self) {
@@ -133,8 +150,6 @@ impl Display for Address {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::*;
-    use anyhow::Result;
 
     fn serialize_uint(arg: u64) -> Vec<u8> {
         let mut e = Encoder::default();
@@ -155,7 +170,7 @@ mod tests {
             let val = 1 << x;
             let mut s = Vec::new();
             s.push(0x80 | (1 << (x % 7)));
-            for i in 1..(x / 7) { s.push(0x80); }
+            for _i in 1..(x / 7) { s.push(0x80); }
             s.push(0);
             assert_eq!(serialize_uint(val), s);
         }
