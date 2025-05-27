@@ -20,7 +20,7 @@ compose the Acropolis Architecture
 * [Governance State](governance_state) - tracks Governance Actions and voting
 * [Stake Delta Filter](stake_delta_filter) - filters out stake address changes and handles stake pointer references
 * [Epoch Activity Counter](epoch_activity_couinter) - counts fees and block production for rewards
-* [Reward State](reward_state) - calculates block rewards
+* [Accounts State](accounts_state) - stake and reward accounts tracker
 
 ## How to add a new module
 

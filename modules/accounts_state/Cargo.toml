@@ -1,11 +1,11 @@
 # Acropolis reward state module
 
 [package]
-name = "acropolis_module_reward_state"
+name = "acropolis_module_accounts_state"
 version = "0.1.0"
 edition = "2021"
 authors = ["Paul Clark <paul.clark@iohk.io>"]
-description = "Reward State Tracker"
+description = "Stake and rewards accounts state Tracker"
 license = "Apache-2.0"
 
 [dependencies]
@@ -22,4 +22,4 @@ hex = "0.4.3"
 imbl = { version = "5.0.0", features = ["serde"] }
 
 [lib]
-path = "src/reward_state.rs"
+path = "src/accounts_state.rs"

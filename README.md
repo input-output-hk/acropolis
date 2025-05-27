@@ -59,7 +59,7 @@ structure is highly subject to change:
 * [Governance State](modules/governance_state) - tracks Governance Actions and voting
 * [Stake Delta Filter](modules/stake_delta_filter) - filters out stake address changes and handles stake pointer references
 * [Epoch Activity Counter](modules/epoch_activity_counter) - counts fees and block production for rewards
-* [Reward State](modules/reward_state) - calculates block rewards
+* [Accounts State](modules/accounts_state) - stake and reward accounts tracker
 
 ```mermaid
 graph LR
@@ -75,7 +75,7 @@ graph LR
    GovernanceState(Governance State)
    StakeDeltaFilter(Stake Delta Filter)
    EpochActivityCounter(Epoch Activity Counter)
-   RewardState(Reward State)
+   AccountsState(Accounts State)
 
    UpstreamChainFetcher --> BlockUnpacker
    MithrilSnapshotFetcher --> BlockUnpacker
@@ -83,14 +83,15 @@ graph LR
    GenesisBootstrapper --> UTXOState
    TxUnpacker --> UTXOState
    TxUnpacker --> EpochActivityCounter
-   TxUnpacker --> RewardState
+   TxUnpacker --> AccountsState
    TxUnpacker --> SPOState
    TxUnpacker --> DRepState
    TxUnpacker --> GovernanceState
    UTXOState --> StakeDeltaFilter
    UpstreamChainFetcher --> EpochActivityCounter
    MithrilSnapshotFetcher --> EpochActivityCounter
-   EpochActivityCounter --> RewardState
+   EpochActivityCounter --> AccountsState
+   SPOState --> AccountsState
 ```
 
 ## Messages
