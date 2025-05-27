@@ -5,6 +5,8 @@ pub mod messages;
 pub mod calculations;
 pub mod rational_number;
 pub mod params;
+pub mod address;
 
 // Flattened re-exports
 pub use self::types::*;
+pub use self::address::*;
