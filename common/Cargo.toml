@@ -2,7 +2,7 @@
 
 [package]
 name = "acropolis_common"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 authors = ["Paul Clark <paul.clark@iohk.io>"]
 description = "Common types, messages and helpers for Acropolis"

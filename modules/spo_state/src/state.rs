@@ -1,6 +1,7 @@
 //! Acropolis SPOState: State storage
 use acropolis_common::{
     messages::TxCertificatesMessage,
+    BlockInfo,
     PoolRegistration,
     TxCertificate,
     params::{SECURITY_PARAMETER_K, TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH,},
@@ -118,11 +119,12 @@ impl State {
         }
     }
 
-    pub fn handle(&mut self, tx_cert_msg: &TxCertificatesMessage) -> Result<()> {
-        let mut current = self.get_previous_state(tx_cert_msg.block.number);
-        current.block = tx_cert_msg.block.number;
-        if tx_cert_msg.block.epoch > current.epoch {
-            current.epoch = tx_cert_msg.block.epoch;
+    pub fn handle(&mut self, block: &BlockInfo,
+                  tx_cert_msg: &TxCertificatesMessage) -> Result<()> {
+        let mut current = self.get_previous_state(block.number);
+        current.block = block.number;
+        if block.epoch > current.epoch {
+            current.epoch = block.epoch;
             let deregistrations = current.pending_deregistrations.remove(&current.epoch);
             match deregistrations {
                 Some(deregistrations) => {
@@ -166,5 +168,279 @@ impl State {
         self.history.push_back(current);
 
         Ok(())
+    }
+}
+
+// -- Tests --
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use acropolis_common::{
+        BlockInfo,
+        Era,
+        BlockStatus,
+        PoolRetirement,
+        Ratio,
+        TxCertificate,
+    };
+
+    #[tokio::test]
+    async fn new_state_is_empty() {
+        let state = State::new();
+        assert_eq!(0, state.history.len());
+    }
+
+    #[tokio::test]
+    async fn current_on_new_state_returns_none() {
+        let state = State::new();
+        assert!(state.current().is_none());
+    }
+
+    fn new_msg() -> TxCertificatesMessage {
+        TxCertificatesMessage {
+            certificates: Vec::<TxCertificate>::new(),
+        }
+    }
+
+    fn new_block() -> BlockInfo {
+        BlockInfo {
+            status: BlockStatus::Immutable,
+            slot: 0,
+            number: 0,
+            hash: Vec::<u8>::new(),
+            epoch: 0,
+            new_epoch: true,
+            era: Era::Byron,
+        }
+    }
+
+    #[tokio::test]
+    async fn state_is_not_empty_after_handle() {
+        let mut state = State::new();
+        let msg = new_msg();
+        let block = new_block();
+        assert!(state.handle(&block, &msg).is_ok());
+        assert_eq!(1, state.history.len());
+    }
+
+    #[tokio::test]
+    async fn spo_gets_registered() {
+        let mut state = State::new();
+        let mut msg = new_msg();
+        msg.certificates.push(TxCertificate::PoolRegistration(PoolRegistration {
+            operator: vec![0],
+            vrf_key_hash: vec![0],
+            pledge: 0,
+            cost: 0,
+            margin: Ratio {
+                numerator: 0,
+                denominator: 0,
+            },
+            reward_account: vec![0],
+            pool_owners: vec![vec![0]],
+            relays: vec![],
+            pool_metadata: None,
+        }));
+        let block = new_block();
+        assert!(state.handle(&block, &msg).is_ok());
+        let current = state.current();
+        assert!(!current.is_none());
+        if let Some(current) = current {
+            assert_eq!(1, current.spos.len());
+            let spo = current.spos.get(&vec![0u8]);
+            assert!(!spo.is_none());
+        };
+    }
+
+    #[tokio::test]
+    async fn pending_deregistration_gets_queued() {
+        let mut state = State::new();
+        let mut msg = new_msg();
+        msg.certificates.push(TxCertificate::PoolRetirement(PoolRetirement {
+            operator: vec![0],
+            epoch: 1,
+        }));
+        let block = new_block();
+        assert!(state.handle(&block, &msg).is_ok());
+        let current = state.current();
+        assert!(!current.is_none());
+        if let Some(current) = current {
+            assert_eq!(1, current.pending_deregistrations.len());
+            let drs = current.pending_deregistrations.get(&1);
+            assert!(!drs.is_none());
+            if let Some(drs) = drs {
+                assert_eq!(1, drs.len());
+                assert!(drs.contains(&vec![0u8]));
+            }
+        };
+    }
+
+    #[tokio::test]
+    async fn second_pending_deregistration_gets_queued() {
+        let mut state = State::new();
+        let mut msg = new_msg();
+        msg.certificates.push(TxCertificate::PoolRetirement(PoolRetirement {
+            operator: vec![0],
+            epoch: 2,
+        }));
+        let mut block = new_block();
+        assert!(state.handle(&block, &msg).is_ok());
+        let mut msg = new_msg();
+        block.number = 1;
+        msg.certificates.push(TxCertificate::PoolRetirement(PoolRetirement {
+            operator: vec![1],
+            epoch: 2,
+        }));
+        assert!(state.handle(&block, &msg).is_ok());
+        let current = state.current();
+        assert!(!current.is_none());
+        if let Some(current) = current {
+            assert_eq!(1, current.pending_deregistrations.len());
+            let drs = current.pending_deregistrations.get(&2);
+            assert!(!drs.is_none());
+            if let Some(drs) = drs {
+                assert_eq!(2, drs.len());
+                assert!(drs.contains(&vec![0u8]));
+                assert!(drs.contains(&vec![1u8]));
+            }
+        };
+    }
+
+    #[tokio::test]
+    async fn rollback_removes_second_pending_deregistration() {
+        let mut state = State::new();
+        let mut msg = new_msg();
+        msg.certificates.push(TxCertificate::PoolRetirement(PoolRetirement {
+            operator: vec![0],
+            epoch: 2,
+        }));
+        let mut block = new_block();
+        assert!(state.handle(&block, &msg).is_ok());
+        let mut msg = new_msg();
+        block.number = 1;
+        msg.certificates.push(TxCertificate::PoolRetirement(PoolRetirement {
+            operator: vec![1],
+            epoch: 2,
+        }));
+        assert!(state.handle(&block, &msg).is_ok());
+        let msg = new_msg();
+        block.number = 1;
+        assert!(state.handle(&block, &msg).is_ok());
+        let current = state.current();
+        assert!(!current.is_none());
+        if let Some(current) = current {
+            assert_eq!(1, current.pending_deregistrations.len());
+            let drs = current.pending_deregistrations.get(&2);
+            assert!(!drs.is_none());
+            if let Some(drs) = drs {
+                assert_eq!(1, drs.len());
+                assert!(drs.contains(&vec![0u8]));
+            }
+        };
+    }
+
+    #[tokio::test]
+    async fn spo_gets_deregistered() {
+        let mut state = State::new();
+        let mut msg = new_msg();
+        msg.certificates.push(TxCertificate::PoolRegistration(PoolRegistration {
+            operator: vec![0],
+            vrf_key_hash: vec![0],
+            pledge: 0,
+            cost: 0,
+            margin: Ratio {
+                numerator: 0,
+                denominator: 0,
+            },
+            reward_account: vec![0],
+            pool_owners: vec![vec![0]],
+            relays: vec![],
+            pool_metadata: None,
+        }));
+        let mut block = new_block();
+        assert!(state.handle(&block, &msg).is_ok());
+        let current = state.current();
+        assert!(!current.is_none());
+        if let Some(current) = current {
+            assert_eq!(1, current.spos.len());
+            let spo = current.spos.get(&vec![0u8]);
+            assert!(!spo.is_none());
+        };
+        let mut msg = new_msg();
+        block.number = 1;
+        msg.certificates.push(TxCertificate::PoolRetirement(PoolRetirement {
+            operator: vec![0],
+            epoch: 1,
+        }));
+        assert!(state.handle(&block, &msg).is_ok());
+        let msg = new_msg();
+        block.number = 2;
+        block.epoch = 1;
+        assert!(state.handle(&block, &msg).is_ok());
+        let current = state.current();
+        assert!(!current.is_none());
+        if let Some(current) = current {
+            assert!(current.spos.is_empty());
+        };
+    }
+
+    #[tokio::test]
+    async fn spo_gets_restored_on_rollback() {
+        let mut state = State::new();
+        let mut msg = new_msg();
+        msg.certificates.push(TxCertificate::PoolRegistration(PoolRegistration {
+            operator: vec![0],
+            vrf_key_hash: vec![0],
+            pledge: 0,
+            cost: 0,
+            margin: Ratio {
+                numerator: 0,
+                denominator: 0,
+            },
+            reward_account: vec![0],
+            pool_owners: vec![vec![0]],
+            relays: vec![],
+            pool_metadata: None,
+        }));
+        let mut block = new_block();
+        assert!(state.handle(&block, &msg).is_ok());
+        println!("{}", serde_json::to_string_pretty(&state.history).unwrap());
+        let current = state.current();
+        assert!(!current.is_none());
+        if let Some(current) = current {
+            assert_eq!(1, current.spos.len());
+            let spo = current.spos.get(&vec![0u8]);
+            assert!(!spo.is_none());
+        };
+        let mut msg = new_msg();
+        block.number = 1;
+        msg.certificates.push(TxCertificate::PoolRetirement(PoolRetirement {
+            operator: vec![0],
+            epoch: 1,
+        }));
+        assert!(state.handle(&block, &msg).is_ok());
+        println!("{}", serde_json::to_string_pretty(&state.history).unwrap());
+        let msg = new_msg();
+        block.number = 2;
+        block.epoch = 1;
+        assert!(state.handle(&block, &msg).is_ok());
+        println!("{}", serde_json::to_string_pretty(&state.history).unwrap());
+        let current = state.current();
+        assert!(!current.is_none());
+        if let Some(current) = current {
+            assert!(current.spos.is_empty());
+        };
+        let msg = new_msg();
+        block.number = 2;
+        block.epoch = 0;
+        assert!(state.handle(&block, &msg).is_ok());
+        println!("{}", serde_json::to_string_pretty(&state.history).unwrap());
+        let current = state.current();
+        assert!(!current.is_none());
+        if let Some(current) = current {
+            assert_eq!(1, current.spos.len());
+            let spo = current.spos.get(&vec![0u8]);
+            assert!(!spo.is_none());
+        };
     }
 }

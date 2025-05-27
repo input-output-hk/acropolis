@@ -5,8 +5,9 @@ use std::{collections::HashMap, sync::Arc, fs};
 use std::collections::HashSet;
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
 use acropolis_common::{
-    SingleVoterVotes,
-    messages::{GovernanceProceduresMessage, Message, TxCertificatesMessage, UTXODeltasMessage}, *,
+    messages::{GovernanceProceduresMessage, Message, CardanoMessage, BlockFeesMessage,
+               TxCertificatesMessage, UTXODeltasMessage},
+    *,
 };
 
 use anyhow::{anyhow, Result};
@@ -641,6 +642,11 @@ impl TxUnpacker
             info!("Publishing governance procedures on '{topic}'");
         }
 
+        let publish_fees_topic = config.get_string("publish-fees-topic").ok();
+        if let Some(ref topic) = publish_fees_topic {
+            info!("Publishing block fees on '{topic}'");
+        }
+
         let governance_logs_dir = config.get_string("governance-logs-dir").ok();
         if let Some(ref gov_log_dir) = governance_logs_dir {
             info!("Logging governance messages to '{gov_log_dir}'")
@@ -652,20 +658,22 @@ impl TxUnpacker
             let publish_utxo_deltas_topic = publish_utxo_deltas_topic.clone();
             let publish_certificates_topic = publish_certificates_topic.clone();
             let publish_governance_procedures_topic = publish_governance_procedures_topic.clone();
+            let publish_fees_topic = publish_fees_topic.clone();
             let governance_logs_dir = governance_logs_dir.clone();
 
             async move {
                 match message.as_ref() {
-                    Message::ReceivedTxs(txs_msg) => {
+                    Message::Cardano((block, CardanoMessage::ReceivedTxs(txs_msg))) => {
                         if tracing::enabled!(tracing::Level::DEBUG) {
                             debug!("Received {} txs for slot {}",
-                                txs_msg.txs.len(), txs_msg.block.slot);
+                                txs_msg.txs.len(), block.slot);
                         }
 
                         let mut deltas = Vec::new();
                         let mut certificates = Vec::new();
                         let mut voting_procedures = Vec::new();
                         let mut proposal_procedures = Vec::new();
+                        let mut total_fees: u64 = 0;
 
                         for (tx_index, raw_tx) in txs_msg.txs.iter().enumerate() {
                             // Parse the tx
@@ -760,7 +768,7 @@ impl TxUnpacker
                                                     .and_then (|proc_id| Self::map_governance_proposals_procedures(&proc_id, &pallas_governance_proposals))
                                                 {
                                                     Ok(g) => proposal_procedures.push(g),
-                                                    Err(e) => error!("Cannot decode governance proposal procedure {} idx {} in slot {}: {e}", proc_id, action_index, txs_msg.block.slot)
+                                                    Err(e) => error!("Cannot decode governance proposal procedure {} idx {} in slot {}: {e}", proc_id, action_index, block.slot)
                                                 }
                                             }
                                         }
@@ -769,53 +777,65 @@ impl TxUnpacker
                                             // Nonempty set -- governance_message.voting_procedures will not be empty
                                             match Self::map_all_governance_voting_procedures(pallas_vp) {
                                                 Ok(vp) => voting_procedures.push((tx.hash().to_vec(), vp)),
-                                                Err(e) => error!("Cannot decode governance voting procedures in slot {}: {e}", txs_msg.block.slot)
+                                                Err(e) => error!("Cannot decode governance voting procedures in slot {}: {e}", block.slot)
                                             }
                                         }
+                                    }
+
+                                    // Capture the fees
+                                    if let Some(fee) = tx.fee() {
+                                        total_fees += fee;
                                     }
                                 },
 
                                 Err(e) => error!("Can't decode transaction in slot {}: {e}",
-                                                 txs_msg.block.slot)
+                                                 block.slot)
                             }
                         }
 
                         // Publish messages in parallel
                         let mut futures = Vec::new();
                         if let Some(topic) = publish_utxo_deltas_topic {
-                            let msg = Message::UTXODeltas(UTXODeltasMessage {
-                                block: txs_msg.block.clone(),
-                                deltas,
-                            });
+                            let msg = Message::Cardano((
+                                block.clone(),
+                                CardanoMessage::UTXODeltas(UTXODeltasMessage {
+                                    deltas,
+                                })
+                            ));
 
                             futures.push(context.message_bus.publish(&topic, Arc::new(msg)));
                         }
 
                         if let Some(topic) = publish_certificates_topic {
-                            let msg = Message::TxCertificates(TxCertificatesMessage {
-                                block: txs_msg.block.clone(),
-                                certificates,
-                            });
+                            let msg = Message::Cardano((
+                                block.clone(),
+                                CardanoMessage::TxCertificates(TxCertificatesMessage {
+                                    certificates,
+                                })
+                            ));
 
                             futures.push(context.message_bus.publish(&topic, Arc::new(msg)));
                         }
 
                         if let Some(topic) = publish_governance_procedures_topic {
-                            let governance_empty = voting_procedures.is_empty() && proposal_procedures.is_empty() && !txs_msg.block.new_epoch;
+                            let governance_empty = voting_procedures.is_empty() && proposal_procedures.is_empty() && !block.new_epoch;
 
-                            let governance_msg = Arc::new(Message::GovernanceProcedures(
-                                GovernanceProceduresMessage {
-                                    block: txs_msg.block.clone(),
-                                    voting_procedures,
-                                    proposal_procedures,
-                                }));
+                            let governance_msg = Arc::new(Message::Cardano((
+                                block.clone(),
+                                CardanoMessage::GovernanceProcedures(
+                                    GovernanceProceduresMessage {
+                                        voting_procedures,
+                                        proposal_procedures,
+                                    })
+                            )));
 
-                            futures.push(context.message_bus.publish(&topic, governance_msg.clone()));
+                            futures.push(context.message_bus.publish(&topic,
+                                                                     governance_msg.clone()));
 
                             if !governance_empty {
                                 if let Some(ref dir) = governance_logs_dir {
-                                    let filename = format!("{dir}/gov_{:012}.json", txs_msg.block.number);
-                                    let data = match serde_json::to_string(&governance_msg) {
+                                    let filename = format!("{dir}/gov_{:012}.json", block.number);
+                                    let data = match serde_json::to_string(&*governance_msg) {
                                         Ok(data) => data,
                                         Err(e) => format!("Error serializing message to json: {e}")
                                     };
@@ -823,8 +843,8 @@ impl TxUnpacker
                                         error!("Error writing to file: {}", e);
                                     }
 
-                                    let filename = format!("{dir}/src_{:012}.json", txs_msg.block.number);
-                                    let data = match serde_json::to_string(&message) {
+                                    let filename = format!("{dir}/src_{:012}.json", block.number);
+                                    let data = match serde_json::to_string(&*message) {
                                         Ok(data) => data,
                                         Err(e) => format!("Error serializing message to json: {e}")
                                     };
@@ -833,6 +853,17 @@ impl TxUnpacker
                                     }
                                 }
                             }
+                        }
+
+                        if let Some(topic) = publish_fees_topic {
+                            let msg = Message::Cardano((
+                                block.clone(),
+                                CardanoMessage::BlockFees(BlockFeesMessage {
+                                    total_fees
+                                })
+                            ));
+
+                            futures.push(context.message_bus.publish(&topic, Arc::new(msg)));
                         }
 
                         join_all(futures)

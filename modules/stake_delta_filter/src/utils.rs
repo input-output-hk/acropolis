@@ -1,5 +1,11 @@
 use std::{cmp::max, collections::{HashMap, HashSet}, fs::File, io::BufReader, io::Write, sync::Arc};
 use anyhow::{anyhow, Result};
+<<<<<<< HEAD
+=======
+use acropolis_common::{Address, ShelleyAddressDelegationPart, ShelleyAddressPointer,
+                       StakeAddress, StakeAddressDelta};
+use acropolis_common::messages::{AddressDeltasMessage, StakeAddressDeltasMessage};
+>>>>>>> cbf26d40606bf4bec8c7fd9bf08d829efd58abfb
 use serde_with::serde_as;
 use acropolis_common::{
     Address, AddressDelta, BlockInfo, 
@@ -118,6 +124,7 @@ pub struct OccurrenceInfo {
     stake_address_delta: Option<StakeAddressDelta>
 }
 
+<<<<<<< HEAD
 #[derive(Debug)]
 enum OccurrenceInfoKind {
     Valid,
@@ -242,9 +249,12 @@ impl Tracker {
 /// (and removes all others). If the address is a pointer, tries to resolve it.
 /// If the pointer is incorrect, then filters it out too (incorrect pointers cannot
 /// be used for staking). Updates info about pointer occurrences, if tracker provided.
-pub async fn process_message(cache: &PointerCache, delta: &AddressDeltasMessage, mut tracker: Option<&mut Tracker>) -> Result<StakeAddressDeltasMessage> {
+pub async fn process_message(
+   cache: &PointerCache, 
+   delta: &AddressDeltasMessage, 
+   mut tracker: Option<&mut Tracker>
+) -> Result<StakeAddressDeltasMessage> {
     let mut result = StakeAddressDeltasMessage {
-        block: delta.block.clone(),
         deltas: Vec::new()
     };
 

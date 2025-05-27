@@ -16,6 +16,7 @@ members = [
     "modules/drep_state",              # DRep state
     "modules/governance_state",        # Governance state
     "modules/stake_delta_filter",      # Filters address deltas
+    "modules/epoch_activity_counter",  # Counts fees and block producers for rewards
 
     # Process builds
     "processes/omnibus",               # All-inclusive omnibus process

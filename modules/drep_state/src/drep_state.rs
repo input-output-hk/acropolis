@@ -2,7 +2,7 @@
 //! Accepts certificate events and derives the DRep State in memory
 
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
-use acropolis_common::{messages::Message, DRepCredential};
+use acropolis_common::{messages::{Message, CardanoMessage}, DRepCredential};
 use std::sync::Arc;
 use anyhow::{anyhow, Result};
 use config::Config;
@@ -86,9 +86,9 @@ impl DRepState
             let state = state1.clone();
             async move {
                 match message.as_ref() {
-                    Message::TxCertificates(tx_cert_msg) => {
+                    Message::Cardano((block_info, CardanoMessage::TxCertificates(tx_cert_msg))) => {
                         let mut state = state.lock().await;
-                        state.handle(tx_cert_msg)
+                        state.handle(block_info, tx_cert_msg)
                             .await
                             .inspect_err(|e| error!("Messaging handling error: {e}"))
                             .ok();

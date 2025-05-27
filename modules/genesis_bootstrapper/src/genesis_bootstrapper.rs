@@ -5,11 +5,11 @@ use std::collections::HashMap;
 use caryatid_sdk::{module, Context, MessageBusExt, Module};
 use acropolis_common::{
     messages::{
-        GenesisCompleteMessage, Message, UTXODeltasMessage
+        GenesisCompleteMessage, Message, UTXODeltasMessage, CardanoMessage,
     },
     Address, Anchor, BlockInfo, BlockStatus, ByronAddress,
     Committee, Constitution, ConwayGenesisParams, Credential,
-    DRepVotingThresholds, PoolVotingThresholds,
+    DRepVotingThresholds, Era, PoolVotingThresholds,
     TxOutput, UTXODelta,
 };
 use hex::decode;
@@ -171,15 +171,17 @@ impl GenesisBootstrapper
                     };
 
                     // Construct message
+                    let block_info = BlockInfo {
+                        status: BlockStatus::Bootstrap,
+                        slot: 0,
+                        number: 0,
+                        hash: Vec::new(),
+                        epoch: 0,
+                        new_epoch: false,
+                        era: Era::Byron,
+                    };
+
                     let mut message = UTXODeltasMessage {
-                        block: BlockInfo {
-                            status: BlockStatus::Bootstrap,
-                            slot: 0,
-                            number: 0,
-                            hash: Vec::new(),
-                            epoch: 0,
-                            new_epoch: false
-                        },
                         deltas: Vec::new(),
                     };
 
@@ -198,7 +200,10 @@ impl GenesisBootstrapper
                         message.deltas.push(UTXODelta::Output(tx_output));
                     }
 
-                    let message_enum = Message::UTXODeltas(message);
+                    let message_enum = Message::Cardano((
+                        block_info.clone(),
+                        CardanoMessage::UTXODeltas(message)
+                    ));
                     context.message_bus.publish(&publish_utxo_deltas_topic,
                                                 Arc::new(message_enum))
                         .await
@@ -214,7 +219,10 @@ impl GenesisBootstrapper
                             }),
                     };
 
-                    let message_enum = Message::GenesisComplete(completion_message);
+                    let message_enum = Message::Cardano((
+                        block_info,
+                        CardanoMessage::GenesisComplete(completion_message)
+                    ));
                     context.message_bus.publish(&completion_topic, Arc::new(message_enum))
                         .await
                         .unwrap_or_else(|e| error!("Failed to publish: {e}"));

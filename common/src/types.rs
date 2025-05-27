@@ -12,6 +12,19 @@ use hex::decode;
 use bitmask_enum::bitmask;
 use crate::rational_number::RationalNumber;
 
+/// Protocol era
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum Era
+{
+    Byron,
+    Shelley,
+    Allegra,
+    Mary,
+    Alonzo,
+    Babbage,
+    Conway,
+}
+
 /// Block status
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum BlockStatus
@@ -22,12 +35,8 @@ pub enum BlockStatus
     RolledBack,  // Volatile, restarted after rollback
 }
 
-impl Default for BlockStatus {
-    fn default() -> Self { Self::Immutable }
-}
-
 /// Block info, shared across multiple messages
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BlockInfo {
     /// Block status
     pub status: BlockStatus,
@@ -46,6 +55,9 @@ pub struct BlockInfo {
 
     /// Does this block start a new epoch?
     pub new_epoch: bool,
+
+    /// Protocol era
+    pub era: Era,
 }
 
 /// a Byron-era address
@@ -985,7 +997,6 @@ pub enum TxCertificate {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::*;
     use anyhow::Result;
 
     fn make_committee_credential(addr_key_hash: bool, val: u8) -> CommitteeCredential {
