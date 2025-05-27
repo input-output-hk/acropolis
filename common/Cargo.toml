@@ -24,6 +24,10 @@ tokio = { version = "1", features = ["full"] }
 anyhow = "1.0"
 bech32 = "0.11"
 lf-queue = "0.1.0"
+bs58 = "0.5.1"
+
+[dev-dependencies]
+blake2 = "0.10.6"
 
 [lib]
 crate-type = ["rlib"]
