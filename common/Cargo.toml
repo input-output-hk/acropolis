@@ -9,9 +9,9 @@ description = "Common types, messages and helpers for Acropolis"
 license = "Apache-2.0"
 
 [dependencies]
-caryatid_sdk = "0.5"
-caryatid_module_clock = "0.5"
-caryatid_module_rest_server = "0.6"
+caryatid_sdk = "0.6"
+caryatid_module_clock = "0.6"
+caryatid_module_rest_server = "0.7"
 bitmask-enum = "2.2"
 gcd = "2.3"
 hex = "0.4"
