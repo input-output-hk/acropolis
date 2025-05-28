@@ -3,18 +3,25 @@ Stake Delta Filter module
 
 The module subscribes to deltas topic, which gives info about money, 
 deposited to accounts (positive delta) or retrieved from accounts (negative
-deltas). The module then filters the topic and leaves only those deltas, 
-which tell about stake accounts.
+deltas). The module then filters the topic and translates further only 
+those deltas, which are bound to stake accounts.
 
-Stake accounts can be addressed directly (this filtering is done in
-straightforward fashion), but also can be addressed via pointers.
-This case is handled separately.
+There can be three types of addresses, and each type is processed in its own way:
+* Byron addresses, they cannot be used in staking, therefore they are ignored.
+* Base addresses (direct address of Staking account, not split into payment and
+delegation parts), they are translated to output.
+* Shelley addresses (split into payment and delegation parts). In this type of address,
+payment part is ignored and the delegation part is translated further (if it is specified).
+Enterprise addresses (which have empty delegation part) are not connected to any
+staking, so they are ignored.
 
-The pointers specify a block number, transaction and certificate index of 
-the actual account for transaction. If the pointer is valid, then the pointer 
-is substiuted with the corresponding stake account. If the pointer is invalid, 
-then it is ignored (such pointers are allowed to address money, but are not 
-allowed to participate in staking).
+The staking part of Shelley address in turn may be specified directly (in this case
+this info is forwarded to ouptut), or via a pointer. The pointers specify a block 
+number, transaction and certificate index of the actual staking address for 
+transaction. If the pointer is valid, then the pointer is substiuted with the 
+corresponding stake account. If the pointer is invalid, then it is ignored 
+(such pointers are allowed to address money, but are not allowed to participate in 
+staking).
 
 Pointer Cache
 -------------
@@ -34,8 +41,8 @@ configuration .toml file:
 
      This mode is probably the best variant for an ordinal user because it is not allowed to make any
      pointers to Conway epoch stakes. Also, the authors believe that no new pointers may appear since 
-     Conway epoch started even to previous epochs', and only those pointers that were actually used 
-     in the Main blockchain up to this moment can exist at any future moment.
+     Conway epoch started, and only those pointers that were actually used in the blockchain up to 
+     this moment can exist at any future moment.
 
      So, if the network has advanced to Conway epoch, then predefined cache can be collected
      in the way that allows to decode any possible pointer address.

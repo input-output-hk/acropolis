@@ -264,10 +264,12 @@ pub async fn process_message(
         cache.ensure_up_to_date(&d.address)?;
 
         let stake_address = match &d.address {
+            // Not good for staking
             Address::None | Address::Byron(_) => continue,
 
             Address::Shelley(shelley) => {
                 match &shelley.delegation {
+                    // Base addresses (stake delegated to itself)
                     ShelleyAddressDelegationPart::StakeKeyHash(keyhash) =>
                         StakeAddress {
                             network: shelley.network.clone(),
@@ -280,6 +282,7 @@ pub async fn process_message(
                             payload: StakeAddressPayload::ScriptHash(scripthash.clone())
                         },
 
+                    // Shelley addresses (stake delegated to some different address)
                     ShelleyAddressDelegationPart::Pointer(ref ptr) => match cache.decode_pointer(ptr) {
                         None => {
                             tracing::warn!("Pointer {ptr:?} is not registered in cache");
@@ -298,7 +301,7 @@ pub async fn process_message(
                         }
                     }
 
-                    // Enterprise addresses do not reference stakes: ignore
+                    // Enterprise addresses, does not delegate stake
                     ShelleyAddressDelegationPart::None => continue 
                 }
             }
@@ -308,38 +311,6 @@ pub async fn process_message(
 
         let stake_delta = StakeAddressDelta { address: stake_address, delta: d.delta };
         result.deltas.push (stake_delta);
-/*
-        match d.address.get_pointer() {
-            None => match d.address {
-                Address::Stake(ref stake_address) =>
-                    let stake_delta = StakeAddressDelta { address: stake_address.clone(), delta: d.delta };
-                    result.deltas.push (stake_delta);
-                },
-                        Ok(Some(StakeAddress {
-                            network: shelley_address.network.clone(),
-                            payload:
-                              StakeAddressPayload::StakeKeyHash(keyhash.clone())
-                        }
-            }
-
-            Some(ptr) => match cache.decode_pointer(&ptr) {
-                None => {
-                    tracing::warn!("Pointer {ptr:?} is not registered in cache");
-                    tracker.as_mut().map(|t| t.track(&ptr, block, &d, None));
-                },
-
-                Some(None) => {
-                    tracker.as_mut().map(|t| t.track(&ptr, block, &d, None));
-                },
-
-                Some(Some(stake_address)) => {
-                    let stake_delta = StakeAddressDelta { address: stake_address.clone(), delta: d.delta };
-                    tracker.as_mut().map(|t| t.track(&ptr, block, &d, Some(&stake_delta)));
-                    result.deltas.push (stake_delta);
-                }
-            }
-        }
- */
     }
 
     Ok(result)
