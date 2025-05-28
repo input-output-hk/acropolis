@@ -1,7 +1,7 @@
 //! Acropolis epoch activity counter module for Caryatid
 //! Unpacks block bodies to get transaction fees
 
-use caryatid_sdk::{Context, Module, module};
+use caryatid_sdk::{Context, Module, module, message_bus::Subscription};
 use acropolis_common::{Era, messages::{Message, CardanoMessage}};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -27,17 +27,10 @@ pub struct EpochActivityCounter;
 
 impl EpochActivityCounter
 {
-    /// Async run loop
-    async fn run(context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
-
-        // Get configuration
-        let subscribe_headers_topic = config.get_string("subscribe-headers-topic")
-            .unwrap_or(DEFAULT_SUBSCRIBE_HEADERS_TOPIC.to_string());
-        info!("Creating subscriber for headers on '{subscribe_headers_topic}'");
-
-        let subscribe_fees_topic = config.get_string("subscribe-fees-topic")
-            .unwrap_or(DEFAULT_SUBSCRIBE_FEES_TOPIC.to_string());
-        info!("Creating subscriber for fees on '{subscribe_fees_topic}'");
+    /// Run loop
+    async fn run(context: Arc<Context<Message>>, config: Arc<Config>,
+                 mut headers_subscription: Box<dyn Subscription<Message>>,
+                 mut fees_subscription: Box<dyn Subscription<Message>>) -> Result<()> {
 
         let publish_topic = config.get_string("publish-topic")
             .unwrap_or(DEFAULT_PUBLISH_TOPIC.to_string());
@@ -46,10 +39,6 @@ impl EpochActivityCounter
         // Create state
         // TODO!  Handling rollbacks with StateHistory
         let state = Arc::new(Mutex::new(State::new()));
-
-        // Subscribe
-        let mut headers_subscription = context.message_bus.register(&subscribe_headers_topic).await?;
-        let mut fees_subscription = context.message_bus.register(&subscribe_fees_topic).await?;
 
         loop {
             // Read both topics in parallel
@@ -111,12 +100,38 @@ impl EpochActivityCounter
         }
     }
 
+    /// Async initialisation
+    async fn async_init(context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
+
+        // Get configuration
+        let subscribe_headers_topic = config.get_string("subscribe-headers-topic")
+            .unwrap_or(DEFAULT_SUBSCRIBE_HEADERS_TOPIC.to_string());
+        info!("Creating subscriber for headers on '{subscribe_headers_topic}'");
+
+        let subscribe_fees_topic = config.get_string("subscribe-fees-topic")
+            .unwrap_or(DEFAULT_SUBSCRIBE_FEES_TOPIC.to_string());
+        info!("Creating subscriber for fees on '{subscribe_fees_topic}'");
+
+        // Subscribe
+        let mut headers_subscription = context.message_bus.register(&subscribe_headers_topic).await?;
+        let mut fees_subscription = context.message_bus.register(&subscribe_fees_topic).await?;
+
+        // Start run task
+        tokio::spawn(async move {
+            Self::run(context, config, headers_subscription, fees_subscription)
+                .await.unwrap_or_else(|e| error!("Failed: {e}"));
+        });
+
+        Ok(())
+    }
+
     /// Main init function
     pub fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
 
-        tokio::spawn(async move {
-            Self::run(context, config).await.unwrap_or_else(|e| error!("Failed: {e}"));
-        });
+        async move {
+            Self::async_init(context, config)
+                .await.unwrap_or_else(|e| error!("Failed: {e}"));
+        };
 
         Ok(())
     }
