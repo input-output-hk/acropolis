@@ -1,7 +1,7 @@
 //! Acropolis epoch activity counter module for Caryatid
 //! Unpacks block bodies to get transaction fees
 
-use caryatid_sdk::{Context, Module, module, MessageBusExt};
+use caryatid_sdk::{Context, Module, module};
 use acropolis_common::{Era, messages::{Message, CardanoMessage}};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -27,8 +27,8 @@ pub struct EpochActivityCounter;
 
 impl EpochActivityCounter
 {
-    /// Main init function
-    pub fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
+    /// Async run loop
+    async fn run(context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
 
         // Get configuration
         let subscribe_headers_topic = config.get_string("subscribe-headers-topic")
@@ -44,81 +44,75 @@ impl EpochActivityCounter
         info!("Publishing on '{publish_topic}'");
 
         // Create state
+        // TODO!  Handling rollbacks with StateHistory
         let state = Arc::new(Mutex::new(State::new()));
-        let state_headers = state.clone();
-        let state_fees = state.clone();
 
-        // TODO!  Synchronisation between these two subscriptions - fees may be wrongly
-        // accounted to the next epoch if the order is wrong
+        // Subscribe
+        let mut headers_subscription = context.message_bus.register(&subscribe_headers_topic).await?;
+        let mut fees_subscription = context.message_bus.register(&subscribe_fees_topic).await?;
 
-        // TODO!  Handling rollbacks - delay by 'k' is an option
+        loop {
+            // Handle headers first
+            let (_, message) = headers_subscription.read().await?;
+            match message.as_ref() {
+                Message::Cardano((block, CardanoMessage::BlockHeader(header_msg))) => {
 
-        // Handle block headers
-        let context_headers = context.clone();
-        context.clone().message_bus.subscribe(&subscribe_headers_topic,
-                                              move |message: Arc<Message>| {
-            let state = state_headers.clone();
-            let publish_topic = publish_topic.clone();
-            let context = context_headers.clone();
-
-            async move {
-                match message.as_ref() {
-                    Message::Cardano((block, CardanoMessage::BlockHeader(header_msg))) => {
-
-                        // End of epoch?
-                        if block.new_epoch {
-                            let mut state = state.lock().await;
-                            let msg = state.end_epoch(&block, block.epoch-1);
-                            context.message_bus.publish(&publish_topic, msg)
-                                .await
-                                .unwrap_or_else(|e| error!("Failed to publish: {e}"));
-                        }
-
-                        // Derive the variant from the era - just enough to make
-                        // MultiEraHeader::decode() work.
-                        let variant = match block.era {
-                            Era::Byron => 0,
-                            Era::Shelley => 1,
-                            Era::Allegra => 2,
-                            Era::Mary => 3,
-                            Era::Alonzo => 4,
-                            _ => 5,
-                        };
-
-                        // Parse the header - note we ignore the subtag because EBBs
-                        // are suppressed upstream
-                        match MultiEraHeader::decode(variant, None, &header_msg.raw) {
-                            Ok(header) => {
-                                if let Some(vrf_vkey) = header.vrf_vkey() {
-                                    let mut state = state.lock().await;
-                                    state.handle_mint(&block, vrf_vkey);
-                                }
-                            }
-
-                            Err(e) => error!("Can't decode header {}: {e}", block.slot)
-                        }
-                    }
-
-                    _ => error!("Unexpected message type: {message:?}")
-                }
-            }
-        })?;
-
-        // Handle block fees
-        context.clone().message_bus.subscribe(&subscribe_fees_topic,
-                                              move |message: Arc<Message>| {
-            let state = state_fees.clone();
-            async move {
-                match message.as_ref() {
-                    Message::Cardano((block, CardanoMessage::BlockFees(fees_msg))) => {
+                    // End of epoch?
+                    if block.new_epoch {
                         let mut state = state.lock().await;
-                        state.handle_fees(&block, fees_msg.total_fees);
+                        let msg = state.end_epoch(&block, block.epoch-1);
+                        context.message_bus.publish(&publish_topic, msg)
+                            .await
+                            .unwrap_or_else(|e| error!("Failed to publish: {e}"));
                     }
 
-                    _ => error!("Unexpected message type: {message:?}")
+                    // Derive the variant from the era - just enough to make
+                    // MultiEraHeader::decode() work.
+                    let variant = match block.era {
+                        Era::Byron => 0,
+                        Era::Shelley => 1,
+                        Era::Allegra => 2,
+                        Era::Mary => 3,
+                        Era::Alonzo => 4,
+                        _ => 5,
+                    };
+
+                    // Parse the header - note we ignore the subtag because EBBs
+                    // are suppressed upstream
+                    match MultiEraHeader::decode(variant, None, &header_msg.raw) {
+                        Ok(header) => {
+                            if let Some(vrf_vkey) = header.vrf_vkey() {
+                                let mut state = state.lock().await;
+                                state.handle_mint(&block, vrf_vkey);
+                            }
+                        }
+
+                        Err(e) => error!("Can't decode header {}: {e}", block.slot)
+                    }
                 }
+
+                _ => error!("Unexpected message type: {message:?}")
             }
-        })?;
+
+            // Handle block fees second - this is what generates the EpochActivity message
+            let (_, message) = fees_subscription.read().await?;
+            match message.as_ref() {
+                Message::Cardano((block, CardanoMessage::BlockFees(fees_msg))) => {
+                    let mut state = state.lock().await;
+                    state.handle_fees(&block, fees_msg.total_fees);
+                }
+
+                _ => error!("Unexpected message type: {message:?}")
+            }
+        }
+    }
+
+    /// Main init function
+    pub fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
+
+        tokio::spawn(async move {
+            Self::run(context, config).await.unwrap_or_else(|e| error!("Failed: {e}"));
+        });
 
         Ok(())
     }
