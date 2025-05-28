@@ -113,8 +113,8 @@ impl EpochActivityCounter
         info!("Creating subscriber for fees on '{subscribe_fees_topic}'");
 
         // Subscribe
-        let mut headers_subscription = context.message_bus.register(&subscribe_headers_topic).await?;
-        let mut fees_subscription = context.message_bus.register(&subscribe_fees_topic).await?;
+        let headers_subscription = context.message_bus.register(&subscribe_headers_topic).await?;
+        let fees_subscription = context.message_bus.register(&subscribe_fees_topic).await?;
 
         // Start run task
         tokio::spawn(async move {
@@ -128,10 +128,10 @@ impl EpochActivityCounter
     /// Main init function
     pub fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
 
-        async move {
+        tokio::runtime::Handle::current().block_on(async move {
             Self::async_init(context, config)
                 .await.unwrap_or_else(|e| error!("Failed: {e}"));
-        };
+        });
 
         Ok(())
     }
