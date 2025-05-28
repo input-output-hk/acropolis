@@ -52,8 +52,12 @@ impl EpochActivityCounter
         let mut fees_subscription = context.message_bus.register(&subscribe_fees_topic).await?;
 
         loop {
+            // Read both topics in parallel
+            let headers_message_f = headers_subscription.read();
+            let fees_message_f = fees_subscription.read();
+
             // Handle headers first
-            let (_, message) = headers_subscription.read().await?;
+            let (_, message) = headers_message_f.await?;
             match message.as_ref() {
                 Message::Cardano((block, CardanoMessage::BlockHeader(header_msg))) => {
 
@@ -95,7 +99,7 @@ impl EpochActivityCounter
             }
 
             // Handle block fees second - this is what generates the EpochActivity message
-            let (_, message) = fees_subscription.read().await?;
+            let (_, message) = fees_message_f.await?;
             match message.as_ref() {
                 Message::Cardano((block, CardanoMessage::BlockFees(fees_msg))) => {
                     let mut state = state.lock().await;
