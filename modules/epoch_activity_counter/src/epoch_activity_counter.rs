@@ -4,7 +4,7 @@
 use caryatid_sdk::{Context, Module, module, message_bus::Subscription};
 use acropolis_common::{Era, messages::{Message, CardanoMessage}};
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::{task, sync::Mutex};
 use anyhow::Result;
 use config::Config;
 use tracing::{info, error};
@@ -128,9 +128,11 @@ impl EpochActivityCounter
     /// Main init function
     pub fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
 
-        tokio::runtime::Handle::current().block_on(async move {
-            Self::async_init(context, config)
-                .await.unwrap_or_else(|e| error!("Failed: {e}"));
+        task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async move {
+                Self::async_init(context, config)
+                    .await.unwrap_or_else(|e| error!("Failed: {e}"));
+            })
         });
 
         Ok(())

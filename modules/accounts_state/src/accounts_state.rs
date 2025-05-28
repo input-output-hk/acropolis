@@ -8,7 +8,7 @@ use acropolis_common::{
 use std::sync::Arc;
 use anyhow::Result;
 use config::Config;
-use tokio::sync::Mutex;
+use tokio::{task, sync::Mutex};
 use tracing::{error, info};
 use serde_json;
 
@@ -40,37 +40,10 @@ impl AccountsState
 
         // Main loop
         loop {
-            // Read all topics in parallel
-            let spos_message_f = spos_subscription.read();
-            let ea_message_f = ea_subscription.read();
+            // Read per-block topics in parallel
             let certs_message_f = certs_subscription.read();
             let stake_message_f = stake_subscription.read();
-
-            // Handle SPOs
-            let (_, message) = spos_message_f.await?;
-            match message.as_ref() {
-                Message::Cardano((block_info, CardanoMessage::SPOState(spo_msg))) => {
-                    let mut state = state.lock().await;
-                    state.handle_spo_state(block_info, spo_msg)
-                        .inspect_err(|e| error!("Messaging handling error: {e}"))
-                        .ok();
-                }
-
-                _ => error!("Unexpected message type: {message:?}")
-            }
-
-            // Handle epoch activity
-            let (_, message) = ea_message_f.await?;
-            match message.as_ref() {
-                Message::Cardano((block_info, CardanoMessage::EpochActivity(ea_msg))) => {
-                    let mut state = state.lock().await;
-                    state.handle_epoch_activity(block_info, ea_msg)
-                        .inspect_err(|e| error!("Messaging handling error: {e}"))
-                        .ok();
-                }
-
-                _ => error!("Unexpected message type: {message:?}")
-            }
+            let mut new_epoch = false;
 
             // Handle certificates
             let (_, message) = certs_message_f.await?;
@@ -80,6 +53,7 @@ impl AccountsState
                     state.handle_tx_certificates(block_info, tx_certs_msg)
                         .inspect_err(|e| error!("Messaging handling error: {e}"))
                         .ok();
+                    if block_info.new_epoch { new_epoch = true; }
                 }
 
                 _ => error!("Unexpected message type: {message:?}")
@@ -94,9 +68,42 @@ impl AccountsState
                     state.handle_stake_deltas(block_info, deltas_msg)
                         .inspect_err(|e| error!("Messaging handling error: {e}"))
                         .ok();
+                    if block_info.new_epoch { new_epoch = true; }
                 }
 
                 _ => error!("Unexpected message type: {message:?}")
+            }
+
+            // Read from epoch-boundary messages only when it's a new epoch
+            if new_epoch {
+                let spos_message_f = spos_subscription.read();
+                let ea_message_f = ea_subscription.read();
+
+                // Handle SPOs
+                let (_, message) = spos_message_f.await?;
+                match message.as_ref() {
+                    Message::Cardano((block_info, CardanoMessage::SPOState(spo_msg))) => {
+                        let mut state = state.lock().await;
+                        state.handle_spo_state(block_info, spo_msg)
+                            .inspect_err(|e| error!("Messaging handling error: {e}"))
+                            .ok();
+                    }
+
+                    _ => error!("Unexpected message type: {message:?}")
+                }
+
+                // Handle epoch activity
+                let (_, message) = ea_message_f.await?;
+                match message.as_ref() {
+                    Message::Cardano((block_info, CardanoMessage::EpochActivity(ea_msg))) => {
+                        let mut state = state.lock().await;
+                        state.handle_epoch_activity(block_info, ea_msg)
+                            .inspect_err(|e| error!("Messaging handling error: {e}"))
+                            .ok();
+                    }
+
+                    _ => error!("Unexpected message type: {message:?}")
+                }
             }
         }
     }
@@ -229,9 +236,12 @@ impl AccountsState
     /// Main init function
     pub fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
 
-        tokio::runtime::Handle::current().block_on(async move {
-            Self::async_init(context, config)
-                .await.unwrap_or_else(|e| error!("Failed: {e}"));
+        // Spawn the async_init - creates a race condition, we really need init() to be async!
+        task::block_in_place(|| {
+            tokio::spawn(async move {
+                Self::async_init(context, config)
+                    .await.unwrap_or_else(|e| error!("Failed: {e}"));
+            })
         });
 
         Ok(())
