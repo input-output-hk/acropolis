@@ -1,7 +1,7 @@
 //! Acropolis accounts state module for Caryatid
 //! Manages stake and reward accounts state
 
-use caryatid_sdk::{Context, Module, module, MessageBusExt};
+use caryatid_sdk::{Context, Module, module, MessageBusExt, message_bus::Subscription};
 use acropolis_common::{
     messages::{Message, RESTResponse, CardanoMessage},
 };
@@ -31,7 +31,78 @@ pub struct AccountsState;
 
 impl AccountsState
 {
-    pub fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
+    /// Async run loop
+    async fn run(state: Arc<Mutex<State>>,
+                 mut spos_subscription: Box<dyn Subscription<Message>>,
+                 mut ea_subscription: Box<dyn Subscription<Message>>,
+                 mut certs_subscription: Box<dyn Subscription<Message>>,
+                 mut stake_subscription: Box<dyn Subscription<Message>>) -> Result<()> {
+
+        // Main loop
+        loop {
+            // Read all topics in parallel
+            let spos_message_f = spos_subscription.read();
+            let ea_message_f = ea_subscription.read();
+            let certs_message_f = certs_subscription.read();
+            let stake_message_f = stake_subscription.read();
+
+            // Handle SPOs
+            let (_, message) = spos_message_f.await?;
+            match message.as_ref() {
+                Message::Cardano((block_info, CardanoMessage::SPOState(spo_msg))) => {
+                    let mut state = state.lock().await;
+                    state.handle_spo_state(block_info, spo_msg)
+                        .inspect_err(|e| error!("Messaging handling error: {e}"))
+                        .ok();
+                }
+
+                _ => error!("Unexpected message type: {message:?}")
+            }
+
+            // Handle epoch activity
+            let (_, message) = ea_message_f.await?;
+            match message.as_ref() {
+                Message::Cardano((block_info, CardanoMessage::EpochActivity(ea_msg))) => {
+                    let mut state = state.lock().await;
+                    state.handle_epoch_activity(block_info, ea_msg)
+                        .inspect_err(|e| error!("Messaging handling error: {e}"))
+                        .ok();
+                }
+
+                _ => error!("Unexpected message type: {message:?}")
+            }
+
+            // Handle certificates
+            let (_, message) = certs_message_f.await?;
+            match message.as_ref() {
+                Message::Cardano((block_info, CardanoMessage::TxCertificates(tx_certs_msg))) => {
+                    let mut state = state.lock().await;
+                    state.handle_tx_certificates(block_info, tx_certs_msg)
+                        .inspect_err(|e| error!("Messaging handling error: {e}"))
+                        .ok();
+                }
+
+                _ => error!("Unexpected message type: {message:?}")
+            }
+
+            // Handle stake address deltas
+            let (_, message) = stake_message_f.await?;
+            match message.as_ref() {
+                Message::Cardano((block_info,
+                                  CardanoMessage::StakeAddressDeltas(deltas_msg))) => {
+                    let mut state = state.lock().await;
+                    state.handle_stake_deltas(block_info, deltas_msg)
+                        .inspect_err(|e| error!("Messaging handling error: {e}"))
+                        .ok();
+                }
+
+                _ => error!("Unexpected message type: {message:?}")
+            }
+        }
+    }
+
+    /// Async initialisation
+    async fn async_init(context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
 
         // Get configuration
         let spo_state_topic = config.get_string("spo-state-topic")
@@ -54,85 +125,11 @@ impl AccountsState
             .unwrap_or(DEFAULT_HANDLE_TOPIC.to_string());
         info!("Creating request handler on '{handle_topic}'");
 
+        // Create state
         let state = Arc::new(Mutex::new(State::new()));
-        let state_spo_state = state.clone();
-        let state_epoch_activity = state.clone();
-        let state_tx_certificates = state.clone();
-        let state_stake_deltas = state.clone();
         let state_handle_full = state.clone();
         let state_handle_single = state.clone();
         let state_tick = state.clone();
-
-        // !TODO These need to be synchronised and handled alternately - SPO state first
-
-        // Subscribe for SPO state messages
-        context.clone().message_bus.subscribe(&spo_state_topic, move |message: Arc<Message>| {
-            let state = state_spo_state.clone();
-            async move {
-                match message.as_ref() {
-                    Message::Cardano((block_info, CardanoMessage::SPOState(spo_msg))) => {
-                        let mut state = state.lock().await;
-                        state.handle_spo_state(block_info, spo_msg)
-                            .inspect_err(|e| error!("Messaging handling error: {e}"))
-                            .ok();
-                    }
-
-                    _ => error!("Unexpected message type: {message:?}")
-                }
-            }
-        })?;
-
-        // Subscribe for epoch activity messages
-        context.clone().message_bus.subscribe(&epoch_activity_topic, move |message: Arc<Message>| {
-            let state = state_epoch_activity.clone();
-            async move {
-                match message.as_ref() {
-                    Message::Cardano((block_info, CardanoMessage::EpochActivity(ea_msg))) => {
-                        let mut state = state.lock().await;
-                        state.handle_epoch_activity(block_info, ea_msg)
-                            .inspect_err(|e| error!("Messaging handling error: {e}"))
-                            .ok();
-                    }
-
-                    _ => error!("Unexpected message type: {message:?}")
-                }
-            }
-        })?;
-
-        // Subscribe for certificate messages (delegations)
-        context.clone().message_bus.subscribe(&tx_certificates_topic, move |message: Arc<Message>| {
-            let state = state_tx_certificates.clone();
-            async move {
-                match message.as_ref() {
-                    Message::Cardano((block_info, CardanoMessage::TxCertificates(tx_certs_msg))) => {
-                        let mut state = state.lock().await;
-                        state.handle_tx_certificates(block_info, tx_certs_msg)
-                            .inspect_err(|e| error!("Messaging handling error: {e}"))
-                            .ok();
-                    }
-
-                    _ => error!("Unexpected message type: {message:?}")
-                }
-            }
-        })?;
-
-        // Subscribe for stake address deltas
-        context.clone().message_bus.subscribe(&stake_deltas_topic, move |message: Arc<Message>| {
-            let state = state_stake_deltas.clone();
-            async move {
-                match message.as_ref() {
-                    Message::Cardano((block_info,
-                                      CardanoMessage::StakeAddressDeltas(deltas_msg))) => {
-                        let mut state = state.lock().await;
-                        state.handle_stake_deltas(block_info, deltas_msg)
-                            .inspect_err(|e| error!("Messaging handling error: {e}"))
-                            .ok();
-                    }
-
-                    _ => error!("Unexpected message type: {message:?}")
-                }
-            }
-        })?;
 
         // Handle requests for full state
         context.message_bus.handle(&handle_topic, move |message: Arc<Message>| {
@@ -212,6 +209,30 @@ impl AccountsState
                 }
             }
         })?;
+
+        // Subscribe
+        let spos_subscription = context.message_bus.register(&spo_state_topic).await?;
+        let ea_subscription = context.message_bus.register(&epoch_activity_topic).await?;
+        let certs_subscription = context.message_bus.register(&tx_certificates_topic).await?;
+        let stake_subscription = context.message_bus.register(&stake_deltas_topic).await?;
+
+        // Start run task
+        tokio::spawn(async move {
+            Self::run(state, spos_subscription, ea_subscription,
+                      certs_subscription, stake_subscription)
+                .await.unwrap_or_else(|e| error!("Failed: {e}"));
+        });
+
+        Ok(())
+    }
+
+    /// Main init function
+    pub fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
+
+        tokio::runtime::Handle::current().block_on(async move {
+            Self::async_init(context, config)
+                .await.unwrap_or_else(|e| error!("Failed: {e}"));
+        });
 
         Ok(())
     }
