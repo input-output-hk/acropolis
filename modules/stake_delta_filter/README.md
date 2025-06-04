@@ -52,7 +52,7 @@ configuration .toml file:
 
   - `write`: collects pointer cache on the fly, and writes the results into cache directory.
      The file name is equal to the network name (in lower-case, with .json extension).
-     Along with cache, additional file (with .track.json extension) is collected,
+     Along with cache, additional file (with .track.log extension) is collected,
      containing extensive info about all pointers that were used in the blockchain.
 
   - `write-if-absent`: tries to `read` cache, if reading fails, then behaves as `write`.

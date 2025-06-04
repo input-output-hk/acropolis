@@ -13,7 +13,7 @@ use bitmask_enum::bitmask;
 use crate::rational_number::RationalNumber;
 
 /// Protocol era
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 pub enum Era
 {
     Byron,
@@ -23,6 +23,10 @@ pub enum Era
     Alonzo,
     Babbage,
     Conway,
+}
+
+impl Default for Era {
+    fn default() -> Era { Era::Byron }
 }
 
 /// Block status
@@ -729,7 +733,19 @@ pub struct DRepVotingThresholds {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ConwayGenesisParams {
+pub struct AlonzoParams {
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ByronParams {
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ShelleyParams {
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ConwayParams {
     pub pool_voting_thresholds: PoolVotingThresholds,
     pub d_rep_voting_thresholds: DRepVotingThresholds,
     pub committee_min_size: u64,
@@ -742,6 +758,14 @@ pub struct ConwayGenesisParams {
     pub plutus_v3_cost_model: Vec<i64>,
     pub constitution: Constitution,
     pub committee: Committee,
+}
+
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ProtocolParams {
+    pub alonzo: Option<AlonzoParams>,
+    pub byron: Option<ByronParams>,
+    pub shelley: Option<ShelleyParams>,
+    pub conway: Option<ConwayParams>,
 }
 
 #[bitmask(u8)]
@@ -831,12 +855,17 @@ pub struct TreasuryWithdrawalsAction {
 
 #[serde_as]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct UpdateCommitteeAction {
-    pub previous_action_id: Option<GovActionId>,
+pub struct CommitteeChange {
     pub removed_committee_members: HashSet<CommitteeCredential>,
     #[serde_as(as = "Vec<(_, _)>")]
     pub new_committee_members: HashMap<CommitteeCredential, u64>,
     pub terms: UnitInterval,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct UpdateCommitteeAction {
+    pub previous_action_id: Option<GovActionId>,
+    pub data: CommitteeChange
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -919,6 +948,22 @@ pub struct ProposalProcedure {
     pub gov_action_id: GovActionId,
     pub gov_action: GovernanceAction,
     pub anchor: Anchor,
+}
+
+#[serde_as]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CommitteeUpdateEnactment {
+    #[serde_as(as = "Vec<(_, _)>")]
+    pub members_change: HashMap<CommitteeCredential, Option<u64>>,
+    pub terms: RationalNumber
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum EnactStateElem {
+    Params(Box<ProtocolParamUpdate>),
+    Constitution(Constitution),
+    Committee(CommitteeChange),
+    NoConfidence
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

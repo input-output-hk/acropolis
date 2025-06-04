@@ -1,13 +1,18 @@
 //! Acropolis Governance State: State storage
 
-use std::{cmp::max, collections::{HashMap, VecDeque}};
+use std::{sync::Arc, cmp::max, collections::{HashMap, VecDeque}};
 use anyhow::{anyhow, Result};
 use hex::ToHex;
 use tracing::{debug, error, info};
+use caryatid_sdk::Context;
 use acropolis_common::{
-    messages::{GovernanceProceduresMessage, DRepStakeDistributionMessage, GenesisCompleteMessage},
-    rational_number::RationalNumber, BlockInfo,
-    ConwayGenesisParams, DRepCredential, DataHash, GovActionId, GovernanceAction,
+    messages::{
+        Message, CardanoMessage,
+        DRepStakeDistributionMessage, EnactStateMessage, ProtocolParamsMessage,
+        GovernanceProceduresMessage
+    },
+    rational_number::RationalNumber, BlockInfo, ConwayParams, DRepCredential, DataHash, 
+    EnactStateElem, GovActionId, GovernanceAction,
     KeyHash, Lovelace, ProposalProcedure, ProtocolParamType, ProtocolParamUpdate,
     SingleVoterVotes, Voter, VotingProcedure
 };
@@ -20,15 +25,17 @@ pub struct VotingRegistrationState {
     committee_size: u64
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct State {
+    pub enact_state_topic: String,
+    pub context: Arc<Context<Message>>,
+
     proposal_count: usize,
 
     pub action_proposal_count: usize,
     pub votes_count: usize,
     pub drep_stake_messages_count: usize,
 
-    pub conway: Option<ConwayGenesisParams>,
+    pub conway: Option<ConwayParams>,
 
     // epoch and procedure
     pub proposals: HashMap<GovActionId, (u64, ProposalProcedure)>,
@@ -39,13 +46,21 @@ pub struct State {
     drep_stake: HashMap<DRepCredential, Lovelace>,
     pub spo_stake: HashMap<KeyHash, u64>,
 
-    // governance actions arrived before blockchain parameters are known
+    // Synchronisation fields. Because of the data loop (params -> governance -> enact),
+    // one must process all parameters updates up to latest governance block of the
+    // previous epoch, and only then the governance actions to be processed further.
+    // Invariant: prev_governance_block_number <= params_block_number.
+    prev_governance_block_number: u64,
+    params_block_number: u64,
     pending_governance_actions: VecDeque<(BlockInfo, GovernanceProceduresMessage)>
 }
 
 impl State {
-    pub fn new() -> Self {
+    pub fn new(context: Arc<Context<Message>>, enact_state_topic: String) -> Self {
         Self {
+            context,
+            enact_state_topic,
+
             proposal_count: 0,
             action_proposal_count: 0,
             votes_count: 0,
@@ -59,33 +74,50 @@ impl State {
 
             drep_stake: HashMap::new(),
             spo_stake: HashMap::new(),
+            prev_governance: None,
+            prev_parameters: None,
             pending_governance_actions: VecDeque::new()
         }
     }
 
-    pub async fn handle_genesis(&mut self, message: &GenesisCompleteMessage) -> Result<()> {
-        info!("Received genesis complete message; conway present = {}", 
-            message.conway_genesis.is_some()
-        );
-        self.conway = message.conway_genesis.clone();
-        self.replay_queue().await
+    pub async fn handle_protocol_parameters(&mut self, block: &BlockInfo, message: &ProtocolParamsMessage) -> Result<()> {
+        self.actual_parameters = block;
+        if message.params.conway.is_some() {
+            self.conway = message.params.conway.clone();
+        }
+
+        if block >= self.prev_governance {
+            self.replay_queue(block).await?;
+        }
+
+        Ok(())
     }
 
     pub async fn handle_governance(&mut self, block: &BlockInfo,
                                    new_msg: &GovernanceProceduresMessage) -> Result<()> {
         self.pending_governance_actions.push_back((block.clone(), new_msg.clone()));
-        if !self.is_initalized() {
-            tracing::warn!("Postponing message {:?}, module is not initalized yet", new_msg);
+        if self.params_block_number < self.prev_governance_block_number {
+            tracing::warn!("Postponing message {:?}, parameters block {}, not up to date yet", 
+                new_msg, self.prev_governance_block_number);
             Ok(())
         }
         else {
-            self.replay_queue().await
+            self.replay_queue(self.params_block_number).await
         }
     }
 
-    async fn replay_queue(&mut self) -> Result<()> {
-        while let Some((block_info, pending_msg)) = self.pending_governance_actions.pop_front() {
-            if let Err(e) = self.handle_impl(&block_info, &pending_msg).await {
+    async fn replay_queue(&mut self, replay_up_to: u64) -> Result<()> {
+        while let Some((block_info, _pending_msg)) = self.pending_governance_actions.get(0) {
+            if block_info.number > replay_up_to {
+                return Ok(());
+            }
+
+            let (blk, pending_msg) = self.pending_governance_actions.pop_front().unwrap_or_else(||
+                anyhow!("Cannot pop message for block {} from pending_governance_actions",
+                    block_info.number
+                )
+            )?;
+            if let Err(e) = self.handle_impl(&blk, &pending_msg).await {
                 error!("Error processing message {:?}: {}", pending_msg, e)
             }
         }
@@ -99,7 +131,7 @@ impl State {
         Ok(())
     }
 
-    pub fn get_conway_params(&self) -> Result<&ConwayGenesisParams> {
+    pub fn get_conway_params(&self) -> Result<&ConwayParams> {
         self.conway.as_ref().ok_or_else(|| anyhow!("Conway parameters not available"))
     }
 
@@ -166,23 +198,6 @@ impl State {
         let p = pool.proportion_of(self.voting_state.total_spos)?.round_up();
         let (d,c) = self.proportional_count_drep_comm(drep, comm)?;
         Ok((p, d, c))
-    }
-
-    #[allow(dead_code)]
-    fn upd<T: Clone>(dst: &mut T, u: &Option<T>) {
-        if let Some(u) = u { *dst = (*u).clone(); }
-    }
-
-    fn _update_conway_params(c: &mut ConwayGenesisParams, p: &ProtocolParamUpdate) {
-        Self::upd(&mut c.pool_voting_thresholds, &p.pool_voting_thresholds);
-        Self::upd(&mut c.d_rep_voting_thresholds, &p.drep_voting_thresholds);
-        Self::upd(&mut c.committee_min_size, &p.min_committee_size);
-        Self::upd(&mut c.committee_max_term_length, &p.committee_term_limit.map(|x| x as u32));
-        Self::upd(&mut c.d_rep_activity, &p.drep_inactivity_period.map(|x| x as u32));
-        Self::upd(&mut c.d_rep_deposit, &p.drep_deposit);
-        Self::upd(&mut c.gov_action_deposit, &p.governance_action_deposit);
-        Self::upd(&mut c.gov_action_lifetime, &p.governance_action_validity_period.map(|x| x as u32));
-        Self::upd(&mut c.min_fee_ref_script_cost_per_byte, &p.minfee_refscript_cost_per_byte)
     }
 
     /// Returns protocol parameter types, needed to determine voting thresholds for
@@ -256,7 +271,7 @@ impl State {
     /// Computes necessary votes count to accept proposal `pp`, according to
     /// actual parameters. The result is triple of votes' thresholds (as fraction of the
     /// total corresponding votes count): (Pool, DRep, Committee)
-    fn get_action_thresholds(&self, pp: &ProposalProcedure, thresholds: &ConwayGenesisParams) -> Result<(u64, u64, u64)> {
+    fn get_action_thresholds(&self, pp: &ProposalProcedure, thresholds: &ConwayParams) -> Result<(u64, u64, u64)> {
         let d = &thresholds.d_rep_voting_thresholds;
         let p = &thresholds.pool_voting_thresholds;
         let c = &thresholds.committee;
@@ -316,10 +331,10 @@ impl State {
     }
 
     /// Should be called when voting is over
-    fn end_voting(&mut self, action_id: &GovActionId) {
+    fn end_voting(&mut self, action_id: &GovActionId) -> Result<()> {
         self.return_rewards(self.votes.get(&action_id));
         self.votes.remove(&action_id);
-        self.proposals.remove(&action_id);
+        Ok(())
     }
 
     /// Returns actual votes: (Pool votes, DRep votes, committee votes)
@@ -354,30 +369,52 @@ impl State {
         Ok(proposal_epoch + self.get_conway_params()?.gov_action_lifetime as u64 <= new_epoch)
     }
 
+    fn pack_as_enact_state_elem(p: &ProposalProcedure) -> Option<EnactStateElem> {
+        match &p.gov_action {
+            GovernanceAction::HardForkInitiation(_hf) => None,
+            GovernanceAction::TreasuryWithdrawals(_wt) => None,
+            GovernanceAction::Information => None,
+
+            GovernanceAction::ParameterChange(pc) => Some(EnactStateElem::Params(pc.protocol_param_update.clone())),
+            GovernanceAction::NewConstitution(nc) => Some(EnactStateElem::Constitution(nc.new_constitution.clone())),
+            GovernanceAction::UpdateCommittee(uc) => Some(EnactStateElem::Committee(uc.data.clone())),
+            GovernanceAction::NoConfidence(_) => Some(EnactStateElem::NoConfidence)
+        }
+    }
+
     /// Checks and updates action_id state at the start of new_epoch
-    fn process_one_proposal(&mut self, new_epoch: u64, action_id: &GovActionId) -> Result<()> {
+    fn process_one_proposal(&mut self, new_epoch: u64, action_id: &GovActionId) -> Result<Option<EnactStateElem>> {
         if self.is_finally_accepted(&action_id)? {
-            self.end_voting(&action_id);
+            let enact_state_elem = self.proposals.get(action_id).map(|e|
+                Self::pack_as_enact_state_elem (&e.1)
+            );
+            self.end_voting(&action_id)?;
+            return Ok(enact_state_elem.flatten());
         }
 
         if self.is_expired(new_epoch, &action_id)? {
-            self.end_voting(&action_id);
             info!("New epoch {new_epoch}: voting for {action_id} is expired");
+            self.end_voting(&action_id)?;
         }
 
-        Ok(())
+        Ok(None)
     }
 
     /// Loops through all actions and checks their status for the new_epoch
-    fn process_new_epoch(&mut self, new_epoch: u64) {
+    fn process_new_epoch(&mut self, new_epoch: u64) -> EnactStateMessage {
+        let mut output = EnactStateMessage::default();
         let actions = self.proposals.keys().map(|a| a.clone()).collect::<Vec<_>>();
 
         for action_id in actions.iter() {
             info!("Epoch {}: processing action {}", new_epoch, action_id);
-            if let Err(e) = self.process_one_proposal(new_epoch, &action_id) {
-                error!("Error processing governance {action_id}: {e}");
+            match self.process_one_proposal(new_epoch, &action_id) {
+                Err(e) => error!("Error processing governance {action_id}: {e}"),
+                Ok(Some(e)) => output.enactments.push(e),
+                Ok(None) => ()
             }
         }
+
+        return output;
     }
 
     async fn log_stats(&self) {
@@ -393,6 +430,22 @@ impl State {
                 procedure.len()
             )
         }
+    }
+
+    async fn send(&self, block: &BlockInfo, message: EnactStateMessage) -> Result<()> {
+        let packed_message = Arc::new(Message::Cardano((
+            block.clone(),
+            CardanoMessage::EnactState(message)
+        )));
+        let context = self.context.clone();
+        let enact_state_topic = self.enact_state_topic.clone();
+
+        tokio::spawn(async move {
+            context.message_bus
+                .publish(&enact_state_topic, packed_message).await
+                .unwrap_or_else(|e| tracing::error!("Failed to publish: {e}")); 
+        });
+        Ok(())
     }
 
     /// Get list of actual voting proposals
@@ -425,7 +478,8 @@ impl State {
                          governance_message: &GovernanceProceduresMessage) -> Result<()> {
         if block.new_epoch {
             debug!("Processing new epoch {}", block.epoch);
-            self.process_new_epoch(block.epoch);
+            let enact_state = self.process_new_epoch(block.epoch);
+            self.send(block, enact_state).await?;
         }
 
         for pproc in &governance_message.proposal_procedures {

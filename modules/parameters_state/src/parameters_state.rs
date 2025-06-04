@@ -1,60 +1,34 @@
-//! Acropolis Governance State module for Caryatid
+//! Acropolis Parameter State module for Caryatid
 //! Accepts certificate events and derives the Governance State in memory
 
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
 use acropolis_common::messages::{Message, RESTResponse, CardanoMessage};
 use std::sync::Arc;
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use config::Config;
-use hex::ToHex;
 use tokio::sync::Mutex;
 use tracing::{error, info};
 
 mod state;
+mod parameters_updater;
+
 use state::State;
+use parameters_updater::ParametersUpdater;
 
-const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.governance";
+const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.enact.state";
+const DEFAULT_GENESIS_COMPLETE_TOPIC: &str = "cardano.sequence.bootstrapped";
 const DEFAULT_HANDLE_TOPIC: &str = "rest.get.governance-state.*";
-const DEFAULT_DREP_DISTRIBUTION_TOPIC: &str = "cardano.drep.distribution";
-const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: &str = "cardano.sequence.bootstrapped";
-const DEFAULT_ENACT_STATE_TOPIC: &str = "cardano.enact.state";
+const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: &str = "cardano.protocol.parameters";
 
-/// SPO State module
+/// Parameters State module
 #[module(
     message_type(Message),
-    name = "governance-state",
-    description = "In-memory Governance State from events"
+    name = "parameters-state",
+    description = "Current protocol parameters handling"
 )]
-pub struct GovernanceState;
+pub struct ParametersState;
 
-fn perform_rest_request(state: &State, path: &str) -> Result<String> {
-    let request = match path.rfind('/') {
-        None => return Err(anyhow!("Poorly formed url, '/' expected.")),
-        Some(suffix_start) => &path[suffix_start+1..]
-    };
-
-    if request == "list" {
-        let mut list_votes = Vec::new();
-        let mut list_props = Vec::new();
-
-        for (a,p) in state.list_proposals()?.into_iter() {
-            list_props.push(format!("{}: {:?}", a, p));
-        }
-
-        for (a,v,tx,vp) in state.list_votes()?.into_iter() {
-            list_votes.push(format!("{}: {} at {} voted as {:?}", a, v, tx.encode_hex::<String>(), vp));
-        }
-
-        Ok(format!("Governance proposals list: {:?}\nGovernance votes list: {:?}",
-            list_props, list_votes
-        ))
-    }
-    else {
-        Err(anyhow!("Invalid action specified."))
-    }
-}
-
-impl GovernanceState
+impl ParametersState
 {
     pub fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // Get configuration
@@ -66,53 +40,29 @@ impl GovernanceState
             .unwrap_or(DEFAULT_HANDLE_TOPIC.to_string());
         info!("Creating request handler on '{handle_topic}'");
 
-        let drep_distribution_topic = config.get_string("stake-drep-distribution-topic")
-            .unwrap_or(DEFAULT_DREP_DISTRIBUTION_TOPIC.to_string());
-        info!("Creating request handler on '{drep_distribution_topic}'");
-
         let protocol_parameters_topic = config.get_string("protocol-parameters-topic")
             .unwrap_or(DEFAULT_PROTOCOL_PARAMETERS_TOPIC.to_string());
         info!("Creating request handler on '{protocol_parameters_topic}'");
 
-        let enact_state_topic = config.get_string("enact-state-topic")
-            .unwrap_or(DEFAULT_ENACT_STATE_TOPIC.to_string());
-        info!("Creating request handler on '{enact_state_topic}'");
+        let genesis_complete_topic = config.get_string("genesis-complete-topic")
+            .unwrap_or(DEFAULT_GENESIS_COMPLETE_TOPIC.to_string());
+        info!("Creating request handler on '{genesis_complete_topic}'");
 
-        let state = Arc::new(Mutex::new(State::new(context.clone(), enact_state_topic)));
-        let state_gov = state.clone();
-        let state_drep = state.clone();
-        let state_parameters = state.clone();
+        let state = Arc::new(Mutex::new(State::new()));
+        let state_enact = state.clone();
+        let state_genesis = state.clone();
         let state_handle = state.clone();
         let state_tick = state.clone();
 
         // Subscribe to governance procedures serializer
         context.clone().message_bus.subscribe(&subscribe_topic, move |message: Arc<Message>| {
-            let state = state_gov.clone();
+            let state = state_enact.clone();
 
             async move {
                 match message.as_ref() {
-                    Message::Cardano((block_info, CardanoMessage::GovernanceProcedures(msg))) => {
+                    Message::Cardano((block_info, CardanoMessage::EnactState(msg))) => {
                         let mut state = state.lock().await;
-                        state.handle_governance(block_info, msg)
-                            .await
-                            .inspect_err(|e| error!("Messaging handling error: {e}"))
-                            .ok();
-                    }
-
-                    _ => error!("Unexpected message type: {message:?}")
-                }
-            }
-        })?;
-
-        // Subscribe to drep stake distribution serializer
-        context.clone().message_bus.subscribe(&drep_distribution_topic, move |message: Arc<Message>| {
-            let state = state_drep.clone();
-
-            async move {
-                match message.as_ref() {
-                    Message::Cardano((_block_info, CardanoMessage::DRepStakeDistribution(msg))) => {
-                        let mut state = state.lock().await;
-                        state.handle_drep_stake(msg)
+                        state.handle_enact_state(block_info, msg)
                             .await
                             .inspect_err(|e| error!("Messaging handling error: {e}"))
                             .ok();
@@ -124,14 +74,14 @@ impl GovernanceState
         })?;
 
         // Subscribe to bootstrap completion serializer
-        context.clone().message_bus.subscribe(&protocol_parameters_topic, move |message: Arc<Message>| {
-            let state = state_parameters.clone();
+        context.clone().message_bus.subscribe(&genesis_complete_topic, move |message: Arc<Message>| {
+            let state = state_genesis.clone();
 
             async move {
                 match message.as_ref() {
-                    Message::Cardano((block_info, CardanoMessage::ProtocolParams(msg))) => {
+                    Message::Cardano((_block_info, CardanoMessage::GenesisComplete(msg))) => {
                         let mut state = state.lock().await;
-                        state.handle_protocol_parameters(&block_info, msg)
+                        state.handle_genesis(msg)
                             .await
                             .inspect_err(|e| error!("Messaging handling error: {e}"))
                             .ok();
@@ -143,6 +93,7 @@ impl GovernanceState
         })?;
 
         // REST requests handling
+/*
         context.message_bus.handle(&handle_topic, move |message: Arc<Message>| {
             let state = state_handle.clone();
             async move {
@@ -168,7 +119,7 @@ impl GovernanceState
                 Arc::new(Message::RESTResponse(response))
             }
         })?;
-
+*/
         // Ticker to log stats
         context.clone().message_bus.subscribe("clock.tick", move |message: Arc<Message>| {
             let state = state_tick.clone();

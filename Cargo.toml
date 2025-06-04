@@ -15,6 +15,7 @@ members = [
     "modules/spo_state",               # SPO state
     "modules/drep_state",              # DRep state
     "modules/governance_state",        # Governance state
+    "modules/parameters_state",        # Keeps track of protocol parameters
     "modules/stake_delta_filter",      # Filters address deltas
     "modules/epoch_activity_counter",  # Counts fees and block producers for rewards
 
