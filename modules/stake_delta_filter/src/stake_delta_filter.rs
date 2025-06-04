@@ -111,7 +111,7 @@ impl StakeDeltaFilterParams {
 }
 
 impl StakeDeltaFilter {
-    pub fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
+    pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         let params = StakeDeltaFilterParams::init(context, config.clone())?;
         let cache_path = params.get_cache_file_name(".json")?;
 

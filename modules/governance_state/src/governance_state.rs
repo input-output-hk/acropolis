@@ -55,7 +55,7 @@ fn perform_rest_request(state: &State, path: &str) -> Result<String> {
 
 impl GovernanceState
 {
-    pub fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
+    pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // Get configuration
         let subscribe_topic = config.get_string("subscribe-topic")
             .unwrap_or(DEFAULT_SUBSCRIBE_TOPIC.to_string());

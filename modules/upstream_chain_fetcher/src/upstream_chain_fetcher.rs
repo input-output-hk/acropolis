@@ -246,7 +246,7 @@ impl UpstreamChainFetcher
     }
 
     /// Main init function
-    pub fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
+    pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         let node_address = config.get_string("node-address")
             .unwrap_or(DEFAULT_NODE_ADDRESS.to_string());
         let magic_number: u64 = config.get::<u64>("magic-number")
