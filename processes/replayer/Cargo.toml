@@ -8,12 +8,12 @@ description = "Acropolis replayer process, allowing to debug any module"
 license = "Apache-2.0"
 
 [dependencies]
-caryatid_process = "0.5"
-caryatid_sdk = "0.5"
-caryatid_module_clock = "0.5"
-caryatid_module_rest_server = "0.6"
-caryatid_module_spy = "0.5"
-caryatid_module_playback = "0.2"
+caryatid_process = "0.9"
+caryatid_sdk = "0.9"
+caryatid_module_clock = "0.9"
+caryatid_module_rest_server = "0.10"
+caryatid_module_spy = "0.9"
+caryatid_module_playback = "0.6"
 
 # Core message definition
 acropolis_common = { path = "../../common" }

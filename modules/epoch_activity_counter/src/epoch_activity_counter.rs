@@ -28,7 +28,7 @@ pub struct EpochActivityCounter;
 impl EpochActivityCounter
 {
     /// Main init function
-    pub fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
+    pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
 
         // Get configuration
         let subscribe_headers_topic = config.get_string("subscribe-headers-topic")

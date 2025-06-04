@@ -9,7 +9,7 @@ description = "DRep State Tracker"
 license = "Apache-2.0"
 
 [dependencies]
-caryatid_sdk = "0.5.0"
+caryatid_sdk = "0.9.0"
 acropolis_common = { path = "../../common" }
 anyhow = "1.0"
 tokio = { version = "1", features = ["full"] }
