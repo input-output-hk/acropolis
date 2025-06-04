@@ -158,7 +158,7 @@ mod tests {
     }
 
     #[test]
-    fn unit_serialization_test() {
+    fn uint_serialization_test() {
         assert_eq!(serialize_uint(0), vec![0]);
         assert_eq!(serialize_uint(1), vec![1]);
         assert_eq!(serialize_uint(0x7f), vec![0x7f]);
