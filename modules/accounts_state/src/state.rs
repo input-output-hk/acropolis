@@ -72,7 +72,7 @@ pub struct State {
 impl State {
     pub fn new() -> Self {
         Self {
-            history: StateHistory::new(),
+            history: StateHistory::new("AccountsState"),
         }
     }
 
@@ -145,6 +145,7 @@ impl State {
     }
 
     /// Handle TxCertificates with stake delegations
+    /// Note this one handles the rollback
     pub fn handle_tx_certificates(&mut self, block: &BlockInfo,
                                   tx_certs_msg: &TxCertificatesMessage) -> Result<()> {
         // Handle rollback here

@@ -38,6 +38,11 @@ impl AccountsState
                  mut certs_subscription: Box<dyn Subscription<Message>>,
                  mut stake_subscription: Box<dyn Subscription<Message>>) -> Result<()> {
 
+        // Get the stake address deltas from the genesis bootstrap, which we know
+        // don't contain any stake
+        // !TODO this seems overly specific to our startup process
+        let _ = stake_subscription.read().await?;
+
         // Main loop
         loop {
             // Read per-block topics in parallel
@@ -49,6 +54,7 @@ impl AccountsState
             let (_, message) = certs_message_f.await?;
             match message.as_ref() {
                 Message::Cardano((block_info, CardanoMessage::TxCertificates(tx_certs_msg))) => {
+                    info!(block = block_info.number, "Certs");
                     let mut state = state.lock().await;
                     state.handle_tx_certificates(block_info, tx_certs_msg)
                         .inspect_err(|e| error!("Messaging handling error: {e}"))

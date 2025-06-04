@@ -1,6 +1,6 @@
 //! Acropolis Stake Delta Filter: State storage
 
-use std::{collections::{HashMap, VecDeque}, fs, io::Write, sync::Arc};
+use std::{collections::HashMap, fs, io::Write, sync::Arc};
 use acropolis_common::{
     messages::{AddressDeltasMessage, Message, CardanoMessage,
                StakeAddressDeltasMessage, TxCertificatesMessage},
@@ -86,23 +86,16 @@ pub struct State {
     pub correct_ptrs: PointerOccurrence,
     pub incorrect_ptrs: PointerOccurrence,
 
-    pub request_queue: VecDeque<(BlockInfo, AddressDeltasMessage)>,
     pub params: Arc<StakeDeltaFilterParams>,
     pub delta_publisher: DeltaPublisher
 }
 
 impl State {
     pub async fn handle_deltas(&mut self, block: &BlockInfo,
-                               most_recent_delta: &AddressDeltasMessage) -> Result<()> {
-        self.request_queue.push_back((block.clone(), most_recent_delta.clone()));
+                               delta: &AddressDeltasMessage) -> Result<()> {
 
-        while let Some((block, delta)) = self.request_queue.get(0) {
-            match process_message(&self.pointer_cache, delta).await {
-                Err(e) => tracing::debug!("Cannot decode and convert stake key for {most_recent_delta:?}: {e}"),
-                Ok(r) => self.delta_publisher.publish(block, r).await?
-            }
-            self.request_queue.pop_front();
-        }
+        let msg = process_message(&self.pointer_cache, delta);
+        self.delta_publisher.publish(block, msg).await?;
         Ok(())
     }
 
@@ -138,7 +131,6 @@ impl State {
         pointer_cache: PointerCache::new(),
         correct_ptrs: PointerOccurrence::default(),
         incorrect_ptrs: PointerOccurrence::default(),
-        request_queue: VecDeque::default(),
         params: params.clone(),
         delta_publisher: DeltaPublisher::new(params.clone())
     }}
