@@ -22,15 +22,19 @@ struct HistoryEntry<S> {
 pub struct StateHistory<S> {
 
     /// History, one per block
-    history: VecDeque<HistoryEntry<S>>
+    history: VecDeque<HistoryEntry<S>>,
+
+    /// Module name
+    module: String,
 }
 
 impl<S: Clone + Default> StateHistory<S> {
 
     /// Construct
-    pub fn new() -> Self {
+    pub fn new(module: &str) -> Self {
         Self {
             history: VecDeque::new(),
+            module: module.to_string(),
         }
     }
 
@@ -48,7 +52,8 @@ impl<S: Clone + Default> StateHistory<S> {
         loop {
             match self.history.back() {
                 Some(state) => if state.block >= block.number {
-                    info!("Rolling back state for block {}", state.block);
+                    info!("{} rolling back state to {} removing block {}", self.module,
+                          block.number, state.block);
                     self.history.pop_back();
                 } else {
                     break

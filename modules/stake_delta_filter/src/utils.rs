@@ -4,6 +4,7 @@ use acropolis_common::{Address, ShelleyAddressDelegationPart, ShelleyAddressPoin
                        StakeAddress, StakeAddressPayload, StakeAddressDelta};
 use acropolis_common::messages::{AddressDeltasMessage, StakeAddressDeltasMessage};
 use serde_with::serde_as;
+use tracing::error;
 
 #[serde_as]
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
@@ -112,14 +113,14 @@ pub enum CacheMode {
 //}
 
 //pub async fn process_message(cache: &PointerCache, delta: &AddressDeltasMessage, tracker: Option<&mut dyn PointerTracker>) -> Result<StakeAddressDeltasMessage> {
-pub async fn process_message(cache: &PointerCache, delta: &AddressDeltasMessage)
-                             -> Result<StakeAddressDeltasMessage> {
+pub fn process_message(cache: &PointerCache, delta: &AddressDeltasMessage)
+                             -> StakeAddressDeltasMessage {
     let mut result = StakeAddressDeltasMessage {
         deltas: Vec::new()
     };
 
     for d in delta.deltas.iter() {
-        cache.ensure_up_to_date(&d.address)?;
+        cache.ensure_up_to_date(&d.address).unwrap_or_else(|e| error!("{e}"));
 
         match cache.decode_stake_address(&d.address) {
             Ok(Some(stake_address)) => {
@@ -136,5 +137,5 @@ pub async fn process_message(cache: &PointerCache, delta: &AddressDeltasMessage)
         }
     }
 
-    Ok(result)
+    result
 }
