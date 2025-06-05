@@ -139,27 +139,28 @@ impl State {
 
         // Handle deltas
         for delta in deltas_msg.deltas.iter() {
-            match &delta.address.payload {
-                StakeAddressPayload::StakeKeyHash(hash) => {
-                    let state = self.stake_addresses
-                        .entry(hash.to_vec())
-                        .or_insert(StakeAddressState::default());
 
-                    if delta.delta >= 0 {
-                        state.utxo_value = state.utxo_value.saturating_add(delta.delta as u64);
-                    } else {
-                        let abs = (-delta.delta) as u64;
-                        if abs > state.utxo_value {
-                            error!("Stake address went negative in delta {:?}", delta);
-                            state.utxo_value = 0;
-                        } else {
-                            state.utxo_value -= abs;
-                        }
-                    }
+            // Fold both stake key and script hashes into one - assuming the chance of
+            // collision is negligible
+            let hash = match &delta.address.payload {
+                StakeAddressPayload::StakeKeyHash(hash) => hash,
+                StakeAddressPayload::ScriptHash(hash) => hash,
+            };
+
+            // Update or create the stake entry's UTXO value
+            let state = self.stake_addresses.entry(hash.to_vec())
+                .or_insert(StakeAddressState::default());
+
+            if delta.delta >= 0 {
+                state.utxo_value = state.utxo_value.saturating_add(delta.delta as u64);
+            } else {
+                let abs = (-delta.delta) as u64;
+                if abs > state.utxo_value {
+                    error!("Stake address went negative in delta {:?}", delta);
+                    state.utxo_value = 0;
+                } else {
+                    state.utxo_value -= abs;
                 }
-
-                StakeAddressPayload::ScriptHash(_hash) =>
-                    error!("ScriptHashes not handled")
             }
         }
 
