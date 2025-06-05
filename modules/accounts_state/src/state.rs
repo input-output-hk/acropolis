@@ -3,7 +3,6 @@ use acropolis_common::{
     messages::{EpochActivityMessage, SPOStateMessage, TxCertificatesMessage,
                StakeAddressDeltasMessage},
     BlockInfo, PoolRegistration, TxCertificate, KeyHash, StakeAddressPayload,
-    state_history::StateHistory,
 };
 use anyhow::Result;
 use imbl::HashMap;
@@ -48,10 +47,10 @@ pub struct StakeAddressState {
     delegated_spo: Option<KeyHash>,
 }
 
-/// Per-block state
+/// Overall state - stored per block
 #[serde_as]
 #[derive(Debug, Default, Clone, serde::Serialize)]
-pub struct BlockState {
+pub struct State {
     /// Epoch this state is for
     epoch: u64,
 
@@ -64,55 +63,31 @@ pub struct BlockState {
     stake_addresses: HashMap<Vec::<u8>, StakeAddressState>,
 }
 
-/// Overall state
-pub struct State {
-    history: StateHistory<BlockState>,
-}
-
 impl State {
-    pub fn new() -> Self {
-        Self {
-            history: StateHistory::new("AccountsState"),
-        }
-    }
-
-    pub fn current(&self) -> Option<&BlockState> {
-        self.history.current()
-    }
-
     pub fn get_rewards(&self, stake_key: &Vec<u8>) -> Option<u64> {
-        if let Some(current) = self.history.current() {
-            current.stake_addresses.get(stake_key).map(|sa| sa.rewards)
-        } else {
-            None
-        }
+        self.stake_addresses.get(stake_key).map(|sa| sa.rewards)
     }
 
-    async fn log_stats(&self) {
-        if let Some(current) = self.history.current() {
-            info!(
-                num_stake_addresses = current.stake_addresses.keys().len(),
-            );
-        } else {
-            info!(num_stake_addresses = 0);
-        }
+    fn log_stats(&self) {
+        info!(
+            num_stake_addresses = self.stake_addresses.keys().len(),
+        );
     }
 
     pub async fn tick(&self) -> Result<()> {
-        self.log_stats().await;
+        self.log_stats();
         Ok(())
     }
 
     /// Handle an EpochActivityMessage giving total fees and block counts by VRF key for
     /// the just-ended epoch
-    pub fn handle_epoch_activity(&mut self, block: &BlockInfo,
+    pub fn handle_epoch_activity(&mut self,
                                  ea_msg: &EpochActivityMessage) -> Result<()> {
-        let mut current = self.history.get_current_state();
-        current.epoch = ea_msg.epoch;
+        self.epoch = ea_msg.epoch;
 
         // Look up every VRF key in the SPO map
         for (vrf_vkey_hash, count) in ea_msg.vrf_vkey_hashes.iter() {
-            match current.spos_by_vrf_key.get(vrf_vkey_hash) {
+            match self.spos_by_vrf_key.get(vrf_vkey_hash) {
                 Some(spo) => {
                     // !TODO count rewards for this block
                 }
@@ -121,35 +96,26 @@ impl State {
             }
         }
 
-        self.history.commit(block, current);
-
         Ok(())
     }
 
     /// Handle an SPOStateMessage with the full set of SPOs valid at the end of the last
     /// epoch
-    pub fn handle_spo_state(&mut self, block: &BlockInfo,
+    pub fn handle_spo_state(&mut self,
                             spo_msg: &SPOStateMessage) -> Result<()> {
-        let mut current = self.history.get_current_state();
-        current.epoch = spo_msg.epoch;
 
         // Capture current SPOs, mapped by VRF vkey hash
-        current.spos_by_vrf_key = spo_msg.spos.iter()
+        self.spos_by_vrf_key = spo_msg.spos.iter()
             .cloned()
             .map(|spo| (spo.vrf_key_hash.clone(), spo))
             .collect();
-
-        self.history.commit(block, current);
 
         Ok(())
     }
 
     /// Handle TxCertificates with stake delegations
-    /// Note this one handles the rollback
-    pub fn handle_tx_certificates(&mut self, block: &BlockInfo,
+    pub fn handle_tx_certificates(&mut self,
                                   tx_certs_msg: &TxCertificatesMessage) -> Result<()> {
-        // Handle rollback here
-        let mut current = self.history.get_rolled_back_state(block);
 
         // Handle certificates
         for tx_cert in tx_certs_msg.certificates.iter() {
@@ -164,22 +130,18 @@ impl State {
             }
         }
 
-        self.history.commit(block, current);
-
         Ok(())
     }
 
     /// Handle stake deltas
-    pub fn handle_stake_deltas(&mut self, block: &BlockInfo,
+    pub fn handle_stake_deltas(&mut self,
                                deltas_msg: &StakeAddressDeltasMessage) -> Result<()> {
-        // Handle rollback here
-        let mut current = self.history.get_current_state();
 
         // Handle deltas
         for delta in deltas_msg.deltas.iter() {
             match &delta.address.payload {
                 StakeAddressPayload::StakeKeyHash(hash) => {
-                    let state = current.stake_addresses
+                    let state = self.stake_addresses
                         .entry(hash.to_vec())
                         .or_insert(StakeAddressState::default());
 
@@ -201,8 +163,6 @@ impl State {
             }
         }
 
-        self.history.commit(block, current);
-
         Ok(())
     }
 }
@@ -216,18 +176,6 @@ mod tests {
         Era,
         BlockStatus,
     };
-
-    #[tokio::test]
-    async fn new_state_is_empty() {
-        let state = State::new();
-        assert_eq!(0, state.history.len());
-    }
-
-    #[tokio::test]
-    async fn current_on_new_state_returns_none() {
-        let state = State::new();
-        assert!(state.current().is_none());
-    }
 
     fn new_msg() -> EpochActivityMessage {
         EpochActivityMessage {
