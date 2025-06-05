@@ -620,7 +620,7 @@ impl TxUnpacker
     }
 
     /// Main init function
-    pub fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
+    pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
 
         // Subscribe for tx messages
         // Get configuration

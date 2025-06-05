@@ -18,6 +18,7 @@ members = [
     "modules/parameters_state",        # Keeps track of protocol parameters
     "modules/stake_delta_filter",      # Filters address deltas
     "modules/epoch_activity_counter",  # Counts fees and block producers for rewards
+    "modules/accounts_state",          # Tracks stake and reward accounts
 
     # Process builds
     "processes/omnibus",               # All-inclusive omnibus process

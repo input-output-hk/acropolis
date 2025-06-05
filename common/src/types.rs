@@ -30,7 +30,7 @@ impl Default for Era {
 }
 
 /// Block status
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum BlockStatus
 {
     Bootstrap,   // Pseudo-block from bootstrap data
@@ -221,7 +221,10 @@ pub struct AddressDelta {
 /// Stake balance change
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StakeAddressDelta {
+    /// Address
     pub address: StakeAddress,
+
+    /// Balance change
     pub delta: i64
 }
 

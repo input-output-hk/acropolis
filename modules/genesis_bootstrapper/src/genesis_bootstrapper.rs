@@ -137,7 +137,7 @@ fn map_conway_genesis (genesis: &conway::GenesisFile) -> Result<ConwayParams> {
 impl GenesisBootstrapper
 {
     /// Main init function
-    pub fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
+    pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
 
         let startup_topic = config.get_string("startup-topic")
             .unwrap_or(DEFAULT_STARTUP_TOPIC.to_string());

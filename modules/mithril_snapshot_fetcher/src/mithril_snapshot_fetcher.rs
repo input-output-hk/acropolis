@@ -1,7 +1,7 @@
 //! Acropolis Mithril snapshot fetcher module for Caryatid
 //! Fetches a snapshot from Mithril and replays all the blocks in it
 
-use caryatid_sdk::{Context, Module, module, MessageBusExt, message_bus::QoS};
+use caryatid_sdk::{Context, Module, module, MessageBusExt};
 use acropolis_common::{
     calculations::slot_to_epoch, messages::{
         BlockBodyMessage, BlockHeaderMessage, Message, CardanoMessage,
@@ -250,8 +250,8 @@ impl MithrilSnapshotFetcher
                         block_info.clone(),
                         CardanoMessage::BlockHeader(header_message)
                     ));
-                    let header_future = context.message_bus.publish_with_qos(&header_topic,
-                        Arc::new(header_message_enum), QoS::Bulk);
+                    let header_future = context.message_bus.publish(&header_topic,
+                        Arc::new(header_message_enum));
 
                     // Send the block body message
                     let body_message = BlockBodyMessage {
@@ -262,8 +262,8 @@ impl MithrilSnapshotFetcher
                         block_info.clone(),
                         CardanoMessage::BlockBody(body_message)
                     ));
-                    let body_future = context.message_bus.publish_with_qos(&body_topic,
-                        Arc::new(body_message_enum), QoS::Bulk);
+                    let body_future = context.message_bus.publish(&body_topic,
+                        Arc::new(body_message_enum));
 
                     let (header_result, body_result) = join!(header_future, body_future);
                     header_result.unwrap_or_else(|e| error!("Failed to publish header: {e}"));
@@ -290,7 +290,7 @@ impl MithrilSnapshotFetcher
     }
 
     /// Main init function
-    pub fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
+    pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
 
         let startup_topic = config.get_string("startup-topic")
             .unwrap_or(DEFAULT_STARTUP_TOPIC.to_string());

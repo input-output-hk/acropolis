@@ -87,18 +87,6 @@ fn perform_rest_request(state: &State, path: &str) -> Result<String> {
 }
 
 impl GovernanceState {
-    async fn async_init(context: Arc<Context<Message>>, config: Arc<GovernanceStateConfig>) -> Result<()> {
-        let gt = context.clone().message_bus.register(&config.subscribe_topic).await?;
-        let dt = context.clone().message_bus.register(&config.drep_distribution_topic).await?;
-        let pt = context.clone().message_bus.register(&config.protocol_parameters_topic).await?;
-
-        tokio::spawn(async move {
-            Self::run(context, config, gt, dt, pt).await.unwrap_or_else(|e| error!("Failed: {e}"));
-        });
-
-        Ok(())
-    }
-
     async fn read_governance(governance_s: &mut Box<dyn Subscription<Message>>) 
         -> Result<(BlockInfo, GovernanceProceduresMessage)>
     {
@@ -190,12 +178,14 @@ impl GovernanceState {
         }
     }
 
-    pub fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
-        tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async move {
-                Self::async_init(context, GovernanceStateConfig::new(&config))
-                    .await.unwrap_or_else(|e| error!("Failed: {e}"));
-            })
+    pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
+        let cfg = GovernanceStateConfig::new(&config);
+        let gt = context.clone().message_bus.register(&cfg.subscribe_topic).await?;
+        let dt = context.clone().message_bus.register(&cfg.drep_distribution_topic).await?;
+        let pt = context.clone().message_bus.register(&cfg.protocol_parameters_topic).await?;
+
+        tokio::spawn(async move {
+            Self::run(context, cfg, gt, dt, pt).await.unwrap_or_else(|e| error!("Failed: {e}"));
         });
 
         Ok(())

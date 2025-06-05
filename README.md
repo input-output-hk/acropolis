@@ -55,7 +55,11 @@ structure is highly subject to change:
   changes
 * [UTXO State](modules/utxo_state) - watches UTXO changes and maintains a basic in-memory UTXO state
 * [SPO State](modules/spo_state) - matches SPO registrations and retirements
-* [Epoch Activity Counter](modules/epoch_activity_couinter) - counts fees and block production for rewards
+* [DRep State](modules/drep_state) - tracks DRep registrations
+* [Governance State](modules/governance_state) - tracks Governance Actions and voting
+* [Stake Delta Filter](modules/stake_delta_filter) - filters out stake address changes and handles stake pointer references
+* [Epoch Activity Counter](modules/epoch_activity_counter) - counts fees and block production for rewards
+* [Accounts State](modules/accounts_state) - stake and reward accounts tracker
 
 ```mermaid
 graph LR
@@ -65,13 +69,32 @@ graph LR
    MithrilSnapshotFetcher(Mithril Snapshot Fetcher)
    BlockUnpacker(Block Unpacker)
    TxUnpacker(Transaction Unpacker)
-   UTXOState(UTXOState)
+   UTXOState(UTXO State)
+   SPOState(SPO State)
+   DRepState(DRep State)
+   GovernanceState(Governance State)
+   StakeDeltaFilter(Stake Delta Filter)
+   EpochActivityCounter(Epoch Activity Counter)
+   AccountsState(Accounts State)
 
    UpstreamChainFetcher --> BlockUnpacker
    MithrilSnapshotFetcher --> BlockUnpacker
    BlockUnpacker --> TxUnpacker
    GenesisBootstrapper --> UTXOState
    TxUnpacker --> UTXOState
+   TxUnpacker --> EpochActivityCounter
+   TxUnpacker --> AccountsState
+   TxUnpacker --> SPOState
+   TxUnpacker --> DRepState
+   TxUnpacker --> GovernanceState
+   UTXOState --> StakeDeltaFilter
+   StakeDeltaFilter --> AccountsState
+   UpstreamChainFetcher --> EpochActivityCounter
+   MithrilSnapshotFetcher --> EpochActivityCounter
+   EpochActivityCounter --> AccountsState
+   SPOState --> AccountsState
+   DRepState --> GovernanceState
+   GovernanceState --> AccountsState
 ```
 
 ## Messages
@@ -84,6 +107,5 @@ the [Messages](messages) crate.
 There is currently only one process, for testing:
 
 * [Omnibus](processes/omnibus) - includes all the above modules for
-  testing, by default using the external message bus to allow
-  diagnostics
+  testing, by default using the internal message bus only
 

@@ -60,7 +60,7 @@ fn perform_rest_request(state: &State, path: &str) -> Result<String> {
 
 impl DRepState
 {
-    pub fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
+    pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
 
         // Get configuration
         let subscribe_topic = config.get_string("subscribe-topic")
@@ -73,7 +73,7 @@ impl DRepState
 
         let drep_distribution_topic = config.get_string("publish-drep-distribution-topic")
             .unwrap_or(DEFAULT_DREP_DISTRIBUTION_TOPIC.to_string());
-        info!("Creating request handler on '{drep_distribution_topic}'");
+        info!("Creating DRep distribution publisher on '{drep_distribution_topic}'");
 
         let publisher = DRepDistributionPublisher::new(context.clone(), drep_distribution_topic);
         let state = Arc::new(Mutex::new(State::new(Some(publisher))));
