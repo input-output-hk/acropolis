@@ -1,4 +1,4 @@
-//! Acropolis SPOState: State storage
+//! Acropolis Governance State: State storage
 
 use std::{cmp::max, collections::{HashMap, VecDeque}};
 use anyhow::{anyhow, Result};

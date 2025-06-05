@@ -268,13 +268,13 @@ impl State {
             BlockStatus::Volatile | BlockStatus::RolledBack => {
                 self.volatile_created.add_utxo(&key);
 
-                if self.volatile_utxos.insert(key, value).is_some() {
+                if self.volatile_utxos.insert(key.clone(), value).is_some() {
                     error!("Saw UTXO {}:{} before, in block {}",
                     encode(&output.tx_hash), output.index, block.number);
                 }
             }
             BlockStatus::Bootstrap | BlockStatus::Immutable => {
-                self.immutable_utxos.add_utxo(key, value).await?;
+                self.immutable_utxos.add_utxo(key.clone(), value).await?;
                 // Note we don't check for duplicates in immutable - store
                 // may double check this anyway
             }

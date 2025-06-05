@@ -81,6 +81,10 @@ impl Default for AddressNetwork {
     fn default() -> Self { Self::Main }
 }
 
+
+/// Key hash used for pool IDs etc.
+pub type KeyHash = Vec<u8>;
+
 pub type ScriptHash = KeyHash;
 pub type AddrKeyhash = KeyHash;
 
@@ -112,6 +116,7 @@ pub struct ShelleyAddressPointer {
 }
 
 /// A Shelley-era address - delegation part
+#[serde_as]
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ShelleyAddressDelegationPart {
     /// No delegation (enterprise addresses)
@@ -145,13 +150,20 @@ pub struct ShelleyAddress {
 }
 
 /// Payload of a stake address
+#[serde_as]
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum StakeAddressPayload {
     /// Stake key
-    StakeKeyHash(Vec<u8>),
+    StakeKeyHash(
+        #[serde_as(as = "Hex")]
+        Vec<u8>
+    ),
 
     /// Script hash
-    ScriptHash(Vec<u8>),    
+    ScriptHash(
+        #[serde_as(as = "Hex")]
+        Vec<u8>
+    ),
 }
 
 impl Default for StakeAddressPayload {
@@ -252,10 +264,6 @@ pub enum UTXODelta {
 impl Default for UTXODelta {
     fn default() -> Self { Self::None(()) }
 }
-
-/// Key hash used for pool IDs etc.
-pub type KeyHash = Vec<u8>;
-
 /// Data hash used for metadata, anchors (SHA256)
 pub type DataHash = Vec<u8>;
 
