@@ -1,7 +1,7 @@
 //! Acropolis transaction unpacker module for Caryatid
 //! Unpacks transaction bodies into UTXO events
 
-use std::{collections::HashMap, sync::Arc, fs};
+use std::{collections::HashMap, sync::Arc};
 use std::collections::HashSet;
 use caryatid_sdk::{Context, Module, module, MessageBusExt};
 use acropolis_common::{
@@ -647,11 +647,6 @@ impl TxUnpacker
             info!("Publishing block fees on '{topic}'");
         }
 
-        let governance_logs_dir = config.get_string("governance-logs-dir").ok();
-        if let Some(ref gov_log_dir) = governance_logs_dir {
-            info!("Logging governance messages to '{gov_log_dir}'")
-        }
-
         context.clone().message_bus.subscribe(&subscribe_topic, move |message: Arc<Message>| {
 
             let context = context.clone();
@@ -659,7 +654,6 @@ impl TxUnpacker
             let publish_certificates_topic = publish_certificates_topic.clone();
             let publish_governance_procedures_topic = publish_governance_procedures_topic.clone();
             let publish_fees_topic = publish_fees_topic.clone();
-            let governance_logs_dir = governance_logs_dir.clone();
 
             async move {
                 match message.as_ref() {
@@ -818,8 +812,6 @@ impl TxUnpacker
                         }
 
                         if let Some(topic) = publish_governance_procedures_topic {
-                            let governance_empty = voting_procedures.is_empty() && proposal_procedures.is_empty() && !block.new_epoch;
-
                             let governance_msg = Arc::new(Message::Cardano((
                                 block.clone(),
                                 CardanoMessage::GovernanceProcedures(
@@ -831,28 +823,6 @@ impl TxUnpacker
 
                             futures.push(context.message_bus.publish(&topic,
                                                                      governance_msg.clone()));
-
-                            if !governance_empty {
-                                if let Some(ref dir) = governance_logs_dir {
-                                    let filename = format!("{dir}/gov_{:012}.json", block.number);
-                                    let data = match serde_json::to_string(&*governance_msg) {
-                                        Ok(data) => data,
-                                        Err(e) => format!("Error serializing message to json: {e}")
-                                    };
-                                    if let Err(e) = fs::write(filename, data) {
-                                        error!("Error writing to file: {}", e);
-                                    }
-
-                                    let filename = format!("{dir}/src_{:012}.json", block.number);
-                                    let data = match serde_json::to_string(&*message) {
-                                        Ok(data) => data,
-                                        Err(e) => format!("Error serializing message to json: {e}")
-                                    };
-                                    if let Err(e) = fs::write(filename, data) {
-                                        error!("Error writing to file: {}", e);
-                                    }
-                                }
-                            }
                         }
 
                         if let Some(topic) = publish_fees_topic {

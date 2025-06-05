@@ -54,7 +54,7 @@ impl AddressDeltaObserver for AddressDeltaPublisher {
         // Accumulate the delta
         self.deltas.lock().await.push(AddressDelta {
             address: address.clone(),
-            delta,
+            delta
         });
     }
 
