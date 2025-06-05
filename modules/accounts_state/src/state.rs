@@ -2,7 +2,7 @@
 use acropolis_common::{
     messages::{EpochActivityMessage, SPOStateMessage, TxCertificatesMessage,
                StakeAddressDeltasMessage},
-    BlockInfo, PoolRegistration, TxCertificate, KeyHash, StakeAddressPayload,
+    PoolRegistration, TxCertificate, KeyHash, StakeAddressPayload,
 };
 use anyhow::Result;
 use imbl::HashMap;

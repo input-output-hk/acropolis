@@ -10,7 +10,7 @@ use acropolis_common::{
 use std::sync::Arc;
 use anyhow::Result;
 use config::Config;
-use tokio::{task, sync::Mutex};
+use tokio::sync::Mutex;
 use tracing::{error, info};
 use serde_json;
 
@@ -128,7 +128,7 @@ impl AccountsState
     }
 
     /// Async initialisation
-    async fn async_init(context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
+    pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
 
         // Get configuration
         let spo_state_topic = config.get_string("spo-state-topic")
@@ -246,24 +246,10 @@ impl AccountsState
         let stake_subscription = context.message_bus.register(&stake_deltas_topic).await?;
 
         // Start run task
-        tokio::spawn(async move {
+        context.run(async move {
             Self::run(history, spos_subscription, ea_subscription,
                       certs_subscription, stake_subscription)
                 .await.unwrap_or_else(|e| error!("Failed: {e}"));
-        });
-
-        Ok(())
-    }
-
-    /// Main init function
-    pub fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
-
-        // Spawn the async_init - creates a race condition, we really need init() to be async!
-        task::block_in_place(|| {
-            tokio::spawn(async move {
-                Self::async_init(context, config)
-                    .await.unwrap_or_else(|e| error!("Failed: {e}"));
-            })
         });
 
         Ok(())

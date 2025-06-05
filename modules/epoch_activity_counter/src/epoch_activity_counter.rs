@@ -100,8 +100,8 @@ impl EpochActivityCounter
         }
     }
 
-    /// Async initialisation
-    async fn async_init(context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
+    /// Main init function
+    pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
 
         // Get configuration
         let subscribe_headers_topic = config.get_string("subscribe-headers-topic")
@@ -117,22 +117,10 @@ impl EpochActivityCounter
         let fees_subscription = context.message_bus.register(&subscribe_fees_topic).await?;
 
         // Start run task
-        tokio::spawn(async move {
-            Self::run(context, config, headers_subscription, fees_subscription)
+        let run_context = context.clone();
+        context.run(async move {
+            Self::run(run_context, config, headers_subscription, fees_subscription)
                 .await.unwrap_or_else(|e| error!("Failed: {e}"));
-        });
-
-        Ok(())
-    }
-
-    /// Main init function
-    pub fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
-
-        task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async move {
-                Self::async_init(context, config)
-                    .await.unwrap_or_else(|e| error!("Failed: {e}"));
-            })
         });
 
         Ok(())
