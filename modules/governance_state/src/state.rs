@@ -78,9 +78,10 @@ impl State {
     }
 
     pub async fn handle_drep_stake(&mut self, message: &DRepStakeDistributionMessage) -> Result<()> {
-        info!("Received drep stake distribution message: {} dreps", message.data.len());
         self.drep_stake_messages_count += 1;
-        self.drep_stake = HashMap::from_iter(message.data.iter().cloned());
+        if message.data.len() > 0 {
+            self.drep_stake = HashMap::from_iter(message.data.iter().cloned());
+        }
         Ok(())
     }
 

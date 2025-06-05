@@ -154,15 +154,11 @@ impl GovernanceState {
         })?;
 
         loop {
-            info!("tick: reading {}", config.subscribe_topic);
-
             let (blk_g, gov_procs) = Self::read_governance(&mut governance_s).await?;
             state.lock().await.handle_governance(&blk_g, &gov_procs).await?;
-            info!("governance {:?}", blk_g);
 
             if blk_g.new_epoch {
                 let (blk_p, params) = Self::read_parameters(&mut protocol_s).await?;
-                info!("parameters {:?}", blk_g);
                 if blk_g != blk_p {
                     error!("Governance {blk_g:?} and protocol parameters {blk_p:?} are out of sync");
                 }
@@ -170,7 +166,6 @@ impl GovernanceState {
             };
 
             let (blk_drep, distr) = Self::read_drep(&mut drep_s).await?;
-            info!("drep {:?}", blk_g);
             if blk_g != blk_drep {
                 error!("Governance {blk_g:?} and DRep distribution {blk_drep:?} are out of sync");
             }

@@ -116,14 +116,19 @@ impl State {
             }
         }
 
-        if changed && self.drep_distribution_publisher.is_some() 
+        let distribution = if changed && self.drep_distribution_publisher.is_some() 
         {
             let d = self.new_drep_distribution();
             info!("New vote distribution at slot = {}: len = {}", tx_slot, d.len());
-            if let Some(ref mut publisher) = self.drep_distribution_publisher {
-                if let Err(e) = publisher.publish_stake(block, d).await {
-                    tracing::error!("Error publishing drep voting stake distribution: {e}");
-                }
+            d
+        }
+        else {
+            Vec::new()
+        };
+
+        if let Some(ref mut publisher) = self.drep_distribution_publisher {
+            if let Err(e) = publisher.publish_stake(block, distribution).await {
+                tracing::error!("Error publishing drep voting stake distribution: {e}");
             }
         }
 
