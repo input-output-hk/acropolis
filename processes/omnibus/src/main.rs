@@ -18,6 +18,7 @@ use acropolis_module_utxo_state::UTXOState;
 use acropolis_module_spo_state::SPOState;
 use acropolis_module_drep_state::DRepState;
 use acropolis_module_governance_state::GovernanceState;
+use acropolis_module_parameters_state::ParametersState;
 use acropolis_module_stake_delta_filter::StakeDeltaFilter;
 use acropolis_module_epoch_activity_counter::EpochActivityCounter;
 
@@ -54,6 +55,7 @@ pub async fn main() -> Result<()> {
     SPOState::register(&mut process);
     DRepState::register(&mut process);
     GovernanceState::register(&mut process);
+    ParametersState::register(&mut process);
     StakeDeltaFilter::register(&mut process);
     EpochActivityCounter::register(&mut process);
 
