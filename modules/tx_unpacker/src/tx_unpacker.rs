@@ -541,13 +541,14 @@ impl TxUnpacker
             conway::GovAction::UpdateCommittee(id, committee, threshold, terms) =>
                 Ok(GovernanceAction::UpdateCommittee(UpdateCommitteeAction {
                     previous_action_id: Self::map_nullable_gov_action_id(id)?,
-                    removed_committee_members: HashSet::from_iter(
-                        committee.iter().map(Self::map_stake_credential)
-                    ),
-                    new_committee_members: HashMap::from_iter(
-                        threshold.iter().map(|(k,v)| (Self::map_stake_credential(k), *v))
-                    ),
-                    terms: Self::map_unit_interval(terms),
+                    data: CommitteeChange { removed_committee_members: HashSet::from_iter(
+                            committee.iter().map(Self::map_stake_credential)
+                        ),
+                        new_committee_members: HashMap::from_iter(
+                            threshold.iter().map(|(k,v)| (Self::map_stake_credential(k), *v))
+                        ),
+                        terms: Self::map_unit_interval(terms)
+                    }
                 })),
 
             conway::GovAction::NewConstitution(id, constitution) =>

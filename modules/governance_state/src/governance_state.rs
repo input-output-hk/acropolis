@@ -2,7 +2,13 @@
 //! Accepts certificate events and derives the Governance State in memory
 
 use caryatid_sdk::{Context, Module, module, MessageBusExt, message_bus::Subscription};
-use acropolis_common::messages::{Message, RESTResponse, CardanoMessage};
+use acropolis_common::{
+    messages::{
+        Message, RESTResponse, CardanoMessage,
+        GovernanceProceduresMessage, ProtocolParamsMessage, DRepStakeDistributionMessage
+    },
+    BlockInfo
+};
 use std::sync::Arc;
 use anyhow::{anyhow, Result};
 use config::Config;
@@ -16,7 +22,7 @@ use state::State;
 const DEFAULT_SUBSCRIBE_TOPIC: (&str, &str) = ("subscribe-topic", "cardano.governance");
 const DEFAULT_HANDLE_TOPIC: (&str, &str) = ("handle-topic", "rest.get.governance-state.*");
 const DEFAULT_DREP_DISTRIBUTION_TOPIC: (&str, &str) = ("stake-drep-distribution-topic", "cardano.drep.distribution");
-const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: (&str, &str) = ("protocol-parameters-topic", "cardano.parameters.state");
+const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: (&str, &str) = ("protocol-parameters-topic", "cardano.protocol.parameters");
 const DEFAULT_ENACT_STATE_TOPIC: (&str, &str) = ("enact-state-topic", "cardano.enact.state");
 
 /// SPO State module
@@ -93,6 +99,36 @@ impl GovernanceState {
         Ok(())
     }
 
+    async fn read_governance(governance_s: &mut Box<dyn Subscription<Message>>) 
+        -> Result<(BlockInfo, GovernanceProceduresMessage)>
+    {
+        match governance_s.read().await?.1.as_ref() {
+            Message::Cardano((blk, CardanoMessage::GovernanceProcedures(msg))) => 
+                Ok((blk.clone(), msg.clone())),
+            msg => Err(anyhow!("Unexpected message {msg:?} for governance procedures topic"))
+        }
+    }
+
+    async fn read_parameters(parameters_s: &mut Box<dyn Subscription<Message>>)
+        -> Result<(BlockInfo, ProtocolParamsMessage)>
+    {
+        match parameters_s.read().await?.1.as_ref() {
+            Message::Cardano((blk, CardanoMessage::ProtocolParams(params))) => 
+                Ok((blk.clone(), params.clone())),
+            msg => Err(anyhow!("Unexpected message {msg:?} for protocol parameters topic"))
+        }
+    }
+
+    async fn read_drep(drep_s: &mut Box<dyn Subscription<Message>>)
+        -> Result<(BlockInfo, DRepStakeDistributionMessage)>
+    {
+        match drep_s.read().await?.1.as_ref() {
+            Message::Cardano((blk, CardanoMessage::DRepStakeDistribution(distr))) =>
+                Ok((blk.clone(), distr.clone())),
+            msg => Err(anyhow!("Unexpected message {msg:?} for DRep distribution topic"))
+        }
+    }
+
     async fn run(context: Arc<Context<Message>>, config: Arc<GovernanceStateConfig>,
                  mut governance_s: Box<dyn Subscription<Message>>,
                  mut drep_s: Box<dyn Subscription<Message>>,
@@ -131,34 +167,26 @@ impl GovernanceState {
 
         loop {
             info!("tick: reading {}", config.subscribe_topic);
-            let (blk_g, gov_procs) = match governance_s.read().await?.1.as_ref() {
-                Message::Cardano((block, CardanoMessage::GovernanceProcedures(procs))) => (block.clone(), procs.clone()),
-                msg => {
-                    error!("Unexpected message {msg:?} for governance procedures topic");
-                    continue
-                }
-            };
-            info!("read {}: {:?}, {:?}", config.subscribe_topic, blk_g, gov_procs);
+
+            let (blk_g, gov_procs) = Self::read_governance(&mut governance_s).await?;
+            state.lock().await.handle_governance(&blk_g, &gov_procs).await?;
+            info!("governance {:?}", blk_g);
 
             if blk_g.new_epoch {
-                match protocol_s.read().await?.1.as_ref() {
-                    Message::Cardano((blk_p, CardanoMessage::ProtocolParams(params))) => {
-                        if blk_p.number != blk_g.number {
-                            error!("Misaligned governance and protocol blocks: {blk_g:?} and {blk_p:?}");
-                        }
-                        state.lock().await.handle_protocol_parameters(&blk_p, &params).await?;
-                    }
-                    msg => error!("Unexpected message {msg:?} for protocol parameters topic")
+                let (blk_p, params) = Self::read_parameters(&mut protocol_s).await?;
+                info!("parameters {:?}", blk_g);
+                if blk_g != blk_p {
+                    error!("Governance {blk_g:?} and protocol parameters {blk_p:?} are out of sync");
                 }
+                state.lock().await.handle_protocol_parameters(&blk_p, &params).await?;
             };
 
-            state.lock().await.handle_governance(&blk_g, &gov_procs).await?;
-
-            match drep_s.read().await?.1.as_ref() {
-                Message::Cardano((block, CardanoMessage::DRepStakeDistribution(procs))) => 
-                    state.lock().await.handle_drep_stake(/*&block, */&procs).await?,
-                msg => error!("Unexpected message {msg:?} for DRep distribution topic")
+            let (blk_drep, distr) = Self::read_drep(&mut drep_s).await?;
+            info!("drep {:?}", blk_g);
+            if blk_g != blk_drep {
+                error!("Governance {blk_g:?} and DRep distribution {blk_drep:?} are out of sync");
             }
+            state.lock().await.handle_drep_stake(&distr).await?
         }
     }
 

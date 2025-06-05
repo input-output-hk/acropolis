@@ -30,7 +30,7 @@ impl Default for Era {
 }
 
 /// Block status
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum BlockStatus
 {
     Bootstrap,   // Pseudo-block from bootstrap data
@@ -40,7 +40,7 @@ pub enum BlockStatus
 }
 
 /// Block info, shared across multiple messages
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BlockInfo {
     /// Block status
     pub status: BlockStatus,
