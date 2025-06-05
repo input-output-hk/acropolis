@@ -104,7 +104,8 @@ impl ParametersState
         }
     }
 
-    async fn async_init(cfg: Arc<ParametersStateConfig>) -> Result<()> {
+    pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
+        let cfg = ParametersStateConfig::new(context.clone(), &config);
         let genesis = cfg.context.message_bus.register(&cfg.genesis_complete_topic).await?;
         let enact = cfg.context.message_bus.register(&cfg.enact_state_topic).await?;
 
@@ -115,15 +116,6 @@ impl ParametersState
 
         Ok(())
     }
-
-    pub fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
-        let cfg = ParametersStateConfig::new(context.clone(), &config);
-
-        tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async move {
-                Self::async_init(cfg).await.unwrap_or_else(|e| error!("Failed: {e}"));
-            })
-        });
 /*
         // Subscribe to governance procedures serializer
         context.clone().message_bus.subscribe(&subscribe_topic, move |message: Arc<Message>| {
@@ -208,6 +200,4 @@ impl ParametersState
             }
         })?;
 */
-        Ok(())
-    }
 }

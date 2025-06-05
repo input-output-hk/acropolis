@@ -6,6 +6,7 @@ use acropolis_common::{
     ShelleyAddressDelegationPart, StakeAddressPayload,
     messages::{AddressDeltasMessage, StakeAddressDeltasMessage}
 };
+use tracing::error;
 
 #[serde_as]
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
@@ -240,17 +241,19 @@ impl Tracker {
 /// (and removes all others). If the address is a pointer, tries to resolve it.
 /// If the pointer is incorrect, then filters it out too (incorrect pointers cannot
 /// be used for staking). Updates info about pointer occurrences, if tracker provided.
-pub async fn process_message(
-   cache: &PointerCache, 
-   delta: &AddressDeltasMessage, 
+pub fn process_message(
+   cache: &PointerCache,
+   delta: &AddressDeltasMessage,
    block: &BlockInfo,
    mut tracker: Option<&mut Tracker>
-) -> Result<StakeAddressDeltasMessage> {
+) -> StakeAddressDeltasMessage {
+
     let mut result = StakeAddressDeltasMessage {
         deltas: Vec::new()
     };
 
     for d in delta.deltas.iter() {
+
         // Variants to be processed:
         // 1. Shelley Address delegation is a stake
         // 2. Shelley Address delegation is a pointer + target address is a stake
@@ -261,7 +264,7 @@ pub async fn process_message(
         // Errors:
         // 1. Shelley Address delegation is a pointer + pointer not known
 
-        cache.ensure_up_to_date(&d.address)?;
+        cache.ensure_up_to_date(&d.address).unwrap_or_else(|e| error!("{e}"));
 
         let stake_address = match &d.address {
             // Not good for staking
@@ -313,7 +316,7 @@ pub async fn process_message(
         result.deltas.push (stake_delta);
     }
 
-    Ok(result)
+    result
 }
 
 #[cfg(test)]

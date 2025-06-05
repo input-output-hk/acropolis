@@ -1,6 +1,6 @@
 //! Acropolis Stake Delta Filter: State storage
 
-use std::{collections::{HashMap, VecDeque}, fs, io::Write, sync::Arc};
+use std::{collections::HashMap, fs, io::Write, sync::Arc};
 use acropolis_common::{
     messages::{AddressDeltasMessage, Message, CardanoMessage,
                StakeAddressDeltasMessage, TxCertificatesMessage},
@@ -36,11 +36,10 @@ impl DeltaPublisher {
         )));
         let params = self.params.clone();
 
-        tokio::spawn(async move {
-            params.context.message_bus
-                .publish(&params.stake_address_delta_topic, packed_message).await
-                .unwrap_or_else(|e| tracing::error!("Failed to publish: {e}")); 
-        });
+        params.context.message_bus
+            .publish(&params.stake_address_delta_topic, packed_message).await
+            .unwrap_or_else(|e| tracing::error!("Failed to publish: {e}"));
+
         Ok(())
     }
 }
@@ -48,7 +47,6 @@ impl DeltaPublisher {
 pub struct State {
     pub pointer_cache: PointerCache,
 
-    pub request_queue: VecDeque<(BlockInfo, AddressDeltasMessage)>,
     pub params: Arc<StakeDeltaFilterParams>,
     pub delta_publisher: DeltaPublisher,
 
@@ -56,21 +54,12 @@ pub struct State {
 }
 
 impl State {
-    pub async fn handle_deltas(&mut self,
-        block: &BlockInfo,
-        most_recent_delta: &AddressDeltasMessage
-    ) -> Result<()> {
-        self.request_queue.push_back((block.clone(), most_recent_delta.clone()));
 
-        while let Some((block, delta)) = self.request_queue.get(0) {
-            match process_message(&self.pointer_cache, delta, block, Some(&mut self.tracker)).await {
-                Err(e) => tracing::debug!(
-                    "Cannot decode and convert stake key for {most_recent_delta:?}: {e}"
-                ),
-                Ok(r) => self.delta_publisher.publish(block, r).await?
-            }
-            self.request_queue.pop_front();
-        }
+    pub async fn handle_deltas(&mut self, block: &BlockInfo,
+                               delta: &AddressDeltasMessage) -> Result<()> {
+
+        let msg = process_message(&self.pointer_cache, delta, block, Some(&mut self.tracker));
+        self.delta_publisher.publish(block, msg).await?;
         Ok(())
     }
 
@@ -105,7 +94,6 @@ impl State {
 
     pub fn new(params: Arc<StakeDeltaFilterParams>) -> Self { Self {
         pointer_cache: PointerCache::new(),
-        request_queue: VecDeque::default(),
         params: params.clone(),
         delta_publisher: DeltaPublisher::new(params.clone()),
         tracker: Tracker::new()

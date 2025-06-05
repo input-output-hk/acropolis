@@ -49,7 +49,7 @@ pub struct UTXOState;
 impl UTXOState
 {
     /// Main init function
-    pub fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
+    pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
 
         // Get configuration
         let subscribe_topic = config.get_string("subscribe-topic")

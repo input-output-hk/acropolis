@@ -12,7 +12,7 @@ use tracing::{error, info};
 
 const DEFAULT_ADDRESS_DELTA_TOPIC: (&str,&str) = ("subscription-address-delta-topic", "cardano.address.delta");
 const DEFAULT_CERTIFICATES_TOPIC: (&str,&str) = ("subscription-certificates-topic", "cardano.certificates");
-const DEFAULT_STAKE_ADDRESS_DELTA_TOPIC: (&str,&str) = ("publishing-stake-delta-topic", "cardano.stake.delta");
+const DEFAULT_STAKE_ADDRESS_DELTA_TOPIC: (&str,&str) = ("publishing-stake-delta-topic", "cardano.stake.deltas");
 
 /// Directory to put cached shelley address pointers into. Depending on the address 
 /// cache mode, these cached pointers can be used instead of tracking current pointer
@@ -111,7 +111,7 @@ impl StakeDeltaFilterParams {
 }
 
 impl StakeDeltaFilter {
-    pub fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
+    pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         let params = StakeDeltaFilterParams::init(context, config.clone())?;
         let cache_path = params.get_cache_file_name(".json")?;
 
@@ -147,16 +147,13 @@ impl StakeDeltaFilter {
 
             async move {
                 match message.as_ref() {
-                    Message::Cardano((block_info, CardanoMessage::AddressDeltas(delta))) =>
-                        match process_message(&cache_copy, delta, block_info, None).await {
-                            Err(e) => tracing::error!(
-                                "Cannot decode and convert stake key for {block_info:?}, {delta:?}: {e}"
-                            ),
-                            Ok(r) => publisher.publish(block_info, r)
-                                .await.unwrap_or_else(|e| error!("Publish error: {e}"))
-                        }
+                    Message::Cardano((block_info, CardanoMessage::AddressDeltas(delta))) => {
+                        let msg = process_message(&cache_copy, delta, block_info, None);
+                        publisher.publish(block_info, msg)
+                            .await.unwrap_or_else(|e| error!("Publish error: {e}"))
+                    }
 
-                    msg => error!("Unexpected message type for {}: {msg:?}", 
+                    msg => error!("Unexpected message type for {}: {msg:?}",
                         &params_copy.address_delta_topic
                     )
                 }

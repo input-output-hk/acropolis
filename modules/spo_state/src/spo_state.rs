@@ -17,6 +17,7 @@ use state::State;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.certificates";
 const DEFAULT_HANDLE_TOPIC: &str = "rest.get.spo-state";
+const DEFAULT_SPO_STATE_TOPIC: &str = "cardano.spo.state";
 
 /// SPO State module
 #[module(
@@ -28,7 +29,7 @@ pub struct SPOState;
 
 impl SPOState
 {
-    pub fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
+    pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
 
         // Get configuration
         let subscribe_topic = config.get_string("subscribe-topic")
@@ -39,20 +40,38 @@ impl SPOState
             .unwrap_or(DEFAULT_HANDLE_TOPIC.to_string());
         info!("Creating request handler on '{handle_topic}'");
 
+        let spo_state_topic = config.get_string("publish-spo-state-topic")
+            .unwrap_or(DEFAULT_SPO_STATE_TOPIC.to_string());
+        info!("Creating SPO state publisher on '{spo_state_topic}'");
+
         let state = Arc::new(Mutex::new(State::new()));
         let state_subscribe = state.clone();
         let state_handle_full = state.clone();
         let state_handle_single = state.clone();
         let state_tick = state.clone();
+        let context_subscribe = context.clone();
 
         // Subscribe for certificate messages
         context.clone().message_bus.subscribe(&subscribe_topic, move |message: Arc<Message>| {
             let state = state_subscribe.clone();
+            let context = context_subscribe.clone();
+            let spo_state_topic = spo_state_topic.clone();
+
             async move {
                 match message.as_ref() {
-                    Message::Cardano((block_info, CardanoMessage::TxCertificates(tx_cert_msg))) => {
+                    Message::Cardano((block, CardanoMessage::TxCertificates(tx_certs_msg))) => {
+
+                        // End of epoch?
+                        if block.new_epoch {
+                            let mut state = state.lock().await;
+                            let msg = state.end_epoch(&block);
+                            context.message_bus.publish(&spo_state_topic, msg)
+                                .await
+                                .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+                        }
+
                         let mut state = state.lock().await;
-                        state.handle(block_info, tx_cert_msg)
+                        state.handle_tx_certs(block, tx_certs_msg)
                             .inspect_err(|e| error!("Messaging handling error: {e}"))
                             .ok();
                     }
