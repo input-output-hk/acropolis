@@ -1,9 +1,10 @@
 //! Acropolis Protocol Params: State storage
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use tracing::info;
 use acropolis_common::{
-    messages::{EnactStateMessage, GenesisCompleteMessage}, BlockInfo, Era, ProtocolParams
+    messages::{EnactStateMessage, GenesisCompleteMessage, ProtocolParamsMessage}, 
+    BlockInfo, Era, ProtocolParams
 };
 use crate::ParametersUpdater;
 
@@ -22,7 +23,7 @@ impl State {
 
             current_params: ParametersUpdater::new(),
             current_era: Era::default(),
-            current_epoch: 0,
+            current_epoch: 0
         }
     }
 
@@ -33,7 +34,9 @@ impl State {
         }
     }
 
-    pub async fn handle_genesis(&mut self, message: &GenesisCompleteMessage) -> Result<()> {
+    pub async fn handle_genesis(&mut self, 
+        message: &GenesisCompleteMessage
+    ) -> Result<()> {
         info!("Received genesis complete message; conway present = {}", 
             message.conway_genesis.is_some()
         );
@@ -44,13 +47,14 @@ impl State {
     pub async fn handle_enact_state(&mut self,
         block: &BlockInfo, 
         msg: &EnactStateMessage
-    ) -> Result<()> {
-        self.current_params.apply_enact_state(msg);
-        if self.current_epoch < block.epoch {
-            self.current_epoch = block.epoch.clone();
-            self.process_new_epoch(block);
+    ) -> Result<ProtocolParamsMessage> {
+        if !block.new_epoch {
+            return Err(anyhow!("Enact state at block {:?} (not a new epoch)", block));
         }
-        Ok(())
+
+        self.process_new_epoch(&block);
+        self.current_params.apply_enact_state(msg);
+        Ok(ProtocolParamsMessage { params: self.current_params.get_params() })
     }
 
     fn log_stats(&self) {

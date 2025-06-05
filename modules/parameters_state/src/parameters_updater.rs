@@ -80,4 +80,8 @@ impl ParametersUpdater {
             _ => () // does not have corresponding genesis params
         }
     }
+
+    pub fn get_params(&self) -> ProtocolParams {
+        return self.params.clone();
+    }
 }
