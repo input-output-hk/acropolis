@@ -96,7 +96,6 @@ impl ParametersState
             match enact_s.read().await?.1.as_ref() {
                 Message::Cardano((block, CardanoMessage::EnactState(enact))) => {
                     let params = state.lock().await.handle_enact_state(&block, &enact).await?;
-                    info!("enact state {:?}", block);
                     Self::publish_update(&config, &block, params)?;
                 },
                 msg => error!("Unexpected message {msg:?} for enact state topic")
