@@ -81,10 +81,17 @@ impl AccountsState
             match message.as_ref() {
                 Message::Cardano((block_info,
                                   CardanoMessage::StakeAddressDeltas(deltas_msg))) => {
+
+                    if let Some(ref block) = current_block {
+                        if block.number != block_info.number {
+                            error!(expected=block.number, received=block_info.number,
+                                   "Certificate and deltas messages re-ordered!");
+                        }
+                    }
+
                     state.handle_stake_deltas(deltas_msg)
                         .inspect_err(|e| error!("Messaging handling error: {e}"))
                         .ok();
-                    if block_info.new_epoch { new_epoch = true; }
                 }
 
                 _ => error!("Unexpected message type: {message:?}")
@@ -98,7 +105,15 @@ impl AccountsState
                 // Handle SPOs
                 let (_, message) = spos_message_f.await?;
                 match message.as_ref() {
-                    Message::Cardano((_block_info, CardanoMessage::SPOState(spo_msg))) => {
+                    Message::Cardano((block_info, CardanoMessage::SPOState(spo_msg))) => {
+
+                        if let Some(ref block) = current_block {
+                            if block.number != block_info.number {
+                                error!(expected=block.number, received=block_info.number,
+                                       "Certificate and epoch SPOs messages re-ordered!");
+                            }
+                        }
+
                         state.handle_spo_state(spo_msg)
                             .inspect_err(|e| error!("Messaging handling error: {e}"))
                             .ok();
@@ -110,7 +125,15 @@ impl AccountsState
                 // Handle epoch activity
                 let (_, message) = ea_message_f.await?;
                 match message.as_ref() {
-                    Message::Cardano((_block_info, CardanoMessage::EpochActivity(ea_msg))) => {
+                    Message::Cardano((block_info, CardanoMessage::EpochActivity(ea_msg))) => {
+
+                        if let Some(ref block) = current_block {
+                            if block.number != block_info.number {
+                                error!(expected=block.number, received=block_info.number,
+                                       "Certificate and epoch activity messages re-ordered!");
+                            }
+                        }
+
                         state.handle_epoch_activity(ea_msg)
                             .inspect_err(|e| error!("Messaging handling error: {e}"))
                             .ok();

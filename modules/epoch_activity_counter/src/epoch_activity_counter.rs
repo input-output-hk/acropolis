@@ -4,7 +4,7 @@
 use caryatid_sdk::{Context, Module, module, message_bus::Subscription};
 use acropolis_common::{Era, messages::{Message, CardanoMessage}};
 use std::sync::Arc;
-use tokio::{task, sync::Mutex};
+use tokio::sync::Mutex;
 use anyhow::Result;
 use config::Config;
 use tracing::{info, error};
