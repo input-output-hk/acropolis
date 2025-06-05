@@ -68,19 +68,14 @@ impl AddressDeltaObserver for AddressDeltaPublisher {
                 deltas: std::mem::take(&mut *deltas),
             };
 
-            let context = self.context.clone();
-            let topic = topic.clone();
-            let block = block.clone();
-            tokio::spawn(async move {
-                let message_enum = Message::Cardano((
-                    block,
-                    CardanoMessage::AddressDeltas(message)
-                ));
-                context.message_bus.publish(&topic,
-                                            Arc::new(message_enum))
-                    .await
-                    .unwrap_or_else(|e| error!("Failed to publish: {e}"));
-            });
+            let message_enum = Message::Cardano((
+                block.clone(),
+                CardanoMessage::AddressDeltas(message)
+            ));
+            self.context.message_bus.publish(&topic,
+                                        Arc::new(message_enum))
+                .await
+                .unwrap_or_else(|e| error!("Failed to publish: {e}"));
         }
     }
 }

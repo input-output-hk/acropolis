@@ -36,11 +36,10 @@ impl DeltaPublisher {
         )));
         let params = self.params.clone();
 
-        tokio::spawn(async move {
-            params.context.message_bus
-                .publish(&params.stake_address_delta_topic, packed_message).await
-                .unwrap_or_else(|e| tracing::error!("Failed to publish: {e}")); 
-        });
+        params.context.message_bus
+            .publish(&params.stake_address_delta_topic, packed_message).await
+            .unwrap_or_else(|e| tracing::error!("Failed to publish: {e}"));
+
         Ok(())
     }
 }
