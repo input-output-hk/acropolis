@@ -45,14 +45,6 @@ pub struct State {
 
     drep_stake: HashMap<DRepCredential, Lovelace>,
     pub spo_stake: HashMap<KeyHash, u64>,
-
-    // Synchronisation fields. Because of the data loop (params -> governance -> enact),
-    // one must process all parameters updates up to latest governance block of the
-    // previous epoch, and only then the governance actions to be processed further.
-    // Invariant: prev_governance_block_number <= params_block_number.
-    prev_governance_block_number: u64,
-    params_block_number: u64,
-    pending_governance_actions: VecDeque<(BlockInfo, GovernanceProceduresMessage)>
 }
 
 impl State {
@@ -74,53 +66,14 @@ impl State {
 
             drep_stake: HashMap::new(),
             spo_stake: HashMap::new(),
-            prev_governance: None,
-            prev_parameters: None,
-            pending_governance_actions: VecDeque::new()
         }
     }
 
     pub async fn handle_protocol_parameters(&mut self, block: &BlockInfo, message: &ProtocolParamsMessage) -> Result<()> {
-        self.actual_parameters = block;
         if message.params.conway.is_some() {
             self.conway = message.params.conway.clone();
         }
 
-        if block >= self.prev_governance {
-            self.replay_queue(block).await?;
-        }
-
-        Ok(())
-    }
-
-    pub async fn handle_governance(&mut self, block: &BlockInfo,
-                                   new_msg: &GovernanceProceduresMessage) -> Result<()> {
-        self.pending_governance_actions.push_back((block.clone(), new_msg.clone()));
-        if self.params_block_number < self.prev_governance_block_number {
-            tracing::warn!("Postponing message {:?}, parameters block {}, not up to date yet", 
-                new_msg, self.prev_governance_block_number);
-            Ok(())
-        }
-        else {
-            self.replay_queue(self.params_block_number).await
-        }
-    }
-
-    async fn replay_queue(&mut self, replay_up_to: u64) -> Result<()> {
-        while let Some((block_info, _pending_msg)) = self.pending_governance_actions.get(0) {
-            if block_info.number > replay_up_to {
-                return Ok(());
-            }
-
-            let (blk, pending_msg) = self.pending_governance_actions.pop_front().unwrap_or_else(||
-                anyhow!("Cannot pop message for block {} from pending_governance_actions",
-                    block_info.number
-                )
-            )?;
-            if let Err(e) = self.handle_impl(&blk, &pending_msg).await {
-                error!("Error processing message {:?}: {}", pending_msg, e)
-            }
-        }
         Ok(())
     }
 
@@ -474,10 +427,12 @@ impl State {
     }
 
     /// Implementation of new governance message processing handle
-    async fn handle_impl(&mut self, block: &BlockInfo,
-                         governance_message: &GovernanceProceduresMessage) -> Result<()> {
+    pub async fn handle_governance(&mut self,
+        block: &BlockInfo,
+        governance_message: &GovernanceProceduresMessage
+    ) -> Result<()> {
         if block.new_epoch {
-            debug!("Processing new epoch {}", block.epoch);
+            info!("Processing new epoch {}", block.epoch);
             let enact_state = self.process_new_epoch(block.epoch);
             self.send(block, enact_state).await?;
         }

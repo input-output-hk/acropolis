@@ -1,7 +1,7 @@
 //! Acropolis Parameter State module for Caryatid
 //! Accepts certificate events and derives the Governance State in memory
 
-use caryatid_sdk::{Context, Module, module, MessageBusExt};
+use caryatid_sdk::{Context, Module, module, MessageBusExt, message_bus::Subscription};
 use acropolis_common::messages::{Message, RESTResponse, CardanoMessage};
 use std::sync::Arc;
 use anyhow::Result;
@@ -15,7 +15,7 @@ mod parameters_updater;
 use state::State;
 use parameters_updater::ParametersUpdater;
 
-const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.enact.state";
+const DEFAULT_ENACT_STATE_TOPIC: &str = "cardano.enact.state";
 const DEFAULT_GENESIS_COMPLETE_TOPIC: &str = "cardano.sequence.bootstrapped";
 const DEFAULT_HANDLE_TOPIC: &str = "rest.get.governance-state.*";
 const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: &str = "cardano.protocol.parameters";
@@ -30,8 +30,45 @@ pub struct ParametersState;
 
 impl ParametersState
 {
+    async fn run(context: Arc<Context<Message>>,
+                 mut genesis_s: Box<dyn Subscription<Message>>,
+                 mut enact_s: Box<dyn Subscription<Message>>) -> Result<()>
+    {
+        let state = Arc::new(Mutex::new(State::new()));
+
+        {
+            match &genesis_s.read().await?.1.as_ref() {
+                Message::Cardano((_block, CardanoMessage::GenesisComplete(genesis))) => 
+                    state.lock().await.handle_genesis(&genesis).await?,
+                msg => error!("Unexpected message {msg:?} for genesis topic")
+            }
+        }
+
+        loop {
+            match enact_s.read().await?.1.as_ref() {
+                Message::Cardano((block, CardanoMessage::EnactState(enact))) => 
+                    state.lock().await.handle_enact_state(&block, &enact).await?,
+                msg => error!("Unexpected message {msg:?} for enact state topic")
+            }
+        }
+    }
+
+    async fn async_init(context: Arc<Context<Message>>, genesis_topic: String, enact_topic: String) -> Result<()> {
+        let genesis = context.message_bus.register(&genesis_topic).await?;
+        let enact = context.message_bus.register(&enact_topic).await?;
+
+        // Start run task
+        tokio::spawn(async move {
+            Self::run(context, genesis, enact)
+                .await.unwrap_or_else(|e| error!("Failed: {e}"));
+        });
+
+        Ok(())
+    }
+
     pub fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // Get configuration
+/*
         let subscribe_topic = config.get_string("subscribe-topic")
             .unwrap_or(DEFAULT_SUBSCRIBE_TOPIC.to_string());
         info!("Creating subscriber on '{subscribe_topic}'");
@@ -39,21 +76,22 @@ impl ParametersState
         let handle_topic = config.get_string("handle-topic")
             .unwrap_or(DEFAULT_HANDLE_TOPIC.to_string());
         info!("Creating request handler on '{handle_topic}'");
+ */
+        let enact_topic = config.get_string("enact-state-topic")
+            .unwrap_or(DEFAULT_ENACT_STATE_TOPIC.to_string());
+        info!("Creating request handler on '{enact_topic}'");
 
-        let protocol_parameters_topic = config.get_string("protocol-parameters-topic")
-            .unwrap_or(DEFAULT_PROTOCOL_PARAMETERS_TOPIC.to_string());
-        info!("Creating request handler on '{protocol_parameters_topic}'");
-
-        let genesis_complete_topic = config.get_string("genesis-complete-topic")
+        let genesis_topic = config.get_string("genesis-complete-topic")
             .unwrap_or(DEFAULT_GENESIS_COMPLETE_TOPIC.to_string());
-        info!("Creating request handler on '{genesis_complete_topic}'");
+        info!("Creating request handler on '{genesis_topic}'");
 
-        let state = Arc::new(Mutex::new(State::new()));
-        let state_enact = state.clone();
-        let state_genesis = state.clone();
-        let state_handle = state.clone();
-        let state_tick = state.clone();
-
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async move {
+                Self::async_init(context, genesis_topic, enact_topic)
+                    .await.unwrap_or_else(|e| error!("Failed: {e}"));
+            })
+        });
+/*
         // Subscribe to governance procedures serializer
         context.clone().message_bus.subscribe(&subscribe_topic, move |message: Arc<Message>| {
             let state = state_enact.clone();
@@ -91,7 +129,7 @@ impl ParametersState
                 }
             }
         })?;
-
+*/
         // REST requests handling
 /*
         context.message_bus.handle(&handle_topic, move |message: Arc<Message>| {
@@ -121,6 +159,7 @@ impl ParametersState
         })?;
 */
         // Ticker to log stats
+/*
         context.clone().message_bus.subscribe("clock.tick", move |message: Arc<Message>| {
             let state = state_tick.clone();
 
@@ -135,7 +174,7 @@ impl ParametersState
                 }
             }
         })?;
-
+*/
         Ok(())
     }
 }

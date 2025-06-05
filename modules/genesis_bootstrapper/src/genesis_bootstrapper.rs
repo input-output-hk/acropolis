@@ -8,7 +8,7 @@ use acropolis_common::{
         GenesisCompleteMessage, Message, UTXODeltasMessage, CardanoMessage,
     },
     Address, Anchor, BlockInfo, BlockStatus, ByronAddress,
-    Committee, Constitution, ConwayGenesisParams, Credential,
+    Committee, Constitution, Credential, ConwayParams,
     DRepVotingThresholds, Era, PoolVotingThresholds,
     TxOutput, UTXODelta,
 };
@@ -117,8 +117,8 @@ pub fn map_committee(committee: &conway::Committee) -> Result<Committee> {
     })
 }
 
-fn map_conway_genesis (genesis: &conway::GenesisFile) -> Result<ConwayGenesisParams> {
-    Ok(ConwayGenesisParams {
+fn map_conway_genesis (genesis: &conway::GenesisFile) -> Result<ConwayParams> {
+    Ok(ConwayParams {
         pool_voting_thresholds: map_pool_thresholds(&genesis.pool_voting_thresholds)?,
         d_rep_voting_thresholds: map_drep_thresholds(&genesis.d_rep_voting_thresholds)?,
         committee_min_size: genesis.committee_min_size,
