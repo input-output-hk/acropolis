@@ -1,7 +1,7 @@
 //! Acropolis Parameter State module for Caryatid
 //! Accepts certificate events and derives the Governance State in memory
 
-use caryatid_sdk::{Context, Module, module, MessageBusExt, message_bus::Subscription};
+use caryatid_sdk::{Context, MessageBusExt, Module, module, message_bus::Subscription};
 use acropolis_common::{BlockInfo, messages::{Message, RESTResponse, CardanoMessage, ProtocolParamsMessage}};
 use std::sync::Arc;
 use anyhow::{anyhow, Result};
@@ -67,12 +67,10 @@ impl ParametersState
             CardanoMessage::ProtocolParams(message)
         )));
 
-        info!("Publishing {:?} at {}", packed_message, config.protocol_parameters_topic);
         tokio::spawn(async move {
             config.context.message_bus
                 .publish(&config.protocol_parameters_topic, packed_message).await
                 .unwrap_or_else(|e| tracing::error!("Failed to publish: {e}")); 
-            info!("Published");
         });
 
         Ok(())
@@ -83,14 +81,43 @@ impl ParametersState
                  mut enact_s: Box<dyn Subscription<Message>>
     ) -> Result<()> {
         let state = Arc::new(Mutex::new(State::new()));
+        let state_handle = state.clone();
+
+        config.context.message_bus.handle(&config.handle_topic, move |message: Arc<Message>| {
+            let _state = state_handle.clone();
+            async move {
+                let response = match message.as_ref() {
+                    Message::RESTRequest(request) => {
+                        info!("REST received {} {}", request.method, request.path);
+                        RESTResponse::with_text(200, "Ok")
+/*
+                        let lock = state.lock().await;
+
+                        match perform_rest_request(&lock, &request.path) {
+                            Ok(response) => RESTResponse::with_text(200, &response),
+                            Err(error) => {
+                                error!("Governance State REST request error: {error:?}");
+                                RESTResponse::with_text(400, &format!("{error:?}"))
+                            }
+                        }
+ */
+                    },
+                    _ => {
+                        error!("Unexpected message type: {message:?}");
+                        RESTResponse::with_text(500, &format!("Unexpected message type"))
+                    }
+                };
+
+                Arc::new(Message::RESTResponse(response))
+            }
+        })?;
 
         match &genesis_s.read().await?.1.as_ref() {
-            Message::Cardano((block, CardanoMessage::GenesisComplete(genesis))) => {
+            Message::Cardano((_block, CardanoMessage::GenesisComplete(genesis))) => {
                 state.lock().await.handle_genesis(&genesis).await?;
             },
             msg => return Err(anyhow!("Unexpected genesis {msg:?}; cannot initialize parameters module"))
         };
-        info!("genesis complete");
 
         loop {
             match enact_s.read().await?.1.as_ref() {
@@ -155,33 +182,8 @@ impl ParametersState
         })?;
 */
         // REST requests handling
-/*
-        context.message_bus.handle(&handle_topic, move |message: Arc<Message>| {
-            let state = state_handle.clone();
-            async move {
-                let response = match message.as_ref() {
-                    Message::RESTRequest(request) => {
-                        info!("REST received {} {}", request.method, request.path);
-                        let lock = state.lock().await;
 
-                        match perform_rest_request(&lock, &request.path) {
-                            Ok(response) => RESTResponse::with_text(200, &response),
-                            Err(error) => {
-                                error!("Governance State REST request error: {error:?}");
-                                RESTResponse::with_text(400, &format!("{error:?}"))
-                            }
-                        }
-                    },
-                    _ => {
-                        error!("Unexpected message type: {message:?}");
-                        RESTResponse::with_text(500, &format!("Unexpected message type"))
-                    }
-                };
 
-                Arc::new(Message::RESTResponse(response))
-            }
-        })?;
-*/
         // Ticker to log stats
 /*
         context.clone().message_bus.subscribe("clock.tick", move |message: Arc<Message>| {

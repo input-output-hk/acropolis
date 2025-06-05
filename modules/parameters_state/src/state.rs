@@ -12,8 +12,7 @@ pub struct State {
     pub genesis: ProtocolParams,
 
     pub current_params: ParametersUpdater,
-    pub current_epoch: u64,
-    pub current_era: Era
+    pub current_era: Option<Era>
 }
 
 impl State {
@@ -22,16 +21,20 @@ impl State {
             genesis: ProtocolParams::default(),
 
             current_params: ParametersUpdater::new(),
-            current_era: Era::default(),
-            current_epoch: 0
+            current_era: None
         }
     }
 
-    pub fn process_new_epoch(&mut self, new_epoch_block: &BlockInfo) {
-        if self.current_era < new_epoch_block.era {
-            self.current_params.apply_genesis (&new_epoch_block.era, &self.genesis);
-            self.current_era = new_epoch_block.era.clone();
+    pub fn apply_genesis(&mut self, new_epoch_block: &BlockInfo) {
+        if let Some(ref era) = self.current_era {
+            if *era == new_epoch_block.era {
+                return;
+            }
         }
+        info!("Applying genesis for {:?}", new_epoch_block.era);
+
+        self.current_params.apply_genesis (&new_epoch_block.era, &self.genesis);
+        self.current_era = Some(new_epoch_block.era.clone());
     }
 
     pub async fn handle_genesis(&mut self, 
@@ -52,7 +55,7 @@ impl State {
             return Err(anyhow!("Enact state at block {:?} (not a new epoch)", block));
         }
 
-        self.process_new_epoch(&block);
+        self.apply_genesis(&block);
         self.current_params.apply_enact_state(msg);
         Ok(ProtocolParamsMessage { params: self.current_params.get_params() })
     }
