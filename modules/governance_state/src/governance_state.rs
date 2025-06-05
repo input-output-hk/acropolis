@@ -162,14 +162,16 @@ impl GovernanceState {
                 if blk_g != blk_p {
                     error!("Governance {blk_g:?} and protocol parameters {blk_p:?} are out of sync");
                 }
-                state.lock().await.handle_protocol_parameters(&blk_p, &params).await?;
+                state.lock().await.handle_protocol_parameters(&params).await?;
             };
 
             let (blk_drep, distr) = Self::read_drep(&mut drep_s).await?;
             if blk_g != blk_drep {
                 error!("Governance {blk_g:?} and DRep distribution {blk_drep:?} are out of sync");
             }
-            state.lock().await.handle_drep_stake(&distr).await?
+            if distr.data.is_some() {
+                state.lock().await.handle_drep_stake(&distr).await?
+            }
         }
     }
 

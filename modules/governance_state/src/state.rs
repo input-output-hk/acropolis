@@ -1,6 +1,6 @@
 //! Acropolis Governance State: State storage
 
-use std::{sync::Arc, cmp::max, collections::{HashMap, VecDeque}};
+use std::{sync::Arc, cmp::max, collections::HashMap};
 use anyhow::{anyhow, Result};
 use hex::ToHex;
 use tracing::{debug, error, info};
@@ -69,7 +69,7 @@ impl State {
         }
     }
 
-    pub async fn handle_protocol_parameters(&mut self, block: &BlockInfo, message: &ProtocolParamsMessage) -> Result<()> {
+    pub async fn handle_protocol_parameters(&mut self, message: &ProtocolParamsMessage) -> Result<()> {
         if message.params.conway.is_some() {
             self.conway = message.params.conway.clone();
         }
@@ -79,8 +79,8 @@ impl State {
 
     pub async fn handle_drep_stake(&mut self, message: &DRepStakeDistributionMessage) -> Result<()> {
         self.drep_stake_messages_count += 1;
-        if message.data.len() > 0 {
-            self.drep_stake = HashMap::from_iter(message.data.iter().cloned());
+        if let Some(ref vec) = message.data {
+            self.drep_stake = HashMap::from_iter(vec.iter().cloned());
         }
         Ok(())
     }

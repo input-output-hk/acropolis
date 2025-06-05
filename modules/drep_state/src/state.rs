@@ -116,14 +116,13 @@ impl State {
             }
         }
 
-        let distribution = if changed && self.drep_distribution_publisher.is_some() 
-        {
+        let distribution = if changed {
             let d = self.new_drep_distribution();
             info!("New vote distribution at slot = {}: len = {}", tx_slot, d.len());
-            d
+            Some(d)
         }
         else {
-            Vec::new()
+            None
         };
 
         if let Some(ref mut publisher) = self.drep_distribution_publisher {

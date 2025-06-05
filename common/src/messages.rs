@@ -110,8 +110,8 @@ pub struct GovernanceProceduresMessage {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DRepStakeDistributionMessage {
-    // DRep stake distribution by ID
-    pub data: Vec<(DRepCredential, Lovelace)>
+    /// DRep stake distribution by ID, if None then no changes
+    pub data: Option<Vec<(DRepCredential, Lovelace)>>
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

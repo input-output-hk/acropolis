@@ -17,7 +17,7 @@ impl DRepDistributionPublisher {
     }
 
     pub async fn publish_stake(&mut self, block: &BlockInfo,
-                               s: Vec<(DRepCredential, Lovelace)>) -> anyhow::Result<()> {
+                               s: Option<Vec<(DRepCredential, Lovelace)>>) -> anyhow::Result<()> {
         self.context.message_bus.publish(
             &self.topic,
             Arc::new(Message::Cardano((
