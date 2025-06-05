@@ -26,7 +26,7 @@ pub enum Era
 }
 
 /// Block status
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum BlockStatus
 {
     Bootstrap,   // Pseudo-block from bootstrap data

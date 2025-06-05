@@ -4,6 +4,8 @@
 use caryatid_sdk::{Context, Module, module, MessageBusExt, message_bus::Subscription};
 use acropolis_common::{
     messages::{Message, RESTResponse, CardanoMessage},
+    state_history::StateHistory,
+    BlockInfo, BlockStatus,
 };
 use std::sync::Arc;
 use anyhow::Result;
@@ -32,7 +34,7 @@ pub struct AccountsState;
 impl AccountsState
 {
     /// Async run loop
-    async fn run(state: Arc<Mutex<State>>,
+    async fn run(history: Arc<Mutex<StateHistory<State>>>,
                  mut spos_subscription: Box<dyn Subscription<Message>>,
                  mut ea_subscription: Box<dyn Subscription<Message>>,
                  mut certs_subscription: Box<dyn Subscription<Message>>,
@@ -45,21 +47,30 @@ impl AccountsState
 
         // Main loop
         loop {
+            // Get a mutable state
+            let mut state = history.lock().await.get_current_state();
+
             // Read per-block topics in parallel
             let certs_message_f = certs_subscription.read();
             let stake_message_f = stake_subscription.read();
             let mut new_epoch = false;
+            let mut current_block: Option<BlockInfo> = None;
 
             // Handle certificates
             let (_, message) = certs_message_f.await?;
             match message.as_ref() {
                 Message::Cardano((block_info, CardanoMessage::TxCertificates(tx_certs_msg))) => {
-                    info!(block = block_info.number, "Certs");
-                    let mut state = state.lock().await;
-                    state.handle_tx_certificates(block_info, tx_certs_msg)
+
+                    // Handle rollbacks on this topic only
+                    if block_info.status == BlockStatus::RolledBack {
+                        state = history.lock().await.get_rolled_back_state(&block_info);
+                    }
+
+                    state.handle_tx_certificates(tx_certs_msg)
                         .inspect_err(|e| error!("Messaging handling error: {e}"))
                         .ok();
                     if block_info.new_epoch { new_epoch = true; }
+                    current_block = Some(block_info.clone());
                 }
 
                 _ => error!("Unexpected message type: {message:?}")
@@ -70,8 +81,7 @@ impl AccountsState
             match message.as_ref() {
                 Message::Cardano((block_info,
                                   CardanoMessage::StakeAddressDeltas(deltas_msg))) => {
-                    let mut state = state.lock().await;
-                    state.handle_stake_deltas(block_info, deltas_msg)
+                    state.handle_stake_deltas(deltas_msg)
                         .inspect_err(|e| error!("Messaging handling error: {e}"))
                         .ok();
                     if block_info.new_epoch { new_epoch = true; }
@@ -88,9 +98,8 @@ impl AccountsState
                 // Handle SPOs
                 let (_, message) = spos_message_f.await?;
                 match message.as_ref() {
-                    Message::Cardano((block_info, CardanoMessage::SPOState(spo_msg))) => {
-                        let mut state = state.lock().await;
-                        state.handle_spo_state(block_info, spo_msg)
+                    Message::Cardano((_block_info, CardanoMessage::SPOState(spo_msg))) => {
+                        state.handle_spo_state(spo_msg)
                             .inspect_err(|e| error!("Messaging handling error: {e}"))
                             .ok();
                     }
@@ -101,15 +110,19 @@ impl AccountsState
                 // Handle epoch activity
                 let (_, message) = ea_message_f.await?;
                 match message.as_ref() {
-                    Message::Cardano((block_info, CardanoMessage::EpochActivity(ea_msg))) => {
-                        let mut state = state.lock().await;
-                        state.handle_epoch_activity(block_info, ea_msg)
+                    Message::Cardano((_block_info, CardanoMessage::EpochActivity(ea_msg))) => {
+                        state.handle_epoch_activity(ea_msg)
                             .inspect_err(|e| error!("Messaging handling error: {e}"))
                             .ok();
                     }
 
                     _ => error!("Unexpected message type: {message:?}")
                 }
+            }
+
+            // Commit the new state
+            if let Some(block_info) = current_block {
+                history.lock().await.commit(&block_info, state);
             }
         }
     }
@@ -138,20 +151,20 @@ impl AccountsState
             .unwrap_or(DEFAULT_HANDLE_TOPIC.to_string());
         info!("Creating request handler on '{handle_topic}'");
 
-        // Create state
-        let state = Arc::new(Mutex::new(State::new()));
-        let state_handle_full = state.clone();
-        let state_handle_single = state.clone();
-        let state_tick = state.clone();
+        // Create history
+        let history = Arc::new(Mutex::new(StateHistory::<State>::new("AccountsState")));
+        let history_full = history.clone();
+        let history_single = history.clone();
+        let history_tick = history.clone();
 
         // Handle requests for full state
         context.message_bus.handle(&handle_topic, move |message: Arc<Message>| {
-            let state = state_handle_full.clone();
+            let history = history_full.clone();
             async move {
                 let response = match message.as_ref() {
                     Message::RESTRequest(request) => {
                         info!("REST received {} {}", request.method, request.path);
-                        if let Some(state) = state.lock().await.current().clone() {
+                        if let Some(state) = history.lock().await.current().clone() {
                             match serde_json::to_string(state) {
                                 Ok(body) => RESTResponse::with_json(200, &body),
                                 Err(error) => RESTResponse::with_text(500, &format!("{error:?}").to_string()),
@@ -174,7 +187,7 @@ impl AccountsState
 
         // Handle requests for single reward state based on stake address
         context.message_bus.handle(&handle_topic_single, move |message: Arc<Message>| {
-            let state = state_handle_single.clone();
+            let history = history_single.clone();
             async move {
                 let response = match message.as_ref() {
                     Message::RESTRequest(request) => {
@@ -183,13 +196,16 @@ impl AccountsState
                             // TODO! Stake addresses will be text encoded "stake1xxx"
                             Some(id) => match hex::decode(&id) {
                                 Ok(id) => {
-                                    let state = state.lock().await;
-                                    match state.get_rewards(&id) {
-                                        Some(reward) => match serde_json::to_string(&reward) {
-                                            Ok(body) => RESTResponse::with_json(200, &body),
-                                            Err(error) => RESTResponse::with_text(500, &format!("{error:?}").to_string()),
-                                        },
-                                        None => RESTResponse::with_text(404, "Stake address not found"),
+                                    match history.lock().await.current() {
+                                        Some(state) => match state.get_rewards(&id) {
+                                            Some(reward) => match serde_json::to_string(&reward) {
+                                                Ok(body) => RESTResponse::with_json(200, &body),
+                                                Err(error) => RESTResponse::with_text(500, &format!("{error:?}").to_string()),
+                                            },
+                                            None => RESTResponse::with_text(404, "Stake address not found"),
+                                        }
+
+                                        None => RESTResponse::with_text(500, "No state")
                                     }
                                 },
                                 Err(error) => RESTResponse::with_text(400, &format!("Stake address must be hex encoded vector of bytes: {error:?}").to_string()),
@@ -209,15 +225,15 @@ impl AccountsState
 
         // Ticker to log stats
         context.clone().message_bus.subscribe("clock.tick", move |message: Arc<Message>| {
-            let state = state_tick.clone();
-
+            let history = history_tick.clone();
             async move {
                 if let Message::Clock(message) = message.as_ref() {
                     if (message.number % 60) == 0 {
-                        state.lock().await.tick()
-                            .await
-                            .inspect_err(|e| error!("Tick error: {e}"))
-                            .ok();
+                        if let Some(state) = history.lock().await.current() {
+                            state.tick().await
+                                .inspect_err(|e| error!("Tick error: {e}"))
+                                .ok();
+                        }
                     }
                 }
             }
@@ -231,7 +247,7 @@ impl AccountsState
 
         // Start run task
         tokio::spawn(async move {
-            Self::run(state, spos_subscription, ea_subscription,
+            Self::run(history, spos_subscription, ea_subscription,
                       certs_subscription, stake_subscription)
                 .await.unwrap_or_else(|e| error!("Failed: {e}"));
         });
