@@ -5,36 +5,14 @@ use acropolis_common::{
     PoolRegistration,
     TxCertificate,
     params::{SECURITY_PARAMETER_K, TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH,},
+    serialization::SerializeMapAs,
 };
 use anyhow::Result;
 use std::sync::Arc;
 use imbl::HashMap;
 use tracing::{error, info};
-use serde::{Serializer, ser::SerializeMap};
-use serde_with::{serde_as, hex::Hex, SerializeAs, ser::SerializeAsWrap};
+use serde_with::{serde_as, hex::Hex};
 use std::collections::VecDeque;
-
-struct HashMapSerial<KAs, VAs>(std::marker::PhantomData<(KAs, VAs)>);
-
-impl<K, V, KAs, VAs> SerializeAs<HashMap<K, V>> for HashMapSerial<KAs, VAs>
-where
-    KAs: SerializeAs<K>,
-    VAs: SerializeAs<V>,
-{
-    fn serialize_as<S>(source: &HashMap<K, V>, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut map_ser = serializer.serialize_map(Some(source.len()))?;
-        for (k, v) in source {
-            map_ser.serialize_entry(
-                &SerializeAsWrap::<K, KAs>::new(k),
-                &SerializeAsWrap::<V, VAs>::new(v),
-            )?;
-        }
-        map_ser.end()
-    }
-}
 
 #[serde_as]
 #[derive(Debug, Clone, serde::Serialize)]
@@ -43,10 +21,10 @@ pub struct BlockState {
 
     epoch: u64,
 
-    #[serde_as(as = "HashMapSerial<Hex, _>")]
+    #[serde_as(as = "SerializeMapAs<Hex, _>")]
     spos: HashMap<Vec::<u8>, PoolRegistration>,
 
-    #[serde_as(as = "HashMapSerial<_, Vec<Hex>>")]
+    #[serde_as(as = "SerializeMapAs<_, Vec<Hex>>")]
     pending_deregistrations: HashMap<u64, Vec<Vec<u8>>>,
 }
 
