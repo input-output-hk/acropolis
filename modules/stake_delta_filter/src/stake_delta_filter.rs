@@ -3,7 +3,7 @@
 
 use std::{path::Path, sync::Arc};
 use serde::Deserialize;
-use caryatid_sdk::{Context, Module, module, MessageBusExt};
+use caryatid_sdk::{Context, Module, module};
 use acropolis_common::{messages::{Message, CardanoMessage}, AddressNetwork};
 use anyhow::{anyhow, Result};
 use config::Config;
@@ -118,68 +118,65 @@ impl StakeDeltaFilter {
         match params.cache_mode {
             CacheMode::Predefined => Self::stateless_init(
                 PointerCache::try_load_predefined(&params.get_network_name())?, params
-            ),
+            ).await,
 
-            CacheMode::Read => Self::stateless_init(PointerCache::try_load(&cache_path)?, params),
+            CacheMode::Read => Self::stateless_init(PointerCache::try_load(&cache_path)?, params).await,
 
             CacheMode::WriteIfAbsent => match PointerCache::try_load(&cache_path) {
-                Ok(cache) => Self::stateless_init(cache, params),
+                Ok(cache) => Self::stateless_init(cache, params).await,
                 Err(e) => {
                     info!("Cannot load cache: {}, building from scratch", e);
-                    Self::stateful_init(params)
+                    Self::stateful_init(params).await
                 }
             }
 
-            CacheMode::Write => Self::stateful_init(params)
+            CacheMode::Write => Self::stateful_init(params).await
         }
     }
 
-    fn stateless_init(cache: Arc<PointerCache>, params: Arc<StakeDeltaFilterParams>) -> Result<()> {
+    async fn stateless_init(cache: Arc<PointerCache>, params: Arc<StakeDeltaFilterParams>) -> Result<()> {
         info!("Stateless init: using stake pointer cache");
 
         // Subscribe for certificate messages
         info!("Creating subscriber on '{}'", params.address_delta_topic);
-        let cache = cache.clone();
-        params.context.clone().message_bus.subscribe(&params.clone().address_delta_topic, move |message: Arc<Message>| {
-            let params_copy = params.clone();
-            let cache_copy = cache.clone();
+        let mut subscription = params.context.message_bus.register(&params.clone().address_delta_topic).await?;
+        params.context.clone().run(async move {
             let publisher = DeltaPublisher::new(params.clone());
 
-            async move {
+            loop {
+                let Ok((_, message)) = subscription.read().await else { return; };
                 match message.as_ref() {
                     Message::Cardano((block_info, CardanoMessage::AddressDeltas(delta))) => {
-                        let msg = process_message(&cache_copy, delta, block_info, None);
-                        publisher.publish(block_info, msg)
+                        let msg = process_message(&cache, &delta, &block_info, None);
+                        publisher.publish(&block_info, msg)
                             .await.unwrap_or_else(|e| error!("Publish error: {e}"))
                     }
 
                     msg => error!("Unexpected message type for {}: {msg:?}",
-                        &params_copy.address_delta_topic
+                        &params.address_delta_topic
                     )
                 }
             }
-        })?;
+        });
 
         Ok(())
     }
 
-    fn stateful_init(params: Arc<StakeDeltaFilterParams>) -> Result<()> {
+    async fn stateful_init(params: Arc<StakeDeltaFilterParams>) -> Result<()> {
         info!("Stateful init: creating stake pointer cache");
 
         // State
         let state = Arc::new(Mutex::new(State::new(params.clone())));
-        let state_certs = state.clone();
-        let state_deltas = state.clone();
-        let state_tick = state.clone();
-        let params_d = params.clone();
 
         info!("Creating subscriber on '{}'", params.tx_certificates_topic);
-        params.context.clone().message_bus.subscribe(&params.tx_certificates_topic, move |message: Arc<Message>| {
-            let state = state_certs.clone();
-            async move {
+        let state_certs = state.clone();
+        let mut subscription = params.context.message_bus.register(&params.tx_certificates_topic).await?;
+        params.clone().context.run(async move {
+            loop {
+                let Ok((_, message)) = subscription.read().await else { return; };
                 match message.as_ref() {
                     Message::Cardano((block_info, CardanoMessage::TxCertificates(tx_cert_msg))) => {
-                        let mut state = state.lock().await;
+                        let mut state = state_certs.lock().await;
                         state.handle_certs(block_info, tx_cert_msg)
                             .await
                             .inspect_err(|e| error!("Messaging handling error: {e}"))
@@ -189,42 +186,45 @@ impl StakeDeltaFilter {
                     _ => error!("Unexpected message type: {message:?}")
                 }
             }
-        })?;
+        });
 
         info!("Creating subscriber on '{}'", params.address_delta_topic);
-        params.context.clone().message_bus.subscribe(&params.clone().address_delta_topic, move |message: Arc<Message>| {
-            let state = state_deltas.clone();
-            let params = params_d.clone();
-            async move {
+        let state_deltas = state.clone();
+        let topic = params.address_delta_topic.clone();
+        let mut subscription = params.context.message_bus.register(&topic).await?;
+        params.clone().context.run(async move {
+            loop {
+                let Ok((_, message)) = subscription.read().await else { return; };
                 match message.as_ref() {
                     Message::Cardano((block_info, CardanoMessage::AddressDeltas(deltas))) => {
-                        let mut state = state.lock().await;
+                        let mut state = state_deltas.lock().await;
                         state.handle_deltas(block_info, deltas)
                             .await
                             .inspect_err(|e| error!("Messaging handling error: {e}"))
                             .ok();
                     }
 
-                    _ => error!("Unexpected message type for {}: {message:?}", &params.address_delta_topic)
+                    _ => error!("Unexpected message type for {}: {message:?}", &topic)
                 }
             }
-        })?;
+        });
 
         // Ticker to log stats
-        params.context.clone().message_bus.subscribe("clock.tick", move |message: Arc<Message>| {
-            let state = state_tick.clone();
-
-            async move {
+        let state_tick = state.clone();
+        let mut subscription = params.context.message_bus.register("clock.tick").await?;
+        params.clone().context.run(async move {
+            loop {
+                let Ok((_, message)) = subscription.read().await else { return; };
                 if let Message::Clock(message) = message.as_ref() {
                     if (message.number % 60) == 0 {
-                        state.lock().await.tick()
+                        state_tick.lock().await.tick()
                             .await
                             .inspect_err(|e| error!("Tick error: {e}"))
                             .ok();
                     }
                 }
             }
-        })?;
+        });
 
         Ok(())
     }

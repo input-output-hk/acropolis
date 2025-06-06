@@ -1,7 +1,7 @@
 //! Acropolis Block unpacker module for Caryatid
 //! Unpacks block bodies into transactions
 
-use caryatid_sdk::{Context, Module, module, MessageBusExt};
+use caryatid_sdk::{Context, Module, module};
 use acropolis_common::messages::{RawTxsMessage, CardanoMessage, Message};
 use std::sync::Arc;
 use anyhow::Result;
@@ -36,11 +36,11 @@ impl BlockUnpacker
             .unwrap_or(DEFAULT_PUBLISH_TOPIC.to_string());
         info!("Publishing on '{publish_topic}'");
 
-        context.clone().message_bus.subscribe(&subscribe_topic, move |message: Arc<Message>| {
-            let context = context.clone();
-            let publish_topic = publish_topic.clone();
+        let mut subscription = context.message_bus.register(&subscribe_topic).await?;
 
-            async move {
+        context.clone().run(async move {
+            loop {
+                let Ok((_, message)) = subscription.read().await else { return; };
                 match message.as_ref() {
                     Message::Cardano((block_info, CardanoMessage::BlockBody(body_msg))) => {
                         // Parse the body
@@ -50,9 +50,6 @@ impl BlockUnpacker
                                     debug!("Decoded block number {} slot {} with {} txs",
                                            block.number(), block.slot(), block.txs().len());
                                 }
-
-                                let context = context.clone();
-                                let publish_topic = publish_topic.clone();
 
                                 // Encode the Tx into hex, and take ownership
                                 let txs: Vec<_> = block.txs().into_iter()
@@ -77,7 +74,7 @@ impl BlockUnpacker
                     _ => error!("Unexpected message type: {message:?}")
                 }
             }
-        })?;
+        });
 
         Ok(())
     }

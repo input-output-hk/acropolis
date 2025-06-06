@@ -2,7 +2,7 @@
 //! Reads genesis files and outputs initial UTXO events
 
 use std::collections::HashMap;
-use caryatid_sdk::{module, Context, MessageBusExt, Module};
+use caryatid_sdk::{module, Context, Module};
 use acropolis_common::{
     messages::{
         GenesisCompleteMessage, Message, UTXODeltasMessage, CardanoMessage,
@@ -143,94 +143,88 @@ impl GenesisBootstrapper
             .unwrap_or(DEFAULT_STARTUP_TOPIC.to_string());
         info!("Creating startup subscriber on '{startup_topic}'");
 
-        context.clone().message_bus.subscribe(&startup_topic, 
-            move |_message: Arc<Message>| {
-                let context = context.clone();
-                let config = config.clone();
-                info!("Received startup message");
+        let mut subscription = context.message_bus.register(&startup_topic).await?;
+        context.clone().run(async move {
+            let Ok(_) = subscription.read().await else { return; };
+            info!("Received startup message");
 
-                tokio::spawn(async move {
-                    let publish_utxo_deltas_topic = config.get_string("publish-utxo-deltas-topic")
-                        .unwrap_or(DEFAULT_PUBLISH_UTXO_DELTAS_TOPIC.to_string());
-                    info!("Publishing UTXO deltas on '{publish_utxo_deltas_topic}'");
+            let publish_utxo_deltas_topic = config.get_string("publish-utxo-deltas-topic")
+                .unwrap_or(DEFAULT_PUBLISH_UTXO_DELTAS_TOPIC.to_string());
+            info!("Publishing UTXO deltas on '{publish_utxo_deltas_topic}'");
 
-                    let completion_topic = config.get_string("completion-topic")
-                        .unwrap_or(DEFAULT_COMPLETION_TOPIC.to_string());
-                    info!("Completing with '{completion_topic}'");
+            let completion_topic = config.get_string("completion-topic")
+                .unwrap_or(DEFAULT_COMPLETION_TOPIC.to_string());
+            info!("Completing with '{completion_topic}'");
 
-                    // Read genesis data
-                    let genesis: byron::GenesisFile = serde_json::from_slice(MAINNET_BYRON_GENESIS)
-                        .expect("Invalid JSON in MAINNET_BYRON_GENESIS file");
+            // Read genesis data
+            let genesis: byron::GenesisFile = serde_json::from_slice(MAINNET_BYRON_GENESIS)
+                .expect("Invalid JSON in MAINNET_BYRON_GENESIS file");
 
-                    let conway_genesis: Option<conway::GenesisFile> = match serde_json::from_slice(MAINNET_CONWAY_GENESIS) {
-                        Ok(file) => Some(file),
-                        Err(e) => {
-                            info!("Cannot read JSON in MAINNET_CONWAY_GENESIS file: {e}");
-                            None
-                        }
-                    };
+            let conway_genesis: Option<conway::GenesisFile> = match serde_json::from_slice(MAINNET_CONWAY_GENESIS) {
+                Ok(file) => Some(file),
+                Err(e) => {
+                    info!("Cannot read JSON in MAINNET_CONWAY_GENESIS file: {e}");
+                    None
+                }
+            };
 
-                    // Construct message
-                    let block_info = BlockInfo {
-                        status: BlockStatus::Bootstrap,
-                        slot: 0,
-                        number: 0,
-                        hash: Vec::new(),
-                        epoch: 0,
-                        new_epoch: false,
-                        era: Era::Byron,
-                    };
+            // Construct message
+            let block_info = BlockInfo {
+                status: BlockStatus::Bootstrap,
+                slot: 0,
+                number: 0,
+                hash: Vec::new(),
+                epoch: 0,
+                new_epoch: false,
+                era: Era::Byron,
+            };
 
-                    let mut message = UTXODeltasMessage {
-                        deltas: Vec::new(),
-                    };
+            let mut message = UTXODeltasMessage {
+                deltas: Vec::new(),
+            };
 
-                    // Convert the AVVM distributions into pseudo-UTXOs
-                    let gen_utxos = genesis_utxos(&genesis);
-                    for (hash, address, amount) in gen_utxos {
-                        let tx_output = TxOutput {
-                            tx_hash: hash.to_vec(),
-                            index: 0,
-                            address: Address::Byron(ByronAddress{
-                                payload: address.payload.to_vec(),
-                            }),
-                            value: amount
-                        };
+            // Convert the AVVM distributions into pseudo-UTXOs
+            let gen_utxos = genesis_utxos(&genesis);
+            for (hash, address, amount) in gen_utxos {
+                let tx_output = TxOutput {
+                    tx_hash: hash.to_vec(),
+                    index: 0,
+                    address: Address::Byron(ByronAddress{
+                        payload: address.payload.to_vec(),
+                    }),
+                    value: amount
+                };
 
-                        message.deltas.push(UTXODelta::Output(tx_output));
-                    }
-
-                    let message_enum = Message::Cardano((
-                        block_info.clone(),
-                        CardanoMessage::UTXODeltas(message)
-                    ));
-                    context.message_bus.publish(&publish_utxo_deltas_topic,
-                                                Arc::new(message_enum))
-                        .await
-                        .unwrap_or_else(|e| error!("Failed to publish: {e}"));
-
-                    // Send completion message
-                    let completion_message = GenesisCompleteMessage {
-                        conway_genesis: conway_genesis
-                            .map(|g| map_conway_genesis(&g))
-                            .transpose().unwrap_or_else(|e| {
-                                error!("Failure to parse conway genesis block: {e}");
-                                None
-                            }),
-                    };
-
-                    let message_enum = Message::Cardano((
-                        block_info,
-                        CardanoMessage::GenesisComplete(completion_message)
-                    ));
-                    context.message_bus.publish(&completion_topic, Arc::new(message_enum))
-                        .await
-                        .unwrap_or_else(|e| error!("Failed to publish: {e}"));
-                });
-
-                async {}
+                message.deltas.push(UTXODelta::Output(tx_output));
             }
-        )?;
+
+            let message_enum = Message::Cardano((
+                block_info.clone(),
+                CardanoMessage::UTXODeltas(message)
+            ));
+            context.message_bus.publish(&publish_utxo_deltas_topic,
+                                        Arc::new(message_enum))
+                .await
+                .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+
+            // Send completion message
+            let completion_message = GenesisCompleteMessage {
+                conway_genesis: conway_genesis
+                    .map(|g| map_conway_genesis(&g))
+                    .transpose().unwrap_or_else(|e| {
+                        error!("Failure to parse conway genesis block: {e}");
+                        None
+                    }),
+            };
+
+            let message_enum = Message::Cardano((
+                block_info,
+                CardanoMessage::GenesisComplete(completion_message)
+            ));
+            context.message_bus.publish(&completion_topic, Arc::new(message_enum))
+                .await
+                .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+        });
 
         Ok(())
     }
