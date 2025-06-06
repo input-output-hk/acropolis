@@ -8,6 +8,7 @@ pub mod params;
 pub mod crypto;
 pub mod state_history;
 pub mod encoding;
+pub mod serialization;
 
 // Flattened re-exports
 pub use self::types::*;
