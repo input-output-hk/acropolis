@@ -3,7 +3,7 @@
 #![allow(dead_code)]
 use anyhow::{Result, anyhow};
 use crate::types::{KeyHash, ScriptHash};
-use crate::varint_encoder::VarIntEncoder;
+use crate::cip19::{VarIntEncoder, VarIntDecoder};
 
 /// a Byron-era address
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -87,6 +87,54 @@ pub struct ShelleyAddress {
 }
 
 impl ShelleyAddress {
+    /// Read from string format
+    pub fn from_string(text: &str) -> Result<Self> {
+
+        let (hrp, data) = bech32::decode(text)?;
+        if let Some(header) = data.first() {
+
+            let network = match hrp.as_str().contains("test") {
+                true => AddressNetwork::Test,
+                false => AddressNetwork::Main
+            };
+
+            let header = *header;
+
+            let payment_part = match (header >> 4) & 0x01 {
+                0 => ShelleyAddressPaymentPart::PaymentKeyHash(data[1..29].to_vec()),
+                1 => ShelleyAddressPaymentPart::ScriptHash(data[1..29].to_vec()),
+                _ => panic!()
+            };
+
+            let delegation_part = match (header >> 5) & 0x03 {
+                0 => ShelleyAddressDelegationPart::StakeKeyHash(data[29..57].to_vec()),
+                1 => ShelleyAddressDelegationPart::ScriptHash(data[29..57].to_vec()),
+                2 => {
+                    let mut decoder = VarIntDecoder::new(&data[29..]);
+                    let slot = decoder.read()?;
+                    let tx_index = decoder.read()?;
+                    let cert_index = decoder.read()?;
+
+                    ShelleyAddressDelegationPart::Pointer(ShelleyAddressPointer {
+                        slot,
+                        tx_index,
+                        cert_index,
+                    })
+                },
+                3 => ShelleyAddressDelegationPart::None,
+                _ => panic!()
+            };
+
+            return Ok(ShelleyAddress {
+                network,
+                payment: payment_part,
+                delegation: delegation_part,
+            });
+        }
+
+        Err(anyhow!("Empty address data"))
+    }
+
     /// Convert to addr1xxx form
     pub fn to_string(&self) -> Result<String> {
         let (hrp, network_bits) = match self.network {
@@ -153,6 +201,28 @@ pub struct StakeAddress {
 }
 
 impl StakeAddress {
+    /// Read from string format
+    pub fn from_string(text: &str) -> Result<Self> {
+        let (hrp, data) = bech32::decode(text)?;
+        if let Some(header) = data.first() {
+
+            let network = match hrp.as_str().contains("test") {
+                true => AddressNetwork::Test,
+                false => AddressNetwork::Main
+            };
+
+            let payload = match (header >> 4) & 0x0F {
+                0b1110 => StakeAddressPayload::StakeKeyHash(data[1..].to_vec()),
+                0b1111 => StakeAddressPayload::ScriptHash(data[1..].to_vec()),
+                _ => return Err(anyhow!("Unknown header {header} in stake address"))
+            };
+
+            return Ok(StakeAddress{ network, payload });
+        }
+
+        Err(anyhow!("Empty stake address data"))
+    }
+
     /// Convert to string stake1xxx form
     pub fn to_string(&self) -> Result<String> {
         let (hrp, network_bits) = match self.network {
@@ -195,13 +265,28 @@ impl Address {
         return None
     }
 
+    /// Read from string format
+    pub fn from_string(text: &str) -> Result<Self> {
+        if text.starts_with("addr1") || text.starts_with("addr_test1") {
+            Ok(Self::Shelley(ShelleyAddress::from_string(text)?))
+        } else if text.starts_with("stake1") || text.starts_with("stake_test1") {
+            Ok(Self::Stake(StakeAddress::from_string(text)?))
+        } else {
+            if let Ok(bytes) = bs58::decode(text).into_vec() {
+                Ok(Self::Byron(ByronAddress { payload: bytes }))
+            } else {
+                Ok(Self::None)
+            }
+        }
+    }
+
     /// Convert to standard string representation
     pub fn to_string(&self) -> Result<String> {
         match self {
-            Address::None => Err(anyhow!("No address")),
-            Address::Byron(byron) => Ok(bs58::encode(&byron.payload).into_string()),
-            Address::Shelley(shelley) => shelley.to_string(),
-            Address::Stake(stake) => stake.to_string(),
+            Self::None => Err(anyhow!("No address")),
+            Self::Byron(byron) => Ok(bs58::encode(&byron.payload).into_string()),
+            Self::Shelley(shelley) => shelley.to_string(),
+            Self::Stake(stake) => stake.to_string(),
         }
     }
 }
@@ -216,7 +301,11 @@ mod tests {
     fn byron_address() {
         let payload = vec!(42);
         let address = Address::Byron(ByronAddress{ payload });
-        assert_eq!(address.to_string().unwrap(), "j");
+        let text = address.to_string().unwrap();
+        assert_eq!(text, "j");
+
+        let unpacked = Address::from_string(&text).unwrap();
+        assert_eq!(address, unpacked);
     }
 
     // Standard keys from CIP-19
@@ -271,8 +360,11 @@ mod tests {
             delegation: ShelleyAddressDelegationPart::StakeKeyHash(test_stake_key_hash()),
         });
 
-        assert_eq!(address.to_string().unwrap(),
-                   "addr1qx2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzer3n0d3vllmyqwsx5wktcd8cc3sq835lu7drv2xwl2wywfgse35a3x");
+        let text = address.to_string().unwrap();
+        assert_eq!(text, "addr1qx2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzer3n0d3vllmyqwsx5wktcd8cc3sq835lu7drv2xwl2wywfgse35a3x");
+
+        let unpacked = Address::from_string(&text).unwrap();
+        assert_eq!(address, unpacked);
     }
 
     #[test]
@@ -283,8 +375,11 @@ mod tests {
             delegation: ShelleyAddressDelegationPart::StakeKeyHash(test_stake_key_hash()),
         });
 
-        assert_eq!(address.to_string().unwrap(),
-                   "addr1z8phkx6acpnf78fuvxn0mkew3l0fd058hzquvz7w36x4gten0d3vllmyqwsx5wktcd8cc3sq835lu7drv2xwl2wywfgs9yc0hh");
+        let text = address.to_string().unwrap();
+        assert_eq!(text, "addr1z8phkx6acpnf78fuvxn0mkew3l0fd058hzquvz7w36x4gten0d3vllmyqwsx5wktcd8cc3sq835lu7drv2xwl2wywfgs9yc0hh");
+
+        let unpacked = Address::from_string(&text).unwrap();
+        assert_eq!(address, unpacked);
     }
 
     #[test]
@@ -295,8 +390,11 @@ mod tests {
             delegation: ShelleyAddressDelegationPart::ScriptHash(test_script_hash()),
         });
 
-        assert_eq!(address.to_string().unwrap(),
-                   "addr1yx2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzerkr0vd4msrxnuwnccdxlhdjar77j6lg0wypcc9uar5d2shs2z78ve");
+        let text = address.to_string().unwrap();
+        assert_eq!(text, "addr1yx2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzerkr0vd4msrxnuwnccdxlhdjar77j6lg0wypcc9uar5d2shs2z78ve");
+
+        let unpacked = Address::from_string(&text).unwrap();
+        assert_eq!(address, unpacked);
     }
 
     #[test]
@@ -307,8 +405,11 @@ mod tests {
             delegation: ShelleyAddressDelegationPart::ScriptHash(test_script_hash()),
         });
 
-        assert_eq!(address.to_string().unwrap(),
-                   "addr1x8phkx6acpnf78fuvxn0mkew3l0fd058hzquvz7w36x4gt7r0vd4msrxnuwnccdxlhdjar77j6lg0wypcc9uar5d2shskhj42g");
+        let text = address.to_string().unwrap();
+        assert_eq!(text, "addr1x8phkx6acpnf78fuvxn0mkew3l0fd058hzquvz7w36x4gt7r0vd4msrxnuwnccdxlhdjar77j6lg0wypcc9uar5d2shskhj42g");
+
+        let unpacked = Address::from_string(&text).unwrap();
+        assert_eq!(address, unpacked);
     }
 
     #[test]
@@ -319,8 +420,11 @@ mod tests {
             delegation: ShelleyAddressDelegationPart::Pointer(test_pointer()),
         });
 
-        assert_eq!(address.to_string().unwrap(),
-                   "addr1gx2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzer5pnz75xxcrzqf96k");
+        let text = address.to_string().unwrap();
+        assert_eq!(text, "addr1gx2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzer5pnz75xxcrzqf96k");
+
+        let unpacked = Address::from_string(&text).unwrap();
+        assert_eq!(address, unpacked);
     }
 
     #[test]
@@ -331,8 +435,11 @@ mod tests {
             delegation: ShelleyAddressDelegationPart::Pointer(test_pointer()),
         });
 
-        assert_eq!(address.to_string().unwrap(),
-                   "addr128phkx6acpnf78fuvxn0mkew3l0fd058hzquvz7w36x4gtupnz75xxcrtw79hu");
+        let text = address.to_string().unwrap();
+        assert_eq!(text, "addr128phkx6acpnf78fuvxn0mkew3l0fd058hzquvz7w36x4gtupnz75xxcrtw79hu");
+
+        let unpacked = Address::from_string(&text).unwrap();
+        assert_eq!(address, unpacked);
     }
 
     #[test]
@@ -343,8 +450,11 @@ mod tests {
             delegation: ShelleyAddressDelegationPart::None,
         });
 
-        assert_eq!(address.to_string().unwrap(),
-                   "addr1vx2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzers66hrl8");
+        let text = address.to_string().unwrap();
+        assert_eq!(text, "addr1vx2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzers66hrl8");
+
+        let unpacked = Address::from_string(&text).unwrap();
+        assert_eq!(address, unpacked);
     }
 
     #[test]
@@ -355,8 +465,11 @@ mod tests {
             delegation: ShelleyAddressDelegationPart::None,
         });
 
-        assert_eq!(address.to_string().unwrap(),
-                   "addr1w8phkx6acpnf78fuvxn0mkew3l0fd058hzquvz7w36x4gtcyjy7wx");
+        let text = address.to_string().unwrap();
+        assert_eq!(text, "addr1w8phkx6acpnf78fuvxn0mkew3l0fd058hzquvz7w36x4gtcyjy7wx");
+
+        let unpacked = Address::from_string(&text).unwrap();
+        assert_eq!(address, unpacked);
     }
 
     #[test]
@@ -366,8 +479,11 @@ mod tests {
             payload: StakeAddressPayload::StakeKeyHash(test_stake_key_hash()),
         });
 
-        assert_eq!(address.to_string().unwrap(),
-                   "stake1uyehkck0lajq8gr28t9uxnuvgcqrc6070x3k9r8048z8y5gh6ffgw");
+        let text = address.to_string().unwrap();
+        assert_eq!(text, "stake1uyehkck0lajq8gr28t9uxnuvgcqrc6070x3k9r8048z8y5gh6ffgw");
+
+        let unpacked = Address::from_string(&text).unwrap();
+        assert_eq!(address, unpacked);
     }
 
     #[test]
@@ -377,7 +493,10 @@ mod tests {
             payload: StakeAddressPayload::ScriptHash(test_script_hash()),
         });
 
-        assert_eq!(address.to_string().unwrap(),
-                   "stake178phkx6acpnf78fuvxn0mkew3l0fd058hzquvz7w36x4gtcccycj5");
+        let text = address.to_string().unwrap();
+        assert_eq!(text, "stake178phkx6acpnf78fuvxn0mkew3l0fd058hzquvz7w36x4gtcccycj5");
+
+        let unpacked = Address::from_string(&text).unwrap();
+        assert_eq!(address, unpacked);
     }
 }
