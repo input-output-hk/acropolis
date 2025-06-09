@@ -4,6 +4,7 @@
 use anyhow::{Result, anyhow};
 use crate::types::{KeyHash, ScriptHash};
 use crate::cip19::{VarIntEncoder, VarIntDecoder};
+use serde_with::{hex::Hex, serde_as};
 
 /// a Byron-era address
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -168,13 +169,20 @@ impl ShelleyAddress {
 }
 
 /// Payload of a stake address
+#[serde_as]
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum StakeAddressPayload {
     /// Stake key
-    StakeKeyHash(Vec<u8>),
+    StakeKeyHash(
+        #[serde_as(as = "Hex")]
+        Vec<u8>
+    ),
 
     /// Script hash
-    ScriptHash(ScriptHash),
+    ScriptHash(
+        #[serde_as(as = "Hex")]
+        ScriptHash
+    ),
 }
 
 impl StakeAddressPayload {
