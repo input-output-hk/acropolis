@@ -12,6 +12,7 @@ use tracing::{error, info};
 use serde_with::{serde_as, hex::Hex};
 
 /// State of an individual stake address
+#[serde_as]
 #[derive(Debug, Default, Clone, serde::Serialize)]
 pub struct StakeAddressState {
 
@@ -22,6 +23,7 @@ pub struct StakeAddressState {
     rewards: u64,
 
     /// SPO ID they are delegated to ("operator" ID)
+    #[serde_as(as = "Option<Hex>")]
     delegated_spo: Option<KeyHash>,
 }
 
@@ -42,16 +44,19 @@ pub struct State {
 }
 
 impl State {
-    pub fn get_rewards(&self, stake_key: &Vec<u8>) -> Option<u64> {
-        self.stake_addresses.get(stake_key).map(|sa| sa.rewards)
+    /// Get the stake address state for a give stake key
+    pub fn get_stake_state(&self, stake_key: &Vec<u8>) -> Option<StakeAddressState> {
+        self.stake_addresses.get(stake_key).cloned()
     }
 
+    /// Log statistics
     fn log_stats(&self) {
         info!(
             num_stake_addresses = self.stake_addresses.keys().len(),
         );
     }
 
+    /// Background tick
     pub async fn tick(&self) -> Result<()> {
         self.log_stats();
         Ok(())
