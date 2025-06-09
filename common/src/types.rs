@@ -310,6 +310,13 @@ impl Credential {
             Err(anyhow!("Incorrect credential {}, expected scriptHash- or keyHash- prefix", credential).into())
         }
     }
+
+    pub fn get_hash(&self) -> KeyHash {
+        match self {
+            Self::AddrKeyHash(hash) => hash,
+            Self::ScriptHash(hash) => hash
+        }.clone()
+    }
 }
 
 impl Default for Credential {
