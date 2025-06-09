@@ -1,20 +1,13 @@
-# Protocol updates synchronisation
+# ProtocolParams updates synchronisation
 
-Currently only Conway governance is supported.
+Let us suppose that epoch N is changed by epoch N+1.
 
-Protocol receives EnactState message for the current epoch from the Governance module,
-updates the info, and sends EnactState message for the next epoch.
+Parameters module receives EnactState message for epoch N (in the beginning of epoch N+1, the
+message has BlockInfo of the first block in epoch N+1) from the Governance module.
+It updates the info, and sends ProtocolParams message for the next epoch (it's labelled
+with the same BlockInfo --- of the first block in epoch N+1).
 
-Other ProtocolParameters updates are also epoch-based.
-
-Technical idea:
-* governance collects proposal & votes up to "new epoch" block message;
-* EnactState message is generated after that and translated into Parameters module with "new
-epoch" message info.
-* Parameters module updates the info and sends "new epoch" block message along with parameters.
-
-So, the parameters are meant to be updated in the beginning of a new epoch, before any other
-messages are checked and parsed.
+Only messages at epoch boundaries are acceptable for EnactState messages and Governance messages.
 
 E.g., a ususal user of the parameters moudle could look like this:
 
@@ -25,3 +18,8 @@ if msg.block.new_epoch {
     update_parameters(params);
 }
 normal_processing(msg);```
+
+# EnactState
+
+Enact state is loosely related to the structure from Ledger technical description. It consists
+of a series of elementary events.
