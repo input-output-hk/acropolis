@@ -21,8 +21,20 @@ use acropolis_common::{
 pub struct VotingRegistrationState {
     total_spos: u64,
     registered_spos: u64,
-    registered_dpres: u64,
+    registered_dreps: u64,
     committee_size: u64
+}
+
+impl VotingRegistrationState {
+    // At least one vote in each category is enough.
+    pub fn fake() -> Self {
+        Self {
+            total_spos: 1,
+            registered_spos: 1,
+            registered_dreps: 1,
+            committee_size: 1
+        }
+    }
 }
 
 pub struct State {
@@ -35,16 +47,13 @@ pub struct State {
     pub votes_count: usize,
     pub drep_stake_messages_count: usize,
 
-    pub conway: Option<ConwayParams>,
-
-    // epoch and procedure
-    pub proposals: HashMap<GovActionId, (u64, ProposalProcedure)>,
-
-    pub votes: HashMap<GovActionId, HashMap<Voter, (DataHash, VotingProcedure)>>,
-    pub voting_state: VotingRegistrationState,
-
+    conway: Option<ConwayParams>,
     drep_stake: HashMap<DRepCredential, Lovelace>,
-    pub spo_stake: HashMap<KeyHash, u64>,
+    spo_stake: HashMap<KeyHash, u64>,
+    voting_state: VotingRegistrationState,
+
+    proposals: HashMap<GovActionId, (u64, ProposalProcedure)>,
+    votes: HashMap<GovActionId, HashMap<Voter, (DataHash, VotingProcedure)>>
 }
 
 impl State {
@@ -62,7 +71,7 @@ impl State {
 
             proposals: HashMap::new(),
             votes: HashMap::new(),
-            voting_state: VotingRegistrationState::default(),
+            voting_state: VotingRegistrationState::fake(),
 
             drep_stake: HashMap::new(),
             spo_stake: HashMap::new(),
@@ -85,15 +94,41 @@ impl State {
         Ok(())
     }
 
+    /// Implementation of new governance message processing handle
+    pub async fn handle_governance(&mut self,
+        block: &BlockInfo,
+        governance_message: &GovernanceProceduresMessage
+    ) -> Result<()> {
+        if block.new_epoch {
+            // TODO: move to governance_state.rs
+            let enact_state = self.process_new_epoch(block.epoch);
+            self.send(block, enact_state).await?;
+        }
+
+        for pproc in &governance_message.proposal_procedures {
+            self.proposal_count += 1;
+            if let Err(e) = self.insert_proposal_procedure(block.epoch, pproc) {
+                error!("Error handling governance_message: '{}'", e);
+            }
+        }
+
+        for (trans, vproc) in &governance_message.voting_procedures {
+            for (voter, voter_votes) in vproc.votes.iter() {
+                if let Err(e) = self.insert_voting_procedure(voter, trans, voter_votes) {
+                    error!("Error handling governance voting block {}, trans {}: '{}'",
+                        block.number, trans.encode_hex::<String>(), e
+                    );
+                }
+                self.votes_count += voter_votes.voting_procedures.len();
+            }
+        }
+        Ok(())
+    }
+
     pub fn get_conway_params(&self) -> Result<&ConwayParams> {
         self.conway.as_ref().ok_or_else(|| anyhow!("Conway parameters not available"))
     }
 
-    fn is_initalized(&self) -> bool {
-        self.conway.is_some()
-    }
-
-    #[allow(dead_code)]
     fn have_committee(&self) -> bool {
         !self.conway.iter().any(|c| c.committee.is_empty())
     }
@@ -133,7 +168,7 @@ impl State {
     }
 
     fn proportional_count_drep_comm(&self, drep: &RationalNumber, comm: &RationalNumber) -> Result<(u64, u64)> {
-        let d = drep.proportion_of(self.voting_state.registered_dpres)?.round_up();
+        let d = drep.proportion_of(self.voting_state.registered_dreps)?.round_up();
         let c = comm.proportion_of(self.voting_state.committee_size)?.round_up();
         Ok((d, c))
     }
@@ -277,7 +312,9 @@ impl State {
 
         let (d,p,c) = self.get_action_thresholds(proposal, conway_params)?;
         let (d_act, p_act, c_act) = self.get_actual_votes(action_id);
-        Ok(d_act >= d && p_act >= p && c_act >= c)
+        let accepted = d_act >= d && p_act >= p && c_act >= c;
+        info!("Proposal {action_id}: votes {d_act}/{p_act}/{c_act}, thresholds {d}/{p}/{c}, result {accepted}");
+        Ok(accepted)
     }
 
     /// Distribute and return all rewards for cast votes (government action is expired/voted)
@@ -422,38 +459,4 @@ impl State {
         Ok(result)
     }
 
-    pub async fn tick(&self) -> Result<()> {
-        self.log_stats().await;
-        Ok(())
-    }
-
-    /// Implementation of new governance message processing handle
-    pub async fn handle_governance(&mut self,
-        block: &BlockInfo,
-        governance_message: &GovernanceProceduresMessage
-    ) -> Result<()> {
-        if block.new_epoch {
-            info!("Processing new epoch {}", block.epoch);
-            let enact_state = self.process_new_epoch(block.epoch);
-            self.send(block, enact_state).await?;
-        }
-
-        for pproc in &governance_message.proposal_procedures {
-            self.proposal_count += 1;
-            if let Err(e) = self.insert_proposal_procedure(block.epoch, pproc) {
-                error!("Error handling governance_message: '{}'", e);
-            }
-        }
-        for (trans, vproc) in &governance_message.voting_procedures {
-            for (voter, voter_votes) in vproc.votes.iter() {
-                if let Err(e) = self.insert_voting_procedure(voter, trans, voter_votes) {
-                    error!("Error handling governance voting block {}, trans {}: '{}'",
-                        block.number, trans.encode_hex::<String>(), e
-                    );
-                }
-                self.votes_count += voter_votes.voting_procedures.len();
-            }
-        }
-        Ok(())
-    }
 }

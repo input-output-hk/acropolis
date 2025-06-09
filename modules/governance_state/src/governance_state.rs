@@ -9,6 +9,7 @@ use acropolis_common::{
     },
     BlockInfo
 };
+use owning_ref::{ArcRef, OwningRef};
 use std::sync::Arc;
 use anyhow::{anyhow, Result};
 use config::Config;
@@ -25,7 +26,7 @@ const DEFAULT_DREP_DISTRIBUTION_TOPIC: (&str, &str) = ("stake-drep-distribution-
 const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: (&str, &str) = ("protocol-parameters-topic", "cardano.protocol.parameters");
 const DEFAULT_ENACT_STATE_TOPIC: (&str, &str) = ("enact-state-topic", "cardano.enact.state");
 
-/// SPO State module
+/// Governance State module
 #[module(
     message_type(Message),
     name = "governance-state",
@@ -97,14 +98,14 @@ impl GovernanceState {
         }
     }
 
-    async fn read_parameters(parameters_s: &mut Box<dyn Subscription<Message>>)
-        -> Result<(BlockInfo, ProtocolParamsMessage)>
+    async fn read_parameters<'a>(parameters_s: &mut Box<dyn Subscription<Message>>)
+        -> Result<ArcRef<Arc<Message>, (&BlockInfo, &ProtocolParamsMessage)>>
     {
-        match parameters_s.read().await?.1.as_ref() {
+        OwningRef::new(parameters_s.read().await?.1).map(|x| match x {
             Message::Cardano((blk, CardanoMessage::ProtocolParams(params))) => 
-                Ok((blk.clone(), params.clone())),
-            msg => Err(anyhow!("Unexpected message {msg:?} for protocol parameters topic"))
-        }
+                &(&blk, &params),
+            msg => () //Err(anyhow!("Unexpected message {msg:?} for protocol parameters topic"))
+        })
     }
 
     async fn read_drep(drep_s: &mut Box<dyn Subscription<Message>>)
@@ -124,7 +125,6 @@ impl GovernanceState {
     {
         let state = Arc::new(Mutex::new(State::new(context.clone(), config.enact_state_topic.clone())));
         let state_handle = state.clone();
-        //let state_tick = state.clone();
 
         // REST requests handling
         context.message_bus.handle(&config.clone().handle_topic, move |message: Arc<Message>| {
@@ -155,7 +155,9 @@ impl GovernanceState {
 
         loop {
             let (blk_g, gov_procs) = Self::read_governance(&mut governance_s).await?;
-            state.lock().await.handle_governance(&blk_g, &gov_procs).await?;
+            {
+                state.lock().await.handle_governance(&blk_g, &gov_procs).await?;
+            }
 
             if blk_g.new_epoch {
                 let (blk_p, params) = Self::read_parameters(&mut protocol_s).await?;
