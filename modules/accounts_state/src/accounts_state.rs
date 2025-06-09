@@ -247,12 +247,13 @@ impl AccountsState
         })?;
 
         // Ticker to log stats
-        context.clone().message_bus.subscribe("clock.tick", move |message: Arc<Message>| {
-            let history = history_tick.clone();
-            async move {
+        let mut tick_subscription = context.message_bus.register("clock.tick").await?;
+        context.clone().run(async move {
+            loop {
+                let Ok((_, message)) = tick_subscription.read().await else { return; };
                 if let Message::Clock(message) = message.as_ref() {
                     if (message.number % 60) == 0 {
-                        if let Some(state) = history.lock().await.current() {
+                        if let Some(state) = history_tick.lock().await.current() {
                             state.tick().await
                                 .inspect_err(|e| error!("Tick error: {e}"))
                                 .ok();
@@ -260,7 +261,7 @@ impl AccountsState
                     }
                 }
             }
-        })?;
+        });
 
         // Subscribe
         let spos_subscription = context.message_bus.register(&spo_state_topic).await?;

@@ -3,35 +3,12 @@ use acropolis_common::{
     messages::{EpochActivityMessage, SPOStateMessage, TxCertificatesMessage,
                StakeAddressDeltasMessage},
     PoolRegistration, TxCertificate, KeyHash, StakeAddressPayload,
+    serialization::SerializeMapAs,
 };
 use anyhow::Result;
 use imbl::HashMap;
 use tracing::{error, info};
-use serde::{Serializer, ser::SerializeMap};
-use serde_with::{serde_as, hex::Hex, SerializeAs, ser::SerializeAsWrap};
-
-struct HashMapSerial<KAs, VAs>(std::marker::PhantomData<(KAs, VAs)>);
-
-// TODO!  This should move to common - AJW may have already done so
-impl<K, V, KAs, VAs> SerializeAs<HashMap<K, V>> for HashMapSerial<KAs, VAs>
-where
-    KAs: SerializeAs<K>,
-    VAs: SerializeAs<V>,
-{
-    fn serialize_as<S>(source: &HashMap<K, V>, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut map_ser = serializer.serialize_map(Some(source.len()))?;
-        for (k, v) in source {
-            map_ser.serialize_entry(
-                &SerializeAsWrap::<K, KAs>::new(k),
-                &SerializeAsWrap::<V, VAs>::new(v),
-            )?;
-        }
-        map_ser.end()
-    }
-}
+use serde_with::{serde_as, hex::Hex};
 
 /// State of an individual stake address
 #[derive(Debug, Default, Clone, serde::Serialize)]
@@ -55,11 +32,11 @@ pub struct State {
     epoch: u64,
 
     /// Map of active SPOs by VRF vkey
-    #[serde_as(as = "HashMapSerial<Hex, _>")]
+    #[serde_as(as = "SerializeMapAs<Hex, _>")]
     spos_by_vrf_key: HashMap<Vec::<u8>, PoolRegistration>,
 
     /// Map of staking address values
-    #[serde_as(as = "HashMapSerial<Hex, _>")]
+    #[serde_as(as = "SerializeMapAs<Hex, _>")]
     stake_addresses: HashMap<Vec::<u8>, StakeAddressState>,
 }
 

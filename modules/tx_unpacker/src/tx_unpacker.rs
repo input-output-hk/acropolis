@@ -3,7 +3,7 @@
 
 use std::{collections::HashMap, sync::Arc};
 use std::collections::HashSet;
-use caryatid_sdk::{Context, Module, module, MessageBusExt};
+use caryatid_sdk::{Context, Module, module};
 use acropolis_common::{
     messages::{GovernanceProceduresMessage, Message, CardanoMessage, BlockFeesMessage,
                TxCertificatesMessage, UTXODeltasMessage},
@@ -647,15 +647,10 @@ impl TxUnpacker
             info!("Publishing block fees on '{topic}'");
         }
 
-        context.clone().message_bus.subscribe(&subscribe_topic, move |message: Arc<Message>| {
-
-            let context = context.clone();
-            let publish_utxo_deltas_topic = publish_utxo_deltas_topic.clone();
-            let publish_certificates_topic = publish_certificates_topic.clone();
-            let publish_governance_procedures_topic = publish_governance_procedures_topic.clone();
-            let publish_fees_topic = publish_fees_topic.clone();
-
-            async move {
+        let mut subscription = context.message_bus.register(&subscribe_topic).await?;
+        context.clone().run(async move {
+            loop {
+                let Ok((_, message)) = subscription.read().await else { return; };
                 match message.as_ref() {
                     Message::Cardano((block, CardanoMessage::ReceivedTxs(txs_msg))) => {
                         if tracing::enabled!(tracing::Level::DEBUG) {
@@ -789,7 +784,7 @@ impl TxUnpacker
 
                         // Publish messages in parallel
                         let mut futures = Vec::new();
-                        if let Some(topic) = publish_utxo_deltas_topic {
+                        if let Some(ref topic) = publish_utxo_deltas_topic {
                             let msg = Message::Cardano((
                                 block.clone(),
                                 CardanoMessage::UTXODeltas(UTXODeltasMessage {
@@ -800,7 +795,7 @@ impl TxUnpacker
                             futures.push(context.message_bus.publish(&topic, Arc::new(msg)));
                         }
 
-                        if let Some(topic) = publish_certificates_topic {
+                        if let Some(ref topic) = publish_certificates_topic {
                             let msg = Message::Cardano((
                                 block.clone(),
                                 CardanoMessage::TxCertificates(TxCertificatesMessage {
@@ -811,7 +806,7 @@ impl TxUnpacker
                             futures.push(context.message_bus.publish(&topic, Arc::new(msg)));
                         }
 
-                        if let Some(topic) = publish_governance_procedures_topic {
+                        if let Some(ref topic) = publish_governance_procedures_topic {
                             let governance_msg = Arc::new(Message::Cardano((
                                 block.clone(),
                                 CardanoMessage::GovernanceProcedures(
@@ -825,7 +820,7 @@ impl TxUnpacker
                                                                      governance_msg.clone()));
                         }
 
-                        if let Some(topic) = publish_fees_topic {
+                        if let Some(ref topic) = publish_fees_topic {
                             let msg = Message::Cardano((
                                 block.clone(),
                                 CardanoMessage::BlockFees(BlockFeesMessage {
@@ -846,7 +841,7 @@ impl TxUnpacker
                     _ => error!("Unexpected message type: {message:?}")
                 }
             }
-        })?;
+        });
 
         Ok(())
     }
