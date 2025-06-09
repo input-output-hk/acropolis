@@ -57,7 +57,7 @@ impl SPOState
                     Message::Cardano((block, CardanoMessage::TxCertificates(tx_certs_msg))) => {
 
                         // End of epoch?
-                        if block.new_epoch {
+                        if block.new_epoch && block.epoch > 0 {
                             let mut state = state_subscribe.lock().await;
                             let msg = state.end_epoch(&block);
                             context_subscribe.message_bus.publish(&spo_state_topic, msg)
