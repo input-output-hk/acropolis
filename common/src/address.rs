@@ -87,6 +87,7 @@ pub struct ShelleyAddress {
 }
 
 impl ShelleyAddress {
+    /// Convert to addr1xxx form
     pub fn to_string(&self) -> Result<String> {
         let (hrp, network_bits) = match self.network {
             AddressNetwork::Main => (bech32::Hrp::parse("addr")?, 1u8),
@@ -128,13 +129,9 @@ pub enum StakeAddressPayload {
     ScriptHash(ScriptHash),
 }
 
-impl Default for StakeAddressPayload {
-    fn default() -> Self { Self::StakeKeyHash(Vec::new()) }
-}
-
 impl StakeAddressPayload {
 
-    // Covnert to string - note different encoding from when used as part of a StakeAddress
+    // Convert to string - note different encoding from when used as part of a StakeAddress
     pub fn to_string(&self) -> Result<String> {
         let (hrp, data) = match &self {
             Self::StakeKeyHash(data) => (bech32::Hrp::parse("stake_vkh")?, data),
@@ -146,7 +143,7 @@ impl StakeAddressPayload {
 }
 
 /// A stake address
-#[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct StakeAddress {
     /// Network id
     pub network: AddressNetwork,
@@ -156,6 +153,7 @@ pub struct StakeAddress {
 }
 
 impl StakeAddress {
+    /// Convert to string stake1xxx form
     pub fn to_string(&self) -> Result<String> {
         let (hrp, network_bits) = match self.network {
             AddressNetwork::Main => (bech32::Hrp::parse("stake")?, 1u8),
@@ -187,6 +185,7 @@ impl Default for Address {
 }
 
 impl Address {
+    /// Get the stake pointer if there is one
     pub fn get_pointer(&self) -> Option<ShelleyAddressPointer> {
         if let Address::Shelley(shelley) = self {
             if let ShelleyAddressDelegationPart::Pointer(ptr) = &shelley.delegation {

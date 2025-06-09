@@ -62,7 +62,7 @@ pub struct BlockInfo {
 }
 
 /// Individual address balance change
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AddressDelta {
     /// Address
     pub address: Address,
@@ -72,7 +72,7 @@ pub struct AddressDelta {
 }
 
 /// Stake balance change
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StakeAddressDelta {
     /// Address
     pub address: StakeAddress,
@@ -82,7 +82,7 @@ pub struct StakeAddressDelta {
 }
 
 /// Transaction output (UTXO)
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TxOutput {
     /// Tx hash
     pub tx_hash: Vec<u8>,
@@ -101,7 +101,7 @@ pub struct TxOutput {
 }
 
 /// Transaction input (UTXO reference)
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TxInput {
     /// Tx hash of referenced UTXO
     pub tx_hash: Vec<u8>,
@@ -138,7 +138,7 @@ pub type DataHash = Vec<u8>;
 pub type Lovelace = u64;
 
 /// Rational number = numerator / denominator
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Ratio {
     pub numerator: u64,
     pub denominator: u64,
@@ -186,10 +186,6 @@ impl Credential {
     }
 }
 
-impl Default for Credential {
-    fn default() -> Self { Self::AddrKeyHash(Vec::new()) }
-}
-
 pub type StakeCredential = Credential;
 
 /// Relay single host address
@@ -206,7 +202,7 @@ pub struct SingleHostAddr {
 }
 
 /// Relay hostname
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SingleHostName {
     /// Optional port number
     pub port: Option<u16>,
@@ -216,7 +212,7 @@ pub struct SingleHostName {
 }
 
 /// Relay multihost (SRV)
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct MultiHostName {
     /// DNS name (SRC record)
     pub dns_name: String,
@@ -230,13 +226,9 @@ pub enum Relay {
     MultiHostName(MultiHostName),
 }
 
-impl Default for Relay {
-    fn default() -> Self { Self::SingleHostAddr(SingleHostAddr::default()) }
-}
-
 /// Pool metadata
 #[serde_as]
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PoolMetadata {
     /// Metadata URL
     pub url: String,
@@ -250,7 +242,7 @@ type RewardAccount = Vec<u8>;
 
 /// Pool registration data
 #[serde_as]
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PoolRegistration {
     /// Operator pool key hash - used as ID
     #[serde_as(as = "Hex")]
@@ -285,7 +277,7 @@ pub struct PoolRegistration {
 }
 
 /// Pool retirement data
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PoolRetirement {
     /// Operator pool key hash - used as ID
     pub operator: KeyHash,
@@ -295,7 +287,7 @@ pub struct PoolRetirement {
 }
 
 /// Stake delegation data
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StakeDelegation {
     /// Stake credential
     pub credential: StakeCredential,
@@ -305,7 +297,7 @@ pub struct StakeDelegation {
 }
 
 /// Genesis key delegation
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenesisKeyDelegation {
     /// Genesis hash
     pub genesis_hash: KeyHash,
@@ -324,10 +316,6 @@ pub enum InstantaneousRewardSource {
     Treasury,
 }
 
-impl Default for InstantaneousRewardSource {
-    fn default() -> Self { Self::Reserves }
-}
-
 /// Target of a MIR
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum InstantaneousRewardTarget {
@@ -335,12 +323,8 @@ pub enum InstantaneousRewardTarget {
     OtherAccountingPot(u64),
 }
 
-impl Default for InstantaneousRewardTarget {
-    fn default() -> Self { Self::OtherAccountingPot(0) }
-}
-
 /// Move instantaneous reward
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct MoveInstantaneosReward {
     /// Source
     pub source: InstantaneousRewardSource,
@@ -350,7 +334,7 @@ pub struct MoveInstantaneosReward {
 }
 
 /// Register stake (Conway version) = 'reg_cert'
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Registration {
     /// Stake credential
     pub credential: StakeCredential,
@@ -360,7 +344,7 @@ pub struct Registration {
 }
 
 /// Deregister stake (Conway version) = 'unreg_cert'
- #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+ #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Deregistration {
     /// Stake credential
     pub credential: StakeCredential,
@@ -385,12 +369,8 @@ pub enum DRepChoice {
     NoConfidence,
 }
 
-impl Default for DRepChoice {
-    fn default() -> Self { Self::Abstain }
-}
-
 /// Vote delegation (simple, existing registration) = vote_deleg_cert
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct VoteDelegation {
     /// Stake credential
     pub credential: StakeCredential,
@@ -400,65 +380,65 @@ pub struct VoteDelegation {
 }
 
 /// Stake+vote delegation (to SPO and DRep) = stake_vote_deleg_cert
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StakeAndVoteDelegation {
     /// Stake credential
     pub credential: StakeCredential,
 
     /// Pool
     pub operator: KeyHash,
-   
+
     // DRep vote
     pub drep: DRepChoice,
 }
 
 /// Stake delegation to SPO + registration = stake_reg_deleg_cert
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StakeRegistrationAndDelegation {
     /// Stake credential
     pub credential: StakeCredential,
 
     /// Pool
     pub operator: KeyHash,
-   
+
     // Deposit paid
     pub deposit: Lovelace,
 }
 
 /// Vote delegation to DRep + registration = vote_reg_deleg_cert
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StakeRegistrationAndVoteDelegation {
     /// Stake credential
     pub credential: StakeCredential,
 
     /// DRep choice
     pub drep: DRepChoice,
-   
+
     // Deposit paid
     pub deposit: Lovelace,
 }
 
-/// All the trimmings: 
+/// All the trimmings:
 /// Vote delegation to DRep + Stake delegation to SPO + registration
 /// = stake_vote_reg_deleg_cert
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StakeRegistrationAndStakeAndVoteDelegation {
     /// Stake credential
     pub credential: StakeCredential,
 
     /// Pool
     pub operator: KeyHash,
-   
+
     /// DRep choice
     pub drep: DRepChoice,
-   
+
     // Deposit paid
     pub deposit: Lovelace,
 }
 
 /// Anchor
 #[serde_as]
-#[derive(Debug, Default, Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Anchor {
     /// Metadata URL
     pub url: String,
@@ -471,7 +451,7 @@ pub struct Anchor {
 pub type DRepCredential = Credential;
 
 /// DRep Registration = reg_drep_cert
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DRepRegistration {
     /// DRep credential
     pub credential: DRepCredential,
@@ -484,7 +464,7 @@ pub struct DRepRegistration {
 }
 
 /// DRep Deregistration = unreg_drep_cert
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DRepDeregistration {
     /// DRep credential
     pub credential: DRepCredential,
@@ -494,7 +474,7 @@ pub struct DRepDeregistration {
 }
 
 /// DRep Update = update_drep_cert
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DRepUpdate {
     /// DRep credential
     pub credential: DRepCredential,
@@ -506,7 +486,7 @@ pub struct DRepUpdate {
 pub type CommitteeCredential = Credential;
 
 /// Authorise a committee hot credential
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AuthCommitteeHot {
     /// Cold credential
     pub cold_credential: CommitteeCredential,
@@ -516,7 +496,7 @@ pub struct AuthCommitteeHot {
 }
 
 /// Resign a committee cold credential
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ResignCommitteeCold {
     /// Cold credential
     pub cold_credential: CommitteeCredential,
@@ -685,21 +665,21 @@ impl Committee {
     pub fn is_empty(&self) -> bool { return self.members.len() == 0; }
 }
 
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ParameterChangeAction {
     pub previous_action_id: Option<GovActionId>,
     pub protocol_param_update: Box<ProtocolParamUpdate>,
     pub script_hash: Option<Vec<u8>>
 }
 
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct HardForkInitiationAction {
     pub previous_action_id: Option<GovActionId>,
     pub protocol_version: (u64, u64),
 }
 
 #[serde_as]
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TreasuryWithdrawalsAction {
     #[serde_as(as = "Vec<(_, _)>")]
     pub rewards: HashMap<Vec<u8>, Lovelace>,
