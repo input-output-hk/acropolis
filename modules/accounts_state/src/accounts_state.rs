@@ -21,7 +21,7 @@ const DEFAULT_SPO_STATE_TOPIC: &str = "cardano.spo.state";
 const DEFAULT_EPOCH_ACTIVITY_TOPIC: &str = "cardano.epoch.activity";
 const DEFAULT_TX_CERTIFICATES_TOPIC: &str = "cardano.certificates";
 const DEFAULT_STAKE_DELTAS_TOPIC: &str = "cardano.stake.deltas";
-const DEFAULT_HANDLE_TOPIC: &str = "rest.get.rewards";
+const DEFAULT_HANDLE_TOPIC: &str = "rest.get.stake";
 
 /// Accounts State module
 #[module(
@@ -220,8 +220,8 @@ impl AccountsState
                             Some(id) => match hex::decode(&id) {
                                 Ok(id) => {
                                     match history.lock().await.current() {
-                                        Some(state) => match state.get_rewards(&id) {
-                                            Some(reward) => match serde_json::to_string(&reward) {
+                                        Some(state) => match state.get_stake_state(&id) {
+                                            Some(stake) => match serde_json::to_string(&stake) {
                                                 Ok(body) => RESTResponse::with_json(200, &body),
                                                 Err(error) => RESTResponse::with_text(500, &format!("{error:?}").to_string()),
                                             },
