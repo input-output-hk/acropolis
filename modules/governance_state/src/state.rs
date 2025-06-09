@@ -423,7 +423,7 @@ impl State {
     /// Implementation of new governance message processing handle
     async fn handle_impl(&mut self, block: &BlockInfo,
                          governance_message: &GovernanceProceduresMessage) -> Result<()> {
-        if block.new_epoch {
+        if block.new_epoch && block.epoch > 0 {
             debug!("Processing new epoch {}", block.epoch);
             self.process_new_epoch(block.epoch);
         }
