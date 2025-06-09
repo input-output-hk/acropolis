@@ -4,6 +4,7 @@ pub mod address;
 pub mod calculations;
 pub mod cip19;
 pub mod crypto;
+pub mod ledger_state;
 pub mod messages;
 pub mod params;
 pub mod rational_number;

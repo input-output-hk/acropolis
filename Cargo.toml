@@ -6,23 +6,24 @@ members = [
     "common",
 
     # Modules
-    "modules/genesis_bootstrapper",    # Genesis bootstrap UTXOs
-    "modules/mithril_snapshot_fetcher",# Mithril snapshot fetcher
-    "modules/upstream_chain_fetcher",  # Upstream chain fetcher
-    "modules/block_unpacker",          # Block to transaction unpacker
-    "modules/tx_unpacker",             # Tx to UTXO unpacker
-    "modules/utxo_state",              # UTXO state
-    "modules/spo_state",               # SPO state
-    "modules/drep_state",              # DRep state
-    "modules/governance_state",        # Governance state
-    "modules/parameters_state",        # Keeps track of protocol parameters
-    "modules/stake_delta_filter",      # Filters address deltas
-    "modules/epoch_activity_counter",  # Counts fees and block producers for rewards
-    "modules/accounts_state",          # Tracks stake and reward accounts
+    "modules/genesis_bootstrapper",     # Genesis bootstrap UTXOs
+    "modules/mithril_snapshot_fetcher", # Mithril snapshot fetcher
+    "modules/snapshot_bootstrapper",    # Bootstrap state from a ledger snapshot
+    "modules/upstream_chain_fetcher",   # Upstream chain fetcher
+    "modules/block_unpacker",           # Block to transaction unpacker
+    "modules/tx_unpacker",              # Tx to UTXO unpacker
+    "modules/utxo_state",               # UTXO state
+    "modules/spo_state",                # SPO state
+    "modules/drep_state",               # DRep state
+    "modules/parameters_state",         # Keeps track of protocol parameters
+    "modules/governance_state",         # Governance state
+    "modules/stake_delta_filter",       # Filters address deltas
+    "modules/epoch_activity_counter",   # Counts fees and block producers for rewards
+    "modules/accounts_state",           # Tracks stake and reward accounts
 
     # Process builds
-    "processes/omnibus",               # All-inclusive omnibus process
-    "processes/replayer",              # All-inclusive process to replay messages
+    "processes/omnibus",  # All-inclusive omnibus process
+    "processes/replayer", # All-inclusive process to replay messages
 ]
 
 resolver = "2"
