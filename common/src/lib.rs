@@ -9,7 +9,7 @@ pub mod crypto;
 pub mod state_history;
 pub mod serialization;
 pub mod address;
-pub mod varint_encoder;
+pub mod cip19;
 
 // Flattened re-exports
 pub use self::types::*;
