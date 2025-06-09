@@ -11,6 +11,7 @@ use bech32::{Bech32, Hrp};
 use hex::decode;
 use bitmask_enum::bitmask;
 use crate::rational_number::RationalNumber;
+use crate::address::{Address, StakeAddress};
 
 /// Protocol era
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -58,150 +59,6 @@ pub struct BlockInfo {
 
     /// Protocol era
     pub era: Era,
-}
-
-/// a Byron-era address
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct ByronAddress {
-    /// Raw payload
-    pub payload: Vec<u8>,
-}
-
-/// Address network identifier
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum AddressNetwork {
-    /// Mainnet
-    Main,
-
-    /// Testnet
-    Test,
-}
-
-impl Default for AddressNetwork {
-    fn default() -> Self { Self::Main }
-}
-
-
-/// Key hash used for pool IDs etc.
-pub type KeyHash = Vec<u8>;
-
-pub type ScriptHash = KeyHash;
-pub type AddrKeyhash = KeyHash;
-
-/// A Shelley-era address - payment part
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum ShelleyAddressPaymentPart {
-    /// Payment to a key
-    PaymentKeyHash(KeyHash),
-
-    /// Payment to a script
-    ScriptHash(ScriptHash),
-}
-
-impl Default for ShelleyAddressPaymentPart {
-    fn default() -> Self { Self::PaymentKeyHash(Vec::new()) }
-}
-
-/// Delegation pointer
-#[derive(Debug, Default, Clone, Hash, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct ShelleyAddressPointer {
-    /// Slot number
-    pub slot: u64,
-
-    /// Transaction index within the slot
-    pub tx_index: u64,
-
-    /// Certificate index within the transaction
-    pub cert_index: u64,
-}
-
-/// A Shelley-era address - delegation part
-#[serde_as]
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum ShelleyAddressDelegationPart {
-    /// No delegation (enterprise addresses)
-    None,
-
-    /// Delegation to stake key
-    StakeKeyHash(Vec<u8>),
-
-    /// Delegation to script key
-    ScriptHash(Vec<u8>),
-
-    /// Delegation to pointer
-    Pointer(ShelleyAddressPointer),
-}
-
-impl Default for ShelleyAddressDelegationPart {
-    fn default() -> Self { Self::None }
-}
-
-/// A Shelley-era address
-#[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct ShelleyAddress {
-    /// Network id
-    pub network: AddressNetwork,
-
-    /// Payment part
-    pub payment: ShelleyAddressPaymentPart,
-
-    /// Delegation part
-    pub delegation: ShelleyAddressDelegationPart,
-}
-
-/// Payload of a stake address
-#[serde_as]
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum StakeAddressPayload {
-    /// Stake key
-    StakeKeyHash(
-        #[serde_as(as = "Hex")]
-        Vec<u8>
-    ),
-
-    /// Script hash
-    ScriptHash(
-        #[serde_as(as = "Hex")]
-        Vec<u8>
-    ),
-}
-
-impl Default for StakeAddressPayload {
-    fn default() -> Self { Self::StakeKeyHash(Vec::new()) }
-}
-
-/// A stake address
-#[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct StakeAddress {
-    /// Network id
-    pub network: AddressNetwork,
-
-    /// Payload
-    pub payload: StakeAddressPayload,
-}
-
-/// A Cardano address
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum Address {
-    None,
-    Byron(ByronAddress),
-    Shelley(ShelleyAddress),
-    Stake(StakeAddress),
-}
-
-impl Default for Address {
-    fn default() -> Self { Self::None }
-}
-
-impl Address {
-    pub fn get_pointer(&self) -> Option<ShelleyAddressPointer> {
-        if let Address::Shelley(shelley) = self {
-            if let ShelleyAddressDelegationPart::Pointer(ptr) = &shelley.delegation {
-                return Some(ptr.clone())
-            }
-        }
-        return None
-    }
 }
 
 /// Individual address balance change
@@ -264,6 +121,16 @@ pub enum UTXODelta {
 impl Default for UTXODelta {
     fn default() -> Self { Self::None(()) }
 }
+
+/// Key hash used for pool IDs etc.
+pub type KeyHash = Vec<u8>;
+
+/// Script identifier
+pub type ScriptHash = KeyHash;
+
+/// Address key hash
+pub type AddrKeyhash = KeyHash;
+
 /// Data hash used for metadata, anchors (SHA256)
 pub type DataHash = Vec<u8>;
 
