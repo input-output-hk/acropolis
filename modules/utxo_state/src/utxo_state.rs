@@ -93,17 +93,16 @@ impl UTXOState
         state.register_address_delta_observer(Arc::new(publisher));
 
         let state = Arc::new(Mutex::new(state));
-        let state1 = state.clone();
-        let state2 = state.clone();
-        let state3 = state.clone();
 
         // Subscribe for UTXO messages
-        context.clone().message_bus.subscribe(&subscribe_topic, move |message: Arc<Message>| {
-            let state = state1.clone();
-            async move {
+        let state1 = state.clone();
+        let mut subscription = context.message_bus.register(&subscribe_topic).await?;
+        context.run(async move {
+            loop {
+                let Ok((_, message)) = subscription.read().await else { return; };
                 match message.as_ref() {
                     Message::Cardano((block, CardanoMessage::UTXODeltas(deltas_msg))) => {
-                        let mut state = state.lock().await;
+                        let mut state = state1.lock().await;
                         state.handle(block, deltas_msg)
                             .await
                             .inspect_err(|e| error!("Messaging handling error: {e}"))
@@ -113,25 +112,27 @@ impl UTXOState
                     _ => error!("Unexpected message type: {message:?}")
                 }
             }
-        })?;
+        });
 
         // Ticker to log stats and prune state
-        context.clone().message_bus.subscribe("clock.tick", move |message: Arc<Message>| {
-            let state = state2.clone();
-
-            async move {
+        let state2 = state.clone();
+        let mut subscription = context.message_bus.register("clock.tick").await?;
+        context.run(async move {
+            loop {
+                let Ok((_, message)) = subscription.read().await else { return; };
                 if let Message::Clock(message) = message.as_ref() {
                     if (message.number % 60) == 0 {
-                        state.lock().await.tick()
+                        state2.lock().await.tick()
                             .await
                             .inspect_err(|e| error!("Tick error: {e}"))
                             .ok();
                     }
                 }
             }
-        })?;
+        });
 
         // Handle REST requests for utxo.<id>
+        let state3 = state.clone();
         context.message_bus.handle(&rest_topic, move |message: Arc<Message>| {
             let state = state3.clone();
 

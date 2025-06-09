@@ -454,7 +454,7 @@ mod test {
             era: Era::Conway 
         };
 
-        let stake_delta = process_message(&cache, &delta, &block, None).await?;
+        let stake_delta = process_message(&cache, &delta, &block, None);
 
         assert_eq!(stake_delta.deltas.get(0).unwrap().address.to_string(), stake_addr);
         assert_eq!(stake_delta.deltas.get(1).unwrap().address.to_string(), stake_addr);

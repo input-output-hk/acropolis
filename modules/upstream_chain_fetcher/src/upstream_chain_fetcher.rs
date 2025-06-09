@@ -254,7 +254,7 @@ impl UpstreamChainFetcher
 
         info!("Connecting to {node_address} ({magic_number})");
 
-        tokio::spawn(async move {
+        context.clone().run(async move {
             // TODO Multiple peers
             let peer = PeerClient::connect(node_address, magic_number).await;
 
