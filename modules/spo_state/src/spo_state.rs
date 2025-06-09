@@ -1,7 +1,7 @@
 //! Acropolis SPO state module for Caryatid
 //! Accepts certificate events and derives the SPO state in memory
 
-use acropolis_common::messages::{CardanoMessage, Message, RESTResponse};
+use acropolis_common::messages::{CardanoMessage, Message, RESTResponse, SnapshotStateMessage};
 use anyhow::Result;
 use caryatid_sdk::{module, Context, Module};
 use config::Config;
@@ -11,8 +11,10 @@ use tokio::sync::Mutex;
 use tracing::{error, info};
 
 mod state;
+
 use state::State;
 
+const DEFAULT_SNAPSHOT_TOPIC: &str = "cardano.snapshot";
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.certificates";
 const DEFAULT_HANDLE_TOPIC: &str = "rest.get.spo-state";
 const DEFAULT_SPO_STATE_TOPIC: &str = "cardano.spo.state";
@@ -33,6 +35,11 @@ impl SPOState {
             .unwrap_or(DEFAULT_SUBSCRIBE_TOPIC.to_string());
         info!("Creating subscriber on '{subscribe_topic}'");
 
+        let snapshot_topic = config
+            .get_string("snapshot-topic")
+            .unwrap_or(DEFAULT_SNAPSHOT_TOPIC.to_string());
+        info!("Creating subscriber on '{snapshot_topic}'");
+
         let handle_topic = config
             .get_string("handle-topic")
             .unwrap_or(DEFAULT_HANDLE_TOPIC.to_string());
@@ -43,7 +50,32 @@ impl SPOState {
             .unwrap_or(DEFAULT_SPO_STATE_TOPIC.to_string());
         info!("Creating SPO state publisher on '{spo_state_topic}'");
 
+        let can_bootstrap_from_snapshot = config
+            .get_bool("can-bootstrap-from-snapshot")
+            .unwrap_or(false);
+        info!("Able to use snapshot to bootstrap: {can_bootstrap_from_snapshot}");
+
         let state = Arc::new(Mutex::new(State::new()));
+
+        // Subscribe for snapshot messages
+        let mut subscription = context.message_bus.register(&snapshot_topic).await?;
+        let state_subscription = state.clone();
+        context.run(async move {
+            let Ok((_, message)) = subscription.read().await else {
+                return;
+            };
+
+            match message.as_ref() {
+                Message::SnapshotState(SnapshotStateMessage::SPOState(spo_state)) => {
+                    if !can_bootstrap_from_snapshot {
+                        error!("Configuration disallows bootstrapping from snapshot");
+                    }
+                    let mut state = state_subscription.lock().await;
+                    state.bootstrap(spo_state.clone());
+                }
+                _ => error!("Unexpected message type: {message:?}"),
+            }
+        });
 
         // Subscribe for certificate messages
         let mut subscription = context.subscribe(&subscribe_topic).await?;
@@ -54,6 +86,7 @@ impl SPOState {
                 let Ok((_, message)) = subscription.read().await else {
                     return;
                 };
+
                 match message.as_ref() {
                     Message::Cardano((block, CardanoMessage::TxCertificates(tx_certs_msg))) => {
                         // End of epoch?
@@ -73,7 +106,6 @@ impl SPOState {
                             .inspect_err(|e| error!("Messaging handling error: {e}"))
                             .ok();
                     }
-
                     _ => error!("Unexpected message type: {message:?}"),
                 }
             }

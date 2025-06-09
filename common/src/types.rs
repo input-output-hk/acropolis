@@ -8,6 +8,7 @@ use anyhow::anyhow;
 use bech32::{Bech32, Hrp};
 use bitmask_enum::bitmask;
 use hex::decode;
+use minicbor::data::Tag;
 use serde::{Deserialize, Serialize};
 use serde_with::{hex::Hex, serde_as};
 use std::collections::{HashMap, HashSet};
@@ -156,6 +157,33 @@ pub struct Ratio {
     pub denominator: u64,
 }
 
+// NOTE: Implementations from Pallas, why aren't we just using Pallas types here?
+impl<'b, C> minicbor::decode::Decode<'b, C> for Ratio {
+    fn decode(d: &mut minicbor::Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        // TODO: Enforce tag == 30 & array of size 2
+        d.tag()?;
+        d.array()?;
+        Ok(Ratio {
+            numerator: d.decode_with(ctx)?,
+            denominator: d.decode_with(ctx)?,
+        })
+    }
+}
+
+impl<C> minicbor::encode::Encode<C> for Ratio {
+    fn encode<W: minicbor::encode::Write>(
+        &self,
+        e: &mut minicbor::Encoder<W>,
+        ctx: &mut C,
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        e.tag(Tag::new(30))?;
+        e.array(2)?;
+        e.encode_with(self.numerator, ctx)?;
+        e.encode_with(self.denominator, ctx)?;
+        Ok(())
+    }
+}
+
 /// General credential
 #[derive(
     Debug, Clone, Ord, Eq, PartialEq, PartialOrd, Hash, serde::Serialize, serde::Deserialize,
@@ -251,15 +279,80 @@ pub enum Relay {
     MultiHostName(MultiHostName),
 }
 
+// NOTE: Implementations from Pallas, why aren't we just using Pallas types here?
+impl<'b, C> minicbor::decode::Decode<'b, C> for Relay {
+    fn decode(d: &mut minicbor::Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        d.array()?;
+        let variant = d.u16()?;
+
+        match variant {
+            0 => Ok(Relay::SingleHostAddr(SingleHostAddr {
+                port: d.decode_with(ctx)?,
+                ipv4: d.decode_with(ctx)?,
+                ipv6: d.decode_with(ctx)?,
+            })),
+            1 => Ok(Relay::SingleHostName(SingleHostName {
+                port: d.decode_with(ctx)?,
+                dns_name: d.decode_with(ctx)?,
+            })),
+            2 => Ok(Relay::MultiHostName(MultiHostName {
+                dns_name: d.decode_with(ctx)?,
+            })),
+            _ => Err(minicbor::decode::Error::message(
+                "invalid variant id for Relay",
+            )),
+        }
+    }
+}
+
+impl<C> minicbor::encode::Encode<C> for Relay {
+    fn encode<W: minicbor::encode::Write>(
+        &self,
+        e: &mut minicbor::Encoder<W>,
+        ctx: &mut C,
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        match self {
+            Relay::SingleHostAddr(SingleHostAddr { port, ipv4, ipv6 }) => {
+                e.array(4)?;
+                e.encode_with(0, ctx)?;
+                e.encode_with(port, ctx)?;
+                e.encode_with(ipv4, ctx)?;
+                e.encode_with(ipv6, ctx)?;
+
+                Ok(())
+            }
+            Relay::SingleHostName(SingleHostName { port, dns_name }) => {
+                e.array(3)?;
+                e.encode_with(1, ctx)?;
+                e.encode_with(port, ctx)?;
+                e.encode_with(dns_name, ctx)?;
+
+                Ok(())
+            }
+            Relay::MultiHostName(MultiHostName { dns_name }) => {
+                e.array(2)?;
+                e.encode_with(2, ctx)?;
+                e.encode_with(dns_name, ctx)?;
+
+                Ok(())
+            }
+        }
+    }
+}
+
 /// Pool metadata
 #[serde_as]
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, serde::Serialize, serde::Deserialize, minicbor::Encode, minicbor::Decode,
+)]
 pub struct PoolMetadata {
     /// Metadata URL
+    #[n(0)]
     pub url: String,
 
     /// Metadata hash
     #[serde_as(as = "Hex")]
+    #[n(1)]
     pub hash: DataHash,
 }
 
@@ -267,37 +360,48 @@ type RewardAccount = Vec<u8>;
 
 /// Pool registration data
 #[serde_as]
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, serde::Serialize, serde::Deserialize, minicbor::Decode, minicbor::Encode,
+)]
 pub struct PoolRegistration {
     /// Operator pool key hash - used as ID
     #[serde_as(as = "Hex")]
+    #[n(0)]
     pub operator: KeyHash,
 
     /// VRF key hash
     #[serde_as(as = "Hex")]
+    #[n(1)]
     pub vrf_key_hash: KeyHash,
 
     /// Pledged Ada
+    #[n(2)]
     pub pledge: Lovelace,
 
     /// Fixed cost
+    #[n(3)]
     pub cost: Lovelace,
 
     /// Marginal cost (fraction)
+    #[n(4)]
     pub margin: Ratio,
 
     /// Reward account
     #[serde_as(as = "Hex")]
+    #[n(5)]
     pub reward_account: Vec<u8>,
 
     /// Pool owners by their key hash
     #[serde_as(as = "Vec<Hex>")]
+    #[n(6)]
     pub pool_owners: Vec<KeyHash>,
 
     // Relays
+    #[n(7)]
     pub relays: Vec<Relay>,
 
     // Metadata
+    #[n(8)]
     pub pool_metadata: Option<PoolMetadata>,
 }
 
