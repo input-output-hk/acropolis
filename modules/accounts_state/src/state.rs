@@ -3,6 +3,7 @@ use acropolis_common::{
     messages::{EpochActivityMessage, SPOStateMessage, TxCertificatesMessage,
                StakeAddressDeltasMessage},
     PoolRegistration, TxCertificate, KeyHash, StakeAddressPayload,
+    StakeCredential,
     serialization::SerializeMapAs,
 };
 use anyhow::Result;
@@ -90,6 +91,19 @@ impl State {
         Ok(())
     }
 
+    /// Record a delegation
+    fn record_delegation(&mut self, credential: &StakeCredential, spo: &KeyHash)
+    {
+        let hash = credential.get_hash();
+
+        // Create or update the stake address
+        let state = self.stake_addresses.entry(hash)
+            .or_insert(StakeAddressState::default());
+
+        // Set the delegation
+        state.delegated_spo = Some(spo.clone());
+    }
+
     /// Handle TxCertificates with stake delegations
     pub fn handle_tx_certificates(&mut self,
                                   tx_certs_msg: &TxCertificatesMessage) -> Result<()> {
@@ -98,10 +112,20 @@ impl State {
         for tx_cert in tx_certs_msg.certificates.iter() {
             match tx_cert {
                 TxCertificate::StakeDelegation(delegation) => {
-                    // !TODO record delegation
+                    self.record_delegation(&delegation.credential, &delegation.operator);
                 }
 
-                // !TODO Conway delegation varieties
+                TxCertificate::StakeAndVoteDelegation(delegation) => {
+                    self.record_delegation(&delegation.credential, &delegation.operator)
+                }
+
+                TxCertificate::StakeRegistrationAndDelegation(delegation) => {
+                    self.record_delegation(&delegation.credential, &delegation.operator)
+                }
+
+                TxCertificate::StakeRegistrationAndStakeAndVoteDelegation(delegation) => {
+                    self.record_delegation(&delegation.credential, &delegation.operator)
+                }
 
                 _ => ()
             }
