@@ -173,7 +173,7 @@ impl GenesisBootstrapper {
                 match serde_json::from_slice(MAINNET_SHELLEY_GENESIS) {
                     Ok(file) => Some(file),
                     Err(e) => {
-                        info!("Cannot read JSON in MAINNET_SHELLEY_GENESIS file: {e}");
+                        error!("Cannot read JSON in MAINNET_SHELLEY_GENESIS file: {e}");
                         None
                     }
                 };
@@ -182,7 +182,7 @@ impl GenesisBootstrapper {
                 match serde_json::from_slice(MAINNET_CONWAY_GENESIS) {
                     Ok(file) => Some(file),
                     Err(e) => {
-                        info!("Cannot read JSON in MAINNET_CONWAY_GENESIS file: {e}");
+                        error!("Cannot read JSON in MAINNET_CONWAY_GENESIS file: {e}");
                         None
                     }
                 };
