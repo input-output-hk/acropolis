@@ -129,6 +129,7 @@ impl State {
         self.conway.as_ref().ok_or_else(|| anyhow!("Conway parameters not available"))
     }
 
+    #[allow(dead_code)]
     fn have_committee(&self) -> bool {
         !self.conway.iter().any(|c| c.committee.is_empty())
     }
@@ -464,35 +465,4 @@ impl State {
         self.log_stats().await;
         Ok(())
     }
-/*
-<<<<<<< HEAD
-=======
-    /// Implementation of new governance message processing handle
-    async fn handle_impl(&mut self, block: &BlockInfo,
-                         governance_message: &GovernanceProceduresMessage) -> Result<()> {
-        if block.new_epoch && block.epoch > 0 {
-            debug!("Processing new epoch {}", block.epoch);
-            self.process_new_epoch(block.epoch);
-        }
-
-        for pproc in &governance_message.proposal_procedures {
-            self.proposal_count += 1;
-            if let Err(e) = self.insert_proposal_procedure(block.epoch, pproc) {
-                error!("Error handling governance_message: '{}'", e);
-            }
-        }
-        for (trans, vproc) in &governance_message.voting_procedures {
-            for (voter, voter_votes) in vproc.votes.iter() {
-                if let Err(e) = self.insert_voting_procedure(voter, trans, voter_votes) {
-                    error!("Error handling governance voting block {}, trans {}: '{}'",
-                        block.number, trans.encode_hex::<String>(), e
-                    );
-                }
-                self.votes_count += voter_votes.voting_procedures.len();
-            }
-        }
-        Ok(())
-    }
->>>>>>> cf7b7b49d274573f7cd34b5debb1c0d037dba643
-*/
 }
