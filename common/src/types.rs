@@ -922,9 +922,16 @@ mod tests {
 
         let gov_action = GovernanceAction::UpdateCommittee(UpdateCommitteeAction {
             previous_action_id: None,
-            removed_committee_members: HashSet::from_iter(vec![make_committee_credential(true, 48), make_committee_credential(false, 12)].into_iter()),
-            new_committee_members: HashMap::from_iter(vec![(make_committee_credential(false, 87), 1234)].into_iter()),
-            terms: RationalNumber::from(1),
+            data: CommitteeChange {
+                removed_committee_members: HashSet::from_iter(vec![
+                    make_committee_credential(true, 48), 
+                    make_committee_credential(false, 12)
+                ].into_iter()),
+                new_committee_members: HashMap::from_iter(vec![
+                    (make_committee_credential(false, 87), 1234)
+                ].into_iter()),
+                terms: RationalNumber::from(1)
+            }
         });
 
         let proposal = ProposalProcedure {
