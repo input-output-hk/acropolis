@@ -1,21 +1,20 @@
 //! Acropolis AccountsState: State storage
 use acropolis_common::{
-    messages::{EpochActivityMessage, SPOStateMessage, TxCertificatesMessage,
-               StakeAddressDeltasMessage},
-    PoolRegistration, TxCertificate, KeyHash, StakeAddressPayload,
-    StakeCredential,
+    messages::{
+        EpochActivityMessage, SPOStateMessage, StakeAddressDeltasMessage, TxCertificatesMessage,
+    },
     serialization::SerializeMapAs,
+    KeyHash, PoolRegistration, StakeAddressPayload, StakeCredential, TxCertificate,
 };
 use anyhow::Result;
 use imbl::HashMap;
+use serde_with::{hex::Hex, serde_as};
 use tracing::{error, info};
-use serde_with::{serde_as, hex::Hex};
 
 /// State of an individual stake address
 #[serde_as]
 #[derive(Debug, Default, Clone, serde::Serialize)]
 pub struct StakeAddressState {
-
     /// Total value in UTXO addresses
     utxo_value: u64,
 
@@ -36,11 +35,11 @@ pub struct State {
 
     /// Map of active SPOs by VRF vkey
     #[serde_as(as = "SerializeMapAs<Hex, _>")]
-    spos_by_vrf_key: HashMap<Vec::<u8>, PoolRegistration>,
+    spos_by_vrf_key: HashMap<Vec<u8>, PoolRegistration>,
 
     /// Map of staking address values
     #[serde_as(as = "SerializeMapAs<Hex, _>")]
-    stake_addresses: HashMap<Vec::<u8>, StakeAddressState>,
+    stake_addresses: HashMap<Vec<u8>, StakeAddressState>,
 }
 
 impl State {
@@ -51,9 +50,7 @@ impl State {
 
     /// Log statistics
     fn log_stats(&self) {
-        info!(
-            num_stake_addresses = self.stake_addresses.keys().len(),
-        );
+        info!(num_stake_addresses = self.stake_addresses.keys().len(),);
     }
 
     /// Background tick
@@ -64,8 +61,7 @@ impl State {
 
     /// Handle an EpochActivityMessage giving total fees and block counts by VRF key for
     /// the just-ended epoch
-    pub fn handle_epoch_activity(&mut self,
-                                 ea_msg: &EpochActivityMessage) -> Result<()> {
+    pub fn handle_epoch_activity(&mut self, ea_msg: &EpochActivityMessage) -> Result<()> {
         self.epoch = ea_msg.epoch;
 
         // Look up every VRF key in the SPO map
@@ -75,7 +71,10 @@ impl State {
                     // !TODO count rewards for this block
                 }
 
-                None => error!("VRF vkey {} not found in SPO map", hex::encode(vrf_vkey_hash))
+                None => error!(
+                    "VRF vkey {} not found in SPO map",
+                    hex::encode(vrf_vkey_hash)
+                ),
             }
         }
 
@@ -84,11 +83,11 @@ impl State {
 
     /// Handle an SPOStateMessage with the full set of SPOs valid at the end of the last
     /// epoch
-    pub fn handle_spo_state(&mut self,
-                            spo_msg: &SPOStateMessage) -> Result<()> {
-
+    pub fn handle_spo_state(&mut self, spo_msg: &SPOStateMessage) -> Result<()> {
         // Capture current SPOs, mapped by VRF vkey hash
-        self.spos_by_vrf_key = spo_msg.spos.iter()
+        self.spos_by_vrf_key = spo_msg
+            .spos
+            .iter()
             .cloned()
             .map(|spo| (spo.vrf_key_hash.clone(), spo))
             .collect();
@@ -97,12 +96,13 @@ impl State {
     }
 
     /// Record a delegation
-    fn record_delegation(&mut self, credential: &StakeCredential, spo: &KeyHash)
-    {
+    fn record_delegation(&mut self, credential: &StakeCredential, spo: &KeyHash) {
         let hash = credential.get_hash();
 
         // Create or update the stake address
-        let state = self.stake_addresses.entry(hash)
+        let state = self
+            .stake_addresses
+            .entry(hash)
             .or_insert(StakeAddressState::default());
 
         // Set the delegation
@@ -110,9 +110,7 @@ impl State {
     }
 
     /// Handle TxCertificates with stake delegations
-    pub fn handle_tx_certificates(&mut self,
-                                  tx_certs_msg: &TxCertificatesMessage) -> Result<()> {
-
+    pub fn handle_tx_certificates(&mut self, tx_certs_msg: &TxCertificatesMessage) -> Result<()> {
         // Handle certificates
         for tx_cert in tx_certs_msg.certificates.iter() {
             match tx_cert {
@@ -132,7 +130,7 @@ impl State {
                     self.record_delegation(&delegation.credential, &delegation.operator)
                 }
 
-                _ => ()
+                _ => (),
             }
         }
 
@@ -140,12 +138,9 @@ impl State {
     }
 
     /// Handle stake deltas
-    pub fn handle_stake_deltas(&mut self,
-                               deltas_msg: &StakeAddressDeltasMessage) -> Result<()> {
-
+    pub fn handle_stake_deltas(&mut self, deltas_msg: &StakeAddressDeltasMessage) -> Result<()> {
         // Handle deltas
         for delta in deltas_msg.deltas.iter() {
-
             // Fold both stake key and script hashes into one - assuming the chance of
             // collision is negligible
             let hash = match &delta.address.payload {
@@ -154,7 +149,9 @@ impl State {
             };
 
             // Update or create the stake entry's UTXO value
-            let state = self.stake_addresses.entry(hash.to_vec())
+            let state = self
+                .stake_addresses
+                .entry(hash.to_vec())
                 .or_insert(StakeAddressState::default());
 
             if delta.delta >= 0 {
@@ -178,11 +175,7 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acropolis_common::{
-        BlockInfo,
-        Era,
-        BlockStatus,
-    };
+    use acropolis_common::{BlockInfo, BlockStatus, Era};
 
     fn new_msg() -> EpochActivityMessage {
         EpochActivityMessage {

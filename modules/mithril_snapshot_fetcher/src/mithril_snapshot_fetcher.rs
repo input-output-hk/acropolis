@@ -1,33 +1,29 @@
 //! Acropolis Mithril snapshot fetcher module for Caryatid
 //! Fetches a snapshot from Mithril and replays all the blocks in it
 
-use caryatid_sdk::{Context, Module, module};
 use acropolis_common::{
-    calculations::slot_to_epoch, messages::{
-        BlockBodyMessage, BlockHeaderMessage, Message, CardanoMessage,
-    }, BlockInfo, BlockStatus, Era,
+    calculations::slot_to_epoch,
+    messages::{BlockBodyMessage, BlockHeaderMessage, CardanoMessage, Message},
+    BlockInfo, BlockStatus, Era,
 };
-use std::sync::Arc;
-use tokio::{join, sync::Mutex};
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
+use caryatid_sdk::{module, Context, Module};
 use config::Config;
-use tracing::{debug, info, error};
 use mithril_client::{
-    ClientBuilder,
-    MessageBuilder,
-    feedback::{
-        FeedbackReceiver,
-        MithrilEvent
-    }
+    feedback::{FeedbackReceiver, MithrilEvent},
+    ClientBuilder, MessageBuilder,
 };
-use std::fs;
-use std::path::Path;
-use std::thread::sleep;
-use std::time::Duration;
 use pallas::{
     ledger::traverse::{Era as PallasEra, MultiEraBlock},
     storage::hardano,
 };
+use std::fs;
+use std::path::Path;
+use std::sync::Arc;
+use std::thread::sleep;
+use std::time::Duration;
+use tokio::{join, sync::Mutex};
+use tracing::{debug, error, info};
 
 const DEFAULT_STARTUP_TOPIC: &str = "cardano.sequence.bootstrapped";
 const DEFAULT_HEADER_TOPIC: &str = "cardano.block.header";
@@ -49,20 +45,25 @@ struct FeedbackLogger {
 
 impl FeedbackLogger {
     fn new() -> Self {
-        Self { last_percentage: Arc::new(Mutex::new(0)) }
+        Self {
+            last_percentage: Arc::new(Mutex::new(0)),
+        }
     }
 }
 
 #[async_trait::async_trait]
 impl FeedbackReceiver for FeedbackLogger {
     async fn handle_event(&self, event: MithrilEvent) {
-
         #[allow(unreachable_patterns)] // To allow _ in cases where we do cover everything
         match event {
             MithrilEvent::SnapshotDownloadStarted { size, .. } => {
                 info!("Started snapshot download - {size} bytes");
             }
-            MithrilEvent::SnapshotDownloadProgress { downloaded_bytes: bytes, size, .. } => {
+            MithrilEvent::SnapshotDownloadProgress {
+                downloaded_bytes: bytes,
+                size,
+                ..
+            } => {
                 let percentage = bytes * 100 / size;
                 let mut last_percentage = self.last_percentage.lock().await;
                 if percentage > *last_percentage {
@@ -76,13 +77,17 @@ impl FeedbackReceiver for FeedbackLogger {
             MithrilEvent::CertificateChainValidationStarted { .. } => {
                 info!("Started certificate chain validation");
             }
-            MithrilEvent::CertificateValidated { certificate_hash, .. } => {
+            MithrilEvent::CertificateValidated {
+                certificate_hash, ..
+            } => {
                 info!("Validated certificate {certificate_hash}");
             }
             MithrilEvent::CertificateChainValidated { .. } => {
                 info!("Certificate chain validated OK");
             }
-            MithrilEvent::CertificateFetchedFromCache { certificate_hash, .. } => {
+            MithrilEvent::CertificateFetchedFromCache {
+                certificate_hash, ..
+            } => {
                 info!("Fetched certificate {certificate_hash} from cache");
             }
 
@@ -99,15 +104,17 @@ impl FeedbackReceiver for FeedbackLogger {
 )]
 pub struct MithrilSnapshotFetcher;
 
-impl MithrilSnapshotFetcher
-{
+impl MithrilSnapshotFetcher {
     /// Fetch and unpack a snapshot
     async fn download_snapshot(config: Arc<Config>) -> Result<()> {
-       let aggregator_url = config.get_string("aggregator-url")
+        let aggregator_url = config
+            .get_string("aggregator-url")
             .unwrap_or(DEFAULT_AGGREGATOR_URL.to_string());
-        let genesis_key = config.get_string("genesis-key")
+        let genesis_key = config
+            .get_string("genesis-key")
             .unwrap_or(DEFAULT_GENESIS_KEY.to_string());
-        let directory = config.get_string("directory")
+        let directory = config
+            .get_string("directory")
             .unwrap_or(DEFAULT_DIRECTORY.to_string());
 
         let feedback_logger = Arc::new(FeedbackLogger::new());
@@ -117,9 +124,10 @@ impl MithrilSnapshotFetcher
 
         // Find the latest snapshot
         let snapshots = client.cardano_database().list().await?;
-        let latest_snapshot = snapshots.first()
-            .ok_or(anyhow!("No snapshots available"))?;
-        let snapshot = client.cardano_database().get(&latest_snapshot.digest)
+        let latest_snapshot = snapshots.first().ok_or(anyhow!("No snapshots available"))?;
+        let snapshot = client
+            .cardano_database()
+            .get(&latest_snapshot.digest)
             .await?
             .ok_or(anyhow!("No snapshot for digest {}", latest_snapshot.digest))?;
         info!("Using Mithril snapshot {snapshot:?}");
@@ -133,7 +141,9 @@ impl MithrilSnapshotFetcher
         // Download the snapshot
         fs::create_dir_all(&directory)?;
         let dir = Path::new(&directory);
-        client.cardano_database().download_unpack(&snapshot, &dir)
+        client
+            .cardano_database()
+            .download_unpack(&snapshot, &dir)
             .await?;
 
         // Register download
@@ -155,15 +165,18 @@ impl MithrilSnapshotFetcher
     }
 
     /// Process the snapshot
-    async fn process_snapshot(context: Arc<Context<Message>>,
-                              config: Arc<Config>) -> Result<()> {
-        let header_topic = config.get_string("header-topic")
+    async fn process_snapshot(context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
+        let header_topic = config
+            .get_string("header-topic")
             .unwrap_or(DEFAULT_HEADER_TOPIC.to_string());
-        let body_topic = config.get_string("body-topic")
+        let body_topic = config
+            .get_string("body-topic")
             .unwrap_or(DEFAULT_BODY_TOPIC.to_string());
-        let completion_topic = config.get_string("completion-topic")
+        let completion_topic = config
+            .get_string("completion-topic")
             .unwrap_or(DEFAULT_COMPLETION_TOPIC.to_string());
-        let directory = config.get_string("directory")
+        let directory = config
+            .get_string("directory")
             .unwrap_or(DEFAULT_DIRECTORY.to_string());
 
         // Path to immutable DB
@@ -171,7 +184,10 @@ impl MithrilSnapshotFetcher
 
         // Scan using hardano and output blocks
         if let Some(tip) = hardano::immutable::get_tip(&path)? {
-            info!("Snapshot contains blocks up to slot {}", tip.slot_or_default());
+            info!(
+                "Snapshot contains blocks up to slot {}",
+                tip.slot_or_default()
+            );
         }
 
         let mut last_block_info: Option<BlockInfo> = None;
@@ -182,7 +198,6 @@ impl MithrilSnapshotFetcher
         for raw_block in blocks {
             match raw_block {
                 Ok(raw_block) => {
-
                     // Decode it
                     // TODO - can we avoid this and still get the slot & number?
                     let block = MultiEraBlock::decode(&raw_block)?;
@@ -201,8 +216,10 @@ impl MithrilSnapshotFetcher
 
                     // Error and ignore any out of sequence
                     if number <= last_block_number && last_block_number != 0 {
-                        error!(number, last_block_number,
-                            "Rewind of block number in Mithril! Skipped...");
+                        error!(
+                            number,
+                            last_block_number, "Rewind of block number in Mithril! Skipped..."
+                        );
                         continue;
                     }
                     last_block_number = number;
@@ -210,7 +227,7 @@ impl MithrilSnapshotFetcher
                     let epoch = slot_to_epoch(slot);
                     let new_epoch = match last_epoch {
                         Some(last_epoch) => epoch != last_epoch,
-                        None => true
+                        None => true,
                     };
                     last_epoch = Some(epoch);
 
@@ -241,29 +258,29 @@ impl MithrilSnapshotFetcher
                     // Send the block header message
                     let header = block.header();
                     let header_message = BlockHeaderMessage {
-                        raw: header.cbor().to_vec()
+                        raw: header.cbor().to_vec(),
                     };
 
                     // We use Qos::Bulk to avoid swamping all the queues and blocking downstream
                     // modules from sending their own messages
                     let header_message_enum = Message::Cardano((
                         block_info.clone(),
-                        CardanoMessage::BlockHeader(header_message)
+                        CardanoMessage::BlockHeader(header_message),
                     ));
-                    let header_future = context.message_bus.publish(&header_topic,
-                        Arc::new(header_message_enum));
+                    let header_future = context
+                        .message_bus
+                        .publish(&header_topic, Arc::new(header_message_enum));
 
                     // Send the block body message
-                    let body_message = BlockBodyMessage {
-                        raw: raw_block
-                    };
+                    let body_message = BlockBodyMessage { raw: raw_block };
 
                     let body_message_enum = Message::Cardano((
                         block_info.clone(),
-                        CardanoMessage::BlockBody(body_message)
+                        CardanoMessage::BlockBody(body_message),
                     ));
-                    let body_future = context.message_bus.publish(&body_topic,
-                        Arc::new(body_message_enum));
+                    let body_future = context
+                        .message_bus
+                        .publish(&body_topic, Arc::new(body_message_enum));
 
                     let (header_result, body_result) = join!(header_future, body_future);
                     header_result.unwrap_or_else(|e| error!("Failed to publish header: {e}"));
@@ -271,18 +288,17 @@ impl MithrilSnapshotFetcher
 
                     last_block_info = Some(block_info);
                 }
-                Err(e) => error!("Error reading block: {e}")
+                Err(e) => error!("Error reading block: {e}"),
             }
         }
 
         // Send completion message
         if let Some(last_block_info) = last_block_info {
-            let message_enum = Message::Cardano((
-                last_block_info,
-                CardanoMessage::SnapshotComplete
-            ));
-            context.message_bus.publish(&completion_topic,
-                Arc::new(message_enum))
+            let message_enum =
+                Message::Cardano((last_block_info, CardanoMessage::SnapshotComplete));
+            context
+                .message_bus
+                .publish(&completion_topic, Arc::new(message_enum))
                 .await
                 .unwrap_or_else(|e| error!("Failed to publish: {e}"));
         }
@@ -291,14 +307,16 @@ impl MithrilSnapshotFetcher
 
     /// Main init function
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
-
-        let startup_topic = config.get_string("startup-topic")
+        let startup_topic = config
+            .get_string("startup-topic")
             .unwrap_or(DEFAULT_STARTUP_TOPIC.to_string());
         info!("Creating startup subscriber on '{startup_topic}'");
 
         let mut subscription = context.message_bus.register(&startup_topic).await?;
         context.clone().run(async move {
-            let Ok(_) = subscription.read().await else { return; };
+            let Ok(_) = subscription.read().await else {
+                return;
+            };
             info!("Received startup message");
 
             if config.get_bool("download").unwrap_or(true) {
@@ -306,7 +324,9 @@ impl MithrilSnapshotFetcher
                 loop {
                     match Self::download_snapshot(config.clone()).await {
                         Err(e) => error!("Failed to fetch Mithril snapshot: {e}"),
-                        _ => { break; }
+                        _ => {
+                            break;
+                        }
                     }
                     info!("Will retry in {delay}s");
                     sleep(Duration::from_secs(delay));

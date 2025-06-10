@@ -1,16 +1,14 @@
 //! Acropolis SPO state module for Caryatid
 //! Accepts certificate events and derives the SPO state in memory
 
-use caryatid_sdk::{Context, Module, module, MessageBusExt};
-use acropolis_common::{
-    messages::{Message, RESTResponse, CardanoMessage},
-};
-use std::sync::Arc;
+use acropolis_common::messages::{CardanoMessage, Message, RESTResponse};
 use anyhow::Result;
+use caryatid_sdk::{module, Context, MessageBusExt, Module};
 use config::Config;
+use serde_json;
+use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info};
-use serde_json;
 
 mod state;
 use state::State;
@@ -27,20 +25,21 @@ const DEFAULT_SPO_STATE_TOPIC: &str = "cardano.spo.state";
 )]
 pub struct SPOState;
 
-impl SPOState
-{
+impl SPOState {
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
-
         // Get configuration
-        let subscribe_topic = config.get_string("subscribe-topic")
+        let subscribe_topic = config
+            .get_string("subscribe-topic")
             .unwrap_or(DEFAULT_SUBSCRIBE_TOPIC.to_string());
         info!("Creating subscriber on '{subscribe_topic}'");
 
-        let handle_topic = config.get_string("handle-topic")
+        let handle_topic = config
+            .get_string("handle-topic")
             .unwrap_or(DEFAULT_HANDLE_TOPIC.to_string());
         info!("Creating request handler on '{handle_topic}'");
 
-        let spo_state_topic = config.get_string("publish-spo-state-topic")
+        let spo_state_topic = config
+            .get_string("publish-spo-state-topic")
             .unwrap_or(DEFAULT_SPO_STATE_TOPIC.to_string());
         info!("Creating SPO state publisher on '{spo_state_topic}'");
 
@@ -52,56 +51,65 @@ impl SPOState
         let state_subscribe = state.clone();
         context.run(async move {
             loop {
-                let Ok((_, message)) = subscription.read().await else { return; };
+                let Ok((_, message)) = subscription.read().await else {
+                    return;
+                };
                 match message.as_ref() {
                     Message::Cardano((block, CardanoMessage::TxCertificates(tx_certs_msg))) => {
-
                         // End of epoch?
                         if block.new_epoch && block.epoch > 0 {
                             let mut state = state_subscribe.lock().await;
                             let msg = state.end_epoch(&block);
-                            context_subscribe.message_bus.publish(&spo_state_topic, msg)
+                            context_subscribe
+                                .message_bus
+                                .publish(&spo_state_topic, msg)
                                 .await
                                 .unwrap_or_else(|e| error!("Failed to publish: {e}"));
                         }
 
                         let mut state = state_subscribe.lock().await;
-                        state.handle_tx_certs(block, tx_certs_msg)
+                        state
+                            .handle_tx_certs(block, tx_certs_msg)
                             .inspect_err(|e| error!("Messaging handling error: {e}"))
                             .ok();
                     }
 
-                    _ => error!("Unexpected message type: {message:?}")
+                    _ => error!("Unexpected message type: {message:?}"),
                 }
             }
         });
 
         // Handle requests for full SPO state
         let state_handle_full = state.clone();
-        context.message_bus.handle(&handle_topic, move |message: Arc<Message>| {
-            let state = state_handle_full.clone();
-            async move {
-                let response = match message.as_ref() {
-                    Message::RESTRequest(request) => {
-                        info!("REST received {} {}", request.method, request.path);
-                        if let Some(state) = state.lock().await.current().clone() {
-                            match serde_json::to_string(state) {
-                                Ok(body) => RESTResponse::with_json(200, &body),
-                                Err(error) => RESTResponse::with_text(500, &format!("{error:?}").to_string()),
+        context
+            .message_bus
+            .handle(&handle_topic, move |message: Arc<Message>| {
+                let state = state_handle_full.clone();
+                async move {
+                    let response = match message.as_ref() {
+                        Message::RESTRequest(request) => {
+                            info!("REST received {} {}", request.method, request.path);
+                            if let Some(state) = state.lock().await.current().clone() {
+                                match serde_json::to_string(state) {
+                                    Ok(body) => RESTResponse::with_json(200, &body),
+                                    Err(error) => RESTResponse::with_text(
+                                        500,
+                                        &format!("{error:?}").to_string(),
+                                    ),
+                                }
+                            } else {
+                                RESTResponse::with_json(200, "{}")
                             }
-                        } else {
-                            RESTResponse::with_json(200, "{}")
                         }
-                    },
-                    _ => {
-                        error!("Unexpected message type {:?}", message);
-                        RESTResponse::with_text(500, "Unexpected message in REST request")
-                    }
-                };
+                        _ => {
+                            error!("Unexpected message type {:?}", message);
+                            RESTResponse::with_text(500, "Unexpected message in REST request")
+                        }
+                    };
 
-                Arc::new(Message::RESTResponse(response))
-            }
-        })?;
+                    Arc::new(Message::RESTResponse(response))
+                }
+            })?;
 
         // Handle requests for single SPO state
         let handle_topic_single = handle_topic + ".*";
@@ -144,10 +152,15 @@ impl SPOState
         let mut subscription = context.message_bus.register("clock.tick").await?;
         context.run(async move {
             loop {
-                let Ok((_, message)) = subscription.read().await else { return; };
+                let Ok((_, message)) = subscription.read().await else {
+                    return;
+                };
                 if let Message::Clock(message) = message.as_ref() {
                     if (message.number % 60) == 0 {
-                        state_tick.lock().await.tick()
+                        state_tick
+                            .lock()
+                            .await
+                            .tick()
                             .await
                             .inspect_err(|e| error!("Tick error: {e}"))
                             .ok();

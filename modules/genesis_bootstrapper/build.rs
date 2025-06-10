@@ -1,8 +1,8 @@
 // Build-time script to download generics
+use reqwest::blocking::get;
 use std::fs;
 use std::io::Write;
 use std::path::Path;
-use reqwest::blocking::get;
 
 const OUTPUT_DIR: &str = "downloads";
 
@@ -18,14 +18,19 @@ fn download(url: &str, filename: &str) {
 
     let file_path = output_path.join(filename);
     let mut file = fs::File::create(&file_path).expect("Failed to create file {file_path}");
-    file.write_all(data.as_bytes()).expect("Failed to write file {file_path}");
+    file.write_all(data.as_bytes())
+        .expect("Failed to write file {file_path}");
 }
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs"); // Ensure the script runs if modified
 
-    download("https://book.world.dev.cardano.org/environments/mainnet/byron-genesis.json",
-             "mainnet-byron-genesis.json");
-    download("https://book.world.dev.cardano.org/environments/mainnet/conway-genesis.json",
-             "mainnet-conway-genesis.json");
+    download(
+        "https://book.world.dev.cardano.org/environments/mainnet/byron-genesis.json",
+        "mainnet-byron-genesis.json",
+    );
+    download(
+        "https://book.world.dev.cardano.org/environments/mainnet/conway-genesis.json",
+        "mainnet-conway-genesis.json",
+    );
 }

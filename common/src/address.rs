@@ -1,9 +1,9 @@
 //! Cardano address definitions for Acropolis
 // We don't use these types in the acropolis_common crate itself
 #![allow(dead_code)]
-use anyhow::{Result, anyhow};
+use crate::cip19::{VarIntDecoder, VarIntEncoder};
 use crate::types::{KeyHash, ScriptHash};
-use crate::cip19::{VarIntEncoder, VarIntDecoder};
+use anyhow::{anyhow, Result};
 use serde_with::{hex::Hex, serde_as};
 
 /// a Byron-era address
@@ -24,7 +24,9 @@ pub enum AddressNetwork {
 }
 
 impl Default for AddressNetwork {
-    fn default() -> Self { Self::Main }
+    fn default() -> Self {
+        Self::Main
+    }
 }
 
 /// A Shelley-era address - payment part
@@ -38,7 +40,9 @@ pub enum ShelleyAddressPaymentPart {
 }
 
 impl Default for ShelleyAddressPaymentPart {
-    fn default() -> Self { Self::PaymentKeyHash(Vec::new()) }
+    fn default() -> Self {
+        Self::PaymentKeyHash(Vec::new())
+    }
 }
 
 /// Delegation pointer
@@ -71,7 +75,9 @@ pub enum ShelleyAddressDelegationPart {
 }
 
 impl Default for ShelleyAddressDelegationPart {
-    fn default() -> Self { Self::None }
+    fn default() -> Self {
+        Self::None
+    }
 }
 
 /// A Shelley-era address
@@ -90,13 +96,11 @@ pub struct ShelleyAddress {
 impl ShelleyAddress {
     /// Read from string format
     pub fn from_string(text: &str) -> Result<Self> {
-
         let (hrp, data) = bech32::decode(text)?;
         if let Some(header) = data.first() {
-
             let network = match hrp.as_str().contains("test") {
                 true => AddressNetwork::Test,
-                false => AddressNetwork::Main
+                false => AddressNetwork::Main,
             };
 
             let header = *header;
@@ -104,7 +108,7 @@ impl ShelleyAddress {
             let payment_part = match (header >> 4) & 0x01 {
                 0 => ShelleyAddressPaymentPart::PaymentKeyHash(data[1..29].to_vec()),
                 1 => ShelleyAddressPaymentPart::ScriptHash(data[1..29].to_vec()),
-                _ => panic!()
+                _ => panic!(),
             };
 
             let delegation_part = match (header >> 5) & 0x03 {
@@ -121,9 +125,9 @@ impl ShelleyAddress {
                         tx_index,
                         cert_index,
                     })
-                },
+                }
                 3 => ShelleyAddressDelegationPart::None,
-                _ => panic!()
+                _ => panic!(),
             };
 
             return Ok(ShelleyAddress {
@@ -145,7 +149,7 @@ impl ShelleyAddress {
 
         let (payment_hash, payment_bits): (&Vec<u8>, u8) = match &self.payment {
             ShelleyAddressPaymentPart::PaymentKeyHash(data) => (data, 0),
-            ShelleyAddressPaymentPart::ScriptHash(data) => (data, 1)
+            ShelleyAddressPaymentPart::ScriptHash(data) => (data, 1),
         };
 
         let (delegation_hash, delegation_bits): (&Vec<u8>, u8) = match &self.delegation {
@@ -161,7 +165,7 @@ impl ShelleyAddress {
             }
         };
 
-        let mut data = vec!( network_bits | (payment_bits << 4) | (delegation_bits << 5) );
+        let mut data = vec![network_bits | (payment_bits << 4) | (delegation_bits << 5)];
         data.extend(payment_hash);
         data.extend(delegation_hash);
         Ok(bech32::encode::<bech32::Bech32>(hrp, &data)?)
@@ -173,20 +177,13 @@ impl ShelleyAddress {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum StakeAddressPayload {
     /// Stake key
-    StakeKeyHash(
-        #[serde_as(as = "Hex")]
-        Vec<u8>
-    ),
+    StakeKeyHash(#[serde_as(as = "Hex")] Vec<u8>),
 
     /// Script hash
-    ScriptHash(
-        #[serde_as(as = "Hex")]
-        ScriptHash
-    ),
+    ScriptHash(#[serde_as(as = "Hex")] ScriptHash),
 }
 
 impl StakeAddressPayload {
-
     // Convert to string - note different encoding from when used as part of a StakeAddress
     pub fn to_string(&self) -> Result<String> {
         let (hrp, data) = match &self {
@@ -213,19 +210,18 @@ impl StakeAddress {
     pub fn from_string(text: &str) -> Result<Self> {
         let (hrp, data) = bech32::decode(text)?;
         if let Some(header) = data.first() {
-
             let network = match hrp.as_str().contains("test") {
                 true => AddressNetwork::Test,
-                false => AddressNetwork::Main
+                false => AddressNetwork::Main,
             };
 
             let payload = match (header >> 4) & 0x0F {
                 0b1110 => StakeAddressPayload::StakeKeyHash(data[1..].to_vec()),
                 0b1111 => StakeAddressPayload::ScriptHash(data[1..].to_vec()),
-                _ => return Err(anyhow!("Unknown header {header} in stake address"))
+                _ => return Err(anyhow!("Unknown header {header} in stake address")),
             };
 
-            return Ok(StakeAddress{ network, payload });
+            return Ok(StakeAddress { network, payload });
         }
 
         Err(anyhow!("Empty stake address data"))
@@ -235,15 +231,15 @@ impl StakeAddress {
     pub fn to_string(&self) -> Result<String> {
         let (hrp, network_bits) = match self.network {
             AddressNetwork::Main => (bech32::Hrp::parse("stake")?, 1u8),
-            AddressNetwork::Test => (bech32::Hrp::parse("stake_test")?, 0u8)
+            AddressNetwork::Test => (bech32::Hrp::parse("stake_test")?, 0u8),
         };
 
         let (stake_hash, stake_bits): (&Vec<u8>, u8) = match &self.payload {
             StakeAddressPayload::StakeKeyHash(data) => (data, 0b1110),
-            StakeAddressPayload::ScriptHash(data) => (data, 0b1111)
+            StakeAddressPayload::ScriptHash(data) => (data, 0b1111),
         };
 
-        let mut data = vec!( network_bits | (stake_bits << 4) );
+        let mut data = vec![network_bits | (stake_bits << 4)];
         data.extend(stake_hash);
         Ok(bech32::encode::<bech32::Bech32>(hrp, &data)?)
     }
@@ -259,7 +255,9 @@ pub enum Address {
 }
 
 impl Default for Address {
-    fn default() -> Self { Self::None }
+    fn default() -> Self {
+        Self::None
+    }
 }
 
 impl Address {
@@ -267,10 +265,10 @@ impl Address {
     pub fn get_pointer(&self) -> Option<ShelleyAddressPointer> {
         if let Address::Shelley(shelley) = self {
             if let ShelleyAddressDelegationPart::Pointer(ptr) = &shelley.delegation {
-                return Some(ptr.clone())
+                return Some(ptr.clone());
             }
         }
-        return None
+        return None;
     }
 
     /// Read from string format
@@ -303,12 +301,15 @@ impl Address {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use blake2::{Blake2bVar, digest::{Update, VariableOutput}};
+    use blake2::{
+        digest::{Update, VariableOutput},
+        Blake2bVar,
+    };
 
     #[test]
     fn byron_address() {
-        let payload = vec!(42);
-        let address = Address::Byron(ByronAddress{ payload });
+        let payload = vec![42];
+        let address = Address::Byron(ByronAddress { payload });
         let text = address.to_string().unwrap();
         assert_eq!(text, "j");
 
@@ -355,14 +356,14 @@ mod tests {
         ShelleyAddressPointer {
             slot: 2498243,
             tx_index: 27,
-            cert_index: 3
+            cert_index: 3,
         }
     }
 
     // Test vectors from CIP-19
     #[test]
     fn shelley_type_0() {
-        let address = Address::Shelley(ShelleyAddress{
+        let address = Address::Shelley(ShelleyAddress {
             network: AddressNetwork::Main,
             payment: ShelleyAddressPaymentPart::PaymentKeyHash(test_payment_key_hash()),
             delegation: ShelleyAddressDelegationPart::StakeKeyHash(test_stake_key_hash()),
@@ -377,7 +378,7 @@ mod tests {
 
     #[test]
     fn shelley_type_1() {
-        let address = Address::Shelley(ShelleyAddress{
+        let address = Address::Shelley(ShelleyAddress {
             network: AddressNetwork::Main,
             payment: ShelleyAddressPaymentPart::ScriptHash(test_script_hash()),
             delegation: ShelleyAddressDelegationPart::StakeKeyHash(test_stake_key_hash()),
@@ -392,7 +393,7 @@ mod tests {
 
     #[test]
     fn shelley_type_2() {
-        let address = Address::Shelley(ShelleyAddress{
+        let address = Address::Shelley(ShelleyAddress {
             network: AddressNetwork::Main,
             payment: ShelleyAddressPaymentPart::PaymentKeyHash(test_payment_key_hash()),
             delegation: ShelleyAddressDelegationPart::ScriptHash(test_script_hash()),
@@ -407,7 +408,7 @@ mod tests {
 
     #[test]
     fn shelley_type_3() {
-        let address = Address::Shelley(ShelleyAddress{
+        let address = Address::Shelley(ShelleyAddress {
             network: AddressNetwork::Main,
             payment: ShelleyAddressPaymentPart::ScriptHash(test_script_hash()),
             delegation: ShelleyAddressDelegationPart::ScriptHash(test_script_hash()),
@@ -422,14 +423,17 @@ mod tests {
 
     #[test]
     fn shelley_type_4() {
-        let address = Address::Shelley(ShelleyAddress{
+        let address = Address::Shelley(ShelleyAddress {
             network: AddressNetwork::Main,
             payment: ShelleyAddressPaymentPart::PaymentKeyHash(test_payment_key_hash()),
             delegation: ShelleyAddressDelegationPart::Pointer(test_pointer()),
         });
 
         let text = address.to_string().unwrap();
-        assert_eq!(text, "addr1gx2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzer5pnz75xxcrzqf96k");
+        assert_eq!(
+            text,
+            "addr1gx2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzer5pnz75xxcrzqf96k"
+        );
 
         let unpacked = Address::from_string(&text).unwrap();
         assert_eq!(address, unpacked);
@@ -437,14 +441,17 @@ mod tests {
 
     #[test]
     fn shelley_type_5() {
-        let address = Address::Shelley(ShelleyAddress{
+        let address = Address::Shelley(ShelleyAddress {
             network: AddressNetwork::Main,
             payment: ShelleyAddressPaymentPart::ScriptHash(test_script_hash()),
             delegation: ShelleyAddressDelegationPart::Pointer(test_pointer()),
         });
 
         let text = address.to_string().unwrap();
-        assert_eq!(text, "addr128phkx6acpnf78fuvxn0mkew3l0fd058hzquvz7w36x4gtupnz75xxcrtw79hu");
+        assert_eq!(
+            text,
+            "addr128phkx6acpnf78fuvxn0mkew3l0fd058hzquvz7w36x4gtupnz75xxcrtw79hu"
+        );
 
         let unpacked = Address::from_string(&text).unwrap();
         assert_eq!(address, unpacked);
@@ -452,14 +459,17 @@ mod tests {
 
     #[test]
     fn shelley_type_6() {
-        let address = Address::Shelley(ShelleyAddress{
+        let address = Address::Shelley(ShelleyAddress {
             network: AddressNetwork::Main,
             payment: ShelleyAddressPaymentPart::PaymentKeyHash(test_payment_key_hash()),
             delegation: ShelleyAddressDelegationPart::None,
         });
 
         let text = address.to_string().unwrap();
-        assert_eq!(text, "addr1vx2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzers66hrl8");
+        assert_eq!(
+            text,
+            "addr1vx2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzers66hrl8"
+        );
 
         let unpacked = Address::from_string(&text).unwrap();
         assert_eq!(address, unpacked);
@@ -467,14 +477,17 @@ mod tests {
 
     #[test]
     fn shelley_type_7() {
-        let address = Address::Shelley(ShelleyAddress{
+        let address = Address::Shelley(ShelleyAddress {
             network: AddressNetwork::Main,
             payment: ShelleyAddressPaymentPart::ScriptHash(test_script_hash()),
             delegation: ShelleyAddressDelegationPart::None,
         });
 
         let text = address.to_string().unwrap();
-        assert_eq!(text, "addr1w8phkx6acpnf78fuvxn0mkew3l0fd058hzquvz7w36x4gtcyjy7wx");
+        assert_eq!(
+            text,
+            "addr1w8phkx6acpnf78fuvxn0mkew3l0fd058hzquvz7w36x4gtcyjy7wx"
+        );
 
         let unpacked = Address::from_string(&text).unwrap();
         assert_eq!(address, unpacked);
@@ -482,13 +495,16 @@ mod tests {
 
     #[test]
     fn shelley_type_14() {
-        let address = Address::Stake(StakeAddress{
+        let address = Address::Stake(StakeAddress {
             network: AddressNetwork::Main,
             payload: StakeAddressPayload::StakeKeyHash(test_stake_key_hash()),
         });
 
         let text = address.to_string().unwrap();
-        assert_eq!(text, "stake1uyehkck0lajq8gr28t9uxnuvgcqrc6070x3k9r8048z8y5gh6ffgw");
+        assert_eq!(
+            text,
+            "stake1uyehkck0lajq8gr28t9uxnuvgcqrc6070x3k9r8048z8y5gh6ffgw"
+        );
 
         let unpacked = Address::from_string(&text).unwrap();
         assert_eq!(address, unpacked);
@@ -496,13 +512,16 @@ mod tests {
 
     #[test]
     fn shelley_type_15() {
-        let address = Address::Stake(StakeAddress{
+        let address = Address::Stake(StakeAddress {
             network: AddressNetwork::Main,
             payload: StakeAddressPayload::ScriptHash(test_script_hash()),
         });
 
         let text = address.to_string().unwrap();
-        assert_eq!(text, "stake178phkx6acpnf78fuvxn0mkew3l0fd058hzquvz7w36x4gtcccycj5");
+        assert_eq!(
+            text,
+            "stake178phkx6acpnf78fuvxn0mkew3l0fd058hzquvz7w36x4gtcccycj5"
+        );
 
         let unpacked = Address::from_string(&text).unwrap();
         assert_eq!(address, unpacked);

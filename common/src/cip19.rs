@@ -1,5 +1,5 @@
 //! Variable length integer encoding/decoding according to CIP19
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 
 // ANBF:
 // VARIABLE-LENGTH-UINT = (%b1 | UINT7 | VARIABLE-LENGTH-UINT)
@@ -8,12 +8,11 @@ use anyhow::{Result, anyhow};
 // UINT7 = 7BIT
 
 pub struct VarIntEncoder {
-    data: Vec<u8>
+    data: Vec<u8>,
 }
 
 /// Variable-length integer encoder
 impl VarIntEncoder {
-
     /// Construct
     pub fn new() -> Self {
         Self { data: Vec::new() }
@@ -34,7 +33,9 @@ impl VarIntEncoder {
     }
 
     /// Get the resulting vector
-    pub fn to_vec(self) -> Vec<u8> { self.data }
+    pub fn to_vec(self) -> Vec<u8> {
+        self.data
+    }
 }
 
 /// Variable length integer decoder
@@ -93,15 +94,17 @@ mod tests {
         assert_eq!(serialize_uint(0), vec![0]);
         assert_eq!(serialize_uint(1), vec![1]);
         assert_eq!(serialize_uint(0x7f), vec![0x7f]);
-        assert_eq!(serialize_uint(0x80), vec![0x81,0]);
-        assert_eq!(serialize_uint(0x4000), vec![0x81,0x80,0]);
-        assert_eq!(serialize_uint(0x400), vec![0x88,0]);
+        assert_eq!(serialize_uint(0x80), vec![0x81, 0]);
+        assert_eq!(serialize_uint(0x4000), vec![0x81, 0x80, 0]);
+        assert_eq!(serialize_uint(0x400), vec![0x88, 0]);
 
         for x in 7..63 {
             let val = 1 << x;
             let mut s = Vec::new();
             s.push(0x80 | (1 << (x % 7)));
-            for _i in 1..(x / 7) { s.push(0x80); }
+            for _i in 1..(x / 7) {
+                s.push(0x80);
+            }
             s.push(0);
             assert_eq!(serialize_uint(val), s);
         }
@@ -109,14 +112,7 @@ mod tests {
 
     #[test]
     fn uint_deserialization_test() {
-        let data: Vec<u8> = vec![
-            0,
-            1,
-            0x7f,
-            0x81, 0,
-            0x81, 0x80, 0,
-            0x88, 0
-        ];
+        let data: Vec<u8> = vec![0, 1, 0x7f, 0x81, 0, 0x81, 0x80, 0, 0x88, 0];
 
         let mut decoder = VarIntDecoder::new(&data);
         assert_eq!(decoder.read().unwrap(), 0);

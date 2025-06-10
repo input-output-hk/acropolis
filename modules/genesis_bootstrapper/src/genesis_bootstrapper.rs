@@ -1,25 +1,21 @@
 //! Acropolis genesis bootstrapper module for Caryatid
 //! Reads genesis files and outputs initial UTXO events
 
-use std::collections::HashMap;
-use caryatid_sdk::{module, Context, Module};
-use acropolis_common::{
-    messages::{
-        GenesisCompleteMessage, Message, UTXODeltasMessage, CardanoMessage,
-    },
-    Address, Anchor, BlockInfo, BlockStatus, ByronAddress,
-    Committee, Constitution, Credential, ConwayParams,
-    DRepVotingThresholds, Era, PoolVotingThresholds,
-    TxOutput, UTXODelta,
-};
-use hex::decode;
-use fraction::Fraction;
-use std::sync::Arc;
-use anyhow::{anyhow, Result};
-use config::Config;
-use tracing::{error, info};
-use pallas::ledger::configs::{byron::genesis_utxos, *};
 use acropolis_common::rational_number::RationalNumber;
+use acropolis_common::{
+    messages::{CardanoMessage, GenesisCompleteMessage, Message, UTXODeltasMessage},
+    Address, Anchor, BlockInfo, BlockStatus, ByronAddress, Committee, Constitution, ConwayParams,
+    Credential, DRepVotingThresholds, Era, PoolVotingThresholds, TxOutput, UTXODelta,
+};
+use anyhow::{anyhow, Result};
+use caryatid_sdk::{module, Context, Module};
+use config::Config;
+use fraction::Fraction;
+use hex::decode;
+use pallas::ledger::configs::{byron::genesis_utxos, *};
+use std::collections::HashMap;
+use std::sync::Arc;
+use tracing::{error, info};
 
 const DEFAULT_STARTUP_TOPIC: &str = "cardano.sequence.start";
 const DEFAULT_PUBLISH_UTXO_DELTAS_TOPIC: &str = "cardano.utxo.deltas";
@@ -41,9 +37,12 @@ fn decode_hex_string(s: &str, len: usize) -> Result<Vec<u8>> {
     let key_hash = decode(s.to_owned().into_bytes())?;
     if key_hash.len() == len {
         Ok(key_hash)
-    }
-    else {
-        Err(anyhow!("Incorrect hex length: {} instead of {}", key_hash.len(), len))
+    } else {
+        Err(anyhow!(
+            "Incorrect hex length: {} instead of {}",
+            key_hash.len(),
+            len
+        ))
     }
 }
 
@@ -67,8 +66,12 @@ pub fn map_f32_to_rational(value: f32) -> Result<RationalNumber> {
     }
     let fract = Fraction::from(value);
     Ok(RationalNumber {
-        numerator: *fract.numer().ok_or_else(|| anyhow!("Cannot get numerator for {}", value))?,
-        denominator: *fract.denom().ok_or_else(|| anyhow!("Cannot get denominator for {}", value))?
+        numerator: *fract
+            .numer()
+            .ok_or_else(|| anyhow!("Cannot get numerator for {}", value))?,
+        denominator: *fract
+            .denom()
+            .ok_or_else(|| anyhow!("Cannot get denominator for {}", value))?,
     })
 }
 
@@ -100,7 +103,7 @@ fn map_drep_thresholds(thresholds: &conway::DRepVotingThresholds) -> Result<DRep
 pub fn map_constitution(constitution: &conway::Constitution) -> Result<Constitution> {
     Ok(Constitution {
         anchor: map_anchor(&constitution.anchor)?,
-        guardrail_script: Some(decode_hex_string(&constitution.script, 28)?)
+        guardrail_script: Some(decode_hex_string(&constitution.script, 28)?),
     })
 }
 
@@ -109,7 +112,7 @@ pub fn map_committee(committee: &conway::Committee) -> Result<Committee> {
 
     for (member, expiry_epoch) in committee.members.iter() {
         members.insert(Credential::from_json_string(member)?, *expiry_epoch);
-    };
+    }
 
     Ok(Committee {
         members,
@@ -117,7 +120,7 @@ pub fn map_committee(committee: &conway::Committee) -> Result<Committee> {
     })
 }
 
-fn map_conway_genesis (genesis: &conway::GenesisFile) -> Result<ConwayParams> {
+fn map_conway_genesis(genesis: &conway::GenesisFile) -> Result<ConwayParams> {
     Ok(ConwayParams {
         pool_voting_thresholds: map_pool_thresholds(&genesis.pool_voting_thresholds)?,
         d_rep_voting_thresholds: map_drep_thresholds(&genesis.d_rep_voting_thresholds)?,
@@ -127,32 +130,37 @@ fn map_conway_genesis (genesis: &conway::GenesisFile) -> Result<ConwayParams> {
         gov_action_deposit: genesis.gov_action_deposit,
         d_rep_deposit: genesis.d_rep_deposit,
         d_rep_activity: genesis.d_rep_activity,
-        min_fee_ref_script_cost_per_byte: RationalNumber::from(genesis.min_fee_ref_script_cost_per_byte),
+        min_fee_ref_script_cost_per_byte: RationalNumber::from(
+            genesis.min_fee_ref_script_cost_per_byte,
+        ),
         plutus_v3_cost_model: genesis.plutus_v3_cost_model.clone(),
         constitution: map_constitution(&genesis.constitution)?,
         committee: map_committee(&genesis.committee)?,
     })
 }
 
-impl GenesisBootstrapper
-{
+impl GenesisBootstrapper {
     /// Main init function
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
-
-        let startup_topic = config.get_string("startup-topic")
+        let startup_topic = config
+            .get_string("startup-topic")
             .unwrap_or(DEFAULT_STARTUP_TOPIC.to_string());
         info!("Creating startup subscriber on '{startup_topic}'");
 
         let mut subscription = context.message_bus.register(&startup_topic).await?;
         context.clone().run(async move {
-            let Ok(_) = subscription.read().await else { return; };
+            let Ok(_) = subscription.read().await else {
+                return;
+            };
             info!("Received startup message");
 
-            let publish_utxo_deltas_topic = config.get_string("publish-utxo-deltas-topic")
+            let publish_utxo_deltas_topic = config
+                .get_string("publish-utxo-deltas-topic")
                 .unwrap_or(DEFAULT_PUBLISH_UTXO_DELTAS_TOPIC.to_string());
             info!("Publishing UTXO deltas on '{publish_utxo_deltas_topic}'");
 
-            let completion_topic = config.get_string("completion-topic")
+            let completion_topic = config
+                .get_string("completion-topic")
                 .unwrap_or(DEFAULT_COMPLETION_TOPIC.to_string());
             info!("Completing with '{completion_topic}'");
 
@@ -160,13 +168,14 @@ impl GenesisBootstrapper
             let genesis: byron::GenesisFile = serde_json::from_slice(MAINNET_BYRON_GENESIS)
                 .expect("Invalid JSON in MAINNET_BYRON_GENESIS file");
 
-            let conway_genesis: Option<conway::GenesisFile> = match serde_json::from_slice(MAINNET_CONWAY_GENESIS) {
-                Ok(file) => Some(file),
-                Err(e) => {
-                    info!("Cannot read JSON in MAINNET_CONWAY_GENESIS file: {e}");
-                    None
-                }
-            };
+            let conway_genesis: Option<conway::GenesisFile> =
+                match serde_json::from_slice(MAINNET_CONWAY_GENESIS) {
+                    Ok(file) => Some(file),
+                    Err(e) => {
+                        info!("Cannot read JSON in MAINNET_CONWAY_GENESIS file: {e}");
+                        None
+                    }
+                };
 
             // Construct message
             let block_info = BlockInfo {
@@ -179,9 +188,7 @@ impl GenesisBootstrapper
                 era: Era::Byron,
             };
 
-            let mut message = UTXODeltasMessage {
-                deltas: Vec::new(),
-            };
+            let mut message = UTXODeltasMessage { deltas: Vec::new() };
 
             // Convert the AVVM distributions into pseudo-UTXOs
             let gen_utxos = genesis_utxos(&genesis);
@@ -189,21 +196,20 @@ impl GenesisBootstrapper
                 let tx_output = TxOutput {
                     tx_hash: hash.to_vec(),
                     index: 0,
-                    address: Address::Byron(ByronAddress{
+                    address: Address::Byron(ByronAddress {
                         payload: address.payload.to_vec(),
                     }),
-                    value: amount
+                    value: amount,
                 };
 
                 message.deltas.push(UTXODelta::Output(tx_output));
             }
 
-            let message_enum = Message::Cardano((
-                block_info.clone(),
-                CardanoMessage::UTXODeltas(message)
-            ));
-            context.message_bus.publish(&publish_utxo_deltas_topic,
-                                        Arc::new(message_enum))
+            let message_enum =
+                Message::Cardano((block_info.clone(), CardanoMessage::UTXODeltas(message)));
+            context
+                .message_bus
+                .publish(&publish_utxo_deltas_topic, Arc::new(message_enum))
                 .await
                 .unwrap_or_else(|e| error!("Failed to publish: {e}"));
 
@@ -211,7 +217,8 @@ impl GenesisBootstrapper
             let completion_message = GenesisCompleteMessage {
                 conway_genesis: conway_genesis
                     .map(|g| map_conway_genesis(&g))
-                    .transpose().unwrap_or_else(|e| {
+                    .transpose()
+                    .unwrap_or_else(|e| {
                         error!("Failure to parse conway genesis block: {e}");
                         None
                     }),
@@ -219,9 +226,11 @@ impl GenesisBootstrapper
 
             let message_enum = Message::Cardano((
                 block_info,
-                CardanoMessage::GenesisComplete(completion_message)
+                CardanoMessage::GenesisComplete(completion_message),
             ));
-            context.message_bus.publish(&completion_topic, Arc::new(message_enum))
+            context
+                .message_bus
+                .publish(&completion_topic, Arc::new(message_enum))
                 .await
                 .unwrap_or_else(|e| error!("Failed to publish: {e}"));
         });
@@ -232,16 +241,46 @@ impl GenesisBootstrapper
 
 #[cfg(test)]
 mod tests {
-    use acropolis_common::rational_number::RationalNumber;
     use crate::map_f32_to_rational;
+    use acropolis_common::rational_number::RationalNumber;
 
     #[test]
     fn test_fractions() -> Result<(), anyhow::Error> {
-        assert_eq!(map_f32_to_rational(0.51)?, RationalNumber { numerator: 51, denominator: 100 });
-        assert_eq!(map_f32_to_rational(0.67)?, RationalNumber { numerator: 67, denominator: 100 });
-        assert_eq!(map_f32_to_rational(0.6)?, RationalNumber { numerator: 3, denominator: 5 });
-        assert_eq!(map_f32_to_rational(0.75)?, RationalNumber { numerator: 3, denominator: 4 });
-        assert_eq!(map_f32_to_rational(0.5)?, RationalNumber { numerator: 1, denominator: 2 });
+        assert_eq!(
+            map_f32_to_rational(0.51)?,
+            RationalNumber {
+                numerator: 51,
+                denominator: 100
+            }
+        );
+        assert_eq!(
+            map_f32_to_rational(0.67)?,
+            RationalNumber {
+                numerator: 67,
+                denominator: 100
+            }
+        );
+        assert_eq!(
+            map_f32_to_rational(0.6)?,
+            RationalNumber {
+                numerator: 3,
+                denominator: 5
+            }
+        );
+        assert_eq!(
+            map_f32_to_rational(0.75)?,
+            RationalNumber {
+                numerator: 3,
+                denominator: 4
+            }
+        );
+        assert_eq!(
+            map_f32_to_rational(0.5)?,
+            RationalNumber {
+                numerator: 1,
+                denominator: 2
+            }
+        );
         Ok(())
     }
 }

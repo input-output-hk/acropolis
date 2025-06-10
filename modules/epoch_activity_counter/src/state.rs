@@ -1,14 +1,15 @@
 //! Acropolis epoch activity counter: state storage
 
-use acropolis_common::{BlockInfo, KeyHash,
-                       messages::{Message, CardanoMessage, EpochActivityMessage},
-                       crypto::keyhash};
+use acropolis_common::{
+    crypto::keyhash,
+    messages::{CardanoMessage, EpochActivityMessage, Message},
+    BlockInfo, KeyHash,
+};
+use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::info;
-use std::collections::HashMap;
 
 pub struct State {
-
     // Map of counts by VRF key hashes
     vrf_vkey_hashes: HashMap<KeyHash, usize>,
 
@@ -44,8 +45,13 @@ impl State {
 
     // Handle end of epoch, returns message to be published
     pub fn end_epoch(&mut self, block: &BlockInfo, epoch: u64) -> Arc<Message> {
-        info!(epoch, total_blocks = self.total_blocks, unique_vrf_keys = self.vrf_vkey_hashes.len(),
-              total_fees = self.total_fees, "End of epoch");
+        info!(
+            epoch,
+            total_blocks = self.total_blocks,
+            unique_vrf_keys = self.vrf_vkey_hashes.len(),
+            total_fees = self.total_fees,
+            "End of epoch"
+        );
 
         let message = Arc::new(Message::Cardano((
             block.clone(),
@@ -54,8 +60,8 @@ impl State {
                 total_blocks: self.total_blocks,
                 total_fees: self.total_fees,
                 vrf_vkey_hashes: self.vrf_vkey_hashes.drain().collect(),
-            }))
-        ));
+            }),
+        )));
 
         self.total_blocks = 0;
         self.total_fees = 0;
@@ -67,9 +73,11 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acropolis_common::{BlockStatus, Era, BlockInfo,
-                           messages::{Message, CardanoMessage},
-                           crypto::keyhash};
+    use acropolis_common::{
+        crypto::keyhash,
+        messages::{CardanoMessage, Message},
+        BlockInfo, BlockStatus, Era,
+    };
 
     fn make_block(epoch: u64) -> BlockInfo {
         BlockInfo {
@@ -114,14 +122,22 @@ mod tests {
 
         assert_eq!(state.total_blocks, 3);
         assert_eq!(state.vrf_vkey_hashes.len(), 2);
-        assert_eq!(state.vrf_vkey_hashes.iter()
-                     .find(|(k, _)| *k == &keyhash(b"vrf_1"))
-                     .map(|(_, v)| *v),
-                   Some(1));
-        assert_eq!(state.vrf_vkey_hashes.iter()
-                     .find(|(k, _)| *k == &keyhash(b"vrf_2"))
-                     .map(|(_, v)| *v),
-                   Some(2));
+        assert_eq!(
+            state
+                .vrf_vkey_hashes
+                .iter()
+                .find(|(k, _)| *k == &keyhash(b"vrf_1"))
+                .map(|(_, v)| *v),
+            Some(1)
+        );
+        assert_eq!(
+            state
+                .vrf_vkey_hashes
+                .iter()
+                .find(|(k, _)| *k == &keyhash(b"vrf_2"))
+                .map(|(_, v)| *v),
+            Some(2)
+        );
     }
 
     #[test]
@@ -150,10 +166,13 @@ mod tests {
                 assert_eq!(ea.total_blocks, 1);
                 assert_eq!(ea.total_fees, 123);
                 assert_eq!(ea.vrf_vkey_hashes.len(), 1);
-                assert_eq!(ea.vrf_vkey_hashes.iter()
-                     .find(|(k, _)| k == &keyhash(b"vrf_1"))
-                     .map(|(_, v)| *v),
-                   Some(1));
+                assert_eq!(
+                    ea.vrf_vkey_hashes
+                        .iter()
+                        .find(|(k, _)| k == &keyhash(b"vrf_1"))
+                        .map(|(_, v)| *v),
+                    Some(1)
+                );
             }
             _ => panic!("Expected EpochActivity message"),
         }

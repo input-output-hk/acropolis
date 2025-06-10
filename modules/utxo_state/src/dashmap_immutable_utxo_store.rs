@@ -2,11 +2,11 @@
 // Faster and API is simpler because it uses internally sharded locks
 // but it takes a lot more memory than HashMap
 
-use crate::state::{UTXOKey, UTXOValue, ImmutableUTXOStore};
-use dashmap::DashMap;
-use async_trait::async_trait;
+use crate::state::{ImmutableUTXOStore, UTXOKey, UTXOValue};
 use anyhow::Result;
+use async_trait::async_trait;
 use config::Config;
+use dashmap::DashMap;
 use std::sync::Arc;
 use tracing::info;
 
@@ -16,17 +16,16 @@ pub struct DashMapImmutableUTXOStore {
 }
 
 impl DashMapImmutableUTXOStore {
-    pub fn new(_config: Arc<Config>) -> Self { 
+    pub fn new(_config: Arc<Config>) -> Self {
         info!("Storing immutable UTXOs in memory (DashMap)");
         Self {
-            utxos: DashMap::new()
+            utxos: DashMap::new(),
         }
     }
 }
 
 #[async_trait]
 impl ImmutableUTXOStore for DashMapImmutableUTXOStore {
-
     /// Add a UTXO
     async fn add_utxo(&self, key: UTXOKey, value: UTXOValue) -> Result<()> {
         self.utxos.insert(key, value);

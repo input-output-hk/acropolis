@@ -2,21 +2,20 @@
 // We don't use these types in the acropolis_common crate itself
 #![allow(dead_code)]
 
-use std::collections::{HashMap, HashSet};
-use std::fmt::{Display, Formatter};
+use crate::address::{Address, StakeAddress};
+use crate::rational_number::RationalNumber;
 use anyhow::anyhow;
+use bech32::{Bech32, Hrp};
+use bitmask_enum::bitmask;
+use hex::decode;
 use serde::{Deserialize, Serialize};
 use serde_with::{hex::Hex, serde_as};
-use bech32::{Bech32, Hrp};
-use hex::decode;
-use bitmask_enum::bitmask;
-use crate::rational_number::RationalNumber;
-use crate::address::{Address, StakeAddress};
+use std::collections::{HashMap, HashSet};
+use std::fmt::{Display, Formatter};
 
 /// Protocol era
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
-pub enum Era
-{
+pub enum Era {
     Byron,
     Shelley,
     Allegra,
@@ -27,17 +26,18 @@ pub enum Era
 }
 
 impl Default for Era {
-    fn default() -> Era { Era::Byron }
+    fn default() -> Era {
+        Era::Byron
+    }
 }
 
 /// Block status
 #[derive(Debug, Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-pub enum BlockStatus
-{
-    Bootstrap,   // Pseudo-block from bootstrap data
-    Immutable,   // Now immutable (more than 'k' blocks ago)
-    Volatile,    // Volatile, in sequence
-    RolledBack,  // Volatile, restarted after rollback
+pub enum BlockStatus {
+    Bootstrap,  // Pseudo-block from bootstrap data
+    Immutable,  // Now immutable (more than 'k' blocks ago)
+    Volatile,   // Volatile, in sequence
+    RolledBack, // Volatile, restarted after rollback
 }
 
 /// Block info, shared across multiple messages
@@ -82,7 +82,7 @@ pub struct StakeAddressDelta {
     pub address: StakeAddress,
 
     /// Balance change
-    pub delta: i64
+    pub delta: i64,
 }
 
 /// Transaction output (UTXO)
@@ -99,9 +99,8 @@ pub struct TxOutput {
 
     /// Output value (Lovelace)
     pub value: u64,
-
-// todo: Implement datum    /// Datum (raw)
-// !!!    pub datum: Vec<u8>,
+    // todo: Implement datum    /// Datum (raw)
+    // !!!    pub datum: Vec<u8>,
 }
 
 /// Transaction input (UTXO reference)
@@ -123,7 +122,9 @@ pub enum UTXODelta {
 }
 
 impl Default for UTXODelta {
-    fn default() -> Self { Self::None(()) }
+    fn default() -> Self {
+        Self::None(())
+    }
 }
 
 /// Key hash used for pool IDs etc.
@@ -149,8 +150,9 @@ pub struct Ratio {
 }
 
 /// General credential
-#[derive(Debug, Clone, Ord, Eq, PartialEq, PartialOrd, Hash,
-        serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Ord, Eq, PartialEq, PartialOrd, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub enum Credential {
     /// Address key hash
     AddrKeyHash(KeyHash),
@@ -163,30 +165,35 @@ impl Credential {
     fn hex_string_to_hash(hex_str: &str) -> anyhow::Result<KeyHash> {
         let key_hash = decode(hex_str.to_owned().into_bytes())?;
         if key_hash.len() != 28 {
-            Err(anyhow!("Invalid hash length for {:?}, expected 28 bytes", hex_str))
-        }
-        else {
+            Err(anyhow!(
+                "Invalid hash length for {:?}, expected 28 bytes",
+                hex_str
+            ))
+        } else {
             Ok(key_hash)
         }
     }
 
-    pub fn from_json_string (credential: &str) -> anyhow::Result<Self> {
+    pub fn from_json_string(credential: &str) -> anyhow::Result<Self> {
         if let Some(hash) = credential.strip_prefix("scriptHash-") {
             Ok(Credential::ScriptHash(Self::hex_string_to_hash(hash)?))
-        }
-        else if let Some(hash) = credential.strip_prefix("keyHash-") {
+        } else if let Some(hash) = credential.strip_prefix("keyHash-") {
             Ok(Credential::AddrKeyHash(Self::hex_string_to_hash(hash)?))
-        }
-        else {
-            Err(anyhow!("Incorrect credential {}, expected scriptHash- or keyHash- prefix", credential).into())
+        } else {
+            Err(anyhow!(
+                "Incorrect credential {}, expected scriptHash- or keyHash- prefix",
+                credential
+            )
+            .into())
         }
     }
 
     pub fn get_hash(&self) -> KeyHash {
         match self {
             Self::AddrKeyHash(hash) => hash,
-            Self::ScriptHash(hash) => hash
-        }.clone()
+            Self::ScriptHash(hash) => hash,
+        }
+        .clone()
     }
 }
 
@@ -348,7 +355,7 @@ pub struct Registration {
 }
 
 /// Deregister stake (Conway version) = 'unreg_cert'
- #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Deregistration {
     /// Stake credential
     pub credential: StakeCredential,
@@ -543,7 +550,7 @@ impl GovActionId {
 
     pub fn set_action_index(&mut self, action_index: usize) -> Result<&Self, anyhow::Error> {
         if action_index >= 256 {
-            return Err(anyhow!("Action_index {action_index} >= 256"))
+            return Err(anyhow!("Action_index {action_index} >= 256"));
         }
 
         self.action_index = action_index as u8;
@@ -590,16 +597,13 @@ pub struct DRepVotingThresholds {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct AlonzoParams {
-}
+pub struct AlonzoParams {}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ByronParams {
-}
+pub struct ByronParams {}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ShelleyParams {
-}
+pub struct ShelleyParams {}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ConwayParams {
@@ -632,7 +636,7 @@ pub enum ProtocolParamType {
     EconomicGroup,
     TechnicalGroup,
     GovernanceGroup,
-    SecurityProperty
+    SecurityProperty,
 }
 
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
@@ -686,14 +690,16 @@ pub struct Committee {
 }
 
 impl Committee {
-    pub fn is_empty(&self) -> bool { return self.members.len() == 0; }
+    pub fn is_empty(&self) -> bool {
+        return self.members.len() == 0;
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ParameterChangeAction {
     pub previous_action_id: Option<GovActionId>,
     pub protocol_param_update: Box<ProtocolParamUpdate>,
-    pub script_hash: Option<Vec<u8>>
+    pub script_hash: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -722,13 +728,13 @@ pub struct CommitteeChange {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct UpdateCommitteeAction {
     pub previous_action_id: Option<GovActionId>,
-    pub data: CommitteeChange
+    pub data: CommitteeChange,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct NewConstitutionAction {
     pub previous_action_id: Option<GovActionId>,
-    pub new_constitution: Constitution
+    pub new_constitution: Constitution,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -739,10 +745,12 @@ pub enum GovernanceAction {
     NoConfidence(Option<GovActionId>),
     UpdateCommittee(UpdateCommitteeAction),
     NewConstitution(NewConstitutionAction),
-    Information
+    Information,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, PartialOrd, Eq, Ord, Clone, Hash)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Debug, PartialEq, PartialOrd, Eq, Ord, Clone, Hash,
+)]
 pub enum Voter {
     ConstitutionalCommitteeKey(AddrKeyhash),
     ConstitutionalCommitteeScript(ScriptHash),
@@ -763,7 +771,9 @@ impl Display for Voter {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Voter::ConstitutionalCommitteeKey(h) => write!(f, "{}", self.to_bech32("cc_hot", &h)),
-            Voter::ConstitutionalCommitteeScript(s) => write!(f, "{}", self.to_bech32("cc_hot_script", &s)),
+            Voter::ConstitutionalCommitteeScript(s) => {
+                write!(f, "{}", self.to_bech32("cc_hot_script", &s))
+            }
             Voter::DRepKey(k) => write!(f, "{}", self.to_bech32("drep", &k)),
             Voter::DRepScript(s) => write!(f, "{}", self.to_bech32("drep_script", &s)),
             Voter::StakePoolKey(k) => write!(f, "{}", self.to_bech32("pool", &k)),
@@ -781,21 +791,21 @@ pub enum Vote {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct VotingProcedure {
     pub vote: Vote,
-    pub anchor: Option<Anchor>
+    pub anchor: Option<Anchor>,
 }
 
 #[serde_as]
 #[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SingleVoterVotes {
     #[serde_as(as = "Vec<(_, _)>")]
-    pub voting_procedures: HashMap<GovActionId, VotingProcedure>
+    pub voting_procedures: HashMap<GovActionId, VotingProcedure>,
 }
 
 #[serde_as]
 #[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct VotingProcedures {
     #[serde_as(as = "Vec<(_, _)>")]
-    pub votes: HashMap <Voter, SingleVoterVotes>
+    pub votes: HashMap<Voter, SingleVoterVotes>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -812,7 +822,7 @@ pub struct ProposalProcedure {
 pub struct CommitteeUpdateEnactment {
     #[serde_as(as = "Vec<(_, _)>")]
     pub members_change: HashMap<CommitteeCredential, Option<u64>>,
-    pub terms: RationalNumber
+    pub terms: RationalNumber,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -820,14 +830,14 @@ pub enum EnactStateElem {
     Params(Box<ProtocolParamUpdate>),
     Constitution(Constitution),
     Committee(CommitteeChange),
-    NoConfidence
+    NoConfidence,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StakeCredentialWithPos {
     pub stake_credential: StakeCredential,
     pub tx_index: u64,
-    pub cert_index: u64
+    pub cert_index: u64,
 }
 
 /// Certificate in a transaction
@@ -901,10 +911,9 @@ mod tests {
 
     fn make_committee_credential(addr_key_hash: bool, val: u8) -> CommitteeCredential {
         if addr_key_hash {
-            Credential::AddrKeyHash(vec!(val))
-        }
-        else {
-            Credential::ScriptHash(vec!(val))
+            Credential::AddrKeyHash(vec![val])
+        } else {
+            Credential::ScriptHash(vec![val])
         }
     }
 
@@ -913,33 +922,51 @@ mod tests {
         let gov_action_id = GovActionId::default();
 
         let mut voting = VotingProcedures::default();
-        voting.votes.insert(Voter::StakePoolKey(vec![1,2,3,4]), SingleVoterVotes::default());
+        voting.votes.insert(
+            Voter::StakePoolKey(vec![1, 2, 3, 4]),
+            SingleVoterVotes::default(),
+        );
 
         let mut single_voter = SingleVoterVotes::default();
-        single_voter.voting_procedures.insert(gov_action_id.clone(), VotingProcedure { anchor: None, vote: Vote::Abstain });
-        voting.votes.insert(Voter::StakePoolKey(vec![1,2,3,4]), SingleVoterVotes::default());
+        single_voter.voting_procedures.insert(
+            gov_action_id.clone(),
+            VotingProcedure {
+                anchor: None,
+                vote: Vote::Abstain,
+            },
+        );
+        voting.votes.insert(
+            Voter::StakePoolKey(vec![1, 2, 3, 4]),
+            SingleVoterVotes::default(),
+        );
         println!("Json: {}", serde_json::to_string(&voting)?);
 
         let gov_action = GovernanceAction::UpdateCommittee(UpdateCommitteeAction {
             previous_action_id: None,
             data: CommitteeChange {
-                removed_committee_members: HashSet::from_iter(vec![
-                    make_committee_credential(true, 48), 
-                    make_committee_credential(false, 12)
-                ].into_iter()),
-                new_committee_members: HashMap::from_iter(vec![
-                    (make_committee_credential(false, 87), 1234)
-                ].into_iter()),
-                terms: RationalNumber::from(1)
-            }
+                removed_committee_members: HashSet::from_iter(
+                    vec![
+                        make_committee_credential(true, 48),
+                        make_committee_credential(false, 12),
+                    ]
+                    .into_iter(),
+                ),
+                new_committee_members: HashMap::from_iter(
+                    vec![(make_committee_credential(false, 87), 1234)].into_iter(),
+                ),
+                terms: RationalNumber::from(1),
+            },
         });
 
         let proposal = ProposalProcedure {
             deposit: 9876,
-            reward_account: vec![7,4,6,7],
+            reward_account: vec![7, 4, 6, 7],
             gov_action_id,
             gov_action,
-            anchor: Anchor { url: "some.url".to_owned(), data_hash: vec![2,3,4,5] }
+            anchor: Anchor {
+                url: "some.url".to_owned(),
+                data_hash: vec![2, 3, 4, 5],
+            },
         };
         println!("Json: {}", serde_json::to_string(&proposal)?);
 
