@@ -206,12 +206,15 @@ impl Tracker {
             let mut src_addr_set = HashSet::new();
             let mut dst_addr_set = HashSet::new();
             for event in stats.iter() {
-                let src_addr = event.address_delta.address.to_string();
-                let dst_addr = event.stake_address.as_ref().map(|a| a.to_string()).unwrap_or("(none)".to_owned());
+                let src_addr = event.address_delta.address.to_string()
+                    .unwrap_or("(???)".to_owned());
+                let dst_addr = event.stake_address.as_ref().map(|a| a.to_string())
+                    .unwrap_or(Ok("(none)".to_owned()))
+                    .unwrap_or("(???)".to_owned());
                 delta += event.address_delta.delta;
 
-                chunk.push(format!("   blk {}, {}: {} ({:?}) => {} ({:?})", 
-                    event.block.number, src_addr, event.address_delta.delta, 
+                chunk.push(format!("   blk {}, {}: {} ({:?}) => {} ({:?})",
+                    event.block.number, src_addr, event.address_delta.delta,
                     event.address_delta.address, dst_addr, event.stake_address
                 ));
 
@@ -454,20 +457,22 @@ mod test {
             era: Era::Conway 
         };
 
-        let stake_delta = process_message(&cache, &delta, &block, None).await?;
+        let stake_delta = process_message(&cache, &delta, &block, None);
 
-        assert_eq!(stake_delta.deltas.get(0).unwrap().address.to_string(), stake_addr);
-        assert_eq!(stake_delta.deltas.get(1).unwrap().address.to_string(), stake_addr);
-        assert_eq!(stake_delta.deltas.get(2).unwrap().address.to_string(), script_addr);
-        assert_eq!(stake_delta.deltas.get(3).unwrap().address.to_string(), script_addr);
-        assert_eq!(stake_delta.deltas.get(4).unwrap().address.to_string(), pointed_addr);
-        assert_eq!(stake_delta.deltas.get(5).unwrap().address.to_string(), pointed_addr);
-        assert_eq!(stake_delta.deltas.get(6).unwrap().address.to_string(), stake_addr);
-        assert_eq!(stake_delta.deltas.get(7).unwrap().address.to_string(), script_addr);
+        assert_eq!(stake_delta.deltas.get(0).unwrap().address.to_string().unwrap(), stake_addr);
+        assert_eq!(stake_delta.deltas.get(1).unwrap().address.to_string().unwrap(), stake_addr);
+        assert_eq!(stake_delta.deltas.get(2).unwrap().address.to_string().unwrap(), script_addr);
+        assert_eq!(stake_delta.deltas.get(3).unwrap().address.to_string().unwrap(), script_addr);
+        assert_eq!(stake_delta.deltas.get(4).unwrap().address.to_string().unwrap(), pointed_addr);
+        assert_eq!(stake_delta.deltas.get(5).unwrap().address.to_string().unwrap(), pointed_addr);
+        assert_eq!(stake_delta.deltas.get(6).unwrap().address.to_string().unwrap(), stake_addr);
+        assert_eq!(stake_delta.deltas.get(7).unwrap().address.to_string().unwrap(), script_addr);
 
         // additional check: payload conversion correctness
-        assert_eq!(stake_delta.deltas.get(0).unwrap().address.payload.to_string(), stake_key_hash);
-        assert_eq!(stake_delta.deltas.get(2).unwrap().address.payload.to_string(), script_hash);
+        assert_eq!(stake_delta.deltas.get(0).unwrap().address.payload.to_string().unwrap(),
+                   stake_key_hash);
+        assert_eq!(stake_delta.deltas.get(2).unwrap().address.payload.to_string().unwrap(),
+                   script_hash);
 
         assert_eq!(stake_delta.deltas.len(), 8);
 

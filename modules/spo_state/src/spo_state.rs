@@ -45,32 +45,27 @@ impl SPOState
         info!("Creating SPO state publisher on '{spo_state_topic}'");
 
         let state = Arc::new(Mutex::new(State::new()));
-        let state_subscribe = state.clone();
-        let state_handle_full = state.clone();
-        let state_handle_single = state.clone();
-        let state_tick = state.clone();
-        let context_subscribe = context.clone();
 
         // Subscribe for certificate messages
-        context.clone().message_bus.subscribe(&subscribe_topic, move |message: Arc<Message>| {
-            let state = state_subscribe.clone();
-            let context = context_subscribe.clone();
-            let spo_state_topic = spo_state_topic.clone();
-
-            async move {
+        let mut subscription = context.message_bus.register(&subscribe_topic).await?;
+        let context_subscribe = context.clone();
+        let state_subscribe = state.clone();
+        context.run(async move {
+            loop {
+                let Ok((_, message)) = subscription.read().await else { return; };
                 match message.as_ref() {
                     Message::Cardano((block, CardanoMessage::TxCertificates(tx_certs_msg))) => {
 
                         // End of epoch?
-                        if block.new_epoch {
-                            let mut state = state.lock().await;
+                        if block.new_epoch && block.epoch > 0 {
+                            let mut state = state_subscribe.lock().await;
                             let msg = state.end_epoch(&block);
-                            context.message_bus.publish(&spo_state_topic, msg)
+                            context_subscribe.message_bus.publish(&spo_state_topic, msg)
                                 .await
                                 .unwrap_or_else(|e| error!("Failed to publish: {e}"));
                         }
 
-                        let mut state = state.lock().await;
+                        let mut state = state_subscribe.lock().await;
                         state.handle_tx_certs(block, tx_certs_msg)
                             .inspect_err(|e| error!("Messaging handling error: {e}"))
                             .ok();
@@ -79,9 +74,10 @@ impl SPOState
                     _ => error!("Unexpected message type: {message:?}")
                 }
             }
-        })?;
+        });
 
         // Handle requests for full SPO state
+        let state_handle_full = state.clone();
         context.message_bus.handle(&handle_topic, move |message: Arc<Message>| {
             let state = state_handle_full.clone();
             async move {
@@ -107,9 +103,9 @@ impl SPOState
             }
         })?;
 
-        let handle_topic_single = handle_topic + ".*";
-
         // Handle requests for single SPO state
+        let handle_topic_single = handle_topic + ".*";
+        let state_handle_single = state.clone();
         context.message_bus.handle(&handle_topic_single, move |message: Arc<Message>| {
             let state = state_handle_single.clone();
             async move {
@@ -144,20 +140,21 @@ impl SPOState
         })?;
 
         // Ticker to log stats
-        context.clone().message_bus.subscribe("clock.tick", move |message: Arc<Message>| {
-            let state = state_tick.clone();
-
-            async move {
+        let state_tick = state.clone();
+        let mut subscription = context.message_bus.register("clock.tick").await?;
+        context.run(async move {
+            loop {
+                let Ok((_, message)) = subscription.read().await else { return; };
                 if let Message::Clock(message) = message.as_ref() {
                     if (message.number % 60) == 0 {
-                        state.lock().await.tick()
+                        state_tick.lock().await.tick()
                             .await
                             .inspect_err(|e| error!("Tick error: {e}"))
                             .ok();
                     }
                 }
             }
-        })?;
+        });
 
         Ok(())
     }

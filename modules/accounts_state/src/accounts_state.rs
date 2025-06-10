@@ -6,6 +6,7 @@ use acropolis_common::{
     messages::{Message, RESTResponse, CardanoMessage},
     state_history::StateHistory,
     BlockInfo, BlockStatus,
+    Address, StakeAddress, StakeAddressPayload,
 };
 use std::sync::Arc;
 use anyhow::Result;
@@ -21,7 +22,7 @@ const DEFAULT_SPO_STATE_TOPIC: &str = "cardano.spo.state";
 const DEFAULT_EPOCH_ACTIVITY_TOPIC: &str = "cardano.epoch.activity";
 const DEFAULT_TX_CERTIFICATES_TOPIC: &str = "cardano.certificates";
 const DEFAULT_STAKE_DELTAS_TOPIC: &str = "cardano.stake.deltas";
-const DEFAULT_HANDLE_TOPIC: &str = "rest.get.rewards";
+const DEFAULT_HANDLE_TOPIC: &str = "rest.get.stake";
 
 /// Accounts State module
 #[module(
@@ -69,7 +70,7 @@ impl AccountsState
                     state.handle_tx_certificates(tx_certs_msg)
                         .inspect_err(|e| error!("Messaging handling error: {e}"))
                         .ok();
-                    if block_info.new_epoch { new_epoch = true; }
+                    if block_info.new_epoch && block_info.epoch > 0 { new_epoch = true; }
                     current_block = Some(block_info.clone());
                 }
 
@@ -216,12 +217,14 @@ impl AccountsState
                     Message::RESTRequest(request) => {
                         info!("REST received {} {}", request.method, request.path);
                         match request.path_elements.get(1) {
-                            // TODO! Stake addresses will be text encoded "stake1xxx"
-                            Some(id) => match hex::decode(&id) {
-                                Ok(id) => {
+                            Some(addr) => match Address::from_string(addr) {
+                                Ok(Address::Stake(StakeAddress {
+                                    payload: StakeAddressPayload::StakeKeyHash(hash),
+                                    ..
+                                })) => {
                                     match history.lock().await.current() {
-                                        Some(state) => match state.get_rewards(&id) {
-                                            Some(reward) => match serde_json::to_string(&reward) {
+                                        Some(state) => match state.get_stake_state(&hash) {
+                                            Some(stake) => match serde_json::to_string(&stake) {
                                                 Ok(body) => RESTResponse::with_json(200, &body),
                                                 Err(error) => RESTResponse::with_text(500, &format!("{error:?}").to_string()),
                                             },
@@ -231,7 +234,7 @@ impl AccountsState
                                         None => RESTResponse::with_text(500, "No state")
                                     }
                                 },
-                                Err(error) => RESTResponse::with_text(400, &format!("Stake address must be hex encoded vector of bytes: {error:?}").to_string()),
+                                _ => RESTResponse::with_text(400, "Not a stake address"),
                             },
                             None => RESTResponse::with_text(400, "Stake address must be provided"),
                         }
@@ -247,12 +250,13 @@ impl AccountsState
         })?;
 
         // Ticker to log stats
-        context.clone().message_bus.subscribe("clock.tick", move |message: Arc<Message>| {
-            let history = history_tick.clone();
-            async move {
+        let mut tick_subscription = context.message_bus.register("clock.tick").await?;
+        context.clone().run(async move {
+            loop {
+                let Ok((_, message)) = tick_subscription.read().await else { return; };
                 if let Message::Clock(message) = message.as_ref() {
                     if (message.number % 60) == 0 {
-                        if let Some(state) = history.lock().await.current() {
+                        if let Some(state) = history_tick.lock().await.current() {
                             state.tick().await
                                 .inspect_err(|e| error!("Tick error: {e}"))
                                 .ok();
@@ -260,7 +264,7 @@ impl AccountsState
                     }
                 }
             }
-        })?;
+        });
 
         // Subscribe
         let spos_subscription = context.message_bus.register(&spo_state_topic).await?;

@@ -77,17 +77,16 @@ impl DRepState
 
         let publisher = DRepDistributionPublisher::new(context.clone(), drep_distribution_topic);
         let state = Arc::new(Mutex::new(State::new(Some(publisher))));
-        let state1 = state.clone();
-        let state2 = state.clone();
-        let state3 = state.clone();
 
         // Subscribe for certificate messages
-        context.clone().message_bus.subscribe(&subscribe_topic, move |message: Arc<Message>| {
-            let state = state1.clone();
-            async move {
+        let state1 = state.clone();
+        let mut subscription = context.message_bus.register(&subscribe_topic).await?;
+        context.run(async move {
+            loop {
+                let Ok((_, message)) = subscription.read().await else { return; };
                 match message.as_ref() {
                     Message::Cardano((block_info, CardanoMessage::TxCertificates(tx_cert_msg))) => {
-                        let mut state = state.lock().await;
+                        let mut state = state1.lock().await;
                         state.handle(block_info, tx_cert_msg)
                             .await
                             .inspect_err(|e| error!("Messaging handling error: {e}"))
@@ -97,9 +96,10 @@ impl DRepState
                     _ => error!("Unexpected message type: {message:?}")
                 }
             }
-        })?;
+        });
 
         // Handle requests for single DRep state
+        let state2 = state.clone();
         context.message_bus.handle(&handle_topic, move |message: Arc<Message>| {
             let state = state2.clone();
             async move {
@@ -127,20 +127,21 @@ impl DRepState
         })?;
 
         // Ticker to log stats
-        context.clone().message_bus.subscribe("clock.tick", move |message: Arc<Message>| {
-            let state = state3.clone();
-
-            async move {
+        let mut subscription = context.message_bus.register(&subscribe_topic).await?;
+        let state3 = state.clone();
+        context.run(async move {
+            loop {
+                let Ok((_, message)) = subscription.read().await else { return; };
                 if let Message::Clock(message) = message.as_ref() {
                     if (message.number % 60) == 0 {
-                        state.lock().await.tick()
+                        state3.lock().await.tick()
                             .await
                             .inspect_err(|e| error!("Tick error: {e}"))
                             .ok();
                     }
                 }
             }
-        })?;
+        });
 
         Ok(())
     }

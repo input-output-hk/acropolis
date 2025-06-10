@@ -3,37 +3,16 @@ use acropolis_common::{
     messages::{EpochActivityMessage, SPOStateMessage, TxCertificatesMessage,
                StakeAddressDeltasMessage},
     PoolRegistration, TxCertificate, KeyHash, StakeAddressPayload,
+    StakeCredential,
+    serialization::SerializeMapAs,
 };
 use anyhow::Result;
 use imbl::HashMap;
 use tracing::{error, info};
-use serde::{Serializer, ser::SerializeMap};
-use serde_with::{serde_as, hex::Hex, SerializeAs, ser::SerializeAsWrap};
-
-struct HashMapSerial<KAs, VAs>(std::marker::PhantomData<(KAs, VAs)>);
-
-// TODO!  This should move to common - AJW may have already done so
-impl<K, V, KAs, VAs> SerializeAs<HashMap<K, V>> for HashMapSerial<KAs, VAs>
-where
-    KAs: SerializeAs<K>,
-    VAs: SerializeAs<V>,
-{
-    fn serialize_as<S>(source: &HashMap<K, V>, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut map_ser = serializer.serialize_map(Some(source.len()))?;
-        for (k, v) in source {
-            map_ser.serialize_entry(
-                &SerializeAsWrap::<K, KAs>::new(k),
-                &SerializeAsWrap::<V, VAs>::new(v),
-            )?;
-        }
-        map_ser.end()
-    }
-}
+use serde_with::{serde_as, hex::Hex};
 
 /// State of an individual stake address
+#[serde_as]
 #[derive(Debug, Default, Clone, serde::Serialize)]
 pub struct StakeAddressState {
 
@@ -44,6 +23,7 @@ pub struct StakeAddressState {
     rewards: u64,
 
     /// SPO ID they are delegated to ("operator" ID)
+    #[serde_as(as = "Option<Hex>")]
     delegated_spo: Option<KeyHash>,
 }
 
@@ -55,25 +35,28 @@ pub struct State {
     epoch: u64,
 
     /// Map of active SPOs by VRF vkey
-    #[serde_as(as = "HashMapSerial<Hex, _>")]
+    #[serde_as(as = "SerializeMapAs<Hex, _>")]
     spos_by_vrf_key: HashMap<Vec::<u8>, PoolRegistration>,
 
     /// Map of staking address values
-    #[serde_as(as = "HashMapSerial<Hex, _>")]
+    #[serde_as(as = "SerializeMapAs<Hex, _>")]
     stake_addresses: HashMap<Vec::<u8>, StakeAddressState>,
 }
 
 impl State {
-    pub fn get_rewards(&self, stake_key: &Vec<u8>) -> Option<u64> {
-        self.stake_addresses.get(stake_key).map(|sa| sa.rewards)
+    /// Get the stake address state for a give stake key
+    pub fn get_stake_state(&self, stake_key: &Vec<u8>) -> Option<StakeAddressState> {
+        self.stake_addresses.get(stake_key).cloned()
     }
 
+    /// Log statistics
     fn log_stats(&self) {
         info!(
             num_stake_addresses = self.stake_addresses.keys().len(),
         );
     }
 
+    /// Background tick
     pub async fn tick(&self) -> Result<()> {
         self.log_stats();
         Ok(())
@@ -113,6 +96,19 @@ impl State {
         Ok(())
     }
 
+    /// Record a delegation
+    fn record_delegation(&mut self, credential: &StakeCredential, spo: &KeyHash)
+    {
+        let hash = credential.get_hash();
+
+        // Create or update the stake address
+        let state = self.stake_addresses.entry(hash)
+            .or_insert(StakeAddressState::default());
+
+        // Set the delegation
+        state.delegated_spo = Some(spo.clone());
+    }
+
     /// Handle TxCertificates with stake delegations
     pub fn handle_tx_certificates(&mut self,
                                   tx_certs_msg: &TxCertificatesMessage) -> Result<()> {
@@ -121,10 +117,20 @@ impl State {
         for tx_cert in tx_certs_msg.certificates.iter() {
             match tx_cert {
                 TxCertificate::StakeDelegation(delegation) => {
-                    // !TODO record delegation
+                    self.record_delegation(&delegation.credential, &delegation.operator);
                 }
 
-                // !TODO Conway delegation varieties
+                TxCertificate::StakeAndVoteDelegation(delegation) => {
+                    self.record_delegation(&delegation.credential, &delegation.operator)
+                }
+
+                TxCertificate::StakeRegistrationAndDelegation(delegation) => {
+                    self.record_delegation(&delegation.credential, &delegation.operator)
+                }
+
+                TxCertificate::StakeRegistrationAndStakeAndVoteDelegation(delegation) => {
+                    self.record_delegation(&delegation.credential, &delegation.operator)
+                }
 
                 _ => ()
             }
@@ -139,27 +145,28 @@ impl State {
 
         // Handle deltas
         for delta in deltas_msg.deltas.iter() {
-            match &delta.address.payload {
-                StakeAddressPayload::StakeKeyHash(hash) => {
-                    let state = self.stake_addresses
-                        .entry(hash.to_vec())
-                        .or_insert(StakeAddressState::default());
 
-                    if delta.delta >= 0 {
-                        state.utxo_value = state.utxo_value.saturating_add(delta.delta as u64);
-                    } else {
-                        let abs = (-delta.delta) as u64;
-                        if abs > state.utxo_value {
-                            error!("Stake address went negative in delta {:?}", delta);
-                            state.utxo_value = 0;
-                        } else {
-                            state.utxo_value -= abs;
-                        }
-                    }
+            // Fold both stake key and script hashes into one - assuming the chance of
+            // collision is negligible
+            let hash = match &delta.address.payload {
+                StakeAddressPayload::StakeKeyHash(hash) => hash,
+                StakeAddressPayload::ScriptHash(hash) => hash,
+            };
+
+            // Update or create the stake entry's UTXO value
+            let state = self.stake_addresses.entry(hash.to_vec())
+                .or_insert(StakeAddressState::default());
+
+            if delta.delta >= 0 {
+                state.utxo_value = state.utxo_value.saturating_add(delta.delta as u64);
+            } else {
+                let abs = (-delta.delta) as u64;
+                if abs > state.utxo_value {
+                    error!("Stake address went negative in delta {:?}", delta);
+                    state.utxo_value = 0;
+                } else {
+                    state.utxo_value -= abs;
                 }
-
-                StakeAddressPayload::ScriptHash(_hash) =>
-                    error!("ScriptHashes not handled")
             }
         }
 
