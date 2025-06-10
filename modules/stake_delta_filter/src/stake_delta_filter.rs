@@ -1,36 +1,42 @@
 //! Acropolis Stake Delta Filter module
 //! Reads address deltas and filters out only stake addresses from it; also resolves pointer addresses.
 
-use std::{path::Path, sync::Arc};
-use serde::Deserialize;
-use caryatid_sdk::{Context, Module, module};
-use acropolis_common::{messages::{Message, CardanoMessage}, AddressNetwork};
+use acropolis_common::{
+    messages::{CardanoMessage, Message},
+    AddressNetwork,
+};
 use anyhow::{anyhow, Result};
+use caryatid_sdk::{module, Context, Module};
 use config::Config;
+use serde::Deserialize;
+use std::{path::Path, sync::Arc};
 use tokio::sync::Mutex;
 use tracing::{error, info};
 
-const DEFAULT_ADDRESS_DELTA_TOPIC: (&str,&str) = ("subscription-address-delta-topic", "cardano.address.delta");
-const DEFAULT_CERTIFICATES_TOPIC: (&str,&str) = ("subscription-certificates-topic", "cardano.certificates");
-const DEFAULT_STAKE_ADDRESS_DELTA_TOPIC: (&str,&str) = ("publishing-stake-delta-topic", "cardano.stake.deltas");
+const DEFAULT_ADDRESS_DELTA_TOPIC: (&str, &str) =
+    ("subscription-address-delta-topic", "cardano.address.delta");
+const DEFAULT_CERTIFICATES_TOPIC: (&str, &str) =
+    ("subscription-certificates-topic", "cardano.certificates");
+const DEFAULT_STAKE_ADDRESS_DELTA_TOPIC: (&str, &str) =
+    ("publishing-stake-delta-topic", "cardano.stake.deltas");
 
-/// Directory to put cached shelley address pointers into. Depending on the address 
+/// Directory to put cached shelley address pointers into. Depending on the address
 /// cache mode, these cached pointers can be used instead of tracking current pointer
 /// values in blockchain (which can be quite resource-consuming).
-const DEFAULT_CACHE_DIR: (&str,&str) = ("cache-dir", "cache");
+const DEFAULT_CACHE_DIR: (&str, &str) = ("cache-dir", "cache");
 
-/// Cache mode: use built-in; always build cache; always read cache (error if missing); 
+/// Cache mode: use built-in; always build cache; always read cache (error if missing);
 /// build if missing, read otherwise.
-const DEFAULT_CACHE_MODE: (&str,CacheMode) = ("cache-mode", CacheMode::Predefined);
+const DEFAULT_CACHE_MODE: (&str, CacheMode) = ("cache-mode", CacheMode::Predefined);
 
 /// Cache remembers all stake addresses that could potentially be referenced by pointers. However
 /// only a few addressed are actually referenced by pointers in real blockchain.
 /// `true` means that all possible addresses should be written to disk (as potential pointers).
 /// `false` means that only addresses used in actual pointers should be written to disk.
-const DEFAULT_WRITE_FULL_CACHE: (&str,bool) = ("write-full-cache", false);
+const DEFAULT_WRITE_FULL_CACHE: (&str, bool) = ("write-full-cache", false);
 
 /// Network: currently only Main/Test. Parameter is necessary to distinguish caches.
-const DEFAULT_NETWORK: (&str,AddressNetwork) = ("network", AddressNetwork::Main);
+const DEFAULT_NETWORK: (&str, AddressNetwork) = ("network", AddressNetwork::Main);
 
 /// Stake Delta Filter module
 #[module(
@@ -40,12 +46,12 @@ const DEFAULT_NETWORK: (&str,AddressNetwork) = ("network", AddressNetwork::Main)
 )]
 pub struct StakeDeltaFilter;
 
+mod predefined;
 mod state;
 mod utils;
-mod predefined;
 
 use state::{DeltaPublisher, State};
-use utils::{CacheMode, PointerCache, process_message, Tracker};
+use utils::{process_message, CacheMode, PointerCache, Tracker};
 
 #[derive(Clone, Debug)]
 struct StakeDeltaFilterParams {
@@ -58,14 +64,16 @@ struct StakeDeltaFilterParams {
     cache_mode: CacheMode,
     write_full_cache: bool,
 
-    context: Arc<Context<Message>>
+    context: Arc<Context<Message>>,
 }
 
 impl StakeDeltaFilterParams {
     fn get_cache_file_name(&self, modifier: &str) -> Result<String> {
         let path = Path::new(&self.cache_dir);
         let full = path.join(format!("{}{}", self.get_network_name(), modifier).to_lowercase());
-        let str = full.to_str().ok_or_else(|| anyhow!("Cannot produce cache file name".to_string()))?;
+        let str = full
+            .to_str()
+            .ok_or_else(|| anyhow!("Cannot produce cache file name".to_string()))?;
         Ok(str.to_string())
     }
 
@@ -79,9 +87,10 @@ impl StakeDeltaFilterParams {
 
     fn conf_enum<'a, T: Deserialize<'a>>(config: &Arc<Config>, keydef: (&str, T)) -> Result<T> {
         if config.get_string(keydef.0).is_ok() {
-            config.get::<T>(keydef.0).or_else(|e| Err(anyhow!("cannot parse {} value: {e}", keydef.0)))
-        }
-        else {
+            config
+                .get::<T>(keydef.0)
+                .or_else(|e| Err(anyhow!("cannot parse {} value: {e}", keydef.0)))
+        } else {
             Ok(keydef.1)
         }
     }
@@ -95,13 +104,16 @@ impl StakeDeltaFilterParams {
             cache_mode: Self::conf_enum::<CacheMode>(&cfg, DEFAULT_CACHE_MODE)?,
             write_full_cache: Self::conf_enum::<bool>(&cfg, DEFAULT_WRITE_FULL_CACHE)?,
             context,
-            network: Self::conf_enum::<AddressNetwork>(&cfg, DEFAULT_NETWORK)?
+            network: Self::conf_enum::<AddressNetwork>(&cfg, DEFAULT_NETWORK)?,
         };
 
         info!("Cache mode {:?}", params.cache_mode);
         if params.cache_mode != CacheMode::Predefined {
             if !Path::new(&params.cache_dir).try_exists()? {
-                return Err(anyhow!("Pointer cache directory '{}' does not exist.", params.cache_dir))
+                return Err(anyhow!(
+                    "Pointer cache directory '{}' does not exist.",
+                    params.cache_dir
+                ));
             }
             info!("Reading (writing) caches from (to) {}", params.cache_dir);
         }
@@ -116,11 +128,17 @@ impl StakeDeltaFilter {
         let cache_path = params.get_cache_file_name(".json")?;
 
         match params.cache_mode {
-            CacheMode::Predefined => Self::stateless_init(
-                PointerCache::try_load_predefined(&params.get_network_name())?, params
-            ).await,
+            CacheMode::Predefined => {
+                Self::stateless_init(
+                    PointerCache::try_load_predefined(&params.get_network_name())?,
+                    params,
+                )
+                .await
+            }
 
-            CacheMode::Read => Self::stateless_init(PointerCache::try_load(&cache_path)?, params).await,
+            CacheMode::Read => {
+                Self::stateless_init(PointerCache::try_load(&cache_path)?, params).await
+            }
 
             CacheMode::WriteIfAbsent => match PointerCache::try_load(&cache_path) {
                 Ok(cache) => Self::stateless_init(cache, params).await,
@@ -128,33 +146,45 @@ impl StakeDeltaFilter {
                     info!("Cannot load cache: {}, building from scratch", e);
                     Self::stateful_init(params).await
                 }
-            }
+            },
 
-            CacheMode::Write => Self::stateful_init(params).await
+            CacheMode::Write => Self::stateful_init(params).await,
         }
     }
 
-    async fn stateless_init(cache: Arc<PointerCache>, params: Arc<StakeDeltaFilterParams>) -> Result<()> {
+    async fn stateless_init(
+        cache: Arc<PointerCache>,
+        params: Arc<StakeDeltaFilterParams>,
+    ) -> Result<()> {
         info!("Stateless init: using stake pointer cache");
 
         // Subscribe for certificate messages
         info!("Creating subscriber on '{}'", params.address_delta_topic);
-        let mut subscription = params.context.message_bus.register(&params.clone().address_delta_topic).await?;
+        let mut subscription = params
+            .context
+            .message_bus
+            .register(&params.clone().address_delta_topic)
+            .await?;
         params.context.clone().run(async move {
             let publisher = DeltaPublisher::new(params.clone());
 
             loop {
-                let Ok((_, message)) = subscription.read().await else { return; };
+                let Ok((_, message)) = subscription.read().await else {
+                    return;
+                };
                 match message.as_ref() {
                     Message::Cardano((block_info, CardanoMessage::AddressDeltas(delta))) => {
                         let msg = process_message(&cache, &delta, &block_info, None);
-                        publisher.publish(&block_info, msg)
-                            .await.unwrap_or_else(|e| error!("Publish error: {e}"))
+                        publisher
+                            .publish(&block_info, msg)
+                            .await
+                            .unwrap_or_else(|e| error!("Publish error: {e}"))
                     }
 
-                    msg => error!("Unexpected message type for {}: {msg:?}",
+                    msg => error!(
+                        "Unexpected message type for {}: {msg:?}",
                         &params.address_delta_topic
-                    )
+                    ),
                 }
             }
         });
@@ -170,20 +200,27 @@ impl StakeDeltaFilter {
 
         info!("Creating subscriber on '{}'", params.tx_certificates_topic);
         let state_certs = state.clone();
-        let mut subscription = params.context.message_bus.register(&params.tx_certificates_topic).await?;
+        let mut subscription = params
+            .context
+            .message_bus
+            .register(&params.tx_certificates_topic)
+            .await?;
         params.clone().context.run(async move {
             loop {
-                let Ok((_, message)) = subscription.read().await else { return; };
+                let Ok((_, message)) = subscription.read().await else {
+                    return;
+                };
                 match message.as_ref() {
                     Message::Cardano((block_info, CardanoMessage::TxCertificates(tx_cert_msg))) => {
                         let mut state = state_certs.lock().await;
-                        state.handle_certs(block_info, tx_cert_msg)
+                        state
+                            .handle_certs(block_info, tx_cert_msg)
                             .await
                             .inspect_err(|e| error!("Messaging handling error: {e}"))
                             .ok();
                     }
 
-                    _ => error!("Unexpected message type: {message:?}")
+                    _ => error!("Unexpected message type: {message:?}"),
                 }
             }
         });
@@ -194,17 +231,20 @@ impl StakeDeltaFilter {
         let mut subscription = params.context.message_bus.register(&topic).await?;
         params.clone().context.run(async move {
             loop {
-                let Ok((_, message)) = subscription.read().await else { return; };
+                let Ok((_, message)) = subscription.read().await else {
+                    return;
+                };
                 match message.as_ref() {
                     Message::Cardano((block_info, CardanoMessage::AddressDeltas(deltas))) => {
                         let mut state = state_deltas.lock().await;
-                        state.handle_deltas(block_info, deltas)
+                        state
+                            .handle_deltas(block_info, deltas)
                             .await
                             .inspect_err(|e| error!("Messaging handling error: {e}"))
                             .ok();
                     }
 
-                    _ => error!("Unexpected message type for {}: {message:?}", &topic)
+                    _ => error!("Unexpected message type for {}: {message:?}", &topic),
                 }
             }
         });
@@ -214,10 +254,15 @@ impl StakeDeltaFilter {
         let mut subscription = params.context.message_bus.register("clock.tick").await?;
         params.clone().context.run(async move {
             loop {
-                let Ok((_, message)) = subscription.read().await else { return; };
+                let Ok((_, message)) = subscription.read().await else {
+                    return;
+                };
                 if let Message::Clock(message) = message.as_ref() {
                     if (message.number % 60) == 0 {
-                        state_tick.lock().await.tick()
+                        state_tick
+                            .lock()
+                            .await
+                            .tick()
                             .await
                             .inspect_err(|e| error!("Tick error: {e}"))
                             .ok();

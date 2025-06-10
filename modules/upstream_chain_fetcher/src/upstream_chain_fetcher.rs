@@ -1,18 +1,16 @@
 //! Acropolis Miniprotocols module for Caryatid
 //! Multi-connection, multi-protocol client interface to the Cardano node
 
-use caryatid_sdk::{Context, Module, module, MessageBusExt};
 use acropolis_common::{
-    calculations::slot_to_epoch, messages::{
-        BlockBodyMessage, BlockHeaderMessage, Message, CardanoMessage,
-    }, BlockInfo, BlockStatus, Era
+    calculations::slot_to_epoch,
+    messages::{BlockBodyMessage, BlockHeaderMessage, CardanoMessage, Message},
+    BlockInfo, BlockStatus, Era,
 };
-use std::sync::Arc;
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
+use caryatid_sdk::{module, Context, MessageBusExt, Module};
 use config::Config;
-use tracing::{debug, info, error};
-use tokio::sync::Mutex;
 use pallas::{
+    ledger::traverse::MultiEraHeader,
     network::{
         facades::PeerClient,
         miniprotocols::{
@@ -20,8 +18,10 @@ use pallas::{
             Point,
         },
     },
-    ledger::traverse::MultiEraHeader,
 };
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use tracing::{debug, error, info};
 
 const DEFAULT_HEADER_TOPIC: &str = "cardano.block.header";
 const DEFAULT_BODY_TOPIC: &str = "cardano.block.body";
@@ -41,14 +41,19 @@ const DEFAULT_SYNC_POINT: &str = "snapshot";
 )]
 pub struct UpstreamChainFetcher;
 
-impl UpstreamChainFetcher
-{
+impl UpstreamChainFetcher {
     /// Fetch an individual block and unpack it into messages
     // TODO fetch in batches
-    async fn fetch_block(context: Arc<Context<Message>>, config: Arc<Config>,
-                         peer: &mut PeerClient, point: Point,
-                         block_info: BlockInfo) -> Result<()> {
-        let topic = config.get_string("body-topic").unwrap_or(DEFAULT_BODY_TOPIC.to_string());
+    async fn fetch_block(
+        context: Arc<Context<Message>>,
+        config: Arc<Config>,
+        peer: &mut PeerClient,
+        point: Point,
+        block_info: BlockInfo,
+    ) -> Result<()> {
+        let topic = config
+            .get_string("body-topic")
+            .unwrap_or(DEFAULT_BODY_TOPIC.to_string());
 
         // Fetch the block body
         debug!("Requesting single block {point:?}");
@@ -56,34 +61,40 @@ impl UpstreamChainFetcher
 
         match body {
             Ok(body) => {
-                info!(number=block_info.number, size=body.len(), "Fetched block");
+                info!(
+                    number = block_info.number,
+                    size = body.len(),
+                    "Fetched block"
+                );
 
                 // Construct message
-                let message = BlockBodyMessage {
-                    raw: body
-                };
+                let message = BlockBodyMessage { raw: body };
 
-                let message_enum = Message::Cardano((
-                    block_info,
-                    CardanoMessage::BlockBody(message)
-                ));
-                context.message_bus.publish(&topic, Arc::new(message_enum))
+                let message_enum =
+                    Message::Cardano((block_info, CardanoMessage::BlockBody(message)));
+                context
+                    .message_bus
+                    .publish(&topic, Arc::new(message_enum))
                     .await
                     .unwrap_or_else(|e| error!("Failed to publish: {e}"));
-            },
+            }
 
-            Err(e) => error!("Can't fetch block at {point:?}: {e}")
+            Err(e) => error!("Can't fetch block at {point:?}: {e}"),
         }
 
         Ok(())
     }
 
     /// ChainSync client loop - fetch headers and publish details, plus fetch each block
-    async fn sync_to_point(context: Arc<Context<Message>>, config: Arc<Config>,
-                           peer: Arc<Mutex<PeerClient>>,
-                           point: Point) -> Result<()> {
-
-        let topic = config.get_string("header-topic").unwrap_or(DEFAULT_HEADER_TOPIC.to_string());
+    async fn sync_to_point(
+        context: Arc<Context<Message>>,
+        config: Arc<Config>,
+        peer: Arc<Mutex<PeerClient>>,
+        point: Point,
+    ) -> Result<()> {
+        let topic = config
+            .get_string("header-topic")
+            .unwrap_or(DEFAULT_HEADER_TOPIC.to_string());
 
         // Find intersect to given point
         let slot = point.slot_or_default();
@@ -95,7 +106,7 @@ impl UpstreamChainFetcher
         // Loop fetching messages
         let mut rolled_back = false;
         let mut last_epoch: Option<u64> = match slot {
-            0 => None,  // If we're starting from origin
+            0 => None,                      // If we're starting from origin
             _ => Some(slot_to_epoch(slot)), // From slot of last block
         };
 
@@ -109,7 +120,7 @@ impl UpstreamChainFetcher
                     // Get Byron sub-tag if any
                     let tag = match h.byron_prefix {
                         Some((tag, _)) => Some(tag),
-                        _ => None
+                        _ => None,
                     };
 
                     // Decode header
@@ -124,7 +135,7 @@ impl UpstreamChainFetcher
                             let epoch = slot_to_epoch(slot);
                             let new_epoch = match last_epoch {
                                 Some(last_epoch) => epoch != last_epoch,
-                                None => true
+                                None => true,
                             };
                             last_epoch = Some(epoch);
 
@@ -137,7 +148,7 @@ impl UpstreamChainFetcher
                             // TODO do this properly once we understand the values of the 'variant'
                             // byte
                             let era = match header {
-                                MultiEraHeader::EpochBoundary(_) => continue,  // Ignore EBBs
+                                MultiEraHeader::EpochBoundary(_) => continue, // Ignore EBBs
                                 MultiEraHeader::Byron(_) => Era::Byron,
                                 MultiEraHeader::ShelleyCompatible(_) => Era::Shelley,
                                 MultiEraHeader::BabbageCompatible(_) => Era::Babbage,
@@ -145,10 +156,11 @@ impl UpstreamChainFetcher
 
                             // Construct message
                             let block_info = BlockInfo {
-                                status: if rolled_back
-                                            { BlockStatus::RolledBack }
-                                        else
-                                            { BlockStatus::Volatile }, // TODO vary with 'k'
+                                status: if rolled_back {
+                                    BlockStatus::RolledBack
+                                } else {
+                                    BlockStatus::Volatile
+                                }, // TODO vary with 'k'
                                 slot,
                                 number,
                                 hash: hash.clone(),
@@ -156,15 +168,15 @@ impl UpstreamChainFetcher
                                 new_epoch,
                                 era,
                             };
-                            let message = BlockHeaderMessage {
-                                raw: h.cbor
-                            };
+                            let message = BlockHeaderMessage { raw: h.cbor };
 
                             let message_enum = Message::Cardano((
                                 block_info.clone(),
-                                CardanoMessage::BlockHeader(message)
+                                CardanoMessage::BlockHeader(message),
                             ));
-                            context.message_bus.publish(&topic, Arc::new(message_enum))
+                            context
+                                .message_bus
+                                .publish(&topic, Arc::new(message_enum))
                                 .await
                                 .unwrap_or_else(|e| error!("Failed to publish: {e}"));
 
@@ -172,37 +184,50 @@ impl UpstreamChainFetcher
                             // reconstruct a Point from the header because the one we get
                             // in the RollForward is the *tip*, not the next read point
                             let fetch_point = Point::Specific(slot, hash);
-                            Self::fetch_block(context.clone(), config.clone(),
-                                              &mut *my_peer, fetch_point, block_info)
-                                .await?;
+                            Self::fetch_block(
+                                context.clone(),
+                                config.clone(),
+                                &mut *my_peer,
+                                fetch_point,
+                                block_info,
+                            )
+                            .await?;
                         }
                         Err(e) => error!("Bad header: {e}"),
                     }
 
                     rolled_back = false;
-                },
+                }
 
                 // TODO Handle RollBackward, publish sync message
                 NextResponse::RollBackward(point, _) => {
                     info!("RollBackward to {point:?}");
                     rolled_back = true;
-                },
+                }
 
-                _ => debug!("Ignoring message: {next:?}")
+                _ => debug!("Ignoring message: {next:?}"),
             }
         }
     }
 
     /// ChainSync client loop - fetch headers and publish details, plus fetch each block
-    async fn run_chain_sync(context: Arc<Context<Message>>, config: Arc<Config>,
-                            peer: Arc<Mutex<PeerClient>>) -> Result<()> {
-        let sync_point = config.get_string("sync-point").unwrap_or(DEFAULT_SYNC_POINT.to_string());
+    async fn run_chain_sync(
+        context: Arc<Context<Message>>,
+        config: Arc<Config>,
+        peer: Arc<Mutex<PeerClient>>,
+    ) -> Result<()> {
+        let sync_point = config
+            .get_string("sync-point")
+            .unwrap_or(DEFAULT_SYNC_POINT.to_string());
         let mut my_peer = peer.lock().await;
 
         match sync_point.as_str() {
             "tip" => {
                 // Ask for origin but get the tip as well
-                let (_, Tip(point, _)) = my_peer.chainsync().find_intersect(vec![Point::Origin]).await?;
+                let (_, Tip(point, _)) = my_peer
+                    .chainsync()
+                    .find_intersect(vec![Point::Origin])
+                    .await?;
                 Self::sync_to_point(context, config, peer.clone(), point).await?;
             }
             "origin" => {
@@ -210,36 +235,41 @@ impl UpstreamChainFetcher
             }
             "snapshot" => {
                 // Subscribe to snapshotter and sync to its point
-                let topic = config.get_string("snapshot-complete-topic")
+                let topic = config
+                    .get_string("snapshot-complete-topic")
                     .unwrap_or(DEFAULT_SNAPSHOT_COMPLETION_TOPIC.to_string());
                 info!("Waiting for snapshot completion on {topic}");
 
                 let peer = peer.clone();
-                context.clone().message_bus.subscribe(&topic, move |message: Arc<Message>| {
+                context
+                    .clone()
+                    .message_bus
+                    .subscribe(&topic, move |message: Arc<Message>| {
+                        let context = context.clone();
+                        let config = config.clone();
+                        let peer = peer.clone();
 
-                    let context = context.clone();
-                    let config = config.clone();
-                    let peer = peer.clone();
+                        tokio::spawn(async move {
+                            match message.as_ref() {
+                                Message::Cardano((block, CardanoMessage::SnapshotComplete)) => {
+                                    info!(
+                                        "Notified snapshot complete at slot {} block number {}",
+                                        block.slot, block.number
+                                    );
+                                    let point = Point::Specific(block.slot, block.hash.clone());
 
-                    tokio::spawn(async move {
-                        match message.as_ref() {
-                            Message::Cardano((block, CardanoMessage::SnapshotComplete)) => {
-                                info!("Notified snapshot complete at slot {} block number {}",
-                                    block.slot, block.number);
-                                let point = Point::Specific(block.slot, block.hash.clone());
-
-                                Self::sync_to_point(context, config, peer, point)
-                                    .await
-                                    .unwrap_or_else(|e| error!("Can't sync: {e}"));
+                                    Self::sync_to_point(context, config, peer, point)
+                                        .await
+                                        .unwrap_or_else(|e| error!("Can't sync: {e}"));
+                                }
+                                _ => error!("Unexpected message type: {message:?}"),
                             }
-                            _ => error!("Unexpected message type: {message:?}")
-                        }
-                    });
+                        });
 
-                    async {}
-                })?;
+                        async {}
+                    })?;
             }
-            _ => return Err(anyhow!("Sync point {sync_point} not understood"))
+            _ => return Err(anyhow!("Sync point {sync_point} not understood")),
         };
 
         Ok(())
@@ -247,9 +277,11 @@ impl UpstreamChainFetcher
 
     /// Main init function
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
-        let node_address = config.get_string("node-address")
+        let node_address = config
+            .get_string("node-address")
             .unwrap_or(DEFAULT_NODE_ADDRESS.to_string());
-        let magic_number: u64 = config.get::<u64>("magic-number")
+        let magic_number: u64 = config
+            .get::<u64>("magic-number")
             .unwrap_or(DEFAULT_MAGIC_NUMBER);
 
         info!("Connecting to {node_address} ({magic_number})");
@@ -264,8 +296,8 @@ impl UpstreamChainFetcher
                     Self::run_chain_sync(context, config, Arc::new(Mutex::new(peer)))
                         .await
                         .unwrap_or_else(|e| error!("Chain sync failed: {e}"));
-                },
-                Err(e) => error!("Failed to connect to peer: {e}")
+                }
+                Err(e) => error!("Failed to connect to peer: {e}"),
             }
         });
 

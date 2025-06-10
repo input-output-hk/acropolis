@@ -1,10 +1,17 @@
+use acropolis_common::{
+    messages::{AddressDeltasMessage, StakeAddressDeltasMessage},
+    Address, AddressDelta, BlockInfo, ShelleyAddressDelegationPart, ShelleyAddressPointer,
+    StakeAddress, StakeAddressDelta, StakeAddressPayload,
+};
 use anyhow::{anyhow, Result};
 use serde_with::serde_as;
-use std::{cmp::max, collections::{HashMap, HashSet}, fs::File, io::BufReader, io::Write, sync::Arc};
-use acropolis_common::{
-    Address, AddressDelta, BlockInfo, ShelleyAddressPointer, StakeAddress, StakeAddressDelta,
-    ShelleyAddressDelegationPart, StakeAddressPayload,
-    messages::{AddressDeltasMessage, StakeAddressDeltasMessage}
+use std::{
+    cmp::max,
+    collections::{HashMap, HashSet},
+    fs::File,
+    io::BufReader,
+    io::Write,
+    sync::Arc,
 };
 use tracing::error;
 
@@ -13,14 +20,14 @@ use tracing::error;
 pub struct PointerCache {
     #[serde_as(as = "Vec<(_, _)>")]
     pub pointer_map: HashMap<ShelleyAddressPointer, Option<StakeAddress>>,
-    pub max_slot: u64
+    pub max_slot: u64,
 }
 
 impl PointerCache {
     pub fn new() -> Self {
         Self {
             pointer_map: HashMap::new(),
-            max_slot: 0
+            max_slot: 0,
         }
     }
 
@@ -35,7 +42,11 @@ impl PointerCache {
 
     pub fn ensure_up_to_date_ptr(&self, ptr: &ShelleyAddressPointer) -> Result<()> {
         if ptr.slot > self.max_slot {
-            return Err(anyhow!("Pointer {:?} is too recent, cache reflects slots up to {}", ptr, self.max_slot));
+            return Err(anyhow!(
+                "Pointer {:?} is too recent, cache reflects slots up to {}",
+                ptr,
+                self.max_slot
+            ));
         }
         Ok(())
     }
@@ -61,18 +72,23 @@ impl PointerCache {
         let reader = BufReader::new(file);
         match serde_json::from_reader::<BufReader<std::fs::File>, PointerCache>(reader) {
             Ok(res) => Ok(Arc::new(res)),
-            Err(err) => Err(anyhow!("Error reading json for {}: '{}'", file_path, err))
+            Err(err) => Err(anyhow!("Error reading json for {}: '{}'", file_path, err)),
         }
     }
 
     pub fn try_load_predefined(name: &str) -> Result<Arc<Self>> {
-        let value = crate::predefined::POINTER_CACHE.iter()
-            .fold(None, |prev, (id,val)| prev.or_else(|| if *id==name { Some(val) } else { None }))
+        let value = crate::predefined::POINTER_CACHE
+            .iter()
+            .fold(None, |prev, (id, val)| {
+                prev.or_else(|| if *id == name { Some(val) } else { None })
+            })
             .ok_or_else(|| anyhow!("Error finding predefined pointer cache for {name}"))?;
 
         match serde_json::from_str::<PointerCache>(value) {
             Ok(res) => Ok(Arc::new(res.clone())),
-            Err(err) => Err(anyhow!("Error reading predefined cache JSON for {name}: '{err}'"))
+            Err(err) => Err(anyhow!(
+                "Error reading predefined cache JSON for {name}: '{err}'"
+            )),
         }
     }
 
@@ -82,14 +98,21 @@ impl PointerCache {
         Ok(())
     }
 
-    pub fn try_save_filtered(&self, file_path: &str, used_pointers: &Vec<ShelleyAddressPointer>) -> Result<()> {
+    pub fn try_save_filtered(
+        &self,
+        file_path: &str,
+        used_pointers: &Vec<ShelleyAddressPointer>,
+    ) -> Result<()> {
         let mut clean_pointer_cache = PointerCache {
             max_slot: self.max_slot,
-            pointer_map: HashMap::new()
+            pointer_map: HashMap::new(),
         };
 
         for ptr in used_pointers.iter() {
-            clean_pointer_cache.pointer_map.insert(ptr.clone(), self.pointer_map.get(ptr).unwrap_or(&None).clone());
+            clean_pointer_cache.pointer_map.insert(
+                ptr.clone(),
+                self.pointer_map.get(ptr).unwrap_or(&None).clone(),
+            );
         }
 
         clean_pointer_cache.try_save(file_path)
@@ -99,53 +122,67 @@ impl PointerCache {
 #[derive(Clone, Debug, serde::Deserialize, PartialEq)]
 pub enum CacheMode {
     /// Built-in cache (see builit-in.rs, Address::network is taken as cache name), fails if none.
-    #[serde(rename="predefined")]
+    #[serde(rename = "predefined")]
     Predefined,
     /// Read cache, fail if it is not found on disk.
-    #[serde(rename="read")]
-    Read, 
+    #[serde(rename = "read")]
+    Read,
     /// Create and write cache, ignoring anything pre-existing cache on disk.
-    #[serde(rename="write")]
-    Write, 
+    #[serde(rename = "write")]
+    Write,
     /// Create and write cache only if it is absent, otherwise use existing one.
-    #[serde(rename="write-if-absent")]
-    WriteIfAbsent
+    #[serde(rename = "write-if-absent")]
+    WriteIfAbsent,
 }
 
 #[derive(Debug)]
 pub struct OccurrenceInfo {
     block: BlockInfo,
-    address_delta: AddressDelta, 
-    stake_address: Option<StakeAddress>
+    address_delta: AddressDelta,
+    stake_address: Option<StakeAddress>,
 }
 
 #[derive(Debug)]
 enum OccurrenceInfoKind {
     Valid,
     Invalid,
-    Mixed
+    Mixed,
 }
 
 #[derive(Debug)]
 pub struct Tracker {
-    occurrence: HashMap<ShelleyAddressPointer, Vec<OccurrenceInfo>>
+    occurrence: HashMap<ShelleyAddressPointer, Vec<OccurrenceInfo>>,
 }
 
 impl Tracker {
     pub fn new() -> Self {
-        Self { occurrence: HashMap::new() }
+        Self {
+            occurrence: HashMap::new(),
+        }
     }
 
     pub fn get_used_pointers(&self) -> Vec<ShelleyAddressPointer> {
-        self.occurrence.keys().cloned().collect::<Vec<ShelleyAddressPointer>>()
+        self.occurrence
+            .keys()
+            .cloned()
+            .collect::<Vec<ShelleyAddressPointer>>()
     }
 
-    pub fn track(&mut self, p: &ShelleyAddressPointer, b: &BlockInfo, d: &AddressDelta, sa: Option<&StakeAddress>) {
-        self.occurrence.entry(p.clone()).or_insert(vec![]).push(OccurrenceInfo {
-            block: b.clone(),
-            address_delta: d.clone(),
-            stake_address: sa.cloned()
-        });
+    pub fn track(
+        &mut self,
+        p: &ShelleyAddressPointer,
+        b: &BlockInfo,
+        d: &AddressDelta,
+        sa: Option<&StakeAddress>,
+    ) {
+        self.occurrence
+            .entry(p.clone())
+            .or_insert(vec![])
+            .push(OccurrenceInfo {
+                block: b.clone(),
+                address_delta: d.clone(),
+                stake_address: sa.cloned(),
+            });
     }
 
     fn get_kind(v: &Vec<OccurrenceInfo>) -> Option<OccurrenceInfoKind> {
@@ -159,7 +196,7 @@ impl Tracker {
             (true, false) => Some(OccurrenceInfoKind::Valid),
             (false, true) => Some(OccurrenceInfoKind::Invalid),
             (true, true) => Some(OccurrenceInfoKind::Mixed),
-            _ => None
+            _ => None,
         }
     }
 
@@ -167,16 +204,21 @@ impl Tracker {
         let mut valid_ptrs = 0;
         let mut invalid_ptrs = 0;
         let mut mixed_ptrs = 0;
-        for (_k,v) in self.occurrence.iter() {
+        for (_k, v) in self.occurrence.iter() {
             if let Some(kind) = Self::get_kind(&v) {
                 match kind {
                     OccurrenceInfoKind::Valid => valid_ptrs += 1,
                     OccurrenceInfoKind::Invalid => invalid_ptrs += 1,
-                    OccurrenceInfoKind::Mixed => mixed_ptrs += 1
+                    OccurrenceInfoKind::Mixed => mixed_ptrs += 1,
                 }
             }
         }
-        tracing::info!("Pointers dereferencing stats: valid {}, invalid {}, mixed {}", valid_ptrs, invalid_ptrs, mixed_ptrs)
+        tracing::info!(
+            "Pointers dereferencing stats: valid {}, invalid {}, mixed {}",
+            valid_ptrs,
+            invalid_ptrs,
+            mixed_ptrs
+        )
     }
 
     fn join_hash_set(hs: HashSet<String>, mid: &str) -> String {
@@ -206,16 +248,27 @@ impl Tracker {
             let mut src_addr_set = HashSet::new();
             let mut dst_addr_set = HashSet::new();
             for event in stats.iter() {
-                let src_addr = event.address_delta.address.to_string()
+                let src_addr = event
+                    .address_delta
+                    .address
+                    .to_string()
                     .unwrap_or("(???)".to_owned());
-                let dst_addr = event.stake_address.as_ref().map(|a| a.to_string())
+                let dst_addr = event
+                    .stake_address
+                    .as_ref()
+                    .map(|a| a.to_string())
                     .unwrap_or(Ok("(none)".to_owned()))
                     .unwrap_or("(???)".to_owned());
                 delta += event.address_delta.delta;
 
-                chunk.push(format!("   blk {}, {}: {} ({:?}) => {} ({:?})",
-                    event.block.number, src_addr, event.address_delta.delta,
-                    event.address_delta.address, dst_addr, event.stake_address
+                chunk.push(format!(
+                    "   blk {}, {}: {} ({:?}) => {} ({:?})",
+                    event.block.number,
+                    src_addr,
+                    event.address_delta.delta,
+                    event.address_delta.address,
+                    dst_addr,
+                    event.stake_address
                 ));
 
                 src_addr_set.insert(src_addr);
@@ -223,14 +276,16 @@ impl Tracker {
             }
             let src_addr = Self::join_hash_set(src_addr_set, ":");
             let dst_addr = Self::join_hash_set(dst_addr_set, ":");
-            chunk.insert(0, format!("{kind} {src_addr} => {dst_addr}, pointer {ptr:?}, total delta {delta}"));
+            chunk.insert(
+                0,
+                format!("{kind} {src_addr} => {dst_addr}, pointer {ptr:?}, total delta {delta}"),
+            );
             chunk.push("".to_owned());
 
             let flattened = chunk.join("\n");
             if is_valid {
                 valid.push(flattened);
-            }
-            else {
+            } else {
                 invalid.push(flattened);
             }
         }
@@ -240,23 +295,19 @@ impl Tracker {
     }
 }
 
-/// Iterates through all address deltas in `delta`, leaves only stake addresses 
+/// Iterates through all address deltas in `delta`, leaves only stake addresses
 /// (and removes all others). If the address is a pointer, tries to resolve it.
 /// If the pointer is incorrect, then filters it out too (incorrect pointers cannot
 /// be used for staking). Updates info about pointer occurrences, if tracker provided.
 pub fn process_message(
-   cache: &PointerCache,
-   delta: &AddressDeltasMessage,
-   block: &BlockInfo,
-   mut tracker: Option<&mut Tracker>
+    cache: &PointerCache,
+    delta: &AddressDeltasMessage,
+    block: &BlockInfo,
+    mut tracker: Option<&mut Tracker>,
 ) -> StakeAddressDeltasMessage {
-
-    let mut result = StakeAddressDeltasMessage {
-        deltas: Vec::new()
-    };
+    let mut result = StakeAddressDeltasMessage { deltas: Vec::new() };
 
     for d in delta.deltas.iter() {
-
         // Variants to be processed:
         // 1. Shelley Address delegation is a stake
         // 2. Shelley Address delegation is a pointer + target address is a stake
@@ -267,7 +318,9 @@ pub fn process_message(
         // Errors:
         // 1. Shelley Address delegation is a pointer + pointer not known
 
-        cache.ensure_up_to_date(&d.address).unwrap_or_else(|e| error!("{e}"));
+        cache
+            .ensure_up_to_date(&d.address)
+            .unwrap_or_else(|e| error!("{e}"));
 
         let stake_address = match &d.address {
             // Not good for staking
@@ -276,47 +329,52 @@ pub fn process_message(
             Address::Shelley(shelley) => {
                 match &shelley.delegation {
                     // Base addresses (stake delegated to itself)
-                    ShelleyAddressDelegationPart::StakeKeyHash(keyhash) =>
-                        StakeAddress {
-                            network: shelley.network.clone(),
-                            payload: StakeAddressPayload::StakeKeyHash(keyhash.clone())
-                        },
+                    ShelleyAddressDelegationPart::StakeKeyHash(keyhash) => StakeAddress {
+                        network: shelley.network.clone(),
+                        payload: StakeAddressPayload::StakeKeyHash(keyhash.clone()),
+                    },
 
-                    ShelleyAddressDelegationPart::ScriptHash(scripthash) =>
-                        StakeAddress {
-                            network: shelley.network.clone(),
-                            payload: StakeAddressPayload::ScriptHash(scripthash.clone())
-                        },
+                    ShelleyAddressDelegationPart::ScriptHash(scripthash) => StakeAddress {
+                        network: shelley.network.clone(),
+                        payload: StakeAddressPayload::ScriptHash(scripthash.clone()),
+                    },
 
                     // Shelley addresses (stake delegated to some different address)
-                    ShelleyAddressDelegationPart::Pointer(ref ptr) => match cache.decode_pointer(ptr) {
-                        None => {
-                            tracing::warn!("Pointer {ptr:?} is not registered in cache");
-                            tracker.as_mut().map(|t| t.track(ptr, block, &d, None));
-                            continue
-                        },
+                    ShelleyAddressDelegationPart::Pointer(ref ptr) => {
+                        match cache.decode_pointer(ptr) {
+                            None => {
+                                tracing::warn!("Pointer {ptr:?} is not registered in cache");
+                                tracker.as_mut().map(|t| t.track(ptr, block, &d, None));
+                                continue;
+                            }
 
-                        Some(None) => {
-                            tracker.as_mut().map(|t| t.track(ptr, block, &d, None));
-                            continue
-                        },
+                            Some(None) => {
+                                tracker.as_mut().map(|t| t.track(ptr, block, &d, None));
+                                continue;
+                            }
 
-                        Some(Some(ref stake_address)) => {
-                            tracker.as_mut().map(|t| t.track(ptr, block, &d, Some(stake_address)));
-                            stake_address.clone()
+                            Some(Some(ref stake_address)) => {
+                                tracker
+                                    .as_mut()
+                                    .map(|t| t.track(ptr, block, &d, Some(stake_address)));
+                                stake_address.clone()
+                            }
                         }
                     }
 
                     // Enterprise addresses, does not delegate stake
-                    ShelleyAddressDelegationPart::None => continue 
+                    ShelleyAddressDelegationPart::None => continue,
                 }
             }
 
-            Address::Stake(stake_address) => stake_address.clone()
+            Address::Stake(stake_address) => stake_address.clone(),
         };
 
-        let stake_delta = StakeAddressDelta { address: stake_address, delta: d.delta };
-        result.deltas.push (stake_delta);
+        let stake_delta = StakeAddressDelta {
+            address: stake_address,
+            delta: d.delta,
+        };
+        result.deltas.push(stake_delta);
     }
 
     result
@@ -324,18 +382,20 @@ pub fn process_message(
 
 #[cfg(test)]
 mod test {
-    use bech32::{Bech32, Hrp};
     use crate::*;
     use acropolis_common::{
-        AddressDelta, Address, BlockInfo, BlockStatus, ByronAddress, Era, 
-        ShelleyAddress, ShelleyAddressPaymentPart, ShelleyAddressDelegationPart,
-        StakeAddressPayload, StakeAddress, ShelleyAddressPointer,
-        messages::AddressDeltasMessage
+        messages::AddressDeltasMessage, Address, AddressDelta, BlockInfo, BlockStatus,
+        ByronAddress, Era, ShelleyAddress, ShelleyAddressDelegationPart, ShelleyAddressPaymentPart,
+        ShelleyAddressPointer, StakeAddress, StakeAddressPayload,
     };
+    use bech32::{Bech32, Hrp};
 
     fn parse_addr(s: &str) -> Result<AddressDelta> {
         let a = pallas_addresses::Address::from_bech32(s)?;
-        Ok(AddressDelta { address: map_address(&a)?, delta: 1 })
+        Ok(AddressDelta {
+            address: map_address(&a)?,
+            delta: 1,
+        })
     }
 
     /// Map Pallas Network to our AddressNetwork
@@ -343,7 +403,7 @@ mod test {
         match network {
             pallas_addresses::Network::Mainnet => Ok(AddressNetwork::Main),
             pallas_addresses::Network::Testnet => Ok(AddressNetwork::Test),
-            _ => return Err(anyhow!("Unknown network in address"))
+            _ => return Err(anyhow!("Unknown network in address")),
         }
     }
 
@@ -356,48 +416,56 @@ mod test {
                 payload: byron_address.payload.to_vec(),
             })),
 
-            pallas_addresses::Address::Shelley(shelley_address) => Ok(Address::Shelley(ShelleyAddress {
-                network: map_network(shelley_address.network())?,
+            pallas_addresses::Address::Shelley(shelley_address) => {
+                Ok(Address::Shelley(ShelleyAddress {
+                    network: map_network(shelley_address.network())?,
 
-                payment: match shelley_address.payment() {
-                    pallas_addresses::ShelleyPaymentPart::Key(hash) =>
-                        ShelleyAddressPaymentPart::PaymentKeyHash(hash.to_vec()),
-                    pallas_addresses::ShelleyPaymentPart::Script(hash) =>
-                        ShelleyAddressPaymentPart::ScriptHash(hash.to_vec()),
+                    payment: match shelley_address.payment() {
+                        pallas_addresses::ShelleyPaymentPart::Key(hash) => {
+                            ShelleyAddressPaymentPart::PaymentKeyHash(hash.to_vec())
+                        }
+                        pallas_addresses::ShelleyPaymentPart::Script(hash) => {
+                            ShelleyAddressPaymentPart::ScriptHash(hash.to_vec())
+                        }
+                    },
 
-                },
-
-                delegation: match shelley_address.delegation() {
-                    pallas_addresses::ShelleyDelegationPart::Null =>
-                        ShelleyAddressDelegationPart::None,
-                    pallas_addresses::ShelleyDelegationPart::Key(hash) =>
-                        ShelleyAddressDelegationPart::StakeKeyHash(hash.to_vec()),
-                    pallas_addresses::ShelleyDelegationPart::Script(hash) =>
-                        ShelleyAddressDelegationPart::ScriptHash(hash.to_vec()),
-                    pallas_addresses::ShelleyDelegationPart::Pointer(pointer) =>
-                        ShelleyAddressDelegationPart::Pointer(ShelleyAddressPointer {
-                            slot: pointer.slot(),
-                            tx_index: pointer.tx_idx(),
-                            cert_index: pointer.cert_idx()
-                        })
-                }
-            })),
+                    delegation: match shelley_address.delegation() {
+                        pallas_addresses::ShelleyDelegationPart::Null => {
+                            ShelleyAddressDelegationPart::None
+                        }
+                        pallas_addresses::ShelleyDelegationPart::Key(hash) => {
+                            ShelleyAddressDelegationPart::StakeKeyHash(hash.to_vec())
+                        }
+                        pallas_addresses::ShelleyDelegationPart::Script(hash) => {
+                            ShelleyAddressDelegationPart::ScriptHash(hash.to_vec())
+                        }
+                        pallas_addresses::ShelleyDelegationPart::Pointer(pointer) => {
+                            ShelleyAddressDelegationPart::Pointer(ShelleyAddressPointer {
+                                slot: pointer.slot(),
+                                tx_index: pointer.tx_idx(),
+                                cert_index: pointer.cert_idx(),
+                            })
+                        }
+                    },
+                }))
+            }
 
             pallas_addresses::Address::Stake(stake_address) => Ok(Address::Stake(StakeAddress {
                 network: map_network(stake_address.network())?,
                 payload: match stake_address.payload() {
-                    pallas_addresses::StakePayload::Stake(hash) =>
-                        StakeAddressPayload::StakeKeyHash(hash.to_vec()),
-                    pallas_addresses::StakePayload::Script(hash) =>
-                        StakeAddressPayload::ScriptHash(hash.to_vec()),
-                }
+                    pallas_addresses::StakePayload::Stake(hash) => {
+                        StakeAddressPayload::StakeKeyHash(hash.to_vec())
+                    }
+                    pallas_addresses::StakePayload::Script(hash) => {
+                        StakeAddressPayload::ScriptHash(hash.to_vec())
+                    }
+                },
             })),
-
         }
     }
 
     fn key_to_keyhash(prefix: &str, key: &str) -> String {
-        let (_hrp,key_vec) = bech32::decode(key).unwrap();
+        let (_hrp, key_vec) = bech32::decode(key).unwrap();
         let hash_vec = pallas_crypto::hash::Hasher::<224>::hash(&key_vec);
         let prefix_hrp: Hrp = Hrp::parse(prefix).unwrap();
         bech32::encode::<Bech32>(prefix_hrp, &hash_vec.to_vec()).unwrap()
@@ -419,13 +487,17 @@ mod test {
 
         let pointed = match parse_addr(pointed_addr)?.address {
             Address::Stake(stake) => stake.clone(),
-            _ => panic!("Not a stake address")
+            _ => panic!("Not a stake address"),
         };
 
         cache.set_pointer(
-            ShelleyAddressPointer { slot: 2498243, tx_index: 27, cert_index: 3 },
+            ShelleyAddressPointer {
+                slot: 2498243,
+                tx_index: 27,
+                cert_index: 3,
+            },
             pointed,
-            2498243
+            2498243,
         );
 
         let delta = AddressDeltasMessage {
@@ -447,32 +519,122 @@ mod test {
             ]
         };
 
-        let block = BlockInfo { 
-            status: BlockStatus::Immutable, 
-            slot: 2498243, 
-            number: 1, 
-            hash: vec![], 
-            epoch: 1, 
-            new_epoch: true, 
-            era: Era::Conway 
+        let block = BlockInfo {
+            status: BlockStatus::Immutable,
+            slot: 2498243,
+            number: 1,
+            hash: vec![],
+            epoch: 1,
+            new_epoch: true,
+            era: Era::Conway,
         };
 
         let stake_delta = process_message(&cache, &delta, &block, None);
 
-        assert_eq!(stake_delta.deltas.get(0).unwrap().address.to_string().unwrap(), stake_addr);
-        assert_eq!(stake_delta.deltas.get(1).unwrap().address.to_string().unwrap(), stake_addr);
-        assert_eq!(stake_delta.deltas.get(2).unwrap().address.to_string().unwrap(), script_addr);
-        assert_eq!(stake_delta.deltas.get(3).unwrap().address.to_string().unwrap(), script_addr);
-        assert_eq!(stake_delta.deltas.get(4).unwrap().address.to_string().unwrap(), pointed_addr);
-        assert_eq!(stake_delta.deltas.get(5).unwrap().address.to_string().unwrap(), pointed_addr);
-        assert_eq!(stake_delta.deltas.get(6).unwrap().address.to_string().unwrap(), stake_addr);
-        assert_eq!(stake_delta.deltas.get(7).unwrap().address.to_string().unwrap(), script_addr);
+        assert_eq!(
+            stake_delta
+                .deltas
+                .get(0)
+                .unwrap()
+                .address
+                .to_string()
+                .unwrap(),
+            stake_addr
+        );
+        assert_eq!(
+            stake_delta
+                .deltas
+                .get(1)
+                .unwrap()
+                .address
+                .to_string()
+                .unwrap(),
+            stake_addr
+        );
+        assert_eq!(
+            stake_delta
+                .deltas
+                .get(2)
+                .unwrap()
+                .address
+                .to_string()
+                .unwrap(),
+            script_addr
+        );
+        assert_eq!(
+            stake_delta
+                .deltas
+                .get(3)
+                .unwrap()
+                .address
+                .to_string()
+                .unwrap(),
+            script_addr
+        );
+        assert_eq!(
+            stake_delta
+                .deltas
+                .get(4)
+                .unwrap()
+                .address
+                .to_string()
+                .unwrap(),
+            pointed_addr
+        );
+        assert_eq!(
+            stake_delta
+                .deltas
+                .get(5)
+                .unwrap()
+                .address
+                .to_string()
+                .unwrap(),
+            pointed_addr
+        );
+        assert_eq!(
+            stake_delta
+                .deltas
+                .get(6)
+                .unwrap()
+                .address
+                .to_string()
+                .unwrap(),
+            stake_addr
+        );
+        assert_eq!(
+            stake_delta
+                .deltas
+                .get(7)
+                .unwrap()
+                .address
+                .to_string()
+                .unwrap(),
+            script_addr
+        );
 
         // additional check: payload conversion correctness
-        assert_eq!(stake_delta.deltas.get(0).unwrap().address.payload.to_string().unwrap(),
-                   stake_key_hash);
-        assert_eq!(stake_delta.deltas.get(2).unwrap().address.payload.to_string().unwrap(),
-                   script_hash);
+        assert_eq!(
+            stake_delta
+                .deltas
+                .get(0)
+                .unwrap()
+                .address
+                .payload
+                .to_string()
+                .unwrap(),
+            stake_key_hash
+        );
+        assert_eq!(
+            stake_delta
+                .deltas
+                .get(2)
+                .unwrap()
+                .address
+                .payload
+                .to_string()
+                .unwrap(),
+            script_hash
+        );
 
         assert_eq!(stake_delta.deltas.len(), 8);
 

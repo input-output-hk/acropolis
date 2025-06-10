@@ -1,5 +1,6 @@
-pub const POINTER_CACHE: [(&str,&str);1] = [
-("Main", r#"
+pub const POINTER_CACHE: [(&str, &str); 1] = [(
+    "Main",
+    r#"
 {
   "pointer_map": [
     [
@@ -124,4 +125,5 @@ pub const POINTER_CACHE: [(&str,&str);1] = [
   ],
   "max_slot": 154396745
 }
-"#)];
+"#,
+)];

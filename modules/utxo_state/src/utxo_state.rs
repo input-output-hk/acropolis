@@ -1,22 +1,20 @@
 //! Acropolis UTXO state module for Caryatid
 //! Accepts UTXO events and derives the current ledger state in memory
 
-use caryatid_sdk::{Context, Module, module, MessageBusExt};
-use acropolis_common::{
-    messages::{Message, CardanoMessage, RESTResponse},
-};
+use acropolis_common::messages::{CardanoMessage, Message, RESTResponse};
+use caryatid_sdk::{module, Context, MessageBusExt, Module};
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use config::Config;
-use tracing::{info, error};
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tracing::{error, info};
 
 mod state;
-use state::{State, ImmutableUTXOStore};
+use state::{ImmutableUTXOStore, State};
 
-mod volatile_index;
 mod address_delta_publisher;
+mod volatile_index;
 use address_delta_publisher::AddressDeltaPublisher;
 mod in_memory_immutable_utxo_store;
 use in_memory_immutable_utxo_store::InMemoryImmutableUTXOStore;
@@ -46,45 +44,33 @@ const DEFAULT_STORE: &str = "memory";
 )]
 pub struct UTXOState;
 
-impl UTXOState
-{
+impl UTXOState {
     /// Main init function
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
-
         // Get configuration
-        let subscribe_topic = config.get_string("subscribe-topic")
+        let subscribe_topic = config
+            .get_string("subscribe-topic")
             .unwrap_or(DEFAULT_SUBSCRIBE_TOPIC.to_string());
         info!("Creating subscriber on '{subscribe_topic}'");
 
-        let rest_topic = config.get_string("rest-topic")
+        let rest_topic = config
+            .get_string("rest-topic")
             .unwrap_or(DEFAULT_REST_TOPIC.to_string());
         info!("Creating REST handler on '{rest_topic}'");
 
         // Create store
-        let store_type = config.get_string("store").unwrap_or(DEFAULT_STORE.to_string());
+        let store_type = config
+            .get_string("store")
+            .unwrap_or(DEFAULT_STORE.to_string());
         let store: Arc<dyn ImmutableUTXOStore> = match store_type.as_str() {
-            "memory" => {
-                Arc::new(InMemoryImmutableUTXOStore::new(config.clone()))
-            }
-            "dashmap" => {
-                Arc::new(DashMapImmutableUTXOStore::new(config.clone()))
-            }
-            "sled" => {
-                Arc::new(SledImmutableUTXOStore::new(config.clone())?)
-            }
-            "sled-async" => {
-                Arc::new(SledAsyncImmutableUTXOStore::new(config.clone())?)
-            }
-            "fjall" => {
-                Arc::new(FjallImmutableUTXOStore::new(config.clone())?)
-            }
-            "fjall-async" => {
-                Arc::new(FjallAsyncImmutableUTXOStore::new(config.clone())?)
-            }
-            "fake" => {
-                Arc::new(FakeImmutableUTXOStore::new(config.clone()))
-            }
-            _ => return Err(anyhow!("Unknown store type {store_type}"))
+            "memory" => Arc::new(InMemoryImmutableUTXOStore::new(config.clone())),
+            "dashmap" => Arc::new(DashMapImmutableUTXOStore::new(config.clone())),
+            "sled" => Arc::new(SledImmutableUTXOStore::new(config.clone())?),
+            "sled-async" => Arc::new(SledAsyncImmutableUTXOStore::new(config.clone())?),
+            "fjall" => Arc::new(FjallImmutableUTXOStore::new(config.clone())?),
+            "fjall-async" => Arc::new(FjallAsyncImmutableUTXOStore::new(config.clone())?),
+            "fake" => Arc::new(FakeImmutableUTXOStore::new(config.clone())),
+            _ => return Err(anyhow!("Unknown store type {store_type}")),
         };
         let mut state = State::new(store);
 
@@ -99,17 +85,20 @@ impl UTXOState
         let mut subscription = context.message_bus.register(&subscribe_topic).await?;
         context.run(async move {
             loop {
-                let Ok((_, message)) = subscription.read().await else { return; };
+                let Ok((_, message)) = subscription.read().await else {
+                    return;
+                };
                 match message.as_ref() {
                     Message::Cardano((block, CardanoMessage::UTXODeltas(deltas_msg))) => {
                         let mut state = state1.lock().await;
-                        state.handle(block, deltas_msg)
+                        state
+                            .handle(block, deltas_msg)
                             .await
                             .inspect_err(|e| error!("Messaging handling error: {e}"))
                             .ok();
                     }
 
-                    _ => error!("Unexpected message type: {message:?}")
+                    _ => error!("Unexpected message type: {message:?}"),
                 }
             }
         });
@@ -119,10 +108,15 @@ impl UTXOState
         let mut subscription = context.message_bus.register("clock.tick").await?;
         context.run(async move {
             loop {
-                let Ok((_, message)) = subscription.read().await else { return; };
+                let Ok((_, message)) = subscription.read().await else {
+                    return;
+                };
                 if let Message::Clock(message) = message.as_ref() {
                     if (message.number % 60) == 0 {
-                        state2.lock().await.tick()
+                        state2
+                            .lock()
+                            .await
+                            .tick()
                             .await
                             .inspect_err(|e| error!("Tick error: {e}"))
                             .ok();
@@ -133,43 +127,45 @@ impl UTXOState
 
         // Handle REST requests for utxo.<id>
         let state3 = state.clone();
-        context.message_bus.handle(&rest_topic, move |message: Arc<Message>| {
-            let state = state3.clone();
+        context
+            .message_bus
+            .handle(&rest_topic, move |message: Arc<Message>| {
+                let state = state3.clone();
 
-            async move {
-                let response = match message.as_ref() {
-                    Message::RESTRequest(request) => {
-                        info!("REST received {} {}", request.method, request.path);
-                        match request.path_elements.get(1) {
+                async move {
+                    let response =
+                        match message.as_ref() {
+                            Message::RESTRequest(request) => {
+                                info!("REST received {} {}", request.method, request.path);
+                                match request.path_elements.get(1) {
                             Some(id) => match hex::decode(&id) {
                                 Ok(id) => {
                                     let key = state::UTXOKey::new(&id, 0); // TODO parse :index
                                     match state.lock().await.lookup_utxo(&key).await {
                                         Ok(Some(utxo)) => match serde_json::to_string(&utxo) {
                                             Ok(body) => RESTResponse::with_json(200, &body),
-                                            Err(error) => RESTResponse::with_text(500, 
+                                            Err(error) => RESTResponse::with_text(500,
                                                 &format!("{error:?}").to_string()),
                                         },
                                         _ => RESTResponse::with_text(404, "UTXO not found"),
                                     }
                                 },
-                                Err(error) => RESTResponse::with_text(400, 
+                                Err(error) => RESTResponse::with_text(400,
                                     &format!("UTXO must be hex encoded vector of bytes: {error:?}") // TODO real format
                                     .to_string()),
                             },
                             None => RESTResponse::with_text(400, "UTXO id must be provided"),
                         }
-                    },
-                    _ => {
-                        error!("Unexpected message type {:?}", message);
-                        RESTResponse::with_text(500, "Unexpected message in REST request")
-                    }
-                };
+                            }
+                            _ => {
+                                error!("Unexpected message type {:?}", message);
+                                RESTResponse::with_text(500, "Unexpected message in REST request")
+                            }
+                        };
 
-                Arc::new(Message::RESTResponse(response))
-            }
-        })?;
-
+                    Arc::new(Message::RESTResponse(response))
+                }
+            })?;
 
         Ok(())
     }

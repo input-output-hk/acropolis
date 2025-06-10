@@ -1,12 +1,12 @@
 //! In-memory store for immutable UTXOs using standard HashMap
 
-use crate::state::{UTXOKey, UTXOValue, ImmutableUTXOStore};
-use std::collections::HashMap;
-use async_trait::async_trait;
-use tokio::sync::RwLock;
+use crate::state::{ImmutableUTXOStore, UTXOKey, UTXOValue};
 use anyhow::Result;
+use async_trait::async_trait;
 use config::Config;
+use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::sync::RwLock;
 use tracing::info;
 
 pub struct InMemoryImmutableUTXOStore {
@@ -26,7 +26,6 @@ impl InMemoryImmutableUTXOStore {
 
 #[async_trait]
 impl ImmutableUTXOStore for InMemoryImmutableUTXOStore {
-
     /// Add a UTXO
     async fn add_utxo(&self, key: UTXOKey, value: UTXOValue) -> Result<()> {
         self.utxos.write().await.insert(key, value);

@@ -1,18 +1,18 @@
 //! Acropolis Governance State module for Caryatid
 //! Accepts certificate events and derives the Governance State in memory
 
-use caryatid_sdk::{Context, Module, module, MessageBusExt, message_bus::Subscription};
 use acropolis_common::{
     messages::{
-        Message, RESTResponse, CardanoMessage,
-        GovernanceProceduresMessage, ProtocolParamsMessage, DRepStakeDistributionMessage
+        CardanoMessage, DRepStakeDistributionMessage, GovernanceProceduresMessage, Message,
+        ProtocolParamsMessage, RESTResponse,
     },
-    BlockInfo
+    BlockInfo,
 };
-use std::sync::Arc;
 use anyhow::{anyhow, Result};
+use caryatid_sdk::{message_bus::Subscription, module, Context, MessageBusExt, Module};
 use config::Config;
 use hex::ToHex;
+use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info};
 
@@ -21,8 +21,10 @@ use state::State;
 
 const DEFAULT_SUBSCRIBE_TOPIC: (&str, &str) = ("subscribe-topic", "cardano.governance");
 const DEFAULT_HANDLE_TOPIC: (&str, &str) = ("handle-topic", "rest.get.governance-state.*");
-const DEFAULT_DREP_DISTRIBUTION_TOPIC: (&str, &str) = ("stake-drep-distribution-topic", "cardano.drep.distribution");
-const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: (&str, &str) = ("protocol-parameters-topic", "cardano.protocol.parameters");
+const DEFAULT_DREP_DISTRIBUTION_TOPIC: (&str, &str) =
+    ("stake-drep-distribution-topic", "cardano.drep.distribution");
+const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: (&str, &str) =
+    ("protocol-parameters-topic", "cardano.protocol.parameters");
 const DEFAULT_ENACT_STATE_TOPIC: (&str, &str) = ("enact-state-topic", "cardano.enact.state");
 
 /// Governance State module
@@ -38,7 +40,7 @@ pub struct GovernanceStateConfig {
     handle_topic: String,
     drep_distribution_topic: String,
     protocol_parameters_topic: String,
-    enact_state_topic: String
+    enact_state_topic: String,
 }
 
 impl GovernanceStateConfig {
@@ -54,7 +56,7 @@ impl GovernanceStateConfig {
             handle_topic: Self::conf(config, DEFAULT_HANDLE_TOPIC),
             drep_distribution_topic: Self::conf(config, DEFAULT_DREP_DISTRIBUTION_TOPIC),
             protocol_parameters_topic: Self::conf(config, DEFAULT_PROTOCOL_PARAMETERS_TOPIC),
-            enact_state_topic: Self::conf(config, DEFAULT_ENACT_STATE_TOPIC)
+            enact_state_topic: Self::conf(config, DEFAULT_ENACT_STATE_TOPIC),
         })
     }
 }
@@ -62,105 +64,133 @@ impl GovernanceStateConfig {
 fn perform_rest_request(state: &State, path: &str) -> Result<String> {
     let request = match path.rfind('/') {
         None => return Err(anyhow!("Poorly formed url, '/' expected.")),
-        Some(suffix_start) => &path[suffix_start+1..]
+        Some(suffix_start) => &path[suffix_start + 1..],
     };
 
     if request == "list" {
         let mut list_votes = Vec::new();
         let mut list_props = Vec::new();
 
-        for (a,p) in state.list_proposals()?.into_iter() {
+        for (a, p) in state.list_proposals()?.into_iter() {
             list_props.push(format!("{}: {:?}", a, p));
         }
 
-        for (a,v,tx,vp) in state.list_votes()?.into_iter() {
-            list_votes.push(format!("{}: {} at {} voted as {:?}", a, v, tx.encode_hex::<String>(), vp));
+        for (a, v, tx, vp) in state.list_votes()?.into_iter() {
+            list_votes.push(format!(
+                "{}: {} at {} voted as {:?}",
+                a,
+                v,
+                tx.encode_hex::<String>(),
+                vp
+            ));
         }
 
-        Ok(format!("Governance proposals list: {:?}\nGovernance votes list: {:?}",
+        Ok(format!(
+            "Governance proposals list: {:?}\nGovernance votes list: {:?}",
             list_props, list_votes
         ))
-    }
-    else {
+    } else {
         Err(anyhow!("Invalid action specified."))
     }
 }
 
 impl GovernanceState {
-    async fn read_governance(governance_s: &mut Box<dyn Subscription<Message>>) 
-        -> Result<(BlockInfo, GovernanceProceduresMessage)>
-    {
+    async fn read_governance(
+        governance_s: &mut Box<dyn Subscription<Message>>,
+    ) -> Result<(BlockInfo, GovernanceProceduresMessage)> {
         match governance_s.read().await?.1.as_ref() {
-            Message::Cardano((blk, CardanoMessage::GovernanceProcedures(msg))) => 
-                Ok((blk.clone(), msg.clone())),
-            msg => Err(anyhow!("Unexpected message {msg:?} for governance procedures topic"))
+            Message::Cardano((blk, CardanoMessage::GovernanceProcedures(msg))) => {
+                Ok((blk.clone(), msg.clone()))
+            }
+            msg => Err(anyhow!(
+                "Unexpected message {msg:?} for governance procedures topic"
+            )),
         }
     }
 
-    async fn read_parameters<'a>(parameters_s: &mut Box<dyn Subscription<Message>>)
-        -> Result<(BlockInfo, ProtocolParamsMessage)>
-    {
+    async fn read_parameters<'a>(
+        parameters_s: &mut Box<dyn Subscription<Message>>,
+    ) -> Result<(BlockInfo, ProtocolParamsMessage)> {
         match parameters_s.read().await?.1.as_ref() {
-            Message::Cardano((blk, CardanoMessage::ProtocolParams(params))) => 
-                Ok((blk.clone(), params.clone())),
-            msg => Err(anyhow!("Unexpected message {msg:?} for protocol parameters topic"))
+            Message::Cardano((blk, CardanoMessage::ProtocolParams(params))) => {
+                Ok((blk.clone(), params.clone()))
+            }
+            msg => Err(anyhow!(
+                "Unexpected message {msg:?} for protocol parameters topic"
+            )),
         }
     }
 
-    async fn read_drep(drep_s: &mut Box<dyn Subscription<Message>>)
-        -> Result<(BlockInfo, DRepStakeDistributionMessage)>
-    {
+    async fn read_drep(
+        drep_s: &mut Box<dyn Subscription<Message>>,
+    ) -> Result<(BlockInfo, DRepStakeDistributionMessage)> {
         match drep_s.read().await?.1.as_ref() {
-            Message::Cardano((blk, CardanoMessage::DRepStakeDistribution(distr))) =>
-                Ok((blk.clone(), distr.clone())),
-            msg => Err(anyhow!("Unexpected message {msg:?} for DRep distribution topic"))
+            Message::Cardano((blk, CardanoMessage::DRepStakeDistribution(distr))) => {
+                Ok((blk.clone(), distr.clone()))
+            }
+            msg => Err(anyhow!(
+                "Unexpected message {msg:?} for DRep distribution topic"
+            )),
         }
     }
 
-    async fn run(context: Arc<Context<Message>>, config: Arc<GovernanceStateConfig>,
-                 mut governance_s: Box<dyn Subscription<Message>>,
-                 mut drep_s: Box<dyn Subscription<Message>>,
-                 mut protocol_s: Box<dyn Subscription<Message>>) -> Result<()>
-    {
-        let state = Arc::new(Mutex::new(State::new(context.clone(), config.enact_state_topic.clone())));
+    async fn run(
+        context: Arc<Context<Message>>,
+        config: Arc<GovernanceStateConfig>,
+        mut governance_s: Box<dyn Subscription<Message>>,
+        mut drep_s: Box<dyn Subscription<Message>>,
+        mut protocol_s: Box<dyn Subscription<Message>>,
+    ) -> Result<()> {
+        let state = Arc::new(Mutex::new(State::new(
+            context.clone(),
+            config.enact_state_topic.clone(),
+        )));
         let state_handle = state.clone();
         let state_tick = state.clone();
 
         // REST requests handling
-        context.message_bus.handle(&config.clone().handle_topic, move |message: Arc<Message>| {
-            let state = state_handle.clone();
-            async move {
-                let response = match message.as_ref() {
-                    Message::RESTRequest(request) => {
-                        info!("REST received {} {}", request.method, request.path);
-                        let lock = state.lock().await;
+        context.message_bus.handle(
+            &config.clone().handle_topic,
+            move |message: Arc<Message>| {
+                let state = state_handle.clone();
+                async move {
+                    let response = match message.as_ref() {
+                        Message::RESTRequest(request) => {
+                            info!("REST received {} {}", request.method, request.path);
+                            let lock = state.lock().await;
 
-                        match perform_rest_request(&lock, &request.path) {
-                            Ok(response) => RESTResponse::with_text(200, &response),
-                            Err(error) => {
-                                error!("Governance State REST request error: {error:?}");
-                                RESTResponse::with_text(400, &format!("{error:?}"))
+                            match perform_rest_request(&lock, &request.path) {
+                                Ok(response) => RESTResponse::with_text(200, &response),
+                                Err(error) => {
+                                    error!("Governance State REST request error: {error:?}");
+                                    RESTResponse::with_text(400, &format!("{error:?}"))
+                                }
                             }
                         }
-                    },
-                    _ => {
-                        error!("Unexpected message type: {message:?}");
-                        RESTResponse::with_text(500, &format!("Unexpected message type"))
-                    }
-                };
+                        _ => {
+                            error!("Unexpected message type: {message:?}");
+                            RESTResponse::with_text(500, &format!("Unexpected message type"))
+                        }
+                    };
 
-                Arc::new(Message::RESTResponse(response))
-            }
-        })?;
+                    Arc::new(Message::RESTResponse(response))
+                }
+            },
+        )?;
 
         // Ticker to log stats
         let mut subscription = context.message_bus.register("clock.tick").await?;
         context.run(async move {
             loop {
-                let Ok((_, message)) = subscription.read().await else { return; };
+                let Ok((_, message)) = subscription.read().await else {
+                    return;
+                };
                 if let Message::Clock(message) = message.as_ref() {
                     if (message.number % 60) == 0 {
-                        state_tick.lock().await.tick()
+                        state_tick
+                            .lock()
+                            .await
+                            .tick()
                             .await
                             .inspect_err(|e| error!("Tick error: {e}"))
                             .ok();
@@ -172,15 +202,25 @@ impl GovernanceState {
         loop {
             let (blk_g, gov_procs) = Self::read_governance(&mut governance_s).await?;
             {
-                state.lock().await.handle_governance(&blk_g, &gov_procs).await?;
+                state
+                    .lock()
+                    .await
+                    .handle_governance(&blk_g, &gov_procs)
+                    .await?;
             }
 
             if blk_g.new_epoch {
                 let (blk_p, params) = Self::read_parameters(&mut protocol_s).await?;
                 if blk_g != blk_p {
-                    error!("Governance {blk_g:?} and protocol parameters {blk_p:?} are out of sync");
+                    error!(
+                        "Governance {blk_g:?} and protocol parameters {blk_p:?} are out of sync"
+                    );
                 }
-                state.lock().await.handle_protocol_parameters(&params).await?;
+                state
+                    .lock()
+                    .await
+                    .handle_protocol_parameters(&params)
+                    .await?;
             };
 
             let (blk_drep, distr) = Self::read_drep(&mut drep_s).await?;
@@ -195,12 +235,26 @@ impl GovernanceState {
 
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         let cfg = GovernanceStateConfig::new(&config);
-        let gt = context.clone().message_bus.register(&cfg.subscribe_topic).await?;
-        let dt = context.clone().message_bus.register(&cfg.drep_distribution_topic).await?;
-        let pt = context.clone().message_bus.register(&cfg.protocol_parameters_topic).await?;
+        let gt = context
+            .clone()
+            .message_bus
+            .register(&cfg.subscribe_topic)
+            .await?;
+        let dt = context
+            .clone()
+            .message_bus
+            .register(&cfg.drep_distribution_topic)
+            .await?;
+        let pt = context
+            .clone()
+            .message_bus
+            .register(&cfg.protocol_parameters_topic)
+            .await?;
 
         tokio::spawn(async move {
-            Self::run(context, cfg, gt, dt, pt).await.unwrap_or_else(|e| error!("Failed: {e}"));
+            Self::run(context, cfg, gt, dt, pt)
+                .await
+                .unwrap_or_else(|e| error!("Failed: {e}"));
         });
 
         Ok(())
