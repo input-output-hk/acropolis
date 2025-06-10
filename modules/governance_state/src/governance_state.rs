@@ -9,7 +9,6 @@ use acropolis_common::{
     },
     BlockInfo
 };
-use owning_ref::{ArcRef, OwningRef};
 use std::sync::Arc;
 use anyhow::{anyhow, Result};
 use config::Config;
@@ -99,13 +98,13 @@ impl GovernanceState {
     }
 
     async fn read_parameters<'a>(parameters_s: &mut Box<dyn Subscription<Message>>)
-        -> Result<ArcRef<Arc<Message>, (&BlockInfo, &ProtocolParamsMessage)>>
+        -> Result<(BlockInfo, ProtocolParamsMessage)>
     {
-        OwningRef::new(parameters_s.read().await?.1).map(|x| match x {
+        match parameters_s.read().await?.1.as_ref() {
             Message::Cardano((blk, CardanoMessage::ProtocolParams(params))) => 
-                &(&blk, &params),
-            msg => () //Err(anyhow!("Unexpected message {msg:?} for protocol parameters topic"))
-        })
+                Ok((blk.clone(), params.clone())),
+            msg => Err(anyhow!("Unexpected message {msg:?} for protocol parameters topic"))
+        }
     }
 
     async fn read_drep(drep_s: &mut Box<dyn Subscription<Message>>)
@@ -125,7 +124,69 @@ impl GovernanceState {
     {
         let state = Arc::new(Mutex::new(State::new(context.clone(), config.enact_state_topic.clone())));
         let state_handle = state.clone();
+        let state_tick = state.clone();
 
+/*
+<<<<<<< HEAD
+=======
+        // Subscribe to governance procedures serializer
+        let mut subscription = context.message_bus.register(&subscribe_topic).await?;
+        context.run(async move {
+            loop {
+                let Ok((_, message)) = subscription.read().await else { return; };
+                match message.as_ref() {
+                    Message::Cardano((block_info, CardanoMessage::GovernanceProcedures(msg))) => {
+                        let mut state = state_gov.lock().await;
+                        state.handle_governance(block_info, msg)
+                            .await
+                            .inspect_err(|e| error!("Messaging handling error: {e}"))
+                            .ok();
+                    }
+
+                    _ => error!("Unexpected message type: {message:?}")
+                }
+            }
+        });
+
+        // Subscribe to drep stake distribution serializer
+        let mut subscription = context.message_bus.register(&drep_distribution_topic).await?;
+        context.run(async move {
+            loop {
+                let Ok((_, message)) = subscription.read().await else { return; };
+                match message.as_ref() {
+                    Message::Cardano((_block_info, CardanoMessage::DRepStakeDistribution(msg))) => {
+                        let mut state = state_drep.lock().await;
+                        state.handle_drep_stake(msg)
+                            .await
+                            .inspect_err(|e| error!("Messaging handling error: {e}"))
+                            .ok();
+                    }
+
+                    _ => error!("Unexpected message type: {message:?}")
+                }
+            }
+        });
+
+        // Subscribe to bootstrap completion serializer
+        let mut subscription = context.message_bus.register(&genesis_complete_topic).await?;
+        context.run(async move {
+            loop {
+                let Ok((_, message)) = subscription.read().await else { return; };
+                match message.as_ref() {
+                    Message::Cardano((_block_info, CardanoMessage::GenesisComplete(msg))) => {
+                        let mut state = state_genesis.lock().await;
+                        state.handle_genesis(msg)
+                            .await
+                            .inspect_err(|e| error!("Messaging handling error: {e}"))
+                            .ok();
+                    }
+
+                    _ => error!("Unexpected message type: {message:?}")
+                }
+            }
+        });
+>>>>>>> cf7b7b49d274573f7cd34b5debb1c0d037dba643
+*/
         // REST requests handling
         context.message_bus.handle(&config.clone().handle_topic, move |message: Arc<Message>| {
             let state = state_handle.clone();
@@ -152,6 +213,22 @@ impl GovernanceState {
                 Arc::new(Message::RESTResponse(response))
             }
         })?;
+
+        // Ticker to log stats
+        let mut subscription = context.message_bus.register("clock.tick").await?;
+        context.run(async move {
+            loop {
+                let Ok((_, message)) = subscription.read().await else { return; };
+                if let Message::Clock(message) = message.as_ref() {
+                    if (message.number % 60) == 0 {
+                        state_tick.lock().await.tick()
+                            .await
+                            .inspect_err(|e| error!("Tick error: {e}"))
+                            .ok();
+                    }
+                }
+            }
+        });
 
         loop {
             let (blk_g, gov_procs) = Self::read_governance(&mut governance_s).await?;
