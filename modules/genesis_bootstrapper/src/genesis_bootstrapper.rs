@@ -23,6 +23,7 @@ const DEFAULT_COMPLETION_TOPIC: &str = "cardano.sequence.bootstrapped";
 
 // Include genesis data (downloaded by build.rs)
 const MAINNET_BYRON_GENESIS: &[u8] = include_bytes!("../downloads/mainnet-byron-genesis.json");
+const MAINNET_SHELLEY_GENESIS: &[u8] = include_bytes!("../downloads/mainnet-shelley-genesis.json");
 const MAINNET_CONWAY_GENESIS: &[u8] = include_bytes!("../downloads/mainnet-conway-genesis.json");
 
 /// Genesis bootstrapper module
@@ -167,6 +168,15 @@ impl GenesisBootstrapper {
             // Read genesis data
             let genesis: byron::GenesisFile = serde_json::from_slice(MAINNET_BYRON_GENESIS)
                 .expect("Invalid JSON in MAINNET_BYRON_GENESIS file");
+
+            let shelley_genesis: Option<shelley::GenesisFile> =
+                match serde_json::from_slice(MAINNET_SHELLEY_GENESIS) {
+                    Ok(file) => Some(file),
+                    Err(e) => {
+                        info!("Cannot read JSON in MAINNET_SHELLEY_GENESIS file: {e}");
+                        None
+                    }
+                };
 
             let conway_genesis: Option<conway::GenesisFile> =
                 match serde_json::from_slice(MAINNET_CONWAY_GENESIS) {

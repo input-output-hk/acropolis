@@ -30,6 +30,10 @@ fn main() {
         "mainnet-byron-genesis.json",
     );
     download(
+        "https://book.world.dev.cardano.org/environments/mainnet/shelley-genesis.json",
+        "mainnet-shelley-genesis.json",
+    );
+    download(
         "https://book.world.dev.cardano.org/environments/mainnet/conway-genesis.json",
         "mainnet-conway-genesis.json",
     );
