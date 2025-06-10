@@ -60,11 +60,8 @@ impl State {
         Ok(ProtocolParamsMessage { params: self.current_params.get_params() })
     }
 
-    fn log_stats(&self) {
-    }
-
+    #[allow(dead_code)]
     pub async fn tick(&self) -> Result<()> {
-        self.log_stats();
         Ok(())
     }
 }
