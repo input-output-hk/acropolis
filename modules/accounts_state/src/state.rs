@@ -99,14 +99,15 @@ impl State {
     fn record_delegation(&mut self, credential: &StakeCredential, spo: &KeyHash) {
         let hash = credential.get_hash();
 
-        // Create or update the stake address
-        let state = self
-            .stake_addresses
-            .entry(hash)
-            .or_insert(StakeAddressState::default());
+        // Get old stake address state, or create one
+        let mut sas = match self.stake_addresses.get(&hash) {
+            Some(sas) => sas.clone(),
+            None => StakeAddressState::default()
+        };
 
-        // Set the delegation
-        state.delegated_spo = Some(spo.clone());
+        // Immutably create or update the stake address
+        sas.delegated_spo = Some(spo.clone());
+        self.stake_addresses = self.stake_addresses.update(hash.clone(), sas);
     }
 
     /// Handle TxCertificates with stake delegations
@@ -148,23 +149,27 @@ impl State {
                 StakeAddressPayload::ScriptHash(hash) => hash,
             };
 
-            // Update or create the stake entry's UTXO value
-            let state = self
-                .stake_addresses
-                .entry(hash.to_vec())
-                .or_insert(StakeAddressState::default());
+            // Get old stake address state, or create one
+            let mut sas = match self.stake_addresses.get(hash) {
+                Some(sas) => sas.clone(),
+                None => StakeAddressState::default()
+            };
 
+            // Update UTXO value, with fences
             if delta.delta >= 0 {
-                state.utxo_value = state.utxo_value.saturating_add(delta.delta as u64);
+                sas.utxo_value = sas.utxo_value.saturating_add(delta.delta as u64);
             } else {
                 let abs = (-delta.delta) as u64;
-                if abs > state.utxo_value {
+                if abs > sas.utxo_value {
                     error!("Stake address went negative in delta {:?}", delta);
-                    state.utxo_value = 0;
+                    sas.utxo_value = 0;
                 } else {
-                    state.utxo_value -= abs;
+                    sas.utxo_value -= abs;
                 }
             }
+
+            // Immutably create or update the stake address
+            self.stake_addresses = self.stake_addresses.update(hash.clone(), sas);
         }
 
         Ok(())
