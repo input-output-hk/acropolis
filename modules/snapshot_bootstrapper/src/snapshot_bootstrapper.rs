@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use acropolis_common::{
     ledger_state::LedgerState,
-    messages::{Message, SnapshotStateMessage},
+    messages::{Message, SnapshotMessage, SnapshotStateMessage},
 };
 use anyhow::{Context as AnyhowContext, Result};
 use caryatid_sdk::{module, Context, Module};
@@ -39,9 +39,9 @@ impl SnapshotBootstrapper {
             };
             info!("Received startup message");
 
-            let spo_state_message =
-                Message::SnapshotState(SnapshotStateMessage::SPOState(ledger_state.spo_state));
-
+            let spo_state_message = Message::Snapshot(SnapshotMessage::Bootstrap(
+                SnapshotStateMessage::SPOState(ledger_state.spo_state),
+            ));
             context
                 .message_bus
                 .publish(&snapshot_topic, Arc::new(spo_state_message))

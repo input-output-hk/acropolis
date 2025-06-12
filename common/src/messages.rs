@@ -158,6 +158,18 @@ pub enum CardanoMessage {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum SnapshotMessage {
+    Bootstrap(SnapshotStateMessage),
+    DumpRequest(SnapshotDumpMessage),
+    Dump(SnapshotStateMessage),
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SnapshotDumpMessage {
+    pub block_height: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum SnapshotStateMessage {
     SPOState(SPOState),
 }
@@ -180,7 +192,7 @@ pub enum Message {
     Cardano((BlockInfo, CardanoMessage)),
 
     // Initialize state from a snapshot
-    SnapshotState(SnapshotStateMessage),
+    Snapshot(SnapshotMessage),
 }
 
 impl Default for Message {

@@ -10,7 +10,7 @@ use acropolis_common::{
 use anyhow::Result;
 use imbl::HashMap;
 use serde_with::{hex::Hex, serde_as};
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 use tracing::{error, info};
 
@@ -54,6 +54,33 @@ impl From<SPOState> for BlockState {
                 HashMap::new(),
                 |mut acc, (key_hash, epoch)| {
                     acc.entry(epoch).or_insert_with(Vec::new).push(key_hash);
+                    acc
+                },
+            ),
+        }
+    }
+}
+
+// TODO: cleanup clones and into_iter, if possible
+// It's not the end of the world here, as this is only used in testing, for now.
+impl From<&BlockState> for SPOState {
+    fn from(value: &BlockState) -> Self {
+        Self {
+            pools: value
+                .spos
+                .clone()
+                .into_iter()
+                .fold(BTreeMap::new(), |mut acc, (key, value)| {
+                    acc.insert(key, value);
+                    acc
+                }),
+            retiring: value.pending_deregistrations.clone().into_iter().fold(
+                BTreeMap::new(),
+                |mut acc, (epoch, key_hashes)| {
+                    key_hashes.into_iter().for_each(|key_hash| {
+                        acc.insert(key_hash, epoch);
+                    });
+
                     acc
                 },
             ),
@@ -126,6 +153,16 @@ impl State {
         } else {
             BlockState::new(0, 0, HashMap::new(), HashMap::new())
         }
+    }
+
+    /// Returns a reference to the block state at a specified height, if applicable
+    pub fn inspect_previous_state(&self, block_height: u64) -> Option<&BlockState> {
+        for state in self.history.iter().rev() {
+            if state.block == block_height {
+                return Some(state);
+            }
+        }
+        None
     }
 
     // Handle end of epoch, returns message to be published
@@ -235,6 +272,11 @@ impl State {
     pub fn bootstrap(&mut self, state: SPOState) {
         self.history.clear();
         self.history.push_back(state.into());
+    }
+
+    pub fn dump(&self, block_height: u64) -> Option<SPOState> {
+        self.inspect_previous_state(block_height)
+            .map(SPOState::from)
     }
 }
 

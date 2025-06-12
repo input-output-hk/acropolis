@@ -38,11 +38,11 @@ impl LedgerState {
     pub fn from_directory(directory_path: impl AsRef<Path>) -> Result<Self> {
         let directory_path = directory_path.as_ref();
         if !directory_path.exists() {
-            bail!("directory does not exist: {:?}", directory_path);
+            bail!("directory does not exist: {}", directory_path.display());
         }
 
         if !directory_path.is_dir() {
-            bail!("path is not a directory: {:?}", directory_path);
+            bail!("path is not a directory: {}", directory_path.display());
         }
 
         let mut ledger_state = Self::default();
@@ -50,8 +50,8 @@ impl LedgerState {
             .load_from_directory(directory_path)
             .with_context(|| {
                 format!(
-                    "Failed to load ledger state from directory: {:?}",
-                    directory_path
+                    "Failed to load ledger state from directory: {}",
+                    directory_path.display()
                 )
             })?;
 
@@ -61,7 +61,7 @@ impl LedgerState {
     fn load_from_directory(&mut self, directory_path: impl AsRef<Path>) -> Result<()> {
         let directory_path = directory_path.as_ref();
         let entries = fs::read_dir(directory_path)
-            .with_context(|| format!("failed to read directory: {:?}", directory_path))?;
+            .with_context(|| format!("failed to read directory: {}", directory_path.display()))?;
 
         for entry in entries {
             let entry = entry.with_context(|| "failed to read directory entry")?;
@@ -69,7 +69,7 @@ impl LedgerState {
 
             if path.is_file() && path.extension().map_or(false, |ext| ext == "cbor") {
                 self.load_cbor_file(&path)
-                    .with_context(|| format!("failed to load CBOR file: {:?}", path))?;
+                    .with_context(|| format!("failed to load CBOR file: {}", path.display()))?;
             }
         }
 
@@ -81,15 +81,16 @@ impl LedgerState {
         let filename = file_path
             .file_stem()
             .and_then(|s| s.to_str())
-            .with_context(|| format!("invalid filename: {:?}", file_path))?;
+            .with_context(|| format!("invalid filename: {}", file_path.display()))?;
 
-        let bytes =
-            fs::read(file_path).with_context(|| format!("failed to read file: {:?}", file_path))?;
+        let bytes = fs::read(file_path)
+            .with_context(|| format!("failed to read file: {}", file_path.display()))?;
 
         match filename {
             "pools" => {
-                self.spo_state = minicbor::decode(&bytes)
-                    .with_context(|| format!("failed to decode SPO state from: {:?}", file_path))?;
+                self.spo_state = minicbor::decode(&bytes).with_context(|| {
+                    format!("failed to decode SPO state from: {}", file_path.display())
+                })?;
             }
             _ => {
                 // ignore unknown cbor files
