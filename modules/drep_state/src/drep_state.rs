@@ -1,7 +1,7 @@
 //! Acropolis DRep State module for Caryatid
 //! Accepts certificate events and derives the DRep State in memory
 
-use acropolis_common::messages::RESTResponse;
+use acropolis_common::messages::{DRepStateMessage, RESTResponse};
 use acropolis_common::{
     messages::{CardanoMessage, Message},
     DRepCredential,
@@ -13,15 +13,13 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info};
 
-mod drep_distribution_publisher;
 mod state;
 
-use crate::drep_distribution_publisher::DRepDistributionPublisher;
 use state::State;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.certificates";
 const DEFAULT_HANDLE_TOPIC: &str = "rest.get.drep-state.*";
-const DEFAULT_DREP_DISTRIBUTION_TOPIC: &str = "cardano.drep.distribution";
+const DEFAULT_DREP_STATE_TOPIC: &str = "cardano.drep.state";
 
 /// DRep State module
 #[module(
@@ -74,17 +72,17 @@ impl DRepState {
             .unwrap_or(DEFAULT_HANDLE_TOPIC.to_string());
         info!("Creating request handler on '{handle_topic}'");
 
-        let drep_distribution_topic = config
-            .get_string("publish-drep-distribution-topic")
-            .unwrap_or(DEFAULT_DREP_DISTRIBUTION_TOPIC.to_string());
-        info!("Creating DRep distribution publisher on '{drep_distribution_topic}'");
+        let drep_state_topic = config
+            .get_string("publish-drep-state-topic")
+            .unwrap_or(DEFAULT_DREP_STATE_TOPIC.to_string());
+        info!("Creating DRep state publisher on '{drep_state_topic}'");
 
-        let publisher = DRepDistributionPublisher::new(context.clone(), drep_distribution_topic);
-        let state = Arc::new(Mutex::new(State::new(Some(publisher))));
+        let state = Arc::new(Mutex::new(State::new()));
 
         // Subscribe for certificate messages
         let state1 = state.clone();
         let mut subscription = context.message_bus.register(&subscribe_topic).await?;
+        let context_subscribe = context.clone();
         context.run(async move {
             loop {
                 let Ok((_, message)) = subscription.read().await else {
@@ -94,10 +92,27 @@ impl DRepState {
                     Message::Cardano((block_info, CardanoMessage::TxCertificates(tx_cert_msg))) => {
                         let mut state = state1.lock().await;
                         state
-                            .handle(block_info, tx_cert_msg)
+                            .handle(tx_cert_msg)
                             .await
                             .inspect_err(|e| error!("Messaging handling error: {e}"))
                             .ok();
+
+                        if block_info.new_epoch && block_info.epoch > 0 {
+                            // publish DRep state at end of epoch
+                            let dreps = state.active_drep_list();
+                            let message = Message::Cardano((
+                                block_info.clone(),
+                                CardanoMessage::DRepState(DRepStateMessage {
+                                    epoch: block_info.epoch,
+                                    dreps,
+                                }),
+                            ));
+                            context_subscribe
+                                .message_bus
+                                .publish(&drep_state_topic, Arc::new(message))
+                                .await
+                                .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+                        }
                     }
 
                     _ => error!("Unexpected message type: {message:?}"),
