@@ -100,12 +100,21 @@ impl LedgerState {
     }
 }
 
-// NOTE: Implementations from Pallas, why aren't we just using Pallas types here?
 impl<'b, C> minicbor::decode::Decode<'b, C> for Ratio {
     fn decode(d: &mut minicbor::Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
-        // TODO: Enforce tag == 30 & array of size 2
-        d.tag()?;
-        d.array()?;
+        let tag = d.tag()?;
+        if tag.as_u64() != 30 {
+            return Err(minicbor::decode::Error::message("tag must be 30"));
+        }
+        let maybe_array_length = d.array()?;
+        if let Some(length) = maybe_array_length {
+            if length != 2 {
+                return Err(minicbor::decode::Error::message(
+                    "array must be of length 2",
+                ));
+            }
+        }
+
         Ok(Ratio {
             numerator: d.decode_with(ctx)?,
             denominator: d.decode_with(ctx)?,
@@ -127,7 +136,6 @@ impl<C> minicbor::encode::Encode<C> for Ratio {
     }
 }
 
-// NOTE: Implementations from Pallas, why aren't we just using Pallas types here?
 impl<'b, C> minicbor::decode::Decode<'b, C> for Relay {
     fn decode(d: &mut minicbor::Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
         d.array()?;
