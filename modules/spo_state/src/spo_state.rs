@@ -1,7 +1,10 @@
 //! Acropolis SPO state module for Caryatid
 //! Accepts certificate events and derives the SPO state in memory
 
-use acropolis_common::messages::{CardanoMessage, Message, RESTResponse, SnapshotStateMessage};
+use acropolis_common::messages::{
+    CardanoMessage, Message, RESTResponse, SnapshotDumpMessage, SnapshotMessage,
+    SnapshotStateMessage,
+};
 use anyhow::Result;
 use caryatid_sdk::{module, Context, Module};
 use config::Config;
@@ -54,16 +57,39 @@ impl SPOState {
         // Subscribe for snapshot messages, if allowed
         if let Some(snapshot_topic) = maybe_snapshot_topic {
             let mut subscription = context.message_bus.register(&snapshot_topic).await?;
-            let state_subscription = state.clone();
+            let context_snapshot = context.clone();
+            let state_snapshot = state.clone();
             context.run(async move {
                 let Ok((_, message)) = subscription.read().await else {
                     return;
                 };
 
                 match message.as_ref() {
-                    Message::SnapshotState(SnapshotStateMessage::SPOState(spo_state)) => {
-                        let mut state = state_subscription.lock().await;
+                    Message::Snapshot(SnapshotMessage::Bootstrap(
+                        SnapshotStateMessage::SPOState(spo_state),
+                    )) => {
+                        let mut state = state_snapshot.lock().await;
                         state.bootstrap(spo_state.clone());
+                    }
+                    Message::Snapshot(SnapshotMessage::DumpRequest(SnapshotDumpMessage {
+                        block_height,
+                    })) => {
+                        info!("inspecting state at block height {}", block_height);
+                        let state = state_snapshot.lock().await;
+                        let maybe_spo_state = state.dump(*block_height);
+
+                        if let Some(spo_state) = maybe_spo_state {
+                            context_snapshot
+                                .message_bus
+                                .publish(
+                                    &snapshot_topic,
+                                    Arc::new(Message::Snapshot(SnapshotMessage::Dump(
+                                        SnapshotStateMessage::SPOState(spo_state),
+                                    ))),
+                                )
+                                .await
+                                .unwrap_or_else(|e| error!("failed to publish snapshot dump: {e}"))
+                        }
                     }
                     _ => error!("Unexpected message type: {message:?}"),
                 }
