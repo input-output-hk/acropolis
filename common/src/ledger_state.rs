@@ -1,5 +1,8 @@
-use crate::{KeyHash, PoolRegistration};
+use crate::{
+    KeyHash, MultiHostName, PoolRegistration, Ratio, Relay, SingleHostAddr, SingleHostName,
+};
 use anyhow::{bail, Context, Result};
+use minicbor::data::Tag;
 use std::{collections::BTreeMap, fs, path::Path};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
@@ -94,5 +97,93 @@ impl LedgerState {
         }
 
         Ok(())
+    }
+}
+
+// NOTE: Implementations from Pallas, why aren't we just using Pallas types here?
+impl<'b, C> minicbor::decode::Decode<'b, C> for Ratio {
+    fn decode(d: &mut minicbor::Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        // TODO: Enforce tag == 30 & array of size 2
+        d.tag()?;
+        d.array()?;
+        Ok(Ratio {
+            numerator: d.decode_with(ctx)?,
+            denominator: d.decode_with(ctx)?,
+        })
+    }
+}
+
+impl<C> minicbor::encode::Encode<C> for Ratio {
+    fn encode<W: minicbor::encode::Write>(
+        &self,
+        e: &mut minicbor::Encoder<W>,
+        ctx: &mut C,
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        e.tag(Tag::new(30))?;
+        e.array(2)?;
+        e.encode_with(self.numerator, ctx)?;
+        e.encode_with(self.denominator, ctx)?;
+        Ok(())
+    }
+}
+
+// NOTE: Implementations from Pallas, why aren't we just using Pallas types here?
+impl<'b, C> minicbor::decode::Decode<'b, C> for Relay {
+    fn decode(d: &mut minicbor::Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        d.array()?;
+        let variant = d.u16()?;
+
+        match variant {
+            0 => Ok(Relay::SingleHostAddr(SingleHostAddr {
+                port: d.decode_with(ctx)?,
+                ipv4: d.decode_with(ctx)?,
+                ipv6: d.decode_with(ctx)?,
+            })),
+            1 => Ok(Relay::SingleHostName(SingleHostName {
+                port: d.decode_with(ctx)?,
+                dns_name: d.decode_with(ctx)?,
+            })),
+            2 => Ok(Relay::MultiHostName(MultiHostName {
+                dns_name: d.decode_with(ctx)?,
+            })),
+            _ => Err(minicbor::decode::Error::message(
+                "invalid variant id for Relay",
+            )),
+        }
+    }
+}
+
+impl<C> minicbor::encode::Encode<C> for Relay {
+    fn encode<W: minicbor::encode::Write>(
+        &self,
+        e: &mut minicbor::Encoder<W>,
+        ctx: &mut C,
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        match self {
+            Relay::SingleHostAddr(SingleHostAddr { port, ipv4, ipv6 }) => {
+                e.array(4)?;
+                e.encode_with(0, ctx)?;
+                e.encode_with(port, ctx)?;
+                e.encode_with(ipv4, ctx)?;
+                e.encode_with(ipv6, ctx)?;
+
+                Ok(())
+            }
+            Relay::SingleHostName(SingleHostName { port, dns_name }) => {
+                e.array(3)?;
+                e.encode_with(1, ctx)?;
+                e.encode_with(port, ctx)?;
+                e.encode_with(dns_name, ctx)?;
+
+                Ok(())
+            }
+            Relay::MultiHostName(MultiHostName { dns_name }) => {
+                e.array(2)?;
+                e.encode_with(2, ctx)?;
+                e.encode_with(dns_name, ctx)?;
+
+                Ok(())
+            }
+        }
     }
 }
