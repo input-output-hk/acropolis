@@ -14,6 +14,8 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info};
 
+mod drep_distribution_publisher;
+use drep_distribution_publisher::DRepDistributionPublisher;
 mod state;
 use state::State;
 
@@ -21,6 +23,8 @@ const DEFAULT_SPO_STATE_TOPIC: &str = "cardano.spo.state";
 const DEFAULT_EPOCH_ACTIVITY_TOPIC: &str = "cardano.epoch.activity";
 const DEFAULT_TX_CERTIFICATES_TOPIC: &str = "cardano.certificates";
 const DEFAULT_STAKE_DELTAS_TOPIC: &str = "cardano.stake.deltas";
+const DEFAULT_DREP_STATE_TOPIC: &str = "cardano.drep.state";
+const DEFAULT_DREP_DISTRIBUTION_TOPIC: &str = "cardano.drep.distribution";
 const DEFAULT_HANDLE_TOPIC: &str = "rest.get.stake";
 
 /// Accounts State module
@@ -35,10 +39,12 @@ impl AccountsState {
     /// Async run loop
     async fn run(
         history: Arc<Mutex<StateHistory<State>>>,
+        mut publisher: DRepDistributionPublisher,
         mut spos_subscription: Box<dyn Subscription<Message>>,
         mut ea_subscription: Box<dyn Subscription<Message>>,
         mut certs_subscription: Box<dyn Subscription<Message>>,
         mut stake_subscription: Box<dyn Subscription<Message>>,
+        mut drep_state_subscription: Box<dyn Subscription<Message>>,
     ) -> Result<()> {
         // Get the stake address deltas from the genesis bootstrap, which we know
         // don't contain any stake
@@ -103,8 +109,25 @@ impl AccountsState {
 
             // Read from epoch-boundary messages only when it's a new epoch
             if new_epoch {
+                let dreps_message_f = drep_state_subscription.read();
                 let spos_message_f = spos_subscription.read();
                 let ea_message_f = ea_subscription.read();
+
+                // Handle DRep
+                let (_, message) = dreps_message_f.await?;
+                match message.as_ref() {
+                    Message::Cardano((block_info, CardanoMessage::DRepState(dreps_msg))) => {
+                        // TODO: update our list of dreps
+                        if let Err(e) = publisher
+                            .publish_stake(block_info, Some(dreps_msg.dreps.clone()))
+                            .await
+                        {
+                            tracing::error!("Error publishing drep voting stake distribution: {e}")
+                        }
+                    }
+
+                    _ => error!("Unexpected message type: {message:?}"),
+                }
 
                 // Handle SPOs
                 let (_, message) = spos_message_f.await?;
@@ -182,6 +205,14 @@ impl AccountsState {
             .get_string("stake-deltas-topic")
             .unwrap_or(DEFAULT_STAKE_DELTAS_TOPIC.to_string());
         info!("Creating stake deltas subscriber on '{stake_deltas_topic}'");
+
+        let drep_state_topic = config
+            .get_string("publish-drep-state-topic")
+            .unwrap_or(DEFAULT_DREP_STATE_TOPIC.to_string());
+
+        let drep_distribution_topic = config
+            .get_string("publish-drep-distribution-topic")
+            .unwrap_or(DEFAULT_DREP_DISTRIBUTION_TOPIC.to_string());
 
         let handle_topic = config
             .get_string("handle-topic")
@@ -296,20 +327,25 @@ impl AccountsState {
             }
         });
 
+        let publisher = DRepDistributionPublisher::new(context.clone(), drep_distribution_topic);
+
         // Subscribe
         let spos_subscription = context.message_bus.register(&spo_state_topic).await?;
         let ea_subscription = context.message_bus.register(&epoch_activity_topic).await?;
         let certs_subscription = context.message_bus.register(&tx_certificates_topic).await?;
         let stake_subscription = context.message_bus.register(&stake_deltas_topic).await?;
+        let drep_state_subscription = context.message_bus.register(&drep_state_topic).await?;
 
         // Start run task
         context.run(async move {
             Self::run(
                 history,
+                publisher,
                 spos_subscription,
                 ea_subscription,
                 certs_subscription,
                 stake_subscription,
+                drep_state_subscription,
             )
             .await
             .unwrap_or_else(|e| error!("Failed: {e}"));
