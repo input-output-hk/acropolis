@@ -102,7 +102,7 @@ impl State {
         // Get old stake address state, or create one
         let mut sas = match self.stake_addresses.get(&hash) {
             Some(sas) => sas.clone(),
-            None => StakeAddressState::default()
+            None => StakeAddressState::default(),
         };
 
         // Immutably create or update the stake address
@@ -152,7 +152,7 @@ impl State {
             // Get old stake address state, or create one
             let mut sas = match self.stake_addresses.get(hash) {
                 Some(sas) => sas.clone(),
-                None => StakeAddressState::default()
+                None => StakeAddressState::default(),
             };
 
             // Update UTXO value, with fences
@@ -180,26 +180,88 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acropolis_common::{BlockInfo, BlockStatus, Era};
+    use acropolis_common::{AddressNetwork, StakeAddress, StakeAddressDelta, StakeAddressPayload};
 
-    fn new_msg() -> EpochActivityMessage {
-        EpochActivityMessage {
-            epoch: 0,
-            total_blocks: 0,
-            total_fees: 0,
-            vrf_vkey_hashes: Vec::new(),
+    const STAKE_KEY_HASH: [u8; 3] = [0x99, 0x0f, 0x00];
+
+    fn create_address() -> StakeAddress {
+        StakeAddress {
+            network: AddressNetwork::Main,
+            payload: StakeAddressPayload::StakeKeyHash(STAKE_KEY_HASH.to_vec()),
         }
     }
 
-    fn new_block() -> BlockInfo {
-        BlockInfo {
-            status: BlockStatus::Immutable,
-            slot: 0,
-            number: 0,
-            hash: Vec::<u8>::new(),
-            epoch: 0,
-            new_epoch: true,
-            era: Era::Byron,
-        }
+    #[test]
+    fn stake_addresses_initialise_to_first_delta_and_increment_subsequently() {
+        let mut state = State::default();
+        let msg = StakeAddressDeltasMessage {
+            deltas: vec![StakeAddressDelta {
+                address: create_address(),
+                delta: 42,
+            }],
+        };
+
+        state.handle_stake_deltas(&msg).unwrap();
+
+        assert_eq!(state.stake_addresses.len(), 1);
+        assert_eq!(
+            state
+                .stake_addresses
+                .get(&STAKE_KEY_HASH.to_vec())
+                .unwrap()
+                .utxo_value,
+            42
+        );
+
+        state.handle_stake_deltas(&msg).unwrap();
+
+        assert_eq!(state.stake_addresses.len(), 1);
+        assert_eq!(
+            state
+                .stake_addresses
+                .get(&STAKE_KEY_HASH.to_vec())
+                .unwrap()
+                .utxo_value,
+            84
+        );
+    }
+
+    #[test]
+    fn stake_address_changes_dont_leak_across_clone() {
+        let mut state = State::default();
+        let state2 = state.clone();
+
+        let msg = StakeAddressDeltasMessage {
+            deltas: vec![StakeAddressDelta {
+                address: create_address(),
+                delta: 42,
+            }],
+        };
+
+        state.handle_stake_deltas(&msg).unwrap();
+
+        // New delta must not be reflected in the clone
+        assert_eq!(state.stake_addresses.len(), 1);
+        assert_eq!(state2.stake_addresses.len(), 0);
+
+        // Clone again and ensure value stays constant too
+        let state2 = state.clone();
+        state.handle_stake_deltas(&msg).unwrap();
+        assert_eq!(
+            state
+                .stake_addresses
+                .get(&STAKE_KEY_HASH.to_vec())
+                .unwrap()
+                .utxo_value,
+            84
+        );
+        assert_eq!(
+            state2
+                .stake_addresses
+                .get(&STAKE_KEY_HASH.to_vec())
+                .unwrap()
+                .utxo_value,
+            42
+        );
     }
 }
