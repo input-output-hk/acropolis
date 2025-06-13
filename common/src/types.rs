@@ -150,7 +150,7 @@ pub type DataHash = Vec<u8>;
 pub type Lovelace = u64;
 
 /// Rational number = numerator / denominator
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Eq, PartialEq)]
 pub struct Ratio {
     pub numerator: u64,
     pub denominator: u64,
@@ -214,7 +214,7 @@ impl Credential {
 pub type StakeCredential = Credential;
 
 /// Relay single host address
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize, Eq, PartialEq)]
 pub struct SingleHostAddr {
     /// Optional port number
     pub port: Option<u16>,
@@ -227,7 +227,7 @@ pub struct SingleHostAddr {
 }
 
 /// Relay hostname
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Eq, PartialEq)]
 pub struct SingleHostName {
     /// Optional port number
     pub port: Option<u16>,
@@ -237,14 +237,14 @@ pub struct SingleHostName {
 }
 
 /// Relay multihost (SRV)
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Eq, PartialEq)]
 pub struct MultiHostName {
     /// DNS name (SRC record)
     pub dns_name: String,
 }
 
 /// Pool relay
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Eq, PartialEq)]
 pub enum Relay {
     SingleHostAddr(SingleHostAddr),
     SingleHostName(SingleHostName),
@@ -254,7 +254,14 @@ pub enum Relay {
 /// Pool metadata
 #[serde_as]
 #[derive(
-    Debug, Clone, serde::Serialize, serde::Deserialize, minicbor::Encode, minicbor::Decode,
+    Debug,
+    Clone,
+    serde::Serialize,
+    serde::Deserialize,
+    minicbor::Encode,
+    minicbor::Decode,
+    Eq,
+    PartialEq,
 )]
 pub struct PoolMetadata {
     /// Metadata URL
@@ -272,7 +279,14 @@ type RewardAccount = Vec<u8>;
 /// Pool registration data
 #[serde_as]
 #[derive(
-    Debug, Clone, serde::Serialize, serde::Deserialize, minicbor::Decode, minicbor::Encode,
+    Debug,
+    Clone,
+    serde::Serialize,
+    serde::Deserialize,
+    minicbor::Decode,
+    minicbor::Encode,
+    PartialEq,
+    Eq,
 )]
 pub struct PoolRegistration {
     /// Operator pool key hash - used as ID
