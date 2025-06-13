@@ -10,6 +10,7 @@ use config::Config;
 use tracing::{error, info};
 
 const DEFAULT_SNAPSHOT_TOPIC: &str = "cardano.snapshot";
+const DEFAULT_STARTUP_TOPIC: &str = "cardano.sequence.start";
 
 #[module(
     message_type(Message),
@@ -27,12 +28,16 @@ impl SnapshotBootstrapper {
         let ledger_state =
             LedgerState::from_directory(file_path).context("failed to load ledger state")?;
 
+        let startup_topic = config
+            .get_string("startup-topic")
+            .unwrap_or(DEFAULT_STARTUP_TOPIC.to_string());
+
         let snapshot_topic = config
             .get_string("snapshot-topic")
             .unwrap_or(DEFAULT_SNAPSHOT_TOPIC.to_string());
         info!("Publishing snapshots on '{snapshot_topic}'");
 
-        let mut subscription = context.message_bus.register(&snapshot_topic).await?;
+        let mut subscription = context.message_bus.register(&startup_topic).await?;
         context.clone().run(async move {
             let Ok(_) = subscription.read().await else {
                 return;
