@@ -20,6 +20,9 @@ publish-fees-topic = "cardano.block.fees"
 store = "memory"                              # "memory", "dashmap", "fjall", "fjall-async", "sled", "sled-async", "fake"
 address-delta-topic = "cardano.address.delta"
 
+
+[module.test-module]
+
 [module.spo-state]
 
 [module.drep-state]
