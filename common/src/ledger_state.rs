@@ -19,7 +19,15 @@ pub struct AccountState {}
 pub struct ParametersState {}
 
 #[derive(
-    Debug, Clone, serde::Serialize, serde::Deserialize, minicbor::Decode, minicbor::Encode, Default,
+    Debug,
+    Clone,
+    serde::Serialize,
+    serde::Deserialize,
+    minicbor::Decode,
+    minicbor::Encode,
+    Default,
+    Eq,
+    PartialEq,
 )]
 pub struct SPOState {
     #[n(0)]
