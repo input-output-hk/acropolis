@@ -207,7 +207,7 @@ impl AccountsState {
         info!("Creating stake deltas subscriber on '{stake_deltas_topic}'");
 
         let drep_state_topic = config
-            .get_string("publish-drep-state-topic")
+            .get_string("drep-state-topic")
             .unwrap_or(DEFAULT_DREP_STATE_TOPIC.to_string());
 
         let drep_distribution_topic = config
