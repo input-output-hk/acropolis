@@ -8,12 +8,13 @@ use acropolis_common::{
     Address, BlockInfo, BlockStatus, StakeAddress, StakeAddressPayload,
 };
 use anyhow::{anyhow, Result};
-use caryatid_sdk::{message_bus::Subscription, module, Context, MessageBusExt, Module};
+use caryatid_sdk::{message_bus::Subscription, module, Context, Module};
 use config::Config;
 use serde_json;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info};
+use std::collections::HashMap;
 
 mod state;
 use state::State;
@@ -249,7 +250,12 @@ impl AccountsState {
             let history = history_spdd.clone();
             async move {
                 if let Some(state) = history.lock().await.current() {
-                    let spdd = state.generate_spdd();
+                    // Use hex for SPO ID
+                    let spdd: HashMap<String, u64> = state
+                        .generate_spdd()
+                        .iter()
+                        .map(|(k, v)| (hex::encode(k), *v))
+                        .collect();
                     match serde_json::to_string(&spdd) {
                         Ok(body) => Ok(RESTResponse::with_json(200, &body)),
                         Err(error) => Err(anyhow!("{:?}", error)),
