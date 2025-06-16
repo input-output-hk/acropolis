@@ -10,6 +10,9 @@ use anyhow::Result;
 use imbl::HashMap;
 use serde_with::{hex::Hex, serde_as};
 use tracing::{error, info};
+use dashmap::DashMap;
+use rayon::prelude::*;
+use std::sync::Arc;
 
 /// State of an individual stake address
 #[serde_as]
@@ -57,6 +60,37 @@ impl State {
     pub async fn tick(&self) -> Result<()> {
         self.log_stats();
         Ok(())
+    }
+
+    /// Derive the Stake Pool Delegation Distribution (SPDD) - a map of total stake value
+    /// (including both UTXO stake addresses and rewards) for each active SPO
+    /// Key of returned map is the SPO 'operator' ID
+    pub fn generate_spdd(&self) -> HashMap<KeyHash, u64> {
+
+        // Shareable Dashmap with referenced keys
+        let spo_stakes = Arc::new(DashMap::<&KeyHash, u64>::new());
+
+        // Total stake across all addresses in parallel, first collecting into a vector
+        // because imbl::HashMap doesn't work in Rayon
+        self
+            .stake_addresses
+            .values()
+            .collect::<Vec<_>>() // Vec<&StakeAddressState>
+            .par_iter()          // Rayon multi-threaded iterator
+            .for_each_init(|| Arc::clone(&spo_stakes), |map, sas| {
+                if let Some(spo) = sas.delegated_spo.as_ref() {
+                    let stake = sas.utxo_value + sas.rewards;
+                    map.entry(spo)
+                        .and_modify(|v| *v += stake)
+                        .or_insert(stake);
+                }
+            });
+
+        // Collect into a plain HashMap
+        spo_stakes
+            .iter()
+            .map(|entry| ((**entry.key()).clone(), *entry.value()))
+            .collect()
     }
 
     /// Handle an EpochActivityMessage giving total fees and block counts by VRF key for

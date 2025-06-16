@@ -21,7 +21,8 @@ const DEFAULT_SPO_STATE_TOPIC: &str = "cardano.spo.state";
 const DEFAULT_EPOCH_ACTIVITY_TOPIC: &str = "cardano.epoch.activity";
 const DEFAULT_TX_CERTIFICATES_TOPIC: &str = "cardano.certificates";
 const DEFAULT_STAKE_DELTAS_TOPIC: &str = "cardano.stake.deltas";
-const DEFAULT_HANDLE_TOPIC: &str = "rest.get.stake";
+const DEFAULT_HANDLE_STAKE_TOPIC: &str = "rest.get.stake";
+const DEFAULT_HANDLE_SPDD_TOPIC: &str = "rest.get.spdd";
 
 /// Accounts State module
 #[module(
@@ -183,22 +184,28 @@ impl AccountsState {
             .unwrap_or(DEFAULT_STAKE_DELTAS_TOPIC.to_string());
         info!("Creating stake deltas subscriber on '{stake_deltas_topic}'");
 
-        let handle_topic = config
-            .get_string("handle-topic")
-            .unwrap_or(DEFAULT_HANDLE_TOPIC.to_string());
-        info!("Creating request handler on '{handle_topic}'");
+        let handle_stake_topic = config
+            .get_string("handle-stake-topic")
+            .unwrap_or(DEFAULT_HANDLE_STAKE_TOPIC.to_string());
+        info!("Creating request handler on '{handle_stake_topic}'");
+
+        let handle_spdd_topic = config
+            .get_string("handle-spdd-topic")
+            .unwrap_or(DEFAULT_HANDLE_SPDD_TOPIC.to_string());
+        info!("Creating request handler on '{handle_spdd_topic}'");
 
         // Create history
         let history = Arc::new(Mutex::new(StateHistory::<State>::new("AccountsState")));
-        let history_full = history.clone();
-        let history_single = history.clone();
+        let history_stake = history.clone();
+        let history_stake_single = history.clone();
+        let history_spdd = history.clone();
         let history_tick = history.clone();
 
         // Handle requests for full state
         context
             .message_bus
-            .handle(&handle_topic, move |message: Arc<Message>| {
-                let history = history_full.clone();
+            .handle(&handle_stake_topic, move |message: Arc<Message>| {
+                let history = history_stake.clone();
                 async move {
                     let response = match message.as_ref() {
                         Message::RESTRequest(request) => {
@@ -225,13 +232,13 @@ impl AccountsState {
                 }
             })?;
 
-        let handle_topic_single = handle_topic + ".*";
+        let handle_single_stake_topic = handle_stake_topic + ".*";
 
         // Handle requests for single reward state based on stake address
         context
             .message_bus
-            .handle(&handle_topic_single, move |message: Arc<Message>| {
-                let history = history_single.clone();
+            .handle(&handle_single_stake_topic, move |message: Arc<Message>| {
+                let history = history_stake_single.clone();
                 async move {
                     let response = match message.as_ref() {
                         Message::RESTRequest(request) => {
@@ -263,6 +270,38 @@ impl AccountsState {
                                 None => {
                                     RESTResponse::with_text(400, "Stake address must be provided")
                                 }
+                            }
+                        }
+                        _ => {
+                            error!("Unexpected message type {:?}", message);
+                            RESTResponse::with_text(500, "Unexpected message in REST request")
+                        }
+                    };
+
+                    Arc::new(Message::RESTResponse(response))
+                }
+            })?;
+
+        // Handle requests for SPDD
+        context
+            .message_bus
+            .handle(&handle_spdd_topic, move |message: Arc<Message>| {
+                let history = history_spdd.clone();
+                async move {
+                    let response = match message.as_ref() {
+                        Message::RESTRequest(request) => {
+                            info!("REST received {} {}", request.method, request.path);
+                            if let Some(state) = history.lock().await.current() {
+                                let spdd = state.generate_spdd();
+                                match serde_json::to_string(&spdd) {
+                                    Ok(body) => RESTResponse::with_json(200, &body),
+                                    Err(error) => RESTResponse::with_text(
+                                        500,
+                                        &format!("{error:?}").to_string(),
+                                    ),
+                                }
+                            } else {
+                                RESTResponse::with_json(200, "{}")
                             }
                         }
                         _ => {
