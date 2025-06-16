@@ -213,14 +213,16 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acropolis_common::{AddressNetwork, StakeAddress, StakeAddressDelta, StakeAddressPayload};
+    use acropolis_common::{
+        AddressNetwork, Credential, StakeAddress, StakeAddressDelta, StakeAddressPayload,
+    };
 
     const STAKE_KEY_HASH: [u8; 3] = [0x99, 0x0f, 0x00];
 
-    fn create_address() -> StakeAddress {
+    fn create_address(hash: &[u8]) -> StakeAddress {
         StakeAddress {
             network: AddressNetwork::Main,
-            payload: StakeAddressPayload::StakeKeyHash(STAKE_KEY_HASH.to_vec()),
+            payload: StakeAddressPayload::StakeKeyHash(hash.to_vec()),
         }
     }
 
@@ -229,7 +231,7 @@ mod tests {
         let mut state = State::default();
         let msg = StakeAddressDeltasMessage {
             deltas: vec![StakeAddressDelta {
-                address: create_address(),
+                address: create_address(&STAKE_KEY_HASH),
                 delta: 42,
             }],
         };
@@ -266,7 +268,7 @@ mod tests {
 
         let msg = StakeAddressDeltasMessage {
             deltas: vec![StakeAddressDelta {
-                address: create_address(),
+                address: create_address(&STAKE_KEY_HASH),
                 delta: 42,
             }],
         };
@@ -296,5 +298,54 @@ mod tests {
                 .utxo_value,
             42
         );
+    }
+
+    #[test]
+    fn spdd_is_empty_at_start() {
+        let state = State::default();
+        let spdd = state.generate_spdd();
+        assert!(spdd.is_empty());
+    }
+
+    #[test]
+    fn spdd_from_delegation_with_utxo_values() {
+        let mut state = State::default();
+
+        // Delegate
+        let spo1: KeyHash = vec![0x01];
+        let addr1: KeyHash = vec![0x11];
+        state.record_delegation(&Credential::AddrKeyHash(addr1.clone()), &spo1);
+
+        let spo2: KeyHash = vec![0x02];
+        let addr2: KeyHash = vec![0x12];
+        state.record_delegation(&Credential::AddrKeyHash(addr2.clone()), &spo2);
+
+        // Put some value in
+        let msg1 = StakeAddressDeltasMessage {
+            deltas: vec![StakeAddressDelta {
+                address: create_address(&addr1),
+                delta: 42,
+            }],
+        };
+
+        state.handle_stake_deltas(&msg1).unwrap();
+
+        let msg2 = StakeAddressDeltasMessage {
+            deltas: vec![StakeAddressDelta {
+                address: create_address(&addr2),
+                delta: 21,
+            }],
+        };
+
+        state.handle_stake_deltas(&msg2).unwrap();
+
+        // Get the SPDD
+        let spdd = state.generate_spdd();
+        assert_eq!(spdd.len(), 2);
+
+        let stake1 = spdd.get(&spo1).unwrap();
+        assert_eq!(*stake1, 42);
+        let stake2 = spdd.get(&spo2).unwrap();
+        assert_eq!(*stake2, 21);
     }
 }

@@ -11,10 +11,10 @@ use anyhow::{anyhow, Result};
 use caryatid_sdk::{message_bus::Subscription, module, Context, Module};
 use config::Config;
 use serde_json;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info};
-use std::collections::HashMap;
 
 mod state;
 use state::State;
