@@ -1,17 +1,18 @@
 //! Acropolis AccountsState: State storage
 use acropolis_common::{
     messages::{
-        EpochActivityMessage, SPOStateMessage, StakeAddressDeltasMessage, TxCertificatesMessage,
+        EpochActivityMessage, ProtocolParamsMessage, SPOStateMessage, StakeAddressDeltasMessage,
+        TxCertificatesMessage,
     },
     serialization::SerializeMapAs,
-    KeyHash, PoolRegistration, StakeAddressPayload, StakeCredential, TxCertificate,
+    KeyHash, PoolRegistration, ProtocolParams, StakeAddressPayload, StakeCredential, TxCertificate,
 };
 use anyhow::Result;
 use dashmap::DashMap;
 use imbl::HashMap;
-use std::collections::BTreeMap;
 use rayon::prelude::*;
 use serde_with::{hex::Hex, serde_as};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use tracing::{error, info};
 
@@ -44,6 +45,9 @@ pub struct State {
     /// Map of staking address values
     #[serde_as(as = "SerializeMapAs<Hex, _>")]
     stake_addresses: HashMap<Vec<u8>, StakeAddressState>,
+
+    /// Protocol parameters that apply during this epoch
+    protocol_parameters: Option<ProtocolParams>,
 }
 
 impl State {
@@ -91,6 +95,14 @@ impl State {
             .iter()
             .map(|entry| ((**entry.key()).clone(), *entry.value()))
             .collect()
+    }
+
+    /// Handle an ProtocolParamsMessage with the latest parameters at the start of a new
+    /// epoch
+    pub fn handle_parameters(&mut self, params_msg: &ProtocolParamsMessage) -> Result<()> {
+        self.protocol_parameters = Some(params_msg.params.clone());
+        info!("New parameter set: {:?}", self.protocol_parameters);
+        Ok(())
     }
 
     /// Handle an EpochActivityMessage giving total fees and block counts by VRF key for
@@ -215,7 +227,9 @@ impl State {
 mod tests {
     use super::*;
     use acropolis_common::{
-        AddressNetwork, Credential, StakeAddress, StakeAddressDelta, StakeAddressPayload,
+        rational_number::RationalNumber, AddressNetwork, Anchor, Committee, Constitution,
+        ConwayParams, Credential, DRepVotingThresholds, PoolVotingThresholds, ProtocolParams,
+        StakeAddress, StakeAddressDelta, StakeAddressPayload, UnitInterval,
     };
 
     const STAKE_KEY_HASH: [u8; 3] = [0x99, 0x0f, 0x00];
@@ -348,5 +362,71 @@ mod tests {
         assert_eq!(*stake1, 42);
         let stake2 = spdd.get(&spo2).unwrap();
         assert_eq!(*stake2, 21);
+    }
+
+    #[test]
+    fn protocol_params_are_captured_from_message() {
+        // Fake Conway parameters (a lot of work to test an assignment!)
+        let params = ProtocolParams {
+            conway: Some(ConwayParams {
+                pool_voting_thresholds: PoolVotingThresholds {
+                    motion_no_confidence: UnitInterval::ONE,
+                    committee_normal: UnitInterval::ZERO,
+                    committee_no_confidence: UnitInterval::ZERO,
+                    hard_fork_initiation: UnitInterval::ONE,
+                    security_voting_threshold: UnitInterval::ZERO,
+                },
+                d_rep_voting_thresholds: DRepVotingThresholds {
+                    motion_no_confidence: UnitInterval::ONE,
+                    committee_normal: UnitInterval::ZERO,
+                    committee_no_confidence: UnitInterval::ZERO,
+                    update_constitution: UnitInterval::ONE,
+                    hard_fork_initiation: UnitInterval::ZERO,
+                    pp_network_group: UnitInterval::ZERO,
+                    pp_economic_group: UnitInterval::ZERO,
+                    pp_technical_group: UnitInterval::ZERO,
+                    pp_governance_group: UnitInterval::ZERO,
+                    treasury_withdrawal: UnitInterval::ONE,
+                },
+                committee_min_size: 42,
+                committee_max_term_length: 3,
+                gov_action_lifetime: 99,
+                gov_action_deposit: 500_000_000,
+                d_rep_deposit: 100_000_000,
+                d_rep_activity: 27,
+                min_fee_ref_script_cost_per_byte: RationalNumber::new(1, 42).unwrap(),
+                plutus_v3_cost_model: Vec::new(),
+                constitution: Constitution {
+                    anchor: Anchor {
+                        url: "constitution.cardano.org".to_string(),
+                        data_hash: vec![0x99],
+                    },
+                    guardrail_script: None,
+                },
+                committee: Committee {
+                    members: std::collections::HashMap::new(),
+                    threshold: RationalNumber::new(5, 32).unwrap(),
+                },
+            }),
+
+            ..ProtocolParams::default()
+        };
+
+        let msg = ProtocolParamsMessage {
+            params: params.clone(),
+        };
+        let mut state = State::default();
+
+        state.handle_parameters(&msg).unwrap();
+
+        assert_eq!(
+            state
+                .protocol_parameters
+                .unwrap()
+                .conway
+                .unwrap()
+                .pool_voting_thresholds,
+            params.conway.unwrap().pool_voting_thresholds
+        );
     }
 }
