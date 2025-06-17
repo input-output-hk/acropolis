@@ -1,19 +1,14 @@
 //! Acropolis genesis bootstrapper module for Caryatid
 //! Reads genesis files and outputs initial UTXO events
 
-use acropolis_common::rational_number::RationalNumber;
 use acropolis_common::{
     messages::{CardanoMessage, GenesisCompleteMessage, Message, UTXODeltasMessage},
-    Address, Anchor, BlockInfo, BlockStatus, ByronAddress, Committee, Constitution, ConwayParams,
-    Credential, DRepVotingThresholds, Era, PoolVotingThresholds, TxOutput, UTXODelta,
+    Address, BlockInfo, BlockStatus, ByronAddress, Era, TxOutput, UTXODelta,
 };
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use caryatid_sdk::{module, Context, Module};
 use config::Config;
-use fraction::Fraction;
-use hex::decode;
 use pallas::ledger::configs::{byron::genesis_utxos, *};
-use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{error, info};
 
@@ -111,52 +106,6 @@ impl GenesisBootstrapper {
                 .unwrap_or_else(|e| error!("Failed to publish: {e}"));
         });
 
-        Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::map_f32_to_rational;
-    use acropolis_common::rational_number::RationalNumber;
-
-    #[test]
-    fn test_fractions() -> Result<(), anyhow::Error> {
-        assert_eq!(
-            map_f32_to_rational(0.51)?,
-            RationalNumber {
-                numerator: 51,
-                denominator: 100
-            }
-        );
-        assert_eq!(
-            map_f32_to_rational(0.67)?,
-            RationalNumber {
-                numerator: 67,
-                denominator: 100
-            }
-        );
-        assert_eq!(
-            map_f32_to_rational(0.6)?,
-            RationalNumber {
-                numerator: 3,
-                denominator: 5
-            }
-        );
-        assert_eq!(
-            map_f32_to_rational(0.75)?,
-            RationalNumber {
-                numerator: 3,
-                denominator: 4
-            }
-        );
-        assert_eq!(
-            map_f32_to_rational(0.5)?,
-            RationalNumber {
-                numerator: 1,
-                denominator: 2
-            }
-        );
         Ok(())
     }
 }

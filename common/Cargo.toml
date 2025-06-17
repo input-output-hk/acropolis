@@ -20,6 +20,7 @@ caryatid_module_clock = "0.9"
 caryatid_module_rest_server = "0.10"
 chrono = "0.4"
 gcd = "2.3"
+fraction = "0.15"
 hex = "0.4"
 lf-queue = "0.1.0"
 serde = { version = "1.0.214", features = ["derive"] }
