@@ -5,7 +5,7 @@ use acropolis_common::{
     messages::{CardanoMessage, Message, ProtocolParamsMessage, RESTResponse},
     BlockInfo,
 };
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use caryatid_sdk::{message_bus::Subscription, module, Context, MessageBusExt, Module};
 use config::Config;
 use std::sync::Arc;
@@ -13,14 +13,13 @@ use tokio::sync::Mutex;
 use tracing::{error, info};
 
 mod parameters_updater;
+mod genesis_params;
 mod state;
 
 use parameters_updater::ParametersUpdater;
 use state::State;
 
 const DEFAULT_ENACT_STATE_TOPIC: (&str, &str) = ("enact-state-topic", "cardano.enact.state");
-const DEFAULT_GENESIS_COMPLETE_TOPIC: (&str, &str) =
-    ("genesis-complete-topic", "cardano.sequence.bootstrapped");
 const DEFAULT_HANDLE_TOPIC: (&str, &str) = ("handle-topic", "rest.get.governance-state.*");
 const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: (&str, &str) =
     ("publish-parameters-topic", "cardano.protocol.parameters");
@@ -36,7 +35,6 @@ pub struct ParametersState;
 struct ParametersStateConfig {
     pub context: Arc<Context<Message>>,
     pub enact_state_topic: String,
-    pub genesis_complete_topic: String,
     pub handle_topic: String,
     pub protocol_parameters_topic: String,
 }
@@ -44,7 +42,7 @@ struct ParametersStateConfig {
 impl ParametersStateConfig {
     fn conf(config: &Arc<Config>, keydef: (&str, &str)) -> String {
         let actual = config.get_string(keydef.0).unwrap_or(keydef.1.to_string());
-        info!("Creating subscriber on '{}' for {}", actual, keydef.0);
+        info!("Parameter value '{}' for {}", actual, keydef.0);
         actual
     }
 
@@ -52,7 +50,6 @@ impl ParametersStateConfig {
         Arc::new(Self {
             context,
             enact_state_topic: Self::conf(config, DEFAULT_ENACT_STATE_TOPIC),
-            genesis_complete_topic: Self::conf(config, DEFAULT_GENESIS_COMPLETE_TOPIC),
             handle_topic: Self::conf(config, DEFAULT_HANDLE_TOPIC),
             protocol_parameters_topic: Self::conf(config, DEFAULT_PROTOCOL_PARAMETERS_TOPIC),
         })
@@ -85,7 +82,6 @@ impl ParametersState {
 
     async fn run(
         config: Arc<ParametersStateConfig>,
-        mut genesis_s: Box<dyn Subscription<Message>>,
         mut enact_s: Box<dyn Subscription<Message>>,
     ) -> Result<()> {
         let state = Arc::new(Mutex::new(State::new()));
@@ -102,15 +98,15 @@ impl ParametersState {
                             info!("REST received {} {}", request.method, request.path);
                             RESTResponse::with_text(200, "Ok")
                             /*
-                                                   let lock = state.lock().await;
+                            let lock = state.lock().await;
 
-                                                   match perform_rest_request(&lock, &request.path) {
-                                                       Ok(response) => RESTResponse::with_text(200, &response),
-                                                       Err(error) => {
-                                                           error!("Governance State REST request error: {error:?}");
-                                                           RESTResponse::with_text(400, &format!("{error:?}"))
-                                                       }
-                                                   }
+                            match perform_rest_request(&lock, &request.path) {
+                                Ok(response) => RESTResponse::with_text(200, &response),
+                                Err(error) => {
+                                    error!("Governance State REST request error: {error:?}");
+                                    RESTResponse::with_text(400, &format!("{error:?}"))
+                                }
+                            }
                             */
                         }
                         _ => {
@@ -123,26 +119,13 @@ impl ParametersState {
                 }
             })?;
 
-        match &genesis_s.read().await?.1.as_ref() {
-            Message::Cardano((_block, CardanoMessage::GenesisComplete(genesis))) => {
-                state.lock().await.handle_genesis(&genesis).await?;
-            }
-            msg => {
-                return Err(anyhow!(
-                    "Unexpected genesis {msg:?}; cannot initialize parameters module"
-                ))
-            }
-        };
-
         loop {
+            info!("Waiting for enact state");
             match enact_s.read().await?.1.as_ref() {
                 Message::Cardano((block, CardanoMessage::EnactState(enact))) => {
-                    let params = state
-                        .lock()
-                        .await
-                        .handle_enact_state(&block, &enact)
-                        .await?;
-                    Self::publish_update(&config, &block, params)?;
+                    let mut locked = state.lock().await;
+                    let new_params = locked.handle_enact_state(&block, &enact).await?;
+                    Self::publish_update(&config, &block, new_params)?;
                 }
                 msg => error!("Unexpected message {msg:?} for enact state topic"),
             }
@@ -151,11 +134,7 @@ impl ParametersState {
 
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         let cfg = ParametersStateConfig::new(context.clone(), &config);
-        let genesis = cfg
-            .context
-            .message_bus
-            .register(&cfg.genesis_complete_topic)
-            .await?;
+
         let enact = cfg
             .context
             .message_bus
@@ -164,53 +143,13 @@ impl ParametersState {
 
         // Start run task
         tokio::spawn(async move {
-            Self::run(cfg, genesis, enact)
+            Self::run(cfg, enact)
                 .await
                 .unwrap_or_else(|e| error!("Failed: {e}"));
         });
 
         Ok(())
     }
-    /*
-            // Subscribe to governance procedures serializer
-            context.clone().message_bus.subscribe(&subscribe_topic, move |message: Arc<Message>| {
-                let state = state_enact.clone();
-
-                async move {
-                    match message.as_ref() {
-                        Message::Cardano((block_info, CardanoMessage::EnactState(msg))) => {
-                            let mut state = state.lock().await;
-                            state.handle_enact_state(block_info, msg)
-                                .await
-                                .inspect_err(|e| error!("Messaging handling error: {e}"))
-                                .ok();
-                        }
-
-                        _ => error!("Unexpected message type: {message:?}")
-                    }
-                }
-            })?;
-
-            // Subscribe to bootstrap completion serializer
-            context.clone().message_bus.subscribe(&genesis_complete_topic, move |message: Arc<Message>| {
-                let state = state_genesis.clone();
-
-                async move {
-                    match message.as_ref() {
-                        Message::Cardano((_block_info, CardanoMessage::GenesisComplete(msg))) => {
-                            let mut state = state.lock().await;
-                            state.handle_genesis(msg)
-                                .await
-                                .inspect_err(|e| error!("Messaging handling error: {e}"))
-                                .ok();
-                        }
-
-                        _ => error!("Unexpected message type: {message:?}")
-                    }
-                }
-            })?;
-    */
-    // REST requests handling
 
     // Ticker to log stats
     /*
