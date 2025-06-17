@@ -1,8 +1,7 @@
 //! Acropolis DRepState: State storage
 
-use crate::drep_distribution_publisher::DRepDistributionPublisher;
 use acropolis_common::{
-    messages::TxCertificatesMessage, Anchor, BlockInfo, DRepCredential, Lovelace, TxCertificate,
+    messages::TxCertificatesMessage, Anchor, DRepCredential, Lovelace, TxCertificate,
 };
 use anyhow::{anyhow, Result};
 use serde_with::serde_as;
@@ -24,15 +23,12 @@ impl DRepRecord {
 
 pub struct State {
     dreps: HashMap<DRepCredential, DRepRecord>,
-
-    drep_distribution_publisher: Option<DRepDistributionPublisher>,
 }
 
 impl State {
-    pub fn new(drep_distribution_publisher: Option<DRepDistributionPublisher>) -> Self {
+    pub fn new() -> Self {
         Self {
             dreps: HashMap::new(),
-            drep_distribution_publisher,
         }
     }
 
@@ -105,7 +101,7 @@ impl State {
         }
     }
 
-    pub fn new_drep_distribution(&self) -> Vec<(DRepCredential, Lovelace)> {
+    pub fn active_drep_list(&self) -> Vec<(DRepCredential, Lovelace)> {
         let mut distribution = Vec::new();
         for (drep, drep_info) in self.dreps.iter() {
             distribution.push((drep.clone(), drep_info.deposit));
@@ -113,36 +109,10 @@ impl State {
         distribution
     }
 
-    pub async fn handle(
-        &mut self,
-        block: &BlockInfo,
-        tx_cert_msg: &TxCertificatesMessage,
-    ) -> Result<()> {
-        let mut changed = false;
-        let tx_slot = block.slot;
-
+    pub async fn handle(&mut self, tx_cert_msg: &TxCertificatesMessage) -> Result<()> {
         for tx_cert in tx_cert_msg.certificates.iter() {
-            match self.process_one_certificate(tx_cert) {
-                Err(e) => tracing::error!("Error processing tx_cert {}", e),
-                Ok(chg) => changed |= chg,
-            }
-        }
-
-        let distribution = if changed {
-            let d = self.new_drep_distribution();
-            info!(
-                "New vote distribution at slot = {}: len = {}",
-                tx_slot,
-                d.len()
-            );
-            Some(d)
-        } else {
-            None
-        };
-
-        if let Some(ref mut publisher) = self.drep_distribution_publisher {
-            if let Err(e) = publisher.publish_stake(block, distribution).await {
-                tracing::error!("Error publishing drep voting stake distribution: {e}");
+            if let Err(e) = self.process_one_certificate(tx_cert) {
+                tracing::error!("Error processing tx_cert {}", e);
             }
         }
 
@@ -174,7 +144,7 @@ mod tests {
             deposit: 500000000,
             anchor: None,
         });
-        let mut state = State::new(None);
+        let mut state = State::new();
         assert_eq!(state.process_one_certificate(&tx_cert).unwrap(), true);
         assert_eq!(state.get_count(), 1);
         let tx_cert_record = DRepRecord {
@@ -195,7 +165,7 @@ mod tests {
             deposit: 500000000,
             anchor: None,
         });
-        let mut state = State::new(None);
+        let mut state = State::new();
         assert_eq!(state.process_one_certificate(&tx_cert).unwrap(), true);
 
         let bad_tx_cert = TxCertificate::DRepRegistration(DRepRegistration {
@@ -224,7 +194,7 @@ mod tests {
             deposit: 500000000,
             anchor: None,
         });
-        let mut state = State::new(None);
+        let mut state = State::new();
         assert_eq!(state.process_one_certificate(&tx_cert).unwrap(), true);
 
         let anchor = Anchor {
@@ -262,7 +232,7 @@ mod tests {
             deposit: 500000000,
             anchor: None,
         });
-        let mut state = State::new(None);
+        let mut state = State::new();
         assert_eq!(state.process_one_certificate(&tx_cert).unwrap(), true);
 
         let anchor = Anchor {
@@ -297,7 +267,7 @@ mod tests {
             deposit: 500000000,
             anchor: None,
         });
-        let mut state = State::new(None);
+        let mut state = State::new();
         assert_eq!(state.process_one_certificate(&tx_cert).unwrap(), true);
 
         let unregister_tx_cert = TxCertificate::DRepDeregistration(DRepDeregistration {
@@ -320,7 +290,7 @@ mod tests {
             deposit: 500000000,
             anchor: None,
         });
-        let mut state = State::new(None);
+        let mut state = State::new();
         assert_eq!(state.process_one_certificate(&tx_cert).unwrap(), true);
 
         let unregister_tx_cert = TxCertificate::DRepDeregistration(DRepDeregistration {
