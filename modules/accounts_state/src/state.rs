@@ -9,6 +9,7 @@ use acropolis_common::{
 use anyhow::Result;
 use dashmap::DashMap;
 use imbl::HashMap;
+use std::collections::BTreeMap;
 use rayon::prelude::*;
 use serde_with::{hex::Hex, serde_as};
 use std::sync::Arc;
@@ -65,7 +66,7 @@ impl State {
     /// Derive the Stake Pool Delegation Distribution (SPDD) - a map of total stake value
     /// (including both UTXO stake addresses and rewards) for each active SPO
     /// Key of returned map is the SPO 'operator' ID
-    pub fn generate_spdd(&self) -> HashMap<KeyHash, u64> {
+    pub fn generate_spdd(&self) -> BTreeMap<KeyHash, u64> {
         // Shareable Dashmap with referenced keys
         let spo_stakes = Arc::new(DashMap::<&KeyHash, u64>::new());
 
@@ -85,7 +86,7 @@ impl State {
                 },
             );
 
-        // Collect into a plain HashMap
+        // Collect into a plain BTreeMap, so that it is ordered on output
         spo_stakes
             .iter()
             .map(|entry| ((**entry.key()).clone(), *entry.value()))
