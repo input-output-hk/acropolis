@@ -1,0 +1,31 @@
+; This file contains some some basic, shared types that are used throughout the ledger state specification.
+
+hash_28 = bytes .size 32
+hash_32 = bytes .size 32
+
+keyhash = hash_28
+
+; TODO: Are able to further restrict the legal bytes of reward account according to CIP-19 (https://cips.cardano.org/cip/CIP-19)?
+reward_account = bytes
+
+coin = uint
+epoch = uint .size 8
+
+
+denominator = uint .gt 0
+; A unit interval is a rational number (https://peteroupc.github.io/CBOR/rational.html)
+; that MUST be in the range [0, 1].
+;
+; The additional restriction requires that:
+;   numerator <= denominator
+;
+; This relation cannot be expressed in CDDL (TODO: is this true?)
+; but it must be enforced by serialization/deserialization processes
+unit_interval = #6.30([uint, uint])
+
+; Conway introduced `nonempty_set` as:
+;   `nonempty_set<a0> = #6.258([+ a0])/ [+ a0]`
+; For simplicity, we remove the option, and require the tag 258.
+nonempty_set<T> = #6.258([+ T])
+
+url = text .size (0 .. 128)
