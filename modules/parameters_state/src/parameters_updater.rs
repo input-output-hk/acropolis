@@ -1,8 +1,11 @@
+use anyhow::{anyhow, bail, Result};
 use acropolis_common::{
-    messages::EnactStateMessage, Committee, CommitteeChange, ConwayParams, EnactStateElem, Era,
-    ProtocolParamUpdate, ProtocolParams,
+    messages::EnactStateMessage, Committee, CommitteeChange,
+    ConwayParams, ShelleyParams,
+    EnactStateElem, Era, ProtocolParamUpdate, ProtocolParams,
 };
 use tracing::error;
+use crate::genesis_params;
 
 pub struct ParametersUpdater {
     params: ProtocolParams,
@@ -45,6 +48,10 @@ impl ParametersUpdater {
         )
     }
 
+    fn update_shelley_params(s: &mut ShelleyParams, p: &ProtocolParamUpdate) {
+        Self::upd(&mut s.protocol_params.pool_pledge_influence, &p.pool_pledge_influence)
+    }
+
     fn update_committee(c: &mut Committee, cu: &CommitteeChange) {
         for removed_member in cu.removed_committee_members.iter() {
             if let None = c.members.remove(removed_member) {
@@ -66,40 +73,58 @@ impl ParametersUpdater {
         c.threshold = cu.terms.clone();
     }
 
-    fn apply_enact_state_elem(&mut self, u: &EnactStateElem) {
-        if let Some(ref mut conway) = self.params.conway {
-            match &u {
-                EnactStateElem::Params(pu) => Self::update_conway_params(conway, pu),
-                EnactStateElem::Constitution(cu) => conway.constitution = cu.clone(),
-                EnactStateElem::Committee(cu) => Self::update_committee(&mut conway.committee, cu),
-                EnactStateElem::NoConfidence => conway.committee.members.clear(),
+    fn apply_enact_state_elem(&mut self, u: &EnactStateElem) -> Result<()> {
+        let ref mut conway = self.params.conway.as_mut().ok_or_else(
+            || anyhow!("Conway must present for enact state")
+        )?;
+
+        let ref mut shelley = self.params.shelley.as_mut().ok_or_else(
+            || anyhow!("Shelley must present for enact state")
+        )?;
+
+        match &u {
+            EnactStateElem::Params(pu) => {
+                Self::update_conway_params(conway, pu);
+                Self::update_shelley_params(shelley, pu)
             }
+            EnactStateElem::Constitution(cu) => conway.constitution = cu.clone(),
+            EnactStateElem::Committee(cu) => Self::update_committee(&mut conway.committee, cu),
+            EnactStateElem::NoConfidence => conway.committee.members.clear(),
         }
+
+        Ok(())
     }
 
-    pub fn apply_enact_state(&mut self, u: &EnactStateMessage) {
+    pub fn apply_enact_state(&mut self, u: &EnactStateMessage) -> Result<()> {
         for elem in u.enactments.iter() {
-            self.apply_enact_state_elem(elem);
+            self.apply_enact_state_elem(elem)?;
         }
+        Ok(())
     }
 
-    fn upd_empty_dst<T: Clone>(dst: &mut Option<T>, src: &Option<T>) {
-        if src.is_some() {
-            if dst.is_some() {
-                tracing::error!("Genesis update for non-empty parameters, skipping update");
-            } else {
-                *dst = src.clone();
-            }
+    fn upgen<T: Clone>(dst: &mut Option<T>, src: &T) -> Result<()> {
+        if dst.is_some() {
+            bail!("Destination parameter is not None, skipping applying genesis");
         }
+        *dst = Some(src.clone());
+        Ok(())
     }
 
-    pub fn apply_genesis(&mut self, era: &Era, genesis_params: &ProtocolParams) {
+    pub fn apply_genesis(&mut self, era: &Era) -> Result<()> {
         match era {
-            Era::Byron => Self::upd_empty_dst(&mut self.params.byron, &genesis_params.byron),
-            Era::Shelley => Self::upd_empty_dst(&mut self.params.shelley, &genesis_params.shelley),
-            Era::Alonzo => Self::upd_empty_dst(&mut self.params.alonzo, &genesis_params.alonzo),
-            Era::Conway => Self::upd_empty_dst(&mut self.params.conway, &genesis_params.conway),
-            _ => (), // does not have corresponding genesis params
+            Era::Byron =>
+                Self::upgen(&mut self.params.byron, &genesis_params::read_byron_genesis()?),
+            Era::Shelley => 
+                Self::upgen(&mut self.params.shelley, &genesis_params::read_shelley_genesis()?),
+            Era::Alonzo => Ok(()),
+                // Not implemented yet
+                // Self::upgen(&mut self.params.alonzo, &genesis_params::read_alonzo_genesis()?),
+            Era::Conway =>
+                Self::upgen(&mut self.params.conway, &genesis_params::read_conway_genesis()?),
+            _ => {
+                tracing::info!("Applying genesis: skipping, no genesis exist for {era}");
+                Ok(())
+            }
         }
     }
 

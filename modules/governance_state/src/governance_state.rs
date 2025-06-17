@@ -210,6 +210,7 @@ impl GovernanceState {
             }
 
             if blk_g.new_epoch {
+                info!("Reading parameters");
                 let (blk_p, params) = Self::read_parameters(&mut protocol_s).await?;
                 if blk_g != blk_p {
                     error!(

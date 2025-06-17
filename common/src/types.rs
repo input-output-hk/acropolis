@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_with::{hex::Hex, serde_as};
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
+use chrono::{DateTime, Utc};
 
 /// Protocol era
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
@@ -28,6 +29,12 @@ pub enum Era {
 impl Default for Era {
     fn default() -> Era {
         Era::Byron
+    }
+}
+
+impl Display for Era {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
     }
 }
 
@@ -597,13 +604,137 @@ pub struct DRepVotingThresholds {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct AlonzoParams {}
+pub struct SoftForkRule {
+    pub init_thd: u64,
+    pub min_thd: u64,
+    pub thd_decrement: u64,
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ByronParams {}
+pub struct TxFeePolicy {
+    pub multiplier: u64,
+    pub summand: u64,
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ShelleyParams {}
+pub struct BlockVersionData {
+    pub script_version: u16,
+    pub heavy_del_thd: u64,
+    pub max_block_size: u64,
+    pub max_header_size: u64,
+    pub max_proposal_size: u64,
+    pub max_tx_size: u64,
+    pub mpc_thd: u64,
+    pub slot_duration: u64,
+
+    pub softfork_rule: SoftForkRule,
+    pub tx_fee_policy: TxFeePolicy,
+
+    pub unlock_stake_epoch: u64,
+    pub update_implicit: u64,
+    pub update_proposal_thd: u64,
+    pub update_vote_thd: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ProtocolConsts {
+    pub k: usize,
+    pub protocol_magic: u32,
+    pub vss_max_ttl: Option<u32>,
+    pub vss_min_ttl: Option<u32>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ProtocolVersion {
+    pub minor: u64,
+    pub major: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum NonceVariant {
+    NeutralNonce,
+    Nonce
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Nonce {
+    pub tag: NonceVariant,
+    pub hash: Option<Vec<u8>>
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ShelleyProtocolParams {
+    pub protocol_version: ProtocolVersion,
+    pub max_tx_size: u32,
+    pub max_block_body_size: u32,
+    pub max_block_header_size: u32,
+    pub key_deposit: u64,
+    pub min_utxo_value: u64,
+    pub minfee_a: u32,
+    pub minfee_b: u32,
+    pub pool_deposit: u64,
+
+    /// AKA n_opt, k parameter
+    pub stake_pool_target_num: u32,
+    pub min_pool_cost: u64,
+
+    /// AKA eMax, e_max
+    pub pool_retire_max_epoch: u64,
+    pub extra_entropy: Nonce,
+    pub decentralisation_param: RationalNumber,
+
+    /// AKA Rho
+    pub monetary_expansion: RationalNumber,
+
+    /// AKA Tau
+    pub treasury_cut: RationalNumber,
+
+    /// AKA a0
+    pub pool_pledge_influence: RationalNumber,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AlonzoParams {
+    pub lovelace_per_utxo_word: u64,
+    pub execution_prices: ExUnitPrices,
+    pub max_tx_ex_units: RationalNumber,
+    pub max_block_ex_units: RationalNumber,
+    pub max_value_size: u32,
+    pub collateral_percentage: u32,
+    pub max_collateral_inputs: u32,
+    pub plutus_v1_cost_model: CostModel,
+    pub plutus_v2_cost_model: CostModel
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ByronParams {
+    pub block_version_data: BlockVersionData,
+    pub fts_seed: Option<DataHash>,
+    pub protocol_consts: ProtocolConsts,
+    pub start_time: u64
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum NetworkId {
+    Testnet,
+    Mainnet
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ShelleyParams {
+    pub active_slots_coeff: Option<f32>,
+    pub epoch_length: Option<u32>,
+    pub max_kes_evolutions: Option<u32>,
+    pub max_lovelace_supply: Option<u64>,
+    pub network_id: Option<NetworkId>,
+    pub network_magic: Option<u32>,
+    pub protocol_params: ShelleyProtocolParams,
+    pub security_param: Option<u32>,
+    pub slot_length: Option<u32>,
+    pub slots_per_kes_period: Option<u32>,
+    pub system_start: Option<DateTime<Utc>>,
+    pub update_quorum: Option<u32>
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ConwayParams {
@@ -616,7 +747,7 @@ pub struct ConwayParams {
     pub d_rep_deposit: u64,
     pub d_rep_activity: u32,
     pub min_fee_ref_script_cost_per_byte: RationalNumber,
-    pub plutus_v3_cost_model: Vec<i64>,
+    pub plutus_v3_cost_model: CostModel,
     pub constitution: Constitution,
     pub committee: Committee,
 }
