@@ -6,7 +6,6 @@ use acropolis_common::{
     Credential, Era, AlonzoParams, ByronParams, ConwayParams, ShelleyParams,
     rational_number::RationalNumber
 };
-use fraction::Fraction;
 use hex::decode;
 use pallas::ledger::{configs::*, primitives};
 use serde::Deserialize;
@@ -46,43 +45,28 @@ pub fn map_fraction(fraction: &conway::Fraction) -> RationalNumber {
     }
 }
 
-pub fn map_f32_to_rational(value: f32) -> Result<RationalNumber> {
-    if value.is_sign_negative() {
-        return Err(anyhow!("Value {} must be greater than 0", value));
-    }
-    let fract = Fraction::from(value);
-    Ok(RationalNumber {
-        numerator: *fract
-            .numer()
-            .ok_or_else(|| anyhow!("Cannot get numerator for {}", value))?,
-        denominator: *fract
-            .denom()
-            .ok_or_else(|| anyhow!("Cannot get denominator for {}", value))?,
-    })
-}
-
 fn map_pool_thresholds(thresholds: &conway::PoolVotingThresholds) -> Result<PoolVotingThresholds> {
     Ok(PoolVotingThresholds {
-        motion_no_confidence: map_f32_to_rational(thresholds.motion_no_confidence)?,
-        committee_normal: map_f32_to_rational(thresholds.committee_normal)?,
-        committee_no_confidence: map_f32_to_rational(thresholds.committee_no_confidence)?,
-        hard_fork_initiation: map_f32_to_rational(thresholds.hard_fork_initiation)?,
-        security_voting_threshold: map_f32_to_rational(thresholds.pp_security_group)?,
+        motion_no_confidence: RationalNumber::try_from(thresholds.motion_no_confidence)?,
+        committee_normal: RationalNumber::try_from(thresholds.committee_normal)?,
+        committee_no_confidence: RationalNumber::try_from(thresholds.committee_no_confidence)?,
+        hard_fork_initiation: RationalNumber::try_from(thresholds.hard_fork_initiation)?,
+        security_voting_threshold: RationalNumber::try_from(thresholds.pp_security_group)?,
     })
 }
 
 fn map_drep_thresholds(thresholds: &conway::DRepVotingThresholds) -> Result<DRepVotingThresholds> {
     Ok(DRepVotingThresholds {
-        motion_no_confidence: map_f32_to_rational(thresholds.motion_no_confidence)?,
-        committee_normal: map_f32_to_rational(thresholds.committee_normal)?,
-        committee_no_confidence: map_f32_to_rational(thresholds.committee_normal)?,
-        update_constitution: map_f32_to_rational(thresholds.update_to_constitution)?,
-        hard_fork_initiation: map_f32_to_rational(thresholds.hard_fork_initiation)?,
-        pp_network_group: map_f32_to_rational(thresholds.pp_network_group)?,
-        pp_economic_group: map_f32_to_rational(thresholds.pp_economic_group)?,
-        pp_technical_group: map_f32_to_rational(thresholds.pp_technical_group)?,
-        pp_governance_group: map_f32_to_rational(thresholds.pp_gov_group)?,
-        treasury_withdrawal: map_f32_to_rational(thresholds.treasury_withdrawal)?,
+        motion_no_confidence: RationalNumber::try_from(thresholds.motion_no_confidence)?,
+        committee_normal: RationalNumber::try_from(thresholds.committee_normal)?,
+        committee_no_confidence: RationalNumber::try_from(thresholds.committee_normal)?,
+        update_constitution: RationalNumber::try_from(thresholds.update_to_constitution)?,
+        hard_fork_initiation: RationalNumber::try_from(thresholds.hard_fork_initiation)?,
+        pp_network_group: RationalNumber::try_from(thresholds.pp_network_group)?,
+        pp_economic_group: RationalNumber::try_from(thresholds.pp_economic_group)?,
+        pp_technical_group: RationalNumber::try_from(thresholds.pp_technical_group)?,
+        pp_governance_group: RationalNumber::try_from(thresholds.pp_gov_group)?,
+        treasury_withdrawal: RationalNumber::try_from(thresholds.treasury_withdrawal)?,
     })
 }
 
