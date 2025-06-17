@@ -1,0 +1,47 @@
+; This file defines the specification for the SPO State. It is based on the `PState` definition from the cardano-ledger specification.
+
+; types for codegen-cddl
+keyhash = _CDDL_CODEGEN_EXTERN_TYPE_
+hash_32 = _CDDL_CODEGEN_EXTERN_TYPE_
+coin = _CDDL_CODEGEN_EXTERN_TYPE_
+unit_interval = _CDDL_CODEGEN_EXTERN_TYPE_
+reward_account = _CDDL_CODEGEN_EXTERN_TYPE_
+nonempty_set = _CDDL_CODEGEN_EXTERN_TYPE_
+epoch = _CDDL_CODEGEN_EXTERN_TYPE_
+url = _CDDL_CODEGEN_EXTERN_TYPE_
+
+; `spo_state` provides the current state of active pools, and at which epochs upcoming pool retirements will occur
+spo_state = {
+    pools: { * keyhash => pool_parameters }
+    retiring: { * keyhash => epoch }
+}
+
+pool_parameters = (
+    operator       : keyhash
+  , vrf_keyhash    : hash_32
+  , pledge         : coin
+  , cost           : coin
+  , margin         : unit_interval
+  , reward_account : reward_account
+  , pool_owners    : nonempty_set<keyhash>
+  , relays         : [* relay]
+  , pool_metadata  : pool_metadata / nil
+  )
+
+
+relay = [single_host_addr // single_host_name // multi_host_name]
+
+single_host_addr = (0, port / nil, ipv4 / nil, ipv6 / nil)
+
+port = uint .le 65535
+ipv4 = bytes .size 4
+ipv6 = bytes .size 16
+
+; dns_name: An A or AAAA DNS record
+single_host_name = (1, port / nil, dns_name)
+dns_name = text .size (0 .. 128)
+
+; dns_name: An SRV DNS record
+multi_host_name = (2, dns_name)
+
+pool_metadata = [url, bytes]
