@@ -12,8 +12,8 @@ url = _CDDL_CODEGEN_EXTERN_TYPE_
 
 ; `spo_state` provides the current state of active pools, and at which epochs upcoming pool retirements will occur
 spo_state = {
-    pools: { * keyhash => pool_parameters }
-    retiring: { * keyhash => epoch }
+    pools    : { * keyhash => pool_parameters }
+  , retiring : { * keyhash => epoch }
 }
 
 pool_parameters = (
