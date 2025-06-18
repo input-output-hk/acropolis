@@ -57,6 +57,7 @@ pub struct State {
     #[serde_as(as = "SerializeMapAs<Hex, _>")]
     stake_addresses: HashMap<Vec<u8>, StakeAddressState>,
 
+    /// All registered DReps
     dreps: Vec<(DRepCredential, Lovelace)>,
 }
 
@@ -117,33 +118,37 @@ impl State {
             .iter()
             .map(|(cred, deposit)| (cred.clone(), AtomicU64::new(*deposit)))
             .collect::<BTreeMap<_, _>>();
-        for state in self.stake_addresses.values() {
-            let Some(drep) = state.delegated_drep.clone() else {
-                continue;
-            };
-            let total = match drep {
-                DRepChoice::Key(hash) => {
-                    let cred = DRepCredential::AddrKeyHash(hash);
-                    let Some(total) = dreps.get(&cred) else {
-                        warn!("Delegated to unregistered DRep address {cred:?}");
-                        continue;
-                    };
-                    total
-                }
-                DRepChoice::Script(hash) => {
-                    let cred = DRepCredential::ScriptHash(hash);
-                    let Some(total) = dreps.get(&cred) else {
-                        warn!("Delegated to unregistered DRep script {cred:?}");
-                        continue;
-                    };
-                    total
-                }
-                DRepChoice::Abstain => &abstain,
-                DRepChoice::NoConfidence => &no_confidence,
-            };
-            let stake = state.utxo_value + state.rewards;
-            total.fetch_add(stake, std::sync::atomic::Ordering::Relaxed);
-        }
+        self.stake_addresses
+            .values()
+            .collect::<Vec<_>>()
+            .par_iter()
+            .for_each(|state| {
+                let Some(drep) = state.delegated_drep.clone() else {
+                    return;
+                };
+                let total = match drep {
+                    DRepChoice::Key(hash) => {
+                        let cred = DRepCredential::AddrKeyHash(hash);
+                        let Some(total) = dreps.get(&cred) else {
+                            warn!("Delegated to unregistered DRep address {cred:?}");
+                            return;
+                        };
+                        total
+                    }
+                    DRepChoice::Script(hash) => {
+                        let cred = DRepCredential::ScriptHash(hash);
+                        let Some(total) = dreps.get(&cred) else {
+                            warn!("Delegated to unregistered DRep script {cred:?}");
+                            return;
+                        };
+                        total
+                    }
+                    DRepChoice::Abstain => &abstain,
+                    DRepChoice::NoConfidence => &no_confidence,
+                };
+                let stake = state.utxo_value + state.rewards;
+                total.fetch_add(stake, std::sync::atomic::Ordering::Relaxed);
+            });
         let abstain = abstain.load(std::sync::atomic::Ordering::Relaxed);
         let no_confidence = no_confidence.load(std::sync::atomic::Ordering::Relaxed);
         let dreps = dreps
@@ -529,31 +534,19 @@ mod tests {
 
         let deltas = vec![
             StakeAddressDelta {
-                address: StakeAddress {
-                    network: AddressNetwork::Main,
-                    payload: StakeAddressPayload::StakeKeyHash(spo1),
-                },
+                address: create_address(&spo1),
                 delta: 100,
             },
             StakeAddressDelta {
-                address: StakeAddress {
-                    network: AddressNetwork::Main,
-                    payload: StakeAddressPayload::StakeKeyHash(spo2),
-                },
+                address: create_address(&spo2),
                 delta: 1_000,
             },
             StakeAddressDelta {
-                address: StakeAddress {
-                    network: AddressNetwork::Main,
-                    payload: StakeAddressPayload::StakeKeyHash(spo3),
-                },
+                address: create_address(&spo3),
                 delta: 10_000,
             },
             StakeAddressDelta {
-                address: StakeAddress {
-                    network: AddressNetwork::Main,
-                    payload: StakeAddressPayload::StakeKeyHash(spo4),
-                },
+                address: create_address(&spo4),
                 delta: 100_000,
             },
         ];
