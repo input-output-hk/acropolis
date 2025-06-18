@@ -151,6 +151,15 @@ impl State {
         Ok(())
     }
 
+    /// Register a stake address
+    fn register_stake_address(&mut self, credential: &StakeCredential) {
+        let hash = credential.get_hash();
+
+        // Immutably create the stake address
+        self.stake_addresses = self.stake_addresses.update(hash.clone(),
+                                                           StakeAddressState::default());
+    }
+
     /// Record a delegation
     fn record_delegation(&mut self, credential: &StakeCredential, spo: &KeyHash) {
         let hash = credential.get_hash();
@@ -195,7 +204,7 @@ impl State {
                             Self::update_value_with_delta(source, -*value);
                         }
 
-                        None => bail!("Unknown stake address in MIR"),
+                        None => bail!("Unknown stake address {:?} in MIR", credential),
                     }
                 }
             }
@@ -230,6 +239,10 @@ impl State {
         // Handle certificates
         for tx_cert in tx_certs_msg.certificates.iter() {
             match tx_cert {
+                TxCertificate::StakeRegistration(sc_with_pos) => {
+                    self.register_stake_address(&sc_with_pos.stake_credential);
+                }
+
                 TxCertificate::MoveInstantaneousReward(mir) => {
                     self.handle_mir(&mir)?; // !TODO when we validate we shouldn't just stop
                 }
