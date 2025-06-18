@@ -4,14 +4,15 @@ use acropolis_common::{
         EpochActivityMessage, SPOStateMessage, StakeAddressDeltasMessage, TxCertificatesMessage,
     },
     serialization::SerializeMapAs,
-    KeyHash, PoolRegistration, StakeAddressPayload, StakeCredential, TxCertificate,
+    InstantaneousRewardSource, InstantaneousRewardTarget, KeyHash, MoveInstantaneousReward,
+    PoolRegistration, StakeAddressPayload, StakeCredential, TxCertificate,
 };
-use anyhow::Result;
+use anyhow::{bail, Result};
 use dashmap::DashMap;
 use imbl::HashMap;
-use std::collections::BTreeMap;
 use rayon::prelude::*;
 use serde_with::{hex::Hex, serde_as};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use tracing::{error, info};
 
@@ -30,6 +31,19 @@ pub struct StakeAddressState {
     delegated_spo: Option<KeyHash>,
 }
 
+/// Global 'pot' account state
+#[derive(Debug, Default, Clone, serde::Serialize)]
+pub struct Pots {
+    /// Unallocated reserves
+    reserves: u64,
+
+    /// Treasury
+    treasury: u64,
+
+    /// Deposits
+    deposits: u64,
+}
+
 /// Overall state - stored per block
 #[serde_as]
 #[derive(Debug, Default, Clone, serde::Serialize)]
@@ -44,12 +58,20 @@ pub struct State {
     /// Map of staking address values
     #[serde_as(as = "SerializeMapAs<Hex, _>")]
     stake_addresses: HashMap<Vec<u8>, StakeAddressState>,
+
+    /// Global account pots
+    pots: Pots,
 }
 
 impl State {
     /// Get the stake address state for a give stake key
     pub fn get_stake_state(&self, stake_key: &Vec<u8>) -> Option<StakeAddressState> {
         self.stake_addresses.get(stake_key).cloned()
+    }
+
+    /// Get the current pot balances
+    pub fn get_pots(&self) -> Pots {
+        self.pots.clone()
     }
 
     /// Log statistics
@@ -144,11 +166,74 @@ impl State {
         self.stake_addresses = self.stake_addresses.update(hash.clone(), sas);
     }
 
+    /// Handle an MoveInstantaneousReward (pre-Conway only)
+    pub fn handle_mir(&mut self, mir: &MoveInstantaneousReward) -> Result<()> {
+        let (source, other) = match &mir.source {
+            InstantaneousRewardSource::Reserves => {
+                (&mut self.pots.reserves, &mut self.pots.treasury)
+            }
+            InstantaneousRewardSource::Treasury => {
+                (&mut self.pots.treasury, &mut self.pots.reserves)
+            }
+        };
+
+        match &mir.target {
+            InstantaneousRewardTarget::StakeCredentials(deltas) => {
+                // Transfer to (in theory also from) stake addresses from (to) a pot
+                for (credential, value) in deltas.iter() {
+                    let hash = credential.get_hash();
+                    match self.stake_addresses.get(&hash) {
+                        Some(sas) => {
+                            // Add to this one
+                            let mut sas = sas.clone();
+                            Self::update_value_with_delta(&mut sas.utxo_value, *value);
+
+                            // Immutably update it
+                            self.stake_addresses = self.stake_addresses.update(hash.clone(), sas);
+
+                            // Update the source
+                            Self::update_value_with_delta(source, -*value);
+                        }
+
+                        None => bail!("Unknown stake address in MIR"),
+                    }
+                }
+            }
+
+            InstantaneousRewardTarget::OtherAccountingPot(value) => {
+                // Transfer between pots
+                *source -= value;
+                *other += value;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Update an unsigned value with a signed delta, with fences
+    pub fn update_value_with_delta(value: &mut u64, delta: i64) {
+        if delta >= 0 {
+            *value = (*value).saturating_add(delta as u64);
+        } else {
+            let abs = (-delta) as u64;
+            if abs > *value {
+                error!("Stake address went negative with delta {delta}");
+                *value = 0;
+            } else {
+                *value -= abs;
+            }
+        }
+    }
+
     /// Handle TxCertificates with stake delegations
     pub fn handle_tx_certificates(&mut self, tx_certs_msg: &TxCertificatesMessage) -> Result<()> {
         // Handle certificates
         for tx_cert in tx_certs_msg.certificates.iter() {
             match tx_cert {
+                TxCertificate::MoveInstantaneousReward(mir) => {
+                    self.handle_mir(&mir)?; // !TODO when we validate we shouldn't just stop
+                }
+
                 TxCertificate::StakeDelegation(delegation) => {
                     self.record_delegation(&delegation.credential, &delegation.operator);
                 }
@@ -189,18 +274,7 @@ impl State {
                 None => StakeAddressState::default(),
             };
 
-            // Update UTXO value, with fences
-            if delta.delta >= 0 {
-                sas.utxo_value = sas.utxo_value.saturating_add(delta.delta as u64);
-            } else {
-                let abs = (-delta.delta) as u64;
-                if abs > sas.utxo_value {
-                    error!("Stake address went negative in delta {:?}", delta);
-                    sas.utxo_value = 0;
-                } else {
-                    sas.utxo_value -= abs;
-                }
-            }
+            Self::update_value_with_delta(&mut sas.utxo_value, delta.delta);
 
             // Immutably create or update the stake address
             self.stake_addresses = self.stake_addresses.update(hash.clone(), sas);
@@ -349,4 +423,92 @@ mod tests {
         let stake2 = spdd.get(&spo2).unwrap();
         assert_eq!(*stake2, 21);
     }
+
+    #[test]
+    fn pots_are_zero_at_start() {
+        let state = State::default();
+        assert_eq!(state.pots.reserves, 0);
+        assert_eq!(state.pots.treasury, 0);
+        assert_eq!(state.pots.deposits, 0);
+    }
+
+    #[test]
+    fn mir_transfers_between_pots() {
+        let mut state = State::default();
+
+        // Bootstrap with some in reserves
+        state.pots.reserves = 100;
+
+        // Send in a MIR reserves->42->treasury
+        let mir = MoveInstantaneousReward {
+            source: InstantaneousRewardSource::Reserves,
+            target: InstantaneousRewardTarget::OtherAccountingPot(42),
+        };
+
+        state.handle_mir(&mir).unwrap();
+        assert_eq!(state.pots.reserves, 58);
+        assert_eq!(state.pots.treasury, 42);
+        assert_eq!(state.pots.deposits, 0);
+
+        // Send some of it back
+        let mir = MoveInstantaneousReward {
+            source: InstantaneousRewardSource::Treasury,
+            target: InstantaneousRewardTarget::OtherAccountingPot(10),
+        };
+
+        state.handle_mir(&mir).unwrap();
+        assert_eq!(state.pots.reserves, 68);
+        assert_eq!(state.pots.treasury, 32);
+        assert_eq!(state.pots.deposits, 0);
+    }
+
+    #[test]
+    fn mir_transfers_to_stake_addresses() {
+        let mut state = State::default();
+
+        // Bootstrap with some in reserves
+        state.pots.reserves = 100;
+
+        // Set up one stake address
+        let msg = StakeAddressDeltasMessage {
+            deltas: vec![StakeAddressDelta {
+                address: create_address(&STAKE_KEY_HASH),
+                delta: 99,
+            }],
+        };
+
+        state.handle_stake_deltas(&msg).unwrap();
+        assert_eq!(state.stake_addresses.len(), 1);
+        assert_eq!(
+            state
+                .stake_addresses
+                .get(&STAKE_KEY_HASH.to_vec())
+                .unwrap()
+                .utxo_value,
+            99);
+
+        // Send in a MIR reserves->{47,-5}->stake
+        let mir = MoveInstantaneousReward {
+            source: InstantaneousRewardSource::Reserves,
+            target: InstantaneousRewardTarget::StakeCredentials(vec!(
+                (Credential::AddrKeyHash(STAKE_KEY_HASH.to_vec()), 47),
+                (Credential::AddrKeyHash(STAKE_KEY_HASH.to_vec()), -5),
+            )),
+        };
+
+        state.handle_mir(&mir).unwrap();
+        assert_eq!(state.pots.reserves, 58);
+        assert_eq!(state.pots.treasury, 0);
+        assert_eq!(state.pots.deposits, 0);
+
+        assert_eq!(
+            state
+                .stake_addresses
+                .get(&STAKE_KEY_HASH.to_vec())
+                .unwrap()
+                .utxo_value,
+            141
+        );
+    }
+
 }
