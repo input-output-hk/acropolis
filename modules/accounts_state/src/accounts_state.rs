@@ -216,6 +216,7 @@ impl AccountsState {
         let drep_state_topic = config
             .get_string("drep-state-topic")
             .unwrap_or(DEFAULT_DREP_STATE_TOPIC.to_string());
+        info!("Creating DRep state subscriber on '{drep_state_topic}'");
 
         // Publishing topics
         let drep_distribution_topic = config
