@@ -9,9 +9,9 @@ use acropolis_common::{
 use anyhow::Result;
 use dashmap::DashMap;
 use imbl::HashMap;
-use std::collections::BTreeMap;
 use rayon::prelude::*;
 use serde_with::{hex::Hex, serde_as};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use tracing::{error, info};
 
