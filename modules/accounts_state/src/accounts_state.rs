@@ -123,10 +123,9 @@ impl AccountsState {
                     Message::Cardano((block_info, CardanoMessage::DRepState(dreps_msg))) => {
                         state.handle_drep_state(&dreps_msg);
 
-                        if let Err(e) = publisher
-                            .publish_stake(block_info, Some(dreps_msg.dreps.clone()))
-                            .await
-                        {
+                        let drdd = state.generate_drdd();
+
+                        if let Err(e) = publisher.publish_stake(block_info, drdd).await {
                             tracing::error!("Error publishing drep voting stake distribution: {e}")
                         }
                     }
