@@ -312,7 +312,7 @@ impl MithrilSnapshotFetcher {
             .unwrap_or(DEFAULT_STARTUP_TOPIC.to_string());
         info!("Creating startup subscriber on '{startup_topic}'");
 
-        let mut subscription = context.message_bus.register(&startup_topic).await?;
+        let mut subscription = context.subscribe(&startup_topic).await?;
         context.clone().run(async move {
             let Ok(_) = subscription.read().await else {
                 return;

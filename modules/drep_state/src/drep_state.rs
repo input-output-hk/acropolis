@@ -7,7 +7,7 @@ use acropolis_common::{
     DRepCredential,
 };
 use anyhow::{anyhow, Result};
-use caryatid_sdk::{module, Context, MessageBusExt, Module};
+use caryatid_sdk::{module, Context, Module};
 use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -81,7 +81,7 @@ impl DRepState {
 
         // Subscribe for certificate messages
         let state1 = state.clone();
-        let mut subscription = context.message_bus.register(&subscribe_topic).await?;
+        let mut subscription = context.subscribe(&subscribe_topic).await?;
         let context_subscribe = context.clone();
         context.run(async move {
             loop {
@@ -92,7 +92,7 @@ impl DRepState {
                     Message::Cardano((block_info, CardanoMessage::TxCertificates(tx_cert_msg))) => {
                         let mut state = state1.lock().await;
                         state
-                            .handle(tx_cert_msg)
+                            .handle(&tx_cert_msg)
                             .await
                             .inspect_err(|e| error!("Messaging handling error: {e}"))
                             .ok();
@@ -108,7 +108,6 @@ impl DRepState {
                                 }),
                             ));
                             context_subscribe
-                                .message_bus
                                 .publish(&drep_state_topic, Arc::new(message))
                                 .await
                                 .unwrap_or_else(|e| error!("Failed to publish: {e}"));
@@ -122,36 +121,34 @@ impl DRepState {
 
         // Handle requests for single DRep state
         let state2 = state.clone();
-        context
-            .message_bus
-            .handle(&handle_topic, move |message: Arc<Message>| {
-                let state = state2.clone();
-                async move {
-                    let response = match message.as_ref() {
-                        Message::RESTRequest(request) => {
-                            info!("REST received {} {}", request.method, request.path);
-                            let state = state.lock().await;
+        context.handle(&handle_topic, move |message: Arc<Message>| {
+            let state = state2.clone();
+            async move {
+                let response = match message.as_ref() {
+                    Message::RESTRequest(request) => {
+                        info!("REST received {} {}", request.method, request.path);
+                        let state = state.lock().await;
 
-                            match perform_rest_request(&state, &request.path) {
-                                Ok(response) => RESTResponse::with_text(200, &response),
-                                Err(error) => {
-                                    error!("DRep REST request error: {error:?}");
-                                    RESTResponse::with_text(400, &format!("{error:?}"))
-                                }
+                        match perform_rest_request(&state, &request.path) {
+                            Ok(response) => RESTResponse::with_text(200, &response),
+                            Err(error) => {
+                                error!("DRep REST request error: {error:?}");
+                                RESTResponse::with_text(400, &format!("{error:?}"))
                             }
                         }
-                        _ => {
-                            error!("Unexpected message type: {message:?}");
-                            RESTResponse::with_text(500, &format!("Unexpected message type"))
-                        }
-                    };
+                    }
+                    _ => {
+                        error!("Unexpected message type: {message:?}");
+                        RESTResponse::with_text(500, &format!("Unexpected message type"))
+                    }
+                };
 
-                    Arc::new(Message::RESTResponse(response))
-                }
-            })?;
+                Arc::new(Message::RESTResponse(response))
+            }
+        });
 
         // Ticker to log stats
-        let mut subscription = context.message_bus.register(&subscribe_topic).await?;
+        let mut subscription = context.subscribe(&subscribe_topic).await?;
         let state3 = state.clone();
         context.run(async move {
             loop {
