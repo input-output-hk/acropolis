@@ -330,13 +330,13 @@ pub enum InstantaneousRewardSource {
 /// Target of a MIR
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum InstantaneousRewardTarget {
-    StakeCredentials(Vec<(StakeCredential, u64)>),
+    StakeCredentials(Vec<(StakeCredential, i64)>),
     OtherAccountingPot(u64),
 }
 
 /// Move instantaneous reward
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct MoveInstantaneosReward {
+pub struct MoveInstantaneousReward {
     /// Source
     pub source: InstantaneousRewardSource,
 
@@ -865,7 +865,7 @@ pub enum TxCertificate {
     GenesisKeyDelegation(GenesisKeyDelegation),
 
     /// Move instantaneous rewards
-    MoveInstantaneousReward(MoveInstantaneosReward),
+    MoveInstantaneousReward(MoveInstantaneousReward),
 
     /// New stake registration
     Registration(Registration),

@@ -25,10 +25,12 @@ const DEFAULT_SPO_STATE_TOPIC: &str = "cardano.spo.state";
 const DEFAULT_EPOCH_ACTIVITY_TOPIC: &str = "cardano.epoch.activity";
 const DEFAULT_TX_CERTIFICATES_TOPIC: &str = "cardano.certificates";
 const DEFAULT_STAKE_DELTAS_TOPIC: &str = "cardano.stake.deltas";
-const DEFAULT_HANDLE_STAKE_TOPIC: &str = "rest.get.stake";
-const DEFAULT_HANDLE_SPDD_TOPIC: &str = "rest.get.spdd";
 const DEFAULT_DREP_STATE_TOPIC: &str = "cardano.drep.state";
 const DEFAULT_DREP_DISTRIBUTION_TOPIC: &str = "cardano.drep.distribution";
+
+const DEFAULT_HANDLE_STAKE_TOPIC: &str = "rest.get.stake";
+const DEFAULT_HANDLE_SPDD_TOPIC: &str = "rest.get.spdd";
+const DEFAULT_HANDLE_POTS_TOPIC: &str = "rest.get.pots";
 
 /// Accounts State module
 #[module(
@@ -189,6 +191,8 @@ impl AccountsState {
     /// Async initialisation
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // Get configuration
+
+        // Subscription topics
         let spo_state_topic = config
             .get_string("spo-state-topic")
             .unwrap_or(DEFAULT_SPO_STATE_TOPIC.to_string());
@@ -209,6 +213,16 @@ impl AccountsState {
             .unwrap_or(DEFAULT_STAKE_DELTAS_TOPIC.to_string());
         info!("Creating stake deltas subscriber on '{stake_deltas_topic}'");
 
+        let drep_state_topic = config
+            .get_string("drep-state-topic")
+            .unwrap_or(DEFAULT_DREP_STATE_TOPIC.to_string());
+
+        // Publishing topics
+        let drep_distribution_topic = config
+            .get_string("publish-drep-distribution-topic")
+            .unwrap_or(DEFAULT_DREP_DISTRIBUTION_TOPIC.to_string());
+
+        // REST handler topics
         let handle_stake_topic = config
             .get_string("handle-stake-topic")
             .unwrap_or(DEFAULT_HANDLE_STAKE_TOPIC.to_string());
@@ -219,19 +233,17 @@ impl AccountsState {
             .unwrap_or(DEFAULT_HANDLE_SPDD_TOPIC.to_string());
         info!("Creating request handler on '{handle_spdd_topic}'");
 
-        let drep_state_topic = config
-            .get_string("drep-state-topic")
-            .unwrap_or(DEFAULT_DREP_STATE_TOPIC.to_string());
-
-        let drep_distribution_topic = config
-            .get_string("publish-drep-distribution-topic")
-            .unwrap_or(DEFAULT_DREP_DISTRIBUTION_TOPIC.to_string());
+        let handle_pots_topic = config
+            .get_string("handle-pots-topic")
+            .unwrap_or(DEFAULT_HANDLE_POTS_TOPIC.to_string());
+        info!("Creating request handler on '{handle_pots_topic}'");
 
         // Create history
         let history = Arc::new(Mutex::new(StateHistory::<State>::new("AccountsState")));
         let history_stake = history.clone();
         let history_stake_single = history.clone();
         let history_spdd = history.clone();
+        let history_pots = history.clone();
         let history_tick = history.clone();
 
         // Handle requests for full state
@@ -288,6 +300,22 @@ impl AccountsState {
                         .map(|(k, v)| (hex::encode(k), *v))
                         .collect();
                     match serde_json::to_string(&spdd) {
+                        Ok(body) => Ok(RESTResponse::with_json(200, &body)),
+                        Err(error) => Err(anyhow!("{:?}", error)),
+                    }
+                } else {
+                    Ok(RESTResponse::with_json(200, "{}"))
+                }
+            }
+        })?;
+
+        // Handle requests for POTS
+        handle_rest(context.clone(), &handle_pots_topic, move || {
+            let history = history_pots.clone();
+            async move {
+                if let Some(state) = history.lock().await.current() {
+                    let pots = state.get_pots();
+                    match serde_json::to_string(&pots) {
                         Ok(body) => Ok(RESTResponse::with_json(200, &body)),
                         Err(error) => Err(anyhow!("{:?}", error)),
                     }
