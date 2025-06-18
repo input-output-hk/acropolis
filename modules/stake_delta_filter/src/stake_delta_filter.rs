@@ -162,8 +162,7 @@ impl StakeDeltaFilter {
         info!("Creating subscriber on '{}'", params.address_delta_topic);
         let mut subscription = params
             .context
-            .message_bus
-            .register(&params.clone().address_delta_topic)
+            .subscribe(&params.clone().address_delta_topic)
             .await?;
         params.context.clone().run(async move {
             let publisher = DeltaPublisher::new(params.clone());
@@ -202,8 +201,7 @@ impl StakeDeltaFilter {
         let state_certs = state.clone();
         let mut subscription = params
             .context
-            .message_bus
-            .register(&params.tx_certificates_topic)
+            .subscribe(&params.tx_certificates_topic)
             .await?;
         params.clone().context.run(async move {
             loop {
@@ -228,7 +226,7 @@ impl StakeDeltaFilter {
         info!("Creating subscriber on '{}'", params.address_delta_topic);
         let state_deltas = state.clone();
         let topic = params.address_delta_topic.clone();
-        let mut subscription = params.context.message_bus.register(&topic).await?;
+        let mut subscription = params.context.subscribe(&topic).await?;
         params.clone().context.run(async move {
             loop {
                 let Ok((_, message)) = subscription.read().await else {
@@ -251,7 +249,7 @@ impl StakeDeltaFilter {
 
         // Ticker to log stats
         let state_tick = state.clone();
-        let mut subscription = params.context.message_bus.register("clock.tick").await?;
+        let mut subscription = params.context.subscribe("clock.tick").await?;
         params.clone().context.run(async move {
             loop {
                 let Ok((_, message)) = subscription.read().await else {

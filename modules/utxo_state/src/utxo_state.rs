@@ -2,7 +2,7 @@
 //! Accepts UTXO events and derives the current ledger state in memory
 
 use acropolis_common::messages::{CardanoMessage, Message, RESTResponse};
-use caryatid_sdk::{module, Context, MessageBusExt, Module};
+use caryatid_sdk::{module, Context, Module};
 
 use anyhow::{anyhow, Result};
 use config::Config;
@@ -82,7 +82,7 @@ impl UTXOState {
 
         // Subscribe for UTXO messages
         let state1 = state.clone();
-        let mut subscription = context.message_bus.register(&subscribe_topic).await?;
+        let mut subscription = context.subscribe(&subscribe_topic).await?;
         context.run(async move {
             loop {
                 let Ok((_, message)) = subscription.read().await else {
@@ -105,7 +105,7 @@ impl UTXOState {
 
         // Ticker to log stats and prune state
         let state2 = state.clone();
-        let mut subscription = context.message_bus.register("clock.tick").await?;
+        let mut subscription = context.subscribe("clock.tick").await?;
         context.run(async move {
             loop {
                 let Ok((_, message)) = subscription.read().await else {
@@ -127,45 +127,45 @@ impl UTXOState {
 
         // Handle REST requests for utxo.<id>
         let state3 = state.clone();
-        context
-            .message_bus
-            .handle(&rest_topic, move |message: Arc<Message>| {
-                let state = state3.clone();
-
-                async move {
-                    let response =
-                        match message.as_ref() {
-                            Message::RESTRequest(request) => {
-                                info!("REST received {} {}", request.method, request.path);
-                                match request.path_elements.get(1) {
+        context.handle(&rest_topic, move |message: Arc<Message>| {
+            let state = state3.clone();
+            async move {
+                let response = match message.as_ref() {
+                    Message::RESTRequest(request) => {
+                        info!("REST received {} {}", request.method, request.path);
+                        match request.path_elements.get(1) {
                             Some(id) => match hex::decode(&id) {
                                 Ok(id) => {
                                     let key = state::UTXOKey::new(&id, 0); // TODO parse :index
                                     match state.lock().await.lookup_utxo(&key).await {
                                         Ok(Some(utxo)) => match serde_json::to_string(&utxo) {
                                             Ok(body) => RESTResponse::with_json(200, &body),
-                                            Err(error) => RESTResponse::with_text(500,
-                                                &format!("{error:?}").to_string()),
+                                            Err(error) => RESTResponse::with_text(
+                                                500,
+                                                &format!("{error:?}").to_string(),
+                                            ),
                                         },
                                         _ => RESTResponse::with_text(404, "UTXO not found"),
                                     }
-                                },
-                                Err(error) => RESTResponse::with_text(400,
+                                }
+                                Err(error) => RESTResponse::with_text(
+                                    400,
                                     &format!("UTXO must be hex encoded vector of bytes: {error:?}") // TODO real format
-                                    .to_string()),
+                                        .to_string(),
+                                ),
                             },
                             None => RESTResponse::with_text(400, "UTXO id must be provided"),
                         }
-                            }
-                            _ => {
-                                error!("Unexpected message type {:?}", message);
-                                RESTResponse::with_text(500, "Unexpected message in REST request")
-                            }
-                        };
+                    }
+                    _ => {
+                        error!("Unexpected message type {:?}", message);
+                        RESTResponse::with_text(500, "Unexpected message in REST request")
+                    }
+                };
 
-                    Arc::new(Message::RESTResponse(response))
-                }
-            })?;
+                Arc::new(Message::RESTResponse(response))
+            }
+        });
 
         Ok(())
     }

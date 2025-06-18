@@ -247,7 +247,7 @@ impl AccountsState {
                     Ok(RESTResponse::with_json(200, "{}"))
                 }
             }
-        })?;
+        });
 
         let handle_single_stake_topic = handle_stake_topic + ".*";
 
@@ -274,7 +274,7 @@ impl AccountsState {
                     _ => Ok(RESTResponse::with_text(400, "Not a stake address")),
                 }
             }
-        })?;
+        });
 
         // Handle requests for SPDD
         handle_rest(context.clone(), &handle_spdd_topic, move || {
@@ -295,10 +295,10 @@ impl AccountsState {
                     Ok(RESTResponse::with_json(200, "{}"))
                 }
             }
-        })?;
+        });
 
         // Ticker to log stats
-        let mut tick_subscription = context.message_bus.register("clock.tick").await?;
+        let mut tick_subscription = context.subscribe("clock.tick").await?;
         context.clone().run(async move {
             loop {
                 let Ok((_, message)) = tick_subscription.read().await else {
@@ -321,11 +321,11 @@ impl AccountsState {
         let publisher = DRepDistributionPublisher::new(context.clone(), drep_distribution_topic);
 
         // Subscribe
-        let spos_subscription = context.message_bus.register(&spo_state_topic).await?;
-        let ea_subscription = context.message_bus.register(&epoch_activity_topic).await?;
-        let certs_subscription = context.message_bus.register(&tx_certificates_topic).await?;
-        let stake_subscription = context.message_bus.register(&stake_deltas_topic).await?;
-        let drep_state_subscription = context.message_bus.register(&drep_state_topic).await?;
+        let spos_subscription = context.subscribe(&spo_state_topic).await?;
+        let ea_subscription = context.subscribe(&epoch_activity_topic).await?;
+        let certs_subscription = context.subscribe(&tx_certificates_topic).await?;
+        let stake_subscription = context.subscribe(&stake_deltas_topic).await?;
+        let drep_state_subscription = context.subscribe(&drep_state_topic).await?;
 
         // Start run task
         context.run(async move {
