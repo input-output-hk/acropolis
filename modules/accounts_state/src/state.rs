@@ -141,7 +141,8 @@ impl State {
                 DRepChoice::Abstain => &abstain,
                 DRepChoice::NoConfidence => &no_confidence,
             };
-            total.fetch_add(state.utxo_value, std::sync::atomic::Ordering::Relaxed);
+            let stake = state.utxo_value + state.rewards;
+            total.fetch_add(stake, std::sync::atomic::Ordering::Relaxed);
         }
         let abstain = abstain.load(std::sync::atomic::Ordering::Relaxed);
         let no_confidence = no_confidence.load(std::sync::atomic::Ordering::Relaxed);
@@ -306,9 +307,8 @@ mod tests {
     use super::*;
     use acropolis_common::{
         AddressNetwork, Credential, Registration, StakeAddress, StakeAddressDelta,
-        StakeAddressPayload, StakeAndVoteDelegation, StakeCredentialWithPos,
-        StakeRegistrationAndStakeAndVoteDelegation, StakeRegistrationAndVoteDelegation,
-        VoteDelegation,
+        StakeAddressPayload, StakeAndVoteDelegation, StakeRegistrationAndStakeAndVoteDelegation,
+        StakeRegistrationAndVoteDelegation, VoteDelegation,
     };
 
     const STAKE_KEY_HASH: [u8; 3] = [0x99, 0x0f, 0x00];
