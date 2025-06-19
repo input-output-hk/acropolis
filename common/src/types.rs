@@ -188,6 +188,13 @@ impl Credential {
         }
     }
 
+    pub fn to_json_string(&self) -> String {
+        match self {
+            Self::ScriptHash(hash) => format!("scriptHash-{}", hex::encode(hash)),
+            Self::AddrKeyHash(hash) => format!("keyHash-{}", hex::encode(hash)),
+        }
+    }
+
     pub fn get_hash(&self) -> KeyHash {
         match self {
             Self::AddrKeyHash(hash) => hash,

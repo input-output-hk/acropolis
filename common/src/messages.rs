@@ -115,8 +115,17 @@ pub struct DRepStateMessage {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DRepStakeDistributionMessage {
-    /// DRep stake distribution by ID, if None then no changes
-    pub data: Option<Vec<(DRepCredential, Lovelace)>>,
+    /// Epoch which has ended
+    pub epoch: u64,
+
+    /// DRep stake assigned to the special "abstain" DRep.
+    pub abstain: Lovelace,
+
+    /// DRep stake assigned to the special "no confidence" DRep
+    pub no_confidence: Lovelace,
+
+    /// DRep stake distribution by ID
+    pub dreps: Vec<(DRepCredential, Lovelace)>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
