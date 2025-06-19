@@ -1,10 +1,10 @@
 use anyhow::{anyhow, bail, Result};
 use acropolis_common::{
     Anchor, BlockVersionData, ProtocolConsts, SoftForkRule, ShelleyProtocolParams,
-    TxFeePolicy, Nonce, NonceVariant, ProtocolVersion,
+    TxFeePolicy, Nonce, NonceVariant, ProtocolVersion, ExUnits,
     Committee, Constitution, DRepVotingThresholds, NetworkId, PoolVotingThresholds,
     Credential, Era, AlonzoParams, ByronParams, ConwayParams, ShelleyParams,
-    rational_number::RationalNumber
+    ExUnitPrices, rational_number::RationalNumber
 };
 use hex::decode;
 use pallas::ledger::{configs::*, primitives};
@@ -109,9 +109,44 @@ fn map_conway(genesis: &conway::GenesisFile) -> Result<ConwayParams> {
     })
 }
 
-#[allow(dead_code)]
-fn map_alonzo(_genesis: &alonzo::GenesisFile) -> Result<AlonzoParams> {
-    bail!("Alonzo not supported")
+fn map_ex_units(e: &alonzo::ExUnits) -> Result<ExUnits> {
+    Ok(ExUnits { mem: e.ex_units_mem, steps: e.ex_units_steps })
+}
+
+fn map_alonzo_fraction(fr: &alonzo::Fraction) -> Result<RationalNumber> {
+    RationalNumber::new(fr.numerator, fr.denominator)
+}
+
+fn map_execution_prices(e: &alonzo::ExecutionPrices) -> Result<ExUnitPrices> {
+    Ok(ExUnitPrices {
+        mem_price: map_alonzo_fraction(&e.pr_mem)?,
+        step_price: map_alonzo_fraction(&e.pr_steps)?
+    })
+}
+
+fn map_alonzo_cost_model(cm: &alonzo::CostModelPerLanguage) -> Result<Option<Vec<i64>>> {
+    let cm_keypairs = 
+        primitives::KeyValuePairs::<primitives::alonzo::Language, Vec<i64>>::from(cm.clone());
+    match (cm_keypairs.get(0), cm_keypairs.len()) {
+        (Some((id,model)), 1) if *id == primitives::alonzo::Language::PlutusV1 =>
+            Ok(Some(model.clone())),
+        (_, 0) => Ok(None),
+        _ => bail!("Expected single PlutusV1 language cost model in Alonzo genesis")
+    }
+}
+
+fn map_alonzo(genesis: &alonzo::GenesisFile) -> Result<AlonzoParams> {
+    Ok(AlonzoParams {
+        lovelace_per_utxo_word: genesis.lovelace_per_utxo_word,
+        execution_prices: map_execution_prices(&genesis.execution_prices)?,
+        max_tx_ex_units: map_ex_units(&genesis.max_tx_ex_units)?,
+        max_block_ex_units: map_ex_units(&genesis.max_block_ex_units)?,
+        max_value_size: genesis.max_value_size,
+        collateral_percentage: genesis.collateral_percentage,
+        max_collateral_inputs: genesis.max_collateral_inputs,
+        plutus_v1_cost_model: map_alonzo_cost_model(&genesis.cost_models)?,
+        plutus_v2_cost_model: None
+    })
 }
 
 pub fn map_pallas_rational(r: &primitives::RationalNumber) -> RationalNumber {
@@ -247,7 +282,7 @@ pub fn read_shelley_genesis() -> Result<ShelleyParams> {
     read_pdef_genesis::<shelley::GenesisFile, ShelleyParams> (Era::Shelley, map_shelley)
 }
 
-pub fn _read_alonzo_genesis() -> Result<AlonzoParams> {
+pub fn read_alonzo_genesis() -> Result<AlonzoParams> {
     read_pdef_genesis::<alonzo::GenesisFile, AlonzoParams> (Era::Alonzo, map_alonzo)
 }
 
