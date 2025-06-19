@@ -93,9 +93,7 @@ impl State {
         message: &DRepStakeDistributionMessage,
     ) -> Result<()> {
         self.drep_stake_messages_count += 1;
-        if let Some(ref vec) = message.data {
-            self.drep_stake = HashMap::from_iter(vec.iter().cloned());
-        }
+        self.drep_stake = HashMap::from_iter(message.dreps.iter().cloned());
         Ok(())
     }
 
