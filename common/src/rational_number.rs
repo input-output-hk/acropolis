@@ -1,5 +1,6 @@
-use anyhow::anyhow;
+use anyhow::{anyhow, Error, Result};
 use gcd::Gcd;
+use fraction::Fraction;
 use std::cmp::Ordering;
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Clone)]
@@ -61,6 +62,24 @@ impl From<u64> for RationalNumber {
     }
 }
 
+impl TryFrom<f32> for RationalNumber {
+    type Error = Error;
+    fn try_from(value: f32) -> Result<RationalNumber> {
+        if value.is_sign_negative() {
+            return Err(anyhow!("Value {} must be greater than 0", value));
+        }
+        let fract = Fraction::from(value);
+        Ok(RationalNumber {
+            numerator: *fract
+                .numer()
+                .ok_or_else(|| anyhow!("Cannot get numerator for {}", value))?,
+            denominator: *fract
+                .denom()
+                .ok_or_else(|| anyhow!("Cannot get denominator for {}", value))?,
+        })
+    }
+}
+
 impl PartialOrd for RationalNumber {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(u64::cmp(
@@ -76,5 +95,23 @@ impl Ord for RationalNumber {
             &(self.numerator * other.denominator),
             &(self.denominator * other.numerator),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::rational_number::RationalNumber;
+
+    #[test]
+    fn test_fractions() -> Result<(), anyhow::Error> {
+        assert_eq!(
+            RationalNumber::try_from(0.51)?,
+            RationalNumber::new(51, 100)?
+        );
+        assert_eq!(RationalNumber::try_from(0.67)?, RationalNumber::new(67,100)?);
+        assert_eq!(RationalNumber::try_from(0.6)?, RationalNumber::new(3,5)?);
+        assert_eq!(RationalNumber::try_from(0.75)?, RationalNumber::new(3,4)?);
+        assert_eq!(RationalNumber::try_from(0.5)?, RationalNumber::new(1,2)?);
+        Ok(())
     }
 }
