@@ -6,7 +6,7 @@ use acropolis_common::{
     BlockInfo,
 };
 use anyhow::Result;
-use caryatid_sdk::{message_bus::Subscription, module, Context, MessageBusExt, Module};
+use caryatid_sdk::{message_bus::Subscription, module, Context, Module};
 use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -71,7 +71,6 @@ impl ParametersState {
         tokio::spawn(async move {
             config
                 .context
-                .message_bus
                 .publish(&config.protocol_parameters_topic, packed_message)
                 .await
                 .unwrap_or_else(|e| tracing::error!("Failed to publish: {e}"));
@@ -89,7 +88,6 @@ impl ParametersState {
 
         config
             .context
-            .message_bus
             .handle(&config.handle_topic, move |message: Arc<Message>| {
                 let _state = state_handle.clone();
                 async move {
@@ -117,9 +115,10 @@ impl ParametersState {
 
                     Arc::new(Message::RESTResponse(response))
                 }
-            })?;
+            });
 
         loop {
+            info!("Waiting for enact-state");
             match enact_s.read().await?.1.as_ref() {
                 Message::Cardano((block, CardanoMessage::EnactState(enact))) => {
                     let mut locked = state.lock().await;
@@ -133,12 +132,7 @@ impl ParametersState {
 
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         let cfg = ParametersStateConfig::new(context.clone(), &config);
-
-        let enact = cfg
-            .context
-            .message_bus
-            .register(&cfg.enact_state_topic)
-            .await?;
+        let enact = cfg.context.subscribe(&cfg.enact_state_topic).await?;
 
         // Start run task
         tokio::spawn(async move {

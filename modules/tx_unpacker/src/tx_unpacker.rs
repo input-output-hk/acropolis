@@ -751,7 +751,7 @@ impl TxUnpacker {
             info!("Publishing block fees on '{topic}'");
         }
 
-        let mut subscription = context.message_bus.register(&subscribe_topic).await?;
+        let mut subscription = context.subscribe(&subscribe_topic).await?;
         context.clone().run(async move {
             loop {
                 let Ok((_, message)) = subscription.read().await else { return; };

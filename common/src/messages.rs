@@ -105,6 +105,15 @@ pub struct GovernanceProceduresMessage {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DRepStateMessage {
+    /// Epoch which has ended
+    pub epoch: u64,
+
+    /// DRep initial deposit by id, for all active DReps.
+    pub dreps: Vec<(DRepCredential, Lovelace)>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DRepStakeDistributionMessage {
     /// DRep stake distribution by ID, if None then no changes
     pub data: Option<Vec<(DRepCredential, Lovelace)>>,
@@ -143,6 +152,7 @@ pub enum CardanoMessage {
     AddressDeltas(AddressDeltasMessage),     // Address deltas received
     BlockFees(BlockFeesMessage),             // Total fees in a block
     EpochActivity(EpochActivityMessage),     // Total fees and VRF keys for an epoch
+    DRepState(DRepStateMessage),             // Active DReps at epoch end
     SPOState(SPOStateMessage),               // Active SPOs at epoch end
     GovernanceProcedures(GovernanceProceduresMessage), // Governance procedures received
 

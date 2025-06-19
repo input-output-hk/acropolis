@@ -120,11 +120,8 @@ impl EpochActivityCounter {
         info!("Creating subscriber for fees on '{subscribe_fees_topic}'");
 
         // Subscribe
-        let headers_subscription = context
-            .message_bus
-            .register(&subscribe_headers_topic)
-            .await?;
-        let fees_subscription = context.message_bus.register(&subscribe_fees_topic).await?;
+        let headers_subscription = context.subscribe(&subscribe_headers_topic).await?;
+        let fees_subscription = context.subscribe(&subscribe_fees_topic).await?;
 
         // Start run task
         let run_context = context.clone();
