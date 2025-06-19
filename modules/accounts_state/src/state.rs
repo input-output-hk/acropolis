@@ -14,7 +14,7 @@ use rayon::prelude::*;
 use serde_with::{hex::Hex, serde_as};
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 /// State of an individual stake address
 #[serde_as]
@@ -155,10 +155,26 @@ impl State {
     fn register_stake_address(&mut self, credential: &StakeCredential) {
         let hash = credential.get_hash();
 
-        // Immutably create the stake address
-        self.stake_addresses = self.stake_addresses.update(hash.clone(),
-                                                           StakeAddressState::default());
+        // Repeated registrations seem common
+        if !self.stake_addresses.contains_key(&hash) {
+            self.stake_addresses = self.stake_addresses.update(hash.clone(),
+                                                               StakeAddressState::default());
+        }
     }
+
+    /// Deregister a stake address
+    fn deregister_stake_address(&mut self, credential: &StakeCredential) {
+        let hash = credential.get_hash();
+
+        // Check if it existed
+        // Repeated registrations seem common
+        if self.stake_addresses.contains_key(&hash) {
+            self.stake_addresses = self.stake_addresses.without(&hash);
+        } else {
+            warn!("Deregistraton of unknown stake address {}", hex::encode(hash));
+        }
+    }
+
 
     /// Record a delegation
     fn record_delegation(&mut self, credential: &StakeCredential, spo: &KeyHash) {
@@ -193,23 +209,23 @@ impl State {
                 // Transfer to (in theory also from) stake addresses from (to) a pot
                 for (credential, value) in deltas.iter() {
                     let hash = credential.get_hash();
-                    match self.stake_addresses.get(&hash) {
-                        Some(sas) => {
-                            // Add to this one
-                            let mut sas = sas.clone();
-                            Self::update_value_with_delta(&mut sas.utxo_value, *value)
-                                .with_context(|| format!("Updating stake {}", hex::encode(&hash)))?;
 
-                            // Immutably update it
-                            self.stake_addresses = self.stake_addresses.update(hash.clone(), sas);
+                    // Get old stake address state, or create one
+                    let mut sas = match self.stake_addresses.get(&hash) {
+                        Some(sas) => sas.clone(),
+                        None => StakeAddressState::default(),
+                    };
 
-                            // Update the source
-                            Self::update_value_with_delta(source, -*value)
-                                .with_context(|| format!("Updating {source_name}"))?;
-                        }
+                    // Add to this one
+                    Self::update_value_with_delta(&mut sas.utxo_value, *value)
+                        .with_context(|| format!("Updating stake {}", hex::encode(&hash)))?;
 
-                        None => bail!("Unknown stake address {:?} in MIR", credential),
-                    }
+                    // Immutably update it
+                    self.stake_addresses = self.stake_addresses.update(hash.clone(), sas);
+
+                    // Update the source
+                    Self::update_value_with_delta(source, -*value)
+                        .with_context(|| format!("Updating {source_name}"))?;
                 }
             }
 
@@ -250,8 +266,12 @@ impl State {
                     self.register_stake_address(&sc_with_pos.stake_credential);
                 }
 
+                TxCertificate::StakeDeregistration(sc) => {
+                    self.deregister_stake_address(&sc);
+                }
+
                 TxCertificate::MoveInstantaneousReward(mir) => {
-                    self.handle_mir(&mir)?; // !TODO when we validate we shouldn't just stop
+                    self.handle_mir(&mir).unwrap_or_else(|e| error!("MIR failed: {e:#}"));
                 }
 
                 TxCertificate::StakeDelegation(delegation) => {

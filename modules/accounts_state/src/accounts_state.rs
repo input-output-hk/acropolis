@@ -78,7 +78,7 @@ impl AccountsState {
 
                     state
                         .handle_tx_certificates(tx_certs_msg)
-                        .inspect_err(|e| error!("Messaging handling error: {e}"))
+                        .inspect_err(|e| error!("TxCertificates handling error: {e:#}"))
                         .ok();
                     if block_info.new_epoch && block_info.epoch > 0 {
                         new_epoch = true;
@@ -105,7 +105,7 @@ impl AccountsState {
 
                     state
                         .handle_stake_deltas(deltas_msg)
-                        .inspect_err(|e| error!("Messaging handling error: {e}"))
+                        .inspect_err(|e| error!("StakeAddressDeltas handling error: {e:#}"))
                         .ok();
                 }
 
@@ -127,7 +127,7 @@ impl AccountsState {
                             .publish_stake(block_info, Some(dreps_msg.dreps.clone()))
                             .await
                         {
-                            tracing::error!("Error publishing drep voting stake distribution: {e}")
+                            error!("Error publishing drep voting stake distribution: {e:#}")
                         }
                     }
 
@@ -150,7 +150,7 @@ impl AccountsState {
 
                         state
                             .handle_spo_state(spo_msg)
-                            .inspect_err(|e| error!("Messaging handling error: {e}"))
+                            .inspect_err(|e| error!("SPOState handling error: {e:#}"))
                             .ok();
                     }
 
@@ -173,7 +173,7 @@ impl AccountsState {
 
                         state
                             .handle_epoch_activity(ea_msg)
-                            .inspect_err(|e| error!("Messaging handling error: {e}"))
+                            .inspect_err(|e| error!("EpochActivity handling error: {e:#}"))
                             .ok();
                     }
 
