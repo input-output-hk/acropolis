@@ -5,9 +5,9 @@ use acropolis_common::{
     messages::{CardanoMessage, Message, RESTResponse},
     rest_helper::{handle_rest, handle_rest_with_parameter},
     state_history::StateHistory,
-    Address, BlockInfo, BlockStatus, StakeAddress, StakeAddressPayload,
+    Address, BlockInfo, BlockStatus, Lovelace, StakeAddress, StakeAddressPayload,
 };
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{message_bus::Subscription, module, Context, Module};
 use config::Config;
 use serde_json;
@@ -31,6 +31,7 @@ const DEFAULT_DREP_DISTRIBUTION_TOPIC: &str = "cardano.drep.distribution";
 const DEFAULT_HANDLE_STAKE_TOPIC: &str = "rest.get.stake";
 const DEFAULT_HANDLE_SPDD_TOPIC: &str = "rest.get.spdd";
 const DEFAULT_HANDLE_POTS_TOPIC: &str = "rest.get.pots";
+const DEFAULT_HANDLE_DRDD_TOPIC: &str = "rest.get.drdd";
 
 /// Accounts State module
 #[module(
@@ -122,11 +123,11 @@ impl AccountsState {
                 let (_, message) = dreps_message_f.await?;
                 match message.as_ref() {
                     Message::Cardano((block_info, CardanoMessage::DRepState(dreps_msg))) => {
-                        // TODO: update our list of dreps
-                        if let Err(e) = publisher
-                            .publish_stake(block_info, Some(dreps_msg.dreps.clone()))
-                            .await
-                        {
+                        state.handle_drep_state(&dreps_msg);
+
+                        let drdd = state.generate_drdd();
+
+                        if let Err(e) = publisher.publish_stake(block_info, drdd).await {
                             error!("Error publishing drep voting stake distribution: {e:#}")
                         }
                     }
@@ -239,12 +240,18 @@ impl AccountsState {
             .unwrap_or(DEFAULT_HANDLE_POTS_TOPIC.to_string());
         info!("Creating request handler on '{handle_pots_topic}'");
 
+        let handle_drdd_topic = config
+            .get_string("handle-drdd-topic")
+            .unwrap_or(DEFAULT_HANDLE_DRDD_TOPIC.to_string());
+        info!("Creating request handler on '{handle_drdd_topic}'");
+
         // Create history
         let history = Arc::new(Mutex::new(StateHistory::<State>::new("AccountsState")));
         let history_stake = history.clone();
         let history_stake_single = history.clone();
         let history_spdd = history.clone();
         let history_pots = history.clone();
+        let history_drdd = history.clone();
         let history_tick = history.clone();
 
         // Handle requests for full state
@@ -326,6 +333,32 @@ impl AccountsState {
             }
         });
 
+        // Handle requests for DRDD
+        handle_rest(context.clone(), &handle_drdd_topic, move || {
+            let history = history_drdd.clone();
+            async move {
+                let drdd = history
+                    .lock()
+                    .await
+                    .current()
+                    .map(|state| state.generate_drdd())
+                    .unwrap_or_default();
+                let drdd = APIDRepDelegationDistribution {
+                    abstain: drdd.abstain,
+                    no_confidence: drdd.no_confidence,
+                    dreps: drdd
+                        .dreps
+                        .into_iter()
+                        .map(|(cred, amount)| (cred.to_json_string(), amount))
+                        .collect(),
+                };
+                match serde_json::to_string(&drdd) {
+                    Ok(body) => Ok(RESTResponse::with_json(200, &body)),
+                    Err(error) => bail!("{:?}", error),
+                }
+            }
+        });
+
         // Ticker to log stats
         let mut tick_subscription = context.subscribe("clock.tick").await?;
         context.clone().run(async move {
@@ -373,4 +406,11 @@ impl AccountsState {
 
         Ok(())
     }
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct APIDRepDelegationDistribution {
+    pub abstain: Lovelace,
+    pub no_confidence: Lovelace,
+    pub dreps: Vec<(String, u64)>,
 }

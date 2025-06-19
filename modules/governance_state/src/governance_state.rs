@@ -227,9 +227,7 @@ impl GovernanceState {
             if blk_g != blk_drep {
                 error!("Governance {blk_g:?} and DRep distribution {blk_drep:?} are out of sync");
             }
-            if distr.data.is_some() {
-                state.lock().await.handle_drep_stake(&distr).await?
-            }
+            state.lock().await.handle_drep_stake(&distr).await?
         }
     }
 
