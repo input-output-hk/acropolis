@@ -9,7 +9,7 @@ use acropolis_common::{
     BlockInfo,
 };
 use anyhow::{anyhow, Result};
-use caryatid_sdk::{message_bus::Subscription, module, Context, MessageBusExt, Module};
+use caryatid_sdk::{message_bus::Subscription, module, Context, Module};
 use config::Config;
 use hex::ToHex;
 use std::sync::Arc;
@@ -149,7 +149,7 @@ impl GovernanceState {
         let state_tick = state.clone();
 
         // REST requests handling
-        context.message_bus.handle(
+        context.handle(
             &config.clone().handle_topic,
             move |message: Arc<Message>| {
                 let state = state_handle.clone();
@@ -176,10 +176,10 @@ impl GovernanceState {
                     Arc::new(Message::RESTResponse(response))
                 }
             },
-        )?;
+        );
 
         // Ticker to log stats
-        let mut subscription = context.message_bus.register("clock.tick").await?;
+        let mut subscription = context.subscribe("clock.tick").await?;
         context.run(async move {
             loop {
                 let Ok((_, message)) = subscription.read().await else {
@@ -187,13 +187,9 @@ impl GovernanceState {
                 };
                 if let Message::Clock(message) = message.as_ref() {
                     if (message.number % 60) == 0 {
-                        state_tick
-                            .lock()
-                            .await
-                            .tick()
-                            .await
-                            .inspect_err(|e| error!("Tick error: {e}"))
-                            .ok();
+                        state_tick.lock().await
+                            .tick().await
+                            .inspect_err(|e| error!("Tick error: {e}")).ok();
                     }
                 }
             }
@@ -202,11 +198,9 @@ impl GovernanceState {
         loop {
             let (blk_g, gov_procs) = Self::read_governance(&mut governance_s).await?;
             {
-                state
-                    .lock()
-                    .await
-                    .handle_governance(&blk_g, &gov_procs)
-                    .await?;
+                info!("Reading governance");
+                state.lock().await
+                    .handle_governance(&blk_g, &gov_procs).await?;
             }
 
             if blk_g.new_epoch {
@@ -218,10 +212,8 @@ impl GovernanceState {
                     );
                 }
                 state
-                    .lock()
-                    .await
-                    .handle_protocol_parameters(&params)
-                    .await?;
+                    .lock().await
+                    .handle_protocol_parameters(&params).await?;
             };
 
             let (blk_drep, distr) = Self::read_drep(&mut drep_s).await?;
@@ -236,20 +228,14 @@ impl GovernanceState {
 
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         let cfg = GovernanceStateConfig::new(&config);
-        let gt = context
-            .clone()
-            .message_bus
-            .register(&cfg.subscribe_topic)
-            .await?;
+        let gt = context.clone().subscribe(&cfg.subscribe_topic).await?;
         let dt = context
             .clone()
-            .message_bus
-            .register(&cfg.drep_distribution_topic)
+            .subscribe(&cfg.drep_distribution_topic)
             .await?;
         let pt = context
             .clone()
-            .message_bus
-            .register(&cfg.protocol_parameters_topic)
+            .subscribe(&cfg.protocol_parameters_topic)
             .await?;
 
         tokio::spawn(async move {

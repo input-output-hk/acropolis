@@ -12,7 +12,7 @@ build = "build.rs"
 [dependencies]
 acropolis_common = { path = "../../common" }
 anyhow = "1.0"
-caryatid_sdk = "0.9.0"
+caryatid_sdk = "0.12"
 config = "0.15.11"
 hex = "0.4"
 pallas = "0.32.0"

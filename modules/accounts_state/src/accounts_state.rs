@@ -3,17 +3,21 @@
 
 use acropolis_common::{
     messages::{CardanoMessage, Message, RESTResponse},
+    rest_helper::{handle_rest, handle_rest_with_parameter},
     state_history::StateHistory,
     Address, BlockInfo, BlockStatus, StakeAddress, StakeAddressPayload,
 };
-use anyhow::Result;
-use caryatid_sdk::{message_bus::Subscription, module, Context, MessageBusExt, Module};
+use anyhow::{anyhow, Result};
+use caryatid_sdk::{message_bus::Subscription, module, Context, Module};
 use config::Config;
 use serde_json;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info};
 
+mod drep_distribution_publisher;
+use drep_distribution_publisher::DRepDistributionPublisher;
 mod state;
 use state::State;
 
@@ -21,7 +25,10 @@ const DEFAULT_SPO_STATE_TOPIC: &str = "cardano.spo.state";
 const DEFAULT_EPOCH_ACTIVITY_TOPIC: &str = "cardano.epoch.activity";
 const DEFAULT_TX_CERTIFICATES_TOPIC: &str = "cardano.certificates";
 const DEFAULT_STAKE_DELTAS_TOPIC: &str = "cardano.stake.deltas";
-const DEFAULT_HANDLE_TOPIC: &str = "rest.get.stake";
+const DEFAULT_HANDLE_STAKE_TOPIC: &str = "rest.get.stake";
+const DEFAULT_HANDLE_SPDD_TOPIC: &str = "rest.get.spdd";
+const DEFAULT_DREP_STATE_TOPIC: &str = "cardano.drep.state";
+const DEFAULT_DREP_DISTRIBUTION_TOPIC: &str = "cardano.drep.distribution";
 
 /// Accounts State module
 #[module(
@@ -35,10 +42,12 @@ impl AccountsState {
     /// Async run loop
     async fn run(
         history: Arc<Mutex<StateHistory<State>>>,
+        mut publisher: DRepDistributionPublisher,
         mut spos_subscription: Box<dyn Subscription<Message>>,
         mut ea_subscription: Box<dyn Subscription<Message>>,
         mut certs_subscription: Box<dyn Subscription<Message>>,
         mut stake_subscription: Box<dyn Subscription<Message>>,
+        mut drep_state_subscription: Box<dyn Subscription<Message>>,
     ) -> Result<()> {
         // Get the stake address deltas from the genesis bootstrap, which we know
         // don't contain any stake
@@ -103,8 +112,25 @@ impl AccountsState {
 
             // Read from epoch-boundary messages only when it's a new epoch
             if new_epoch {
+                let dreps_message_f = drep_state_subscription.read();
                 let spos_message_f = spos_subscription.read();
                 let ea_message_f = ea_subscription.read();
+
+                // Handle DRep
+                let (_, message) = dreps_message_f.await?;
+                match message.as_ref() {
+                    Message::Cardano((block_info, CardanoMessage::DRepState(dreps_msg))) => {
+                        // TODO: update our list of dreps
+                        if let Err(e) = publisher
+                            .publish_stake(block_info, Some(dreps_msg.dreps.clone()))
+                            .await
+                        {
+                            tracing::error!("Error publishing drep voting stake distribution: {e}")
+                        }
+                    }
+
+                    _ => error!("Unexpected message type: {message:?}"),
+                }
 
                 // Handle SPOs
                 let (_, message) = spos_message_f.await?;
@@ -183,100 +209,96 @@ impl AccountsState {
             .unwrap_or(DEFAULT_STAKE_DELTAS_TOPIC.to_string());
         info!("Creating stake deltas subscriber on '{stake_deltas_topic}'");
 
-        let handle_topic = config
-            .get_string("handle-topic")
-            .unwrap_or(DEFAULT_HANDLE_TOPIC.to_string());
-        info!("Creating request handler on '{handle_topic}'");
+        let handle_stake_topic = config
+            .get_string("handle-stake-topic")
+            .unwrap_or(DEFAULT_HANDLE_STAKE_TOPIC.to_string());
+        info!("Creating request handler on '{handle_stake_topic}'");
+
+        let handle_spdd_topic = config
+            .get_string("handle-spdd-topic")
+            .unwrap_or(DEFAULT_HANDLE_SPDD_TOPIC.to_string());
+        info!("Creating request handler on '{handle_spdd_topic}'");
+
+        let drep_state_topic = config
+            .get_string("drep-state-topic")
+            .unwrap_or(DEFAULT_DREP_STATE_TOPIC.to_string());
+
+        let drep_distribution_topic = config
+            .get_string("publish-drep-distribution-topic")
+            .unwrap_or(DEFAULT_DREP_DISTRIBUTION_TOPIC.to_string());
 
         // Create history
         let history = Arc::new(Mutex::new(StateHistory::<State>::new("AccountsState")));
-        let history_full = history.clone();
-        let history_single = history.clone();
+        let history_stake = history.clone();
+        let history_stake_single = history.clone();
+        let history_spdd = history.clone();
         let history_tick = history.clone();
 
         // Handle requests for full state
-        context
-            .message_bus
-            .handle(&handle_topic, move |message: Arc<Message>| {
-                let history = history_full.clone();
-                async move {
-                    let response = match message.as_ref() {
-                        Message::RESTRequest(request) => {
-                            info!("REST received {} {}", request.method, request.path);
-                            if let Some(state) = history.lock().await.current().clone() {
-                                match serde_json::to_string(state) {
-                                    Ok(body) => RESTResponse::with_json(200, &body),
-                                    Err(error) => RESTResponse::with_text(
-                                        500,
-                                        &format!("{error:?}").to_string(),
-                                    ),
-                                }
-                            } else {
-                                RESTResponse::with_json(200, "{}")
-                            }
-                        }
-                        _ => {
-                            error!("Unexpected message type {:?}", message);
-                            RESTResponse::with_text(500, "Unexpected message in REST request")
-                        }
-                    };
-
-                    Arc::new(Message::RESTResponse(response))
+        handle_rest(context.clone(), &handle_stake_topic, move || {
+            let history = history_stake.clone();
+            async move {
+                if let Some(state) = history.lock().await.current().clone() {
+                    match serde_json::to_string(state) {
+                        Ok(body) => Ok(RESTResponse::with_json(200, &body)),
+                        Err(error) => Err(anyhow!("{:?}", error)),
+                    }
+                } else {
+                    Ok(RESTResponse::with_json(200, "{}"))
                 }
-            })?;
+            }
+        });
 
-        let handle_topic_single = handle_topic + ".*";
+        let handle_single_stake_topic = handle_stake_topic + ".*";
 
         // Handle requests for single reward state based on stake address
-        context
-            .message_bus
-            .handle(&handle_topic_single, move |message: Arc<Message>| {
-                let history = history_single.clone();
-                async move {
-                    let response = match message.as_ref() {
-                        Message::RESTRequest(request) => {
-                            info!("REST received {} {}", request.method, request.path);
-                            match request.path_elements.get(1) {
-                                Some(addr) => match Address::from_string(addr) {
-                                    Ok(Address::Stake(StakeAddress {
-                                        payload: StakeAddressPayload::StakeKeyHash(hash),
-                                        ..
-                                    })) => match history.lock().await.current() {
-                                        Some(state) => match state.get_stake_state(&hash) {
-                                            Some(stake) => match serde_json::to_string(&stake) {
-                                                Ok(body) => RESTResponse::with_json(200, &body),
-                                                Err(error) => RESTResponse::with_text(
-                                                    500,
-                                                    &format!("{error:?}").to_string(),
-                                                ),
-                                            },
-                                            None => RESTResponse::with_text(
-                                                404,
-                                                "Stake address not found",
-                                            ),
-                                        },
+        handle_rest_with_parameter(context.clone(), &handle_single_stake_topic, move |param| {
+            let history = history_stake_single.clone();
+            let param = param.to_string();
 
-                                        None => RESTResponse::with_text(500, "No state"),
-                                    },
-                                    _ => RESTResponse::with_text(400, "Not a stake address"),
-                                },
-                                None => {
-                                    RESTResponse::with_text(400, "Stake address must be provided")
-                                }
-                            }
-                        }
-                        _ => {
-                            error!("Unexpected message type {:?}", message);
-                            RESTResponse::with_text(500, "Unexpected message in REST request")
-                        }
-                    };
-
-                    Arc::new(Message::RESTResponse(response))
+            async move {
+                match Address::from_string(&param) {
+                    Ok(Address::Stake(StakeAddress {
+                        payload: StakeAddressPayload::StakeKeyHash(hash),
+                        ..
+                    })) => match history.lock().await.current() {
+                        Some(state) => match state.get_stake_state(&hash) {
+                            Some(stake) => match serde_json::to_string(&stake) {
+                                Ok(body) => Ok(RESTResponse::with_json(200, &body)),
+                                Err(error) => Err(anyhow!("{:?}", error)),
+                            },
+                            None => Ok(RESTResponse::with_text(404, "Stake address not found")),
+                        },
+                        None => Err(anyhow!("No state")),
+                    },
+                    _ => Ok(RESTResponse::with_text(400, "Not a stake address")),
                 }
-            })?;
+            }
+        });
+
+        // Handle requests for SPDD
+        handle_rest(context.clone(), &handle_spdd_topic, move || {
+            let history = history_spdd.clone();
+            async move {
+                if let Some(state) = history.lock().await.current() {
+                    // Use hex for SPO ID
+                    let spdd: HashMap<String, u64> = state
+                        .generate_spdd()
+                        .iter()
+                        .map(|(k, v)| (hex::encode(k), *v))
+                        .collect();
+                    match serde_json::to_string(&spdd) {
+                        Ok(body) => Ok(RESTResponse::with_json(200, &body)),
+                        Err(error) => Err(anyhow!("{:?}", error)),
+                    }
+                } else {
+                    Ok(RESTResponse::with_json(200, "{}"))
+                }
+            }
+        });
 
         // Ticker to log stats
-        let mut tick_subscription = context.message_bus.register("clock.tick").await?;
+        let mut tick_subscription = context.subscribe("clock.tick").await?;
         context.clone().run(async move {
             loop {
                 let Ok((_, message)) = tick_subscription.read().await else {
@@ -296,20 +318,25 @@ impl AccountsState {
             }
         });
 
+        let publisher = DRepDistributionPublisher::new(context.clone(), drep_distribution_topic);
+
         // Subscribe
-        let spos_subscription = context.message_bus.register(&spo_state_topic).await?;
-        let ea_subscription = context.message_bus.register(&epoch_activity_topic).await?;
-        let certs_subscription = context.message_bus.register(&tx_certificates_topic).await?;
-        let stake_subscription = context.message_bus.register(&stake_deltas_topic).await?;
+        let spos_subscription = context.subscribe(&spo_state_topic).await?;
+        let ea_subscription = context.subscribe(&epoch_activity_topic).await?;
+        let certs_subscription = context.subscribe(&tx_certificates_topic).await?;
+        let stake_subscription = context.subscribe(&stake_deltas_topic).await?;
+        let drep_state_subscription = context.subscribe(&drep_state_topic).await?;
 
         // Start run task
         context.run(async move {
             Self::run(
                 history,
+                publisher,
                 spos_subscription,
                 ea_subscription,
                 certs_subscription,
                 stake_subscription,
+                drep_state_subscription,
             )
             .await
             .unwrap_or_else(|e| error!("Failed: {e}"));

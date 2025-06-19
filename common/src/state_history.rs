@@ -63,11 +63,7 @@ impl<S: Clone + Default> StateHistory<S> {
             }
         }
 
-        if let Some(current) = self.history.back() {
-            current.state.clone()
-        } else {
-            S::default()
-        }
+        self.get_current_state()
     }
 
     /// Get the current state assuming any rollback has been done

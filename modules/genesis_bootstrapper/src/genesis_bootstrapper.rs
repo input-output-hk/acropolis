@@ -35,7 +35,7 @@ impl GenesisBootstrapper {
             .unwrap_or(DEFAULT_STARTUP_TOPIC.to_string());
         info!("Creating startup subscriber on '{startup_topic}'");
 
-        let mut subscription = context.message_bus.register(&startup_topic).await?;
+        let mut subscription = context.subscribe(&startup_topic).await?;
         context.clone().run(async move {
             let Ok(_) = subscription.read().await else {
                 return;
@@ -87,7 +87,6 @@ impl GenesisBootstrapper {
             let message_enum =
                 Message::Cardano((block_info.clone(), CardanoMessage::UTXODeltas(message)));
             context
-                .message_bus
                 .publish(&publish_utxo_deltas_topic, Arc::new(message_enum))
                 .await
                 .unwrap_or_else(|e| error!("Failed to publish: {e}"));
