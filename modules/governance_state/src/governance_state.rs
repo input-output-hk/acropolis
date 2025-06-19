@@ -215,16 +215,15 @@ impl GovernanceState {
                     .lock().await
                     .handle_protocol_parameters(&params).await?;
 
-            info!("Waiting for drep state");
-            let (blk_drep, distr) = Self::read_drep(&mut drep_s).await?;
-            if blk_g != blk_drep {
-                error!("Governance {blk_g:?} and DRep distribution {blk_drep:?} are out of sync");
-            }
-            info!("Drep state received");
-            if distr.data.is_some() {
+                info!("Waiting for drep state");
+                let (blk_drep, distr) = Self::read_drep(&mut drep_s).await?;
+                if blk_g != blk_drep {
+                    error!("Governance {blk_g:?} and DRep distribution {blk_drep:?} are out of sync");
+                }
+
+                info!("Drep state received");
                 state.lock().await.handle_drep_stake(&distr).await?
             }
-            };
         }
     }
 
