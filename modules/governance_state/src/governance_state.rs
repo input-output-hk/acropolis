@@ -198,7 +198,6 @@ impl GovernanceState {
         loop {
             let (blk_g, gov_procs) = Self::read_governance(&mut governance_s).await?;
             {
-                info!("Reading governance");
                 state.lock().await
                     .handle_governance(&blk_g, &gov_procs).await?;
             }
@@ -215,14 +214,14 @@ impl GovernanceState {
                     .lock().await
                     .handle_protocol_parameters(&params).await?;
 
-                info!("Waiting for drep state");
-                let (blk_drep, distr) = Self::read_drep(&mut drep_s).await?;
-                if blk_g != blk_drep {
-                    error!("Governance {blk_g:?} and DRep distribution {blk_drep:?} are out of sync");
-                }
+                if blk_g.epoch > 0 { // TODO: make sync more stable
+                    let (blk_drep, distr) = Self::read_drep(&mut drep_s).await?;
+                    if blk_g != blk_drep {
+                        error!("Governance {blk_g:?} and DRep distribution {blk_drep:?} are out of sync");
+                    }
 
-                info!("Drep state received");
-                state.lock().await.handle_drep_stake(&distr).await?
+                    state.lock().await.handle_drep_stake(&distr).await?
+                }
             }
         }
     }
