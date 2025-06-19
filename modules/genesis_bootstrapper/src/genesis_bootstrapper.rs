@@ -94,9 +94,7 @@ impl GenesisBootstrapper {
             // Send completion message
             let message_enum = Message::Cardano((
                 block_info,
-                CardanoMessage::GenesisComplete(GenesisCompleteMessage { 
-                    conway_genesis: None 
-                }),
+                CardanoMessage::GenesisComplete(GenesisCompleteMessage {}),
             ));
             context
                 .message_bus
