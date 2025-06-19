@@ -7,7 +7,7 @@ use acropolis_common::{
     InstantaneousRewardSource, InstantaneousRewardTarget, KeyHash, MoveInstantaneousReward,
     PoolRegistration, StakeAddressPayload, StakeCredential, TxCertificate,
 };
-use anyhow::{bail, Result};
+use anyhow::{bail, Result, Context};
 use dashmap::DashMap;
 use imbl::HashMap;
 use rayon::prelude::*;
@@ -177,12 +177,14 @@ impl State {
 
     /// Handle an MoveInstantaneousReward (pre-Conway only)
     pub fn handle_mir(&mut self, mir: &MoveInstantaneousReward) -> Result<()> {
-        let (source, other) = match &mir.source {
+        let (source, source_name, other, other_name) = match &mir.source {
             InstantaneousRewardSource::Reserves => {
-                (&mut self.pots.reserves, &mut self.pots.treasury)
+                (&mut self.pots.reserves, "reserves",
+                 &mut self.pots.treasury, "treasury")
             }
             InstantaneousRewardSource::Treasury => {
-                (&mut self.pots.treasury, &mut self.pots.reserves)
+                (&mut self.pots.treasury, "treasury",
+                 &mut self.pots.reserves, "reserves")
             }
         };
 
@@ -195,13 +197,15 @@ impl State {
                         Some(sas) => {
                             // Add to this one
                             let mut sas = sas.clone();
-                            Self::update_value_with_delta(&mut sas.utxo_value, *value);
+                            Self::update_value_with_delta(&mut sas.utxo_value, *value)
+                                .with_context(|| format!("Updating stake {}", hex::encode(&hash)))?;
 
                             // Immutably update it
                             self.stake_addresses = self.stake_addresses.update(hash.clone(), sas);
 
                             // Update the source
-                            Self::update_value_with_delta(source, -*value);
+                            Self::update_value_with_delta(source, -*value)
+                                .with_context(|| format!("Updating {source_name}"))?;
                         }
 
                         None => bail!("Unknown stake address {:?} in MIR", credential),
@@ -211,8 +215,10 @@ impl State {
 
             InstantaneousRewardTarget::OtherAccountingPot(value) => {
                 // Transfer between pots
-                *source -= value;
-                *other += value;
+                Self::update_value_with_delta(source, -(*value as i64))
+                    .with_context(|| format!("Updating {source_name}"))?;
+                Self::update_value_with_delta(other, *value as i64)
+                    .with_context(|| format!("Updating {other_name}"))?;
             }
         }
 
@@ -220,18 +226,19 @@ impl State {
     }
 
     /// Update an unsigned value with a signed delta, with fences
-    pub fn update_value_with_delta(value: &mut u64, delta: i64) {
+    pub fn update_value_with_delta(value: &mut u64, delta: i64) -> Result<()> {
         if delta >= 0 {
             *value = (*value).saturating_add(delta as u64);
         } else {
             let abs = (-delta) as u64;
             if abs > *value {
-                error!("Stake address went negative with delta {delta}");
-                *value = 0;
+                bail!("Value underflow - was {}, delta {}", *value, delta);
             } else {
                 *value -= abs;
             }
         }
+
+        Ok(())
     }
 
     /// Handle TxCertificates with stake delegations
@@ -287,7 +294,8 @@ impl State {
                 None => StakeAddressState::default(),
             };
 
-            Self::update_value_with_delta(&mut sas.utxo_value, delta.delta);
+            Self::update_value_with_delta(&mut sas.utxo_value, delta.delta)
+                .with_context(|| format!("Updating stake {}", hex::encode(&hash)))?;
 
             // Immutably create or update the stake address
             self.stake_addresses = self.stake_addresses.update(hash.clone(), sas);
