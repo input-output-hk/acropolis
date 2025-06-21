@@ -1,7 +1,9 @@
 use acropolis_common::messages::{CardanoMessage, DRepStakeDistributionMessage, Message};
-use acropolis_common::{BlockInfo, DRepCredential, Lovelace};
+use acropolis_common::BlockInfo;
 use caryatid_sdk::Context;
 use std::sync::Arc;
+
+use crate::state::DRepDelegationDistribution;
 
 pub struct DRepDistributionPublisher {
     /// Module context
@@ -19,7 +21,7 @@ impl DRepDistributionPublisher {
     pub async fn publish_stake(
         &mut self,
         block: &BlockInfo,
-        s: Option<Vec<(DRepCredential, Lovelace)>>,
+        s: DRepDelegationDistribution,
     ) -> anyhow::Result<()> {
         self.context
             .message_bus
@@ -27,7 +29,12 @@ impl DRepDistributionPublisher {
                 &self.topic,
                 Arc::new(Message::Cardano((
                     block.clone(),
-                    CardanoMessage::DRepStakeDistribution(DRepStakeDistributionMessage { data: s }),
+                    CardanoMessage::DRepStakeDistribution(DRepStakeDistributionMessage {
+                        epoch: block.epoch,
+                        abstain: s.abstain,
+                        no_confidence: s.no_confidence,
+                        dreps: s.dreps,
+                    }),
                 ))),
             )
             .await

@@ -36,7 +36,7 @@ impl BlockUnpacker {
             .unwrap_or(DEFAULT_PUBLISH_TOPIC.to_string());
         info!("Publishing on '{publish_topic}'");
 
-        let mut subscription = context.message_bus.register(&subscribe_topic).await?;
+        let mut subscription = context.subscribe(&subscribe_topic).await?;
 
         context.clone().run(async move {
             loop {
