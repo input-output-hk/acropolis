@@ -33,7 +33,7 @@ const MAINNET_CONWAY_GENESIS: &[u8] = include_bytes!("../downloads/mainnet-conwa
     description = "Genesis bootstrap UTXO event generator"
 )]
 pub struct GenesisBootstrapper;
-
+/*
 fn decode_hex_string(s: &str, len: usize) -> Result<Vec<u8>> {
     let key_hash = decode(s.to_owned().into_bytes())?;
     if key_hash.len() == len {
@@ -139,7 +139,7 @@ fn map_conway_genesis(genesis: &conway::GenesisFile) -> Result<ConwayParams> {
         committee: map_committee(&genesis.committee)?,
     })
 }
-
+*/
 impl GenesisBootstrapper {
     /// Main init function
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
