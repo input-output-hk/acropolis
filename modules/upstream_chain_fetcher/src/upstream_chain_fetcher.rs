@@ -7,7 +7,7 @@ use acropolis_common::{
     BlockInfo, BlockStatus, Era,
 };
 use anyhow::{anyhow, Result};
-use caryatid_sdk::{module, Context, MessageBusExt, Module};
+use caryatid_sdk::{module, Context, Module};
 use config::Config;
 use pallas::{
     ledger::traverse::MultiEraHeader,
@@ -241,33 +241,26 @@ impl UpstreamChainFetcher {
                 info!("Waiting for snapshot completion on {topic}");
 
                 let peer = peer.clone();
-                context
-                    .clone()
-                    .message_bus
-                    .subscribe(&topic, move |message: Arc<Message>| {
-                        let context = context.clone();
-                        let config = config.clone();
-                        let peer = peer.clone();
+                let mut subscription = context.subscribe(&topic).await?;
+                context.clone().run(async move {
+                    let Ok((_, message)) = subscription.read().await else {
+                        return;
+                    };
+                    match message.as_ref() {
+                        Message::Cardano((block, CardanoMessage::SnapshotComplete)) => {
+                            info!(
+                                "Notified snapshot complete at slot {} block number {}",
+                                block.slot, block.number
+                            );
+                            let point = Point::Specific(block.slot, block.hash.clone());
 
-                        tokio::spawn(async move {
-                            match message.as_ref() {
-                                Message::Cardano((block, CardanoMessage::SnapshotComplete)) => {
-                                    info!(
-                                        "Notified snapshot complete at slot {} block number {}",
-                                        block.slot, block.number
-                                    );
-                                    let point = Point::Specific(block.slot, block.hash.clone());
-
-                                    Self::sync_to_point(context, config, peer, point)
-                                        .await
-                                        .unwrap_or_else(|e| error!("Can't sync: {e}"));
-                                }
-                                _ => error!("Unexpected message type: {message:?}"),
-                            }
-                        });
-
-                        async {}
-                    })?;
+                            Self::sync_to_point(context, config, peer, point)
+                                .await
+                                .unwrap_or_else(|e| error!("Can't sync: {e}"));
+                        }
+                        _ => error!("Unexpected message type: {message:?}"),
+                    }
+                });
             }
             _ => return Err(anyhow!("Sync point {sync_point} not understood")),
         };

@@ -1,15 +1,21 @@
 //! Acropolis AccountsState: State storage
 use acropolis_common::{
     messages::{
-        EpochActivityMessage, SPOStateMessage, StakeAddressDeltasMessage, TxCertificatesMessage,
+        DRepStateMessage, EpochActivityMessage, SPOStateMessage, StakeAddressDeltasMessage,
+        TxCertificatesMessage,
     },
     serialization::SerializeMapAs,
-    KeyHash, PoolRegistration, StakeAddressPayload, StakeCredential, TxCertificate,
+    DRepChoice, DRepCredential, KeyHash, Lovelace, PoolRegistration, StakeAddressPayload,
+    StakeCredential, TxCertificate,
 };
 use anyhow::Result;
+use dashmap::DashMap;
 use imbl::HashMap;
+use rayon::prelude::*;
 use serde_with::{hex::Hex, serde_as};
-use tracing::{error, info};
+use std::sync::Arc;
+use std::{collections::BTreeMap, sync::atomic::AtomicU64};
+use tracing::{error, info, warn};
 
 /// State of an individual stake address
 #[serde_as]
@@ -24,6 +30,16 @@ pub struct StakeAddressState {
     /// SPO ID they are delegated to ("operator" ID)
     #[serde_as(as = "Option<Hex>")]
     delegated_spo: Option<KeyHash>,
+
+    /// DRep they are delegated to
+    delegated_drep: Option<DRepChoice>,
+}
+
+#[derive(Default, Debug, PartialEq, Eq)]
+pub struct DRepDelegationDistribution {
+    pub abstain: Lovelace,
+    pub no_confidence: Lovelace,
+    pub dreps: Vec<(DRepCredential, Lovelace)>,
 }
 
 /// Overall state - stored per block
@@ -40,6 +56,9 @@ pub struct State {
     /// Map of staking address values
     #[serde_as(as = "SerializeMapAs<Hex, _>")]
     stake_addresses: HashMap<Vec<u8>, StakeAddressState>,
+
+    /// All registered DReps
+    dreps: Vec<(DRepCredential, Lovelace)>,
 }
 
 impl State {
@@ -57,6 +76,90 @@ impl State {
     pub async fn tick(&self) -> Result<()> {
         self.log_stats();
         Ok(())
+    }
+
+    /// Derive the Stake Pool Delegation Distribution (SPDD) - a map of total stake value
+    /// (including both UTXO stake addresses and rewards) for each active SPO
+    /// Key of returned map is the SPO 'operator' ID
+    pub fn generate_spdd(&self) -> BTreeMap<KeyHash, u64> {
+        // Shareable Dashmap with referenced keys
+        let spo_stakes = Arc::new(DashMap::<&KeyHash, u64>::new());
+
+        // Total stake across all addresses in parallel, first collecting into a vector
+        // because imbl::HashMap doesn't work in Rayon
+        self.stake_addresses
+            .values()
+            .collect::<Vec<_>>() // Vec<&StakeAddressState>
+            .par_iter() // Rayon multi-threaded iterator
+            .for_each_init(
+                || Arc::clone(&spo_stakes),
+                |map, sas| {
+                    if let Some(spo) = sas.delegated_spo.as_ref() {
+                        let stake = sas.utxo_value + sas.rewards;
+                        map.entry(spo).and_modify(|v| *v += stake).or_insert(stake);
+                    }
+                },
+            );
+
+        // Collect into a plain BTreeMap, so that it is ordered on output
+        spo_stakes
+            .iter()
+            .map(|entry| ((**entry.key()).clone(), *entry.value()))
+            .collect()
+    }
+
+    /// Derive the DRep Delegation Distribution (SPDD) - the total amount
+    /// delegated to each DRep, including the special "abstain" and "no confidence" dreps.
+    pub fn generate_drdd(&self) -> DRepDelegationDistribution {
+        let abstain = AtomicU64::new(0);
+        let no_confidence = AtomicU64::new(0);
+        let dreps = self
+            .dreps
+            .iter()
+            .map(|(cred, deposit)| (cred.clone(), AtomicU64::new(*deposit)))
+            .collect::<BTreeMap<_, _>>();
+        self.stake_addresses
+            .values()
+            .collect::<Vec<_>>()
+            .par_iter()
+            .for_each(|state| {
+                let Some(drep) = state.delegated_drep.clone() else {
+                    return;
+                };
+                let total = match drep {
+                    DRepChoice::Key(hash) => {
+                        let cred = DRepCredential::AddrKeyHash(hash);
+                        let Some(total) = dreps.get(&cred) else {
+                            warn!("Delegated to unregistered DRep address {cred:?}");
+                            return;
+                        };
+                        total
+                    }
+                    DRepChoice::Script(hash) => {
+                        let cred = DRepCredential::ScriptHash(hash);
+                        let Some(total) = dreps.get(&cred) else {
+                            warn!("Delegated to unregistered DRep script {cred:?}");
+                            return;
+                        };
+                        total
+                    }
+                    DRepChoice::Abstain => &abstain,
+                    DRepChoice::NoConfidence => &no_confidence,
+                };
+                let stake = state.utxo_value + state.rewards;
+                total.fetch_add(stake, std::sync::atomic::Ordering::Relaxed);
+            });
+        let abstain = abstain.load(std::sync::atomic::Ordering::Relaxed);
+        let no_confidence = no_confidence.load(std::sync::atomic::Ordering::Relaxed);
+        let dreps = dreps
+            .into_iter()
+            .map(|(k, v)| (k, v.load(std::sync::atomic::Ordering::Relaxed)))
+            .collect();
+        DRepDelegationDistribution {
+            abstain,
+            no_confidence,
+            dreps,
+        }
     }
 
     /// Handle an EpochActivityMessage giving total fees and block counts by VRF key for
@@ -95,14 +198,18 @@ impl State {
         Ok(())
     }
 
-    /// Record a delegation
-    fn record_delegation(&mut self, credential: &StakeCredential, spo: &KeyHash) {
+    pub fn handle_drep_state(&mut self, drep_msg: &DRepStateMessage) {
+        self.dreps = drep_msg.dreps.clone();
+    }
+
+    /// Record a stake delegation
+    fn record_stake_delegation(&mut self, credential: &StakeCredential, spo: &KeyHash) {
         let hash = credential.get_hash();
 
         // Get old stake address state, or create one
         let mut sas = match self.stake_addresses.get(&hash) {
             Some(sas) => sas.clone(),
-            None => StakeAddressState::default()
+            None => StakeAddressState::default(),
         };
 
         // Immutably create or update the stake address
@@ -110,25 +217,48 @@ impl State {
         self.stake_addresses = self.stake_addresses.update(hash.clone(), sas);
     }
 
-    /// Handle TxCertificates with stake delegations
+    /// record a drep delegation
+    fn record_drep_delegation(&mut self, credential: &StakeCredential, drep: &DRepChoice) {
+        let hash = credential.get_hash();
+        self.stake_addresses = self.stake_addresses.alter(
+            |old_state| {
+                let mut state = old_state.unwrap_or_default();
+                state.delegated_drep = Some(drep.clone());
+                Some(state)
+            },
+            hash,
+        );
+    }
+
+    /// Handle TxCertificates with stake or drep delegations
     pub fn handle_tx_certificates(&mut self, tx_certs_msg: &TxCertificatesMessage) -> Result<()> {
         // Handle certificates
         for tx_cert in tx_certs_msg.certificates.iter() {
             match tx_cert {
                 TxCertificate::StakeDelegation(delegation) => {
-                    self.record_delegation(&delegation.credential, &delegation.operator);
+                    self.record_stake_delegation(&delegation.credential, &delegation.operator);
+                }
+
+                TxCertificate::VoteDelegation(delegation) => {
+                    self.record_drep_delegation(&delegation.credential, &delegation.drep);
                 }
 
                 TxCertificate::StakeAndVoteDelegation(delegation) => {
-                    self.record_delegation(&delegation.credential, &delegation.operator)
+                    self.record_stake_delegation(&delegation.credential, &delegation.operator);
+                    self.record_drep_delegation(&delegation.credential, &delegation.drep);
                 }
 
                 TxCertificate::StakeRegistrationAndDelegation(delegation) => {
-                    self.record_delegation(&delegation.credential, &delegation.operator)
+                    self.record_stake_delegation(&delegation.credential, &delegation.operator);
+                }
+
+                TxCertificate::StakeRegistrationAndVoteDelegation(delegation) => {
+                    self.record_drep_delegation(&delegation.credential, &delegation.drep);
                 }
 
                 TxCertificate::StakeRegistrationAndStakeAndVoteDelegation(delegation) => {
-                    self.record_delegation(&delegation.credential, &delegation.operator)
+                    self.record_stake_delegation(&delegation.credential, &delegation.operator);
+                    self.record_drep_delegation(&delegation.credential, &delegation.drep);
                 }
 
                 _ => (),
@@ -152,7 +282,7 @@ impl State {
             // Get old stake address state, or create one
             let mut sas = match self.stake_addresses.get(hash) {
                 Some(sas) => sas.clone(),
-                None => StakeAddressState::default()
+                None => StakeAddressState::default(),
             };
 
             // Update UTXO value, with fences
@@ -180,26 +310,258 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acropolis_common::{BlockInfo, BlockStatus, Era};
+    use acropolis_common::{
+        AddressNetwork, Credential, Registration, StakeAddress, StakeAddressDelta,
+        StakeAddressPayload, StakeAndVoteDelegation, StakeRegistrationAndStakeAndVoteDelegation,
+        StakeRegistrationAndVoteDelegation, VoteDelegation,
+    };
 
-    fn new_msg() -> EpochActivityMessage {
-        EpochActivityMessage {
-            epoch: 0,
-            total_blocks: 0,
-            total_fees: 0,
-            vrf_vkey_hashes: Vec::new(),
+    const STAKE_KEY_HASH: [u8; 3] = [0x99, 0x0f, 0x00];
+    const DREP_HASH: [u8; 4] = [0xca, 0xfe, 0xd0, 0x0d];
+
+    fn create_address(hash: &[u8]) -> StakeAddress {
+        StakeAddress {
+            network: AddressNetwork::Main,
+            payload: StakeAddressPayload::StakeKeyHash(hash.to_vec()),
         }
     }
 
-    fn new_block() -> BlockInfo {
-        BlockInfo {
-            status: BlockStatus::Immutable,
-            slot: 0,
-            number: 0,
-            hash: Vec::<u8>::new(),
-            epoch: 0,
-            new_epoch: true,
-            era: Era::Byron,
-        }
+    #[test]
+    fn stake_addresses_initialise_to_first_delta_and_increment_subsequently() {
+        let mut state = State::default();
+        let msg = StakeAddressDeltasMessage {
+            deltas: vec![StakeAddressDelta {
+                address: create_address(&STAKE_KEY_HASH),
+                delta: 42,
+            }],
+        };
+
+        state.handle_stake_deltas(&msg).unwrap();
+
+        assert_eq!(state.stake_addresses.len(), 1);
+        assert_eq!(
+            state
+                .stake_addresses
+                .get(&STAKE_KEY_HASH.to_vec())
+                .unwrap()
+                .utxo_value,
+            42
+        );
+
+        state.handle_stake_deltas(&msg).unwrap();
+
+        assert_eq!(state.stake_addresses.len(), 1);
+        assert_eq!(
+            state
+                .stake_addresses
+                .get(&STAKE_KEY_HASH.to_vec())
+                .unwrap()
+                .utxo_value,
+            84
+        );
+    }
+
+    #[test]
+    fn stake_address_changes_dont_leak_across_clone() {
+        let mut state = State::default();
+        let state2 = state.clone();
+
+        let msg = StakeAddressDeltasMessage {
+            deltas: vec![StakeAddressDelta {
+                address: create_address(&STAKE_KEY_HASH),
+                delta: 42,
+            }],
+        };
+
+        state.handle_stake_deltas(&msg).unwrap();
+
+        // New delta must not be reflected in the clone
+        assert_eq!(state.stake_addresses.len(), 1);
+        assert_eq!(state2.stake_addresses.len(), 0);
+
+        // Clone again and ensure value stays constant too
+        let state2 = state.clone();
+        state.handle_stake_deltas(&msg).unwrap();
+        assert_eq!(
+            state
+                .stake_addresses
+                .get(&STAKE_KEY_HASH.to_vec())
+                .unwrap()
+                .utxo_value,
+            84
+        );
+        assert_eq!(
+            state2
+                .stake_addresses
+                .get(&STAKE_KEY_HASH.to_vec())
+                .unwrap()
+                .utxo_value,
+            42
+        );
+    }
+
+    #[test]
+    fn spdd_is_empty_at_start() {
+        let state = State::default();
+        let spdd = state.generate_spdd();
+        assert!(spdd.is_empty());
+    }
+
+    #[test]
+    fn spdd_from_delegation_with_utxo_values() {
+        let mut state = State::default();
+
+        // Delegate
+        let spo1: KeyHash = vec![0x01];
+        let addr1: KeyHash = vec![0x11];
+        state.record_stake_delegation(&Credential::AddrKeyHash(addr1.clone()), &spo1);
+
+        let spo2: KeyHash = vec![0x02];
+        let addr2: KeyHash = vec![0x12];
+        state.record_stake_delegation(&Credential::AddrKeyHash(addr2.clone()), &spo2);
+
+        // Put some value in
+        let msg1 = StakeAddressDeltasMessage {
+            deltas: vec![StakeAddressDelta {
+                address: create_address(&addr1),
+                delta: 42,
+            }],
+        };
+
+        state.handle_stake_deltas(&msg1).unwrap();
+
+        let msg2 = StakeAddressDeltasMessage {
+            deltas: vec![StakeAddressDelta {
+                address: create_address(&addr2),
+                delta: 21,
+            }],
+        };
+
+        state.handle_stake_deltas(&msg2).unwrap();
+
+        // Get the SPDD
+        let spdd = state.generate_spdd();
+        assert_eq!(spdd.len(), 2);
+
+        let stake1 = spdd.get(&spo1).unwrap();
+        assert_eq!(*stake1, 42);
+        let stake2 = spdd.get(&spo2).unwrap();
+        assert_eq!(*stake2, 21);
+    }
+
+    #[test]
+    fn drdd_is_default_from_start() {
+        let state = State::default();
+        let drdd = state.generate_drdd();
+        assert_eq!(drdd, DRepDelegationDistribution::default());
+    }
+
+    #[test]
+    fn drdd_includes_initial_deposit() {
+        let mut state = State::default();
+
+        let drep_addr_cred = DRepCredential::AddrKeyHash(DREP_HASH.to_vec());
+        state.handle_drep_state(&DRepStateMessage {
+            epoch: 1337,
+            dreps: vec![(drep_addr_cred.clone(), 1_000_000)],
+        });
+
+        let drdd = state.generate_drdd();
+        assert_eq!(
+            drdd,
+            DRepDelegationDistribution {
+                abstain: 0,
+                no_confidence: 0,
+                dreps: vec![(drep_addr_cred, 1_000_000)],
+            }
+        );
+    }
+
+    #[test]
+    fn drdd_respects_different_delegations() -> Result<()> {
+        let mut state = State::default();
+
+        let drep_addr_cred = DRepCredential::AddrKeyHash(DREP_HASH.to_vec());
+        let drep_script_cred = DRepCredential::ScriptHash(DREP_HASH.to_vec());
+        state.handle_drep_state(&DRepStateMessage {
+            epoch: 1337,
+            dreps: vec![
+                (drep_addr_cred.clone(), 1_000_000),
+                (drep_script_cred.clone(), 2_000_000),
+            ],
+        });
+
+        let spo1 = vec![0x01];
+        let spo2 = vec![0x02];
+        let spo3 = vec![0x03];
+        let spo4 = vec![0x04];
+
+        let certificates = vec![
+            // register the first two SPOs separately from their delegation
+            TxCertificate::Registration(Registration {
+                credential: Credential::AddrKeyHash(spo1.clone()),
+                deposit: 1,
+            }),
+            TxCertificate::Registration(Registration {
+                credential: Credential::AddrKeyHash(spo2.clone()),
+                deposit: 1,
+            }),
+            TxCertificate::VoteDelegation(VoteDelegation {
+                credential: Credential::AddrKeyHash(spo1.clone()),
+                drep: DRepChoice::Key(DREP_HASH.to_vec()),
+            }),
+            TxCertificate::StakeAndVoteDelegation(StakeAndVoteDelegation {
+                credential: Credential::AddrKeyHash(spo2.clone()),
+                operator: spo1.clone(),
+                drep: DRepChoice::Script(DREP_HASH.to_vec()),
+            }),
+            TxCertificate::StakeRegistrationAndVoteDelegation(StakeRegistrationAndVoteDelegation {
+                credential: Credential::AddrKeyHash(spo3.clone()),
+                drep: DRepChoice::Abstain,
+                deposit: 1,
+            }),
+            TxCertificate::StakeRegistrationAndStakeAndVoteDelegation(
+                StakeRegistrationAndStakeAndVoteDelegation {
+                    credential: Credential::AddrKeyHash(spo4.clone()),
+                    operator: spo1.clone(),
+                    drep: DRepChoice::NoConfidence,
+                    deposit: 1,
+                },
+            ),
+        ];
+
+        state.handle_tx_certificates(&TxCertificatesMessage { certificates })?;
+
+        let deltas = vec![
+            StakeAddressDelta {
+                address: create_address(&spo1),
+                delta: 100,
+            },
+            StakeAddressDelta {
+                address: create_address(&spo2),
+                delta: 1_000,
+            },
+            StakeAddressDelta {
+                address: create_address(&spo3),
+                delta: 10_000,
+            },
+            StakeAddressDelta {
+                address: create_address(&spo4),
+                delta: 100_000,
+            },
+        ];
+        state.handle_stake_deltas(&StakeAddressDeltasMessage { deltas })?;
+
+        let drdd = state.generate_drdd();
+        assert_eq!(
+            drdd,
+            DRepDelegationDistribution {
+                abstain: 10_000,
+                no_confidence: 100_000,
+                dreps: vec![(drep_addr_cred, 1_000_100), (drep_script_cred, 2_001_000),],
+            }
+        );
+
+        Ok(())
     }
 }

@@ -3,7 +3,7 @@
 
 use acropolis_common::messages::{CardanoMessage, Message, RESTResponse};
 use anyhow::Result;
-use caryatid_sdk::{module, Context, MessageBusExt, Module};
+use caryatid_sdk::{module, Context, Module};
 use config::Config;
 use serde_json;
 use std::sync::Arc;
@@ -46,7 +46,7 @@ impl SPOState {
         let state = Arc::new(Mutex::new(State::new()));
 
         // Subscribe for certificate messages
-        let mut subscription = context.message_bus.register(&subscribe_topic).await?;
+        let mut subscription = context.subscribe(&subscribe_topic).await?;
         let context_subscribe = context.clone();
         let state_subscribe = state.clone();
         context.run(async move {
@@ -81,40 +81,37 @@ impl SPOState {
 
         // Handle requests for full SPO state
         let state_handle_full = state.clone();
-        context
-            .message_bus
-            .handle(&handle_topic, move |message: Arc<Message>| {
-                let state = state_handle_full.clone();
-                async move {
-                    let response = match message.as_ref() {
-                        Message::RESTRequest(request) => {
-                            info!("REST received {} {}", request.method, request.path);
-                            if let Some(state) = state.lock().await.current().clone() {
-                                match serde_json::to_string(state) {
-                                    Ok(body) => RESTResponse::with_json(200, &body),
-                                    Err(error) => RESTResponse::with_text(
-                                        500,
-                                        &format!("{error:?}").to_string(),
-                                    ),
+        context.handle(&handle_topic, move |message: Arc<Message>| {
+            let state = state_handle_full.clone();
+            async move {
+                let response = match message.as_ref() {
+                    Message::RESTRequest(request) => {
+                        info!("REST received {} {}", request.method, request.path);
+                        if let Some(state) = state.lock().await.current().clone() {
+                            match serde_json::to_string(state) {
+                                Ok(body) => RESTResponse::with_json(200, &body),
+                                Err(error) => {
+                                    RESTResponse::with_text(500, &format!("{error:?}").to_string())
                                 }
-                            } else {
-                                RESTResponse::with_json(200, "{}")
                             }
+                        } else {
+                            RESTResponse::with_json(200, "{}")
                         }
-                        _ => {
-                            error!("Unexpected message type {:?}", message);
-                            RESTResponse::with_text(500, "Unexpected message in REST request")
-                        }
-                    };
+                    }
+                    _ => {
+                        error!("Unexpected message type {:?}", message);
+                        RESTResponse::with_text(500, "Unexpected message in REST request")
+                    }
+                };
 
-                    Arc::new(Message::RESTResponse(response))
-                }
-            })?;
+                Arc::new(Message::RESTResponse(response))
+            }
+        });
 
         // Handle requests for single SPO state
         let handle_topic_single = handle_topic + ".*";
         let state_handle_single = state.clone();
-        context.message_bus.handle(&handle_topic_single, move |message: Arc<Message>| {
+        context.handle(&handle_topic_single, move |message: Arc<Message>| {
             let state = state_handle_single.clone();
             async move {
                 let response = match message.as_ref() {
@@ -145,11 +142,11 @@ impl SPOState {
 
                 Arc::new(Message::RESTResponse(response))
             }
-        })?;
+        });
 
         // Ticker to log stats
         let state_tick = state.clone();
-        let mut subscription = context.message_bus.register("clock.tick").await?;
+        let mut subscription = context.subscribe("clock.tick").await?;
         context.run(async move {
             loop {
                 let Ok((_, message)) = subscription.read().await else {

@@ -7,6 +7,7 @@ pub mod crypto;
 pub mod messages;
 pub mod params;
 pub mod rational_number;
+pub mod rest_helper;
 pub mod serialization;
 pub mod state_history;
 pub mod types;

@@ -6,7 +6,7 @@ use acropolis_common::{
     BlockInfo,
 };
 use anyhow::{anyhow, Result};
-use caryatid_sdk::{message_bus::Subscription, module, Context, MessageBusExt, Module};
+use caryatid_sdk::{message_bus::Subscription, module, Context, Module};
 use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -93,7 +93,6 @@ impl ParametersState {
 
         config
             .context
-            .message_bus
             .handle(&config.handle_topic, move |message: Arc<Message>| {
                 let _state = state_handle.clone();
                 async move {
@@ -121,7 +120,7 @@ impl ParametersState {
 
                     Arc::new(Message::RESTResponse(response))
                 }
-            })?;
+            });
 
         match &genesis_s.read().await?.1.as_ref() {
             Message::Cardano((_block, CardanoMessage::GenesisComplete(genesis))) => {
@@ -151,16 +150,8 @@ impl ParametersState {
 
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         let cfg = ParametersStateConfig::new(context.clone(), &config);
-        let genesis = cfg
-            .context
-            .message_bus
-            .register(&cfg.genesis_complete_topic)
-            .await?;
-        let enact = cfg
-            .context
-            .message_bus
-            .register(&cfg.enact_state_topic)
-            .await?;
+        let genesis = cfg.context.subscribe(&cfg.genesis_complete_topic).await?;
+        let enact = cfg.context.subscribe(&cfg.enact_state_topic).await?;
 
         // Start run task
         tokio::spawn(async move {
