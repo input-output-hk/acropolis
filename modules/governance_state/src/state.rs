@@ -455,40 +455,59 @@ impl State {
         }
     }
 
+    fn retrieve_withdrawal(p: &ProposalProcedure) -> Option<TreasuryWithdrawalAction> {
+        if let GovernanceAction::TreasuryWithdrawals(ref action) = p {
+            Some (action.clone())
+        }
+        else {
+            None
+        }
+    }
+
     /// Checks and updates action_id state at the start of new_epoch
+    /// If the action is accepted, returns accepted ProposalProcedure.
     fn process_one_proposal(
         &mut self,
         new_epoch: u64,
         action_id: &GovActionId,
-    ) -> Result<Option<EnactStateElem>> {
+    ) -> Result<(Option<Arc<ProposalProcedure>>, VotingFeesRefund)> {
         if self.is_finally_accepted(&action_id)? {
-            let enact_state_elem = self
-                .proposals
-                .get(action_id)
-                .map(|e| Self::pack_as_enact_state_elem(&e.1));
-            self.end_voting(&action_id)?;
-            return Ok(enact_state_elem.flatten());
+            let action = self.prposals.get(action_id).ok_or_else(
+                || anyhow!("No action for {action_id} found in proposals")
+            )?.cloned();
+            let refund = self.end_voting(&action_id)?;
+            return Ok(action, refund);
         }
 
         if self.is_expired(new_epoch, &action_id)? {
             info!("New epoch {new_epoch}: voting for {action_id} is expired");
-            self.end_voting(&action_id)?;
+            let refund = self.end_voting(&action_id)?;
+            return Ok((None, refund));
         }
 
-        Ok(None)
+        Ok((None, VotingFeesRefund::default()))
     }
 
     /// Loops through all actions and checks their status for the new_epoch
-    fn process_new_epoch(&mut self, new_epoch: u64) -> EnactStateMessage {
+    fn process_new_epoch(&mut self, new_epoch: u64) -> (
+        Vec<Box<Action>>
+    ) {
         let mut output = EnactStateMessage::default();
+        let mut withdrawal = EnactWithdrawalMessage::default();
+        let mut refund = VotingRefundMessage::default();
+
         let actions = self.proposals.keys().map(|a| a.clone()).collect::<Vec<_>>();
 
         for action_id in actions.iter() {
             info!("Epoch {}: processing action {}", new_epoch, action_id);
             match self.process_one_proposal(new_epoch, &action_id) {
                 Err(e) => error!("Error processing governance {action_id}: {e}"),
-                Ok(Some(e)) => output.enactments.push(e),
-                Ok(None) => (),
+                Ok((Some(proposal), refund_elem)) => {
+                    output.enactments.append(Self::pack_as_enact_state_elem(proposal));
+                    withdrawal.transactions.append(Self::retrieve_withdrawal(proposal));
+                    Self::append_refund(refund, refund_elem);
+                }
+                Ok((None, refund_elem)) => Self::append_refund(refund, refund_elem)
             }
         }
 
@@ -500,7 +519,7 @@ impl State {
     }
 
     async fn log_stats(&self) {
-        info!("props: {}, props_with_id: {}, votes: {}, stored proposal procedures: {}, drep stake msgs,size: {},{}",
+        info!("props: {}, props_with_id: {}, votes: {}, stored proposal procedures: {}, drep stake msgs (size): {} ({})",
             self.proposal_count, self.action_proposal_count, self.votes_count, self.proposals.len(),
             self.drep_stake_messages_count, self.drep_stake.len()
         );
