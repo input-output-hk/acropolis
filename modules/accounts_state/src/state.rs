@@ -289,7 +289,7 @@ impl State {
                     };
 
                     // Add to this one
-                    Self::update_value_with_delta(&mut sas.utxo_value, *value)
+                    Self::update_value_with_delta(&mut sas.rewards, *value)
                         .with_context(|| format!("Updating stake {}", hex::encode(&hash)))?;
 
                     // Immutably update it
@@ -618,13 +618,10 @@ mod tests {
 
         state.handle_stake_deltas(&msg).unwrap();
         assert_eq!(state.stake_addresses.len(), 1);
-        assert_eq!(
-            state
-                .stake_addresses
-                .get(&STAKE_KEY_HASH.to_vec())
-                .unwrap()
-                .utxo_value,
-            99);
+
+        let sas = state.stake_addresses.get(&STAKE_KEY_HASH.to_vec()).unwrap();
+        assert_eq!(sas.utxo_value, 99);
+        assert_eq!(sas.rewards, 0);
 
         // Send in a MIR reserves->{47,-5}->stake
         let mir = MoveInstantaneousReward {
@@ -640,14 +637,9 @@ mod tests {
         assert_eq!(state.pots.treasury, 0);
         assert_eq!(state.pots.deposits, 0);
 
-        assert_eq!(
-            state
-                .stake_addresses
-                .get(&STAKE_KEY_HASH.to_vec())
-                .unwrap()
-                .utxo_value,
-            141
-        );
+        let sas = state.stake_addresses.get(&STAKE_KEY_HASH.to_vec()).unwrap();
+        assert_eq!(sas.utxo_value, 99);
+        assert_eq!(sas.rewards, 42);
     }
 
     #[test]
