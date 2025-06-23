@@ -2,15 +2,13 @@
 
 use crate::ParametersUpdater;
 use acropolis_common::{
-    messages::{EnactStateMessage, GenesisCompleteMessage, ProtocolParamsMessage},
-    BlockInfo, Era, ProtocolParams,
+    messages::{EnactStateMessage, ProtocolParamsMessage},
+    BlockInfo, Era,
 };
-use anyhow::{anyhow, Result};
+use anyhow::{bail, Result};
 use tracing::info;
 
 pub struct State {
-    pub genesis: ProtocolParams,
-
     pub current_params: ParametersUpdater,
     pub current_era: Option<Era>,
 }
@@ -18,32 +16,27 @@ pub struct State {
 impl State {
     pub fn new() -> Self {
         Self {
-            genesis: ProtocolParams::default(),
-
             current_params: ParametersUpdater::new(),
             current_era: None,
         }
     }
 
-    pub fn apply_genesis(&mut self, new_epoch_block: &BlockInfo) {
+    pub fn apply_genesis(&mut self, new_block: &BlockInfo) -> Result<()> {
         if let Some(ref era) = self.current_era {
-            if *era == new_epoch_block.era {
-                return;
+            if *era == new_block.era {
+                return Ok(());
             }
         }
-        info!("Applying genesis for {:?}", new_epoch_block.era);
 
-        self.current_params
-            .apply_genesis(&new_epoch_block.era, &self.genesis);
-        self.current_era = Some(new_epoch_block.era.clone());
-    }
+        info!("Applying genesis for {}", new_block.era);
 
-    pub async fn handle_genesis(&mut self, message: &GenesisCompleteMessage) -> Result<()> {
-        info!(
-            "Received genesis complete message; conway present = {}",
-            message.conway_genesis.is_some()
+        self.current_era = Some(new_block.era.clone());
+        self.current_params.apply_genesis(&new_block.era)?;
+
+        info!("Applied genesis for {}, resulting params {:?}", 
+            new_block.era, self.current_params.get_params()
         );
-        self.genesis.conway = message.conway_genesis.clone();
+
         Ok(())
     }
 
@@ -53,14 +46,11 @@ impl State {
         msg: &EnactStateMessage,
     ) -> Result<ProtocolParamsMessage> {
         if !block.new_epoch {
-            return Err(anyhow!(
-                "Enact state at block {:?} (not a new epoch)",
-                block
-            ));
+            bail!("Enact state for block {block:?} (not a new epoch)");
         }
 
-        self.apply_genesis(&block);
-        self.current_params.apply_enact_state(msg);
+        self.apply_genesis(&block)?;
+        self.current_params.apply_enact_state(msg)?;
         Ok(ProtocolParamsMessage {
             params: self.current_params.get_params(),
         })
