@@ -2,13 +2,14 @@
 
 use acropolis_common::{
     messages::{
-        CardanoMessage, DRepStakeDistributionMessage, EnactStateMessage,
+        CardanoMessage, DRepStakeDistributionMessage, GovernanceOutcomesMessage,
         GovernanceProceduresMessage, Message, ProtocolParamsMessage,
     },
     rational_number::RationalNumber,
     BlockInfo, ConwayParams, DRepCredential, DataHash, EnactStateElem, GovActionId,
+    TreasuryWithdrawalsAction,
     GovernanceAction, KeyHash, Lovelace, ProposalProcedure, ProtocolParamType, ProtocolParamUpdate,
-    SingleVoterVotes, Voter, VotingProcedure,
+    SingleVoterVotes, Voter, VotingProcedure, VotingRefund
 };
 use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
@@ -384,13 +385,17 @@ impl State {
     }
 
     /// Distribute and return all rewards for cast votes (government action is expired/voted)
-    fn return_rewards(&self, _votes: Option<&HashMap<Voter, (DataHash, VotingProcedure)>>) {}
+    fn return_rewards(&self, _votes: Option<&HashMap<Voter, (DataHash, VotingProcedure)>>) 
+        -> Result<VotingRefund> 
+    {
+        unimplemented!("")
+    }
 
     /// Should be called when voting is over
-    fn end_voting(&mut self, action_id: &GovActionId) -> Result<()> {
-        self.return_rewards(self.votes.get(&action_id));
+    fn end_voting(&mut self, action_id: &GovActionId) -> Result<VotingRefund> {
+        let rewards = self.return_rewards(self.votes.get(&action_id));
         self.votes.remove(&action_id);
-        Ok(())
+        rewards
     }
 
     /// Returns actual votes: (Pool votes, DRep votes, committee votes)
@@ -453,8 +458,8 @@ impl State {
         }
     }
 
-    fn retrieve_withdrawal(p: &ProposalProcedure) -> Option<TreasuryWithdrawalAction> {
-        if let GovernanceAction::TreasuryWithdrawals(ref action) = p {
+    fn retrieve_withdrawal(p: &ProposalProcedure) -> Option<TreasuryWithdrawalsAction> {
+        if let GovernanceAction::TreasuryWithdrawals(ref action) = p.gov_action {
             Some (action.clone())
         }
         else {
@@ -468,31 +473,28 @@ impl State {
         &mut self,
         new_epoch: u64,
         action_id: &GovActionId,
-    ) -> Result<(Option<Arc<ProposalProcedure>>, VotingFeesRefund)> {
+    ) -> Result<(Option<ProposalProcedure>, Option<VotingRefund>)> {
         if self.is_finally_accepted(&action_id)? {
-            let action = self.prposals.get(action_id).ok_or_else(
+            let (_id,action) = self.proposals.get(action_id).ok_or_else(
                 || anyhow!("No action for {action_id} found in proposals")
-            )?.cloned();
+            )?;
+            let action_res = action.clone();
             let refund = self.end_voting(&action_id)?;
-            return Ok(action, refund);
+            return Ok((Some(action_res), Some(refund)));
         }
 
         if self.is_expired(new_epoch, &action_id)? {
             info!("New epoch {new_epoch}: voting for {action_id} is expired");
             let refund = self.end_voting(&action_id)?;
-            return Ok((None, refund));
+            return Ok((None, Some(refund)));
         }
 
-        Ok((None, VotingFeesRefund::default()))
+        Ok((None, None))
     }
 
     /// Loops through all actions and checks their status for the new_epoch
-    fn process_new_epoch(&mut self, new_epoch: u64) -> (
-        Vec<Box<Action>>
-    ) {
-        let mut output = EnactStateMessage::default();
-        let mut withdrawal = EnactWithdrawalMessage::default();
-        let mut refund = VotingRefundMessage::default();
+    fn process_new_epoch(&mut self, new_epoch: u64) -> GovernanceOutcomesMessage {
+        let mut output = GovernanceOutcomesMessage::default();
 
         let actions = self.proposals.keys().map(|a| a.clone()).collect::<Vec<_>>();
 
@@ -500,18 +502,20 @@ impl State {
             info!("Epoch {}: processing action {}", new_epoch, action_id);
             match self.process_one_proposal(new_epoch, &action_id) {
                 Err(e) => error!("Error processing governance {action_id}: {e}"),
-                Ok((Some(proposal), refund_elem)) => {
-                    output.enactments.append(Self::pack_as_enact_state_elem(proposal));
-                    withdrawal.transactions.append(Self::retrieve_withdrawal(proposal));
-                    Self::append_refund(refund, refund_elem);
+                Ok((Some(proposal), voting_refund)) => {
+                    Self::pack_as_enact_state_elem(&proposal).map(|p| output.enact_state.push(p));
+                    Self::retrieve_withdrawal(&proposal).map(|p| output.withdrawals.push(p));
+                    voting_refund.map(|r| output.refunds.push(r));
                 }
-                Ok((None, refund_elem)) => Self::append_refund(refund, refund_elem)
+                Ok((None, voting_refund)) => {
+                    voting_refund.map(|r| output.refunds.push(r));
+                }
             }
         }
 
         info!(
-            "Epoch {new_epoch}: total {} actions",
-            output.enactments.len()
+            "Epoch {new_epoch}: total {} actions, {} withdrawals, {} refunds",
+            output.enact_state.len(), output.withdrawals.len(), output.refunds.len()
         );
         return output;
     }
@@ -536,10 +540,10 @@ impl State {
         }
     }
 
-    async fn send(&self, block: &BlockInfo, message: EnactStateMessage) -> Result<()> {
+    async fn send(&self, block: &BlockInfo, message: GovernanceOutcomesMessage) -> Result<()> {
         let packed_message = Arc::new(Message::Cardano((
             block.clone(),
-            CardanoMessage::EnactState(message),
+            CardanoMessage::GovernanceOutcomes(message),
         )));
         let context = self.context.clone();
         let enact_state_topic = self.enact_state_topic.clone();

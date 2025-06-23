@@ -930,6 +930,11 @@ pub struct VotingProcedures {
     pub votes: HashMap<Voter, SingleVoterVotes>,
 }
 
+#[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct VotingRefund {
+    pub refund_list: Vec<(Voter, Lovelace)>
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProposalProcedure {
     pub deposit: Lovelace,
