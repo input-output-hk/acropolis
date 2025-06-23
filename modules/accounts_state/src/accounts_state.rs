@@ -24,6 +24,7 @@ use state::State;
 const DEFAULT_SPO_STATE_TOPIC: &str = "cardano.spo.state";
 const DEFAULT_EPOCH_ACTIVITY_TOPIC: &str = "cardano.epoch.activity";
 const DEFAULT_TX_CERTIFICATES_TOPIC: &str = "cardano.certificates";
+const DEFAULT_WITHDRAWALS_TOPIC: &str = "cardano.withdrawals";
 const DEFAULT_STAKE_DELTAS_TOPIC: &str = "cardano.stake.deltas";
 const DEFAULT_DREP_STATE_TOPIC: &str = "cardano.drep.state";
 const DEFAULT_DREP_DISTRIBUTION_TOPIC: &str = "cardano.drep.distribution";
@@ -49,6 +50,7 @@ impl AccountsState {
         mut spos_subscription: Box<dyn Subscription<Message>>,
         mut ea_subscription: Box<dyn Subscription<Message>>,
         mut certs_subscription: Box<dyn Subscription<Message>>,
+        mut withdrawals_subscription: Box<dyn Subscription<Message>>,
         mut stake_subscription: Box<dyn Subscription<Message>>,
         mut drep_state_subscription: Box<dyn Subscription<Message>>,
     ) -> Result<()> {
@@ -65,6 +67,7 @@ impl AccountsState {
             // Read per-block topics in parallel
             let certs_message_f = certs_subscription.read();
             let stake_message_f = stake_subscription.read();
+            let withdrawals_message_f = withdrawals_subscription.read();
             let mut new_epoch = false;
             let mut current_block: Option<BlockInfo> = None;
 
@@ -85,6 +88,29 @@ impl AccountsState {
                         new_epoch = true;
                     }
                     current_block = Some(block_info.clone());
+                }
+
+                _ => error!("Unexpected message type: {message:?}"),
+            }
+
+            // Handle withdrawals
+            let (_, message) = withdrawals_message_f.await?;
+            match message.as_ref() {
+                Message::Cardano((block_info, CardanoMessage::Withdrawals(withdrawals_msg))) => {
+                    if let Some(ref block) = current_block {
+                        if block.number != block_info.number {
+                            error!(
+                                expected = block.number,
+                                received = block_info.number,
+                                "Certificate and withdrawals messages re-ordered!"
+                            );
+                        }
+                    }
+
+                    state
+                        .handle_withdrawals(withdrawals_msg)
+                        .inspect_err(|e| error!("Withdrawals handling error: {e:#}"))
+                        .ok();
                 }
 
                 _ => error!("Unexpected message type: {message:?}"),
@@ -208,6 +234,11 @@ impl AccountsState {
             .get_string("tx-certificates-topic")
             .unwrap_or(DEFAULT_TX_CERTIFICATES_TOPIC.to_string());
         info!("Creating Tx certificates subscriber on '{tx_certificates_topic}'");
+
+        let withdrawals_topic = config
+            .get_string("withdrawals-topic")
+            .unwrap_or(DEFAULT_WITHDRAWALS_TOPIC.to_string());
+        info!("Creating withdrawals subscriber on '{withdrawals_topic}'");
 
         let stake_deltas_topic = config
             .get_string("stake-deltas-topic")
@@ -386,6 +417,7 @@ impl AccountsState {
         let spos_subscription = context.subscribe(&spo_state_topic).await?;
         let ea_subscription = context.subscribe(&epoch_activity_topic).await?;
         let certs_subscription = context.subscribe(&tx_certificates_topic).await?;
+        let withdrawals_subscription = context.subscribe(&withdrawals_topic).await?;
         let stake_subscription = context.subscribe(&stake_deltas_topic).await?;
         let drep_state_subscription = context.subscribe(&drep_state_topic).await?;
 
@@ -397,6 +429,7 @@ impl AccountsState {
                 spos_subscription,
                 ea_subscription,
                 certs_subscription,
+                withdrawals_subscription,
                 stake_subscription,
                 drep_state_subscription,
             )
