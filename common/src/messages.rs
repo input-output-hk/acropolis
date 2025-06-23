@@ -40,8 +40,6 @@ pub struct RawTxsMessage {
 /// Genesis completion message
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenesisCompleteMessage {
-    // Conway genesis block
-    pub conway_genesis: Option<ConwayParams>,
 }
 
 /// Message encapsulating multiple UTXO deltas, in order
