@@ -2,14 +2,13 @@
 use acropolis_common::{
     messages::{
         DRepStateMessage, EpochActivityMessage, SPOStateMessage, StakeAddressDeltasMessage,
-        TxCertificatesMessage,
+        TxCertificatesMessage, WithdrawalsMessage,
     },
     serialization::SerializeMapAs,
-    InstantaneousRewardSource, InstantaneousRewardTarget, KeyHash, MoveInstantaneousReward,
-    PoolRegistration, StakeAddressPayload, StakeCredential, TxCertificate,
-    DRepChoice, DRepCredential, Lovelace,
+    DRepChoice, DRepCredential, InstantaneousRewardSource, InstantaneousRewardTarget, KeyHash,
+    Lovelace, MoveInstantaneousReward, PoolRegistration, StakeCredential, TxCertificate,
 };
-use anyhow::{bail, Result, Context};
+use anyhow::{bail, Context, Result};
 use dashmap::DashMap;
 use imbl::HashMap;
 use rayon::prelude::*;
@@ -226,8 +225,9 @@ impl State {
 
         // Repeated registrations seem common
         if !self.stake_addresses.contains_key(&hash) {
-            self.stake_addresses = self.stake_addresses.update(hash.clone(),
-                                                               StakeAddressState::default());
+            self.stake_addresses = self
+                .stake_addresses
+                .update(hash.clone(), StakeAddressState::default());
         }
     }
 
@@ -240,7 +240,10 @@ impl State {
         if self.stake_addresses.contains_key(&hash) {
             self.stake_addresses = self.stake_addresses.without(&hash);
         } else {
-            warn!("Deregistraton of unknown stake address {}", hex::encode(hash));
+            warn!(
+                "Deregistraton of unknown stake address {}",
+                hex::encode(hash)
+            );
         }
     }
 
@@ -266,14 +269,18 @@ impl State {
     /// Handle an MoveInstantaneousReward (pre-Conway only)
     pub fn handle_mir(&mut self, mir: &MoveInstantaneousReward) -> Result<()> {
         let (source, source_name, other, other_name) = match &mir.source {
-            InstantaneousRewardSource::Reserves => {
-                (&mut self.pots.reserves, "reserves",
-                 &mut self.pots.treasury, "treasury")
-            }
-            InstantaneousRewardSource::Treasury => {
-                (&mut self.pots.treasury, "treasury",
-                 &mut self.pots.reserves, "reserves")
-            }
+            InstantaneousRewardSource::Reserves => (
+                &mut self.pots.reserves,
+                "reserves",
+                &mut self.pots.treasury,
+                "treasury",
+            ),
+            InstantaneousRewardSource::Treasury => (
+                &mut self.pots.treasury,
+                "treasury",
+                &mut self.pots.reserves,
+                "reserves",
+            ),
         };
 
         match &mir.target {
@@ -356,7 +363,8 @@ impl State {
                 }
 
                 TxCertificate::MoveInstantaneousReward(mir) => {
-                    self.handle_mir(&mir).unwrap_or_else(|e| error!("MIR failed: {e:#}"));
+                    self.handle_mir(&mir)
+                        .unwrap_or_else(|e| error!("MIR failed: {e:#}"));
                 }
 
                 TxCertificate::StakeDelegation(delegation) => {
@@ -392,16 +400,43 @@ impl State {
         Ok(())
     }
 
+    /// Handle withdrawals
+    pub fn handle_withdrawals(&mut self, withdrawals_msg: &WithdrawalsMessage) -> Result<()> {
+        for withdrawal in withdrawals_msg.withdrawals.iter() {
+            let hash = withdrawal.address.get_hash();
+
+            // Get old stake address state - which must exist
+            let mut sas = match self.stake_addresses.get(hash) {
+                Some(sas) => sas.clone(),
+                None => bail!(
+                    "Unknown stake address in withdrawal: {:?}",
+                    withdrawal.address
+                ),
+            };
+
+            info!(
+                "Withdrawal of {} from stake key {}",
+                withdrawal.value,
+                hex::encode(hash)
+            );
+
+            Self::update_value_with_delta(&mut sas.rewards, -(withdrawal.value as i64))
+                .with_context(|| format!("Withdrawing from stake address {}", hex::encode(hash)))?;
+
+            // Immutably create or update the stake address
+            self.stake_addresses = self.stake_addresses.update(hash.to_vec(), sas);
+        }
+
+        Ok(())
+    }
+
     /// Handle stake deltas
     pub fn handle_stake_deltas(&mut self, deltas_msg: &StakeAddressDeltasMessage) -> Result<()> {
         // Handle deltas
         for delta in deltas_msg.deltas.iter() {
             // Fold both stake key and script hashes into one - assuming the chance of
             // collision is negligible
-            let hash = match &delta.address.payload {
-                StakeAddressPayload::StakeKeyHash(hash) => hash,
-                StakeAddressPayload::ScriptHash(hash) => hash,
-            };
+            let hash = delta.address.get_hash();
 
             // Get old stake address state, or create one
             let mut sas = match self.stake_addresses.get(hash) {
@@ -410,10 +445,10 @@ impl State {
             };
 
             Self::update_value_with_delta(&mut sas.utxo_value, delta.delta)
-                .with_context(|| format!("Updating stake {}", hex::encode(&hash)))?;
+                .with_context(|| format!("Updating stake {}", hex::encode(hash)))?;
 
             // Immutably create or update the stake address
-            self.stake_addresses = self.stake_addresses.update(hash.clone(), sas);
+            self.stake_addresses = self.stake_addresses.update(hash.to_vec(), sas);
         }
 
         Ok(())
@@ -427,7 +462,7 @@ mod tests {
     use acropolis_common::{
         AddressNetwork, Credential, Registration, StakeAddress, StakeAddressDelta,
         StakeAddressPayload, StakeAndVoteDelegation, StakeRegistrationAndStakeAndVoteDelegation,
-        StakeRegistrationAndVoteDelegation, VoteDelegation,
+        StakeRegistrationAndVoteDelegation, VoteDelegation, Withdrawal,
     };
 
     const STAKE_KEY_HASH: [u8; 3] = [0x99, 0x0f, 0x00];
@@ -626,10 +661,10 @@ mod tests {
         // Send in a MIR reserves->{47,-5}->stake
         let mir = MoveInstantaneousReward {
             source: InstantaneousRewardSource::Reserves,
-            target: InstantaneousRewardTarget::StakeCredentials(vec!(
+            target: InstantaneousRewardTarget::StakeCredentials(vec![
                 (Credential::AddrKeyHash(STAKE_KEY_HASH.to_vec()), 47),
                 (Credential::AddrKeyHash(STAKE_KEY_HASH.to_vec()), -5),
-            )),
+            ]),
         };
 
         state.handle_mir(&mir).unwrap();
@@ -640,6 +675,55 @@ mod tests {
         let sas = state.stake_addresses.get(&STAKE_KEY_HASH.to_vec()).unwrap();
         assert_eq!(sas.utxo_value, 99);
         assert_eq!(sas.rewards, 42);
+    }
+
+    #[test]
+    fn withdrawal_transfers_from_stake_addresses() {
+        let mut state = State::default();
+
+        // Bootstrap with some in reserves
+        state.pots.reserves = 100;
+
+        // Set up one stake address
+        let msg = StakeAddressDeltasMessage {
+            deltas: vec![StakeAddressDelta {
+                address: create_address(&STAKE_KEY_HASH),
+                delta: 99,
+            }],
+        };
+
+        state.handle_stake_deltas(&msg).unwrap();
+        assert_eq!(state.stake_addresses.len(), 1);
+
+        let sas = state.stake_addresses.get(&STAKE_KEY_HASH.to_vec()).unwrap();
+        assert_eq!(sas.utxo_value, 99);
+        assert_eq!(sas.rewards, 0);
+
+        // Send in a MIR reserves->42->stake
+        let mir = MoveInstantaneousReward {
+            source: InstantaneousRewardSource::Reserves,
+            target: InstantaneousRewardTarget::StakeCredentials(vec![(
+                Credential::AddrKeyHash(STAKE_KEY_HASH.to_vec()),
+                42,
+            )]),
+        };
+
+        state.handle_mir(&mir).unwrap();
+        assert_eq!(state.pots.reserves, 58);
+        let sas = state.stake_addresses.get(&STAKE_KEY_HASH.to_vec()).unwrap();
+        assert_eq!(sas.rewards, 42);
+
+        // Withdraw most of it
+        let withdrawals = WithdrawalsMessage {
+            withdrawals: vec![Withdrawal {
+                address: create_address(&STAKE_KEY_HASH),
+                value: 39,
+            }],
+        };
+
+        state.handle_withdrawals(&withdrawals).unwrap();
+        let sas = state.stake_addresses.get(&STAKE_KEY_HASH.to_vec()).unwrap();
+        assert_eq!(sas.rewards, 3);
     }
 
     #[test]

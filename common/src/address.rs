@@ -3,7 +3,7 @@
 #![allow(dead_code)]
 use crate::cip19::{VarIntDecoder, VarIntEncoder};
 use crate::types::{KeyHash, ScriptHash};
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use serde_with::{hex::Hex, serde_as};
 
 /// a Byron-era address
@@ -206,6 +206,14 @@ pub struct StakeAddress {
 }
 
 impl StakeAddress {
+    /// Get either hash of the payload
+    pub fn get_hash(&self) -> &[u8] {
+        match &self.payload {
+            StakeAddressPayload::StakeKeyHash(hash) => hash,
+            StakeAddressPayload::ScriptHash(hash) => hash,
+        }
+    }
+
     /// Read from string format
     pub fn from_string(text: &str) -> Result<Self> {
         let (hrp, data) = bech32::decode(text)?;
@@ -225,6 +233,26 @@ impl StakeAddress {
         }
 
         Err(anyhow!("Empty stake address data"))
+    }
+
+    /// Read from binary format (29 bytes)
+    pub fn from_binary(data: &[u8]) -> Result<Self> {
+        if data.len() != 29 {
+            bail!("Bad stake address length: {}", data.len());
+        }
+
+        let network = match data[0] & 0x01 {
+            0b1 => AddressNetwork::Main,
+            _ => AddressNetwork::Test,
+        };
+
+        let payload = match (data[0] >> 4) & 0x0F {
+            0b1110 => StakeAddressPayload::StakeKeyHash(data[1..].to_vec()),
+            0b1111 => StakeAddressPayload::ScriptHash(data[1..].to_vec()),
+            _ => bail!("Unknown header byte {:x} in stake address", data[0]),
+        };
+
+        return Ok(StakeAddress { network, payload });
     }
 
     /// Convert to string stake1xxx form
@@ -525,5 +553,53 @@ mod tests {
 
         let unpacked = Address::from_string(&text).unwrap();
         assert_eq!(address, unpacked);
+    }
+
+    #[test]
+    fn stake_address_from_binary_mainnet_stake() {
+        // First withdrawal on Mainnet
+        let binary =
+            hex::decode("e1558f3ee09b26d88fac2eddc772a9eda94cce6dbadbe9fee439bd6001").unwrap();
+        let sa = StakeAddress::from_binary(&binary).unwrap();
+        assert_eq!(sa.network, AddressNetwork::Main);
+        assert_eq!(
+            match sa.payload {
+                StakeAddressPayload::StakeKeyHash(key) => hex::encode(&key),
+                _ => "SCRIPT".to_string(),
+            },
+            "558f3ee09b26d88fac2eddc772a9eda94cce6dbadbe9fee439bd6001"
+        );
+    }
+
+    #[test]
+    fn stake_address_from_binary_mainnet_script() {
+        // Fudged script hash from above
+        let binary =
+            hex::decode("f1558f3ee09b26d88fac2eddc772a9eda94cce6dbadbe9fee439bd6001").unwrap();
+        let sa = StakeAddress::from_binary(&binary).unwrap();
+        assert_eq!(sa.network, AddressNetwork::Main);
+        assert_eq!(
+            match sa.payload {
+                StakeAddressPayload::ScriptHash(key) => hex::encode(&key),
+                _ => "STAKE".to_string(),
+            },
+            "558f3ee09b26d88fac2eddc772a9eda94cce6dbadbe9fee439bd6001"
+        );
+    }
+
+    #[test]
+    fn stake_address_from_binary_testnet_stake() {
+        // Fudged testnet from above
+        let binary =
+            hex::decode("e0558f3ee09b26d88fac2eddc772a9eda94cce6dbadbe9fee439bd6001").unwrap();
+        let sa = StakeAddress::from_binary(&binary).unwrap();
+        assert_eq!(sa.network, AddressNetwork::Test);
+        assert_eq!(
+            match sa.payload {
+                StakeAddressPayload::StakeKeyHash(key) => hex::encode(&key),
+                _ => "SCRIPT".to_string(),
+            },
+            "558f3ee09b26d88fac2eddc772a9eda94cce6dbadbe9fee439bd6001"
+        );
     }
 }

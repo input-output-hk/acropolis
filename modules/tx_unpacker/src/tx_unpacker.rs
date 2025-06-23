@@ -4,7 +4,7 @@
 use acropolis_common::{
     messages::{
         BlockFeesMessage, CardanoMessage, GovernanceProceduresMessage, Message,
-        TxCertificatesMessage, UTXODeltasMessage,
+        TxCertificatesMessage, UTXODeltasMessage, WithdrawalsMessage,
     },
     *,
 };
@@ -730,6 +730,11 @@ impl TxUnpacker {
             info!("Publishing UTXO deltas on '{topic}'");
         }
 
+        let publish_withdrawals_topic = config.get_string("publish-withdrawals-topic").ok();
+        if let Some(ref topic) = publish_withdrawals_topic {
+            info!("Publishing withdrawals on '{topic}'");
+        }
+
         let publish_certificates_topic = config.get_string("publish-certificates-topic").ok();
         if let Some(ref topic) = publish_certificates_topic {
             info!("Publishing certificates on '{topic}'");
@@ -758,6 +763,7 @@ impl TxUnpacker {
                         }
 
                         let mut deltas = Vec::new();
+                        let mut withdrawals = Vec::new();
                         let mut certificates = Vec::new();
                         let mut voting_procedures = Vec::new();
                         let mut proposal_procedures = Vec::new();
@@ -770,6 +776,7 @@ impl TxUnpacker {
                                     let inputs = tx.consumes();
                                     let outputs = tx.produces();
                                     let certs = tx.certs();
+                                    let tx_withdrawals = tx.withdrawals_sorted_set();
                                     let mut props = None;
                                     let mut votes = None;
 
@@ -847,6 +854,21 @@ impl TxUnpacker {
                                         }
                                     }
 
+                                    if publish_withdrawals_topic.is_some() {
+                                        for (key, value) in tx_withdrawals {
+                                            match StakeAddress::from_binary(key) {
+                                                Ok(stake_address) => {
+                                                    withdrawals.push(Withdrawal {
+                                                        address: stake_address,
+                                                        value,
+                                                    });
+                                                }
+
+                                                Err(e) => error!("Bad stake address: {e:#}"),
+                                            }
+                                        }
+                                    }
+
                                     if publish_governance_procedures_topic.is_some() {
                                         if let Some(pp) = props {
                                             // Nonempty set -- governance_message.proposal_procedures will not be empty
@@ -888,6 +910,17 @@ impl TxUnpacker {
                                 block.clone(),
                                 CardanoMessage::UTXODeltas(UTXODeltasMessage {
                                     deltas,
+                                })
+                            ));
+
+                            futures.push(context.message_bus.publish(&topic, Arc::new(msg)));
+                        }
+
+                        if let Some(ref topic) = publish_withdrawals_topic {
+                            let msg = Message::Cardano((
+                                block.clone(),
+                                CardanoMessage::Withdrawals(WithdrawalsMessage {
+                                    withdrawals,
                                 })
                             ));
 
