@@ -148,6 +148,7 @@ pub type DataHash = Vec<u8>;
 
 /// Amount of Ada, in Lovelace
 pub type Lovelace = u64;
+pub type LovelaceDelta = i64;
 
 /// Rational number = numerator / denominator
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -164,6 +165,24 @@ pub struct Withdrawal {
 
     /// Value to withdraw
     pub value: Lovelace,
+}
+
+/// Treasury pot account
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum Pot {
+    Reserves,
+    Treasury,
+    Deposits,
+}
+
+/// Pot Delta - internal change of pot values at genesis / era boundaries
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PotDelta {
+    /// Stake address to withdraw to
+    pub pot: Pot,
+
+    /// Delta to apply
+    pub delta: LovelaceDelta,
 }
 
 /// General credential
