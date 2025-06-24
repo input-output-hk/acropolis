@@ -10,14 +10,13 @@ reward_account = bytes
 
 credential = [(0, addr_keyhash) // (1, script_hash)]
 
-
-positive_coin = 1 .. maxWord64
-maxWord64 = 18446744073709551615
+; maxWord64 = 18446744073709551615
+positive_coin = 1 .. 18446744073709551615
 
 coin = uint
 epoch = uint .size 8
 
-gov_action_id = [hash32, uint .size 2]
+gov_action_id = [hash_32, uint .size 2]
 
 
 ; Unfortunately, CDDL does not provide ways that we can restrict the content of a bytestring.

@@ -1,22 +1,6 @@
 ; This file defines the specification for the SPO State. It is based on the `PState` definition from the cardano-ledger specification.
 
-; types for codegen-cddl
-keyhash = _CDDL_CODEGEN_EXTERN_TYPE_
-hash_32 = _CDDL_CODEGEN_EXTERN_TYPE_
-coin = _CDDL_CODEGEN_EXTERN_TYPE_
-unit_interval = _CDDL_CODEGEN_EXTERN_TYPE_
-reward_account = _CDDL_CODEGEN_EXTERN_TYPE_
-nonempty_set = _CDDL_CODEGEN_EXTERN_TYPE_
-epoch = _CDDL_CODEGEN_EXTERN_TYPE_
-url = _CDDL_CODEGEN_EXTERN_TYPE_
-
-; `spo_state` provides the current state of active pools, and at which epochs upcoming pool retirements will occur
-spo_state = {
-    pools    : { * keyhash => pool_parameters }
-  , retiring : { * keyhash => epoch }
-}
-
-pool_parameters = (
+pool_parameters = [
     operator       : keyhash
   , vrf_keyhash    : hash_32
   , pledge         : coin
@@ -26,7 +10,16 @@ pool_parameters = (
   , pool_owners    : nonempty_set<keyhash>
   , relays         : [* relay]
   , pool_metadata  : pool_metadata / nil
-  )
+]
+
+; types for codegen-cddl
+; `spo_state` provides the current state of active pools, and at which epochs upcoming pool retirements will occur
+spo_state = {
+    pools    : { * keyhash => pool_parameters }
+  , retiring : { * keyhash => epoch }
+}
+
+
 
 
 relay = [single_host_addr // single_host_name // multi_host_name]

@@ -1,36 +1,63 @@
 ; This file defines the specification for the UTxO state. It is based on the `UtxOState` definition from the cardano-ledger specification.
 
-; types for codegen-cddl
-hash32 = _CDDL_CODEGEN_EXTERN_TYPE_
-hash28 = _CDDL_CODEGEN_EXTERN_TYPE_
-keyhash = _CDDL_CODEGEN_EXTERN_TYPE_
-address = _CDDL_CODEGEN_EXTERN_TYPE_
-coin = _CDDL_CODEGEN_EXTERN_TYPE_
-positive_coin = _CDDL_CODEGEN_EXTERN_TYPE_
-credential = _CDDL_CODEGEN_EXTERN_TYPE_
-gov_action_id = _CDDL_CODEGEN_EXTERN_TYPE_
 
 ; Cardano Types
-datum_option = [(0, hash32) // (1, data)]
+datum_option = [(0, hash_32) // (1, data)]
 data = #6.24(bytes .cbor plutus_data)
 script_ref = #6.24(bytes .cbor script)
 
+script =
+  [
+  ; @name native
+  (0, native_script)    //
+  ; @name plutus_v1
+  (1, plutus_v1_script) //
+  ; @name plutus_v2
+  (2, plutus_v2_script) //
+  ; @name plutus_v3
+  (3, plutus_v3_script)
+  ]
+
+native_script =
+  [  script_pubkey
+  // script_all
+  // script_any
+  // script_n_of_k
+  // invalid_before
+  // invalid_hereafter
+  ]
+
+script_pubkey = (0, hash_28)
+script_all = (1, [* native_script])
+script_any = (2, [* native_script])
+script_n_of_k = (3, n : int64, [* native_script])
+int64 = -9223372036854775808 .. 9223372036854775807
+invalid_before = (4, slot_no)
+invalid_hereafter = (5, slot_no)
+
+slot_no = uint .size 8
+
+plutus_v1_script = bytes
+plutus_v2_script = bytes
+plutus_v3_script = bytes
+
 plutus_data =
-  constr<plutus_data>
+  constr
   / {* plutus_data => plutus_data}
   / [* plutus_data]
   / big_int
   / bounded_bytes
 
-constr<T> =
-  #6.121([* T])
-  / #6.122([* T])
-  / #6.123([* T])
-  / #6.124([* T])
-  / #6.125([* T])
-  / #6.126([* T])
-  / #6.127([* T])
-  / #6.102([uint, [* T]])
+constr =
+  #6.121([* plutus_data])
+  / #6.122([* plutus_data])
+  / #6.123([* plutus_data])
+  / #6.124([* plutus_data])
+  / #6.125([* plutus_data])
+  / #6.126([* plutus_data])
+  / #6.127([* plutus_data])
+;  / #6.102([uint, [* plutus_data]])
+
 
 ; The real bounded_bytes does not have this limit. it instead has
 ; a different limit which cannot be expressed in CDDL.
@@ -44,15 +71,22 @@ constr<T> =
 ;  of definite-length encoded bytestrings and a stop code )
 bounded_bytes = bytes .size (0 .. 64)
 big_int = int / big_uint / big_nint
+
 big_uint = #6.2(bounded_bytes)
+big_nint = #6.3(bounded_bytes)
 
 
-multiasset<T> = {+ hash28 => {+ bytes .size (0 .. 32) => T}}
-value = coin / [coin, multiasset<positive_coin>]
+asset_quantity<T> = {+ asset_id: bytes .size (0 .. 32) => quantity: T }
+; TODO: this definition is wrong. `multiasset` is used in several places. In mint, it must be non-zero. In a value, it must be positive.
+; We set it to only `uint` for now to remove the generics so that cddl-codegen would work with it.
+multiasset = {+ policy_id: hash_28 => asset_bundle: asset_quantity<uint>}
 
-tx_in = [hash32, uint .size 2]
+; multiasset<T> = {+ policy_id: hash_28 => {+ asset_id: bytes .size (0 .. 32) => quantity: T }}
+value = coin / asset_value
+asset_value =  [lovelace: coin, multi_asset: multiasset]
+tx_in = [hash_32, uint .size 2]
 
-shelley_tx_out = [address, value, ? hash32]
+shelley_tx_out = [address, value, ? hash_32]
 babbage_tx_out = {0 : address, 1 : value, ? 2 : datum_option, ? 3 : script_ref}
 
 tx_out = shelley_tx_out / babbage_tx_out
@@ -62,15 +96,16 @@ utxo_state = {
     utxos   : { * tx_in => tx_out }
   , fees    : coin
   , deposits: { * deposit => coin }
-  , dontions: coin
+  , donations: coin
 }
-
-deposit = credential_deposit
- / pool_deposit
- / drep_deposit
- / gov_action_deposit
 
 credential_deposit = (0, credential)
 pool_deposit = (1, keyhash)
 drep_deposit = (2, credential)
 gov_action_deposit = (3, gov_action_id)
+
+
+deposit = [credential_deposit
+ // pool_deposit
+ // drep_deposit
+ // gov_action_deposit]
