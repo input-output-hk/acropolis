@@ -69,6 +69,13 @@ pub struct WithdrawalsMessage {
     pub withdrawals: Vec<Withdrawal>,
 }
 
+/// Pot deltas message
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PotDeltasMessage {
+    /// Set of pot deltas
+    pub deltas: Vec<PotDelta>,
+}
+
 /// Stake address part of address deltas message
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StakeAddressDeltasMessage {
@@ -164,6 +171,7 @@ pub enum CardanoMessage {
     TxCertificates(TxCertificatesMessage),   // Transaction certificates received
     AddressDeltas(AddressDeltasMessage),     // Address deltas received
     Withdrawals(WithdrawalsMessage),         // Withdrawals from reward accounts
+    PotDeltas(PotDeltasMessage),             // Changes to pot balances
     BlockFees(BlockFeesMessage),             // Total fees in a block
     EpochActivity(EpochActivityMessage),     // Total fees and VRF keys for an epoch
     DRepState(DRepStateMessage),             // Active DReps at epoch end

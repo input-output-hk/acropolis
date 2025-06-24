@@ -2,8 +2,9 @@
 //! Reads genesis files and outputs initial UTXO events
 
 use acropolis_common::{
-    messages::{CardanoMessage, GenesisCompleteMessage, Message, UTXODeltasMessage},
-    Address, BlockInfo, BlockStatus, ByronAddress, Era, TxOutput, UTXODelta,
+    messages::{CardanoMessage, GenesisCompleteMessage, Message, UTXODeltasMessage, PotDeltasMessage},
+    Address, BlockInfo, BlockStatus, ByronAddress, Era, TxOutput, UTXODelta, Lovelace,
+    LovelaceDelta, PotDelta, Pot,
 };
 use anyhow::Result;
 use caryatid_sdk::{module, Context, Module};
@@ -14,10 +15,14 @@ use tracing::{error, info};
 
 const DEFAULT_STARTUP_TOPIC: &str = "cardano.sequence.start";
 const DEFAULT_PUBLISH_UTXO_DELTAS_TOPIC: &str = "cardano.utxo.deltas";
+const DEFAULT_PUBLISH_POT_DELTAS_TOPIC: &str = "cardano.pot.deltas";
 const DEFAULT_COMPLETION_TOPIC: &str = "cardano.sequence.bootstrapped";
 
 // Include genesis data (downloaded by build.rs)
 const MAINNET_BYRON_GENESIS: &[u8] = include_bytes!("../downloads/mainnet-byron-genesis.json");
+
+// Initial reserves (=maximum ever Lovelace supply)
+const INITIAL_RESERVES: Lovelace = 45_000_000_000_000_000;
 
 /// Genesis bootstrapper module
 #[module(
@@ -47,6 +52,11 @@ impl GenesisBootstrapper {
                 .unwrap_or(DEFAULT_PUBLISH_UTXO_DELTAS_TOPIC.to_string());
             info!("Publishing UTXO deltas on '{publish_utxo_deltas_topic}'");
 
+            let publish_pot_deltas_topic = config
+                .get_string("publish-pot-deltas-topic")
+                .unwrap_or(DEFAULT_PUBLISH_POT_DELTAS_TOPIC.to_string());
+            info!("Publishing pot deltas on '{publish_pot_deltas_topic}'");
+
             let completion_topic = config
                 .get_string("completion-topic")
                 .unwrap_or(DEFAULT_COMPLETION_TOPIC.to_string());
@@ -56,7 +66,7 @@ impl GenesisBootstrapper {
             let genesis: byron::GenesisFile = serde_json::from_slice(MAINNET_BYRON_GENESIS)
                 .expect("Invalid JSON in MAINNET_BYRON_GENESIS file");
 
-            // Construct message
+            // Construct messages
             let block_info = BlockInfo {
                 status: BlockStatus::Bootstrap,
                 slot: 0,
@@ -67,10 +77,11 @@ impl GenesisBootstrapper {
                 era: Era::Byron,
             };
 
-            let mut message = UTXODeltasMessage { deltas: Vec::new() };
+            let mut utxo_deltas_message = UTXODeltasMessage { deltas: Vec::new() };
 
             // Convert the AVVM distributions into pseudo-UTXOs
             let gen_utxos = genesis_utxos(&genesis);
+            let mut total_allocated: u64 = 0;
             for (hash, address, amount) in gen_utxos {
                 let tx_output = TxOutput {
                     tx_hash: hash.to_vec(),
@@ -81,13 +92,28 @@ impl GenesisBootstrapper {
                     value: amount,
                 };
 
-                message.deltas.push(UTXODelta::Output(tx_output));
+                utxo_deltas_message.deltas.push(UTXODelta::Output(tx_output));
+                total_allocated += amount;
             }
 
-            let message_enum =
-                Message::Cardano((block_info.clone(), CardanoMessage::UTXODeltas(message)));
+            let message_enum = Message::Cardano((block_info.clone(),
+                                                 CardanoMessage::UTXODeltas(utxo_deltas_message)));
             context
                 .publish(&publish_utxo_deltas_topic, Arc::new(message_enum))
+                .await
+                .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+
+            // Send the pot update message with the remaining reserves
+            let mut pot_deltas_message = PotDeltasMessage { deltas: Vec::new() };
+            pot_deltas_message.deltas.push(PotDelta {
+                pot: Pot::Reserves,
+                delta: (INITIAL_RESERVES - total_allocated) as LovelaceDelta,
+            });
+
+            let message_enum = Message::Cardano((block_info.clone(),
+                                                 CardanoMessage::PotDeltas(pot_deltas_message)));
+            context
+                .publish(&publish_pot_deltas_topic, Arc::new(message_enum))
                 .await
                 .unwrap_or_else(|e| error!("Failed to publish: {e}"));
 
