@@ -7,12 +7,12 @@ use crate::rational_number::RationalNumber;
 use anyhow::anyhow;
 use bech32::{Bech32, Hrp};
 use bitmask_enum::bitmask;
+use chrono::{DateTime, Utc};
 use hex::decode;
 use serde::{Deserialize, Serialize};
 use serde_with::{hex::Hex, serde_as};
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
-use chrono::{DateTime, Utc};
 
 /// Protocol era
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
@@ -148,12 +148,41 @@ pub type DataHash = Vec<u8>;
 
 /// Amount of Ada, in Lovelace
 pub type Lovelace = u64;
+pub type LovelaceDelta = i64;
 
 /// Rational number = numerator / denominator
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Ratio {
     pub numerator: u64,
     pub denominator: u64,
+}
+
+/// Withdrawal
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Withdrawal {
+    /// Stake address to withdraw to
+    pub address: StakeAddress,
+
+    /// Value to withdraw
+    pub value: Lovelace,
+}
+
+/// Treasury pot account
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum Pot {
+    Reserves,
+    Treasury,
+    Deposits,
+}
+
+/// Pot Delta - internal change of pot values at genesis / era boundaries
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PotDelta {
+    /// Stake address to withdraw to
+    pub pot: Pot,
+
+    /// Delta to apply
+    pub delta: LovelaceDelta,
 }
 
 /// General credential
@@ -344,13 +373,13 @@ pub enum InstantaneousRewardSource {
 /// Target of a MIR
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum InstantaneousRewardTarget {
-    StakeCredentials(Vec<(StakeCredential, u64)>),
+    StakeCredentials(Vec<(StakeCredential, i64)>),
     OtherAccountingPot(u64),
 }
 
 /// Move instantaneous reward
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct MoveInstantaneosReward {
+pub struct MoveInstantaneousReward {
     /// Source
     pub source: InstantaneousRewardSource,
 
@@ -660,13 +689,13 @@ pub struct ProtocolVersion {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum NonceVariant {
     NeutralNonce,
-    Nonce
+    Nonce,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Nonce {
     pub tag: NonceVariant,
-    pub hash: Option<Vec<u8>>
+    pub hash: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -710,7 +739,7 @@ pub struct AlonzoParams {
     pub collateral_percentage: u32,
     pub max_collateral_inputs: u32,
     pub plutus_v1_cost_model: Option<CostModel>,
-    pub plutus_v2_cost_model: Option<CostModel>
+    pub plutus_v2_cost_model: Option<CostModel>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -718,13 +747,13 @@ pub struct ByronParams {
     pub block_version_data: BlockVersionData,
     pub fts_seed: Option<Vec<u8>>,
     pub protocol_consts: ProtocolConsts,
-    pub start_time: u64
+    pub start_time: u64,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum NetworkId {
     Testnet,
-    Mainnet
+    Mainnet,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -740,7 +769,7 @@ pub struct ShelleyParams {
     pub slot_length: Option<u32>,
     pub slots_per_kes_period: Option<u32>,
     pub system_start: Option<DateTime<Utc>>,
-    pub update_quorum: Option<u32>
+    pub update_quorum: Option<u32>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -1063,7 +1092,7 @@ pub enum TxCertificate {
     GenesisKeyDelegation(GenesisKeyDelegation),
 
     /// Move instantaneous rewards
-    MoveInstantaneousReward(MoveInstantaneosReward),
+    MoveInstantaneousReward(MoveInstantaneousReward),
 
     /// New stake registration
     Registration(Registration),
