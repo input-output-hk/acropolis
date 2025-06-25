@@ -29,6 +29,7 @@ const DEFAULT_POT_DELTAS_TOPIC: &str = "cardano.pot.deltas";
 const DEFAULT_STAKE_DELTAS_TOPIC: &str = "cardano.stake.deltas";
 const DEFAULT_DREP_STATE_TOPIC: &str = "cardano.drep.state";
 const DEFAULT_DREP_DISTRIBUTION_TOPIC: &str = "cardano.drep.distribution";
+const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: &str = "cardano.protocol.parameters";
 
 const DEFAULT_HANDLE_STAKE_TOPIC: &str = "rest.get.stake";
 const DEFAULT_HANDLE_SPDD_TOPIC: &str = "rest.get.spdd";
@@ -55,6 +56,7 @@ impl AccountsState {
         mut pots_subscription: Box<dyn Subscription<Message>>,
         mut stake_subscription: Box<dyn Subscription<Message>>,
         mut drep_state_subscription: Box<dyn Subscription<Message>>,
+        mut parameters_subscription: Box<dyn Subscription<Message>>,
     ) -> Result<()> {
         // Get the stake address deltas from the genesis bootstrap, which we know
         // don't contain any stake
@@ -173,6 +175,7 @@ impl AccountsState {
                 let dreps_message_f = drep_state_subscription.read();
                 let spos_message_f = spos_subscription.read();
                 let ea_message_f = ea_subscription.read();
+                let params_message_f = parameters_subscription.read();
 
                 // Handle DRep
                 let (_, message) = dreps_message_f.await?;
@@ -235,6 +238,32 @@ impl AccountsState {
 
                     _ => error!("Unexpected message type: {message:?}"),
                 }
+
+                // Update parameters - *after* reward calculation in epoch-activity above
+                // ready for the *next* epoch boundary
+                let (_, message) = params_message_f.await?;
+                match message.as_ref() {
+                    Message::Cardano((block_info, CardanoMessage::ProtocolParams(params_msg))) => {
+                        if let Some(ref block) = current_block {
+                            if block.number != block_info.number {
+                                error!(
+                                    expected = block.number,
+                                    received = block_info.number,
+                                    "Certificate and parameters messages re-ordered!"
+                                );
+                            }
+                        }
+
+                        state
+                            .handle_parameters(params_msg)
+                            .inspect_err(|e| error!("Messaging handling error: {e}"))
+                            .ok();
+                    }
+
+                    _ => error!("Unexpected message type: {message:?}"),
+                }
+
+
             }
 
             // Commit the new state
@@ -284,6 +313,10 @@ impl AccountsState {
             .unwrap_or(DEFAULT_DREP_STATE_TOPIC.to_string());
         info!("Creating DRep state subscriber on '{drep_state_topic}'");
 
+        let parameters_topic = config
+            .get_string("protocol-parameters-topic")
+            .unwrap_or(DEFAULT_PROTOCOL_PARAMETERS_TOPIC.to_string());
+
         // Publishing topics
         let drep_distribution_topic = config
             .get_string("publish-drep-distribution-topic")
@@ -304,6 +337,7 @@ impl AccountsState {
             .get_string("handle-pots-topic")
             .unwrap_or(DEFAULT_HANDLE_POTS_TOPIC.to_string());
         info!("Creating request handler on '{handle_pots_topic}'");
+
 
         let handle_drdd_topic = config
             .get_string("handle-drdd-topic")
@@ -455,6 +489,7 @@ impl AccountsState {
         let pot_deltas_subscription = context.subscribe(&pot_deltas_topic).await?;
         let stake_subscription = context.subscribe(&stake_deltas_topic).await?;
         let drep_state_subscription = context.subscribe(&drep_state_topic).await?;
+        let parameters_subscription = context.subscribe(&parameters_topic).await?;
 
         // Start run task
         context.run(async move {
@@ -468,6 +503,7 @@ impl AccountsState {
                 pot_deltas_subscription,
                 stake_subscription,
                 drep_state_subscription,
+                parameters_subscription,
             )
             .await
             .unwrap_or_else(|e| error!("Failed: {e}"));
