@@ -39,8 +39,7 @@ pub struct RawTxsMessage {
 
 /// Genesis completion message
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct GenesisCompleteMessage {
-}
+pub struct GenesisCompleteMessage {}
 
 /// Message encapsulating multiple UTXO deltas, in order
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -61,6 +60,20 @@ pub struct TxCertificatesMessage {
 pub struct AddressDeltasMessage {
     /// Set of deltas
     pub deltas: Vec<AddressDelta>,
+}
+
+/// Withdrawals message
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct WithdrawalsMessage {
+    /// Set of withdrawals
+    pub withdrawals: Vec<Withdrawal>,
+}
+
+/// Pot deltas message
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PotDeltasMessage {
+    /// Set of pot deltas
+    pub deltas: Vec<PotDelta>,
 }
 
 /// Stake address part of address deltas message
@@ -157,6 +170,8 @@ pub enum CardanoMessage {
     UTXODeltas(UTXODeltasMessage),           // UTXO deltas received
     TxCertificates(TxCertificatesMessage),   // Transaction certificates received
     AddressDeltas(AddressDeltasMessage),     // Address deltas received
+    Withdrawals(WithdrawalsMessage),         // Withdrawals from reward accounts
+    PotDeltas(PotDeltasMessage),             // Changes to pot balances
     BlockFees(BlockFeesMessage),             // Total fees in a block
     EpochActivity(EpochActivityMessage),     // Total fees and VRF keys for an epoch
     DRepState(DRepStateMessage),             // Active DReps at epoch end
