@@ -384,18 +384,21 @@ impl State {
         Ok(accepted)
     }
 
-    /// Distribute and return all rewards for cast votes (government action is expired/voted)
-    fn return_rewards(&self, _votes: Option<&HashMap<Voter, (DataHash, VotingProcedure)>>) 
-        -> Result<VotingRefund> 
-    {
-        unimplemented!("")
-    }
-
     /// Should be called when voting is over
     fn end_voting(&mut self, action_id: &GovActionId) -> Result<VotingRefund> {
-        let rewards = self.return_rewards(self.votes.get(&action_id));
+        let (_id,proposal) = self.proposals.get(&action_id).ok_or_else(
+            || anyhow!("Gov. action {action_id} not found")
+        )?;
+
+        let refund = VotingRefund {
+            reward_account: proposal.reward_account.clone(),
+            deposit: proposal.deposit
+        };
+
         self.votes.remove(&action_id);
-        rewards
+        self.proposals.remove(&action_id);
+
+        Ok(refund)
     }
 
     /// Returns actual votes: (Pool votes, DRep votes, committee votes)
@@ -530,11 +533,7 @@ impl State {
             info!(
                 "{}{} => {}",
                 action_id,
-                if self.proposals.contains_key(action_id) {
-                    ""
-                } else {
-                    " (absent)"
-                },
+                [" (absent)",""][self.proposals.contains_key(action_id) as usize],
                 procedure.len()
             )
         }
