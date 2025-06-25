@@ -24,12 +24,16 @@ use state::State;
 const DEFAULT_SPO_STATE_TOPIC: &str = "cardano.spo.state";
 const DEFAULT_EPOCH_ACTIVITY_TOPIC: &str = "cardano.epoch.activity";
 const DEFAULT_TX_CERTIFICATES_TOPIC: &str = "cardano.certificates";
+const DEFAULT_WITHDRAWALS_TOPIC: &str = "cardano.withdrawals";
+const DEFAULT_POT_DELTAS_TOPIC: &str = "cardano.pot.deltas";
 const DEFAULT_STAKE_DELTAS_TOPIC: &str = "cardano.stake.deltas";
-const DEFAULT_HANDLE_STAKE_TOPIC: &str = "rest.get.stake";
-const DEFAULT_HANDLE_SPDD_TOPIC: &str = "rest.get.spdd";
-const DEFAULT_HANDLE_DRDD_TOPIC: &str = "rest.get.drdd";
 const DEFAULT_DREP_STATE_TOPIC: &str = "cardano.drep.state";
 const DEFAULT_DREP_DISTRIBUTION_TOPIC: &str = "cardano.drep.distribution";
+
+const DEFAULT_HANDLE_STAKE_TOPIC: &str = "rest.get.stake";
+const DEFAULT_HANDLE_SPDD_TOPIC: &str = "rest.get.spdd";
+const DEFAULT_HANDLE_POTS_TOPIC: &str = "rest.get.pots";
+const DEFAULT_HANDLE_DRDD_TOPIC: &str = "rest.get.drdd";
 
 /// Accounts State module
 #[module(
@@ -47,6 +51,8 @@ impl AccountsState {
         mut spos_subscription: Box<dyn Subscription<Message>>,
         mut ea_subscription: Box<dyn Subscription<Message>>,
         mut certs_subscription: Box<dyn Subscription<Message>>,
+        mut withdrawals_subscription: Box<dyn Subscription<Message>>,
+        mut pots_subscription: Box<dyn Subscription<Message>>,
         mut stake_subscription: Box<dyn Subscription<Message>>,
         mut drep_state_subscription: Box<dyn Subscription<Message>>,
     ) -> Result<()> {
@@ -55,7 +61,34 @@ impl AccountsState {
         // !TODO this seems overly specific to our startup process
         let _ = stake_subscription.read().await?;
 
-        // Main loop
+        // Initialisation messages
+        {
+            let mut state = history.lock().await.get_current_state();
+            let mut current_block: Option<BlockInfo> = None;
+
+            let pots_message_f = pots_subscription.read();
+
+            // Handle pots
+            let (_, message) = pots_message_f.await?;
+            match message.as_ref() {
+                Message::Cardano((block_info, CardanoMessage::PotDeltas(pot_deltas_msg))) => {
+                    state
+                        .handle_pot_deltas(pot_deltas_msg)
+                        .inspect_err(|e| error!("Pots handling error: {e:#}"))
+                        .ok();
+
+                    current_block = Some(block_info.clone());
+                }
+
+                _ => error!("Unexpected message type: {message:?}"),
+            }
+
+            if let Some(block_info) = current_block {
+                history.lock().await.commit(&block_info, state);
+            }
+        }
+
+        // Main loop of synchronised messages
         loop {
             // Get a mutable state
             let mut state = history.lock().await.get_current_state();
@@ -63,6 +96,7 @@ impl AccountsState {
             // Read per-block topics in parallel
             let certs_message_f = certs_subscription.read();
             let stake_message_f = stake_subscription.read();
+            let withdrawals_message_f = withdrawals_subscription.read();
             let mut new_epoch = false;
             let mut current_block: Option<BlockInfo> = None;
 
@@ -77,12 +111,35 @@ impl AccountsState {
 
                     state
                         .handle_tx_certificates(tx_certs_msg)
-                        .inspect_err(|e| error!("Messaging handling error: {e}"))
+                        .inspect_err(|e| error!("TxCertificates handling error: {e:#}"))
                         .ok();
                     if block_info.new_epoch && block_info.epoch > 0 {
                         new_epoch = true;
                     }
                     current_block = Some(block_info.clone());
+                }
+
+                _ => error!("Unexpected message type: {message:?}"),
+            }
+
+            // Handle withdrawals
+            let (_, message) = withdrawals_message_f.await?;
+            match message.as_ref() {
+                Message::Cardano((block_info, CardanoMessage::Withdrawals(withdrawals_msg))) => {
+                    if let Some(ref block) = current_block {
+                        if block.number != block_info.number {
+                            error!(
+                                expected = block.number,
+                                received = block_info.number,
+                                "Certificate and withdrawals messages re-ordered!"
+                            );
+                        }
+                    }
+
+                    state
+                        .handle_withdrawals(withdrawals_msg)
+                        .inspect_err(|e| error!("Withdrawals handling error: {e:#}"))
+                        .ok();
                 }
 
                 _ => error!("Unexpected message type: {message:?}"),
@@ -104,7 +161,7 @@ impl AccountsState {
 
                     state
                         .handle_stake_deltas(deltas_msg)
-                        .inspect_err(|e| error!("Messaging handling error: {e}"))
+                        .inspect_err(|e| error!("StakeAddressDeltas handling error: {e:#}"))
                         .ok();
                 }
 
@@ -126,7 +183,7 @@ impl AccountsState {
                         let drdd = state.generate_drdd();
 
                         if let Err(e) = publisher.publish_stake(block_info, drdd).await {
-                            tracing::error!("Error publishing drep voting stake distribution: {e}")
+                            error!("Error publishing drep voting stake distribution: {e:#}")
                         }
                     }
 
@@ -149,7 +206,7 @@ impl AccountsState {
 
                         state
                             .handle_spo_state(spo_msg)
-                            .inspect_err(|e| error!("Messaging handling error: {e}"))
+                            .inspect_err(|e| error!("SPOState handling error: {e:#}"))
                             .ok();
                     }
 
@@ -172,7 +229,7 @@ impl AccountsState {
 
                         state
                             .handle_epoch_activity(ea_msg)
-                            .inspect_err(|e| error!("Messaging handling error: {e}"))
+                            .inspect_err(|e| error!("EpochActivity handling error: {e:#}"))
                             .ok();
                     }
 
@@ -190,6 +247,8 @@ impl AccountsState {
     /// Async initialisation
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // Get configuration
+
+        // Subscription topics
         let spo_state_topic = config
             .get_string("spo-state-topic")
             .unwrap_or(DEFAULT_SPO_STATE_TOPIC.to_string());
@@ -205,11 +264,32 @@ impl AccountsState {
             .unwrap_or(DEFAULT_TX_CERTIFICATES_TOPIC.to_string());
         info!("Creating Tx certificates subscriber on '{tx_certificates_topic}'");
 
+        let withdrawals_topic = config
+            .get_string("withdrawals-topic")
+            .unwrap_or(DEFAULT_WITHDRAWALS_TOPIC.to_string());
+        info!("Creating withdrawals subscriber on '{withdrawals_topic}'");
+
+        let pot_deltas_topic = config
+            .get_string("pot-deltas-topic")
+            .unwrap_or(DEFAULT_POT_DELTAS_TOPIC.to_string());
+        info!("Creating pots subscriber on '{pot_deltas_topic}'");
+
         let stake_deltas_topic = config
             .get_string("stake-deltas-topic")
             .unwrap_or(DEFAULT_STAKE_DELTAS_TOPIC.to_string());
         info!("Creating stake deltas subscriber on '{stake_deltas_topic}'");
 
+        let drep_state_topic = config
+            .get_string("drep-state-topic")
+            .unwrap_or(DEFAULT_DREP_STATE_TOPIC.to_string());
+        info!("Creating DRep state subscriber on '{drep_state_topic}'");
+
+        // Publishing topics
+        let drep_distribution_topic = config
+            .get_string("publish-drep-distribution-topic")
+            .unwrap_or(DEFAULT_DREP_DISTRIBUTION_TOPIC.to_string());
+
+        // REST handler topics
         let handle_stake_topic = config
             .get_string("handle-stake-topic")
             .unwrap_or(DEFAULT_HANDLE_STAKE_TOPIC.to_string());
@@ -220,24 +300,22 @@ impl AccountsState {
             .unwrap_or(DEFAULT_HANDLE_SPDD_TOPIC.to_string());
         info!("Creating request handler on '{handle_spdd_topic}'");
 
+        let handle_pots_topic = config
+            .get_string("handle-pots-topic")
+            .unwrap_or(DEFAULT_HANDLE_POTS_TOPIC.to_string());
+        info!("Creating request handler on '{handle_pots_topic}'");
+
         let handle_drdd_topic = config
             .get_string("handle-drdd-topic")
             .unwrap_or(DEFAULT_HANDLE_DRDD_TOPIC.to_string());
         info!("Creating request handler on '{handle_drdd_topic}'");
-
-        let drep_state_topic = config
-            .get_string("drep-state-topic")
-            .unwrap_or(DEFAULT_DREP_STATE_TOPIC.to_string());
-
-        let drep_distribution_topic = config
-            .get_string("publish-drep-distribution-topic")
-            .unwrap_or(DEFAULT_DREP_DISTRIBUTION_TOPIC.to_string());
 
         // Create history
         let history = Arc::new(Mutex::new(StateHistory::<State>::new("AccountsState")));
         let history_stake = history.clone();
         let history_stake_single = history.clone();
         let history_spdd = history.clone();
+        let history_pots = history.clone();
         let history_drdd = history.clone();
         let history_tick = history.clone();
 
@@ -304,6 +382,22 @@ impl AccountsState {
             }
         });
 
+        // Handle requests for POTS
+        handle_rest(context.clone(), &handle_pots_topic, move || {
+            let history = history_pots.clone();
+            async move {
+                if let Some(state) = history.lock().await.current() {
+                    let pots = state.get_pots();
+                    match serde_json::to_string(&pots) {
+                        Ok(body) => Ok(RESTResponse::with_json(200, &body)),
+                        Err(error) => Err(anyhow!("{:?}", error)),
+                    }
+                } else {
+                    Ok(RESTResponse::with_json(200, "{}"))
+                }
+            }
+        });
+
         // Handle requests for DRDD
         handle_rest(context.clone(), &handle_drdd_topic, move || {
             let history = history_drdd.clone();
@@ -357,6 +451,8 @@ impl AccountsState {
         let spos_subscription = context.subscribe(&spo_state_topic).await?;
         let ea_subscription = context.subscribe(&epoch_activity_topic).await?;
         let certs_subscription = context.subscribe(&tx_certificates_topic).await?;
+        let withdrawals_subscription = context.subscribe(&withdrawals_topic).await?;
+        let pot_deltas_subscription = context.subscribe(&pot_deltas_topic).await?;
         let stake_subscription = context.subscribe(&stake_deltas_topic).await?;
         let drep_state_subscription = context.subscribe(&drep_state_topic).await?;
 
@@ -368,6 +464,8 @@ impl AccountsState {
                 spos_subscription,
                 ea_subscription,
                 certs_subscription,
+                withdrawals_subscription,
+                pot_deltas_subscription,
                 stake_subscription,
                 drep_state_subscription,
             )

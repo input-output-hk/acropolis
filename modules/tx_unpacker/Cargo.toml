@@ -20,6 +20,7 @@ serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0"
 async-trait = "0.1"
 futures = "0.3.31"
+hex = "0.4.3"
 
 [lib]
 path = "src/tx_unpacker.rs"
