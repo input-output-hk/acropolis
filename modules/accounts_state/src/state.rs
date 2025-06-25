@@ -431,7 +431,7 @@ impl State {
     }
 
     /// Handle pots
-    pub fn handle_pots(&mut self, pot_deltas_msg: &PotDeltasMessage) -> Result<()> {
+    pub fn handle_pot_deltas(&mut self, pot_deltas_msg: &PotDeltasMessage) -> Result<()> {
         for pot_delta in pot_deltas_msg.deltas.iter() {
             let pot = match pot_delta.pot {
                 Pot::Reserves => &mut self.pots.reserves,
@@ -480,7 +480,7 @@ mod tests {
     use acropolis_common::{
         AddressNetwork, Credential, Registration, StakeAddress, StakeAddressDelta,
         StakeAddressPayload, StakeAndVoteDelegation, StakeRegistrationAndStakeAndVoteDelegation,
-        StakeRegistrationAndVoteDelegation, VoteDelegation, Withdrawal,
+        StakeRegistrationAndVoteDelegation, VoteDelegation, Withdrawal, PotDelta, Pot,
     };
 
     const STAKE_KEY_HASH: [u8; 3] = [0x99, 0x0f, 0x00];
@@ -622,6 +622,38 @@ mod tests {
         assert_eq!(state.pots.reserves, 0);
         assert_eq!(state.pots.treasury, 0);
         assert_eq!(state.pots.deposits, 0);
+    }
+
+    #[test]
+    fn pot_delta_updates_pots() {
+        let mut state = State::default();
+
+        // Send in a MIR reserves->42->treasury
+        let mir = PotDeltasMessage {
+            deltas: vec![
+                PotDelta {
+                    pot: Pot::Reserves,
+                    delta: 43,
+                },
+                PotDelta {
+                    pot: Pot::Reserves,
+                    delta: -1,
+                },
+                PotDelta {
+                    pot: Pot::Treasury,
+                    delta: 99,
+                },
+                PotDelta {
+                    pot: Pot::Deposits,
+                    delta: 77,
+                },
+            ]
+        };
+
+        state.handle_pot_deltas(&mir).unwrap();
+        assert_eq!(state.pots.reserves, 42);
+        assert_eq!(state.pots.treasury, 99);
+        assert_eq!(state.pots.deposits, 77);
     }
 
     #[test]
