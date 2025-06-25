@@ -2,11 +2,11 @@
 use acropolis_common::{
     messages::{
         DRepStateMessage, EpochActivityMessage, SPOStateMessage, StakeAddressDeltasMessage,
-        TxCertificatesMessage, WithdrawalsMessage,
+        TxCertificatesMessage, WithdrawalsMessage, PotDeltasMessage,
     },
     serialization::SerializeMapAs,
     DRepChoice, DRepCredential, InstantaneousRewardSource, InstantaneousRewardTarget, KeyHash,
-    Lovelace, MoveInstantaneousReward, PoolRegistration, StakeCredential, TxCertificate,
+    Lovelace, MoveInstantaneousReward, PoolRegistration, StakeCredential, TxCertificate, Pot,
 };
 use anyhow::{bail, Context, Result};
 use dashmap::DashMap;
@@ -425,6 +425,24 @@ impl State {
 
             // Immutably create or update the stake address
             self.stake_addresses = self.stake_addresses.update(hash.to_vec(), sas);
+        }
+
+        Ok(())
+    }
+
+    /// Handle pots
+    pub fn handle_pots(&mut self, pot_deltas_msg: &PotDeltasMessage) -> Result<()> {
+        for pot_delta in pot_deltas_msg.deltas.iter() {
+            let pot = match pot_delta.pot {
+                Pot::Reserves => &mut self.pots.reserves,
+                Pot::Treasury => &mut self.pots.treasury,
+                Pot::Deposits => &mut self.pots.deposits,
+            };
+
+            Self::update_value_with_delta(pot, pot_delta.delta)
+                .with_context(|| format!("Applying pot delta {pot_delta:?}"))?;
+
+            info!("Pot delta for {:?} {} => {}", pot_delta.pot, pot_delta.delta, *pot);
         }
 
         Ok(())

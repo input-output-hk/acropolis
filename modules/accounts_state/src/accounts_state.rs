@@ -25,6 +25,7 @@ const DEFAULT_SPO_STATE_TOPIC: &str = "cardano.spo.state";
 const DEFAULT_EPOCH_ACTIVITY_TOPIC: &str = "cardano.epoch.activity";
 const DEFAULT_TX_CERTIFICATES_TOPIC: &str = "cardano.certificates";
 const DEFAULT_WITHDRAWALS_TOPIC: &str = "cardano.withdrawals";
+const DEFAULT_POT_DELTAS_TOPIC: &str = "cardano.pot.deltas";
 const DEFAULT_STAKE_DELTAS_TOPIC: &str = "cardano.stake.deltas";
 const DEFAULT_DREP_STATE_TOPIC: &str = "cardano.drep.state";
 const DEFAULT_DREP_DISTRIBUTION_TOPIC: &str = "cardano.drep.distribution";
@@ -51,6 +52,7 @@ impl AccountsState {
         mut ea_subscription: Box<dyn Subscription<Message>>,
         mut certs_subscription: Box<dyn Subscription<Message>>,
         mut withdrawals_subscription: Box<dyn Subscription<Message>>,
+        mut pots_subscription: Box<dyn Subscription<Message>>,
         mut stake_subscription: Box<dyn Subscription<Message>>,
         mut drep_state_subscription: Box<dyn Subscription<Message>>,
     ) -> Result<()> {
@@ -59,7 +61,34 @@ impl AccountsState {
         // !TODO this seems overly specific to our startup process
         let _ = stake_subscription.read().await?;
 
-        // Main loop
+        // Initialisation messages
+        {
+            let mut state = history.lock().await.get_current_state();
+            let mut current_block: Option<BlockInfo> = None;
+
+            let pots_message_f = pots_subscription.read();
+
+            // Handle pots
+            let (_, message) = pots_message_f.await?;
+            match message.as_ref() {
+                Message::Cardano((block_info, CardanoMessage::PotDeltas(pot_deltas_msg))) => {
+                    state
+                        .handle_pots(pot_deltas_msg)
+                        .inspect_err(|e| error!("Pots handling error: {e:#}"))
+                        .ok();
+
+                    current_block = Some(block_info.clone());
+                }
+
+                _ => error!("Unexpected message type: {message:?}"),
+            }
+
+            if let Some(block_info) = current_block {
+                history.lock().await.commit(&block_info, state);
+            }
+        }
+
+        // Main loop of synchronised messages
         loop {
             // Get a mutable state
             let mut state = history.lock().await.get_current_state();
@@ -240,6 +269,11 @@ impl AccountsState {
             .unwrap_or(DEFAULT_WITHDRAWALS_TOPIC.to_string());
         info!("Creating withdrawals subscriber on '{withdrawals_topic}'");
 
+        let pot_deltas_topic = config
+            .get_string("pot-deltas-topic")
+            .unwrap_or(DEFAULT_POT_DELTAS_TOPIC.to_string());
+        info!("Creating pots subscriber on '{pot_deltas_topic}'");
+
         let stake_deltas_topic = config
             .get_string("stake-deltas-topic")
             .unwrap_or(DEFAULT_STAKE_DELTAS_TOPIC.to_string());
@@ -418,6 +452,7 @@ impl AccountsState {
         let ea_subscription = context.subscribe(&epoch_activity_topic).await?;
         let certs_subscription = context.subscribe(&tx_certificates_topic).await?;
         let withdrawals_subscription = context.subscribe(&withdrawals_topic).await?;
+        let pot_deltas_subscription = context.subscribe(&pot_deltas_topic).await?;
         let stake_subscription = context.subscribe(&stake_deltas_topic).await?;
         let drep_state_subscription = context.subscribe(&drep_state_topic).await?;
 
@@ -430,6 +465,7 @@ impl AccountsState {
                 ea_subscription,
                 certs_subscription,
                 withdrawals_subscription,
+                pot_deltas_subscription,
                 stake_subscription,
                 drep_state_subscription,
             )
