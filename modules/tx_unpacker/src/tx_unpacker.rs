@@ -4,7 +4,7 @@
 use acropolis_common::{
     messages::{
         BlockFeesMessage, CardanoMessage, GovernanceProceduresMessage, Message,
-        TxCertificatesMessage, UTXODeltasMessage,
+        TxCertificatesMessage, UTXODeltasMessage, WithdrawalsMessage,
     },
     *,
 };
@@ -224,102 +224,97 @@ impl TxUnpacker {
         match cert {
             MultiEraCert::NotApplicable => Err(anyhow!("Not applicable cert!")),
 
-            MultiEraCert::AlonzoCompatible(cert) => {
-                match cert.as_ref().as_ref() {
-                    alonzo::Certificate::StakeRegistration(cred) => {
-                        Ok(TxCertificate::StakeRegistration(StakeCredentialWithPos {
-                            stake_credential: Self::map_stake_credential(cred),
-                            tx_index: tx_index.try_into().unwrap(),
-                            cert_index: cert_index.try_into().unwrap(),
-                        }))
-                    }
-                    alonzo::Certificate::StakeDeregistration(cred) => Ok(
-                        TxCertificate::StakeDeregistration(Self::map_stake_credential(cred)),
-                    ),
-                    alonzo::Certificate::StakeDelegation(cred, pool_key_hash) => {
-                        Ok(TxCertificate::StakeDelegation(StakeDelegation {
-                            credential: Self::map_stake_credential(cred),
-                            operator: pool_key_hash.to_vec(),
-                        }))
-                    }
-                    alonzo::Certificate::PoolRegistration {
-                        // TODO relays, pool_metadata
-                        operator,
-                        vrf_keyhash,
-                        pledge,
-                        cost,
-                        margin,
-                        reward_account,
-                        pool_owners,
-                        relays,
-                        pool_metadata,
-                    } => Ok(TxCertificate::PoolRegistration(PoolRegistration {
-                        operator: operator.to_vec(),
-                        vrf_key_hash: vrf_keyhash.to_vec(),
-                        pledge: *pledge,
-                        cost: *cost,
-                        margin: Ratio {
-                            numerator: margin.numerator,
-                            denominator: margin.denominator,
-                        },
-                        reward_account: reward_account.to_vec(),
-                        pool_owners: pool_owners.into_iter().map(|v| v.to_vec()).collect(),
-                        relays: relays
-                            .into_iter()
-                            .map(|relay| Self::map_relay(relay))
-                            .collect(),
-                        pool_metadata: match pool_metadata {
-                            Nullable::Some(md) => Some(PoolMetadata {
-                                url: md.url.clone(),
-                                hash: md.hash.to_vec(),
-                            }),
-                            _ => None,
-                        },
-                    })),
-                    alonzo::Certificate::PoolRetirement(pool_key_hash, epoch) => {
-                        Ok(TxCertificate::PoolRetirement(PoolRetirement {
-                            operator: pool_key_hash.to_vec(),
-                            epoch: *epoch,
-                        }))
-                    }
-                    alonzo::Certificate::GenesisKeyDelegation(
-                        genesis_hash,
-                        genesis_delegate_hash,
-                        vrf_key_hash,
-                    ) => Ok(TxCertificate::GenesisKeyDelegation(GenesisKeyDelegation {
-                        genesis_hash: genesis_hash.to_vec(),
-                        genesis_delegate_hash: genesis_delegate_hash.to_vec(),
-                        vrf_key_hash: vrf_key_hash.to_vec(),
-                    })),
-                    alonzo::Certificate::MoveInstantaneousRewardsCert(mir) => Ok(
-                        TxCertificate::MoveInstantaneousReward(MoveInstantaneosReward {
-                            source: match mir.source {
-                                alonzo::InstantaneousRewardSource::Reserves => {
-                                    InstantaneousRewardSource::Reserves
-                                }
-                                alonzo::InstantaneousRewardSource::Treasury => {
-                                    InstantaneousRewardSource::Treasury
-                                }
-                            },
-                            target: match &mir.target {
-                                alonzo::InstantaneousRewardTarget::StakeCredentials(creds) => {
-                                    InstantaneousRewardTarget::StakeCredentials(
-                                        creds
-                                            .iter()
-                                            .map(|(sc, v)| {
-                                                (Self::map_stake_credential(&sc), *v as u64)
-                                            }) // TODO can be negative?
-                                            .collect(),
-                                    )
-                                }
-                                alonzo::InstantaneousRewardTarget::OtherAccountingPot(n) => {
-                                    InstantaneousRewardTarget::OtherAccountingPot(*n)
-                                }
-                            },
-                        }),
-                    ),
+            MultiEraCert::AlonzoCompatible(cert) => match cert.as_ref().as_ref() {
+                alonzo::Certificate::StakeRegistration(cred) => {
+                    Ok(TxCertificate::StakeRegistration(StakeCredentialWithPos {
+                        stake_credential: Self::map_stake_credential(cred),
+                        tx_index: tx_index.try_into().unwrap(),
+                        cert_index: cert_index.try_into().unwrap(),
+                    }))
                 }
-            }
+                alonzo::Certificate::StakeDeregistration(cred) => Ok(
+                    TxCertificate::StakeDeregistration(Self::map_stake_credential(cred)),
+                ),
+                alonzo::Certificate::StakeDelegation(cred, pool_key_hash) => {
+                    Ok(TxCertificate::StakeDelegation(StakeDelegation {
+                        credential: Self::map_stake_credential(cred),
+                        operator: pool_key_hash.to_vec(),
+                    }))
+                }
+                alonzo::Certificate::PoolRegistration {
+                    operator,
+                    vrf_keyhash,
+                    pledge,
+                    cost,
+                    margin,
+                    reward_account,
+                    pool_owners,
+                    relays,
+                    pool_metadata,
+                } => Ok(TxCertificate::PoolRegistration(PoolRegistration {
+                    operator: operator.to_vec(),
+                    vrf_key_hash: vrf_keyhash.to_vec(),
+                    pledge: *pledge,
+                    cost: *cost,
+                    margin: Ratio {
+                        numerator: margin.numerator,
+                        denominator: margin.denominator,
+                    },
+                    reward_account: reward_account.to_vec(),
+                    pool_owners: pool_owners.into_iter().map(|v| v.to_vec()).collect(),
+                    relays: relays
+                        .into_iter()
+                        .map(|relay| Self::map_relay(relay))
+                        .collect(),
+                    pool_metadata: match pool_metadata {
+                        Nullable::Some(md) => Some(PoolMetadata {
+                            url: md.url.clone(),
+                            hash: md.hash.to_vec(),
+                        }),
+                        _ => None,
+                    },
+                })),
+                alonzo::Certificate::PoolRetirement(pool_key_hash, epoch) => {
+                    Ok(TxCertificate::PoolRetirement(PoolRetirement {
+                        operator: pool_key_hash.to_vec(),
+                        epoch: *epoch,
+                    }))
+                }
+                alonzo::Certificate::GenesisKeyDelegation(
+                    genesis_hash,
+                    genesis_delegate_hash,
+                    vrf_key_hash,
+                ) => Ok(TxCertificate::GenesisKeyDelegation(GenesisKeyDelegation {
+                    genesis_hash: genesis_hash.to_vec(),
+                    genesis_delegate_hash: genesis_delegate_hash.to_vec(),
+                    vrf_key_hash: vrf_key_hash.to_vec(),
+                })),
+                alonzo::Certificate::MoveInstantaneousRewardsCert(mir) => Ok(
+                    TxCertificate::MoveInstantaneousReward(MoveInstantaneousReward {
+                        source: match mir.source {
+                            alonzo::InstantaneousRewardSource::Reserves => {
+                                InstantaneousRewardSource::Reserves
+                            }
+                            alonzo::InstantaneousRewardSource::Treasury => {
+                                InstantaneousRewardSource::Treasury
+                            }
+                        },
+                        target: match &mir.target {
+                            alonzo::InstantaneousRewardTarget::StakeCredentials(creds) => {
+                                InstantaneousRewardTarget::StakeCredentials(
+                                    creds
+                                        .iter()
+                                        .map(|(sc, v)| (Self::map_stake_credential(&sc), *v))
+                                        .collect(),
+                                )
+                            }
+                            alonzo::InstantaneousRewardTarget::OtherAccountingPot(n) => {
+                                InstantaneousRewardTarget::OtherAccountingPot(*n)
+                            }
+                        },
+                    }),
+                ),
+            },
 
             // Now repeated for a different type!
             MultiEraCert::Conway(cert) => {
@@ -735,6 +730,11 @@ impl TxUnpacker {
             info!("Publishing UTXO deltas on '{topic}'");
         }
 
+        let publish_withdrawals_topic = config.get_string("publish-withdrawals-topic").ok();
+        if let Some(ref topic) = publish_withdrawals_topic {
+            info!("Publishing withdrawals on '{topic}'");
+        }
+
         let publish_certificates_topic = config.get_string("publish-certificates-topic").ok();
         if let Some(ref topic) = publish_certificates_topic {
             info!("Publishing certificates on '{topic}'");
@@ -763,6 +763,7 @@ impl TxUnpacker {
                         }
 
                         let mut deltas = Vec::new();
+                        let mut withdrawals = Vec::new();
                         let mut certificates = Vec::new();
                         let mut voting_procedures = Vec::new();
                         let mut proposal_procedures = Vec::new();
@@ -775,6 +776,7 @@ impl TxUnpacker {
                                     let inputs = tx.consumes();
                                     let outputs = tx.produces();
                                     let certs = tx.certs();
+                                    let tx_withdrawals = tx.withdrawals_sorted_set();
                                     let mut props = None;
                                     let mut votes = None;
 
@@ -852,6 +854,21 @@ impl TxUnpacker {
                                         }
                                     }
 
+                                    if publish_withdrawals_topic.is_some() {
+                                        for (key, value) in tx_withdrawals {
+                                            match StakeAddress::from_binary(key) {
+                                                Ok(stake_address) => {
+                                                    withdrawals.push(Withdrawal {
+                                                        address: stake_address,
+                                                        value,
+                                                    });
+                                                }
+
+                                                Err(e) => error!("Bad stake address: {e:#}"),
+                                            }
+                                        }
+                                    }
+
                                     if publish_governance_procedures_topic.is_some() {
                                         if let Some(pp) = props {
                                             // Nonempty set -- governance_message.proposal_procedures will not be empty
@@ -893,6 +910,17 @@ impl TxUnpacker {
                                 block.clone(),
                                 CardanoMessage::UTXODeltas(UTXODeltasMessage {
                                     deltas,
+                                })
+                            ));
+
+                            futures.push(context.message_bus.publish(&topic, Arc::new(msg)));
+                        }
+
+                        if let Some(ref topic) = publish_withdrawals_topic {
+                            let msg = Message::Cardano((
+                                block.clone(),
+                                CardanoMessage::Withdrawals(WithdrawalsMessage {
+                                    withdrawals,
                                 })
                             ));
 
