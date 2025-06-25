@@ -73,7 +73,7 @@ impl AccountsState {
             match message.as_ref() {
                 Message::Cardano((block_info, CardanoMessage::PotDeltas(pot_deltas_msg))) => {
                     state
-                        .handle_pots(pot_deltas_msg)
+                        .handle_pot_deltas(pot_deltas_msg)
                         .inspect_err(|e| error!("Pots handling error: {e:#}"))
                         .ok();
 
