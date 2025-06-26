@@ -706,6 +706,7 @@ pub struct ShelleyProtocolParams {
     pub max_block_header_size: u32,
     pub key_deposit: u64,
     pub min_utxo_value: u64,
+
     pub minfee_a: u32,
     pub minfee_b: u32,
     pub pool_deposit: u64,
@@ -1033,6 +1034,12 @@ pub struct SingleVoterVotes {
 pub struct VotingProcedures {
     #[serde_as(as = "Vec<(_, _)>")]
     pub votes: HashMap<Voter, SingleVoterVotes>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct VotingRefund {
+    pub reward_account: RewardAccount,
+    pub deposit: Lovelace
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

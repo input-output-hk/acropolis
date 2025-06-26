@@ -1,6 +1,6 @@
 use anyhow::{anyhow, bail, Result};
 use acropolis_common::{
-    messages::EnactStateMessage, Committee, CommitteeChange,
+    messages::GovernanceOutcomesMessage, Committee, CommitteeChange,
     ConwayParams, AlonzoParams, ShelleyParams,
     EnactStateElem, Era, ProtocolParamUpdate, ProtocolParams,
 };
@@ -141,8 +141,8 @@ impl ParametersUpdater {
         Ok(())
     }
 
-    pub fn apply_enact_state(&mut self, u: &EnactStateMessage) -> Result<()> {
-        for elem in u.enactments.iter() {
+    pub fn apply_enact_state(&mut self, u: &GovernanceOutcomesMessage) -> Result<()> {
+        for elem in u.enact_state.iter() {
             self.apply_enact_state_elem(elem)?;
         }
         Ok(())
