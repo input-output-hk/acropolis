@@ -151,7 +151,7 @@ pub type Lovelace = u64;
 pub type LovelaceDelta = i64;
 
 /// Rational number = numerator / denominator
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Eq, PartialEq)]
 pub struct Ratio {
     pub numerator: u64,
     pub denominator: u64,
@@ -243,7 +243,7 @@ impl Credential {
 pub type StakeCredential = Credential;
 
 /// Relay single host address
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize, Eq, PartialEq)]
 pub struct SingleHostAddr {
     /// Optional port number
     pub port: Option<u16>,
@@ -256,7 +256,7 @@ pub struct SingleHostAddr {
 }
 
 /// Relay hostname
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Eq, PartialEq)]
 pub struct SingleHostName {
     /// Optional port number
     pub port: Option<u16>,
@@ -266,14 +266,14 @@ pub struct SingleHostName {
 }
 
 /// Relay multihost (SRV)
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Eq, PartialEq)]
 pub struct MultiHostName {
     /// DNS name (SRC record)
     pub dns_name: String,
 }
 
 /// Pool relay
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Eq, PartialEq)]
 pub enum Relay {
     SingleHostAddr(SingleHostAddr),
     SingleHostName(SingleHostName),
@@ -282,13 +282,24 @@ pub enum Relay {
 
 /// Pool metadata
 #[serde_as]
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    serde::Serialize,
+    serde::Deserialize,
+    minicbor::Encode,
+    minicbor::Decode,
+    Eq,
+    PartialEq,
+)]
 pub struct PoolMetadata {
     /// Metadata URL
+    #[n(0)]
     pub url: String,
 
     /// Metadata hash
     #[serde_as(as = "Hex")]
+    #[n(1)]
     pub hash: DataHash,
 }
 
@@ -296,37 +307,55 @@ type RewardAccount = Vec<u8>;
 
 /// Pool registration data
 #[serde_as]
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    serde::Serialize,
+    serde::Deserialize,
+    minicbor::Decode,
+    minicbor::Encode,
+    PartialEq,
+    Eq,
+)]
 pub struct PoolRegistration {
     /// Operator pool key hash - used as ID
     #[serde_as(as = "Hex")]
+    #[n(0)]
     pub operator: KeyHash,
 
     /// VRF key hash
     #[serde_as(as = "Hex")]
+    #[n(1)]
     pub vrf_key_hash: KeyHash,
 
     /// Pledged Ada
+    #[n(2)]
     pub pledge: Lovelace,
 
     /// Fixed cost
+    #[n(3)]
     pub cost: Lovelace,
 
     /// Marginal cost (fraction)
+    #[n(4)]
     pub margin: Ratio,
 
     /// Reward account
     #[serde_as(as = "Hex")]
+    #[n(5)]
     pub reward_account: Vec<u8>,
 
     /// Pool owners by their key hash
     #[serde_as(as = "Vec<Hex>")]
+    #[n(6)]
     pub pool_owners: Vec<KeyHash>,
 
     // Relays
+    #[n(7)]
     pub relays: Vec<Relay>,
 
     // Metadata
+    #[n(8)]
     pub pool_metadata: Option<PoolMetadata>,
 }
 
