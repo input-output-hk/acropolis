@@ -198,6 +198,7 @@ impl StakeDeltaFilter {
         let state = Arc::new(Mutex::new(State::new(params.clone())));
 
         info!("Creating subscriber on '{}'", params.tx_certificates_topic);
+
         let state_certs = state.clone();
         let mut subscription = params
             .context
