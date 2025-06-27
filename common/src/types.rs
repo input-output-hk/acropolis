@@ -1166,6 +1166,24 @@ mod tests {
     use super::*;
     use anyhow::Result;
 
+    #[test]
+    fn era_order() -> Result<()> {
+        assert_eq!(Era::default() as u8, 0);
+        assert_eq!(Era::Byron as u8, 0);
+        assert_eq!(Era::Conway as u8, 6);
+        assert!(!Era::try_from(7).is_ok());
+
+        for ei in 0..=6 {
+            for ej in 0..=6 {
+                assert_eq!(Era::try_from(ei).unwrap() < Era::try_from(ej).unwrap(), ei < ej);
+                assert_eq!(Era::try_from(ei).unwrap() > Era::try_from(ej).unwrap(), ei > ej);
+                assert_eq!(Era::try_from(ei).unwrap() == Era::try_from(ej).unwrap(), ei == ej);
+            }
+        }
+
+        Ok(())
+    }
+
     fn make_committee_credential(addr_key_hash: bool, val: u8) -> CommitteeCredential {
         if addr_key_hash {
             Credential::AddrKeyHash(vec![val])
