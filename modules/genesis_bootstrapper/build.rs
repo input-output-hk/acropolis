@@ -29,4 +29,9 @@ fn main() {
         "https://book.world.dev.cardano.org/environments/mainnet/byron-genesis.json",
         "mainnet-byron-genesis.json",
     );
+
+    download(
+        "https://raw.githubusercontent.com/Hornan7/SanchoNet-Tutorials/refs/heads/main/genesis/byron-genesis.json",
+        "sanchonet-byron-genesis.json",
+    );
 }
