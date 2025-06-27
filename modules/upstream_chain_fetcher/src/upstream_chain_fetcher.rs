@@ -219,11 +219,11 @@ impl UpstreamChainFetcher {
         let sync_point = config
             .get_string("sync-point")
             .unwrap_or(DEFAULT_SYNC_POINT.to_string());
-        let mut my_peer = peer.lock().await;
 
         match sync_point.as_str() {
             "tip" => {
                 // Ask for origin but get the tip as well
+                let mut my_peer = peer.lock().await;
                 let (_, Tip(point, _)) = my_peer
                     .chainsync()
                     .find_intersect(vec![Point::Origin])
