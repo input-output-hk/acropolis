@@ -1,6 +1,7 @@
 # Top-level configuration for Acropolis omnibus process
 
 [module.genesis-bootstrapper]
+network-name = "sanchonet"
 
 #[module.mithril-snapshot-fetcher]
 #aggregator-url = "https://aggregator.release-mainnet.api.mithril.network/aggregator"
@@ -32,6 +33,7 @@ address-delta-topic = "cardano.address.delta"
 [module.governance-state]
 
 [module.parameters-state]
+network-name = "sanchonet"
 
 [module.stake-delta-filter]
 cache-mode = "write" # "predefined", "read", "write", "write-if-absent"

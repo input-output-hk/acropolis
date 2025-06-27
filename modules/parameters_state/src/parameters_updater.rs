@@ -156,18 +156,18 @@ impl ParametersUpdater {
         Ok(())
     }
 
-    pub fn apply_genesis(&mut self, era: &Era) -> Result<()> {
+    pub fn apply_genesis(&mut self, network: &str, era: &Era) -> Result<()> {
         match era {
             Era::Byron =>
-                Self::upgen(&mut self.params.byron, &genesis_params::read_byron_genesis()?),
+                Self::upgen(&mut self.params.byron, &genesis_params::read_byron_genesis(network)?),
             Era::Shelley =>
-                Self::upgen(&mut self.params.shelley, &genesis_params::read_shelley_genesis()?),
+                Self::upgen(&mut self.params.shelley, &genesis_params::read_shelley_genesis(network)?),
             Era::Alonzo =>
-                Self::upgen(&mut self.params.alonzo, &genesis_params::read_alonzo_genesis()?),
+                Self::upgen(&mut self.params.alonzo, &genesis_params::read_alonzo_genesis(network)?),
             Era::Conway =>
-                Self::upgen(&mut self.params.conway, &genesis_params::read_conway_genesis()?),
+                Self::upgen(&mut self.params.conway, &genesis_params::read_conway_genesis(network)?),
             _ => {
-                tracing::info!("Applying genesis: skipping, no genesis exist for {era}");
+                tracing::info!("Applying genesis: skipping, no genesis exist for {network} {era}");
                 Ok(())
             }
         }

@@ -4,7 +4,7 @@
 
 use crate::address::{Address, StakeAddress};
 use crate::rational_number::RationalNumber;
-use anyhow::anyhow;
+use anyhow::{anyhow, bail, Error};
 use bech32::{Bech32, Hrp};
 use bitmask_enum::bitmask;
 use chrono::{DateTime, Utc};
@@ -29,6 +29,36 @@ pub enum Era {
 impl Default for Era {
     fn default() -> Era {
         Era::Byron
+    }
+}
+
+impl From<Era> for u8 {
+    fn from(e: Era) -> u8 {
+        match e {
+            Era::Byron => 0,
+            Era::Shelley => 1,
+            Era::Allegra => 2,
+            Era::Mary => 3,
+            Era::Alonzo => 4,
+            Era::Babbage => 5,
+            Era::Conway => 6
+        }
+    }
+}
+
+impl TryFrom<u8> for Era {
+    type Error = anyhow::Error;
+    fn try_from(v: u8) -> Result<Era, Error> {
+        match v {
+            0 => Ok(Era::Byron),
+            1 => Ok(Era::Shelley),
+            2 => Ok(Era::Allegra),
+            3 => Ok(Era::Mary),
+            4 => Ok(Era::Alonzo),
+            5 => Ok(Era::Babbage),
+            6 => Ok(Era::Conway),
+            n => bail!("Impossilbe era {n}")
+        }
     }
 }
 
