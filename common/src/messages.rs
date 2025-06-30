@@ -3,15 +3,13 @@
 // We don't use these messages in the acropolis_common crate itself
 #![allow(dead_code)]
 
+use crate::ledger_state::SPOState;
+
 use crate::types::*;
 
 // Caryatid core messages which we re-export
 pub use caryatid_module_clock::messages::ClockTickMessage;
-pub use caryatid_module_rest_server::messages::{
-    RESTRequest,
-    RESTResponse,
-    GetRESTResponse
-};
+pub use caryatid_module_rest_server::messages::{GetRESTResponse, RESTRequest, RESTResponse};
 
 /// Block header message
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -43,37 +41,48 @@ pub struct RawTxsMessage {
 
 /// Genesis completion message
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct GenesisCompleteMessage {
-    // Conway genesis block
-    pub conway_genesis: Option<ConwayGenesisParams>,
-}
+pub struct GenesisCompleteMessage {}
 
 /// Message encapsulating multiple UTXO deltas, in order
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct UTXODeltasMessage {
     /// Ordered set of deltas
-    pub deltas: Vec<UTXODelta>
+    pub deltas: Vec<UTXODelta>,
 }
 
 /// Message encapsulating multiple transaction certificates, in order
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TxCertificatesMessage {
     /// Ordered set of certificates
-    pub certificates: Vec<TxCertificate>
+    pub certificates: Vec<TxCertificate>,
 }
 
 /// Address deltas message
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AddressDeltasMessage {
     /// Set of deltas
-    pub deltas: Vec<AddressDelta>
+    pub deltas: Vec<AddressDelta>,
+}
+
+/// Withdrawals message
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct WithdrawalsMessage {
+    /// Set of withdrawals
+    pub withdrawals: Vec<Withdrawal>,
+}
+
+/// Pot deltas message
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PotDeltasMessage {
+    /// Set of pot deltas
+    pub deltas: Vec<PotDelta>,
 }
 
 /// Stake address part of address deltas message
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StakeAddressDeltasMessage {
     /// Set of deltas
-    pub deltas: Vec<StakeAddressDelta>
+    pub deltas: Vec<StakeAddressDelta>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -105,13 +114,47 @@ pub struct GovernanceProceduresMessage {
     pub proposal_procedures: Vec<ProposalProcedure>,
 
     /// Voting
-    pub voting_procedures: Vec<(DataHash, VotingProcedures)>
+    pub voting_procedures: Vec<(DataHash, VotingProcedures)>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DRepStateMessage {
+    /// Epoch which has ended
+    pub epoch: u64,
+
+    /// DRep initial deposit by id, for all active DReps.
+    pub dreps: Vec<(DRepCredential, Lovelace)>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DRepStakeDistributionMessage {
-    // DRep stake distribution by ID
-    pub data: Vec<(DRepCredential, Lovelace)>
+    /// Epoch which has ended
+    pub epoch: u64,
+
+    /// DRep stake assigned to the special "abstain" DRep.
+    pub abstain: Lovelace,
+
+    /// DRep stake assigned to the special "no confidence" DRep
+    pub no_confidence: Lovelace,
+
+    /// DRep stake distribution by ID
+    pub dreps: Vec<(DRepCredential, Lovelace)>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ProtocolParamsMessage {
+    pub params: ProtocolParams,
+}
+
+/// Generated after all governance actions for the current epoch are processed.
+/// Includes info about all actions that are accepted or expired at the epoch edge.
+/// `VotingOutcome` informs about action_id, voting outcome and votes cast for the 
+/// action. If the action is not accepted or has no associated state change (like
+/// Information), then it is included into `refunds` field. Otherwise info is 
+/// specified in `enact_state`/`withdrawals` field and not repeated in `refunds`.
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct GovernanceOutcomesMessage {
+    pub outcomes: Vec<GovernanceOutcome>
 }
 
 /// SPO state message
@@ -121,50 +164,79 @@ pub struct SPOStateMessage {
     pub epoch: u64,
 
     /// All active SPOs
-    pub spos: Vec<PoolRegistration>
+    pub spos: Vec<PoolRegistration>,
 }
 
 /// Cardano message enum
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum CardanoMessage {
-    BlockHeader(BlockHeaderMessage),           // Block header available
-    BlockBody(BlockBodyMessage),               // Block body available
-    SnapshotComplete,                          // Mithril snapshot loaded
-    ReceivedTxs(RawTxsMessage),                // Transaction available
-    GenesisComplete(GenesisCompleteMessage),   // Genesis UTXOs done + genesis params
-    UTXODeltas(UTXODeltasMessage),             // UTXO deltas received
-    TxCertificates(TxCertificatesMessage),     // Transaction certificates received
-    AddressDeltas(AddressDeltasMessage),       // Address deltas received
-    BlockFees(BlockFeesMessage),               // Total fees in a block
-    EpochActivity(EpochActivityMessage),       // Total fees and VRF keys for an epoch
-    SPOState(SPOStateMessage),                 // Active SPOs at epoch end
+    BlockHeader(BlockHeaderMessage),         // Block header available
+    BlockBody(BlockBodyMessage),             // Block body available
+    SnapshotComplete,                        // Mithril snapshot loaded
+    ReceivedTxs(RawTxsMessage),              // Transaction available
+    GenesisComplete(GenesisCompleteMessage), // Genesis UTXOs done + genesis params
+    UTXODeltas(UTXODeltasMessage),           // UTXO deltas received
+    TxCertificates(TxCertificatesMessage),   // Transaction certificates received
+    AddressDeltas(AddressDeltasMessage),     // Address deltas received
+    Withdrawals(WithdrawalsMessage),         // Withdrawals from reward accounts
+    PotDeltas(PotDeltasMessage),             // Changes to pot balances
+    BlockFees(BlockFeesMessage),             // Total fees in a block
+    EpochActivity(EpochActivityMessage),     // Total fees and VRF keys for an epoch
+    DRepState(DRepStateMessage),             // Active DReps at epoch end
+    SPOState(SPOStateMessage),               // Active SPOs at epoch end
     GovernanceProcedures(GovernanceProceduresMessage), // Governance procedures received
+
+    // Protocol Parameters
+    ProtocolParams(ProtocolParamsMessage),   // Generated by Parameter State module
+    GovernanceOutcomes(GovernanceOutcomesMessage), // Enacted updates from Governance
 
     // Stake distribution info
     DRepStakeDistribution(DRepStakeDistributionMessage), // Info about drep stake
     StakeAddressDeltas(StakeAddressDeltasMessage),       // Stake part of address deltas
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum SnapshotMessage {
+    Bootstrap(SnapshotStateMessage),
+    DumpRequest(SnapshotDumpMessage),
+    Dump(SnapshotStateMessage),
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SnapshotDumpMessage {
+    pub block_height: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum SnapshotStateMessage {
+    SPOState(SPOState),
+}
+
 // === Global message enum ===
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum Message {
-    None(()),                                  // Just so we have a simple default
+    None(()), // Just so we have a simple default
 
     // Generic messages, get of jail free cards
-    String(String),                            // Simple string
-    JSON(serde_json::Value),                   // JSON object
+    String(String),          // Simple string
+    JSON(serde_json::Value), // JSON object
 
     // Caryatid standard messages
-    Clock(ClockTickMessage),                   // Clock tick
-    RESTRequest(RESTRequest),                  // REST request
-    RESTResponse(RESTResponse),                // REST response
+    Clock(ClockTickMessage),    // Clock tick
+    RESTRequest(RESTRequest),   // REST request
+    RESTResponse(RESTResponse), // REST response
 
     // Cardano messages with attached BlockInfo
     Cardano((BlockInfo, CardanoMessage)),
+
+    // Initialize state from a snapshot
+    Snapshot(SnapshotMessage),
 }
 
 impl Default for Message {
-    fn default() -> Self { Self::None(()) }
+    fn default() -> Self {
+        Self::None(())
+    }
 }
 
 // Casts from specific Caryatid messages
@@ -196,5 +268,3 @@ impl GetRESTResponse for Message {
         }
     }
 }
-
-

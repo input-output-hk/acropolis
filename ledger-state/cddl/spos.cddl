@@ -1,0 +1,40 @@
+; This file defines the specification for the SPO State. It is based on the `PState` definition from the cardano-ledger specification.
+
+pool_parameters = [
+    operator       : keyhash
+  , vrf_keyhash    : hash_32
+  , pledge         : coin
+  , cost           : coin
+  , margin         : unit_interval
+  , reward_account : reward_account
+  , pool_owners    : nonempty_set<keyhash>
+  , relays         : [* relay]
+  , pool_metadata  : pool_metadata / nil
+]
+
+; types for codegen-cddl
+; `spo_state` provides the current state of active pools, and at which epochs upcoming pool retirements will occur
+spo_state = {
+    pools    : { * keyhash => pool_parameters }
+  , retiring : { * keyhash => epoch }
+}
+
+
+
+
+relay = [single_host_addr // single_host_name // multi_host_name]
+
+single_host_addr = (0, port / nil, ipv4 / nil, ipv6 / nil)
+
+port = uint .le 65535
+ipv4 = bytes .size 4
+ipv6 = bytes .size 16
+
+; dns_name: An A or AAAA DNS record
+single_host_name = (1, port / nil, dns_name)
+dns_name = text .size (0 .. 128)
+
+; dns_name: An SRV DNS record
+multi_host_name = (2, dns_name)
+
+pool_metadata = [url, bytes]

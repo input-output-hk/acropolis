@@ -1,14 +1,14 @@
 //! On-disk store using Sled for immutable UTXOs
 
-use crate::state::{UTXOKey, UTXOValue, ImmutableUTXOStore};
-use async_trait::async_trait;
-use sled::Db;
-use std::path::Path;
-use std::fs;
+use crate::state::{ImmutableUTXOStore, UTXOKey, UTXOValue};
 use anyhow::Result;
+use async_trait::async_trait;
 use config::Config;
-use tracing::info;
+use sled::Db;
+use std::fs;
+use std::path::Path;
 use std::sync::Arc;
+use tracing::info;
 
 const DEFAULT_DATABASE_PATH: &str = "sled-immutable-utxos";
 
@@ -19,8 +19,9 @@ pub struct SledImmutableUTXOStore {
 
 impl SledImmutableUTXOStore {
     pub fn new(config: Arc<Config>) -> Result<Self> {
-        let path = config.get_string("database-path")
-        .unwrap_or(DEFAULT_DATABASE_PATH.to_string());
+        let path = config
+            .get_string("database-path")
+            .unwrap_or(DEFAULT_DATABASE_PATH.to_string());
         info!("Storing immutable UTXOs with Sled (sync) on disk ({path})");
 
         let path = Path::new(&path);
@@ -30,14 +31,13 @@ impl SledImmutableUTXOStore {
             fs::remove_dir_all(path)?;
         }
 
-        let db = sled::open(path)?; 
+        let db = sled::open(path)?;
         Ok(Self { db })
     }
 }
 
 #[async_trait]
 impl ImmutableUTXOStore for SledImmutableUTXOStore {
-
     /// Add a UTXO
     async fn add_utxo(&self, key: UTXOKey, value: UTXOValue) -> Result<()> {
         let key_bytes = key.to_bytes();

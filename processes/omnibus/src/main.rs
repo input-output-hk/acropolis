@@ -1,26 +1,27 @@
 //! 'main' for the Acropolis omnibus process
 
-use caryatid_process::Process;
+use acropolis_common::messages::Message;
 use anyhow::Result;
-use config::{Config, File, Environment};
+use caryatid_process::Process;
+use config::{Config, Environment, File};
+use std::sync::Arc;
 use tracing::info;
 use tracing_subscriber;
-use std::sync::Arc;
-use acropolis_common::messages::Message;
 
 // External modules
-use acropolis_module_genesis_bootstrapper::GenesisBootstrapper;
-use acropolis_module_mithril_snapshot_fetcher::MithrilSnapshotFetcher;
-use acropolis_module_upstream_chain_fetcher::UpstreamChainFetcher;
-use acropolis_module_block_unpacker::BlockUnpacker;
-use acropolis_module_tx_unpacker::TxUnpacker;
-use acropolis_module_utxo_state::UTXOState;
-use acropolis_module_spo_state::SPOState;
-use acropolis_module_drep_state::DRepState;
-use acropolis_module_governance_state::GovernanceState;
-use acropolis_module_stake_delta_filter::StakeDeltaFilter;
-use acropolis_module_epoch_activity_counter::EpochActivityCounter;
 use acropolis_module_accounts_state::AccountsState;
+use acropolis_module_block_unpacker::BlockUnpacker;
+use acropolis_module_drep_state::DRepState;
+use acropolis_module_epoch_activity_counter::EpochActivityCounter;
+use acropolis_module_genesis_bootstrapper::GenesisBootstrapper;
+use acropolis_module_governance_state::GovernanceState;
+use acropolis_module_mithril_snapshot_fetcher::MithrilSnapshotFetcher;
+use acropolis_module_parameters_state::ParametersState;
+use acropolis_module_spo_state::SPOState;
+use acropolis_module_stake_delta_filter::StakeDeltaFilter;
+use acropolis_module_tx_unpacker::TxUnpacker;
+use acropolis_module_upstream_chain_fetcher::UpstreamChainFetcher;
+use acropolis_module_utxo_state::UTXOState;
 
 use caryatid_module_clock::Clock;
 use caryatid_module_rest_server::RESTServer;
@@ -29,18 +30,19 @@ use caryatid_module_spy::Spy;
 /// Standard main
 #[tokio::main]
 pub async fn main() -> Result<()> {
-
     // Initialise tracing
     tracing_subscriber::fmt::init();
 
     info!("Acropolis omnibus process");
 
     // Read the config
-    let config = Arc::new(Config::builder()
-        .add_source(File::with_name("omnibus"))
-        .add_source(Environment::with_prefix("ACROPOLIS"))
-        .build()
-        .unwrap());
+    let config = Arc::new(
+        Config::builder()
+            .add_source(File::with_name("omnibus"))
+            .add_source(Environment::with_prefix("ACROPOLIS"))
+            .build()
+            .unwrap(),
+    );
 
     // Create the process
     let mut process = Process::<Message>::create(config).await;
@@ -55,6 +57,7 @@ pub async fn main() -> Result<()> {
     SPOState::register(&mut process);
     DRepState::register(&mut process);
     GovernanceState::register(&mut process);
+    ParametersState::register(&mut process);
     StakeDeltaFilter::register(&mut process);
     EpochActivityCounter::register(&mut process);
     AccountsState::register(&mut process);
@@ -70,4 +73,3 @@ pub async fn main() -> Result<()> {
     info!("Exiting");
     Ok(())
 }
-

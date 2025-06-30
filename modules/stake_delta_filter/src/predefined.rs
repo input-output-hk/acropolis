@@ -1,7 +1,24 @@
-pub const POINTER_CACHE: [(&str,&str);1] = [
-("Main", r#"
+pub const POINTER_CACHE: [(&str, &str); 1] = [(
+    "Main",
+    r#"
 {
   "pointer_map": [
+    [
+      {
+        "slot": 18446744073709551615,
+        "tx_index": 1221092,
+        "cert_index": 2
+      },
+      null
+    ],
+    [
+      {
+        "slot": 16292793057,
+        "tx_index": 1011302,
+        "cert_index": 20
+      },
+      null
+    ],
     [
       {
         "slot": 124,
@@ -122,6 +139,8 @@ pub const POINTER_CACHE: [(&str,&str);1] = [
       null
     ]
   ],
+  "conway_start_slot": 133660855,
   "max_slot": 154396745
 }
-"#)];
+"#,
+)];

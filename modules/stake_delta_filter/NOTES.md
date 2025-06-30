@@ -29,3 +29,8 @@ Open questions
 1. How a network ID could be retrieved? (Main/Test for the beginning, full network ID 
 at most).
 
+2. Is it possible to have a pointer to the same slot? I believe not (one cannot know
+the slot/block no before his transaction is processed).
+
+If it would be possible, then we need proper order of incoming messages processing
+(first certificates for a block, then transactions).

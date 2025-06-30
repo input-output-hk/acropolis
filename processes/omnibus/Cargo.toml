@@ -8,11 +8,11 @@ description = "Acropolis omnibus process containing every module"
 license = "Apache-2.0"
 
 [dependencies]
-caryatid_process = "0.9"
-caryatid_sdk = "0.9"
-caryatid_module_clock = "0.9"
-caryatid_module_rest_server = "0.10"
-caryatid_module_spy = "0.9"
+caryatid_process = "0.12"
+caryatid_sdk = "0.12"
+caryatid_module_clock = "0.12"
+caryatid_module_rest_server = "0.13"
+caryatid_module_spy = "0.12"
 
 # Core message definition
 acropolis_common = { path = "../../common" }
@@ -27,6 +27,7 @@ acropolis_module_utxo_state = { path = "../../modules/utxo_state" }
 acropolis_module_spo_state = { path = "../../modules/spo_state" }
 acropolis_module_drep_state = { path = "../../modules/drep_state" }
 acropolis_module_governance_state = { path = "../../modules/governance_state" }
+acropolis_module_parameters_state = { path = "../../modules/parameters_state" }
 acropolis_module_stake_delta_filter = { path = "../../modules/stake_delta_filter" }
 acropolis_module_epoch_activity_counter = { path = "../../modules/epoch_activity_counter" }
 acropolis_module_accounts_state = { path = "../../modules/accounts_state" }

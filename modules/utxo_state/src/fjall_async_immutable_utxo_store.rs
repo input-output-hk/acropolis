@@ -1,14 +1,17 @@
 //! On-disk store using Fjall for immutable UTXOs
 
 use crate::state::{ImmutableUTXOStore, UTXOKey, UTXOValue};
-use async_trait::async_trait;
-use fjall::{Keyspace, Partition, PartitionCreateOptions, PersistMode};
-use std::path::Path;
-use std::fs;
-use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
-use tokio::task;
 use anyhow::Result;
+use async_trait::async_trait;
 use config::Config;
+use fjall::{Keyspace, Partition, PartitionCreateOptions, PersistMode};
+use std::fs;
+use std::path::Path;
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
+use tokio::task;
 use tracing::info;
 
 pub struct FjallAsyncImmutableUTXOStore {
@@ -25,8 +28,8 @@ const PARTITION_NAME: &str = "utxos";
 impl FjallAsyncImmutableUTXOStore {
     /// Create a new Fjall-backed UTXO store with default flush threshold (1000)
     pub fn new(config: Arc<Config>) -> Result<Self> {
-
-        let path = config.get_string("database-path")
+        let path = config
+            .get_string("database-path")
             .unwrap_or(DEFAULT_DATABASE_PATH.to_string());
         info!("Storing immutable UTXOs with Fjall (async) on disk ({path})");
 
@@ -36,15 +39,14 @@ impl FjallAsyncImmutableUTXOStore {
         if path.exists() {
             fs::remove_dir_all(path)?;
         }
-    
+
         let mut fjall_config = fjall::Config::new(path);
         fjall_config = fjall_config.manual_journal_persist(true); // We're in control of flushing
         let keyspace = fjall_config.open()?;
-        let partition = keyspace.open_partition(PARTITION_NAME,
-            PartitionCreateOptions::default())?;
+        let partition =
+            keyspace.open_partition(PARTITION_NAME, PartitionCreateOptions::default())?;
 
-        let flush_every = config.get_int("flush-every")
-            .unwrap_or(DEFAULT_FLUSH_EVERY);
+        let flush_every = config.get_int("flush-every").unwrap_or(DEFAULT_FLUSH_EVERY);
 
         Ok(Self {
             keyspace,
@@ -118,9 +120,6 @@ impl ImmutableUTXOStore for FjallAsyncImmutableUTXOStore {
 
     async fn len(&self) -> Result<usize> {
         let partition = self.partition.clone();
-        Ok(task::spawn_blocking(move || {
-            Ok::<_, anyhow::Error>(partition.len()?)
-        })
-        .await??)
+        Ok(task::spawn_blocking(move || Ok::<_, anyhow::Error>(partition.len()?)).await??)
     }
 }

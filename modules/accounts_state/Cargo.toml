@@ -9,7 +9,7 @@ description = "Stake and rewards accounts state Tracker"
 license = "Apache-2.0"
 
 [dependencies]
-caryatid_sdk = "0.9.0"
+caryatid_sdk = "0.12"
 acropolis_common = { path = "../../common" }
 anyhow = "1.0"
 tokio = { version = "1", features = ["full"] }
@@ -21,6 +21,8 @@ serde_with = { version = "3.12.0", features = ["hex"] }
 hex = "0.4.3"
 imbl = { version = "5.0.0", features = ["serde"] }
 bigdecimal = "0.4.8"
+rayon = "1.10.0"
+dashmap = "6.1.0"
 
 [lib]
 path = "src/accounts_state.rs"

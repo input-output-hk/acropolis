@@ -9,7 +9,7 @@ description = "Mithril snapshot fetcher Caryatid module for Acropolis"
 license = "Apache-2.0"
 
 [dependencies]
-caryatid_sdk = "0.9.0"
+caryatid_sdk = "0.12"
 acropolis_common = { path = "../../common" }
 pallas = { version = "0.32.0", features = ["hardano"] }
 anyhow = "1.0"

@@ -37,8 +37,7 @@ impl VolatileIndex {
         if number == self.first_block + self.blocks.len() as u64 {
             // Add empty UTXO set
             self.blocks.push_back(Vec::new());
-        }
-        else {
+        } else {
             error!("Block {number} added to volatile index out of order")
         }
     }
@@ -47,21 +46,23 @@ impl VolatileIndex {
     pub fn add_utxo(&mut self, utxo: &UTXOKey) {
         if let Some(last) = self.blocks.back_mut() {
             last.push(utxo.clone());
-        }  
+        }
     }
 
     /// Prune all blocks before the given boundary, returning a vector of
     /// UTXOs to delete
-    pub fn prune_before(&mut self, boundary: u64) -> Vec<UTXOKey>
-    {
+    pub fn prune_before(&mut self, boundary: u64) -> Vec<UTXOKey> {
         let mut utxos = Vec::<UTXOKey>::new();
 
         // Remove blocks before boundary, calling back for all UTXOs in them
         while self.first_block < boundary {
             if let Some(block) = self.blocks.pop_front() {
-                for utxo in block { utxos.push(utxo); }
+                for utxo in block {
+                    utxos.push(utxo);
+                }
+            } else {
+                break;
             }
-            else { break; }
 
             self.first_block += 1;
         }
@@ -71,29 +72,30 @@ impl VolatileIndex {
 
     /// Prune all blocks at or after the given boundary returning a vector of
     /// UTXOs to delete
-    pub fn prune_on_or_after(&mut self, boundary: u64) -> Vec<UTXOKey>
-    {
+    pub fn prune_on_or_after(&mut self, boundary: u64) -> Vec<UTXOKey> {
         let mut utxos = Vec::<UTXOKey>::new();
 
-        if self.first_block == 0 { return utxos; }
+        if self.first_block == 0 {
+            return utxos;
+        }
         let mut last_block = self.first_block + self.blocks.len() as u64 - 1;
 
         // Remove blocks before boundary, calling back for all UTXOs in them
         while last_block >= boundary {
             if let Some(block) = self.blocks.pop_back() {
-                for utxo in block { utxos.push(utxo); }
+                for utxo in block {
+                    utxos.push(utxo);
+                }
+            } else {
+                break;
             }
-            else { break; }
 
             last_block -= 1;
         }
 
         return utxos;
     }
-
-    
 }
-
 
 // -- Tests --
 #[cfg(test)]
@@ -119,7 +121,6 @@ mod tests {
         assert_eq!(42, index.first_block);
         assert_eq!(2, index.blocks.len());
         assert!(index.blocks[1].is_empty());
-
     }
 
     #[test]
@@ -166,7 +167,7 @@ mod tests {
         assert_eq!(1, pruned[0].index);
         assert_eq!(2, pruned[1].index);
     }
- 
+
     #[test]
     fn prune_on_or_after_deletes_and_calls_back_with_utxos() {
         let mut index = VolatileIndex::new();
