@@ -1,18 +1,16 @@
 //! Acropolis UTXOState: State storage
+use crate::volatile_index::VolatileIndex;
+use acropolis_common::{
+    messages::UTXODeltasMessage, params::SECURITY_PARAMETER_K, Address, BlockInfo, BlockStatus,
+    TxInput, TxOutput, UTXODelta,
+};
+use anyhow::Result;
+use async_trait::async_trait;
+use hex::encode;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
-use acropolis_common::{
-    Address, BlockInfo, BlockStatus,
-    TxInput, TxOutput, UTXODelta,
-    messages::UTXODeltasMessage,
-    params::SECURITY_PARAMETER_K,
-};
-use tracing::{debug, info, error};
-use hex::encode;
 use std::sync::Arc;
-use async_trait::async_trait;
-use anyhow::Result;
-use crate::volatile_index::VolatileIndex;
+use tracing::{debug, error, info};
 
 /// Key of ledger state store
 #[derive(Debug, Clone, Eq)]
@@ -133,8 +131,7 @@ impl State {
     }
 
     /// Register the delta observer
-    pub fn register_address_delta_observer(&mut self, 
-            observer: Arc<dyn AddressDeltaObserver>) {
+    pub fn register_address_delta_observer(&mut self, observer: Arc<dyn AddressDeltaObserver>) {
         self.address_delta_observer = Some(observer);
     }
 
@@ -142,7 +139,7 @@ impl State {
     pub async fn lookup_utxo(&self, key: &UTXOKey) -> Result<Option<UTXOValue>> {
         match self.volatile_utxos.get(key) {
             Some(key) => Ok(Some(key.clone())),
-            None => Ok(self.immutable_utxos.lookup_utxo(key).await?)
+            None => Ok(self.immutable_utxos.lookup_utxo(key).await?),
         }
     }
 
@@ -150,15 +147,18 @@ impl State {
     /// but no spent_at
     pub async fn count_valid_utxos(&self) -> usize {
         return self.volatile_utxos.len() - self.volatile_spent.len()
-             + self.immutable_utxos.len().await.unwrap_or_default();
+            + self.immutable_utxos.len().await.unwrap_or_default();
     }
 
     /// Observe a block for statistics and handle rollbacks
     pub async fn observe_block(&mut self, block: &BlockInfo) -> Result<()> {
-
         match block.status {
             BlockStatus::RolledBack => {
-                info!(slot = block.slot, number = block.number, "Rollback received");
+                info!(
+                    slot = block.slot,
+                    number = block.number,
+                    "Rollback received"
+                );
 
                 // Delete all UTXOs created in or after this block
                 let utxos = self.volatile_created.prune_on_or_after(block.number);
@@ -166,10 +166,12 @@ impl State {
                     if let Some(utxo) = self.volatile_utxos.remove(&key) {
                         // Tell the observer to debit it
                         if let Some(observer) = self.address_delta_observer.as_ref() {
-                            observer.observe_delta(&utxo.address, -(utxo.value as i64)).await;
+                            observer
+                                .observe_delta(&utxo.address, -(utxo.value as i64))
+                                .await;
                         }
                     }
-                };
+                }
 
                 // Any remaining (which were necessarily created before this block)
                 // that were spent in or after this block can be reinstated
@@ -178,10 +180,12 @@ impl State {
                     if let Some(utxo) = self.volatile_utxos.get(&key) {
                         // Tell the observer to recredit it
                         if let Some(observer) = self.address_delta_observer.as_ref() {
-                            observer.observe_delta(&utxo.address, utxo.value as i64).await;
+                            observer
+                                .observe_delta(&utxo.address, utxo.value as i64)
+                                .await;
                         }
                     }
-                };
+                }
 
                 // Let the pruner compress the map
             }
@@ -223,7 +227,9 @@ impl State {
 
                 // Tell the observer it's spent
                 if let Some(observer) = self.address_delta_observer.as_ref() {
-                    observer.observe_delta(&utxo.address, -(utxo.value as i64)).await;
+                    observer
+                        .observe_delta(&utxo.address, -(utxo.value as i64))
+                        .await;
                 }
 
                 match block.status {
@@ -238,8 +244,12 @@ impl State {
                 }
             }
             _ => {
-                error!("UTXO {}:{} unknown in block {}",
-                    encode(&key.hash), key.index, block.number);
+                error!(
+                    "UTXO {}:{} unknown in block {}",
+                    encode(&key.hash),
+                    key.index,
+                    block.number
+                );
             }
         }
 
@@ -247,9 +257,7 @@ impl State {
     }
 
     /// Observe an output UXTO creation
-    pub async fn observe_output(&mut self,  output: &TxOutput, block: &BlockInfo)
-        -> Result<()> {
-
+    pub async fn observe_output(&mut self, output: &TxOutput, block: &BlockInfo) -> Result<()> {
         if tracing::enabled!(tracing::Level::DEBUG) {
             debug!("UTXO >> {}:{}", encode(&output.tx_hash), output.index);
             debug!("        - adding {} to {:?}", output.value, output.address);
@@ -269,8 +277,12 @@ impl State {
                 self.volatile_created.add_utxo(&key);
 
                 if self.volatile_utxos.insert(key.clone(), value).is_some() {
-                    error!("Saw UTXO {}:{} before, in block {}",
-                    encode(&output.tx_hash), output.index, block.number);
+                    error!(
+                        "Saw UTXO {}:{} before, in block {}",
+                        encode(&output.tx_hash),
+                        output.index,
+                        block.number
+                    );
                 }
             }
             BlockStatus::Bootstrap | BlockStatus::Immutable => {
@@ -282,7 +294,9 @@ impl State {
 
         // Tell the observer
         if let Some(observer) = self.address_delta_observer.as_ref() {
-            observer.observe_delta(&output.address, output.value as i64).await;
+            observer
+                .observe_delta(&output.address, output.value as i64)
+                .await;
         }
 
         Ok(())
@@ -300,7 +314,7 @@ impl State {
             let spent_utxos = self.volatile_spent.prune_before(boundary);
             if !spent_utxos.is_empty() {
                 info!("Removing {} immutably spent UTXOs", spent_utxos.len());
-                for key in spent_utxos { 
+                for key in spent_utxos {
                     // Remove from volatile, and only if not there, from immutable
                     if self.volatile_utxos.remove(&key).is_none() {
                         self.immutable_utxos.delete_utxo(&key).await?;
@@ -311,7 +325,10 @@ impl State {
             // Prune the created index too, and transfer the UTXOs to immutable
             let created_utxos = self.volatile_created.prune_before(boundary);
             if !created_utxos.is_empty() {
-                info!("Moving {} volatile UTXOs into immutable", created_utxos.len());
+                info!(
+                    "Moving {} volatile UTXOs into immutable",
+                    created_utxos.len()
+                );
                 for key in created_utxos {
                     let value = self.volatile_utxos.remove(&key);
                     if let Some(value) = value {
@@ -330,7 +347,8 @@ impl State {
     async fn log_stats(&self) {
         let n_immutable = self.immutable_utxos.len().await.unwrap_or_default();
         let n_valid = self.count_valid_utxos().await;
-        info!(slot = self.last_slot,
+        info!(
+            slot = self.last_slot,
             number = self.last_number,
             immutable_utxos = n_immutable,
             volatile_utxos = self.volatile_utxos.len(),
@@ -347,7 +365,6 @@ impl State {
 
     /// Handle a message
     pub async fn handle(&mut self, block: &BlockInfo, deltas: &UTXODeltasMessage) -> Result<()> {
-
         // Start the block for observer
         if let Some(observer) = self.address_delta_observer.as_mut() {
             observer.start_block(&block).await;
@@ -357,20 +374,21 @@ impl State {
         self.observe_block(&block).await?;
 
         // Process the deltas
-        for delta in &deltas.deltas {  // UTXODelta
+        for delta in &deltas.deltas {
+            // UTXODelta
 
-           match delta {
-               UTXODelta::Input(tx_input) => {
-                   self.observe_input(&tx_input, &block).await?;
-               },
+            match delta {
+                UTXODelta::Input(tx_input) => {
+                    self.observe_input(&tx_input, &block).await?;
+                }
 
-               UTXODelta::Output(tx_output) => {
-                   self.observe_output(&tx_output, &block).await?;
-               },
+                UTXODelta::Output(tx_output) => {
+                    self.observe_output(&tx_output, &block).await?;
+                }
 
-               _ => {}
-           }
-       }
+                _ => {}
+            }
+        }
 
         // End the block for observer
         if let Some(observer) = self.address_delta_observer.as_mut() {
@@ -385,24 +403,24 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acropolis_common::{ByronAddress, Era};
-    use tokio::sync::Mutex;
     use crate::InMemoryImmutableUTXOStore;
+    use acropolis_common::{ByronAddress, Era};
     use config::Config;
+    use tokio::sync::Mutex;
 
     // Create an address for testing - we use Byron just because it's easier to
     // create and test the payload
     fn create_address(n: u8) -> Address {
-        Address::Byron(ByronAddress {
-            payload: vec!(n)
-        })
+        Address::Byron(ByronAddress { payload: vec![n] })
     }
 
     // Create a block for testing
     fn create_block(status: BlockStatus, slot: u64, number: u64) -> BlockInfo {
         BlockInfo {
-            status, slot, number,
-            hash: vec!(),
+            status,
+            slot,
+            number,
+            hash: vec![],
             epoch: 99,
             new_epoch: false,
             era: Era::Byron,
@@ -428,10 +446,10 @@ mod tests {
     async fn observe_output_adds_to_immutable_utxos() {
         let mut state = new_state();
         let output = TxOutput {
-           tx_hash: vec!(42),
-           index: 0,
-           address: create_address(99),
-           value: 42,
+            tx_hash: vec![42],
+            index: 0,
+            address: create_address(99),
+            value: 42,
         };
 
         let block = create_block(BlockStatus::Immutable, 1, 1);
@@ -442,12 +460,14 @@ mod tests {
         let key = UTXOKey::new(&output.tx_hash, output.index);
         match state.lookup_utxo(&key).await.unwrap() {
             Some(value) => {
-                assert!(matches!(&value.address, Address::Byron(ByronAddress{ payload }) 
-                    if payload[0] == 99));
+                assert!(
+                    matches!(&value.address, Address::Byron(ByronAddress{ payload })
+                    if payload[0] == 99)
+                );
                 assert_eq!(42, value.value);
-            },
+            }
 
-            _ => panic!("UTXO not found")
+            _ => panic!("UTXO not found"),
         }
     }
 
@@ -455,7 +475,7 @@ mod tests {
     async fn observe_input_spends_utxo() {
         let mut state = new_state();
         let output = TxOutput {
-            tx_hash: vec!(42),
+            tx_hash: vec![42],
             index: 0,
             address: create_address(99),
             value: 42,
@@ -471,7 +491,6 @@ mod tests {
             index: output.index,
         };
 
-
         let block2 = create_block(BlockStatus::Immutable, 2, 2);
         state.observe_input(&input, &block2).await.unwrap();
         assert_eq!(0, state.immutable_utxos.len().await.unwrap());
@@ -482,7 +501,7 @@ mod tests {
     async fn rollback_removes_future_created_utxos() {
         let mut state = new_state();
         let output = TxOutput {
-            tx_hash: vec!(42),
+            tx_hash: vec![42],
             index: 0,
             address: create_address(99),
             value: 42,
@@ -507,7 +526,7 @@ mod tests {
 
         // Create the UTXO in block 10
         let output = TxOutput {
-            tx_hash: vec!(42),
+            tx_hash: vec![42],
             index: 0,
             address: create_address(99),
             value: 42,
@@ -544,7 +563,7 @@ mod tests {
     async fn prune_shifts_new_utxos_into_immutable() {
         let mut state = new_state();
         let output = TxOutput {
-            tx_hash: vec!(42),
+            tx_hash: vec![42],
             index: 0,
             address: create_address(99),
             value: 42,
@@ -576,7 +595,7 @@ mod tests {
     async fn prune_deletes_old_spent_utxos() {
         let mut state = new_state();
         let output = TxOutput {
-            tx_hash: vec!(42),
+            tx_hash: vec![42],
             index: 0,
             address: create_address(99),
             value: 42,
@@ -619,15 +638,15 @@ mod tests {
 
     impl TestDeltaObserver {
         fn new() -> Self {
-            Self { balance: Mutex::new(0) }
+            Self {
+                balance: Mutex::new(0),
+            }
         }
     }
 
     #[async_trait]
     impl AddressDeltaObserver for TestDeltaObserver {
-        async fn start_block(&self, _block: &BlockInfo) {
-
-        }
+        async fn start_block(&self, _block: &BlockInfo) {}
         async fn observe_delta(&self, address: &Address, delta: i64) {
             assert!(matches!(&address, Address::Byron(ByronAddress{ payload })
                 if payload[0] == 99));
@@ -637,9 +656,7 @@ mod tests {
             *balance += delta;
         }
 
-        async fn finalise_block(&self, _block: &BlockInfo) {
-
-        }
+        async fn finalise_block(&self, _block: &BlockInfo) {}
     }
 
     #[tokio::test]
@@ -649,7 +666,7 @@ mod tests {
         state.register_address_delta_observer(observer.clone());
 
         let output = TxOutput {
-            tx_hash: vec!(42),
+            tx_hash: vec![42],
             index: 0,
             address: create_address(99),
             value: 42,
@@ -680,7 +697,7 @@ mod tests {
         state.register_address_delta_observer(observer.clone());
 
         let output = TxOutput {
-            tx_hash: vec!(42),
+            tx_hash: vec![42],
             index: 0,
             address: create_address(99),
             value: 42,
@@ -709,7 +726,7 @@ mod tests {
 
         // Create the UTXO in block 10
         let output = TxOutput {
-            tx_hash: vec!(42),
+            tx_hash: vec![42],
             index: 0,
             address: create_address(99),
             value: 42,
@@ -744,5 +761,4 @@ mod tests {
         assert_eq!(1, state.count_valid_utxos().await);
         assert_eq!(42, *observer.balance.lock().await);
     }
-
 }

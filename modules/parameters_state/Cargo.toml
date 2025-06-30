@@ -1,0 +1,30 @@
+# Acropolis Protocol Parameters State Module
+
+[package]
+name = "acropolis_module_parameters_state"
+version = "0.1.0"
+edition = "2021"
+authors = ["Dmitry Shtukenberg <dmitry.shtukenberg@iohk.io>"]
+description = "Protocol Parameters Tracker"
+license = "Apache-2.0"
+build = "build.rs"
+
+[dependencies]
+acropolis_common = { path = "../../common" }
+anyhow = "1.0"
+async-trait = "0.1"
+caryatid_sdk = "0.12"
+config = "0.15.11"
+hex = "0.4.3"
+pallas = "0.32.0"
+serde = { version = "1.0.214", features = ["derive"] }
+serde_json = "1.0"
+serde_with = { version = "3.12.0", features = ["hex"] }
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1.40"
+
+[build-dependencies]
+reqwest = { version = "0.11", features = ["blocking"] }
+
+[lib]
+path = "src/parameters_state.rs"

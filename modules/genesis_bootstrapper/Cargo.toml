@@ -10,16 +10,15 @@ license = "Apache-2.0"
 build = "build.rs"
 
 [dependencies]
-caryatid_sdk = "0.9.0"
 acropolis_common = { path = "../../common" }
-hex = "0.4"
-fraction = "0.15"
-pallas = "0.32.0"
 anyhow = "1.0"
-tokio = { version = "1", features = ["full"] }
+caryatid_sdk = "0.12"
 config = "0.15.11"
-tracing = "0.1.40"
+hex = "0.4"
+pallas = "0.32.0"
 serde_json = "1.0.138"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1.40"
 
 [build-dependencies]
 reqwest = { version = "0.11", features = ["blocking"] }

@@ -1,14 +1,17 @@
 //! Acropolis epoch activity counter module for Caryatid
 //! Unpacks block bodies to get transaction fees
 
-use caryatid_sdk::{Context, Module, module, message_bus::Subscription};
-use acropolis_common::{Era, messages::{Message, CardanoMessage}};
+use acropolis_common::{
+    messages::{CardanoMessage, Message},
+    Era,
+};
+use anyhow::Result;
+use caryatid_sdk::{message_bus::Subscription, module, Context, Module};
+use config::Config;
+use pallas::ledger::traverse::MultiEraHeader;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use anyhow::Result;
-use config::Config;
-use tracing::{info, error};
-use pallas::ledger::traverse::MultiEraHeader;
+use tracing::{error, info};
 
 mod state;
 use state::State;
@@ -25,14 +28,16 @@ const DEFAULT_PUBLISH_TOPIC: &str = "cardano.epoch.activity";
 )]
 pub struct EpochActivityCounter;
 
-impl EpochActivityCounter
-{
+impl EpochActivityCounter {
     /// Run loop
-    async fn run(context: Arc<Context<Message>>, config: Arc<Config>,
-                 mut headers_subscription: Box<dyn Subscription<Message>>,
-                 mut fees_subscription: Box<dyn Subscription<Message>>) -> Result<()> {
-
-        let publish_topic = config.get_string("publish-topic")
+    async fn run(
+        context: Arc<Context<Message>>,
+        config: Arc<Config>,
+        mut headers_subscription: Box<dyn Subscription<Message>>,
+        mut fees_subscription: Box<dyn Subscription<Message>>,
+    ) -> Result<()> {
+        let publish_topic = config
+            .get_string("publish-topic")
             .unwrap_or(DEFAULT_PUBLISH_TOPIC.to_string());
         info!("Publishing on '{publish_topic}'");
 
@@ -49,12 +54,13 @@ impl EpochActivityCounter
             let (_, message) = headers_message_f.await?;
             match message.as_ref() {
                 Message::Cardano((block, CardanoMessage::BlockHeader(header_msg))) => {
-
                     // End of epoch?
-                    if block.new_epoch {
+                    if block.new_epoch && block.epoch > 0 {
                         let mut state = state.lock().await;
-                        let msg = state.end_epoch(&block, block.epoch-1);
-                        context.message_bus.publish(&publish_topic, msg)
+                        let msg = state.end_epoch(&block, block.epoch - 1);
+                        context
+                            .message_bus
+                            .publish(&publish_topic, msg)
                             .await
                             .unwrap_or_else(|e| error!("Failed to publish: {e}"));
                     }
@@ -80,11 +86,11 @@ impl EpochActivityCounter
                             }
                         }
 
-                        Err(e) => error!("Can't decode header {}: {e}", block.slot)
+                        Err(e) => error!("Can't decode header {}: {e}", block.slot),
                     }
                 }
 
-                _ => error!("Unexpected message type: {message:?}")
+                _ => error!("Unexpected message type: {message:?}"),
             }
 
             // Handle block fees second - this is what generates the EpochActivity message
@@ -95,32 +101,34 @@ impl EpochActivityCounter
                     state.handle_fees(&block, fees_msg.total_fees);
                 }
 
-                _ => error!("Unexpected message type: {message:?}")
+                _ => error!("Unexpected message type: {message:?}"),
             }
         }
     }
 
     /// Main init function
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
-
         // Get configuration
-        let subscribe_headers_topic = config.get_string("subscribe-headers-topic")
+        let subscribe_headers_topic = config
+            .get_string("subscribe-headers-topic")
             .unwrap_or(DEFAULT_SUBSCRIBE_HEADERS_TOPIC.to_string());
         info!("Creating subscriber for headers on '{subscribe_headers_topic}'");
 
-        let subscribe_fees_topic = config.get_string("subscribe-fees-topic")
+        let subscribe_fees_topic = config
+            .get_string("subscribe-fees-topic")
             .unwrap_or(DEFAULT_SUBSCRIBE_FEES_TOPIC.to_string());
         info!("Creating subscriber for fees on '{subscribe_fees_topic}'");
 
         // Subscribe
-        let headers_subscription = context.message_bus.register(&subscribe_headers_topic).await?;
-        let fees_subscription = context.message_bus.register(&subscribe_fees_topic).await?;
+        let headers_subscription = context.subscribe(&subscribe_headers_topic).await?;
+        let fees_subscription = context.subscribe(&subscribe_fees_topic).await?;
 
         // Start run task
         let run_context = context.clone();
         context.run(async move {
             Self::run(run_context, config, headers_subscription, fees_subscription)
-                .await.unwrap_or_else(|e| error!("Failed: {e}"));
+                .await
+                .unwrap_or_else(|e| error!("Failed: {e}"));
         });
 
         Ok(())
