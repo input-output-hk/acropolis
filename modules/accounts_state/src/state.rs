@@ -9,6 +9,7 @@ use imbl::HashMap;
 use tracing::{error, info};
 use serde::{Serializer, ser::SerializeMap};
 use serde_with::{serde_as, hex::Hex, SerializeAs, ser::SerializeAsWrap};
+use crate::rewards;
 
 struct HashMapSerial<KAs, VAs>(std::marker::PhantomData<(KAs, VAs)>);
 
@@ -79,6 +80,43 @@ impl State {
         Ok(())
     }
 
+    /// Calculate rewards
+    pub fn calculate_rewards(&mut self) {
+
+        // NOTE:  This should all be done in bigdecimal
+
+        // For each pool, calculate the total stake, including its own and
+        // from other stake addresses
+
+        // Calculate total supply (total in circulation + treasury) or
+        // equivalently max-supply - reserves - this is the denominator
+        // for sigma, z0, s
+
+        // Run the calculation in
+        // https://docs.cardano.org/about-cardano/learn/pledging-rewards
+        // Requires:
+        //   R = total fees + monetary expansion (reserves * ?)
+        //   a0 parameter
+        //   sigma = total stake
+        //   z0 = pool saturation size (1/k)
+
+        // This gives us the optimum reward for the pool for this epoch
+
+        // Adjust for actual performance *= B/sigma-a.
+        // Beta = fraction of all blocks produced this epoch
+        // sigma-a = delegated stake / total delegated stake
+
+        // => Total rewards for this pool
+
+        // Subtract fixed costs
+        // Subtract margin
+        // Split remainder in proportional to delegated stake, including owners pledge
+
+        // Move from reserves to reward accounts
+
+        // Note: Also move from reserves to treasury some fraction of that taken
+    }
+
     /// Handle an EpochActivityMessage giving total fees and block counts by VRF key for
     /// the just-ended epoch
     pub fn handle_epoch_activity(&mut self,
@@ -96,6 +134,7 @@ impl State {
             }
         }
 
+        self.calculate_rewards();
         Ok(())
     }
 

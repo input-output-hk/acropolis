@@ -16,6 +16,7 @@ use serde_json;
 
 mod state;
 use state::State;
+mod rewards;
 
 const DEFAULT_SPO_STATE_TOPIC: &str = "cardano.spo.state";
 const DEFAULT_EPOCH_ACTIVITY_TOPIC: &str = "cardano.epoch.activity";
