@@ -19,9 +19,7 @@ pub struct SledImmutableUTXOStore {
 
 impl SledImmutableUTXOStore {
     pub fn new(config: Arc<Config>) -> Result<Self> {
-        let path = config
-            .get_string("database-path")
-            .unwrap_or(DEFAULT_DATABASE_PATH.to_string());
+        let path = config.get_string("database-path").unwrap_or(DEFAULT_DATABASE_PATH.to_string());
         info!("Storing immutable UTXOs with Sled (sync) on disk ({path})");
 
         let path = Path::new(&path);

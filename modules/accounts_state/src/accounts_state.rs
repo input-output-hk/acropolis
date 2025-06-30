@@ -262,8 +262,6 @@ impl AccountsState {
 
                     _ => error!("Unexpected message type: {message:?}"),
                 }
-
-
             }
 
             // Commit the new state
@@ -278,9 +276,8 @@ impl AccountsState {
         // Get configuration
 
         // Subscription topics
-        let spo_state_topic = config
-            .get_string("spo-state-topic")
-            .unwrap_or(DEFAULT_SPO_STATE_TOPIC.to_string());
+        let spo_state_topic =
+            config.get_string("spo-state-topic").unwrap_or(DEFAULT_SPO_STATE_TOPIC.to_string());
         info!("Creating SPO state subscriber on '{spo_state_topic}'");
 
         let epoch_activity_topic = config
@@ -293,14 +290,12 @@ impl AccountsState {
             .unwrap_or(DEFAULT_TX_CERTIFICATES_TOPIC.to_string());
         info!("Creating Tx certificates subscriber on '{tx_certificates_topic}'");
 
-        let withdrawals_topic = config
-            .get_string("withdrawals-topic")
-            .unwrap_or(DEFAULT_WITHDRAWALS_TOPIC.to_string());
+        let withdrawals_topic =
+            config.get_string("withdrawals-topic").unwrap_or(DEFAULT_WITHDRAWALS_TOPIC.to_string());
         info!("Creating withdrawals subscriber on '{withdrawals_topic}'");
 
-        let pot_deltas_topic = config
-            .get_string("pot-deltas-topic")
-            .unwrap_or(DEFAULT_POT_DELTAS_TOPIC.to_string());
+        let pot_deltas_topic =
+            config.get_string("pot-deltas-topic").unwrap_or(DEFAULT_POT_DELTAS_TOPIC.to_string());
         info!("Creating pots subscriber on '{pot_deltas_topic}'");
 
         let stake_deltas_topic = config
@@ -308,9 +303,8 @@ impl AccountsState {
             .unwrap_or(DEFAULT_STAKE_DELTAS_TOPIC.to_string());
         info!("Creating stake deltas subscriber on '{stake_deltas_topic}'");
 
-        let drep_state_topic = config
-            .get_string("drep-state-topic")
-            .unwrap_or(DEFAULT_DREP_STATE_TOPIC.to_string());
+        let drep_state_topic =
+            config.get_string("drep-state-topic").unwrap_or(DEFAULT_DREP_STATE_TOPIC.to_string());
         info!("Creating DRep state subscriber on '{drep_state_topic}'");
 
         let parameters_topic = config
@@ -328,20 +322,16 @@ impl AccountsState {
             .unwrap_or(DEFAULT_HANDLE_STAKE_TOPIC.to_string());
         info!("Creating request handler on '{handle_stake_topic}'");
 
-        let handle_spdd_topic = config
-            .get_string("handle-spdd-topic")
-            .unwrap_or(DEFAULT_HANDLE_SPDD_TOPIC.to_string());
+        let handle_spdd_topic =
+            config.get_string("handle-spdd-topic").unwrap_or(DEFAULT_HANDLE_SPDD_TOPIC.to_string());
         info!("Creating request handler on '{handle_spdd_topic}'");
 
-        let handle_pots_topic = config
-            .get_string("handle-pots-topic")
-            .unwrap_or(DEFAULT_HANDLE_POTS_TOPIC.to_string());
+        let handle_pots_topic =
+            config.get_string("handle-pots-topic").unwrap_or(DEFAULT_HANDLE_POTS_TOPIC.to_string());
         info!("Creating request handler on '{handle_pots_topic}'");
 
-
-        let handle_drdd_topic = config
-            .get_string("handle-drdd-topic")
-            .unwrap_or(DEFAULT_HANDLE_DRDD_TOPIC.to_string());
+        let handle_drdd_topic =
+            config.get_string("handle-drdd-topic").unwrap_or(DEFAULT_HANDLE_DRDD_TOPIC.to_string());
         info!("Creating request handler on '{handle_drdd_topic}'");
 
         // Create history
@@ -401,11 +391,8 @@ impl AccountsState {
             async move {
                 if let Some(state) = history.lock().await.current() {
                     // Use hex for SPO ID
-                    let spdd: HashMap<String, u64> = state
-                        .generate_spdd()
-                        .iter()
-                        .map(|(k, v)| (hex::encode(k), *v))
-                        .collect();
+                    let spdd: HashMap<String, u64> =
+                        state.generate_spdd().iter().map(|(k, v)| (hex::encode(k), *v)).collect();
                     match serde_json::to_string(&spdd) {
                         Ok(body) => Ok(RESTResponse::with_json(200, &body)),
                         Err(error) => Err(anyhow!("{:?}", error)),
@@ -468,11 +455,7 @@ impl AccountsState {
                 if let Message::Clock(message) = message.as_ref() {
                     if (message.number % 60) == 0 {
                         if let Some(state) = history_tick.lock().await.current() {
-                            state
-                                .tick()
-                                .await
-                                .inspect_err(|e| error!("Tick error: {e}"))
-                                .ok();
+                            state.tick().await.inspect_err(|e| error!("Tick error: {e}")).ok();
                         }
                     }
                 }

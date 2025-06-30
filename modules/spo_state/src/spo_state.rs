@@ -32,9 +32,8 @@ pub struct SPOState;
 impl SPOState {
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // Get configuration
-        let subscribe_topic = config
-            .get_string("subscribe-topic")
-            .unwrap_or(DEFAULT_SUBSCRIBE_TOPIC.to_string());
+        let subscribe_topic =
+            config.get_string("subscribe-topic").unwrap_or(DEFAULT_SUBSCRIBE_TOPIC.to_string());
         info!("Creating subscriber on '{subscribe_topic}'");
 
         let maybe_snapshot_topic = config
@@ -42,9 +41,8 @@ impl SPOState {
             .ok()
             .inspect(|snapshot_topic| info!("Creating subscriber on '{snapshot_topic}'"));
 
-        let handle_topic = config
-            .get_string("handle-topic")
-            .unwrap_or(DEFAULT_HANDLE_TOPIC.to_string());
+        let handle_topic =
+            config.get_string("handle-topic").unwrap_or(DEFAULT_HANDLE_TOPIC.to_string());
         info!("Creating request handler on '{handle_topic}'");
 
         let spo_state_topic = config

@@ -33,14 +33,11 @@ impl TestModule {
             .get_string("transactions-topic")
             .unwrap_or(DEFAULT_TRANSACTIONS_TOPIC.to_string());
 
-        let snapshot_topic = config
-            .get_string("snapshot-topic")
-            .unwrap_or(DEFAULT_SNAPSHOT_TOPIC.to_string());
+        let snapshot_topic =
+            config.get_string("snapshot-topic").unwrap_or(DEFAULT_SNAPSHOT_TOPIC.to_string());
 
         let tx_bytes = hex::decode(
-            config
-                .get_string("transaction")
-                .with_context(|| "no transaction provided for test")?,
+            config.get_string("transaction").with_context(|| "no transaction provided for test")?,
         )
         .with_context(|| "failed to decode transaction hex")?;
 
@@ -65,9 +62,8 @@ impl TestModule {
             .await
             .with_context(|| "failed to publish transactions message")?;
 
-        let ledger_state_directory = config
-            .get_string("final-state")
-            .with_context(|| "no final state provided for test")?;
+        let ledger_state_directory =
+            config.get_string("final-state").with_context(|| "no final state provided for test")?;
 
         let expected_final_state = LedgerState::from_directory(ledger_state_directory)?;
 

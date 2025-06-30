@@ -123,19 +123,11 @@ mod tests {
         assert_eq!(state.total_blocks, 3);
         assert_eq!(state.vrf_vkey_hashes.len(), 2);
         assert_eq!(
-            state
-                .vrf_vkey_hashes
-                .iter()
-                .find(|(k, _)| *k == &keyhash(b"vrf_1"))
-                .map(|(_, v)| *v),
+            state.vrf_vkey_hashes.iter().find(|(k, _)| *k == &keyhash(b"vrf_1")).map(|(_, v)| *v),
             Some(1)
         );
         assert_eq!(
-            state
-                .vrf_vkey_hashes
-                .iter()
-                .find(|(k, _)| *k == &keyhash(b"vrf_2"))
-                .map(|(_, v)| *v),
+            state.vrf_vkey_hashes.iter().find(|(k, _)| *k == &keyhash(b"vrf_2")).map(|(_, v)| *v),
             Some(2)
         );
     }

@@ -1,0 +1,4 @@
+# Global 'cargo fmt' options
+
+# Don't split chains unless needed by actual width
+chain_width = 100
