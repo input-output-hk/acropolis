@@ -2,7 +2,7 @@ use anyhow::{anyhow, bail, Result};
 use acropolis_common::{
     messages::GovernanceOutcomesMessage, Committee, CommitteeChange,
     ConwayParams, AlonzoParams, ShelleyParams,
-    EnactStateElem, Era, ProtocolParamUpdate, ProtocolParams,
+    EnactStateElem, Era, ProtocolParamUpdate, ProtocolParams, VotingOutcome
 };
 use tracing::error;
 use crate::genesis_params;
@@ -114,7 +114,11 @@ impl ParametersUpdater {
         c.threshold = cu.terms.clone();
     }
 
-    fn apply_enact_state_elem(&mut self, u: &EnactStateElem) -> Result<()> {
+    fn apply_enact_state_elem(&mut self, (v,u): &(VotingOutcome,EnactStateElem)) -> Result<()> {
+        if !v.accepted {
+            bail!("Cannot apply not accepted enact state {:?}", (u,v))
+        }
+
         let ref mut alonzo = self.params.alonzo.as_mut().ok_or_else(
             || anyhow!("Alonzo must present for enact state")
         )?;

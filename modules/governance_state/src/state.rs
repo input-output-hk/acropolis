@@ -9,7 +9,7 @@ use acropolis_common::{
     BlockInfo, ConwayParams, DRepCredential, DataHash, EnactStateElem, GovActionId,
     TreasuryWithdrawalsAction,
     GovernanceAction, KeyHash, Lovelace, ProposalProcedure, ProtocolParamType, ProtocolParamUpdate,
-    SingleVoterVotes, Voter, VotingProcedure, VotingRefund
+    SingleVoterVotes, Voter, VotingProcedure, VotingOutcome
 };
 use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
@@ -366,7 +366,7 @@ impl State {
     }
 
     /// Checks whether action_id can be considered finally accepted
-    fn is_finally_accepted(&self, action_id: &GovActionId) -> Result<bool> {
+    fn is_finally_accepted(&self, action_id: &GovActionId) -> Result<VotingOutcome> {
         let (_epoch, proposal) = self
             .proposals
             .get(action_id)
@@ -381,24 +381,22 @@ impl State {
         let (d_act, p_act, c_act) = self.get_actual_votes(action_id);
         let accepted = d_act >= d && p_act >= p && c_act >= c;
         info!("Proposal {action_id}: votes {d_act}/{p_act}/{c_act}, thresholds {d}/{p}/{c}, result {accepted}");
-        Ok(accepted)
+
+        Ok(VotingOutcome {
+            procedure: proposal.clone(),
+            committee_votes: RationalNumber::new_with_zero(c_act, c)?,
+            drep_votes: RationalNumber::new_with_zero(d_act, d)?,
+            pool_votes: RationalNumber::new_with_zero(p_act, p)?,
+            accepted
+        })
     }
 
     /// Should be called when voting is over
-    fn end_voting(&mut self, action_id: &GovActionId) -> Result<VotingRefund> {
-        let (_id,proposal) = self.proposals.get(&action_id).ok_or_else(
-            || anyhow!("Gov. action {action_id} not found")
-        )?;
-
-        let refund = VotingRefund {
-            reward_account: proposal.reward_account.clone(),
-            deposit: proposal.deposit
-        };
-
+    fn end_voting(&mut self, action_id: &GovActionId) -> Result<()> {
         self.votes.remove(&action_id);
         self.proposals.remove(&action_id);
 
-        Ok(refund)
+        Ok(())
     }
 
     /// Returns actual votes: (Pool votes, DRep votes, committee votes)
@@ -476,23 +474,18 @@ impl State {
         &mut self,
         new_epoch: u64,
         action_id: &GovActionId,
-    ) -> Result<(Option<ProposalProcedure>, Option<VotingRefund>)> {
-        if self.is_finally_accepted(&action_id)? {
-            let (_id,action) = self.proposals.get(action_id).ok_or_else(
-                || anyhow!("No action for {action_id} found in proposals")
-            )?;
-            let action_res = action.clone();
-            let refund = self.end_voting(&action_id)?;
-            return Ok((Some(action_res), Some(refund)));
+    ) -> Result<Option<VotingOutcome>> {
+        let outcome = self.is_finally_accepted(&action_id)?;
+        let expired = self.is_expired(new_epoch, &action_id)?;
+        if outcome.accepted || expired {
+            self.end_voting(&action_id)?;
+            info!("New epoch {new_epoch}: voting for {action_id} outcome: {}, expired: {expired}",
+                outcome.accepted
+            );
+            return Ok(Some(outcome));
         }
 
-        if self.is_expired(new_epoch, &action_id)? {
-            info!("New epoch {new_epoch}: voting for {action_id} is expired");
-            let refund = self.end_voting(&action_id)?;
-            return Ok((None, Some(refund)));
-        }
-
-        Ok((None, None))
+        Ok(None)
     }
 
     /// Loops through all actions and checks their status for the new_epoch
@@ -505,14 +498,20 @@ impl State {
             info!("Epoch {}: processing action {}", new_epoch, action_id);
             match self.process_one_proposal(new_epoch, &action_id) {
                 Err(e) => error!("Error processing governance {action_id}: {e}"),
-                Ok((Some(proposal), voting_refund)) => {
-                    Self::pack_as_enact_state_elem(&proposal).map(|p| output.enact_state.push(p));
-                    Self::retrieve_withdrawal(&proposal).map(|p| output.withdrawals.push(p));
-                    voting_refund.map(|r| output.refunds.push(r));
+                Ok(Some(out)) if out.accepted => {
+                    if let Some(elem) = Self::pack_as_enact_state_elem(&out.procedure) {
+                        output.enact_state.push((out, elem));
+                    }
+                    else if let Some(wt) = Self::retrieve_withdrawal(&out.procedure) {
+                        output.withdrawals.push((out, wt));
+                    }
+                    else {
+                        // Actions without effective output (like Information)
+                        output.refunds.push(out);
+                    }
                 }
-                Ok((None, voting_refund)) => {
-                    voting_refund.map(|r| output.refunds.push(r));
-                }
+                Ok(Some(out)) => output.refunds.push(out),
+                Ok(None) => ()
             }
         }
 
