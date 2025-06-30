@@ -139,9 +139,7 @@ pub struct ProtocolParamsMessage {
 /// specified in `enact_state`/`withdrawals` field and not repeated in `refunds`.
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GovernanceOutcomesMessage {
-    pub enact_state: Vec<(VotingOutcome, EnactStateElem)>,
-    pub withdrawals: Vec<(VotingOutcome, TreasuryWithdrawalsAction)>,
-    pub refunds: Vec<VotingOutcome>
+    pub outcomes: Vec<GovernanceOutcome>
 }
 
 /// SPO state message
