@@ -1,8 +1,9 @@
 use anyhow::{anyhow, bail, Result};
 use acropolis_common::{
-    messages::EnactStateMessage, Committee, CommitteeChange,
+    messages::GovernanceOutcomesMessage, 
+    GovernanceOutcomeVariant, Committee, CommitteeChange,
     ConwayParams, AlonzoParams, ShelleyParams,
-    EnactStateElem, Era, ProtocolParamUpdate, ProtocolParams,
+    EnactStateElem, Era, ProtocolParamUpdate, ProtocolParams
 };
 use tracing::error;
 use crate::genesis_params;
@@ -141,9 +142,11 @@ impl ParametersUpdater {
         Ok(())
     }
 
-    pub fn apply_enact_state(&mut self, u: &EnactStateMessage) -> Result<()> {
-        for elem in u.enactments.iter() {
-            self.apply_enact_state_elem(elem)?;
+    pub fn apply_enact_state(&mut self, u: &GovernanceOutcomesMessage) -> Result<()> {
+        for outcome in u.outcomes.iter() {
+            if let GovernanceOutcomeVariant::EnactStateElem(elem) = &outcome.action_to_perform {
+                self.apply_enact_state_elem(elem)?;
+            }
         }
         Ok(())
     }

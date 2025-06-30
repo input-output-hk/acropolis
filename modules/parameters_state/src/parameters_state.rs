@@ -120,9 +120,9 @@ impl ParametersState {
         loop {
             info!("Waiting for enact-state");
             match enact_s.read().await?.1.as_ref() {
-                Message::Cardano((block, CardanoMessage::EnactState(enact))) => {
+                Message::Cardano((block, CardanoMessage::GovernanceOutcomes(gov))) => {
                     let mut locked = state.lock().await;
-                    let new_params = locked.handle_enact_state(&block, &enact).await?;
+                    let new_params = locked.handle_enact_state(&block, &gov).await?;
                     Self::publish_update(&config, &block, new_params)?;
                 }
                 msg => error!("Unexpected message {msg:?} for enact state topic"),

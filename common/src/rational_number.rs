@@ -23,6 +23,15 @@ impl RationalNumber {
         }
     }
 
+    pub fn new_with_zero(numerator: u64, denominator: u64) -> anyhow::Result<Self> {
+        if numerator == 0 {
+            Ok(Self::ZERO.clone())
+        }
+        else {
+            Self::new(numerator, denominator)
+        }
+    }
+
     pub const ZERO: Self = Self {
         numerator: 0,
         denominator: 1,

@@ -735,6 +735,7 @@ pub struct ShelleyProtocolParams {
     pub max_block_header_size: u32,
     pub key_deposit: u64,
     pub min_utxo_value: u64,
+
     pub minfee_a: u32,
     pub minfee_b: u32,
     pub pool_deposit: u64,
@@ -1065,6 +1066,35 @@ pub struct VotingProcedures {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct VotesCount {
+    pub committee: u64,
+    pub drep: u64,
+    pub pool: u64
+}
+
+impl VotesCount {
+    pub fn zero() -> Self { Self { committee: 0, drep: 0, pool: 0 } }
+
+    pub fn majorizes(&self, v: &VotesCount) -> bool {
+        self.committee >= v.committee && self.drep >= v.drep && self.pool >= v.pool
+    }
+}
+
+impl Display for VotesCount {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "c{}:d{}:p{}", self.committee, self.drep, self.pool)
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct VotingOutcome {
+    pub procedure: ProposalProcedure,
+    pub votes_cast: VotesCount,
+    pub votes_threshold: VotesCount,
+    pub accepted: bool
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProposalProcedure {
     pub deposit: Lovelace,
     pub reward_account: RewardAccount,
@@ -1087,6 +1117,26 @@ pub enum EnactStateElem {
     Constitution(Constitution),
     Committee(CommitteeChange),
     NoConfidence,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum GovernanceOutcomeVariant {
+    EnactStateElem(EnactStateElem),
+    TreasuryWithdrawal(TreasuryWithdrawalsAction),
+    NoAction
+}
+
+/// The structure has info about outcome of a single governance action.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct GovernanceOutcome {
+    /// Information about voting results: what was the issue, 
+    /// how many votes cast, was it accepted or not
+    pub voting: VotingOutcome,
+
+    /// Enact state/Withdrawal, accepted after voting. If the voting failed,
+    /// or if the proposal does not suppose formal action, this field is
+    /// `NoFormalAction`
+    pub action_to_perform: GovernanceOutcomeVariant
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
