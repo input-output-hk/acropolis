@@ -70,6 +70,9 @@ impl State {
         delta: &AddressDeltasMessage,
     ) -> Result<()> {
         let msg = process_message(&self.pointer_cache, delta, block, Some(&mut self.tracker));
+
+        // Updating block number in pointer cache: looking for Conway epoch start.
+        self.pointer_cache.update_block(block);
         self.delta_publisher.publish(block, msg).await?;
         Ok(())
     }
@@ -100,6 +103,7 @@ impl State {
                         },
                     };
 
+                    // Sets pointer; updates max processed slot
                     self.pointer_cache
                         .set_pointer(ptr, stake_address, block.slot);
                 }
