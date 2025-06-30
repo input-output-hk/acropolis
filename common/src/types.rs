@@ -1069,11 +1069,17 @@ pub struct VotingProcedures {
 pub struct VotesCount {
     pub committee: u64,
     pub drep: u64,
-    pub pool: u64
+    pub pool: u64,
 }
 
 impl VotesCount {
-    pub fn zero() -> Self { Self { committee: 0, drep: 0, pool: 0 } }
+    pub fn zero() -> Self {
+        Self {
+            committee: 0,
+            drep: 0,
+            pool: 0,
+        }
+    }
 
     pub fn majorizes(&self, v: &VotesCount) -> bool {
         self.committee >= v.committee && self.drep >= v.drep && self.pool >= v.pool
@@ -1091,7 +1097,7 @@ pub struct VotingOutcome {
     pub procedure: ProposalProcedure,
     pub votes_cast: VotesCount,
     pub votes_threshold: VotesCount,
-    pub accepted: bool
+    pub accepted: bool,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -1123,20 +1129,20 @@ pub enum EnactStateElem {
 pub enum GovernanceOutcomeVariant {
     EnactStateElem(EnactStateElem),
     TreasuryWithdrawal(TreasuryWithdrawalsAction),
-    NoAction
+    NoAction,
 }
 
 /// The structure has info about outcome of a single governance action.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GovernanceOutcome {
-    /// Information about voting results: what was the issue, 
+    /// Information about voting results: what was the issue,
     /// how many votes cast, was it accepted or not
     pub voting: VotingOutcome,
 
     /// Enact state/Withdrawal, accepted after voting. If the voting failed,
     /// or if the proposal does not suppose formal action, this field is
     /// `NoFormalAction`
-    pub action_to_perform: GovernanceOutcomeVariant
+    pub action_to_perform: GovernanceOutcomeVariant,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

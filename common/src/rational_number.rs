@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Error, Result};
-use gcd::Gcd;
 use fraction::Fraction;
+use gcd::Gcd;
 use std::cmp::Ordering;
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Clone)]
@@ -26,8 +26,7 @@ impl RationalNumber {
     pub fn new_with_zero(numerator: u64, denominator: u64) -> anyhow::Result<Self> {
         if numerator == 0 {
             Ok(Self::ZERO.clone())
-        }
-        else {
+        } else {
             Self::new(numerator, denominator)
         }
     }
@@ -117,10 +116,13 @@ mod tests {
             RationalNumber::try_from(0.51)?,
             RationalNumber::new(51, 100)?
         );
-        assert_eq!(RationalNumber::try_from(0.67)?, RationalNumber::new(67,100)?);
-        assert_eq!(RationalNumber::try_from(0.6)?, RationalNumber::new(3,5)?);
-        assert_eq!(RationalNumber::try_from(0.75)?, RationalNumber::new(3,4)?);
-        assert_eq!(RationalNumber::try_from(0.5)?, RationalNumber::new(1,2)?);
+        assert_eq!(
+            RationalNumber::try_from(0.67)?,
+            RationalNumber::new(67, 100)?
+        );
+        assert_eq!(RationalNumber::try_from(0.6)?, RationalNumber::new(3, 5)?);
+        assert_eq!(RationalNumber::try_from(0.75)?, RationalNumber::new(3, 4)?);
+        assert_eq!(RationalNumber::try_from(0.5)?, RationalNumber::new(1, 2)?);
         Ok(())
     }
 }

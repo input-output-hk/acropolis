@@ -107,15 +107,11 @@ pub struct MithrilSnapshotFetcher;
 impl MithrilSnapshotFetcher {
     /// Fetch and unpack a snapshot
     async fn download_snapshot(config: Arc<Config>) -> Result<()> {
-        let aggregator_url = config
-            .get_string("aggregator-url")
-            .unwrap_or(DEFAULT_AGGREGATOR_URL.to_string());
-        let genesis_key = config
-            .get_string("genesis-key")
-            .unwrap_or(DEFAULT_GENESIS_KEY.to_string());
-        let directory = config
-            .get_string("directory")
-            .unwrap_or(DEFAULT_DIRECTORY.to_string());
+        let aggregator_url =
+            config.get_string("aggregator-url").unwrap_or(DEFAULT_AGGREGATOR_URL.to_string());
+        let genesis_key =
+            config.get_string("genesis-key").unwrap_or(DEFAULT_GENESIS_KEY.to_string());
+        let directory = config.get_string("directory").unwrap_or(DEFAULT_DIRECTORY.to_string());
 
         let feedback_logger = Arc::new(FeedbackLogger::new());
         let client = ClientBuilder::aggregator(&aggregator_url, &genesis_key)
@@ -133,18 +129,12 @@ impl MithrilSnapshotFetcher {
         info!("Using Mithril snapshot {snapshot:?}");
 
         // Verify the certificate chain
-        let certificate = client
-            .certificate()
-            .verify_chain(&snapshot.certificate_hash)
-            .await?;
+        let certificate = client.certificate().verify_chain(&snapshot.certificate_hash).await?;
 
         // Download the snapshot
         fs::create_dir_all(&directory)?;
         let dir = Path::new(&directory);
-        client
-            .cardano_database()
-            .download_unpack(&snapshot, &dir)
-            .await?;
+        client.cardano_database().download_unpack(&snapshot, &dir).await?;
 
         // Register download
         if let Err(e) = client.cardano_database().add_statistics(&snapshot).await {
@@ -153,9 +143,7 @@ impl MithrilSnapshotFetcher {
         }
 
         // Verify the snapshot
-        let message = MessageBuilder::new()
-            .compute_snapshot_message(&certificate, dir)
-            .await?;
+        let message = MessageBuilder::new().compute_snapshot_message(&certificate, dir).await?;
 
         if !certificate.match_message(&message) {
             return Err(anyhow!("Snapshot verification failed"));
@@ -166,18 +154,12 @@ impl MithrilSnapshotFetcher {
 
     /// Process the snapshot
     async fn process_snapshot(context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
-        let header_topic = config
-            .get_string("header-topic")
-            .unwrap_or(DEFAULT_HEADER_TOPIC.to_string());
-        let body_topic = config
-            .get_string("body-topic")
-            .unwrap_or(DEFAULT_BODY_TOPIC.to_string());
-        let completion_topic = config
-            .get_string("completion-topic")
-            .unwrap_or(DEFAULT_COMPLETION_TOPIC.to_string());
-        let directory = config
-            .get_string("directory")
-            .unwrap_or(DEFAULT_DIRECTORY.to_string());
+        let header_topic =
+            config.get_string("header-topic").unwrap_or(DEFAULT_HEADER_TOPIC.to_string());
+        let body_topic = config.get_string("body-topic").unwrap_or(DEFAULT_BODY_TOPIC.to_string());
+        let completion_topic =
+            config.get_string("completion-topic").unwrap_or(DEFAULT_COMPLETION_TOPIC.to_string());
+        let directory = config.get_string("directory").unwrap_or(DEFAULT_DIRECTORY.to_string());
 
         // Path to immutable DB
         let path = Path::new(&directory).join("immutable");
@@ -267,9 +249,8 @@ impl MithrilSnapshotFetcher {
                         block_info.clone(),
                         CardanoMessage::BlockHeader(header_message),
                     ));
-                    let header_future = context
-                        .message_bus
-                        .publish(&header_topic, Arc::new(header_message_enum));
+                    let header_future =
+                        context.message_bus.publish(&header_topic, Arc::new(header_message_enum));
 
                     // Send the block body message
                     let body_message = BlockBodyMessage { raw: raw_block };
@@ -278,9 +259,8 @@ impl MithrilSnapshotFetcher {
                         block_info.clone(),
                         CardanoMessage::BlockBody(body_message),
                     ));
-                    let body_future = context
-                        .message_bus
-                        .publish(&body_topic, Arc::new(body_message_enum));
+                    let body_future =
+                        context.message_bus.publish(&body_topic, Arc::new(body_message_enum));
 
                     let (header_result, body_result) = join!(header_future, body_future);
                     header_result.unwrap_or_else(|e| error!("Failed to publish header: {e}"));
@@ -307,9 +287,8 @@ impl MithrilSnapshotFetcher {
 
     /// Main init function
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
-        let startup_topic = config
-            .get_string("startup-topic")
-            .unwrap_or(DEFAULT_STARTUP_TOPIC.to_string());
+        let startup_topic =
+            config.get_string("startup-topic").unwrap_or(DEFAULT_STARTUP_TOPIC.to_string());
         info!("Creating startup subscriber on '{startup_topic}'");
 
         let mut subscription = context.subscribe(&startup_topic).await?;

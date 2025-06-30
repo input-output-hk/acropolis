@@ -187,9 +187,13 @@ impl GovernanceState {
                 };
                 if let Message::Clock(message) = message.as_ref() {
                     if (message.number % 60) == 0 {
-                        state_tick.lock().await
-                            .tick().await
-                            .inspect_err(|e| error!("Tick error: {e}")).ok();
+                        state_tick
+                            .lock()
+                            .await
+                            .tick()
+                            .await
+                            .inspect_err(|e| error!("Tick error: {e}"))
+                            .ok();
                     }
                 }
             }
@@ -198,8 +202,7 @@ impl GovernanceState {
         loop {
             let (blk_g, gov_procs) = Self::read_governance(&mut governance_s).await?;
             {
-                state.lock().await
-                    .handle_governance(&blk_g, &gov_procs).await?;
+                state.lock().await.handle_governance(&blk_g, &gov_procs).await?;
             }
 
             if blk_g.new_epoch {
@@ -210,11 +213,10 @@ impl GovernanceState {
                         "Governance {blk_g:?} and protocol parameters {blk_p:?} are out of sync"
                     );
                 }
-                state
-                    .lock().await
-                    .handle_protocol_parameters(&params).await?;
+                state.lock().await.handle_protocol_parameters(&params).await?;
 
-                if blk_g.epoch > 0 { // TODO: make sync more stable
+                if blk_g.epoch > 0 {
+                    // TODO: make sync more stable
                     let (blk_drep, distr) = Self::read_drep(&mut drep_s).await?;
                     if blk_g != blk_drep {
                         error!("Governance {blk_g:?} and DRep distribution {blk_drep:?} are out of sync");
@@ -229,19 +231,11 @@ impl GovernanceState {
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         let cfg = GovernanceStateConfig::new(&config);
         let gt = context.clone().subscribe(&cfg.subscribe_topic).await?;
-        let dt = context
-            .clone()
-            .subscribe(&cfg.drep_distribution_topic)
-            .await?;
-        let pt = context
-            .clone()
-            .subscribe(&cfg.protocol_parameters_topic)
-            .await?;
+        let dt = context.clone().subscribe(&cfg.drep_distribution_topic).await?;
+        let pt = context.clone().subscribe(&cfg.protocol_parameters_topic).await?;
 
         tokio::spawn(async move {
-            Self::run(context, cfg, gt, dt, pt)
-                .await
-                .unwrap_or_else(|e| error!("Failed: {e}"));
+            Self::run(context, cfg, gt, dt, pt).await.unwrap_or_else(|e| error!("Failed: {e}"));
         });
 
         Ok(())

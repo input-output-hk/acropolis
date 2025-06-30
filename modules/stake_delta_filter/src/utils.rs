@@ -50,7 +50,11 @@ impl PointerCache {
         }
     }
 
-    pub fn ensure_up_to_date_ptr(&self, blk: &BlockInfo, ptr: &ShelleyAddressPointer) -> Result<()> {
+    pub fn ensure_up_to_date_ptr(
+        &self,
+        blk: &BlockInfo,
+        ptr: &ShelleyAddressPointer,
+    ) -> Result<()> {
         if ptr.slot > blk.slot {
             // We believe that pointers cannot point forward
             return Ok(());
@@ -185,10 +189,7 @@ impl Tracker {
     }
 
     pub fn get_used_pointers(&self) -> Vec<ShelleyAddressPointer> {
-        self.occurrence
-            .keys()
-            .cloned()
-            .collect::<Vec<ShelleyAddressPointer>>()
+        self.occurrence.keys().cloned().collect::<Vec<ShelleyAddressPointer>>()
     }
 
     pub fn track(
@@ -198,14 +199,11 @@ impl Tracker {
         d: &AddressDelta,
         sa: Option<&StakeAddress>,
     ) {
-        self.occurrence
-            .entry(p.clone())
-            .or_insert(vec![])
-            .push(OccurrenceInfo {
-                block: b.clone(),
-                address_delta: d.clone(),
-                stake_address: sa.cloned(),
-            });
+        self.occurrence.entry(p.clone()).or_insert(vec![]).push(OccurrenceInfo {
+            block: b.clone(),
+            address_delta: d.clone(),
+            stake_address: sa.cloned(),
+        });
     }
 
     fn get_kind(v: &Vec<OccurrenceInfo>) -> Option<OccurrenceInfoKind> {
@@ -271,11 +269,8 @@ impl Tracker {
             let mut src_addr_set = HashSet::new();
             let mut dst_addr_set = HashSet::new();
             for event in stats.iter() {
-                let src_addr = event
-                    .address_delta
-                    .address
-                    .to_string()
-                    .unwrap_or("(???)".to_owned());
+                let src_addr =
+                    event.address_delta.address.to_string().unwrap_or("(???)".to_owned());
                 let dst_addr = event
                     .stake_address
                     .as_ref()
@@ -341,9 +336,7 @@ pub fn process_message(
         // Errors:
         // 1. Shelley Address delegation is a pointer + pointer not known
 
-        cache
-            .ensure_up_to_date(block, &d.address)
-            .unwrap_or_else(|e| error!("{e}"));
+        cache.ensure_up_to_date(block, &d.address).unwrap_or_else(|e| error!("{e}"));
 
         let stake_address = match &d.address {
             // Not good for staking
@@ -555,107 +548,45 @@ mod test {
         let stake_delta = process_message(&cache, &delta, &block, None);
 
         assert_eq!(
-            stake_delta
-                .deltas
-                .get(0)
-                .unwrap()
-                .address
-                .to_string()
-                .unwrap(),
+            stake_delta.deltas.get(0).unwrap().address.to_string().unwrap(),
             stake_addr
         );
         assert_eq!(
-            stake_delta
-                .deltas
-                .get(1)
-                .unwrap()
-                .address
-                .to_string()
-                .unwrap(),
+            stake_delta.deltas.get(1).unwrap().address.to_string().unwrap(),
             stake_addr
         );
         assert_eq!(
-            stake_delta
-                .deltas
-                .get(2)
-                .unwrap()
-                .address
-                .to_string()
-                .unwrap(),
+            stake_delta.deltas.get(2).unwrap().address.to_string().unwrap(),
             script_addr
         );
         assert_eq!(
-            stake_delta
-                .deltas
-                .get(3)
-                .unwrap()
-                .address
-                .to_string()
-                .unwrap(),
+            stake_delta.deltas.get(3).unwrap().address.to_string().unwrap(),
             script_addr
         );
         assert_eq!(
-            stake_delta
-                .deltas
-                .get(4)
-                .unwrap()
-                .address
-                .to_string()
-                .unwrap(),
+            stake_delta.deltas.get(4).unwrap().address.to_string().unwrap(),
             pointed_addr
         );
         assert_eq!(
-            stake_delta
-                .deltas
-                .get(5)
-                .unwrap()
-                .address
-                .to_string()
-                .unwrap(),
+            stake_delta.deltas.get(5).unwrap().address.to_string().unwrap(),
             pointed_addr
         );
         assert_eq!(
-            stake_delta
-                .deltas
-                .get(6)
-                .unwrap()
-                .address
-                .to_string()
-                .unwrap(),
+            stake_delta.deltas.get(6).unwrap().address.to_string().unwrap(),
             stake_addr
         );
         assert_eq!(
-            stake_delta
-                .deltas
-                .get(7)
-                .unwrap()
-                .address
-                .to_string()
-                .unwrap(),
+            stake_delta.deltas.get(7).unwrap().address.to_string().unwrap(),
             script_addr
         );
 
         // additional check: payload conversion correctness
         assert_eq!(
-            stake_delta
-                .deltas
-                .get(0)
-                .unwrap()
-                .address
-                .payload
-                .to_string()
-                .unwrap(),
+            stake_delta.deltas.get(0).unwrap().address.payload.to_string().unwrap(),
             stake_key_hash
         );
         assert_eq!(
-            stake_delta
-                .deltas
-                .get(2)
-                .unwrap()
-                .address
-                .payload
-                .to_string()
-                .unwrap(),
+            stake_delta.deltas.get(2).unwrap().address.payload.to_string().unwrap(),
             script_hash
         );
 
