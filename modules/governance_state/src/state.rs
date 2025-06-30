@@ -2,13 +2,14 @@
 
 use acropolis_common::{
     messages::{
-        CardanoMessage, DRepStakeDistributionMessage, EnactStateMessage,
+        CardanoMessage, DRepStakeDistributionMessage, GovernanceOutcomesMessage,
         GovernanceProceduresMessage, Message, ProtocolParamsMessage,
     },
     rational_number::RationalNumber,
     BlockInfo, ConwayParams, DRepCredential, DataHash, EnactStateElem, GovActionId,
+    TreasuryWithdrawalsAction, VotesCount, GovernanceOutcome, GovernanceOutcomeVariant,
     GovernanceAction, KeyHash, Lovelace, ProposalProcedure, ProtocolParamType, ProtocolParamUpdate,
-    SingleVoterVotes, Voter, VotingProcedure,
+    SingleVoterVotes, Voter, VotingProcedure, VotingOutcome
 };
 use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
@@ -207,12 +208,13 @@ impl State {
         pool: &RationalNumber,
         drep: &RationalNumber,
         comm: &RationalNumber,
-    ) -> Result<(u64, u64, u64)> {
-        let p = pool
+    ) -> Result<VotesCount> {
+        let mut votes = VotesCount::zero();
+        votes.pool = pool
             .proportion_of(self.voting_state.registered_spos)?
             .round_up();
-        let (d, c) = self.proportional_count_drep_comm(drep, comm)?;
-        Ok((p, d, c))
+        (votes.drep, votes.committee) = self.proportional_count_drep_comm(drep, comm)?;
+        Ok(votes)
     }
 
     fn full_count(
@@ -220,10 +222,11 @@ impl State {
         pool: &RationalNumber,
         drep: &RationalNumber,
         comm: &RationalNumber,
-    ) -> Result<(u64, u64, u64)> {
-        let p = pool.proportion_of(self.voting_state.total_spos)?.round_up();
-        let (d, c) = self.proportional_count_drep_comm(drep, comm)?;
-        Ok((p, d, c))
+    ) -> Result<VotesCount> {
+        let mut votes = VotesCount::zero();
+        votes.pool = pool.proportion_of(self.voting_state.total_spos)?.round_up();
+        (votes.drep, votes.committee) = self.proportional_count_drep_comm(drep, comm)?;
+        Ok(votes)
     }
 
     /// Returns protocol parameter types, needed to determine voting thresholds for
@@ -301,7 +304,7 @@ impl State {
         &self,
         pp: &ProposalProcedure,
         thresholds: &ConwayParams,
-    ) -> Result<(u64, u64, u64)> {
+    ) -> Result<VotesCount> {
         let d = &thresholds.d_rep_voting_thresholds;
         let p = &thresholds.pool_voting_thresholds;
         let c = &thresholds.committee;
@@ -365,7 +368,7 @@ impl State {
     }
 
     /// Checks whether action_id can be considered finally accepted
-    fn is_finally_accepted(&self, action_id: &GovActionId) -> Result<bool> {
+    fn is_finally_accepted(&self, action_id: &GovActionId) -> Result<VotingOutcome> {
         let (_epoch, proposal) = self
             .proposals
             .get(action_id)
@@ -376,48 +379,52 @@ impl State {
             Some(conway_params) => conway_params,
         };
 
-        let (d, p, c) = self.get_action_thresholds(proposal, conway_params)?;
-        let (d_act, p_act, c_act) = self.get_actual_votes(action_id);
-        let accepted = d_act >= d && p_act >= p && c_act >= c;
-        info!("Proposal {action_id}: votes {d_act}/{p_act}/{c_act}, thresholds {d}/{p}/{c}, result {accepted}");
-        Ok(accepted)
-    }
+        let threshold = self.get_action_thresholds(proposal, conway_params)?;
+        let votes = self.get_actual_votes(action_id);
+        let accepted = votes.majorizes(&threshold);
+        info!("Proposal {action_id}: votes {votes}, thresholds {threshold}, result {accepted}");
 
-    /// Distribute and return all rewards for cast votes (government action is expired/voted)
-    fn return_rewards(&self, _votes: Option<&HashMap<Voter, (DataHash, VotingProcedure)>>) {}
+        Ok(VotingOutcome {
+            procedure: proposal.clone(),
+            votes_cast: votes,
+            votes_threshold: threshold,
+            accepted
+        })
+    }
 
     /// Should be called when voting is over
     fn end_voting(&mut self, action_id: &GovActionId) -> Result<()> {
-        self.return_rewards(self.votes.get(&action_id));
         self.votes.remove(&action_id);
+        self.proposals.remove(&action_id);
+
         Ok(())
     }
 
     /// Returns actual votes: (Pool votes, DRep votes, committee votes)
-    fn get_actual_votes(&self, action_id: &GovActionId) -> (u64, u64, u64) {
-        let (mut p, mut d, mut c) = (0, 0, 0);
+    fn get_actual_votes(&self, action_id: &GovActionId) -> VotesCount {
+        let mut votes = VotesCount::zero();
         if let Some(all_votes) = self.votes.get(&action_id) {
             for voter in all_votes.keys() {
                 match voter {
-                    Voter::ConstitutionalCommitteeKey(_) => c += 1,
-                    Voter::ConstitutionalCommitteeScript(_) => c += 1,
+                    Voter::ConstitutionalCommitteeKey(_) => votes.committee += 1,
+                    Voter::ConstitutionalCommitteeScript(_) => votes.committee += 1,
                     Voter::DRepKey(key) => {
                         self.drep_stake
                             .get(&DRepCredential::AddrKeyHash(key.clone()))
-                            .inspect(|v| d += *v);
+                            .inspect(|v| votes.drep += *v);
                     }
                     Voter::DRepScript(script) => {
                         self.drep_stake
                             .get(&DRepCredential::ScriptHash(script.clone()))
-                            .inspect(|v| d += *v);
+                            .inspect(|v| votes.drep += *v);
                     }
                     Voter::StakePoolKey(pool) => {
-                        self.spo_stake.get(pool).inspect(|v| p += *v);
+                        self.spo_stake.get(pool).inspect(|v| votes.pool += *v);
                     }
                 }
             }
         }
-        (p, d, c)
+        votes
     }
 
     /// Checks whether action is expired at the beginning of new_epoch
@@ -453,52 +460,86 @@ impl State {
         }
     }
 
+    fn retrieve_withdrawal(p: &ProposalProcedure) -> Option<TreasuryWithdrawalsAction> {
+        if let GovernanceAction::TreasuryWithdrawals(ref action) = p.gov_action {
+            Some (action.clone())
+        }
+        else {
+            None
+        }
+    }
+
     /// Checks and updates action_id state at the start of new_epoch
+    /// If the action is accepted, returns accepted ProposalProcedure.
     fn process_one_proposal(
         &mut self,
         new_epoch: u64,
         action_id: &GovActionId,
-    ) -> Result<Option<EnactStateElem>> {
-        if self.is_finally_accepted(&action_id)? {
-            let enact_state_elem = self
-                .proposals
-                .get(action_id)
-                .map(|e| Self::pack_as_enact_state_elem(&e.1));
+    ) -> Result<Option<VotingOutcome>> {
+        let outcome = self.is_finally_accepted(&action_id)?;
+        let expired = self.is_expired(new_epoch, &action_id)?;
+        if outcome.accepted || expired {
             self.end_voting(&action_id)?;
-            return Ok(enact_state_elem.flatten());
-        }
-
-        if self.is_expired(new_epoch, &action_id)? {
-            info!("New epoch {new_epoch}: voting for {action_id} is expired");
-            self.end_voting(&action_id)?;
+            info!("New epoch {new_epoch}: voting for {action_id} outcome: {}, expired: {expired}",
+                outcome.accepted
+            );
+            return Ok(Some(outcome));
         }
 
         Ok(None)
     }
 
     /// Loops through all actions and checks their status for the new_epoch
-    fn process_new_epoch(&mut self, new_epoch: u64) -> EnactStateMessage {
-        let mut output = EnactStateMessage::default();
+    fn process_new_epoch(&mut self, new_epoch: u64) -> GovernanceOutcomesMessage {
+        let mut output = GovernanceOutcomesMessage::default();
+
         let actions = self.proposals.keys().map(|a| a.clone()).collect::<Vec<_>>();
+        let mut wdr = 0;
+        let mut ens = 0;
+        let mut rej = 0;
 
         for action_id in actions.iter() {
             info!("Epoch {}: processing action {}", new_epoch, action_id);
             match self.process_one_proposal(new_epoch, &action_id) {
                 Err(e) => error!("Error processing governance {action_id}: {e}"),
-                Ok(Some(e)) => output.enactments.push(e),
                 Ok(None) => (),
+                Ok(Some(out)) if out.accepted => {
+                    let mut action_to_perform = GovernanceOutcomeVariant::NoAction;
+
+                    if let Some(elem) = Self::pack_as_enact_state_elem(&out.procedure) 
+                    {
+                        action_to_perform = GovernanceOutcomeVariant::EnactStateElem(elem);
+                        ens += 1;
+                    }
+                    else if let Some(wt) = Self::retrieve_withdrawal(&out.procedure) {
+                        action_to_perform = GovernanceOutcomeVariant::TreasuryWithdrawal(wt);
+                        wdr += 1;
+                    }
+
+                    output.outcomes.push(GovernanceOutcome {
+                        voting: out,
+                        action_to_perform
+                    })
+                }
+                Ok(Some(out)) => {
+                    rej += 1;
+                    output.outcomes.push(GovernanceOutcome {
+                        voting: out,
+                        action_to_perform: GovernanceOutcomeVariant::NoAction
+                    })
+                }
             }
         }
 
         info!(
-            "Epoch {new_epoch}: total {} actions",
-            output.enactments.len()
+            "Epoch {new_epoch}: total {} actions, {ens} enacts, {wdr} withdrawals, {rej} rejected",
+            output.outcomes.len()
         );
         return output;
     }
 
     async fn log_stats(&self) {
-        info!("props: {}, props_with_id: {}, votes: {}, stored proposal procedures: {}, drep stake msgs,size: {},{}",
+        info!("props: {}, props_with_id: {}, votes: {}, stored proposal procedures: {}, drep stake msgs (size): {} ({})",
             self.proposal_count, self.action_proposal_count, self.votes_count, self.proposals.len(),
             self.drep_stake_messages_count, self.drep_stake.len()
         );
@@ -507,20 +548,16 @@ impl State {
             info!(
                 "{}{} => {}",
                 action_id,
-                if self.proposals.contains_key(action_id) {
-                    ""
-                } else {
-                    " (absent)"
-                },
+                [" (absent)",""][self.proposals.contains_key(action_id) as usize],
                 procedure.len()
             )
         }
     }
 
-    async fn send(&self, block: &BlockInfo, message: EnactStateMessage) -> Result<()> {
+    async fn send(&self, block: &BlockInfo, message: GovernanceOutcomesMessage) -> Result<()> {
         let packed_message = Arc::new(Message::Cardano((
             block.clone(),
-            CardanoMessage::EnactState(message),
+            CardanoMessage::GovernanceOutcomes(message),
         )));
         let context = self.context.clone();
         let enact_state_topic = self.enact_state_topic.clone();
