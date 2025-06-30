@@ -3,6 +3,8 @@
 // We don't use these messages in the acropolis_common crate itself
 #![allow(dead_code)]
 
+use crate::ledger_state::SPOState;
+
 use crate::types::*;
 
 // Caryatid core messages which we re-export
@@ -187,6 +189,23 @@ pub enum CardanoMessage {
     StakeAddressDeltas(StakeAddressDeltasMessage),       // Stake part of address deltas
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum SnapshotMessage {
+    Bootstrap(SnapshotStateMessage),
+    DumpRequest(SnapshotDumpMessage),
+    Dump(SnapshotStateMessage),
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SnapshotDumpMessage {
+    pub block_height: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum SnapshotStateMessage {
+    SPOState(SPOState),
+}
+
 // === Global message enum ===
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum Message {
@@ -203,6 +222,9 @@ pub enum Message {
 
     // Cardano messages with attached BlockInfo
     Cardano((BlockInfo, CardanoMessage)),
+
+    // Initialize state from a snapshot
+    Snapshot(SnapshotMessage),
 }
 
 impl Default for Message {
