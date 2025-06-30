@@ -7,7 +7,7 @@ use acropolis_common::{
     },
     rational_number::RationalNumber,
     BlockInfo, ConwayParams, DRepCredential, DataHash, EnactStateElem, GovActionId,
-    TreasuryWithdrawalsAction,
+    TreasuryWithdrawalsAction, VotesCount, GovernanceOutcome, GovernanceOutcomeVariant,
     GovernanceAction, KeyHash, Lovelace, ProposalProcedure, ProtocolParamType, ProtocolParamUpdate,
     SingleVoterVotes, Voter, VotingProcedure, VotingOutcome
 };
@@ -208,12 +208,13 @@ impl State {
         pool: &RationalNumber,
         drep: &RationalNumber,
         comm: &RationalNumber,
-    ) -> Result<(u64, u64, u64)> {
-        let p = pool
+    ) -> Result<VotesCount> {
+        let mut votes = VotesCount::zero();
+        votes.pool = pool
             .proportion_of(self.voting_state.registered_spos)?
             .round_up();
-        let (d, c) = self.proportional_count_drep_comm(drep, comm)?;
-        Ok((p, d, c))
+        (votes.drep, votes.committee) = self.proportional_count_drep_comm(drep, comm)?;
+        Ok(votes)
     }
 
     fn full_count(
@@ -221,10 +222,11 @@ impl State {
         pool: &RationalNumber,
         drep: &RationalNumber,
         comm: &RationalNumber,
-    ) -> Result<(u64, u64, u64)> {
-        let p = pool.proportion_of(self.voting_state.total_spos)?.round_up();
-        let (d, c) = self.proportional_count_drep_comm(drep, comm)?;
-        Ok((p, d, c))
+    ) -> Result<VotesCount> {
+        let mut votes = VotesCount::zero();
+        votes.pool = pool.proportion_of(self.voting_state.total_spos)?.round_up();
+        (votes.drep, votes.committee) = self.proportional_count_drep_comm(drep, comm)?;
+        Ok(votes)
     }
 
     /// Returns protocol parameter types, needed to determine voting thresholds for
@@ -302,7 +304,7 @@ impl State {
         &self,
         pp: &ProposalProcedure,
         thresholds: &ConwayParams,
-    ) -> Result<(u64, u64, u64)> {
+    ) -> Result<VotesCount> {
         let d = &thresholds.d_rep_voting_thresholds;
         let p = &thresholds.pool_voting_thresholds;
         let c = &thresholds.committee;
@@ -377,16 +379,15 @@ impl State {
             Some(conway_params) => conway_params,
         };
 
-        let (d, p, c) = self.get_action_thresholds(proposal, conway_params)?;
-        let (d_act, p_act, c_act) = self.get_actual_votes(action_id);
-        let accepted = d_act >= d && p_act >= p && c_act >= c;
-        info!("Proposal {action_id}: votes {d_act}/{p_act}/{c_act}, thresholds {d}/{p}/{c}, result {accepted}");
+        let threshold = self.get_action_thresholds(proposal, conway_params)?;
+        let votes = self.get_actual_votes(action_id);
+        let accepted = votes.majorizes(&threshold);
+        info!("Proposal {action_id}: votes {votes}, thresholds {threshold}, result {accepted}");
 
         Ok(VotingOutcome {
             procedure: proposal.clone(),
-            committee_votes: RationalNumber::new_with_zero(c_act, c)?,
-            drep_votes: RationalNumber::new_with_zero(d_act, d)?,
-            pool_votes: RationalNumber::new_with_zero(p_act, p)?,
+            votes_cast: votes,
+            votes_threshold: threshold,
             accepted
         })
     }
@@ -400,30 +401,30 @@ impl State {
     }
 
     /// Returns actual votes: (Pool votes, DRep votes, committee votes)
-    fn get_actual_votes(&self, action_id: &GovActionId) -> (u64, u64, u64) {
-        let (mut p, mut d, mut c) = (0, 0, 0);
+    fn get_actual_votes(&self, action_id: &GovActionId) -> VotesCount {
+        let mut votes = VotesCount::zero();
         if let Some(all_votes) = self.votes.get(&action_id) {
             for voter in all_votes.keys() {
                 match voter {
-                    Voter::ConstitutionalCommitteeKey(_) => c += 1,
-                    Voter::ConstitutionalCommitteeScript(_) => c += 1,
+                    Voter::ConstitutionalCommitteeKey(_) => votes.committee += 1,
+                    Voter::ConstitutionalCommitteeScript(_) => votes.committee += 1,
                     Voter::DRepKey(key) => {
                         self.drep_stake
                             .get(&DRepCredential::AddrKeyHash(key.clone()))
-                            .inspect(|v| d += *v);
+                            .inspect(|v| votes.drep += *v);
                     }
                     Voter::DRepScript(script) => {
                         self.drep_stake
                             .get(&DRepCredential::ScriptHash(script.clone()))
-                            .inspect(|v| d += *v);
+                            .inspect(|v| votes.drep += *v);
                     }
                     Voter::StakePoolKey(pool) => {
-                        self.spo_stake.get(pool).inspect(|v| p += *v);
+                        self.spo_stake.get(pool).inspect(|v| votes.pool += *v);
                     }
                 }
             }
         }
-        (p, d, c)
+        votes
     }
 
     /// Checks whether action is expired at the beginning of new_epoch
@@ -493,31 +494,46 @@ impl State {
         let mut output = GovernanceOutcomesMessage::default();
 
         let actions = self.proposals.keys().map(|a| a.clone()).collect::<Vec<_>>();
+        let mut wdr = 0;
+        let mut ens = 0;
+        let mut rej = 0;
 
         for action_id in actions.iter() {
             info!("Epoch {}: processing action {}", new_epoch, action_id);
             match self.process_one_proposal(new_epoch, &action_id) {
                 Err(e) => error!("Error processing governance {action_id}: {e}"),
+                Ok(None) => (),
                 Ok(Some(out)) if out.accepted => {
-                    if let Some(elem) = Self::pack_as_enact_state_elem(&out.procedure) {
-                        output.enact_state.push((out, elem));
+                    let mut action_to_perform = GovernanceOutcomeVariant::NoAction;
+
+                    if let Some(elem) = Self::pack_as_enact_state_elem(&out.procedure) 
+                    {
+                        action_to_perform = GovernanceOutcomeVariant::EnactStateElem(elem);
+                        ens += 1;
                     }
                     else if let Some(wt) = Self::retrieve_withdrawal(&out.procedure) {
-                        output.withdrawals.push((out, wt));
+                        action_to_perform = GovernanceOutcomeVariant::TreasuryWithdrawal(wt);
+                        wdr += 1;
                     }
-                    else {
-                        // Actions without effective output (like Information)
-                        output.refunds.push(out);
-                    }
+
+                    output.outcomes.push(GovernanceOutcome {
+                        voting: out,
+                        action_to_perform
+                    })
                 }
-                Ok(Some(out)) => output.refunds.push(out),
-                Ok(None) => ()
+                Ok(Some(out)) => {
+                    rej += 1;
+                    output.outcomes.push(GovernanceOutcome {
+                        voting: out,
+                        action_to_perform: GovernanceOutcomeVariant::NoAction
+                    })
+                }
             }
         }
 
         info!(
-            "Epoch {new_epoch}: total {} actions, {} withdrawals, {} refunds",
-            output.enact_state.len(), output.withdrawals.len(), output.refunds.len()
+            "Epoch {new_epoch}: total {} actions, {ens} enacts, {wdr} withdrawals, {rej} rejected",
+            output.outcomes.len()
         );
         return output;
     }
