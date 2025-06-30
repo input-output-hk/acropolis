@@ -72,7 +72,7 @@ impl TestModule {
         let expected_final_state = LedgerState::from_directory(ledger_state_directory)?;
 
         // TODO: We need to enforce a timeout on this logic, at the end of which we validate the state
-        let mut snapshot_subscription = context.message_bus.register(&snapshot_topic).await?;
+        let mut snapshot_subscription = context.subscribe(&snapshot_topic).await?;
         let dump_message = Message::Snapshot(SnapshotMessage::DumpRequest(SnapshotDumpMessage {
             block_height: 1,
         }));

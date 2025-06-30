@@ -56,7 +56,7 @@ impl SPOState {
 
         // Subscribe for snapshot messages, if allowed
         if let Some(snapshot_topic) = maybe_snapshot_topic {
-            let mut subscription = context.message_bus.register(&snapshot_topic).await?;
+            let mut subscription = context.subscribe(&snapshot_topic).await?;
             let context_snapshot = context.clone();
             let state_snapshot = state.clone();
             context.run(async move {
