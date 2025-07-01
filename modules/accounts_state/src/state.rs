@@ -163,6 +163,15 @@ impl State {
                 },
             );
 
+        // Add pledges
+        self.spos_by_vrf_key
+            .values()
+            .for_each(|spo| {
+                spo_stakes.entry(&spo.operator)
+                    .and_modify(|v| *v += spo.pledge)
+                    .or_insert(spo.pledge);
+            });
+
         // Collect into a plain BTreeMap, so that it is ordered on output
         spo_stakes
             .iter()
@@ -534,7 +543,7 @@ mod tests {
         ProtocolParams,
         ConwayParams, PoolVotingThresholds, UnitInterval, DRepVotingThresholds,
         Constitution, Anchor, Committee,
-        rational_number::RationalNumber,
+        rational_number::RationalNumber, Ratio,
     };
 
     const STAKE_KEY_HASH: [u8; 3] = [0x99, 0x0f, 0x00];
@@ -629,15 +638,45 @@ mod tests {
     }
 
     #[test]
-    fn spdd_from_delegation_with_utxo_values() {
+    fn spdd_from_delegation_with_utxo_values_and_pledge() {
         let mut state = State::default();
 
-        // Delegate
         let spo1: KeyHash = vec![0x01];
+        let spo2: KeyHash = vec![0x02];
+
+        // Create the SPOs
+        state.handle_spo_state(&SPOStateMessage {
+            epoch: 1,
+            spos: vec![
+                PoolRegistration {
+                    operator: spo1.clone(),
+                    vrf_key_hash: spo1.clone(),
+                    pledge: 26,
+                    cost: 0,
+                    margin: Ratio { numerator: 1, denominator: 20 },
+                    reward_account: Vec::new(),
+                    pool_owners: Vec::new(),
+                    relays: Vec::new(),
+                    pool_metadata: None
+                },
+                PoolRegistration {
+                    operator: spo2.clone(),
+                    vrf_key_hash: spo2.clone(),
+                    pledge: 47,
+                    cost: 10,
+                    margin: Ratio { numerator: 1, denominator: 10 },
+                    reward_account: Vec::new(),
+                    pool_owners: Vec::new(),
+                    relays: Vec::new(),
+                    pool_metadata: None
+                },
+            ],
+        }).unwrap();
+
+        // Delegate
         let addr1: KeyHash = vec![0x11];
         state.record_stake_delegation(&Credential::AddrKeyHash(addr1.clone()), &spo1);
 
-        let spo2: KeyHash = vec![0x02];
         let addr2: KeyHash = vec![0x12];
         state.record_stake_delegation(&Credential::AddrKeyHash(addr2.clone()), &spo2);
 
@@ -665,9 +704,9 @@ mod tests {
         assert_eq!(spdd.len(), 2);
 
         let stake1 = spdd.get(&spo1).unwrap();
-        assert_eq!(*stake1, 42);
+        assert_eq!(*stake1, 26+42);
         let stake2 = spdd.get(&spo2).unwrap();
-        assert_eq!(*stake2, 21);
+        assert_eq!(*stake2, 47+21);
     }
 
     #[test]
