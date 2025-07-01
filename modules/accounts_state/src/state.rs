@@ -17,6 +17,7 @@ use serde_with::{hex::Hex, serde_as};
 use std::collections::BTreeMap;
 use std::sync::{Arc, atomic::AtomicU64};
 use tracing::{error, info, warn};
+use bigdecimal::BigDecimal;
 
 /// State of an individual stake address
 #[serde_as]
@@ -104,16 +105,26 @@ impl State {
     }
 
     /// Calculate rewards
-    pub fn calculate_rewards(&mut self) {
+    pub fn calculate_rewards(&mut self) -> Result<()> {
 
-        // NOTE:  This should all be done in bigdecimal
+        let shelley_params = match &self.protocol_parameters {
+            Some(ProtocolParams { shelley: Some(sp), .. }) => sp,
+            _ => bail!("No Shelley parameters available")
+        };
 
         // For each pool, calculate the total stake, including its own and
         // from other stake addresses
+        let spdd = self.generate_spdd();
 
         // Calculate total supply (total in circulation + treasury) or
         // equivalently max-supply - reserves - this is the denominator
         // for sigma, z0, s
+        let max_supply = match shelley_params.max_lovelace_supply {
+            Some(supply) => supply,
+            _ => bail!("No max_lovelace_supply")
+        };
+
+        let total_supply = BigDecimal::from(max_supply - self.pots.reserves);
 
         // Run the calculation in
         // https://docs.cardano.org/about-cardano/learn/pledging-rewards
@@ -138,6 +149,8 @@ impl State {
         // Move from reserves to reward accounts
 
         // Note: Also move from reserves to treasury some fraction of that taken
+
+        Ok(())
     }
 
     /// Derive the Stake Pool Delegation Distribution (SPDD) - a map of total stake value
