@@ -26,14 +26,12 @@ impl BlockUnpacker {
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // Subscribe for block body messages
         // Get configuration
-        let subscribe_topic = config
-            .get_string("subscribe-topic")
-            .unwrap_or(DEFAULT_SUBSCRIBE_TOPIC.to_string());
+        let subscribe_topic =
+            config.get_string("subscribe-topic").unwrap_or(DEFAULT_SUBSCRIBE_TOPIC.to_string());
         info!("Creating subscriber on '{subscribe_topic}'");
 
-        let publish_topic = config
-            .get_string("publish-topic")
-            .unwrap_or(DEFAULT_PUBLISH_TOPIC.to_string());
+        let publish_topic =
+            config.get_string("publish-topic").unwrap_or(DEFAULT_PUBLISH_TOPIC.to_string());
         info!("Publishing on '{publish_topic}'");
 
         let mut subscription = context.subscribe(&subscribe_topic).await?;

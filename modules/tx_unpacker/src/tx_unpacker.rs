@@ -262,10 +262,7 @@ impl TxUnpacker {
                     },
                     reward_account: reward_account.to_vec(),
                     pool_owners: pool_owners.into_iter().map(|v| v.to_vec()).collect(),
-                    relays: relays
-                        .into_iter()
-                        .map(|relay| Self::map_relay(relay))
-                        .collect(),
+                    relays: relays.into_iter().map(|relay| Self::map_relay(relay)).collect(),
                     pool_metadata: match pool_metadata {
                         Nullable::Some(md) => Some(PoolMetadata {
                             url: md.url.clone(),
@@ -357,10 +354,7 @@ impl TxUnpacker {
                         },
                         reward_account: reward_account.to_vec(),
                         pool_owners: pool_owners.into_iter().map(|v| v.to_vec()).collect(),
-                        relays: relays
-                            .into_iter()
-                            .map(|relay| Self::map_relay(relay))
-                            .collect(),
+                        relays: relays.into_iter().map(|relay| Self::map_relay(relay)).collect(),
                         pool_metadata: match pool_metadata {
                             Nullable::Some(md) => Some(PoolMetadata {
                                 url: md.url.clone(),
@@ -543,10 +537,7 @@ impl TxUnpacker {
             pool_deposit: p.pool_deposit.clone(),
             maximum_epoch: p.maximum_epoch.clone(),
             desired_number_of_stake_pools: p.desired_number_of_stake_pools.clone(),
-            pool_pledge_influence: p
-                .pool_pledge_influence
-                .as_ref()
-                .map(&Self::map_unit_interval),
+            pool_pledge_influence: p.pool_pledge_influence.as_ref().map(&Self::map_unit_interval),
             expansion_rate: p.expansion_rate.as_ref().map(&Self::map_unit_interval),
             treasury_growth_rate: p.expansion_rate.as_ref().map(&Self::map_unit_interval),
             min_pool_cost: p.min_pool_cost.clone(),
@@ -602,9 +593,7 @@ impl TxUnpacker {
             conway::GovAction::TreasuryWithdrawals(withdrawals, script) => Ok(
                 GovernanceAction::TreasuryWithdrawals(TreasuryWithdrawalsAction {
                     rewards: HashMap::from_iter(
-                        withdrawals
-                            .iter()
-                            .map(|(account, coin)| (account.to_vec(), *coin)),
+                        withdrawals.iter().map(|(account, coin)| (account.to_vec(), *coin)),
                     ),
                     script_hash: Self::map_nullable(&|x: &ScriptHash| x.to_vec(), script),
                 }),
@@ -622,9 +611,7 @@ impl TxUnpacker {
                             committee.iter().map(Self::map_stake_credential),
                         ),
                         new_committee_members: HashMap::from_iter(
-                            threshold
-                                .iter()
-                                .map(|(k, v)| (Self::map_stake_credential(k), *v)),
+                            threshold.iter().map(|(k, v)| (Self::map_stake_credential(k), *v)),
                         ),
                         terms: Self::map_unit_interval(terms),
                     },
@@ -694,10 +681,7 @@ impl TxUnpacker {
         for (pallas_voter, pallas_pair) in vote_procs.iter() {
             let voter = Self::map_voter(pallas_voter);
 
-            if let Some(existing) = procs
-                .votes
-                .insert(voter.clone(), SingleVoterVotes::default())
-            {
+            if let Some(existing) = procs.votes.insert(voter.clone(), SingleVoterVotes::default()) {
                 return Err(anyhow!("Duplicate voter {:?} in governance voting procedures: {:?}, existing {existing:?}", voter, vote_procs));
             }
 
@@ -720,9 +704,8 @@ impl TxUnpacker {
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // Subscribe for tx messages
         // Get configuration
-        let subscribe_topic = config
-            .get_string("subscribe-topic")
-            .unwrap_or(DEFAULT_SUBSCRIBE_TOPIC.to_string());
+        let subscribe_topic =
+            config.get_string("subscribe-topic").unwrap_or(DEFAULT_SUBSCRIBE_TOPIC.to_string());
         info!("Creating subscriber on '{subscribe_topic}'");
 
         let publish_utxo_deltas_topic = config.get_string("publish-utxo-deltas-topic").ok();
