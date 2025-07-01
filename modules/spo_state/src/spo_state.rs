@@ -1,7 +1,10 @@
 //! Acropolis SPO state module for Caryatid
 //! Accepts certificate events and derives the SPO state in memory
 
-use acropolis_common::messages::{CardanoMessage, Message, RESTResponse};
+use acropolis_common::messages::{
+    CardanoMessage, Message, RESTResponse, SnapshotDumpMessage, SnapshotMessage,
+    SnapshotStateMessage,
+};
 use anyhow::Result;
 use caryatid_sdk::{module, Context, Module};
 use config::Config;
@@ -11,6 +14,7 @@ use tokio::sync::Mutex;
 use tracing::{error, info};
 
 mod state;
+
 use state::State;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.certificates";
@@ -28,14 +32,17 @@ pub struct SPOState;
 impl SPOState {
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // Get configuration
-        let subscribe_topic = config
-            .get_string("subscribe-topic")
-            .unwrap_or(DEFAULT_SUBSCRIBE_TOPIC.to_string());
+        let subscribe_topic =
+            config.get_string("subscribe-topic").unwrap_or(DEFAULT_SUBSCRIBE_TOPIC.to_string());
         info!("Creating subscriber on '{subscribe_topic}'");
 
-        let handle_topic = config
-            .get_string("handle-topic")
-            .unwrap_or(DEFAULT_HANDLE_TOPIC.to_string());
+        let maybe_snapshot_topic = config
+            .get_string("snapshot-topic")
+            .ok()
+            .inspect(|snapshot_topic| info!("Creating subscriber on '{snapshot_topic}'"));
+
+        let handle_topic =
+            config.get_string("handle-topic").unwrap_or(DEFAULT_HANDLE_TOPIC.to_string());
         info!("Creating request handler on '{handle_topic}'");
 
         let spo_state_topic = config
@@ -44,6 +51,48 @@ impl SPOState {
         info!("Creating SPO state publisher on '{spo_state_topic}'");
 
         let state = Arc::new(Mutex::new(State::new()));
+
+        // Subscribe for snapshot messages, if allowed
+        if let Some(snapshot_topic) = maybe_snapshot_topic {
+            let mut subscription = context.subscribe(&snapshot_topic).await?;
+            let context_snapshot = context.clone();
+            let state_snapshot = state.clone();
+            context.run(async move {
+                let Ok((_, message)) = subscription.read().await else {
+                    return;
+                };
+
+                match message.as_ref() {
+                    Message::Snapshot(SnapshotMessage::Bootstrap(
+                        SnapshotStateMessage::SPOState(spo_state),
+                    )) => {
+                        let mut state = state_snapshot.lock().await;
+                        state.bootstrap(spo_state.clone());
+                    }
+                    Message::Snapshot(SnapshotMessage::DumpRequest(SnapshotDumpMessage {
+                        block_height,
+                    })) => {
+                        info!("inspecting state at block height {}", block_height);
+                        let state = state_snapshot.lock().await;
+                        let maybe_spo_state = state.dump(*block_height);
+
+                        if let Some(spo_state) = maybe_spo_state {
+                            context_snapshot
+                                .message_bus
+                                .publish(
+                                    &snapshot_topic,
+                                    Arc::new(Message::Snapshot(SnapshotMessage::Dump(
+                                        SnapshotStateMessage::SPOState(spo_state),
+                                    ))),
+                                )
+                                .await
+                                .unwrap_or_else(|e| error!("failed to publish snapshot dump: {e}"))
+                        }
+                    }
+                    _ => error!("Unexpected message type: {message:?}"),
+                }
+            });
+        }
 
         // Subscribe for certificate messages
         let mut subscription = context.subscribe(&subscribe_topic).await?;
@@ -54,6 +103,7 @@ impl SPOState {
                 let Ok((_, message)) = subscription.read().await else {
                     return;
                 };
+
                 match message.as_ref() {
                     Message::Cardano((block, CardanoMessage::TxCertificates(tx_certs_msg))) => {
                         // End of epoch?
@@ -73,7 +123,6 @@ impl SPOState {
                             .inspect_err(|e| error!("Messaging handling error: {e}"))
                             .ok();
                     }
-
                     _ => error!("Unexpected message type: {message:?}"),
                 }
             }

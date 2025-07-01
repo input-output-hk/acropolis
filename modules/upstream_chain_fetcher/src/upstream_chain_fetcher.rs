@@ -51,9 +51,7 @@ impl UpstreamChainFetcher {
         point: Point,
         block_info: BlockInfo,
     ) -> Result<()> {
-        let topic = config
-            .get_string("body-topic")
-            .unwrap_or(DEFAULT_BODY_TOPIC.to_string());
+        let topic = config.get_string("body-topic").unwrap_or(DEFAULT_BODY_TOPIC.to_string());
 
         // Fetch the block body
         debug!("Requesting single block {point:?}");
@@ -92,9 +90,7 @@ impl UpstreamChainFetcher {
         peer: Arc<Mutex<PeerClient>>,
         point: Point,
     ) -> Result<()> {
-        let topic = config
-            .get_string("header-topic")
-            .unwrap_or(DEFAULT_HEADER_TOPIC.to_string());
+        let topic = config.get_string("header-topic").unwrap_or(DEFAULT_HEADER_TOPIC.to_string());
 
         // Find intersect to given point
         let slot = point.slot_or_default();
@@ -270,12 +266,9 @@ impl UpstreamChainFetcher {
 
     /// Main init function
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
-        let node_address = config
-            .get_string("node-address")
-            .unwrap_or(DEFAULT_NODE_ADDRESS.to_string());
-        let magic_number: u64 = config
-            .get::<u64>("magic-number")
-            .unwrap_or(DEFAULT_MAGIC_NUMBER);
+        let node_address =
+            config.get_string("node-address").unwrap_or(DEFAULT_NODE_ADDRESS.to_string());
+        let magic_number: u64 = config.get::<u64>("magic-number").unwrap_or(DEFAULT_MAGIC_NUMBER);
 
         info!("Connecting to {node_address} ({magic_number})");
 

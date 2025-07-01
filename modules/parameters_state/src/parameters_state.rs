@@ -12,8 +12,8 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info};
 
-mod parameters_updater;
 mod genesis_params;
+mod parameters_updater;
 mod state;
 
 use parameters_updater::ParametersUpdater;
@@ -89,43 +89,41 @@ impl ParametersState {
         let state = Arc::new(Mutex::new(State::new(config.network_name.clone())));
         let state_handle = state.clone();
 
-        config
-            .context
-            .handle(&config.handle_topic, move |message: Arc<Message>| {
-                let _state = state_handle.clone();
-                async move {
-                    let response = match message.as_ref() {
-                        Message::RESTRequest(request) => {
-                            info!("REST received {} {}", request.method, request.path);
-                            RESTResponse::with_text(200, "Ok")
-                            /*
-                            let lock = state.lock().await;
+        config.context.handle(&config.handle_topic, move |message: Arc<Message>| {
+            let _state = state_handle.clone();
+            async move {
+                let response = match message.as_ref() {
+                    Message::RESTRequest(request) => {
+                        info!("REST received {} {}", request.method, request.path);
+                        RESTResponse::with_text(200, "Ok")
+                        /*
+                        let lock = state.lock().await;
 
-                            match perform_rest_request(&lock, &request.path) {
-                                Ok(response) => RESTResponse::with_text(200, &response),
-                                Err(error) => {
-                                    error!("Governance State REST request error: {error:?}");
-                                    RESTResponse::with_text(400, &format!("{error:?}"))
-                                }
+                        match perform_rest_request(&lock, &request.path) {
+                            Ok(response) => RESTResponse::with_text(200, &response),
+                            Err(error) => {
+                                error!("Governance State REST request error: {error:?}");
+                                RESTResponse::with_text(400, &format!("{error:?}"))
                             }
-                            */
                         }
-                        _ => {
-                            error!("Unexpected message type: {message:?}");
-                            RESTResponse::with_text(500, &format!("Unexpected message type"))
-                        }
-                    };
+                        */
+                    }
+                    _ => {
+                        error!("Unexpected message type: {message:?}");
+                        RESTResponse::with_text(500, &format!("Unexpected message type"))
+                    }
+                };
 
-                    Arc::new(Message::RESTResponse(response))
-                }
-            });
+                Arc::new(Message::RESTResponse(response))
+            }
+        });
 
         loop {
             info!("Waiting for enact-state");
             match enact_s.read().await?.1.as_ref() {
-                Message::Cardano((block, CardanoMessage::EnactState(enact))) => {
+                Message::Cardano((block, CardanoMessage::GovernanceOutcomes(gov))) => {
                     let mut locked = state.lock().await;
-                    let new_params = locked.handle_enact_state(&block, &enact).await?;
+                    let new_params = locked.handle_enact_state(&block, &gov).await?;
                     Self::publish_update(&config, &block, new_params)?;
                 }
                 msg => error!("Unexpected message {msg:?} for enact state topic"),
@@ -139,9 +137,7 @@ impl ParametersState {
 
         // Start run task
         tokio::spawn(async move {
-            Self::run(cfg, enact)
-                .await
-                .unwrap_or_else(|e| error!("Failed: {e}"));
+            Self::run(cfg, enact).await.unwrap_or_else(|e| error!("Failed: {e}"));
         });
 
         Ok(())

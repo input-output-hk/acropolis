@@ -2,7 +2,7 @@
 
 use crate::ParametersUpdater;
 use acropolis_common::{
-    messages::{EnactStateMessage, ProtocolParamsMessage},
+    messages::{GovernanceOutcomesMessage, ProtocolParamsMessage},
     BlockInfo, Era,
 };
 use std::ops::RangeInclusive;
@@ -54,7 +54,7 @@ impl State {
     pub async fn handle_enact_state(
         &mut self,
         block: &BlockInfo,
-        msg: &EnactStateMessage,
+        msg: &GovernanceOutcomesMessage,
     ) -> Result<ProtocolParamsMessage> {
         if !block.new_epoch {
             bail!("Enact state for block {block:?} (not a new epoch)");

@@ -18,8 +18,7 @@ fn download(url: &str, filename: &str) {
 
     let file_path = output_path.join(filename);
     let mut file = fs::File::create(&file_path).expect("Failed to create file {file_path}");
-    file.write_all(data.as_bytes())
-        .expect("Failed to write file {file_path}");
+    file.write_all(data.as_bytes()).expect("Failed to write file {file_path}");
 }
 
 fn main() {
