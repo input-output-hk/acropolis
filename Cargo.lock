@@ -1115,9 +1115,9 @@ dependencies = [
 
 [[package]]
 name = "caryatid_sdk"
-version = "0.12.1"
+version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1707298acf7c22c7dad6c35674b360528bbdc92ec65d0744f9561dcd23d5baee"
+checksum = "2a5226f72f658ec71e48c3e74a1bfa001798a08dc66179eabb9b70573c9ae72a"
 dependencies = [
  "anyhow",
  "async-trait",
