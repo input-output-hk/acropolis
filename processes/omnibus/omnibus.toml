@@ -49,7 +49,7 @@ port = 4340
 
 [module.spy]
 # Enable for message spying
-#topic = "cardano.drep.state"
+topic = "cardano.spo.distribution"
 
 [startup]
 topic = "cardano.sequence.start"
