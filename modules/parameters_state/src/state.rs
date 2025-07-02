@@ -2,7 +2,7 @@
 
 use crate::ParametersUpdater;
 use acropolis_common::{
-    messages::{EnactStateMessage, ProtocolParamsMessage},
+    messages::{GovernanceOutcomesMessage, ProtocolParamsMessage},
     BlockInfo, Era,
 };
 use anyhow::{bail, Result};
@@ -33,8 +33,10 @@ impl State {
         self.current_era = Some(new_block.era.clone());
         self.current_params.apply_genesis(&new_block.era)?;
 
-        info!("Applied genesis for {}, resulting params {:?}", 
-            new_block.era, self.current_params.get_params()
+        info!(
+            "Applied genesis for {}, resulting params {:?}",
+            new_block.era,
+            self.current_params.get_params()
         );
 
         Ok(())
@@ -43,7 +45,7 @@ impl State {
     pub async fn handle_enact_state(
         &mut self,
         block: &BlockInfo,
-        msg: &EnactStateMessage,
+        msg: &GovernanceOutcomesMessage,
     ) -> Result<ProtocolParamsMessage> {
         if !block.new_epoch {
             bail!("Enact state for block {block:?} (not a new epoch)");

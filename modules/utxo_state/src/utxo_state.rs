@@ -48,20 +48,15 @@ impl UTXOState {
     /// Main init function
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // Get configuration
-        let subscribe_topic = config
-            .get_string("subscribe-topic")
-            .unwrap_or(DEFAULT_SUBSCRIBE_TOPIC.to_string());
+        let subscribe_topic =
+            config.get_string("subscribe-topic").unwrap_or(DEFAULT_SUBSCRIBE_TOPIC.to_string());
         info!("Creating subscriber on '{subscribe_topic}'");
 
-        let rest_topic = config
-            .get_string("rest-topic")
-            .unwrap_or(DEFAULT_REST_TOPIC.to_string());
+        let rest_topic = config.get_string("rest-topic").unwrap_or(DEFAULT_REST_TOPIC.to_string());
         info!("Creating REST handler on '{rest_topic}'");
 
         // Create store
-        let store_type = config
-            .get_string("store")
-            .unwrap_or(DEFAULT_STORE.to_string());
+        let store_type = config.get_string("store").unwrap_or(DEFAULT_STORE.to_string());
         let store: Arc<dyn ImmutableUTXOStore> = match store_type.as_str() {
             "memory" => Arc::new(InMemoryImmutableUTXOStore::new(config.clone())),
             "dashmap" => Arc::new(DashMapImmutableUTXOStore::new(config.clone())),
