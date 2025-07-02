@@ -1,7 +1,10 @@
 //! Acropolis UTXO state module for Caryatid
 //! Accepts UTXO events and derives the current ledger state in memory
 
-use acropolis_common::messages::{CardanoMessage, Message, RESTResponse};
+use acropolis_common::{
+    messages::{CardanoMessage, Message, RESTResponse},
+    rest_helper::handle_rest_with_parameter,
+};
 use caryatid_sdk::{module, Context, Module};
 
 use anyhow::{anyhow, Result};
@@ -125,45 +128,63 @@ impl UTXOState {
             }
         });
 
-        // Handle REST requests for utxo.<id>
-        let state3 = state.clone();
-        context.handle(&rest_topic, move |message: Arc<Message>| {
-            let state = state3.clone();
+        // Handle REST requests for utxo.<tx_hash>:<index>
+        handle_rest_with_parameter(context.clone(), &rest_topic, move |param| {
+            let param = param.to_string();
+            let state = state.clone();
             async move {
-                let response = match message.as_ref() {
-                    Message::RESTRequest(request) => {
-                        info!("REST received {} {}", request.method, request.path);
-                        match request.path_elements.get(1) {
-                            Some(id) => match hex::decode(&id) {
-                                Ok(id) => {
-                                    let key = state::UTXOKey::new(&id, 0); // TODO parse :index
-                                    match state.lock().await.lookup_utxo(&key).await {
-                                        Ok(Some(utxo)) => match serde_json::to_string(&utxo) {
-                                            Ok(body) => RESTResponse::with_json(200, &body),
-                                            Err(error) => RESTResponse::with_text(
-                                                500,
-                                                &format!("{error:?}").to_string(),
-                                            ),
-                                        },
-                                        _ => RESTResponse::with_text(404, "UTXO not found"),
-                                    }
-                                }
-                                Err(error) => RESTResponse::with_text(
-                                    400,
-                                    &format!("UTXO must be hex encoded vector of bytes: {error:?}") // TODO real format
-                                        .to_string(),
-                                ),
-                            },
-                            None => RESTResponse::with_text(400, "UTXO id must be provided"),
-                        }
-                    }
-                    _ => {
-                        error!("Unexpected message type {:?}", message);
-                        RESTResponse::with_text(500, "Unexpected message in REST request")
+                // Parse "<tx_hash>:<index>"
+                let (tx_hash_str, index_str) = match param.split_once(':') {
+                    Some((tx, idx)) => (tx, idx),
+                    None => {
+                        return Ok(RESTResponse::with_text(
+                            400,
+                            "Parameter must be in <tx_hash>:<index> format",
+                        ));
                     }
                 };
 
-                Arc::new(Message::RESTResponse(response))
+                // Validate tx_hash and index, look up the UTXO, and return JSON or an error.
+                match hex::decode(tx_hash_str) {
+                    Ok(tx_hash_bytes) => match index_str.parse::<u64>() {
+                        Ok(index) => {
+                            let key = state::UTXOKey::new(&tx_hash_bytes, index);
+                            match state.lock().await.lookup_utxo(&key).await {
+                                Ok(Some(utxo)) => {
+                                    // Convert address to bech32 string
+                                    let address_text = match utxo.address.to_string() {
+                                        Ok(addr) => addr,
+                                        Err(e) => {
+                                            return Ok(RESTResponse::with_text(
+                                                500,
+                                                &format!(
+                                                    "Failed to convert address to string: {e}"
+                                                ),
+                                            ));
+                                        }
+                                    };
+
+                                    let json_response = serde_json::json!({
+                                        "address": address_text,
+                                        "value": utxo.value,
+                                    });
+
+                                    Ok(RESTResponse::with_json(200, &json_response.to_string()))
+                                }
+                                Ok(None) => Ok(RESTResponse::with_text(404, "UTXO not found")),
+                                Err(error) => Err(anyhow!("{:?}", error)),
+                            }
+                        }
+                        Err(error) => Ok(RESTResponse::with_text(
+                            400,
+                            &format!("Invalid index: {error}"),
+                        )),
+                    },
+                    Err(error) => Ok(RESTResponse::with_text(
+                        400,
+                        &format!("Invalid tx_hash: {error}"),
+                    )),
+                }
             }
         });
 
