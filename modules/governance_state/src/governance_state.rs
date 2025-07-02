@@ -17,7 +17,9 @@ use tokio::sync::Mutex;
 use tracing::{error, info};
 
 mod state;
+mod voting_state;
 use state::State;
+use voting_state::VotingRegistrationState;
 
 const DEFAULT_SUBSCRIBE_TOPIC: (&str, &str) = ("subscribe-topic", "cardano.governance");
 const DEFAULT_HANDLE_TOPIC: (&str, &str) = ("handle-topic", "rest.get.governance-state.*");

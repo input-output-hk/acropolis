@@ -64,3 +64,8 @@ epoch. Special message?
 * If voted/expired: generate money transfer. List of 
 
 * Each epoch boundary governance state tracker issues a "rewards update" message.
+
+### Question:
+
+* How can I get total drep stake?
+* How can I get pools stake?
