@@ -17,7 +17,7 @@ use serde_with::{hex::Hex, serde_as};
 use std::collections::BTreeMap;
 use std::sync::{Arc, atomic::AtomicU64};
 use tracing::{error, info, warn};
-use bigdecimal::BigDecimal;
+use bigdecimal::{BigDecimal, ToPrimitive};
 
 /// State of an individual stake address
 #[serde_as]
@@ -109,6 +109,7 @@ impl State {
     }
 
     /// Calculate rewards
+    // Follows the general scheme in https://docs.cardano.org/about-cardano/learn/pledging-rewards
     pub fn calculate_rewards(&mut self, ea_msg: &EpochActivityMessage) -> Result<()> {
 
         // Get Shelley parameters, silently return if too early in the chain so no
@@ -128,6 +129,27 @@ impl State {
         let max_supply = shelley_params.max_lovelace_supply
             .ok_or_else(|| anyhow!("No max_lovelace_supply"))?;
         let total_supply = BigDecimal::from(max_supply - self.pots.reserves);
+
+        // Handle monetary expansion - movement from reserves to rewards and treasury
+        let monetary_expansion_factor = &shelley_params.protocol_params.monetary_expansion; // Rho
+        let monetary_expansion = BigDecimal::from(self.pots.reserves)
+            * BigDecimal::from(monetary_expansion_factor.numerator)
+            / BigDecimal::from(monetary_expansion_factor.denominator);
+
+        // Top-slice some for treasury
+        let treasury_cut = &shelley_params.protocol_params.treasury_cut;  // Tau
+        let treasury_increase = &monetary_expansion
+            * BigDecimal::from(treasury_cut.numerator)
+            / BigDecimal::from(treasury_cut.denominator);
+        self.pots.treasury += treasury_increase.with_scale(0).to_u64()
+            .ok_or(anyhow!("Can't calculate integral treasury cut"))?;
+
+        // Calculate the total rewards available (R) - fees + monetary expansion left over
+        // after treasury cut
+        let total_rewards = BigDecimal::from(ea_msg.total_fees) + monetary_expansion.clone()
+            - treasury_increase.clone();
+
+        info!(%monetary_expansion, %treasury_increase, %total_rewards, "Reward calculations");
 
         // Run the calculation in
         // https://docs.cardano.org/about-cardano/learn/pledging-rewards
