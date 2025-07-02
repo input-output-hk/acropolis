@@ -15,7 +15,7 @@ anyhow = "1.0"
 caryatid_sdk = "0.12"
 config = "0.15.11"
 hex = "0.4"
-pallas = "0.32.0"
+pallas = "0.32.1"
 serde_json = "1.0.138"
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1.40"

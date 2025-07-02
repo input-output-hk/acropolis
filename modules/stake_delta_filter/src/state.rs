@@ -70,6 +70,9 @@ impl State {
         delta: &AddressDeltasMessage,
     ) -> Result<()> {
         let msg = process_message(&self.pointer_cache, delta, block, Some(&mut self.tracker));
+
+        // Updating block number in pointer cache: looking for Conway epoch start.
+        self.pointer_cache.update_block(block);
         self.delta_publisher.publish(block, msg).await?;
         Ok(())
     }
@@ -100,8 +103,8 @@ impl State {
                         },
                     };
 
-                    self.pointer_cache
-                        .set_pointer(ptr, stake_address, block.slot);
+                    // Sets pointer; updates max processed slot
+                    self.pointer_cache.set_pointer(ptr, stake_address, block.slot);
                 }
                 _ => (),
             }
@@ -131,8 +134,7 @@ impl State {
         let used_pointers = self.tracker.get_used_pointers();
 
         if self.params.write_full_cache {
-            self.pointer_cache
-                .try_save(&self.params.get_cache_file_name(".json")?)?;
+            self.pointer_cache.try_save(&self.params.get_cache_file_name(".json")?)?;
         } else {
             self.pointer_cache
                 .try_save_filtered(&self.params.get_cache_file_name("")?, &used_pointers)?;
