@@ -9,7 +9,7 @@ use acropolis_common::{
     Lovelace, MoveInstantaneousReward, PoolRegistration, StakeCredential, TxCertificate, Pot,
     ProtocolParams,
 };
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, anyhow, Context, Result};
 use dashmap::DashMap;
 use imbl::HashMap;
 use rayon::prelude::*;
@@ -64,9 +64,13 @@ pub struct State {
     /// Epoch this state is for
     epoch: u64,
 
-    /// Map of active SPOs by VRF vkey
+    /// Map of active SPOs by operator ID
     #[serde_as(as = "SerializeMapAs<Hex, _>")]
-    spos_by_vrf_key: HashMap<Vec<u8>, PoolRegistration>,
+    spos: HashMap<KeyHash, PoolRegistration>,
+
+    /// Map of SPO VRF key to operator ID
+    #[serde_as(as = "SerializeMapAs<Hex, Hex>")]
+    spo_ids_by_vrf_key: HashMap<KeyHash, KeyHash>,
 
     /// Map of staking address values
     #[serde_as(as = "SerializeMapAs<Hex, _>")]
@@ -105,11 +109,13 @@ impl State {
     }
 
     /// Calculate rewards
-    pub fn calculate_rewards(&mut self) -> Result<()> {
+    pub fn calculate_rewards(&mut self, ea_msg: &EpochActivityMessage) -> Result<()> {
 
+        // Get Shelley parameters, silently return if too early in the chain so no
+        // rewards to calculate
         let shelley_params = match &self.protocol_parameters {
             Some(ProtocolParams { shelley: Some(sp), .. }) => sp,
-            _ => bail!("No Shelley parameters available")
+            _ => return Ok(())
         };
 
         // For each pool, calculate the total stake, including its own and
@@ -119,11 +125,8 @@ impl State {
         // Calculate total supply (total in circulation + treasury) or
         // equivalently max-supply - reserves - this is the denominator
         // for sigma, z0, s
-        let max_supply = match shelley_params.max_lovelace_supply {
-            Some(supply) => supply,
-            _ => bail!("No max_lovelace_supply")
-        };
-
+        let max_supply = shelley_params.max_lovelace_supply
+            .ok_or_else(|| anyhow!("No max_lovelace_supply"))?;
         let total_supply = BigDecimal::from(max_supply - self.pots.reserves);
 
         // Run the calculation in
@@ -133,6 +136,28 @@ impl State {
         //   a0 parameter
         //   sigma = total stake
         //   z0 = pool saturation size (1/k)
+
+        // Look up every VRF key in the SPO map
+        for (vrf_vkey_hash, count) in ea_msg.vrf_vkey_hashes.iter() {
+            match self.spo_ids_by_vrf_key.get(vrf_vkey_hash) {
+                Some(spo_id) => {
+                    // Lookup SPO by operator ID
+                    match self.spos.get(spo_id) {
+                        Some(spo) => {
+                            // !TODO count rewards for this block
+                        }
+
+                        None => error!("SPO lookup mismatch for VRF key {}",
+                                       hex::encode(vrf_vkey_hash))
+                    }
+                }
+
+                None => error!(
+                    "VRF vkey {} not found in SPO map",
+                    hex::encode(vrf_vkey_hash)
+                ),
+            }
+        }
 
         // This gives us the optimum reward for the pool for this epoch
 
@@ -177,7 +202,7 @@ impl State {
             );
 
         // Add pledges
-        self.spos_by_vrf_key
+        self.spos
             .values()
             .for_each(|spo| {
                 spo_stakes.entry(&spo.operator)
@@ -258,34 +283,26 @@ impl State {
     /// the just-ended epoch
     pub fn handle_epoch_activity(&mut self, ea_msg: &EpochActivityMessage) -> Result<()> {
         self.epoch = ea_msg.epoch;
-
-        // Look up every VRF key in the SPO map
-        for (vrf_vkey_hash, count) in ea_msg.vrf_vkey_hashes.iter() {
-            match self.spos_by_vrf_key.get(vrf_vkey_hash) {
-                Some(spo) => {
-                    // !TODO count rewards for this block
-                }
-
-                None => error!(
-                    "VRF vkey {} not found in SPO map",
-                    hex::encode(vrf_vkey_hash)
-                ),
-            }
-        }
-
-        self.calculate_rewards();
+        self.calculate_rewards(ea_msg)?;
         Ok(())
     }
 
     /// Handle an SPOStateMessage with the full set of SPOs valid at the end of the last
     /// epoch
     pub fn handle_spo_state(&mut self, spo_msg: &SPOStateMessage) -> Result<()> {
-        // Capture current SPOs, mapped by VRF vkey hash
-        self.spos_by_vrf_key = spo_msg
+        // Capture current SPOs, mapped by operator ID
+        self.spos = spo_msg
             .spos
             .iter()
             .cloned()
-            .map(|spo| (spo.vrf_key_hash.clone(), spo))
+            .map(|spo| (spo.operator.clone(), spo))
+            .collect();
+
+        // Map their VRF keys to operator IDs too
+        self.spo_ids_by_vrf_key = spo_msg
+            .spos
+            .iter()
+            .map(|spo| (spo.vrf_key_hash.clone(), spo.operator.clone()))
             .collect();
 
         Ok(())
