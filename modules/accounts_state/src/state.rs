@@ -68,10 +68,6 @@ pub struct State {
     #[serde_as(as = "SerializeMapAs<Hex, _>")]
     spos: HashMap<KeyHash, PoolRegistration>,
 
-    /// Map of SPO VRF key to operator ID
-    #[serde_as(as = "SerializeMapAs<Hex, Hex>")]
-    spo_ids_by_vrf_key: HashMap<KeyHash, KeyHash>,
-
     /// Map of staking address values
     #[serde_as(as = "SerializeMapAs<Hex, _>")]
     stake_addresses: HashMap<Vec<u8>, StakeAddressState>,
@@ -108,9 +104,12 @@ impl State {
         Ok(())
     }
 
-    /// Calculate rewards
+    /// Calculate rewards given
+    ///   total_fees: Total fees taken in this epoch
+    ///   spo_block_counts: Count of blocks minted by VRF key
     // Follows the general scheme in https://docs.cardano.org/about-cardano/learn/pledging-rewards
-    pub fn calculate_rewards(&mut self, ea_msg: &EpochActivityMessage) -> Result<()> {
+    pub fn calculate_rewards(&mut self, total_fees: u64,
+                             spo_block_counts: HashMap<KeyHash, usize>) -> Result<()> {
 
         // Get Shelley parameters, silently return if too early in the chain so no
         // rewards to calculate
@@ -134,68 +133,51 @@ impl State {
         let monetary_expansion_factor = &shelley_params.protocol_params.monetary_expansion; // Rho
         let monetary_expansion = BigDecimal::from(self.pots.reserves)
             * BigDecimal::from(monetary_expansion_factor.numerator)
-            / BigDecimal::from(monetary_expansion_factor.denominator);
+            / BigDecimal::from(monetary_expansion_factor.denominator)
+            .with_scale(0); // floor
 
         // Top-slice some for treasury
         let treasury_cut = &shelley_params.protocol_params.treasury_cut;  // Tau
         let treasury_increase = &monetary_expansion
             * BigDecimal::from(treasury_cut.numerator)
-            / BigDecimal::from(treasury_cut.denominator);
-        self.pots.treasury += treasury_increase.with_scale(0).to_u64()
+            / BigDecimal::from(treasury_cut.denominator)
+            .with_scale(0); // floor
+        self.pots.treasury += treasury_increase.to_u64()
             .ok_or(anyhow!("Can't calculate integral treasury cut"))?;
 
         // Calculate the total rewards available (R) - fees + monetary expansion left over
         // after treasury cut
-        let total_rewards = BigDecimal::from(ea_msg.total_fees) + monetary_expansion.clone()
+        let total_rewards = BigDecimal::from(total_fees) + monetary_expansion.clone()
             - treasury_increase.clone();
 
         info!(%monetary_expansion, %treasury_increase, %total_rewards, "Reward calculations");
 
-        // Run the calculation in
-        // https://docs.cardano.org/about-cardano/learn/pledging-rewards
-        // Requires:
-        //   R = total fees + monetary expansion (reserves * ?)
-        //   a0 parameter
-        //   sigma = total stake
-        //   z0 = pool saturation size (1/k)
+        // Calculate for every registered SPO (even those who didn't participate in this epoch)
+        self.spos.values().for_each(|spo| {
 
-        // Look up every VRF key in the SPO map
-        for (vrf_vkey_hash, count) in ea_msg.vrf_vkey_hashes.iter() {
-            match self.spo_ids_by_vrf_key.get(vrf_vkey_hash) {
-                Some(spo_id) => {
-                    // Lookup SPO by operator ID
-                    match self.spos.get(spo_id) {
-                        Some(spo) => {
-                            // !TODO count rewards for this block
-                        }
+            // Look up SPO in block counts, by VRF key
+            let block_count = spo_block_counts.get(&spo.vrf_key_hash).ok_or(0);
 
-                        None => error!("SPO lookup mismatch for VRF key {}",
-                                       hex::encode(vrf_vkey_hash))
-                    }
-                }
+            // Requires:
+            //   R = total fees + monetary expansion (reserves * ?)
+            //   a0 parameter
+            //   sigma = total stake
+            //   z0 = pool saturation size (1/k)
 
-                None => error!(
-                    "VRF vkey {} not found in SPO map",
-                    hex::encode(vrf_vkey_hash)
-                ),
-            }
-        }
+            // This gives us the optimum reward for the pool for this epoch
 
-        // This gives us the optimum reward for the pool for this epoch
+            // Adjust for actual performance *= B/sigma-a.
+            // Beta = fraction of all blocks produced this epoch
+            // sigma-a = delegated stake / total delegated stake
 
-        // Adjust for actual performance *= B/sigma-a.
-        // Beta = fraction of all blocks produced this epoch
-        // sigma-a = delegated stake / total delegated stake
+            // => Total rewards for this pool
 
-        // => Total rewards for this pool
+            // Subtract fixed costs
+            // Subtract margin
+            // Split remainder in proportional to delegated stake, including owners pledge
 
-        // Subtract fixed costs
-        // Subtract margin
-        // Split remainder in proportional to delegated stake, including owners pledge
-
-        // Move from reserves to reward accounts
-
-        // Note: Also move from reserves to treasury some fraction of that taken
+            // Move from reserves to reward accounts
+        });
 
         Ok(())
     }
@@ -305,7 +287,11 @@ impl State {
     /// the just-ended epoch
     pub fn handle_epoch_activity(&mut self, ea_msg: &EpochActivityMessage) -> Result<()> {
         self.epoch = ea_msg.epoch;
-        self.calculate_rewards(ea_msg)?;
+
+        // Create a HashMap of the spo count data, for quick access
+        let spo_block_counts: HashMap<KeyHash, usize> =
+            ea_msg.vrf_vkey_hashes.iter().map(|(k, v)| (k.clone(), *v)).collect();
+        self.calculate_rewards(ea_msg.total_fees, spo_block_counts)?;
         Ok(())
     }
 
@@ -318,13 +304,6 @@ impl State {
             .iter()
             .cloned()
             .map(|spo| (spo.operator.clone(), spo))
-            .collect();
-
-        // Map their VRF keys to operator IDs too
-        self.spo_ids_by_vrf_key = spo_msg
-            .spos
-            .iter()
-            .map(|spo| (spo.vrf_key_hash.clone(), spo.operator.clone()))
             .collect();
 
         Ok(())
