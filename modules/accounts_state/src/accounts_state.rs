@@ -18,6 +18,8 @@ use tracing::{error, info};
 
 mod drep_distribution_publisher;
 use drep_distribution_publisher::DRepDistributionPublisher;
+mod spo_distribution_publisher;
+use spo_distribution_publisher::SPODistributionPublisher;
 mod state;
 use state::State;
 
@@ -29,6 +31,7 @@ const DEFAULT_POT_DELTAS_TOPIC: &str = "cardano.pot.deltas";
 const DEFAULT_STAKE_DELTAS_TOPIC: &str = "cardano.stake.deltas";
 const DEFAULT_DREP_STATE_TOPIC: &str = "cardano.drep.state";
 const DEFAULT_DREP_DISTRIBUTION_TOPIC: &str = "cardano.drep.distribution";
+const DEFAULT_SPO_DISTRIBUTION_TOPIC: &str = "cardano.spo.distribution";
 const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: &str = "cardano.protocol.parameters";
 
 const DEFAULT_HANDLE_STAKE_TOPIC: &str = "rest.get.stake";
@@ -48,7 +51,8 @@ impl AccountsState {
     /// Async run loop
     async fn run(
         history: Arc<Mutex<StateHistory<State>>>,
-        mut publisher: DRepDistributionPublisher,
+        mut drep_publisher: DRepDistributionPublisher,
+        mut spo_publisher: SPODistributionPublisher,
         mut spos_subscription: Box<dyn Subscription<Message>>,
         mut ea_subscription: Box<dyn Subscription<Message>>,
         mut certs_subscription: Box<dyn Subscription<Message>>,
@@ -184,8 +188,7 @@ impl AccountsState {
                         state.handle_drep_state(&dreps_msg);
 
                         let drdd = state.generate_drdd();
-
-                        if let Err(e) = publisher.publish_stake(block_info, drdd).await {
+                        if let Err(e) = drep_publisher.publish_drdd(block_info, drdd).await {
                             error!("Error publishing drep voting stake distribution: {e:#}")
                         }
                     }
@@ -211,6 +214,11 @@ impl AccountsState {
                             .handle_spo_state(spo_msg)
                             .inspect_err(|e| error!("SPOState handling error: {e:#}"))
                             .ok();
+
+                        let spdd = state.generate_spdd();
+                        if let Err(e) = spo_publisher.publish_spdd(block_info, spdd).await {
+                            error!("Error publishing SPO stake distribution: {e:#}")
+                        }
                     }
 
                     _ => error!("Unexpected message type: {message:?}"),
@@ -315,6 +323,10 @@ impl AccountsState {
         let drep_distribution_topic = config
             .get_string("publish-drep-distribution-topic")
             .unwrap_or(DEFAULT_DREP_DISTRIBUTION_TOPIC.to_string());
+
+        let spo_distribution_topic = config
+            .get_string("publish-spo-distribution-topic")
+            .unwrap_or(DEFAULT_SPO_DISTRIBUTION_TOPIC.to_string());
 
         // REST handler topics
         let handle_stake_topic = config
@@ -462,7 +474,10 @@ impl AccountsState {
             }
         });
 
-        let publisher = DRepDistributionPublisher::new(context.clone(), drep_distribution_topic);
+        let drep_publisher = DRepDistributionPublisher::new(context.clone(),
+                                                            drep_distribution_topic);
+        let spo_publisher = SPODistributionPublisher::new(context.clone(),
+                                                          spo_distribution_topic);
 
         // Subscribe
         let spos_subscription = context.subscribe(&spo_state_topic).await?;
@@ -478,7 +493,8 @@ impl AccountsState {
         context.run(async move {
             Self::run(
                 history,
-                publisher,
+                drep_publisher,
+                spo_publisher,
                 spos_subscription,
                 ea_subscription,
                 certs_subscription,
