@@ -114,7 +114,7 @@ impl SPOState {
                     Err(e) => {
                         return Ok(RESTResponse::with_text(
                             400,
-                            format!("SPO operator id must be hex encoded: {e:?}"),
+                            &format!("SPO operator id must be hex encoded: {e:?}"),
                         ));
                     }
                 };
@@ -122,7 +122,7 @@ impl SPOState {
                 let locked = state.lock().await;
                 match locked.get(&pool_id) {
                     Some(spo) => match serde_json::to_string(spo) {
-                        Ok(body) => Ok(RESTResponse::with_json(200, body)),
+                        Ok(body) => Ok(RESTResponse::with_json(200, &body)),
                         Err(e) => Ok(RESTResponse::with_text(500, &format!("{e:?}"))),
                     },
                     None => Ok(RESTResponse::with_text(404, "SPO not found")),
