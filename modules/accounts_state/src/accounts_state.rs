@@ -18,6 +18,8 @@ use tracing::{error, info};
 
 mod drep_distribution_publisher;
 use drep_distribution_publisher::DRepDistributionPublisher;
+mod spo_distribution_publisher;
+use spo_distribution_publisher::SPODistributionPublisher;
 mod state;
 use state::State;
 
@@ -29,6 +31,8 @@ const DEFAULT_POT_DELTAS_TOPIC: &str = "cardano.pot.deltas";
 const DEFAULT_STAKE_DELTAS_TOPIC: &str = "cardano.stake.deltas";
 const DEFAULT_DREP_STATE_TOPIC: &str = "cardano.drep.state";
 const DEFAULT_DREP_DISTRIBUTION_TOPIC: &str = "cardano.drep.distribution";
+const DEFAULT_SPO_DISTRIBUTION_TOPIC: &str = "cardano.spo.distribution";
+const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: &str = "cardano.protocol.parameters";
 
 const DEFAULT_HANDLE_STAKE_TOPIC: &str = "rest.get.stake";
 const DEFAULT_HANDLE_SPDD_TOPIC: &str = "rest.get.spdd";
@@ -47,7 +51,8 @@ impl AccountsState {
     /// Async run loop
     async fn run(
         history: Arc<Mutex<StateHistory<State>>>,
-        mut publisher: DRepDistributionPublisher,
+        mut drep_publisher: DRepDistributionPublisher,
+        mut spo_publisher: SPODistributionPublisher,
         mut spos_subscription: Box<dyn Subscription<Message>>,
         mut ea_subscription: Box<dyn Subscription<Message>>,
         mut certs_subscription: Box<dyn Subscription<Message>>,
@@ -55,6 +60,7 @@ impl AccountsState {
         mut pots_subscription: Box<dyn Subscription<Message>>,
         mut stake_subscription: Box<dyn Subscription<Message>>,
         mut drep_state_subscription: Box<dyn Subscription<Message>>,
+        mut parameters_subscription: Box<dyn Subscription<Message>>,
     ) -> Result<()> {
         // Get the stake address deltas from the genesis bootstrap, which we know
         // don't contain any stake
@@ -173,6 +179,7 @@ impl AccountsState {
                 let dreps_message_f = drep_state_subscription.read();
                 let spos_message_f = spos_subscription.read();
                 let ea_message_f = ea_subscription.read();
+                let params_message_f = parameters_subscription.read();
 
                 // Handle DRep
                 let (_, message) = dreps_message_f.await?;
@@ -181,8 +188,7 @@ impl AccountsState {
                         state.handle_drep_state(&dreps_msg);
 
                         let drdd = state.generate_drdd();
-
-                        if let Err(e) = publisher.publish_stake(block_info, drdd).await {
+                        if let Err(e) = drep_publisher.publish_drdd(block_info, drdd).await {
                             error!("Error publishing drep voting stake distribution: {e:#}")
                         }
                     }
@@ -208,6 +214,11 @@ impl AccountsState {
                             .handle_spo_state(spo_msg)
                             .inspect_err(|e| error!("SPOState handling error: {e:#}"))
                             .ok();
+
+                        let spdd = state.generate_spdd();
+                        if let Err(e) = spo_publisher.publish_spdd(block_info, spdd).await {
+                            error!("Error publishing SPO stake distribution: {e:#}")
+                        }
                     }
 
                     _ => error!("Unexpected message type: {message:?}"),
@@ -235,6 +246,30 @@ impl AccountsState {
 
                     _ => error!("Unexpected message type: {message:?}"),
                 }
+
+                // Update parameters - *after* reward calculation in epoch-activity above
+                // ready for the *next* epoch boundary
+                let (_, message) = params_message_f.await?;
+                match message.as_ref() {
+                    Message::Cardano((block_info, CardanoMessage::ProtocolParams(params_msg))) => {
+                        if let Some(ref block) = current_block {
+                            if block.number != block_info.number {
+                                error!(
+                                    expected = block.number,
+                                    received = block_info.number,
+                                    "Certificate and parameters messages re-ordered!"
+                                );
+                            }
+                        }
+
+                        state
+                            .handle_parameters(params_msg)
+                            .inspect_err(|e| error!("Messaging handling error: {e}"))
+                            .ok();
+                    }
+
+                    _ => error!("Unexpected message type: {message:?}"),
+                }
             }
 
             // Commit the new state
@@ -249,9 +284,8 @@ impl AccountsState {
         // Get configuration
 
         // Subscription topics
-        let spo_state_topic = config
-            .get_string("spo-state-topic")
-            .unwrap_or(DEFAULT_SPO_STATE_TOPIC.to_string());
+        let spo_state_topic =
+            config.get_string("spo-state-topic").unwrap_or(DEFAULT_SPO_STATE_TOPIC.to_string());
         info!("Creating SPO state subscriber on '{spo_state_topic}'");
 
         let epoch_activity_topic = config
@@ -264,14 +298,12 @@ impl AccountsState {
             .unwrap_or(DEFAULT_TX_CERTIFICATES_TOPIC.to_string());
         info!("Creating Tx certificates subscriber on '{tx_certificates_topic}'");
 
-        let withdrawals_topic = config
-            .get_string("withdrawals-topic")
-            .unwrap_or(DEFAULT_WITHDRAWALS_TOPIC.to_string());
+        let withdrawals_topic =
+            config.get_string("withdrawals-topic").unwrap_or(DEFAULT_WITHDRAWALS_TOPIC.to_string());
         info!("Creating withdrawals subscriber on '{withdrawals_topic}'");
 
-        let pot_deltas_topic = config
-            .get_string("pot-deltas-topic")
-            .unwrap_or(DEFAULT_POT_DELTAS_TOPIC.to_string());
+        let pot_deltas_topic =
+            config.get_string("pot-deltas-topic").unwrap_or(DEFAULT_POT_DELTAS_TOPIC.to_string());
         info!("Creating pots subscriber on '{pot_deltas_topic}'");
 
         let stake_deltas_topic = config
@@ -279,15 +311,22 @@ impl AccountsState {
             .unwrap_or(DEFAULT_STAKE_DELTAS_TOPIC.to_string());
         info!("Creating stake deltas subscriber on '{stake_deltas_topic}'");
 
-        let drep_state_topic = config
-            .get_string("drep-state-topic")
-            .unwrap_or(DEFAULT_DREP_STATE_TOPIC.to_string());
+        let drep_state_topic =
+            config.get_string("drep-state-topic").unwrap_or(DEFAULT_DREP_STATE_TOPIC.to_string());
         info!("Creating DRep state subscriber on '{drep_state_topic}'");
+
+        let parameters_topic = config
+            .get_string("protocol-parameters-topic")
+            .unwrap_or(DEFAULT_PROTOCOL_PARAMETERS_TOPIC.to_string());
 
         // Publishing topics
         let drep_distribution_topic = config
             .get_string("publish-drep-distribution-topic")
             .unwrap_or(DEFAULT_DREP_DISTRIBUTION_TOPIC.to_string());
+
+        let spo_distribution_topic = config
+            .get_string("publish-spo-distribution-topic")
+            .unwrap_or(DEFAULT_SPO_DISTRIBUTION_TOPIC.to_string());
 
         // REST handler topics
         let handle_stake_topic = config
@@ -295,19 +334,16 @@ impl AccountsState {
             .unwrap_or(DEFAULT_HANDLE_STAKE_TOPIC.to_string());
         info!("Creating request handler on '{handle_stake_topic}'");
 
-        let handle_spdd_topic = config
-            .get_string("handle-spdd-topic")
-            .unwrap_or(DEFAULT_HANDLE_SPDD_TOPIC.to_string());
+        let handle_spdd_topic =
+            config.get_string("handle-spdd-topic").unwrap_or(DEFAULT_HANDLE_SPDD_TOPIC.to_string());
         info!("Creating request handler on '{handle_spdd_topic}'");
 
-        let handle_pots_topic = config
-            .get_string("handle-pots-topic")
-            .unwrap_or(DEFAULT_HANDLE_POTS_TOPIC.to_string());
+        let handle_pots_topic =
+            config.get_string("handle-pots-topic").unwrap_or(DEFAULT_HANDLE_POTS_TOPIC.to_string());
         info!("Creating request handler on '{handle_pots_topic}'");
 
-        let handle_drdd_topic = config
-            .get_string("handle-drdd-topic")
-            .unwrap_or(DEFAULT_HANDLE_DRDD_TOPIC.to_string());
+        let handle_drdd_topic =
+            config.get_string("handle-drdd-topic").unwrap_or(DEFAULT_HANDLE_DRDD_TOPIC.to_string());
         info!("Creating request handler on '{handle_drdd_topic}'");
 
         // Create history
@@ -367,11 +403,8 @@ impl AccountsState {
             async move {
                 if let Some(state) = history.lock().await.current() {
                     // Use hex for SPO ID
-                    let spdd: HashMap<String, u64> = state
-                        .generate_spdd()
-                        .iter()
-                        .map(|(k, v)| (hex::encode(k), *v))
-                        .collect();
+                    let spdd: HashMap<String, u64> =
+                        state.generate_spdd().iter().map(|(k, v)| (hex::encode(k), *v)).collect();
                     match serde_json::to_string(&spdd) {
                         Ok(body) => Ok(RESTResponse::with_json(200, &body)),
                         Err(error) => Err(anyhow!("{:?}", error)),
@@ -434,18 +467,17 @@ impl AccountsState {
                 if let Message::Clock(message) = message.as_ref() {
                     if (message.number % 60) == 0 {
                         if let Some(state) = history_tick.lock().await.current() {
-                            state
-                                .tick()
-                                .await
-                                .inspect_err(|e| error!("Tick error: {e}"))
-                                .ok();
+                            state.tick().await.inspect_err(|e| error!("Tick error: {e}")).ok();
                         }
                     }
                 }
             }
         });
 
-        let publisher = DRepDistributionPublisher::new(context.clone(), drep_distribution_topic);
+        let drep_publisher = DRepDistributionPublisher::new(context.clone(),
+                                                            drep_distribution_topic);
+        let spo_publisher = SPODistributionPublisher::new(context.clone(),
+                                                          spo_distribution_topic);
 
         // Subscribe
         let spos_subscription = context.subscribe(&spo_state_topic).await?;
@@ -455,12 +487,14 @@ impl AccountsState {
         let pot_deltas_subscription = context.subscribe(&pot_deltas_topic).await?;
         let stake_subscription = context.subscribe(&stake_deltas_topic).await?;
         let drep_state_subscription = context.subscribe(&drep_state_topic).await?;
+        let parameters_subscription = context.subscribe(&parameters_topic).await?;
 
         // Start run task
         context.run(async move {
             Self::run(
                 history,
-                publisher,
+                drep_publisher,
+                spo_publisher,
                 spos_subscription,
                 ea_subscription,
                 certs_subscription,
@@ -468,6 +502,7 @@ impl AccountsState {
                 pot_deltas_subscription,
                 stake_subscription,
                 drep_state_subscription,
+                parameters_subscription,
             )
             .await
             .unwrap_or_else(|e| error!("Failed: {e}"));

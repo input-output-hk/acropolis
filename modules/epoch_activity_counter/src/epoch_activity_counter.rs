@@ -36,9 +36,8 @@ impl EpochActivityCounter {
         mut headers_subscription: Box<dyn Subscription<Message>>,
         mut fees_subscription: Box<dyn Subscription<Message>>,
     ) -> Result<()> {
-        let publish_topic = config
-            .get_string("publish-topic")
-            .unwrap_or(DEFAULT_PUBLISH_TOPIC.to_string());
+        let publish_topic =
+            config.get_string("publish-topic").unwrap_or(DEFAULT_PUBLISH_TOPIC.to_string());
         info!("Publishing on '{publish_topic}'");
 
         // Create state
