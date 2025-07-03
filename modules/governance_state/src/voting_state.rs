@@ -34,7 +34,6 @@ impl VotingRegistrationState {
         }
     }
 
-
     pub fn new(
         total_spos: u64, registered_spos: u64, registered_dreps: u64, committee_size: u64
     ) -> Self {
