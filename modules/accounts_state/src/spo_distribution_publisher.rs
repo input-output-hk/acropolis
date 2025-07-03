@@ -1,12 +1,11 @@
-use acropolis_common::messages::{CardanoMessage, DRepStakeDistributionMessage, Message};
-use acropolis_common::BlockInfo;
+use acropolis_common::messages::{CardanoMessage, SPOStakeDistributionMessage, Message};
+use acropolis_common::{KeyHash, BlockInfo};
 use caryatid_sdk::Context;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use crate::state::DRepDelegationDistribution;
-
-/// Message publisher for DRep Delegation Distribution (DRDD)
-pub struct DRepDistributionPublisher {
+/// Message publisher for Stake Pool Delegation Distribution (SPDD)
+pub struct SPODistributionPublisher {
     /// Module context
     context: Arc<Context<Message>>,
 
@@ -14,17 +13,17 @@ pub struct DRepDistributionPublisher {
     topic: String,
 }
 
-impl DRepDistributionPublisher {
+impl SPODistributionPublisher {
     /// Construct with context and topic to publish on
     pub fn new(context: Arc<Context<Message>>, topic: String) -> Self {
         Self { context, topic }
     }
 
-    /// Publish the DRep Delegation Distribution
-    pub async fn publish_drdd(
+    /// Publish the SPDD
+    pub async fn publish_spdd(
         &mut self,
         block: &BlockInfo,
-        drdd: DRepDelegationDistribution,
+        spos: BTreeMap<KeyHash, u64>,
     ) -> anyhow::Result<()> {
         self.context
             .message_bus
@@ -32,11 +31,9 @@ impl DRepDistributionPublisher {
                 &self.topic,
                 Arc::new(Message::Cardano((
                     block.clone(),
-                    CardanoMessage::DRepStakeDistribution(DRepStakeDistributionMessage {
+                    CardanoMessage::SPOStakeDistribution(SPOStakeDistributionMessage {
                         epoch: block.epoch,
-                        abstain: drdd.abstain,
-                        no_confidence: drdd.no_confidence,
-                        dreps: drdd.dreps,
+                        spos: spos.into_iter().collect(),
                     }),
                 ))),
             )

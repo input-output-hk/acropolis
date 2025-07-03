@@ -786,18 +786,18 @@ pub enum NetworkId {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ShelleyParams {
-    pub active_slots_coeff: Option<f32>,
-    pub epoch_length: Option<u32>,
-    pub max_kes_evolutions: Option<u32>,
-    pub max_lovelace_supply: Option<u64>,
-    pub network_id: Option<NetworkId>,
-    pub network_magic: Option<u32>,
+    pub active_slots_coeff: f32,
+    pub epoch_length: u32,
+    pub max_kes_evolutions: u32,
+    pub max_lovelace_supply: u64,
+    pub network_id: NetworkId,
+    pub network_magic: u32,
     pub protocol_params: ShelleyProtocolParams,
-    pub security_param: Option<u32>,
-    pub slot_length: Option<u32>,
-    pub slots_per_kes_period: Option<u32>,
-    pub system_start: Option<DateTime<Utc>>,
-    pub update_quorum: Option<u32>,
+    pub security_param: u32,
+    pub slot_length: u32,
+    pub slots_per_kes_period: u32,
+    pub system_start: DateTime<Utc>,
+    pub update_quorum: u32,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
