@@ -142,6 +142,15 @@ pub struct DRepStakeDistributionMessage {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SPOStakeDistributionMessage {
+    /// Epoch which has ended
+    pub epoch: u64,
+
+    /// SPO stake distribution by operator ID
+    pub spos: Vec<(KeyHash, Lovelace)>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtocolParamsMessage {
     pub params: ProtocolParams,
 }
@@ -192,6 +201,7 @@ pub enum CardanoMessage {
 
     // Stake distribution info
     DRepStakeDistribution(DRepStakeDistributionMessage), // Info about drep stake
+    SPOStakeDistribution(SPOStakeDistributionMessage),   // SPO delegation distribution (SPDD)
     StakeAddressDeltas(StakeAddressDeltasMessage),       // Stake part of address deltas
 }
 
