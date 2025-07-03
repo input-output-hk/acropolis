@@ -207,20 +207,30 @@ fn map_shelley_protocol_params(p: &shelley::ProtocolParams) -> Result<ShelleyPro
     })
 }
 
+fn unw<T: Clone>(p: &Option<T>, n: &str) -> Result<T> {
+    p.as_ref().ok_or_else(
+        || anyhow!("Empty parameter {n}, invalidating shelley genesis")
+    ).cloned()
+}
+
 fn map_shelley(genesis: &shelley::GenesisFile) -> Result<ShelleyParams> {
     Ok(ShelleyParams {
-        active_slots_coeff: genesis.active_slots_coeff.clone(),
-        epoch_length: genesis.epoch_length.clone(),
-        max_kes_evolutions: genesis.max_kes_evolutions.clone(),
-        max_lovelace_supply: genesis.max_lovelace_supply.clone(),
-        network_id: genesis.network_id.as_deref().map(map_network_id).transpose()?,
-        network_magic: genesis.network_magic,
+        active_slots_coeff: unw(&genesis.active_slots_coeff, "active_slots_coeff")?,
+        epoch_length: unw(&genesis.epoch_length, "epoch_length")?,
+        max_kes_evolutions: unw(&genesis.max_kes_evolutions, "max_kes_evolutions")?,
+        max_lovelace_supply: unw(&genesis.max_lovelace_supply, "max_lovelace_supply")?,
+        network_id: unw(
+            &genesis.network_id.as_deref().map(map_network_id).transpose()?, "network_id"
+        )?,
+        network_magic: unw(&genesis.network_magic, "network_magic")?,
         protocol_params: map_shelley_protocol_params(&genesis.protocol_params)?,
-        security_param: genesis.security_param.clone(),
-        slot_length: genesis.slot_length.clone(),
-        slots_per_kes_period: genesis.slots_per_kes_period.clone(),
-        system_start: genesis.system_start.as_ref().map(|s| s.parse()).transpose()?,
-        update_quorum: genesis.update_quorum,
+        security_param: unw(&genesis.security_param, "security_param")?,
+        slot_length: unw(&genesis.slot_length, "slot_length")?,
+        slots_per_kes_period: unw(&genesis.slots_per_kes_period, "slots_per_kes_period")?,
+        system_start: unw(
+            &genesis.system_start.as_ref().map(|s| s.parse()).transpose()?, "system_start"
+        )?,
+        update_quorum: unw(&genesis.update_quorum, "update_quorum")?,
     })
 }
 
@@ -279,7 +289,7 @@ fn read_pdef_genesis<'a, PallasStruct: Deserialize<'a>, OurStruct>(
     };
 
     match &serde_json::from_slice(genesis) {
-        Ok(decoded) => Ok(map(decoded)?),
+        Ok(decoded) => map(decoded),
         Err(e) => bail!("Cannot read JSON for {network} {era} genesis: {e}")
     }
 }

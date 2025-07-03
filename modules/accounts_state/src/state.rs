@@ -11,7 +11,7 @@ use acropolis_common::{
 };
 use anyhow::{bail, Context, Result};
 use dashmap::DashMap;
-use imbl::HashMap;
+use imbl::OrdMap;
 use rayon::prelude::*;
 use serde_with::{hex::Hex, serde_as};
 use std::collections::BTreeMap;
@@ -65,11 +65,11 @@ pub struct State {
 
     /// Map of active SPOs by VRF vkey
     #[serde_as(as = "SerializeMapAs<Hex, _>")]
-    spos_by_vrf_key: HashMap<Vec<u8>, PoolRegistration>,
+    spos_by_vrf_key: OrdMap<Vec<u8>, PoolRegistration>,
 
     /// Map of staking address values
     #[serde_as(as = "SerializeMapAs<Hex, _>")]
-    stake_addresses: HashMap<Vec<u8>, StakeAddressState>,
+    stake_addresses: OrdMap<Vec<u8>, StakeAddressState>,
 
     /// Global account pots
     pots: Pots,
@@ -111,7 +111,7 @@ impl State {
         let spo_stakes = Arc::new(DashMap::<&KeyHash, u64>::new());
 
         // Total stake across all addresses in parallel, first collecting into a vector
-        // because imbl::HashMap doesn't work in Rayon
+        // because imbl::OrdMap doesn't work in Rayon
         self.stake_addresses
             .values()
             .collect::<Vec<_>>() // Vec<&StakeAddressState>
