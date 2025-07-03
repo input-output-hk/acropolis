@@ -187,8 +187,8 @@ impl State {
         drep: &RationalNumber,
         comm: &RationalNumber,
     ) -> Result<(u64, u64)> {
-        let d = drep.proportion_of(self.voting_state.registered_dreps)?.round_up();
-        let c = comm.proportion_of(self.voting_state.committee_size)?.round_up();
+        let d = (drep * self.voting_state.registered_dreps).ceil().to_integer();
+        let c = (comm * self.voting_state.committee_size).ceil().to_integer();
         Ok((d, c))
     }
 
@@ -199,7 +199,7 @@ impl State {
         comm: &RationalNumber,
     ) -> Result<VotesCount> {
         let mut votes = VotesCount::zero();
-        votes.pool = pool.proportion_of(self.voting_state.registered_spos)?.round_up();
+        votes.pool = (pool * self.voting_state.registered_spos).ceil().to_integer();
         (votes.drep, votes.committee) = self.proportional_count_drep_comm(drep, comm)?;
         Ok(votes)
     }
@@ -211,7 +211,7 @@ impl State {
         comm: &RationalNumber,
     ) -> Result<VotesCount> {
         let mut votes = VotesCount::zero();
-        votes.pool = pool.proportion_of(self.voting_state.total_spos)?.round_up();
+        votes.pool = (pool * self.voting_state.total_spos).ceil().to_integer();
         (votes.drep, votes.committee) = self.proportional_count_drep_comm(drep, comm)?;
         Ok(votes)
     }
