@@ -1,7 +1,10 @@
 //! Acropolis SPO state module for Caryatid
 //! Accepts certificate events and derives the SPO state in memory
 
-use acropolis_common::messages::{CardanoMessage, Message, RESTResponse};
+use acropolis_common::{
+    messages::{CardanoMessage, Message, RESTResponse},
+    rest_helper::{handle_rest, handle_rest_with_parameter},
+};
 use anyhow::Result;
 use caryatid_sdk::{module, Context, Module};
 use config::Config;
@@ -79,68 +82,51 @@ impl SPOState {
             }
         });
 
-        // Handle requests for full SPO state
+        // Handle REST requests for full SPO state
         let state_handle_full = state.clone();
-        context.handle(&handle_topic, move |message: Arc<Message>| {
+        handle_rest(context.clone(), &handle_topic, move || {
             let state = state_handle_full.clone();
             async move {
-                let response = match message.as_ref() {
-                    Message::RESTRequest(request) => {
-                        info!("REST received {} {}", request.method, request.path);
-                        if let Some(state) = state.lock().await.current().clone() {
-                            match serde_json::to_string(state) {
-                                Ok(body) => RESTResponse::with_json(200, &body),
-                                Err(error) => {
-                                    RESTResponse::with_text(500, &format!("{error:?}").to_string())
-                                }
-                            }
-                        } else {
-                            RESTResponse::with_json(200, "{}")
-                        }
-                    }
-                    _ => {
-                        error!("Unexpected message type {:?}", message);
-                        RESTResponse::with_text(500, "Unexpected message in REST request")
-                    }
+                let locked = state.lock().await;
+                let current_state = locked.current().clone();
+
+                let json = match current_state {
+                    Some(ref state) => serde_json::to_string(state),
+                    None => Ok("{}".to_owned()),
                 };
 
-                Arc::new(Message::RESTResponse(response))
+                match json {
+                    Ok(body) => Ok(RESTResponse::with_json(200, &body)),
+                    Err(e) => Ok(RESTResponse::with_text(500, &format!("{e:?}"))),
+                }
             }
         });
 
-        // Handle requests for single SPO state
-        let handle_topic_single = handle_topic + ".*";
+        // Handle REST requests for single SPO by ID
+        let handle_topic_single = format!("{handle_topic}.*");
         let state_handle_single = state.clone();
-        context.handle(&handle_topic_single, move |message: Arc<Message>| {
+        handle_rest_with_parameter(context.clone(), &handle_topic_single, move |param| {
+            let param = param.to_string();
             let state = state_handle_single.clone();
             async move {
-                let response = match message.as_ref() {
-                    Message::RESTRequest(request) => {
-                        info!("REST received {} {}", request.method, request.path);
-                        match request.path_elements.get(1) {
-                            Some(id) => match hex::decode(&id) {
-                                Ok(id) => {
-                                    let state = state.lock().await;
-                                    match state.get(&id) {
-                                        Some(spo) => match serde_json::to_string(&spo) {
-                                            Ok(body) => RESTResponse::with_json(200, &body),
-                                            Err(error) => RESTResponse::with_text(500, &format!("{error:?}").to_string()),
-                                        },
-                                        None => RESTResponse::with_text(404, "SPO not found"),
-                                    }
-                                },
-                                Err(error) => RESTResponse::with_text(400, &format!("SPO operator id must be hex encoded vector of bytes: {error:?}").to_string()),
-                            },
-                            None => RESTResponse::with_text(400, "SPO operator id must be provided"),
-                        }
-                    },
-                    _ => {
-                        error!("Unexpected message type {:?}", message);
-                        RESTResponse::with_text(500, "Unexpected message in REST request")
+                let pool_id = match hex::decode(param) {
+                    Ok(pool_id) => pool_id,
+                    Err(e) => {
+                        return Ok(RESTResponse::with_text(
+                            400,
+                            format!("SPO operator id must be hex encoded: {e:?}"),
+                        ));
                     }
                 };
 
-                Arc::new(Message::RESTResponse(response))
+                let locked = state.lock().await;
+                match locked.get(&pool_id) {
+                    Some(spo) => match serde_json::to_string(spo) {
+                        Ok(body) => Ok(RESTResponse::with_json(200, body)),
+                        Err(e) => Ok(RESTResponse::with_text(500, &format!("{e:?}"))),
+                    },
+                    None => Ok(RESTResponse::with_text(404, "SPO not found")),
+                }
             }
         });
 
