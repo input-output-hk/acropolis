@@ -2,6 +2,7 @@
 //! Unpacks transaction bodies into UTXO events
 
 use acropolis_common::{
+    rational_number::RationalNumber,
     messages::{
         BlockFeesMessage, CardanoMessage, GovernanceProceduresMessage, Message,
         TxCertificatesMessage, UTXODeltasMessage, WithdrawalsMessage,
@@ -472,11 +473,8 @@ impl TxUnpacker {
         }
     }
 
-    fn map_unit_interval(pallas_interval: &conway::UnitInterval) -> UnitInterval {
-        UnitInterval {
-            numerator: pallas_interval.numerator,
-            denominator: pallas_interval.denominator,
-        }
+    fn map_unit_interval(pallas_interval: &conway::UnitInterval) -> RationalNumber {
+        RationalNumber::new(pallas_interval.numerator, pallas_interval.denominator)
     }
 
     fn map_ex_units(pallas_units: &conway::ExUnits) -> ExUnits {
