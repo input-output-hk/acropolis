@@ -166,9 +166,7 @@ impl State {
                     if let Some(utxo) = self.volatile_utxos.remove(&key) {
                         // Tell the observer to debit it
                         if let Some(observer) = self.address_delta_observer.as_ref() {
-                            observer
-                                .observe_delta(&utxo.address, -(utxo.value as i64))
-                                .await;
+                            observer.observe_delta(&utxo.address, -(utxo.value as i64)).await;
                         }
                     }
                 }
@@ -180,9 +178,7 @@ impl State {
                     if let Some(utxo) = self.volatile_utxos.get(&key) {
                         // Tell the observer to recredit it
                         if let Some(observer) = self.address_delta_observer.as_ref() {
-                            observer
-                                .observe_delta(&utxo.address, utxo.value as i64)
-                                .await;
+                            observer.observe_delta(&utxo.address, utxo.value as i64).await;
                         }
                     }
                 }
@@ -227,9 +223,7 @@ impl State {
 
                 // Tell the observer it's spent
                 if let Some(observer) = self.address_delta_observer.as_ref() {
-                    observer
-                        .observe_delta(&utxo.address, -(utxo.value as i64))
-                        .await;
+                    observer.observe_delta(&utxo.address, -(utxo.value as i64)).await;
                 }
 
                 match block.status {
@@ -294,9 +288,7 @@ impl State {
 
         // Tell the observer
         if let Some(observer) = self.address_delta_observer.as_ref() {
-            observer
-                .observe_delta(&output.address, output.value as i64)
-                .await;
+            observer.observe_delta(&output.address, output.value as i64).await;
         }
 
         Ok(())

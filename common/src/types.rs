@@ -151,7 +151,7 @@ pub type Lovelace = u64;
 pub type LovelaceDelta = i64;
 
 /// Rational number = numerator / denominator
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Eq, PartialEq)]
 pub struct Ratio {
     pub numerator: u64,
     pub denominator: u64,
@@ -243,7 +243,7 @@ impl Credential {
 pub type StakeCredential = Credential;
 
 /// Relay single host address
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize, Eq, PartialEq)]
 pub struct SingleHostAddr {
     /// Optional port number
     pub port: Option<u16>,
@@ -256,7 +256,7 @@ pub struct SingleHostAddr {
 }
 
 /// Relay hostname
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Eq, PartialEq)]
 pub struct SingleHostName {
     /// Optional port number
     pub port: Option<u16>,
@@ -266,14 +266,14 @@ pub struct SingleHostName {
 }
 
 /// Relay multihost (SRV)
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Eq, PartialEq)]
 pub struct MultiHostName {
     /// DNS name (SRC record)
     pub dns_name: String,
 }
 
 /// Pool relay
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Eq, PartialEq)]
 pub enum Relay {
     SingleHostAddr(SingleHostAddr),
     SingleHostName(SingleHostName),
@@ -282,13 +282,24 @@ pub enum Relay {
 
 /// Pool metadata
 #[serde_as]
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    serde::Serialize,
+    serde::Deserialize,
+    minicbor::Encode,
+    minicbor::Decode,
+    Eq,
+    PartialEq,
+)]
 pub struct PoolMetadata {
     /// Metadata URL
+    #[n(0)]
     pub url: String,
 
     /// Metadata hash
     #[serde_as(as = "Hex")]
+    #[n(1)]
     pub hash: DataHash,
 }
 
@@ -296,37 +307,55 @@ type RewardAccount = Vec<u8>;
 
 /// Pool registration data
 #[serde_as]
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    serde::Serialize,
+    serde::Deserialize,
+    minicbor::Decode,
+    minicbor::Encode,
+    PartialEq,
+    Eq,
+)]
 pub struct PoolRegistration {
     /// Operator pool key hash - used as ID
     #[serde_as(as = "Hex")]
+    #[n(0)]
     pub operator: KeyHash,
 
     /// VRF key hash
     #[serde_as(as = "Hex")]
+    #[n(1)]
     pub vrf_key_hash: KeyHash,
 
     /// Pledged Ada
+    #[n(2)]
     pub pledge: Lovelace,
 
     /// Fixed cost
+    #[n(3)]
     pub cost: Lovelace,
 
     /// Marginal cost (fraction)
+    #[n(4)]
     pub margin: Ratio,
 
     /// Reward account
     #[serde_as(as = "Hex")]
+    #[n(5)]
     pub reward_account: Vec<u8>,
 
     /// Pool owners by their key hash
     #[serde_as(as = "Vec<Hex>")]
+    #[n(6)]
     pub pool_owners: Vec<KeyHash>,
 
     // Relays
+    #[n(7)]
     pub relays: Vec<Relay>,
 
     // Metadata
+    #[n(8)]
     pub pool_metadata: Option<PoolMetadata>,
 }
 
@@ -706,6 +735,7 @@ pub struct ShelleyProtocolParams {
     pub max_block_header_size: u32,
     pub key_deposit: u64,
     pub min_utxo_value: u64,
+
     pub minfee_a: u32,
     pub minfee_b: u32,
     pub pool_deposit: u64,
@@ -758,18 +788,18 @@ pub enum NetworkId {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ShelleyParams {
-    pub active_slots_coeff: Option<f32>,
-    pub epoch_length: Option<u32>,
-    pub max_kes_evolutions: Option<u32>,
-    pub max_lovelace_supply: Option<u64>,
-    pub network_id: Option<NetworkId>,
-    pub network_magic: Option<u32>,
+    pub active_slots_coeff: f32,
+    pub epoch_length: u32,
+    pub max_kes_evolutions: u32,
+    pub max_lovelace_supply: u64,
+    pub network_id: NetworkId,
+    pub network_magic: u32,
     pub protocol_params: ShelleyProtocolParams,
-    pub security_param: Option<u32>,
-    pub slot_length: Option<u32>,
-    pub slots_per_kes_period: Option<u32>,
-    pub system_start: Option<DateTime<Utc>>,
-    pub update_quorum: Option<u32>,
+    pub security_param: u32,
+    pub slot_length: u32,
+    pub slots_per_kes_period: u32,
+    pub system_start: DateTime<Utc>,
+    pub update_quorum: u32,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -1036,6 +1066,41 @@ pub struct VotingProcedures {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct VotesCount {
+    pub committee: u64,
+    pub drep: u64,
+    pub pool: u64,
+}
+
+impl VotesCount {
+    pub fn zero() -> Self {
+        Self {
+            committee: 0,
+            drep: 0,
+            pool: 0,
+        }
+    }
+
+    pub fn majorizes(&self, v: &VotesCount) -> bool {
+        self.committee >= v.committee && self.drep >= v.drep && self.pool >= v.pool
+    }
+}
+
+impl Display for VotesCount {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "c{}:d{}:p{}", self.committee, self.drep, self.pool)
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct VotingOutcome {
+    pub procedure: ProposalProcedure,
+    pub votes_cast: VotesCount,
+    pub votes_threshold: VotesCount,
+    pub accepted: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProposalProcedure {
     pub deposit: Lovelace,
     pub reward_account: RewardAccount,
@@ -1058,6 +1123,26 @@ pub enum EnactStateElem {
     Constitution(Constitution),
     Committee(CommitteeChange),
     NoConfidence,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum GovernanceOutcomeVariant {
+    EnactStateElem(EnactStateElem),
+    TreasuryWithdrawal(TreasuryWithdrawalsAction),
+    NoAction,
+}
+
+/// The structure has info about outcome of a single governance action.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct GovernanceOutcome {
+    /// Information about voting results: what was the issue,
+    /// how many votes cast, was it accepted or not
+    pub voting: VotingOutcome,
+
+    /// Enact state/Withdrawal, accepted after voting. If the voting failed,
+    /// or if the proposal does not suppose formal action, this field is
+    /// `NoFormalAction`
+    pub action_to_perform: GovernanceOutcomeVariant,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use crate::state::DRepDelegationDistribution;
 
+/// Message publisher for DRep Delegation Distribution (DRDD)
 pub struct DRepDistributionPublisher {
     /// Module context
     context: Arc<Context<Message>>,
@@ -14,14 +15,16 @@ pub struct DRepDistributionPublisher {
 }
 
 impl DRepDistributionPublisher {
+    /// Construct with context and topic to publish on
     pub fn new(context: Arc<Context<Message>>, topic: String) -> Self {
         Self { context, topic }
     }
 
-    pub async fn publish_stake(
+    /// Publish the DRep Delegation Distribution
+    pub async fn publish_drdd(
         &mut self,
         block: &BlockInfo,
-        s: DRepDelegationDistribution,
+        drdd: DRepDelegationDistribution,
     ) -> anyhow::Result<()> {
         self.context
             .message_bus
@@ -31,9 +34,9 @@ impl DRepDistributionPublisher {
                     block.clone(),
                     CardanoMessage::DRepStakeDistribution(DRepStakeDistributionMessage {
                         epoch: block.epoch,
-                        abstain: s.abstain,
-                        no_confidence: s.no_confidence,
-                        dreps: s.dreps,
+                        abstain: drdd.abstain,
+                        no_confidence: drdd.no_confidence,
+                        dreps: drdd.dreps,
                     }),
                 ))),
             )

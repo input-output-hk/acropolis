@@ -1,20 +1,21 @@
 //! Acropolis AccountsState: State storage
 use acropolis_common::{
     messages::{
-        DRepStateMessage, EpochActivityMessage, SPOStateMessage, StakeAddressDeltasMessage,
-        TxCertificatesMessage, WithdrawalsMessage, PotDeltasMessage,
+        DRepStateMessage, EpochActivityMessage, PotDeltasMessage, ProtocolParamsMessage,
+        SPOStateMessage, StakeAddressDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
     },
     serialization::SerializeMapAs,
     DRepChoice, DRepCredential, InstantaneousRewardSource, InstantaneousRewardTarget, KeyHash,
-    Lovelace, MoveInstantaneousReward, PoolRegistration, StakeCredential, TxCertificate, Pot,
+    Lovelace, MoveInstantaneousReward, PoolRegistration, Pot, ProtocolParams, StakeCredential,
+    TxCertificate,
 };
 use anyhow::{bail, Context, Result};
 use dashmap::DashMap;
-use imbl::HashMap;
+use imbl::OrdMap;
 use rayon::prelude::*;
 use serde_with::{hex::Hex, serde_as};
-use std::sync::Arc;
-use std::{collections::BTreeMap, sync::atomic::AtomicU64};
+use std::collections::BTreeMap;
+use std::sync::{atomic::AtomicU64, Arc};
 use tracing::{error, info, warn};
 
 /// State of an individual stake address
@@ -64,17 +65,20 @@ pub struct State {
 
     /// Map of active SPOs by VRF vkey
     #[serde_as(as = "SerializeMapAs<Hex, _>")]
-    spos_by_vrf_key: HashMap<Vec<u8>, PoolRegistration>,
+    spos_by_vrf_key: OrdMap<Vec<u8>, PoolRegistration>,
 
     /// Map of staking address values
     #[serde_as(as = "SerializeMapAs<Hex, _>")]
-    stake_addresses: HashMap<Vec<u8>, StakeAddressState>,
+    stake_addresses: OrdMap<Vec<u8>, StakeAddressState>,
 
     /// Global account pots
     pots: Pots,
 
     /// All registered DReps
     dreps: Vec<(DRepCredential, Lovelace)>,
+
+    /// Protocol parameters that apply during this epoch
+    protocol_parameters: Option<ProtocolParams>,
 }
 
 impl State {
@@ -107,7 +111,7 @@ impl State {
         let spo_stakes = Arc::new(DashMap::<&KeyHash, u64>::new());
 
         // Total stake across all addresses in parallel, first collecting into a vector
-        // because imbl::HashMap doesn't work in Rayon
+        // because imbl::OrdMap doesn't work in Rayon
         self.stake_addresses
             .values()
             .collect::<Vec<_>>() // Vec<&StakeAddressState>
@@ -123,10 +127,7 @@ impl State {
             );
 
         // Collect into a plain BTreeMap, so that it is ordered on output
-        spo_stakes
-            .iter()
-            .map(|entry| ((**entry.key()).clone(), *entry.value()))
-            .collect()
+        spo_stakes.iter().map(|entry| ((**entry.key()).clone(), *entry.value())).collect()
     }
 
     /// Derive the DRep Delegation Distribution (SPDD) - the total amount
@@ -139,37 +140,33 @@ impl State {
             .iter()
             .map(|(cred, deposit)| (cred.clone(), AtomicU64::new(*deposit)))
             .collect::<BTreeMap<_, _>>();
-        self.stake_addresses
-            .values()
-            .collect::<Vec<_>>()
-            .par_iter()
-            .for_each(|state| {
-                let Some(drep) = state.delegated_drep.clone() else {
-                    return;
-                };
-                let total = match drep {
-                    DRepChoice::Key(hash) => {
-                        let cred = DRepCredential::AddrKeyHash(hash);
-                        let Some(total) = dreps.get(&cred) else {
-                            warn!("Delegated to unregistered DRep address {cred:?}");
-                            return;
-                        };
-                        total
-                    }
-                    DRepChoice::Script(hash) => {
-                        let cred = DRepCredential::ScriptHash(hash);
-                        let Some(total) = dreps.get(&cred) else {
-                            warn!("Delegated to unregistered DRep script {cred:?}");
-                            return;
-                        };
-                        total
-                    }
-                    DRepChoice::Abstain => &abstain,
-                    DRepChoice::NoConfidence => &no_confidence,
-                };
-                let stake = state.utxo_value + state.rewards;
-                total.fetch_add(stake, std::sync::atomic::Ordering::Relaxed);
-            });
+        self.stake_addresses.values().collect::<Vec<_>>().par_iter().for_each(|state| {
+            let Some(drep) = state.delegated_drep.clone() else {
+                return;
+            };
+            let total = match drep {
+                DRepChoice::Key(hash) => {
+                    let cred = DRepCredential::AddrKeyHash(hash);
+                    let Some(total) = dreps.get(&cred) else {
+                        warn!("Delegated to unregistered DRep address {cred:?}");
+                        return;
+                    };
+                    total
+                }
+                DRepChoice::Script(hash) => {
+                    let cred = DRepCredential::ScriptHash(hash);
+                    let Some(total) = dreps.get(&cred) else {
+                        warn!("Delegated to unregistered DRep script {cred:?}");
+                        return;
+                    };
+                    total
+                }
+                DRepChoice::Abstain => &abstain,
+                DRepChoice::NoConfidence => &no_confidence,
+            };
+            let stake = state.utxo_value + state.rewards;
+            total.fetch_add(stake, std::sync::atomic::Ordering::Relaxed);
+        });
         let abstain = abstain.load(std::sync::atomic::Ordering::Relaxed);
         let no_confidence = no_confidence.load(std::sync::atomic::Ordering::Relaxed);
         let dreps = dreps
@@ -181,6 +178,14 @@ impl State {
             no_confidence,
             dreps,
         }
+    }
+
+    /// Handle an ProtocolParamsMessage with the latest parameters at the start of a new
+    /// epoch
+    pub fn handle_parameters(&mut self, params_msg: &ProtocolParamsMessage) -> Result<()> {
+        self.protocol_parameters = Some(params_msg.params.clone());
+        info!("New parameter set: {:?}", self.protocol_parameters);
+        Ok(())
     }
 
     /// Handle an EpochActivityMessage giving total fees and block counts by VRF key for
@@ -209,12 +214,8 @@ impl State {
     /// epoch
     pub fn handle_spo_state(&mut self, spo_msg: &SPOStateMessage) -> Result<()> {
         // Capture current SPOs, mapped by VRF vkey hash
-        self.spos_by_vrf_key = spo_msg
-            .spos
-            .iter()
-            .cloned()
-            .map(|spo| (spo.vrf_key_hash.clone(), spo))
-            .collect();
+        self.spos_by_vrf_key =
+            spo_msg.spos.iter().cloned().map(|spo| (spo.vrf_key_hash.clone(), spo)).collect();
 
         Ok(())
     }
@@ -225,9 +226,8 @@ impl State {
 
         // Repeated registrations seem common
         if !self.stake_addresses.contains_key(&hash) {
-            self.stake_addresses = self
-                .stake_addresses
-                .update(hash.clone(), StakeAddressState::default());
+            self.stake_addresses =
+                self.stake_addresses.update(hash.clone(), StakeAddressState::default());
         }
     }
 
@@ -363,8 +363,7 @@ impl State {
                 }
 
                 TxCertificate::MoveInstantaneousReward(mir) => {
-                    self.handle_mir(&mir)
-                        .unwrap_or_else(|e| error!("MIR failed: {e:#}"));
+                    self.handle_mir(&mir).unwrap_or_else(|e| error!("MIR failed: {e:#}"));
                 }
 
                 TxCertificate::StakeDelegation(delegation) => {
@@ -442,7 +441,10 @@ impl State {
             Self::update_value_with_delta(pot, pot_delta.delta)
                 .with_context(|| format!("Applying pot delta {pot_delta:?}"))?;
 
-            info!("Pot delta for {:?} {} => {}", pot_delta.pot, pot_delta.delta, *pot);
+            info!(
+                "Pot delta for {:?} {} => {}",
+                pot_delta.pot, pot_delta.delta, *pot
+            );
         }
 
         Ok(())
@@ -478,9 +480,11 @@ impl State {
 mod tests {
     use super::*;
     use acropolis_common::{
-        AddressNetwork, Credential, Registration, StakeAddress, StakeAddressDelta,
-        StakeAddressPayload, StakeAndVoteDelegation, StakeRegistrationAndStakeAndVoteDelegation,
-        StakeRegistrationAndVoteDelegation, VoteDelegation, Withdrawal, PotDelta, Pot,
+        rational_number::RationalNumber, AddressNetwork, Anchor, Committee, Constitution,
+        ConwayParams, Credential, DRepVotingThresholds, PoolVotingThresholds, Pot, PotDelta,
+        ProtocolParams, Registration, StakeAddress, StakeAddressDelta, StakeAddressPayload,
+        StakeAndVoteDelegation, StakeRegistrationAndStakeAndVoteDelegation,
+        StakeRegistrationAndVoteDelegation, UnitInterval, VoteDelegation, Withdrawal,
     };
 
     const STAKE_KEY_HASH: [u8; 3] = [0x99, 0x0f, 0x00];
@@ -507,11 +511,7 @@ mod tests {
 
         assert_eq!(state.stake_addresses.len(), 1);
         assert_eq!(
-            state
-                .stake_addresses
-                .get(&STAKE_KEY_HASH.to_vec())
-                .unwrap()
-                .utxo_value,
+            state.stake_addresses.get(&STAKE_KEY_HASH.to_vec()).unwrap().utxo_value,
             42
         );
 
@@ -519,11 +519,7 @@ mod tests {
 
         assert_eq!(state.stake_addresses.len(), 1);
         assert_eq!(
-            state
-                .stake_addresses
-                .get(&STAKE_KEY_HASH.to_vec())
-                .unwrap()
-                .utxo_value,
+            state.stake_addresses.get(&STAKE_KEY_HASH.to_vec()).unwrap().utxo_value,
             84
         );
     }
@@ -550,19 +546,11 @@ mod tests {
         let state2 = state.clone();
         state.handle_stake_deltas(&msg).unwrap();
         assert_eq!(
-            state
-                .stake_addresses
-                .get(&STAKE_KEY_HASH.to_vec())
-                .unwrap()
-                .utxo_value,
+            state.stake_addresses.get(&STAKE_KEY_HASH.to_vec()).unwrap().utxo_value,
             84
         );
         assert_eq!(
-            state2
-                .stake_addresses
-                .get(&STAKE_KEY_HASH.to_vec())
-                .unwrap()
-                .utxo_value,
+            state2.stake_addresses.get(&STAKE_KEY_HASH.to_vec()).unwrap().utxo_value,
             42
         );
     }
@@ -647,7 +635,7 @@ mod tests {
                     pot: Pot::Deposits,
                     delta: 77,
                 },
-            ]
+            ],
         };
 
         state.handle_pot_deltas(&mir).unwrap();
@@ -890,5 +878,66 @@ mod tests {
         );
 
         Ok(())
+    }
+
+    #[test]
+    fn protocol_params_are_captured_from_message() {
+        // Fake Conway parameters (a lot of work to test an assignment!)
+        let params = ProtocolParams {
+            conway: Some(ConwayParams {
+                pool_voting_thresholds: PoolVotingThresholds {
+                    motion_no_confidence: UnitInterval::ONE,
+                    committee_normal: UnitInterval::ZERO,
+                    committee_no_confidence: UnitInterval::ZERO,
+                    hard_fork_initiation: UnitInterval::ONE,
+                    security_voting_threshold: UnitInterval::ZERO,
+                },
+                d_rep_voting_thresholds: DRepVotingThresholds {
+                    motion_no_confidence: UnitInterval::ONE,
+                    committee_normal: UnitInterval::ZERO,
+                    committee_no_confidence: UnitInterval::ZERO,
+                    update_constitution: UnitInterval::ONE,
+                    hard_fork_initiation: UnitInterval::ZERO,
+                    pp_network_group: UnitInterval::ZERO,
+                    pp_economic_group: UnitInterval::ZERO,
+                    pp_technical_group: UnitInterval::ZERO,
+                    pp_governance_group: UnitInterval::ZERO,
+                    treasury_withdrawal: UnitInterval::ONE,
+                },
+                committee_min_size: 42,
+                committee_max_term_length: 3,
+                gov_action_lifetime: 99,
+                gov_action_deposit: 500_000_000,
+                d_rep_deposit: 100_000_000,
+                d_rep_activity: 27,
+                min_fee_ref_script_cost_per_byte: RationalNumber::new(1, 42).unwrap(),
+                plutus_v3_cost_model: Vec::new(),
+                constitution: Constitution {
+                    anchor: Anchor {
+                        url: "constitution.cardano.org".to_string(),
+                        data_hash: vec![0x99],
+                    },
+                    guardrail_script: None,
+                },
+                committee: Committee {
+                    members: std::collections::HashMap::new(),
+                    threshold: RationalNumber::new(5, 32).unwrap(),
+                },
+            }),
+
+            ..ProtocolParams::default()
+        };
+
+        let msg = ProtocolParamsMessage {
+            params: params.clone(),
+        };
+        let mut state = State::default();
+
+        state.handle_parameters(&msg).unwrap();
+
+        assert_eq!(
+            state.protocol_parameters.unwrap().conway.unwrap().pool_voting_thresholds,
+            params.conway.unwrap().pool_voting_thresholds
+        );
     }
 }
