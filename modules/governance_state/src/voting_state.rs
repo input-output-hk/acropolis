@@ -24,6 +24,7 @@ impl fmt::Display for VotingRegistrationState {
 
 impl VotingRegistrationState {
     // At least one vote in each category is enough.
+    #[allow(dead_code)]
     pub fn fake() -> Self {
         Self {
             total_spos: 1,
