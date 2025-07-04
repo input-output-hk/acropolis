@@ -9,7 +9,7 @@ use bech32::{Bech32, Hrp};
 use bitmask_enum::bitmask;
 use chrono::{DateTime, Utc};
 use hex::decode;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 use serde_with::{hex::Hex, serde_as};
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
@@ -604,7 +604,7 @@ pub struct ExUnitPrices {
 
 pub type UnitInterval = RationalNumber;
 
-#[derive(Debug, Default, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash, serde::Deserialize)]
 pub struct GovActionId {
     pub transaction_id: DataHash,
     pub action_index: u8,
@@ -620,6 +620,26 @@ impl GovActionId {
             .unwrap_or_else(|e| format!("Cannot convert {:?} to bech32: {e}", self.transaction_id))
     }
 
+    pub fn from_bech32(bech32_str: &str) -> Result<Self, anyhow::Error> {
+        let (hrp, data) = bech32::decode(bech32_str)?;
+
+        if hrp != Hrp::parse("gov_action")? {
+            return Err(anyhow!("Invalid HRP, expected 'gov_action', got: {}", hrp));
+        }
+
+        if data.len() < 33 {
+            return Err(anyhow!("Invalid Bech32 governance action"));
+        }
+
+        let transaction_id: DataHash = data[..32].to_vec();
+        let action_index = data[32];
+
+        Ok(GovActionId {
+            transaction_id,
+            action_index,
+        })
+    }
+
     pub fn set_action_index(&mut self, action_index: usize) -> Result<&Self, anyhow::Error> {
         if action_index >= 256 {
             return Err(anyhow!("Action_index {action_index} >= 256"));
@@ -627,6 +647,17 @@ impl GovActionId {
 
         self.action_index = action_index as u8;
         Ok(self)
+    }
+}
+
+impl Serialize for GovActionId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // Convert GovActionId to Bech32 before serializing
+        let bech32_str = self.to_bech32();
+        serializer.serialize_str(&bech32_str)
     }
 }
 

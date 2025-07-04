@@ -6,12 +6,12 @@ use acropolis_common::{
         CardanoMessage, DRepStakeDistributionMessage, GovernanceProceduresMessage, Message,
         ProtocolParamsMessage, RESTResponse,
     },
-    BlockInfo,
+    rest_helper::{handle_rest, handle_rest_with_parameter},
+    BlockInfo, GovActionId,
 };
 use anyhow::{anyhow, Result};
 use caryatid_sdk::{message_bus::Subscription, module, Context, Module};
 use config::Config;
-use hex::ToHex;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info};
@@ -37,7 +37,7 @@ pub struct GovernanceState;
 
 pub struct GovernanceStateConfig {
     subscribe_topic: String,
-    handle_topic: String,
+    _handle_topic: String,
     drep_distribution_topic: String,
     protocol_parameters_topic: String,
     enact_state_topic: String,
@@ -53,44 +53,11 @@ impl GovernanceStateConfig {
     pub fn new(config: &Arc<Config>) -> Arc<Self> {
         Arc::new(Self {
             subscribe_topic: Self::conf(config, DEFAULT_SUBSCRIBE_TOPIC),
-            handle_topic: Self::conf(config, DEFAULT_HANDLE_TOPIC),
+            _handle_topic: Self::conf(config, DEFAULT_HANDLE_TOPIC),
             drep_distribution_topic: Self::conf(config, DEFAULT_DREP_DISTRIBUTION_TOPIC),
             protocol_parameters_topic: Self::conf(config, DEFAULT_PROTOCOL_PARAMETERS_TOPIC),
             enact_state_topic: Self::conf(config, DEFAULT_ENACT_STATE_TOPIC),
         })
-    }
-}
-
-fn perform_rest_request(state: &State, path: &str) -> Result<String> {
-    let request = match path.rfind('/') {
-        None => return Err(anyhow!("Poorly formed url, '/' expected.")),
-        Some(suffix_start) => &path[suffix_start + 1..],
-    };
-
-    if request == "list" {
-        let mut list_votes = Vec::new();
-        let mut list_props = Vec::new();
-
-        for (a, p) in state.list_proposals()?.into_iter() {
-            list_props.push(format!("{}: {:?}", a, p));
-        }
-
-        for (a, v, tx, vp) in state.list_votes()?.into_iter() {
-            list_votes.push(format!(
-                "{}: {} at {} voted as {:?}",
-                a,
-                v,
-                tx.encode_hex::<String>(),
-                vp
-            ));
-        }
-
-        Ok(format!(
-            "Governance proposals list: {:?}\nGovernance votes list: {:?}",
-            list_props, list_votes
-        ))
-    } else {
-        Err(anyhow!("Invalid action specified."))
     }
 }
 
@@ -145,40 +112,102 @@ impl GovernanceState {
             context.clone(),
             config.enact_state_topic.clone(),
         )));
-        let state_handle = state.clone();
-        let state_tick = state.clone();
 
-        // REST requests handling
-        context.handle(
-            &config.clone().handle_topic,
-            move |message: Arc<Message>| {
-                let state = state_handle.clone();
+        // Handle REST requests for /governance-state/list
+        let state_handle_list = state.clone();
+        handle_rest(
+            context.clone(),
+            "rest.get.governance-state.list",
+            move || {
+                let state = state_handle_list.clone();
                 async move {
-                    let response = match message.as_ref() {
-                        Message::RESTRequest(request) => {
-                            info!("REST received {} {}", request.method, request.path);
-                            let lock = state.lock().await;
+                    let locked = state.lock().await;
+                    let props = locked.list_proposals();
 
-                            match perform_rest_request(&lock, &request.path) {
-                                Ok(response) => RESTResponse::with_text(200, &response),
-                                Err(error) => {
-                                    error!("Governance State REST request error: {error:?}");
-                                    RESTResponse::with_text(400, &format!("{error:?}"))
-                                }
-                            }
+                    match serde_json::to_string(&props) {
+                        Ok(json) => Ok(RESTResponse::with_json(200, &json)),
+                        Err(e) => {
+                            // Handle serialization error
+                            Ok(RESTResponse::with_text(
+                                500,
+                                &format!("Serialization error: {:?}", e),
+                            ))
                         }
-                        _ => {
-                            error!("Unexpected message type: {message:?}");
-                            RESTResponse::with_text(500, &format!("Unexpected message type"))
+                    }
+                }
+            },
+        );
+
+        // Handle REST requests for /governance-state/proposal/<Bech32_GovActionId>
+        let state_handle_proposal_info = state.clone();
+        handle_rest_with_parameter(
+            context.clone(),
+            "rest.get.governance-state.proposal.*",
+            move |param| {
+                let state = state_handle_proposal_info.clone();
+                let param_string = param.to_string();
+                async move {
+                    let proposal_id = match GovActionId::from_bech32(&param_string) {
+                        Ok(id) => id,
+                        Err(e) => {
+                            return Ok(RESTResponse::with_text(
+                                400,
+                                &format!("Invalid Bech32 proposal_id: {e:?}"),
+                            ));
                         }
                     };
 
-                    Arc::new(Message::RESTResponse(response))
+                    let locked = state.lock().await;
+                    match locked.get_proposal(&proposal_id) {
+                        Some(proposal) => match serde_json::to_string(&proposal) {
+                            Ok(json) => Ok(RESTResponse::with_json(200, &json)),
+                            Err(e) => Ok(RESTResponse::with_text(
+                                500,
+                                &format!("Serialization error: {:?}", e),
+                            )),
+                        },
+                        None => Ok(RESTResponse::with_text(404, "Proposal not found")),
+                    }
+                }
+            },
+        );
+
+        // Handle REST requests for /governance-state/proposal/<proposal_id>/votes
+        let state_handle_proposal_votes = state.clone();
+        handle_rest_with_parameter(
+            context.clone(),
+            "rest.get.governance-state.proposal.*.votes",
+            move |param| {
+                let state = state_handle_proposal_votes.clone();
+                let param_string = param.to_string();
+                async move {
+                    let proposal_id = match GovActionId::from_bech32(&param_string) {
+                        Ok(id) => id,
+                        Err(e) => {
+                            return Ok(RESTResponse::with_text(
+                                400,
+                                &format!("Invalid Bech32 proposal_id: {e:?}"),
+                            ));
+                        }
+                    };
+
+                    let locked = state.lock().await;
+                    match locked.get_proposal_votes(&proposal_id) {
+                        Ok(votes) => match serde_json::to_string(&votes) {
+                            Ok(json) => Ok(RESTResponse::with_json(200, &json)),
+                            Err(e) => Ok(RESTResponse::with_text(
+                                500,
+                                &format!("Serialization error: {:?}", e),
+                            )),
+                        },
+                        Err(e) => Ok(RESTResponse::with_text(404, &e.to_string())),
+                    }
                 }
             },
         );
 
         // Ticker to log stats
+        let state_tick = state.clone();
         let mut subscription = context.subscribe("clock.tick").await?;
         context.run(async move {
             loop {
