@@ -27,6 +27,12 @@ use caryatid_module_clock::Clock;
 use caryatid_module_rest_server::RESTServer;
 use caryatid_module_spy::Spy;
 
+#[cfg(not(target_env = "msvc"))]
+use tikv_jemallocator::Jemalloc;
+#[cfg(not(target_env = "msvc"))]
+#[global_allocator]
+static GLOBAL: Jemalloc = Jemalloc;
+
 /// Standard main
 #[tokio::main]
 pub async fn main() -> Result<()> {
