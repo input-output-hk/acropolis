@@ -69,3 +69,5 @@ epoch. Special message?
 
 * How can I get total drep stake?
 * How can I get pools stake?
+* DRep stake is registered; however SPO stake is of two kinds --- registered and
+total. Need info about voting registration.

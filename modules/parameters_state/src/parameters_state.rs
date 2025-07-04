@@ -119,7 +119,6 @@ impl ParametersState {
         });
 
         loop {
-            info!("Waiting for enact-state");
             match enact_s.read().await?.1.as_ref() {
                 Message::Cardano((block, CardanoMessage::GovernanceOutcomes(gov))) => {
                     let mut locked = state.lock().await;
