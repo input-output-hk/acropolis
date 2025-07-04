@@ -7,9 +7,13 @@ use std::path::Path;
 const OUTPUT_DIR: &str = "downloads";
 
 /// Download a URL to a file in OUTPUT_DIR
-fn download(url: &str, filename: &str) {
+fn download(url: &str, filename: &str, rename: &Vec<(&str,&str)>) {
     let response = get(url).expect("Failed to fetch {url}");
-    let data = response.text().expect("Failed to read response");
+    let mut data = response.text().expect("Failed to read response");
+
+    for (what,with) in rename.iter() {
+        data = data.replace(&format!("\"{what}\""),&format!("\"{with}\""));
+    }
 
     let output_path = Path::new(OUTPUT_DIR);
     if !output_path.exists() {
@@ -27,17 +31,21 @@ fn main() {
     download(
         "https://book.world.dev.cardano.org/environments/mainnet/byron-genesis.json",
         "mainnet-byron-genesis.json",
+        &vec![]
     );
     download(
         "https://book.world.dev.cardano.org/environments/mainnet/shelley-genesis.json",
         "mainnet-shelley-genesis.json",
+        &vec![("slotsPerKESPeriod","slotsPerKesPeriod"),("maxKESEvolutions","maxKesEvolutions")]
     );
     download(
         "https://book.world.dev.cardano.org/environments/mainnet/alonzo-genesis.json",
         "mainnet-alonzo-genesis.json",
+        &vec![]
     );
     download(
         "https://book.world.dev.cardano.org/environments/mainnet/conway-genesis.json",
         "mainnet-conway-genesis.json",
+        &vec![]
     );
 }
