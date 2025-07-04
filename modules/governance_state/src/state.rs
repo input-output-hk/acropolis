@@ -2,10 +2,11 @@
 
 use acropolis_common::{
     messages::{
-        CardanoMessage, DRepStakeDistributionMessage, GovernanceOutcomesMessage,
+        CardanoMessage, DRepStakeDistributionMessage, SPOStakeDistributionMessage,
+        GovernanceOutcomesMessage,
         GovernanceProceduresMessage, Message, ProtocolParamsMessage,
     },
-    BlockInfo, ConwayParams, DRepCredential, DataHash, EnactStateElem, GovActionId,
+    BlockInfo, ConwayParams, DRepCredential, DataHash, EnactStateElem, Era, GovActionId,
     GovernanceAction, GovernanceOutcome, GovernanceOutcomeVariant, KeyHash, Lovelace,
     ProposalProcedure, SingleVoterVotes,
     TreasuryWithdrawalsAction, Voter, VotesCount, VotingOutcome, VotingProcedure,
@@ -69,10 +70,12 @@ impl State {
 
     pub async fn handle_drep_stake(
         &mut self,
-        message: &DRepStakeDistributionMessage,
+        drep_message: &DRepStakeDistributionMessage,
+        spo_message: &SPOStakeDistributionMessage
     ) -> Result<()> {
         self.drep_stake_messages_count += 1;
-        self.drep_stake = HashMap::from_iter(message.dreps.iter().cloned());
+        self.drep_stake = HashMap::from_iter(drep_message.dreps.iter().cloned());
+        self.spo_stake = HashMap::from_iter(spo_message.spos.iter().cloned());
 
         Ok(())
     }
@@ -85,7 +88,7 @@ impl State {
     ) -> Result<()> {
         if block.new_epoch {
             // TODO: move to governance_state.rs
-            let outcome = self.process_new_epoch(block.epoch)?;
+            let outcome = self.process_new_epoch(block)?;
             self.send(block, outcome).await?;
         }
 
@@ -281,23 +284,30 @@ impl State {
     }
 
     fn recalculate_voting_state(&self) -> Result<VotingRegistrationState> {
-        let registered_drep_stake = self.drep_stake.iter().map(|(_dr,lov)| lov).sum();
+        let drep_stake = self.drep_stake.iter().map(|(_dr,lov)| lov).sum();
 
         let committee_usize = self.get_conway_params()?.committee.members.len();
         let committee = committee_usize.try_into().or_else(
             |e| Err(anyhow!("Commitee size: conversion usize -> u64 failed, {e}"))
         )?;
 
-        Ok(VotingRegistrationState::new(0, 0, registered_drep_stake, committee))
+        let spo_stake = self.spo_stake.iter().map(|(_sp,lov)| lov).sum();
+
+        Ok(VotingRegistrationState::new(spo_stake, spo_stake, drep_stake, committee))
     }
 
     /// Loops through all actions and checks their status for the new_epoch
     /// All incoming data (parameters for the epoch, drep distribution, etc)
     /// should already be actual at this moment.
-    fn process_new_epoch(&mut self, new_epoch: u64) -> Result<GovernanceOutcomesMessage> {
-        let voting_state = self.recalculate_voting_state()?;
-
+    fn process_new_epoch(&mut self, new_block: &BlockInfo) 
+        -> Result<GovernanceOutcomesMessage> 
+    {
         let mut output = GovernanceOutcomesMessage::default();
+        if new_block.era < Era::Conway {
+            return Ok(output);
+        }
+
+        let voting_state = self.recalculate_voting_state()?;
 
         let actions = self.proposals.keys().map(|a| a.clone()).collect::<Vec<_>>();
         let mut wdr = 0;
@@ -305,8 +315,8 @@ impl State {
         let mut rej = 0;
 
         for action_id in actions.iter() {
-            info!("Epoch {}: processing action {}", new_epoch, action_id);
-            match self.process_one_proposal(new_epoch, &voting_state, &action_id) {
+            info!("Epoch {}: processing action {}", new_block.epoch, action_id);
+            match self.process_one_proposal(new_block.epoch, &voting_state, &action_id) {
                 Err(e) => error!("Error processing governance {action_id}: {e}"),
                 Ok(None) => (),
                 Ok(Some(out)) if out.accepted => {
@@ -336,8 +346,8 @@ impl State {
         }
 
         info!(
-            "Epoch {new_epoch}: total {} actions, {ens} enacts, {wdr} withdrawals, {rej} rejected",
-            output.outcomes.len()
+            "Epoch {} ({}): {}, total {} actions, {ens} enacts, {wdr} withdrawals, {rej} rejected",
+            voting_state, new_block.epoch, new_block.era, output.outcomes.len()
         );
         return Ok(output);
     }
