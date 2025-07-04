@@ -558,28 +558,35 @@ impl State {
     }
 
     /// Get list of actual voting proposals
-    pub fn list_proposals(&self) -> Result<Vec<(GovActionId, ProposalProcedure)>> {
-        let mut result = Vec::new();
-        for (action, (_epoch, prop)) in self.proposals.iter() {
-            result.push((action.clone(), prop.clone()))
-        }
-        Ok(result)
+    pub fn list_proposals(&self) -> Vec<GovActionId> {
+        self.proposals.keys().cloned().collect()
     }
 
-    /// Get list of casted votes
-    pub fn list_votes(&self) -> Result<Vec<(GovActionId, Voter, DataHash, VotingProcedure)>> {
-        let mut result = Vec::new();
-        for (action, all_votes) in self.votes.iter() {
-            for (voter, (transaction, voting_proc)) in all_votes.iter() {
-                result.push((
-                    action.clone(),
-                    voter.clone(),
-                    transaction.clone(),
-                    voting_proc.clone(),
-                ));
+    /// Get details for a specific proposal
+    pub fn get_proposal(&self, id: &GovActionId) -> Option<ProposalProcedure> {
+        self.proposals.get(id).map(|(_epoch, prop)| prop.clone())
+    }
+
+    /// Get list of votes for a specific proposal
+    pub fn get_proposal_votes(
+        &self,
+        proposal_id: &GovActionId,
+    ) -> Result<Vec<(Voter, DataHash, VotingProcedure)>> {
+        match self.votes.get(proposal_id) {
+            Some(all_votes) => {
+                let result = all_votes
+                    .iter()
+                    .map(|(voter, (transaction, voting_proc))| {
+                        (voter.clone(), transaction.clone(), voting_proc.clone())
+                    })
+                    .collect::<Vec<_>>();
+                Ok(result)
             }
+            None => Err(anyhow::anyhow!(
+                "Governance action: {:?} not found",
+                proposal_id
+            )),
         }
-        Ok(result)
     }
 
     pub async fn tick(&self) -> Result<()> {
