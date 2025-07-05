@@ -4,8 +4,7 @@
 use acropolis_common::{
     messages::{
         CardanoMessage, DRepStakeDistributionMessage, SPOStakeDistributionMessage,
-        GovernanceOutcomesMessage, GovernanceProceduresMessage, Message,
-        ProtocolParamsMessage, RESTResponse,
+        GovernanceProceduresMessage, Message, ProtocolParamsMessage, RESTResponse,
     },
     BlockInfo,
 };
@@ -222,13 +221,7 @@ impl GovernanceState {
                 // New governance from new epoch means that we must prepare all governance
                 // outcome for the previous epoch.
                 let mut state = state.lock().await;
-                let governance_outcomes = match state.process_new_epoch(&blk_g) {
-                    Ok(out) => out,
-                    Err(e) => {
-                        error!("Cannot process new epoch: {e}");
-                        GovernanceOutcomesMessage::default()
-                    }
-                };
+                let governance_outcomes = state.process_new_epoch(&blk_g)?;
                 state.send(&blk_g, governance_outcomes).await?;
             }
 
@@ -243,7 +236,10 @@ impl GovernanceState {
                         "Governance {blk_g:?} and protocol parameters {blk_p:?} are out of sync"
                     );
                 }
-                state.lock().await.handle_protocol_parameters(&params).await?;
+
+                {
+                    state.lock().await.handle_protocol_parameters(&params).await?;
+                }
 
                 if blk_g.epoch > 0 {
                     // TODO: make sync more stable
@@ -262,6 +258,10 @@ impl GovernanceState {
                     }
 
                     state.lock().await.handle_drep_stake(&d_drep, &d_spo).await?
+                }
+
+                {
+                    state.lock().await.advance_era(&blk_g.era);
                 }
             }
         }
