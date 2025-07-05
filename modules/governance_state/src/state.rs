@@ -12,7 +12,7 @@ use acropolis_common::{
     TreasuryWithdrawalsAction, Voter, VotesCount, VotingOutcome, VotingProcedure,
 };
 use crate::VotingRegistrationState;
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::Context;
 use hex::ToHex;
 use std::{collections::HashMap, sync::Arc};
@@ -28,6 +28,7 @@ pub struct State {
     pub votes_count: usize,
     pub drep_stake_messages_count: usize,
 
+    current_era: Era,
     conway: Option<ConwayParams>,
     drep_stake: HashMap<DRepCredential, Lovelace>,
     spo_stake: HashMap<KeyHash, u64>,
@@ -48,6 +49,7 @@ impl State {
             drep_stake_messages_count: 0,
 
             conway: None,
+            current_era: Era::default(),
 
             proposals: HashMap::new(),
             votes: HashMap::new(),
@@ -55,6 +57,10 @@ impl State {
             drep_stake: HashMap::new(),
             spo_stake: HashMap::new(),
         }
+    }
+
+    pub fn advance_era(&mut self, new_era: &Era) {
+        self.current_era = new_era.clone();
     }
 
     pub async fn handle_protocol_parameters(
@@ -86,10 +92,13 @@ impl State {
         block: &BlockInfo,
         governance_message: &GovernanceProceduresMessage,
     ) -> Result<()> {
-        if block.new_epoch {
-            // TODO: move to governance_state.rs
-            let outcome = self.process_new_epoch(block)?;
-            self.send(block, outcome).await?;
+        if block.era < Era::Conway {
+            if !(governance_message.proposal_procedures.is_empty() &&
+                governance_message.voting_procedures.is_empty())
+            {
+                bail!("Non-empty governance message for pre-conway block {block:?}");
+            }
+            return Ok(())
         }
 
         for pproc in &governance_message.proposal_procedures {
@@ -112,6 +121,7 @@ impl State {
                 self.votes_count += voter_votes.voting_procedures.len();
             }
         }
+
         Ok(())
     }
 
@@ -303,7 +313,10 @@ impl State {
         -> Result<GovernanceOutcomesMessage> 
     {
         let mut output = GovernanceOutcomesMessage::default();
-        if new_block.era < Era::Conway {
+        if self.current_era < Era::Conway {
+            // Processes new epoch acts on old events.
+            // However, there should be no governance events before
+            // Conway era start.
             return Ok(output);
         }
 
