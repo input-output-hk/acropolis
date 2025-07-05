@@ -7,7 +7,8 @@ use std::path::Path;
 const OUTPUT_DIR: &str = "downloads";
 
 /// Download a URL to a file in OUTPUT_DIR
-fn download(url: &str, filename: &str, rename: &Vec<(&str,&str)>) {
+fn download(url_base: &str, epoch: &str, filename: &str, rename: &Vec<(&str,&str)>) {
+    let url = format!("{}/{}-genesis.json", url_base, epoch);
     let response = get(url).expect("Failed to fetch {url}");
     let mut data = response.text().expect("Failed to read response");
 
@@ -28,24 +29,20 @@ fn download(url: &str, filename: &str, rename: &Vec<(&str,&str)>) {
 fn main() {
     println!("cargo:rerun-if-changed=build.rs"); // Ensure the script runs if modified
 
-    download(
-        "https://book.world.dev.cardano.org/environments/mainnet/byron-genesis.json",
-        "mainnet-byron-genesis.json",
-        &vec![]
-    );
-    download(
-        "https://book.world.dev.cardano.org/environments/mainnet/shelley-genesis.json",
-        "mainnet-shelley-genesis.json",
-        &vec![("slotsPerKESPeriod","slotsPerKesPeriod"),("maxKESEvolutions","maxKesEvolutions")]
-    );
-    download(
-        "https://book.world.dev.cardano.org/environments/mainnet/alonzo-genesis.json",
-        "mainnet-alonzo-genesis.json",
-        &vec![]
-    );
-    download(
-        "https://book.world.dev.cardano.org/environments/mainnet/conway-genesis.json",
-        "mainnet-conway-genesis.json",
-        &vec![]
-    );
+    let shelley_fix = vec![
+        ("slotsPerKESPeriod","slotsPerKesPeriod"),("maxKESEvolutions","maxKesEvolutions")
+    ];
+
+    let main = "https://book.world.dev.cardano.org/environments/mainnet";
+    download(main, "byron", "mainnet-byron-genesis.json", &vec![]);
+    download(main, "shelley", "mainnet-shelley-genesis.json", &shelley_fix);
+    download(main, "alonzo", "mainnet-alonzo-genesis.json", &vec![]);
+    download(main, "conway", "mainnet-conway-genesis.json", &vec![]);
+
+    let sancho = 
+        "https://raw.githubusercontent.com/Hornan7/SanchoNet-Tutorials/refs/heads/main/genesis";
+    download(sancho, "byron", "sanchonet-byron-genesis.json", &vec![]);
+    download(sancho, "shelley", "sanchonet-shelley-genesis.json", &shelley_fix);
+    download(sancho, "alonzo", "sanchonet-alonzo-genesis.json", &vec![]);
+    download(sancho, "conway", "sanchonet-conway-genesis.json", &vec![]);
 }

@@ -23,6 +23,7 @@ const DEFAULT_ENACT_STATE_TOPIC: (&str, &str) = ("enact-state-topic", "cardano.e
 const DEFAULT_HANDLE_TOPIC: (&str, &str) = ("handle-topic", "rest.get.governance-state.*");
 const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: (&str, &str) =
     ("publish-parameters-topic", "cardano.protocol.parameters");
+const DEFAULT_NETWORK_NAME: (&str, &str) = ("network-name", "mainnet");
 
 /// Parameters State module
 #[module(
@@ -34,6 +35,7 @@ pub struct ParametersState;
 
 struct ParametersStateConfig {
     pub context: Arc<Context<Message>>,
+    pub network_name: String,
     pub enact_state_topic: String,
     pub handle_topic: String,
     pub protocol_parameters_topic: String,
@@ -49,6 +51,7 @@ impl ParametersStateConfig {
     pub fn new(context: Arc<Context<Message>>, config: &Arc<Config>) -> Arc<Self> {
         Arc::new(Self {
             context,
+            network_name: Self::conf(config, DEFAULT_NETWORK_NAME),
             enact_state_topic: Self::conf(config, DEFAULT_ENACT_STATE_TOPIC),
             handle_topic: Self::conf(config, DEFAULT_HANDLE_TOPIC),
             protocol_parameters_topic: Self::conf(config, DEFAULT_PROTOCOL_PARAMETERS_TOPIC),
@@ -83,7 +86,7 @@ impl ParametersState {
         config: Arc<ParametersStateConfig>,
         mut enact_s: Box<dyn Subscription<Message>>,
     ) -> Result<()> {
-        let state = Arc::new(Mutex::new(State::new()));
+        let state = Arc::new(Mutex::new(State::new(config.network_name.clone())));
         let state_handle = state.clone();
 
         config.context.handle(&config.handle_topic, move |message: Arc<Message>| {
@@ -116,7 +119,6 @@ impl ParametersState {
         });
 
         loop {
-            info!("Waiting for enact-state");
             match enact_s.read().await?.1.as_ref() {
                 Message::Cardano((block, CardanoMessage::GovernanceOutcomes(gov))) => {
                     let mut locked = state.lock().await;
@@ -139,22 +141,4 @@ impl ParametersState {
 
         Ok(())
     }
-
-    // Ticker to log stats
-    /*
-            context.clone().message_bus.subscribe("clock.tick", move |message: Arc<Message>| {
-                let state = state_tick.clone();
-
-                async move {
-                    if let Message::Clock(message) = message.as_ref() {
-                        if (message.number % 60) == 0 {
-                            state.lock().await.tick()
-                                .await
-                                .inspect_err(|e| error!("Tick error: {e}"))
-                                .ok();
-                        }
-                    }
-                }
-            })?;
-    */
 }

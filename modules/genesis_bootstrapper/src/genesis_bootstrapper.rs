@@ -19,9 +19,11 @@ const DEFAULT_STARTUP_TOPIC: &str = "cardano.sequence.start";
 const DEFAULT_PUBLISH_UTXO_DELTAS_TOPIC: &str = "cardano.utxo.deltas";
 const DEFAULT_PUBLISH_POT_DELTAS_TOPIC: &str = "cardano.pot.deltas";
 const DEFAULT_COMPLETION_TOPIC: &str = "cardano.sequence.bootstrapped";
+const DEFAULT_NETWORK_NAME: &str = "mainnet";
 
 // Include genesis data (downloaded by build.rs)
 const MAINNET_BYRON_GENESIS: &[u8] = include_bytes!("../downloads/mainnet-byron-genesis.json");
+const SANCHONET_BYRON_GENESIS: &[u8] = include_bytes!("../downloads/sanchonet-byron-genesis.json");
 
 // Initial reserves (=maximum ever Lovelace supply)
 const INITIAL_RESERVES: Lovelace = 45_000_000_000_000_000;
@@ -63,9 +65,23 @@ impl GenesisBootstrapper {
                 .unwrap_or(DEFAULT_COMPLETION_TOPIC.to_string());
             info!("Completing with '{completion_topic}'");
 
+            let network_name = config
+                .get_string("network-name")
+                .unwrap_or(DEFAULT_NETWORK_NAME.to_string());
+
+            let genesis = match network_name.as_ref() {
+                "mainnet" => MAINNET_BYRON_GENESIS,
+                "sanchonet" => SANCHONET_BYRON_GENESIS,
+                _ => {
+                    error!("Cannot find genesis for {network_name}");
+                    return;
+                }
+            };
+            info!("Reading genesis for '{network_name}'");
+
             // Read genesis data
-            let genesis: byron::GenesisFile = serde_json::from_slice(MAINNET_BYRON_GENESIS)
-                .expect("Invalid JSON in MAINNET_BYRON_GENESIS file");
+            let genesis: byron::GenesisFile = serde_json::from_slice(genesis)
+                .expect("Invalid JSON in BYRON_GENESIS file");
 
             // Construct messages
             let block_info = BlockInfo {

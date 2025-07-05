@@ -212,14 +212,18 @@ impl UpstreamChainFetcher {
         config: Arc<Config>,
         peer: Arc<Mutex<PeerClient>>,
     ) -> Result<()> {
-        let sync_point = config.get_string("sync-point").unwrap_or(DEFAULT_SYNC_POINT.to_string());
-        let mut my_peer = peer.lock().await;
+        let sync_point = config
+            .get_string("sync-point")
+            .unwrap_or(DEFAULT_SYNC_POINT.to_string());
 
         match sync_point.as_str() {
             "tip" => {
                 // Ask for origin but get the tip as well
-                let (_, Tip(point, _)) =
-                    my_peer.chainsync().find_intersect(vec![Point::Origin]).await?;
+                let mut my_peer = peer.lock().await;
+                let (_, Tip(point, _)) = my_peer
+                    .chainsync()
+                    .find_intersect(vec![Point::Origin])
+                    .await?;
                 Self::sync_to_point(context, config, peer.clone(), point).await?;
             }
             "origin" => {
