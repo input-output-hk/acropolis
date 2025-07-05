@@ -299,7 +299,7 @@ impl State {
     /// Loops through all actions and checks their status for the new_epoch
     /// All incoming data (parameters for the epoch, drep distribution, etc)
     /// should already be actual at this moment.
-    fn process_new_epoch(&mut self, new_block: &BlockInfo) 
+    pub fn process_new_epoch(&mut self, new_block: &BlockInfo) 
         -> Result<GovernanceOutcomesMessage> 
     {
         let mut output = GovernanceOutcomesMessage::default();
@@ -368,7 +368,7 @@ impl State {
         }
     }
 
-    async fn send(&self, block: &BlockInfo, message: GovernanceOutcomesMessage) -> Result<()> {
+    pub async fn send(&self, block: &BlockInfo, message: GovernanceOutcomesMessage) -> Result<()> {
         let packed_message = Arc::new(Message::Cardano((
             block.clone(),
             CardanoMessage::GovernanceOutcomes(message),

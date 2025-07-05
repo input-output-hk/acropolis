@@ -4,7 +4,7 @@
 use acropolis_common::{
     messages::{
         CardanoMessage, DRepStakeDistributionMessage, SPOStakeDistributionMessage,
-        GovernanceProceduresMessage, Message,
+        GovernanceOutcomesMessage, GovernanceProceduresMessage, Message,
         ProtocolParamsMessage, RESTResponse,
     },
     BlockInfo,
@@ -208,13 +208,8 @@ impl GovernanceState {
                 };
                 if let Message::Clock(message) = message.as_ref() {
                     if (message.number % 60) == 0 {
-                        state_tick
-                            .lock()
-                            .await
-                            .tick()
-                            .await
-                            .inspect_err(|e| error!("Tick error: {e}"))
-                            .ok();
+                        state_tick.lock().await.tick().await
+                            .inspect_err(|e| error!("Tick error: {e}")).ok();
                     }
                 }
             }
@@ -222,6 +217,21 @@ impl GovernanceState {
 
         loop {
             let (blk_g, gov_procs) = Self::read_governance(&mut governance_s).await?;
+
+            if blk_g.new_epoch {
+                // New governance from new epoch means that we must prepare all governance
+                // outcome for the previous epoch.
+                let mut state = state.lock().await;
+                let governance_outcomes = match state.process_new_epoch(&blk_g) {
+                    Ok(out) => out,
+                    Err(e) => {
+                        error!("Cannot process new epoch: {e}");
+                        GovernanceOutcomesMessage::default()
+                    }
+                };
+                state.send(&blk_g, governance_outcomes).await?;
+            }
+
             {
                 state.lock().await.handle_governance(&blk_g, &gov_procs).await?;
             }
@@ -245,6 +255,10 @@ impl GovernanceState {
                     let (blk_spo, d_spo) = Self::read_spo(&mut spo_s).await?;
                     if blk_g != blk_spo {
                         error!("Governance {blk_g:?} and SPO distribution {blk_spo:?} are out of sync");
+                    }
+
+                    if blk_spo.epoch != d_spo.epoch+1 {
+                        error!("SPO distibution {blk_spo:?} != SPO epoch + 1 ({})", d_spo.epoch);
                     }
 
                     state.lock().await.handle_drep_stake(&d_drep, &d_spo).await?

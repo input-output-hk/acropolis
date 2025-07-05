@@ -65,9 +65,11 @@ epoch. Special message?
 
 * Each epoch boundary governance state tracker issues a "rewards update" message.
 
-### Question:
+### Questions
 
-* How can I get total drep stake?
-* How can I get pools stake?
+* How can I get total drep stake? (resolved)
+* How can I get pools stake? (resolved)
 * DRep stake is registered; however SPO stake is of two kinds --- registered and
 total. Need info about voting registration.
+* DRep::epoch -- it's written that it's epoch, which has ended. But I receive
+messages with this epoch in its beginning. Need to sort out.
