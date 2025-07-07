@@ -104,8 +104,7 @@ impl State {
                     };
 
                     // Sets pointer; updates max processed slot
-                    self.pointer_cache
-                        .set_pointer(ptr, stake_address, block.slot);
+                    self.pointer_cache.set_pointer(ptr, stake_address, block.slot);
                 }
                 _ => (),
             }
@@ -135,8 +134,7 @@ impl State {
         let used_pointers = self.tracker.get_used_pointers();
 
         if self.params.write_full_cache {
-            self.pointer_cache
-                .try_save(&self.params.get_cache_file_name(".json")?)?;
+            self.pointer_cache.try_save(&self.params.get_cache_file_name(".json")?)?;
         } else {
             self.pointer_cache
                 .try_save_filtered(&self.params.get_cache_file_name("")?, &used_pointers)?;

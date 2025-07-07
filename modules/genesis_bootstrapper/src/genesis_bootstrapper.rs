@@ -2,9 +2,11 @@
 //! Reads genesis files and outputs initial UTXO events
 
 use acropolis_common::{
-    messages::{CardanoMessage, GenesisCompleteMessage, Message, UTXODeltasMessage, PotDeltasMessage},
-    Address, BlockInfo, BlockStatus, ByronAddress, Era, TxOutput, UTXODelta, Lovelace,
-    LovelaceDelta, PotDelta, Pot,
+    messages::{
+        CardanoMessage, GenesisCompleteMessage, Message, PotDeltasMessage, UTXODeltasMessage,
+    },
+    Address, BlockInfo, BlockStatus, ByronAddress, Era, Lovelace, LovelaceDelta, Pot, PotDelta,
+    TxOutput, UTXODelta,
 };
 use anyhow::Result;
 use caryatid_sdk::{module, Context, Module};
@@ -35,9 +37,8 @@ pub struct GenesisBootstrapper;
 impl GenesisBootstrapper {
     /// Main init function
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
-        let startup_topic = config
-            .get_string("startup-topic")
-            .unwrap_or(DEFAULT_STARTUP_TOPIC.to_string());
+        let startup_topic =
+            config.get_string("startup-topic").unwrap_or(DEFAULT_STARTUP_TOPIC.to_string());
         info!("Creating startup subscriber on '{startup_topic}'");
 
         let mut subscription = context.subscribe(&startup_topic).await?;
@@ -96,10 +97,16 @@ impl GenesisBootstrapper {
                 total_allocated += amount;
             }
 
-            info!(total_allocated, count=gen_utxos.len(), "AVVM genesis UTXOs");
+            info!(
+                total_allocated,
+                count = gen_utxos.len(),
+                "AVVM genesis UTXOs"
+            );
 
-            let message_enum = Message::Cardano((block_info.clone(),
-                                                 CardanoMessage::UTXODeltas(utxo_deltas_message)));
+            let message_enum = Message::Cardano((
+                block_info.clone(),
+                CardanoMessage::UTXODeltas(utxo_deltas_message),
+            ));
             context
                 .publish(&publish_utxo_deltas_topic, Arc::new(message_enum))
                 .await
@@ -112,8 +119,10 @@ impl GenesisBootstrapper {
                 delta: (INITIAL_RESERVES - total_allocated) as LovelaceDelta,
             });
 
-            let message_enum = Message::Cardano((block_info.clone(),
-                                                 CardanoMessage::PotDeltas(pot_deltas_message)));
+            let message_enum = Message::Cardano((
+                block_info.clone(),
+                CardanoMessage::PotDeltas(pot_deltas_message),
+            ));
             context
                 .publish(&publish_pot_deltas_topic, Arc::new(message_enum))
                 .await

@@ -207,9 +207,7 @@ mod tests {
         });
 
         assert_eq!(
-            state
-                .process_one_certificate(&update_anchor_tx_cert)
-                .unwrap(),
+            state.process_one_certificate(&update_anchor_tx_cert).unwrap(),
             false
         );
 
@@ -244,9 +242,7 @@ mod tests {
             anchor: Some(anchor.clone()),
         });
 
-        assert!(state
-            .process_one_certificate(&update_anchor_tx_cert)
-            .is_err());
+        assert!(state.process_one_certificate(&update_anchor_tx_cert).is_err());
 
         assert_eq!(state.get_count(), 1);
         let tx_cert_record = DRepRecord {

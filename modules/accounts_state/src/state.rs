@@ -1,21 +1,22 @@
 //! Acropolis AccountsState: State storage
 use acropolis_common::{
     messages::{
-        DRepStateMessage, EpochActivityMessage, SPOStateMessage, StakeAddressDeltasMessage,
-        TxCertificatesMessage, WithdrawalsMessage, PotDeltasMessage, ProtocolParamsMessage,
+        DRepStateMessage, EpochActivityMessage, PotDeltasMessage, ProtocolParamsMessage,
+        SPOStateMessage, StakeAddressDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
     },
     serialization::SerializeMapAs,
     DRepChoice, DRepCredential, InstantaneousRewardSource, InstantaneousRewardTarget, KeyHash,
-    Lovelace, MoveInstantaneousReward, PoolRegistration, StakeCredential, TxCertificate, Pot,
-    ProtocolParams,
+    Lovelace, MoveInstantaneousReward, PoolRegistration, Pot, ProtocolParams, StakeCredential,
+    TxCertificate,
 };
 use anyhow::{bail, anyhow, Context, Result};
 use dashmap::DashMap;
-use imbl::HashMap;
+use imbl::OrdMap;
+use std::collections::HashMap;
 use rayon::prelude::*;
 use serde_with::{hex::Hex, serde_as};
 use std::collections::BTreeMap;
-use std::sync::{Arc, atomic::AtomicU64};
+use std::sync::{atomic::AtomicU64, Arc};
 use tracing::{error, info, warn};
 use bigdecimal::{BigDecimal, ToPrimitive};
 
@@ -66,11 +67,11 @@ pub struct State {
 
     /// Map of active SPOs by operator ID
     #[serde_as(as = "SerializeMapAs<Hex, _>")]
-    spos: HashMap<KeyHash, PoolRegistration>,
+    spos: OrdMap<KeyHash, PoolRegistration>,
 
     /// Map of staking address values
     #[serde_as(as = "SerializeMapAs<Hex, _>")]
-    stake_addresses: HashMap<Vec<u8>, StakeAddressState>,
+    stake_addresses: OrdMap<Vec<u8>, StakeAddressState>,
 
     /// Global account pots
     pots: Pots,
@@ -125,9 +126,7 @@ impl State {
         // Calculate total supply (total in circulation + treasury) or
         // equivalently max-supply - reserves - this is the denominator
         // for sigma, z0, s
-        let max_supply = shelley_params.max_lovelace_supply
-            .ok_or_else(|| anyhow!("No max_lovelace_supply"))?;
-        let total_supply = BigDecimal::from(max_supply - self.pots.reserves);
+        let total_supply = BigDecimal::from(shelley_params.max_lovelace_supply - self.pots.reserves);
 
         // Handle monetary expansion - movement from reserves to rewards and treasury
         let monetary_expansion_factor = &shelley_params.protocol_params.monetary_expansion; // Rho
@@ -190,7 +189,7 @@ impl State {
         let spo_stakes = Arc::new(DashMap::<&KeyHash, u64>::new());
 
         // Total stake across all addresses in parallel, first collecting into a vector
-        // because imbl::HashMap doesn't work in Rayon
+        // because imbl::OrdMap doesn't work in Rayon
         self.stake_addresses
             .values()
             .collect::<Vec<_>>() // Vec<&StakeAddressState>
@@ -215,10 +214,7 @@ impl State {
             });
 
         // Collect into a plain BTreeMap, so that it is ordered on output
-        spo_stakes
-            .iter()
-            .map(|entry| ((**entry.key()).clone(), *entry.value()))
-            .collect()
+        spo_stakes.iter().map(|entry| ((**entry.key()).clone(), *entry.value())).collect()
     }
 
     /// Derive the DRep Delegation Distribution (SPDD) - the total amount
@@ -231,37 +227,33 @@ impl State {
             .iter()
             .map(|(cred, deposit)| (cred.clone(), AtomicU64::new(*deposit)))
             .collect::<BTreeMap<_, _>>();
-        self.stake_addresses
-            .values()
-            .collect::<Vec<_>>()
-            .par_iter()
-            .for_each(|state| {
-                let Some(drep) = state.delegated_drep.clone() else {
-                    return;
-                };
-                let total = match drep {
-                    DRepChoice::Key(hash) => {
-                        let cred = DRepCredential::AddrKeyHash(hash);
-                        let Some(total) = dreps.get(&cred) else {
-                            warn!("Delegated to unregistered DRep address {cred:?}");
-                            return;
-                        };
-                        total
-                    }
-                    DRepChoice::Script(hash) => {
-                        let cred = DRepCredential::ScriptHash(hash);
-                        let Some(total) = dreps.get(&cred) else {
-                            warn!("Delegated to unregistered DRep script {cred:?}");
-                            return;
-                        };
-                        total
-                    }
-                    DRepChoice::Abstain => &abstain,
-                    DRepChoice::NoConfidence => &no_confidence,
-                };
-                let stake = state.utxo_value + state.rewards;
-                total.fetch_add(stake, std::sync::atomic::Ordering::Relaxed);
-            });
+        self.stake_addresses.values().collect::<Vec<_>>().par_iter().for_each(|state| {
+            let Some(drep) = state.delegated_drep.clone() else {
+                return;
+            };
+            let total = match drep {
+                DRepChoice::Key(hash) => {
+                    let cred = DRepCredential::AddrKeyHash(hash);
+                    let Some(total) = dreps.get(&cred) else {
+                        warn!("Delegated to unregistered DRep address {cred:?}");
+                        return;
+                    };
+                    total
+                }
+                DRepChoice::Script(hash) => {
+                    let cred = DRepCredential::ScriptHash(hash);
+                    let Some(total) = dreps.get(&cred) else {
+                        warn!("Delegated to unregistered DRep script {cred:?}");
+                        return;
+                    };
+                    total
+                }
+                DRepChoice::Abstain => &abstain,
+                DRepChoice::NoConfidence => &no_confidence,
+            };
+            let stake = state.utxo_value + state.rewards;
+            total.fetch_add(stake, std::sync::atomic::Ordering::Relaxed);
+        });
         let abstain = abstain.load(std::sync::atomic::Ordering::Relaxed);
         let no_confidence = no_confidence.load(std::sync::atomic::Ordering::Relaxed);
         let dreps = dreps
@@ -298,6 +290,7 @@ impl State {
     /// Handle an SPOStateMessage with the full set of SPOs valid at the end of the last
     /// epoch
     pub fn handle_spo_state(&mut self, spo_msg: &SPOStateMessage) -> Result<()> {
+
         // Capture current SPOs, mapped by operator ID
         self.spos = spo_msg
             .spos
@@ -315,9 +308,8 @@ impl State {
 
         // Repeated registrations seem common
         if !self.stake_addresses.contains_key(&hash) {
-            self.stake_addresses = self
-                .stake_addresses
-                .update(hash.clone(), StakeAddressState::default());
+            self.stake_addresses =
+                self.stake_addresses.update(hash.clone(), StakeAddressState::default());
         }
     }
 
@@ -453,8 +445,7 @@ impl State {
                 }
 
                 TxCertificate::MoveInstantaneousReward(mir) => {
-                    self.handle_mir(&mir)
-                        .unwrap_or_else(|e| error!("MIR failed: {e:#}"));
+                    self.handle_mir(&mir).unwrap_or_else(|e| error!("MIR failed: {e:#}"));
                 }
 
                 TxCertificate::StakeDelegation(delegation) => {
@@ -532,7 +523,10 @@ impl State {
             Self::update_value_with_delta(pot, pot_delta.delta)
                 .with_context(|| format!("Applying pot delta {pot_delta:?}"))?;
 
-            info!("Pot delta for {:?} {} => {}", pot_delta.pot, pot_delta.delta, *pot);
+            info!(
+                "Pot delta for {:?} {} => {}",
+                pot_delta.pot, pot_delta.delta, *pot
+            );
         }
 
         Ok(())
@@ -568,13 +562,11 @@ impl State {
 mod tests {
     use super::*;
     use acropolis_common::{
-        AddressNetwork, Credential, Registration, StakeAddress, StakeAddressDelta,
-        StakeAddressPayload, StakeAndVoteDelegation, StakeRegistrationAndStakeAndVoteDelegation,
-        StakeRegistrationAndVoteDelegation, VoteDelegation, Withdrawal, PotDelta, Pot,
-        ProtocolParams,
-        ConwayParams, PoolVotingThresholds, UnitInterval, DRepVotingThresholds,
-        Constitution, Anchor, Committee,
-        rational_number::RationalNumber, Ratio,
+        rational_number::RationalNumber, AddressNetwork, Anchor, Committee, Constitution,
+        ConwayParams, Credential, DRepVotingThresholds, PoolVotingThresholds, Pot, PotDelta,
+        ProtocolParams, Ratio, Registration, StakeAddress, StakeAddressDelta, StakeAddressPayload,
+        StakeAndVoteDelegation, StakeRegistrationAndStakeAndVoteDelegation,
+        StakeRegistrationAndVoteDelegation, UnitInterval, VoteDelegation, Withdrawal,
     };
 
     const STAKE_KEY_HASH: [u8; 3] = [0x99, 0x0f, 0x00];
@@ -601,11 +593,7 @@ mod tests {
 
         assert_eq!(state.stake_addresses.len(), 1);
         assert_eq!(
-            state
-                .stake_addresses
-                .get(&STAKE_KEY_HASH.to_vec())
-                .unwrap()
-                .utxo_value,
+            state.stake_addresses.get(&STAKE_KEY_HASH.to_vec()).unwrap().utxo_value,
             42
         );
 
@@ -613,11 +601,7 @@ mod tests {
 
         assert_eq!(state.stake_addresses.len(), 1);
         assert_eq!(
-            state
-                .stake_addresses
-                .get(&STAKE_KEY_HASH.to_vec())
-                .unwrap()
-                .utxo_value,
+            state.stake_addresses.get(&STAKE_KEY_HASH.to_vec()).unwrap().utxo_value,
             84
         );
     }
@@ -644,19 +628,11 @@ mod tests {
         let state2 = state.clone();
         state.handle_stake_deltas(&msg).unwrap();
         assert_eq!(
-            state
-                .stake_addresses
-                .get(&STAKE_KEY_HASH.to_vec())
-                .unwrap()
-                .utxo_value,
+            state.stake_addresses.get(&STAKE_KEY_HASH.to_vec()).unwrap().utxo_value,
             84
         );
         assert_eq!(
-            state2
-                .stake_addresses
-                .get(&STAKE_KEY_HASH.to_vec())
-                .unwrap()
-                .utxo_value,
+            state2.stake_addresses.get(&STAKE_KEY_HASH.to_vec()).unwrap().utxo_value,
             42
         );
     }
@@ -771,7 +747,7 @@ mod tests {
                     pot: Pot::Deposits,
                     delta: 77,
                 },
-            ]
+            ],
         };
 
         state.handle_pot_deltas(&mir).unwrap();
@@ -1056,7 +1032,7 @@ mod tests {
                     guardrail_script: None,
                 },
                 committee: Committee {
-                    members: std::collections::HashMap::new(),
+                    members: HashMap::new(),
                     threshold: RationalNumber::new(5, 32).unwrap(),
                 },
             }),
@@ -1072,12 +1048,7 @@ mod tests {
         state.handle_parameters(&msg).unwrap();
 
         assert_eq!(
-            state
-                .protocol_parameters
-                .unwrap()
-                .conway
-                .unwrap()
-                .pool_voting_thresholds,
+            state.protocol_parameters.unwrap().conway.unwrap().pool_voting_thresholds,
             params.conway.unwrap().pool_voting_thresholds
         );
     }
