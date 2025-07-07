@@ -12,13 +12,13 @@ use acropolis_common::{
 use anyhow::{bail, anyhow, Context, Result};
 use dashmap::DashMap;
 use imbl::OrdMap;
-use std::collections::HashMap;
+use std::collections::{HashMap, BTreeMap};
 use rayon::prelude::*;
 use serde_with::{hex::Hex, serde_as};
-use std::collections::BTreeMap;
 use std::sync::{atomic::AtomicU64, Arc};
 use tracing::{error, info, warn};
-use bigdecimal::{BigDecimal, ToPrimitive, RoundingMode};
+use bigdecimal::{BigDecimal, ToPrimitive, Zero, One};
+use std::cmp::min;
 
 /// State of an individual stake address
 #[serde_as]
@@ -126,21 +126,24 @@ impl State {
         // Calculate total supply (total in circulation + treasury) or
         // equivalently max-supply - reserves - this is the denominator
         // for sigma, z0, s
+        // TODO - do we calculate this before or after reducing reserves?
         let total_supply = BigDecimal::from(shelley_params.max_lovelace_supply - self.pots.reserves);
 
         // Handle monetary expansion - movement from reserves to rewards and treasury
         let monetary_expansion_factor = &shelley_params.protocol_params.monetary_expansion; // Rho
-        let monetary_expansion = BigDecimal::from(self.pots.reserves)
-            * BigDecimal::from(monetary_expansion_factor.numer())
-            / BigDecimal::from(monetary_expansion_factor.denom())
-            .with_scale_round(0, RoundingMode::Down);
+        let monetary_expansion = (BigDecimal::from(self.pots.reserves)
+                                  * BigDecimal::from(monetary_expansion_factor.numer())
+                                  / BigDecimal::from(monetary_expansion_factor.denom()))
+            .with_scale(0);
+        self.pots.reserves -= monetary_expansion.to_u64()
+            .ok_or(anyhow!("Can't calculate integral monetary expansion"))?;
 
         // Top-slice some for treasury
         let treasury_cut = &shelley_params.protocol_params.treasury_cut;  // Tau
-        let treasury_increase = &monetary_expansion
-            * BigDecimal::from(treasury_cut.numer())
-            / BigDecimal::from(treasury_cut.denom())
-            .with_scale_round(0, RoundingMode::Down);
+        let treasury_increase = (&monetary_expansion
+                                 * BigDecimal::from(treasury_cut.numer())
+                                 / BigDecimal::from(treasury_cut.denom()))
+            .with_scale(0);
         self.pots.treasury += treasury_increase.to_u64()
             .ok_or(anyhow!("Can't calculate integral treasury cut"))?;
 
@@ -151,36 +154,82 @@ impl State {
 
         // Total blocks
         let total_blocks: usize = spo_block_counts.values().sum();
+        if total_blocks == 0 {
+            bail!("No blocks produced");
+        }
 
-        info!(%monetary_expansion, %treasury_increase, %total_rewards, %total_blocks,
-              "Reward calculations");
+        info!(%monetary_expansion, %treasury_increase, %total_rewards, %total_supply,
+              %total_blocks, "Reward calculations");
+
+        // Relative pool saturation size (z0)
+        let k = BigDecimal::from(&shelley_params.protocol_params.stake_pool_target_num);
+        if k.is_zero() {
+            bail!("k is zero!");
+        }
+        let relative_pool_saturation_size = k.inverse();
+
+        // Pledge influence factor (a0)
+        let a0 = &shelley_params.protocol_params.pool_pledge_influence;
+        let pledge_influence_factor = BigDecimal::from(a0.numer()) / BigDecimal::from(a0.denom());
 
         // Calculate for every registered SPO (even those who didn't participate in this epoch)
-        self.spos.values().for_each(|spo| {
+        for spo in self.spos.values() {
 
             // Look up SPO in block counts, by VRF key
-            let block_count = spo_block_counts.get(&spo.vrf_key_hash).ok_or(0);
+            let block_count = spo_block_counts.get(&spo.vrf_key_hash).unwrap_or(&0);
 
-            // Requires:
-            //   R = total fees + monetary expansion (reserves * ?)
-            //   a0 parameter
-            //   sigma = total stake
-            //   z0 = pool saturation size (1/k)
+            // and in SPDD to get active stake (sigma)
+            let pool_stake = BigDecimal::from(spdd.get(&spo.operator).unwrap_or(&0));
+            if pool_stake.is_zero() {
+                error!("No pool stake in SPO {}", hex::encode(&spo.operator));
+                continue;
+            }
 
-            // This gives us the optimum reward for the pool for this epoch
+            // Relative stake as fraction of total supply (sigma), and capped with 1/k (sigma')
+            let relative_pool_stake = &pool_stake / &total_supply;
+            let capped_relative_pool_stake = min(&relative_pool_stake,
+                                                 &relative_pool_saturation_size);
 
-            // Adjust for actual performance *= B/sigma-a.
-            // Beta = fraction of all blocks produced this epoch
-            // sigma-a = delegated stake / total delegated stake
+            // Stake pledged by operator (s) and capped with 1/k (s')
+            let relative_pool_pledge = BigDecimal::from(&spo.pledge) / &total_supply;
+            let capped_relative_pool_pledge = min(&relative_pool_pledge,
+                                                  &relative_pool_saturation_size);
 
-            // => Total rewards for this pool
+            // Get the optimum reward for this pool
+            let optimum_rewards = (
+                (&total_rewards / (BigDecimal::one() + &pledge_influence_factor))
+                *
+                (
+                    capped_relative_pool_stake + (
+                        capped_relative_pool_pledge * &pledge_influence_factor * (
+                            capped_relative_pool_stake - (
+                                capped_relative_pool_pledge * (
+                                    (&relative_pool_saturation_size - capped_relative_pool_stake)
+                                        / &relative_pool_saturation_size)
+                            )
+                        )
+                    ) / &relative_pool_saturation_size
+                )
+            ).with_scale(0);
+
+            // TODO! account for decentralisation_param >= 0.8 => performance = 1
+            let relative_blocks = BigDecimal::from(*block_count as u64)        // Beta
+                / BigDecimal::from(total_blocks as u64);
+            let pool_performance = relative_blocks.clone() / relative_pool_stake.clone();
+
+            // Get actual pool rewards
+            let pool_rewards = (&optimum_rewards * &pool_performance).with_scale(0);
+
+            info!(%relative_pool_stake, %relative_blocks, %pool_performance, %optimum_rewards,
+                  %pool_rewards,
+                  "Pool {}", hex::encode(spo.operator.clone()));
 
             // Subtract fixed costs
             // Subtract margin
             // Split remainder in proportional to delegated stake, including owners pledge
 
             // Move from reserves to reward accounts
-        });
+        }
 
         Ok(())
     }
@@ -499,17 +548,15 @@ impl State {
                 ),
             };
 
-            info!(
-                "Withdrawal of {} from stake key {}",
-                withdrawal.value,
-                hex::encode(hash)
-            );
+            // Zero withdrawals are expected, as a way to validate stake addresses (per Pi)
+            if withdrawal.value != 0 {
+                Self::update_value_with_delta(&mut sas.rewards, -(withdrawal.value as i64))
+                    .with_context(|| format!("Withdrawing from stake address {}",
+                                             hex::encode(hash)))?;
 
-            Self::update_value_with_delta(&mut sas.rewards, -(withdrawal.value as i64))
-                .with_context(|| format!("Withdrawing from stake address {}", hex::encode(hash)))?;
-
-            // Immutably create or update the stake address
-            self.stake_addresses = self.stake_addresses.update(hash.to_vec(), sas);
+                // Immutably create or update the stake address
+                self.stake_addresses = self.stake_addresses.update(hash.to_vec(), sas);
+            }
         }
 
         Ok(())

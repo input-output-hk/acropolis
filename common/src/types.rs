@@ -57,7 +57,7 @@ impl TryFrom<u8> for Era {
             4 => Ok(Era::Alonzo),
             5 => Ok(Era::Babbage),
             6 => Ok(Era::Conway),
-            n => bail!("Impossilbe era {n}")
+            n => bail!("Impossible era {n}")
         }
     }
 }
