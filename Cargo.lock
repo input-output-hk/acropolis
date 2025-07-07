@@ -22,6 +22,7 @@ dependencies = [
  "hex",
  "lf-queue",
  "minicbor 0.26.5",
+ "num-rational",
  "serde",
  "serde_json",
  "serde_with 3.14.0",
@@ -150,6 +151,7 @@ dependencies = [
  "caryatid_sdk",
  "config",
  "hex",
+ "num-rational",
  "pallas",
  "reqwest 0.11.27",
  "serde",
@@ -3201,6 +3203,7 @@ dependencies = [
  "num-bigint",
  "num-integer",
  "num-traits",
+ "serde",
 ]
 
 [[package]]

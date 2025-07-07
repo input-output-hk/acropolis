@@ -1,5 +1,6 @@
 use acropolis_common::{
-    rational_number::RationalNumber, AlonzoParams, Anchor, BlockVersionData, ByronParams,
+    rational_number::{RationalNumber, rational_number_from_f32},
+    AlonzoParams, Anchor, BlockVersionData, ByronParams,
     Committee, Constitution, ConwayParams, Credential, DRepVotingThresholds, Era, ExUnitPrices,
     ExUnits, NetworkId, Nonce, NonceVariant, PoolVotingThresholds, ProtocolConsts, ProtocolVersion,
     ShelleyParams, ShelleyProtocolParams, SoftForkRule, TxFeePolicy,
@@ -43,34 +44,31 @@ fn map_anchor(anchor: &conway::Anchor) -> Result<Anchor> {
 }
 
 pub fn map_fraction(fraction: &conway::Fraction) -> RationalNumber {
-    RationalNumber {
-        numerator: fraction.numerator,
-        denominator: fraction.denominator,
-    }
+    RationalNumber::new(fraction.numerator, fraction.denominator)
 }
 
 fn map_pool_thresholds(thresholds: &conway::PoolVotingThresholds) -> Result<PoolVotingThresholds> {
     Ok(PoolVotingThresholds {
-        motion_no_confidence: RationalNumber::try_from(thresholds.motion_no_confidence)?,
-        committee_normal: RationalNumber::try_from(thresholds.committee_normal)?,
-        committee_no_confidence: RationalNumber::try_from(thresholds.committee_no_confidence)?,
-        hard_fork_initiation: RationalNumber::try_from(thresholds.hard_fork_initiation)?,
-        security_voting_threshold: RationalNumber::try_from(thresholds.pp_security_group)?,
+        motion_no_confidence: rational_number_from_f32(thresholds.motion_no_confidence)?,
+        committee_normal: rational_number_from_f32(thresholds.committee_normal)?,
+        committee_no_confidence: rational_number_from_f32(thresholds.committee_no_confidence)?,
+        hard_fork_initiation: rational_number_from_f32(thresholds.hard_fork_initiation)?,
+        security_voting_threshold: rational_number_from_f32(thresholds.pp_security_group)?,
     })
 }
 
 fn map_drep_thresholds(thresholds: &conway::DRepVotingThresholds) -> Result<DRepVotingThresholds> {
     Ok(DRepVotingThresholds {
-        motion_no_confidence: RationalNumber::try_from(thresholds.motion_no_confidence)?,
-        committee_normal: RationalNumber::try_from(thresholds.committee_normal)?,
-        committee_no_confidence: RationalNumber::try_from(thresholds.committee_normal)?,
-        update_constitution: RationalNumber::try_from(thresholds.update_to_constitution)?,
-        hard_fork_initiation: RationalNumber::try_from(thresholds.hard_fork_initiation)?,
-        pp_network_group: RationalNumber::try_from(thresholds.pp_network_group)?,
-        pp_economic_group: RationalNumber::try_from(thresholds.pp_economic_group)?,
-        pp_technical_group: RationalNumber::try_from(thresholds.pp_technical_group)?,
-        pp_governance_group: RationalNumber::try_from(thresholds.pp_gov_group)?,
-        treasury_withdrawal: RationalNumber::try_from(thresholds.treasury_withdrawal)?,
+        motion_no_confidence: rational_number_from_f32(thresholds.motion_no_confidence)?,
+        committee_normal: rational_number_from_f32(thresholds.committee_normal)?,
+        committee_no_confidence: rational_number_from_f32(thresholds.committee_normal)?,
+        update_constitution: rational_number_from_f32(thresholds.update_to_constitution)?,
+        hard_fork_initiation: rational_number_from_f32(thresholds.hard_fork_initiation)?,
+        pp_network_group: rational_number_from_f32(thresholds.pp_network_group)?,
+        pp_economic_group: rational_number_from_f32(thresholds.pp_economic_group)?,
+        pp_technical_group: rational_number_from_f32(thresholds.pp_technical_group)?,
+        pp_governance_group: rational_number_from_f32(thresholds.pp_gov_group)?,
+        treasury_withdrawal: rational_number_from_f32(thresholds.treasury_withdrawal)?,
     })
 }
 
@@ -121,7 +119,7 @@ fn map_ex_units(e: &alonzo::ExUnits) -> Result<ExUnits> {
 }
 
 fn map_alonzo_fraction(fr: &alonzo::Fraction) -> Result<RationalNumber> {
-    RationalNumber::new(fr.numerator, fr.denominator)
+    Ok(RationalNumber::new(fr.numerator, fr.denominator))
 }
 
 fn map_execution_prices(e: &alonzo::ExecutionPrices) -> Result<ExUnitPrices> {
@@ -158,10 +156,7 @@ fn map_alonzo(genesis: &alonzo::GenesisFile) -> Result<AlonzoParams> {
 }
 
 pub fn map_pallas_rational(r: &primitives::RationalNumber) -> RationalNumber {
-    RationalNumber {
-        numerator: r.numerator,
-        denominator: r.denominator,
-    }
+    RationalNumber::new(r.numerator, r.denominator)
 }
 
 fn map_network_id(id: &str) -> Result<NetworkId> {
