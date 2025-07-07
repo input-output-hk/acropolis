@@ -1,0 +1,75 @@
+# Top-level configuration for Acropolis omnibus process
+
+[module.genesis-bootstrapper]
+network-name = "sanchonet" # "sanchonet", "mainnet"
+
+#[module.mithril-snapshot-fetcher]
+#aggregator-url = "https://aggregator.release-mainnet.api.mithril.network/aggregator"
+#genesis-key = "5b3139312c36362c3134302c3138352c3133382c31312c3233372c3230372c3235302c3134342c32372c322c3138382c33302c31322c38312c3135352c3230342c31302c3137392c37352c32332c3133382c3139362c3231372c352c31342c32302c35372c37392c33392c3137365d"
+#download = false
+
+[module.upstream-chain-fetcher]
+sync-point = "origin"
+node-address = "sancho-testnet.able-pool.io:6002"
+magic-number = 4
+
+[module.block-unpacker]
+
+[module.tx-unpacker]
+publish-utxo-deltas-topic = "cardano.utxo.deltas"
+publish-withdrawals-topic = "cardano.withdrawals"
+publish-certificates-topic = "cardano.certificates"
+publish-governance-topic = "cardano.governance"
+publish-fees-topic = "cardano.block.fees"
+
+[module.utxo-state]
+store = "memory" # "memory", "dashmap", "fjall", "fjall-async", "sled", "sled-async", "fake"
+address-delta-topic = "cardano.address.delta"
+
+[module.spo-state]
+
+[module.drep-state]
+
+[module.governance-state]
+
+[module.parameters-state]
+network-name = "sanchonet" # "sanchonet", "mainnet"
+
+[module.stake-delta-filter]
+cache-mode = "write" # "predefined", "read", "write", "write-if-absent"
+write-full-cache = "false"
+
+[module.epoch-activity-counter]
+
+[module.accounts-state]
+
+[module.clock]
+
+[module.rest-server]
+address = "127.0.0.1"
+port = 4340
+
+[module.spy]
+# Enable for message spying
+#topic = "cardano.drep.state"
+
+[startup]
+topic = "cardano.sequence.start"
+
+[message-bus.external]
+class = "rabbit-mq"
+url = "amqp://127.0.0.1:5672/%2f"
+exchange = "caryatid"
+
+[message-bus.internal]
+class = "in-memory"
+workers = 50
+dispatch-queue-size = 1000
+worker-queue-size = 100
+bulk-block-capacity = 50
+bulk-resume-capacity = 75
+
+# Message routing
+[[message-router.route]]  # Everything is internal only
+pattern = "#"
+bus = "internal"
