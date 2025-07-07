@@ -333,7 +333,7 @@ pub struct PoolMetadata {
     pub hash: DataHash,
 }
 
-type RewardAccount = Vec<u8>;
+pub type RewardAccount = Vec<u8>;
 
 /// Pool registration data
 #[serde_as]

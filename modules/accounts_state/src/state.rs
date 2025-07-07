@@ -6,8 +6,8 @@ use acropolis_common::{
     },
     serialization::SerializeMapAs,
     DRepChoice, DRepCredential, InstantaneousRewardSource, InstantaneousRewardTarget, KeyHash,
-    Lovelace, MoveInstantaneousReward, PoolRegistration, Pot, ProtocolParams, StakeCredential,
-    TxCertificate,
+    Lovelace, MoveInstantaneousReward, PoolRegistration, Pot, ProtocolParams, RewardAccount,
+    StakeCredential, TxCertificate,
 };
 use anyhow::{bail, anyhow, Context, Result};
 use dashmap::DashMap;
@@ -109,7 +109,7 @@ impl State {
     ///   total_fees: Total fees taken in this epoch
     ///   spo_block_counts: Count of blocks minted by VRF key
     // Follows the general scheme in https://docs.cardano.org/about-cardano/learn/pledging-rewards
-    pub fn calculate_rewards(&mut self, total_fees: u64,
+    pub fn calculate_rewards(&mut self, epoch: u64, total_fees: u64,
                              spo_block_counts: HashMap<KeyHash, usize>) -> Result<()> {
 
         // Get Shelley parameters, silently return if too early in the chain so no
@@ -158,8 +158,8 @@ impl State {
             bail!("No blocks produced");
         }
 
-        info!(%monetary_expansion, %treasury_increase, %total_rewards, %total_supply,
-              %total_blocks, "Reward calculations");
+        info!(epoch, %monetary_expansion, %treasury_increase, %total_rewards, %total_supply,
+              total_blocks, "Reward calculations");
 
         // Relative pool saturation size (z0)
         let k = BigDecimal::from(&shelley_params.protocol_params.stake_pool_target_num);
@@ -171,6 +171,10 @@ impl State {
         // Pledge influence factor (a0)
         let a0 = &shelley_params.protocol_params.pool_pledge_influence;
         let pledge_influence_factor = BigDecimal::from(a0.numer()) / BigDecimal::from(a0.denom());
+
+        // Map of SPO reward account to amount earned this epoch
+        // Note: Accumulated then spent to avoid borrow horrors on self
+        let mut spo_earnings: HashMap<RewardAccount, Lovelace> = HashMap::new();
 
         // Calculate for every registered SPO (even those who didn't participate in this epoch)
         for spo in self.spos.values() {
@@ -225,11 +229,42 @@ impl State {
                   "Pool {}", hex::encode(spo.operator.clone()));
 
             // Subtract fixed costs
-            // Subtract margin
+            let margin = (pool_rewards
+                          * BigDecimal::from(spo.margin.numerator)  // TODO should be RationalNumber
+                          / BigDecimal::from(spo.margin.denominator))
+                .with_scale(0)
+                .to_u64()
+                .ok_or(anyhow!("Non-integral margin"))?;
+            spo_earnings.insert(spo.reward_account.clone(), spo.cost + margin);
+
             // Split remainder in proportional to delegated stake, including owners pledge
 
             // Move from reserves to reward accounts
         }
+
+        // Pay the SPOs from reserves
+        spo_earnings.into_iter().for_each(|(reward_account, reward)| {
+            self.add_to_reward(&reward_account, reward)
+                .unwrap_or_else(|e| error!("Can't update SPO reward account: {e}"));
+            self.pots.reserves -= reward;
+        });
+
+        Ok(())
+    }
+
+    /// Add a reward to a reward account
+    fn add_to_reward(&mut self, account: &RewardAccount, amount: Lovelace) -> Result<()> {
+        // Get old stake address state, or create one
+        let mut sas = match self.stake_addresses.get(account) {
+            Some(sas) => sas.clone(),
+            None => StakeAddressState::default(),
+        };
+
+        Self::update_value_with_delta(&mut sas.rewards, amount as i64)
+            .with_context(|| format!("Updating stake {}", hex::encode(account)))?;
+
+        // Immutably create or update the stake address
+        self.stake_addresses = self.stake_addresses.update(account.to_vec(), sas);
 
         Ok(())
     }
@@ -336,7 +371,7 @@ impl State {
         // Create a HashMap of the spo count data, for quick access
         let spo_block_counts: HashMap<KeyHash, usize> =
             ea_msg.vrf_vkey_hashes.iter().map(|(k, v)| (k.clone(), *v)).collect();
-        self.calculate_rewards(ea_msg.total_fees, spo_block_counts)?;
+        self.calculate_rewards(self.epoch, ea_msg.total_fees, spo_block_counts)?;
         Ok(())
     }
 
