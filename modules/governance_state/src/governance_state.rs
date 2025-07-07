@@ -3,8 +3,8 @@
 
 use acropolis_common::{
     messages::{
-        CardanoMessage, DRepStakeDistributionMessage, GovernanceProceduresMessage, Message,
-        ProtocolParamsMessage, RESTResponse,
+        CardanoMessage, DRepStakeDistributionMessage, SPOStakeDistributionMessage,
+        GovernanceProceduresMessage, Message, ProtocolParamsMessage, RESTResponse,
     },
     BlockInfo,
 };
@@ -17,12 +17,16 @@ use tokio::sync::Mutex;
 use tracing::{error, info};
 
 mod state;
+mod voting_state;
 use state::State;
+use voting_state::VotingRegistrationState;
 
 const DEFAULT_SUBSCRIBE_TOPIC: (&str, &str) = ("subscribe-topic", "cardano.governance");
 const DEFAULT_HANDLE_TOPIC: (&str, &str) = ("handle-topic", "rest.get.governance-state.*");
 const DEFAULT_DREP_DISTRIBUTION_TOPIC: (&str, &str) =
     ("stake-drep-distribution-topic", "cardano.drep.distribution");
+const DEFAULT_SPO_DISTRIBUTION_TOPIC: (&str, &str) =
+    ("stake-spo-distribution-topic", "cardano.spo.distribution");
 const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: (&str, &str) =
     ("protocol-parameters-topic", "cardano.protocol.parameters");
 const DEFAULT_ENACT_STATE_TOPIC: (&str, &str) = ("enact-state-topic", "cardano.enact.state");
@@ -39,6 +43,7 @@ pub struct GovernanceStateConfig {
     subscribe_topic: String,
     handle_topic: String,
     drep_distribution_topic: String,
+    spo_distribution_topic: String,
     protocol_parameters_topic: String,
     enact_state_topic: String,
 }
@@ -55,6 +60,7 @@ impl GovernanceStateConfig {
             subscribe_topic: Self::conf(config, DEFAULT_SUBSCRIBE_TOPIC),
             handle_topic: Self::conf(config, DEFAULT_HANDLE_TOPIC),
             drep_distribution_topic: Self::conf(config, DEFAULT_DREP_DISTRIBUTION_TOPIC),
+            spo_distribution_topic: Self::conf(config, DEFAULT_SPO_DISTRIBUTION_TOPIC),
             protocol_parameters_topic: Self::conf(config, DEFAULT_PROTOCOL_PARAMETERS_TOPIC),
             enact_state_topic: Self::conf(config, DEFAULT_ENACT_STATE_TOPIC),
         })
@@ -134,11 +140,25 @@ impl GovernanceState {
         }
     }
 
+    async fn read_spo(
+        spo_s: &mut Box<dyn Subscription<Message>>,
+    ) -> Result<(BlockInfo, SPOStakeDistributionMessage)> {
+        match spo_s.read().await?.1.as_ref() {
+            Message::Cardano((blk, CardanoMessage::SPOStakeDistribution(distr))) => {
+                Ok((blk.clone(), distr.clone()))
+            }
+            msg => Err(anyhow!(
+                "Unexpected message {msg:?} for SPO distribution topic"
+            )),
+        }
+    }
+
     async fn run(
         context: Arc<Context<Message>>,
         config: Arc<GovernanceStateConfig>,
         mut governance_s: Box<dyn Subscription<Message>>,
         mut drep_s: Box<dyn Subscription<Message>>,
+        mut spo_s: Box<dyn Subscription<Message>>,
         mut protocol_s: Box<dyn Subscription<Message>>,
     ) -> Result<()> {
         let state = Arc::new(Mutex::new(State::new(
@@ -187,13 +207,8 @@ impl GovernanceState {
                 };
                 if let Message::Clock(message) = message.as_ref() {
                     if (message.number % 60) == 0 {
-                        state_tick
-                            .lock()
-                            .await
-                            .tick()
-                            .await
-                            .inspect_err(|e| error!("Tick error: {e}"))
-                            .ok();
+                        state_tick.lock().await.tick().await
+                            .inspect_err(|e| error!("Tick error: {e}")).ok();
                     }
                 }
             }
@@ -201,28 +216,52 @@ impl GovernanceState {
 
         loop {
             let (blk_g, gov_procs) = Self::read_governance(&mut governance_s).await?;
+
+            if blk_g.new_epoch {
+                // New governance from new epoch means that we must prepare all governance
+                // outcome for the previous epoch.
+                let mut state = state.lock().await;
+                let governance_outcomes = state.process_new_epoch(&blk_g)?;
+                state.send(&blk_g, governance_outcomes).await?;
+            }
+
             {
                 state.lock().await.handle_governance(&blk_g, &gov_procs).await?;
             }
 
             if blk_g.new_epoch {
-                info!("Waiting for parameters");
                 let (blk_p, params) = Self::read_parameters(&mut protocol_s).await?;
                 if blk_g != blk_p {
                     error!(
                         "Governance {blk_g:?} and protocol parameters {blk_p:?} are out of sync"
                     );
                 }
-                state.lock().await.handle_protocol_parameters(&params).await?;
+
+                {
+                    state.lock().await.handle_protocol_parameters(&params).await?;
+                }
 
                 if blk_g.epoch > 0 {
                     // TODO: make sync more stable
-                    let (blk_drep, distr) = Self::read_drep(&mut drep_s).await?;
+                    let (blk_drep, d_drep) = Self::read_drep(&mut drep_s).await?;
                     if blk_g != blk_drep {
                         error!("Governance {blk_g:?} and DRep distribution {blk_drep:?} are out of sync");
                     }
 
-                    state.lock().await.handle_drep_stake(&distr).await?
+                    let (blk_spo, d_spo) = Self::read_spo(&mut spo_s).await?;
+                    if blk_g != blk_spo {
+                        error!("Governance {blk_g:?} and SPO distribution {blk_spo:?} are out of sync");
+                    }
+
+                    if blk_spo.epoch != d_spo.epoch+1 {
+                        error!("SPO distibution {blk_spo:?} != SPO epoch + 1 ({})", d_spo.epoch);
+                    }
+
+                    state.lock().await.handle_drep_stake(&d_drep, &d_spo).await?
+                }
+
+                {
+                    state.lock().await.advance_era(&blk_g.era);
                 }
             }
         }
@@ -232,10 +271,11 @@ impl GovernanceState {
         let cfg = GovernanceStateConfig::new(&config);
         let gt = context.clone().subscribe(&cfg.subscribe_topic).await?;
         let dt = context.clone().subscribe(&cfg.drep_distribution_topic).await?;
+        let st = context.clone().subscribe(&cfg.spo_distribution_topic).await?;
         let pt = context.clone().subscribe(&cfg.protocol_parameters_topic).await?;
 
         tokio::spawn(async move {
-            Self::run(context, cfg, gt, dt, pt).await.unwrap_or_else(|e| error!("Failed: {e}"));
+            Self::run(context, cfg, gt, dt, st, pt).await.unwrap_or_else(|e| error!("Failed: {e}"));
         });
 
         Ok(())

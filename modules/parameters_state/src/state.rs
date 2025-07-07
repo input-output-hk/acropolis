@@ -5,40 +5,49 @@ use acropolis_common::{
     messages::{GovernanceOutcomesMessage, ProtocolParamsMessage},
     BlockInfo, Era,
 };
+use std::ops::RangeInclusive;
 use anyhow::{bail, Result};
 use tracing::info;
 
 pub struct State {
+    pub network_name: String,
     pub current_params: ParametersUpdater,
     pub current_era: Option<Era>,
 }
 
 impl State {
-    pub fn new() -> Self {
+    pub fn new(network_name: String) -> Self {
         Self {
+            network_name,
             current_params: ParametersUpdater::new(),
             current_era: None,
         }
     }
 
+    fn genesis_era_range(from_era: Option<Era>, to_era: Era) -> RangeInclusive<u8> {
+        match from_era {
+            None => Era::default() as u8 ..= to_era as u8,
+            Some(e) => e as u8 + 1 ..= to_era as u8,
+        }
+    }
+
     pub fn apply_genesis(&mut self, new_block: &BlockInfo) -> Result<()> {
-        if let Some(ref era) = self.current_era {
-            if *era == new_block.era {
-                return Ok(());
-            }
+        let to_apply = Self::genesis_era_range(self.current_era.clone(), new_block.era.clone());
+        if to_apply.is_empty() {
+            return Ok(());
         }
 
-        info!("Applying genesis for {}", new_block.era);
+        for mid_era_u8 in to_apply {
+            let mid_era = Era::try_from(mid_era_u8)?;
+            info!("Applying genesis {} for {}", self.network_name, mid_era);
 
-        self.current_era = Some(new_block.era.clone());
-        self.current_params.apply_genesis(&new_block.era)?;
+            self.current_params.apply_genesis(&self.network_name, &mid_era)?;
+        }
 
-        info!(
-            "Applied genesis for {}, resulting params {:?}",
-            new_block.era,
-            self.current_params.get_params()
+        info!("Applied genesis up to {}, resulting params {:?}", 
+            new_block.era, self.current_params.get_params()
         );
-
+        self.current_era = Some(new_block.era.clone());
         Ok(())
     }
 
@@ -60,6 +69,32 @@ impl State {
 
     #[allow(dead_code)]
     pub async fn tick(&self) -> Result<()> {
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::State;
+    use anyhow::Result;
+    use acropolis_common::Era;
+
+    #[test]
+    fn test_genesis_era_range() -> Result<()> {
+        assert_eq!(State::genesis_era_range(None, Era::Byron), 0..=0);
+
+        assert!(State::genesis_era_range(Some(Era::Byron), Era::Byron).is_empty());
+        assert_eq!(State::genesis_era_range(None, Era::Conway), 0..=6);
+        assert_eq!(State::genesis_era_range(Some(Era::Byron), Era::Conway), 1..=6);
+        assert_eq!(State::genesis_era_range(Some(Era::Byron), Era::Shelley), 1..=1);
+        assert!(State::genesis_era_range(Some(Era::Conway), Era::Conway).is_empty());
+
+        // Assert that empty range does not lead to impossible conversions.
+        // Stupid test, but follows a pattern: "if you ever have a doubt about
+        // some impossible behaviour, then write a test/assert about it".
+        for x in State::genesis_era_range(Some(Era::Conway), Era::Conway) {
+            println!("{x} => {}", Era::try_from(x)?);
+        }
         Ok(())
     }
 }
