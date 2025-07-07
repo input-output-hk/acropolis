@@ -176,6 +176,10 @@ impl State {
         // Note: Accumulated then spent to avoid borrow horrors on self
         let mut spo_earnings: HashMap<RewardAccount, Lovelace> = HashMap::new();
 
+        // Map of SPO operator ID to total stake and rewards to split to delegators (not
+        // including the SPO itself, which has already been taken)
+        let mut spo_stake_and_rewards: HashMap<KeyHash, (Lovelace, Lovelace)> = HashMap::new();
+
         // Calculate for every registered SPO (even those who didn't participate in this epoch)
         for spo in self.spos.values() {
 
@@ -183,11 +187,12 @@ impl State {
             let block_count = spo_block_counts.get(&spo.vrf_key_hash).unwrap_or(&0);
 
             // and in SPDD to get active stake (sigma)
-            let pool_stake = BigDecimal::from(spdd.get(&spo.operator).unwrap_or(&0));
-            if pool_stake.is_zero() {
+            let pool_stake_u64 = *(spdd.get(&spo.operator).unwrap_or(&0));
+            if pool_stake_u64 == 0 {
                 error!("No pool stake in SPO {}", hex::encode(&spo.operator));
                 continue;
             }
+            let pool_stake = BigDecimal::from(pool_stake_u64);
 
             // Relative stake as fraction of total supply (sigma), and capped with 1/k (sigma')
             let relative_pool_stake = &pool_stake / &total_supply;
@@ -229,17 +234,27 @@ impl State {
                   "Pool {}", hex::encode(spo.operator.clone()));
 
             // Subtract fixed costs
-            let margin = (pool_rewards
+            let margin = (&pool_rewards
                           * BigDecimal::from(spo.margin.numerator)  // TODO should be RationalNumber
                           / BigDecimal::from(spo.margin.denominator))
-                .with_scale(0)
+                .with_scale(0);
+            let costs = BigDecimal::from(spo.cost) + margin;
+            let remainder = pool_rewards - &costs;
+
+            // Calculate the SPOs reward from their own pledge, too
+            let pledge_reward = (&remainder * BigDecimal::from(spo.pledge) / pool_stake)
+                .with_scale(0);
+            let spo_benefit = (costs + &pledge_reward)
                 .to_u64()
-                .ok_or(anyhow!("Non-integral margin"))?;
-            spo_earnings.insert(spo.reward_account.clone(), spo.cost + margin);
+                .ok_or(anyhow!("Non-integral costs"))?;
+            spo_earnings.insert(spo.reward_account.clone(), spo_benefit);
 
-            // Split remainder in proportional to delegated stake, including owners pledge
+            // Keep remainder by SPO id
+            let to_delegators = (remainder - pledge_reward).to_u64()
+                .ok_or(anyhow!("Non-integral remainder"))?;
 
-            // Move from reserves to reward accounts
+            spo_stake_and_rewards.insert(spo.operator.clone(),
+                                         (pool_stake_u64, to_delegators));
         }
 
         // Pay the SPOs from reserves
@@ -248,6 +263,36 @@ impl State {
                 .unwrap_or_else(|e| error!("Can't update SPO reward account: {e}"));
             self.pots.reserves -= reward;
         });
+
+        // Pay the delegators - split remainder in proportional to delegated stake,
+        // including owners pledge
+        self.stake_addresses
+            .values()
+            .for_each(|sas| {
+                if let Some(spo_id) = &sas.delegated_spo {
+                    // Look up the SPO in the rewards map
+                    match spo_stake_and_rewards.get(spo_id) {
+                        Some((total_stake, rewards)) => {
+                            // Calculate proportion of total stake this delegator has
+                            let proportion = BigDecimal::from(sas.rewards)
+                                / BigDecimal::from(total_stake);
+
+                            // and hence how much of the total reward they get
+                            let reward = BigDecimal::from(rewards) * proportion;
+                            let to_pay = reward.with_scale(0).to_u64().unwrap_or(0);
+
+                            // Transfer from reserves to this account
+                            // TODO!  Can't do this because it's immutable
+                            // - need .values_mut() above but can't do this with OrdMap
+                            // - need to switch to Arc<HashMap> and manage rollbacks differently
+                            // as was already decided
+                            // !!! sas.rewards += to_pay;
+                            self.pots.reserves -= to_pay;
+                        }
+                        None => error!("SPO ID {} not found in rewards map", hex::encode(spo_id))
+                    }
+                }
+            });
 
         Ok(())
     }
