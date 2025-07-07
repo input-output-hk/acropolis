@@ -18,7 +18,7 @@ use serde_with::{hex::Hex, serde_as};
 use std::collections::BTreeMap;
 use std::sync::{atomic::AtomicU64, Arc};
 use tracing::{error, info, warn};
-use bigdecimal::{BigDecimal, ToPrimitive};
+use bigdecimal::{BigDecimal, ToPrimitive, RoundingMode};
 
 /// State of an individual stake address
 #[serde_as]
@@ -133,14 +133,14 @@ impl State {
         let monetary_expansion = BigDecimal::from(self.pots.reserves)
             * BigDecimal::from(monetary_expansion_factor.numer())
             / BigDecimal::from(monetary_expansion_factor.denom())
-            .with_scale(0); // floor
+            .with_scale_round(0, RoundingMode::Down);
 
         // Top-slice some for treasury
         let treasury_cut = &shelley_params.protocol_params.treasury_cut;  // Tau
         let treasury_increase = &monetary_expansion
             * BigDecimal::from(treasury_cut.numer())
             / BigDecimal::from(treasury_cut.denom())
-            .with_scale(0); // floor
+            .with_scale_round(0, RoundingMode::Down);
         self.pots.treasury += treasury_increase.to_u64()
             .ok_or(anyhow!("Can't calculate integral treasury cut"))?;
 
@@ -149,7 +149,11 @@ impl State {
         let total_rewards = BigDecimal::from(total_fees) + monetary_expansion.clone()
             - treasury_increase.clone();
 
-        info!(%monetary_expansion, %treasury_increase, %total_rewards, "Reward calculations");
+        // Total blocks
+        let total_blocks: usize = spo_block_counts.values().sum();
+
+        info!(%monetary_expansion, %treasury_increase, %total_rewards, %total_blocks,
+              "Reward calculations");
 
         // Calculate for every registered SPO (even those who didn't participate in this epoch)
         self.spos.values().for_each(|spo| {
