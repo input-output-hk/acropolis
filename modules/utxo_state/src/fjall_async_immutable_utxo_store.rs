@@ -28,9 +28,7 @@ const PARTITION_NAME: &str = "utxos";
 impl FjallAsyncImmutableUTXOStore {
     /// Create a new Fjall-backed UTXO store with default flush threshold (1000)
     pub fn new(config: Arc<Config>) -> Result<Self> {
-        let path = config
-            .get_string("database-path")
-            .unwrap_or(DEFAULT_DATABASE_PATH.to_string());
+        let path = config.get_string("database-path").unwrap_or(DEFAULT_DATABASE_PATH.to_string());
         info!("Storing immutable UTXOs with Fjall (async) on disk ({path})");
 
         let path = Path::new(&path);

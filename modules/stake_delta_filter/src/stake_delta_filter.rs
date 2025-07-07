@@ -71,9 +71,8 @@ impl StakeDeltaFilterParams {
     fn get_cache_file_name(&self, modifier: &str) -> Result<String> {
         let path = Path::new(&self.cache_dir);
         let full = path.join(format!("{}{}", self.get_network_name(), modifier).to_lowercase());
-        let str = full
-            .to_str()
-            .ok_or_else(|| anyhow!("Cannot produce cache file name".to_string()))?;
+        let str =
+            full.to_str().ok_or_else(|| anyhow!("Cannot produce cache file name".to_string()))?;
         Ok(str.to_string())
     }
 
@@ -160,10 +159,8 @@ impl StakeDeltaFilter {
 
         // Subscribe for certificate messages
         info!("Creating subscriber on '{}'", params.address_delta_topic);
-        let mut subscription = params
-            .context
-            .subscribe(&params.clone().address_delta_topic)
-            .await?;
+        let mut subscription =
+            params.context.subscribe(&params.clone().address_delta_topic).await?;
         params.context.clone().run(async move {
             let publisher = DeltaPublisher::new(params.clone());
 
@@ -200,10 +197,7 @@ impl StakeDeltaFilter {
         info!("Creating subscriber on '{}'", params.tx_certificates_topic);
 
         let state_certs = state.clone();
-        let mut subscription = params
-            .context
-            .subscribe(&params.tx_certificates_topic)
-            .await?;
+        let mut subscription = params.context.subscribe(&params.tx_certificates_topic).await?;
         params.clone().context.run(async move {
             loop {
                 let Ok((_, message)) = subscription.read().await else {

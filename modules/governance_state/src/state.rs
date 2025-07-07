@@ -7,9 +7,9 @@ use acropolis_common::{
     },
     rational_number::RationalNumber,
     BlockInfo, ConwayParams, DRepCredential, DataHash, EnactStateElem, GovActionId,
-    TreasuryWithdrawalsAction, VotesCount, GovernanceOutcome, GovernanceOutcomeVariant,
-    GovernanceAction, KeyHash, Lovelace, ProposalProcedure, ProtocolParamType, ProtocolParamUpdate,
-    SingleVoterVotes, Voter, VotingProcedure, VotingOutcome
+    GovernanceAction, GovernanceOutcome, GovernanceOutcomeVariant, KeyHash, Lovelace,
+    ProposalProcedure, ProtocolParamType, ProtocolParamUpdate, SingleVoterVotes,
+    TreasuryWithdrawalsAction, Voter, VotesCount, VotingOutcome, VotingProcedure,
 };
 use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
@@ -134,9 +134,7 @@ impl State {
     }
 
     pub fn get_conway_params(&self) -> Result<&ConwayParams> {
-        self.conway
-            .as_ref()
-            .ok_or_else(|| anyhow!("Conway parameters not available"))
+        self.conway.as_ref().ok_or_else(|| anyhow!("Conway parameters not available"))
     }
 
     #[allow(dead_code)]
@@ -148,9 +146,7 @@ impl State {
     fn insert_proposal_procedure(&mut self, epoch: u64, proc: &ProposalProcedure) -> Result<()> {
         self.action_proposal_count += 1;
         info!("Inserting proposal procedure: {:?}", proc);
-        let prev = self
-            .proposals
-            .insert(proc.gov_action_id.clone(), (epoch, proc.clone()));
+        let prev = self.proposals.insert(proc.gov_action_id.clone(), (epoch, proc.clone()));
         if let Some(prev) = prev {
             return Err(anyhow!(
                 "Governance procedure {} already exists! New: {:?}, old: {:?}",
@@ -170,10 +166,7 @@ impl State {
         voter_votes: &SingleVoterVotes,
     ) -> Result<()> {
         for (action_id, procedure) in voter_votes.voting_procedures.iter() {
-            let votes = self
-                .votes
-                .entry(action_id.clone())
-                .or_insert_with(|| HashMap::new());
+            let votes = self.votes.entry(action_id.clone()).or_insert_with(|| HashMap::new());
             if let Some((prev_trans, prev_vote)) =
                 votes.insert(voter.clone(), (transaction.clone(), procedure.clone()))
             {
@@ -194,12 +187,8 @@ impl State {
         drep: &RationalNumber,
         comm: &RationalNumber,
     ) -> Result<(u64, u64)> {
-        let d = drep
-            .proportion_of(self.voting_state.registered_dreps)?
-            .round_up();
-        let c = comm
-            .proportion_of(self.voting_state.committee_size)?
-            .round_up();
+        let d = drep.proportion_of(self.voting_state.registered_dreps)?.round_up();
+        let c = comm.proportion_of(self.voting_state.committee_size)?.round_up();
         Ok((d, c))
     }
 
@@ -210,9 +199,7 @@ impl State {
         comm: &RationalNumber,
     ) -> Result<VotesCount> {
         let mut votes = VotesCount::zero();
-        votes.pool = pool
-            .proportion_of(self.voting_state.registered_spos)?
-            .round_up();
+        votes.pool = pool.proportion_of(self.voting_state.registered_spos)?.round_up();
         (votes.drep, votes.committee) = self.proportional_count_drep_comm(drep, comm)?;
         Ok(votes)
     }
@@ -388,7 +375,7 @@ impl State {
             procedure: proposal.clone(),
             votes_cast: votes,
             votes_threshold: threshold,
-            accepted
+            accepted,
         })
     }
 
@@ -462,9 +449,8 @@ impl State {
 
     fn retrieve_withdrawal(p: &ProposalProcedure) -> Option<TreasuryWithdrawalsAction> {
         if let GovernanceAction::TreasuryWithdrawals(ref action) = p.gov_action {
-            Some (action.clone())
-        }
-        else {
+            Some(action.clone())
+        } else {
             None
         }
     }
@@ -480,7 +466,8 @@ impl State {
         let expired = self.is_expired(new_epoch, &action_id)?;
         if outcome.accepted || expired {
             self.end_voting(&action_id)?;
-            info!("New epoch {new_epoch}: voting for {action_id} outcome: {}, expired: {expired}",
+            info!(
+                "New epoch {new_epoch}: voting for {action_id} outcome: {}, expired: {expired}",
                 outcome.accepted
             );
             return Ok(Some(outcome));
@@ -506,26 +493,24 @@ impl State {
                 Ok(Some(out)) if out.accepted => {
                     let mut action_to_perform = GovernanceOutcomeVariant::NoAction;
 
-                    if let Some(elem) = Self::pack_as_enact_state_elem(&out.procedure) 
-                    {
+                    if let Some(elem) = Self::pack_as_enact_state_elem(&out.procedure) {
                         action_to_perform = GovernanceOutcomeVariant::EnactStateElem(elem);
                         ens += 1;
-                    }
-                    else if let Some(wt) = Self::retrieve_withdrawal(&out.procedure) {
+                    } else if let Some(wt) = Self::retrieve_withdrawal(&out.procedure) {
                         action_to_perform = GovernanceOutcomeVariant::TreasuryWithdrawal(wt);
                         wdr += 1;
                     }
 
                     output.outcomes.push(GovernanceOutcome {
                         voting: out,
-                        action_to_perform
+                        action_to_perform,
                     })
                 }
                 Ok(Some(out)) => {
                     rej += 1;
                     output.outcomes.push(GovernanceOutcome {
                         voting: out,
-                        action_to_perform: GovernanceOutcomeVariant::NoAction
+                        action_to_perform: GovernanceOutcomeVariant::NoAction,
                     })
                 }
             }
@@ -548,7 +533,7 @@ impl State {
             info!(
                 "{}{} => {}",
                 action_id,
-                [" (absent)",""][self.proposals.contains_key(action_id) as usize],
+                [" (absent)", ""][self.proposals.contains_key(action_id) as usize],
                 procedure.len()
             )
         }

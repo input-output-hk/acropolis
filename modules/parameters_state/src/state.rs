@@ -33,8 +33,10 @@ impl State {
         self.current_era = Some(new_block.era.clone());
         self.current_params.apply_genesis(&new_block.era)?;
 
-        info!("Applied genesis for {}, resulting params {:?}", 
-            new_block.era, self.current_params.get_params()
+        info!(
+            "Applied genesis for {}, resulting params {:?}",
+            new_block.era,
+            self.current_params.get_params()
         );
 
         Ok(())

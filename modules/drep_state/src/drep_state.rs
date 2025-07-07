@@ -62,14 +62,12 @@ fn perform_rest_request(state: &State, path: &str) -> Result<String> {
 impl DRepState {
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // Get configuration
-        let subscribe_topic = config
-            .get_string("subscribe-topic")
-            .unwrap_or(DEFAULT_SUBSCRIBE_TOPIC.to_string());
+        let subscribe_topic =
+            config.get_string("subscribe-topic").unwrap_or(DEFAULT_SUBSCRIBE_TOPIC.to_string());
         info!("Creating subscriber on '{subscribe_topic}'");
 
-        let handle_topic = config
-            .get_string("handle-topic")
-            .unwrap_or(DEFAULT_HANDLE_TOPIC.to_string());
+        let handle_topic =
+            config.get_string("handle-topic").unwrap_or(DEFAULT_HANDLE_TOPIC.to_string());
         info!("Creating request handler on '{handle_topic}'");
 
         let drep_state_topic = config

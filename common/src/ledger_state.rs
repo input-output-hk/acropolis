@@ -54,14 +54,12 @@ impl LedgerState {
         }
 
         let mut ledger_state = Self::default();
-        ledger_state
-            .load_from_directory(directory_path)
-            .with_context(|| {
-                format!(
-                    "Failed to load ledger state from directory: {}",
-                    directory_path.display()
-                )
-            })?;
+        ledger_state.load_from_directory(directory_path).with_context(|| {
+            format!(
+                "Failed to load ledger state from directory: {}",
+                directory_path.display()
+            )
+        })?;
 
         Ok(ledger_state)
     }

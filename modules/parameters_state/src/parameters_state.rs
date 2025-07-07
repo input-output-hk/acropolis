@@ -12,8 +12,8 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info};
 
-mod parameters_updater;
 mod genesis_params;
+mod parameters_updater;
 mod state;
 
 use parameters_updater::ParametersUpdater;
@@ -86,36 +86,34 @@ impl ParametersState {
         let state = Arc::new(Mutex::new(State::new()));
         let state_handle = state.clone();
 
-        config
-            .context
-            .handle(&config.handle_topic, move |message: Arc<Message>| {
-                let _state = state_handle.clone();
-                async move {
-                    let response = match message.as_ref() {
-                        Message::RESTRequest(request) => {
-                            info!("REST received {} {}", request.method, request.path);
-                            RESTResponse::with_text(200, "Ok")
-                            /*
-                            let lock = state.lock().await;
+        config.context.handle(&config.handle_topic, move |message: Arc<Message>| {
+            let _state = state_handle.clone();
+            async move {
+                let response = match message.as_ref() {
+                    Message::RESTRequest(request) => {
+                        info!("REST received {} {}", request.method, request.path);
+                        RESTResponse::with_text(200, "Ok")
+                        /*
+                        let lock = state.lock().await;
 
-                            match perform_rest_request(&lock, &request.path) {
-                                Ok(response) => RESTResponse::with_text(200, &response),
-                                Err(error) => {
-                                    error!("Governance State REST request error: {error:?}");
-                                    RESTResponse::with_text(400, &format!("{error:?}"))
-                                }
+                        match perform_rest_request(&lock, &request.path) {
+                            Ok(response) => RESTResponse::with_text(200, &response),
+                            Err(error) => {
+                                error!("Governance State REST request error: {error:?}");
+                                RESTResponse::with_text(400, &format!("{error:?}"))
                             }
-                            */
                         }
-                        _ => {
-                            error!("Unexpected message type: {message:?}");
-                            RESTResponse::with_text(500, &format!("Unexpected message type"))
-                        }
-                    };
+                        */
+                    }
+                    _ => {
+                        error!("Unexpected message type: {message:?}");
+                        RESTResponse::with_text(500, &format!("Unexpected message type"))
+                    }
+                };
 
-                    Arc::new(Message::RESTResponse(response))
-                }
-            });
+                Arc::new(Message::RESTResponse(response))
+            }
+        });
 
         loop {
             info!("Waiting for enact-state");
@@ -136,9 +134,7 @@ impl ParametersState {
 
         // Start run task
         tokio::spawn(async move {
-            Self::run(cfg, enact)
-                .await
-                .unwrap_or_else(|e| error!("Failed: {e}"));
+            Self::run(cfg, enact).await.unwrap_or_else(|e| error!("Failed: {e}"));
         });
 
         Ok(())
