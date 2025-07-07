@@ -632,8 +632,6 @@ pub struct ExUnitPrices {
     pub step_price: RationalNumber,
 }
 
-pub type UnitInterval = RationalNumber;
-
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct GovActionId {
     pub transaction_id: DataHash,
@@ -677,25 +675,25 @@ pub struct CostModels {
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct PoolVotingThresholds {
-    pub motion_no_confidence: UnitInterval,
-    pub committee_normal: UnitInterval,
-    pub committee_no_confidence: UnitInterval,
-    pub hard_fork_initiation: UnitInterval,
-    pub security_voting_threshold: UnitInterval,
+    pub motion_no_confidence: RationalNumber,
+    pub committee_normal: RationalNumber,
+    pub committee_no_confidence: RationalNumber,
+    pub hard_fork_initiation: RationalNumber,
+    pub security_voting_threshold: RationalNumber,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct DRepVotingThresholds {
-    pub motion_no_confidence: UnitInterval,
-    pub committee_normal: UnitInterval,
-    pub committee_no_confidence: UnitInterval,
-    pub update_constitution: UnitInterval,
-    pub hard_fork_initiation: UnitInterval,
-    pub pp_network_group: UnitInterval,
-    pub pp_economic_group: UnitInterval,
-    pub pp_technical_group: UnitInterval,
-    pub pp_governance_group: UnitInterval,
-    pub treasury_withdrawal: UnitInterval,
+    pub motion_no_confidence: RationalNumber,
+    pub committee_normal: RationalNumber,
+    pub committee_no_confidence: RationalNumber,
+    pub update_constitution: RationalNumber,
+    pub hard_fork_initiation: RationalNumber,
+    pub pp_network_group: RationalNumber,
+    pub pp_economic_group: RationalNumber,
+    pub pp_technical_group: RationalNumber,
+    pub pp_governance_group: RationalNumber,
+    pub treasury_withdrawal: RationalNumber,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -899,10 +897,10 @@ pub struct ProtocolParamUpdate {
     pub pool_pledge_influence: Option<RationalNumber>,
 
     /// AKA rho, monetary_expansion (Shelley)
-    pub expansion_rate: Option<UnitInterval>,
+    pub expansion_rate: Option<RationalNumber>,
 
     /// AKA tau, treasury_cut (Shelley)
-    pub treasury_growth_rate: Option<UnitInterval>,
+    pub treasury_growth_rate: Option<RationalNumber>,
 
     /// (Shelley)
     pub min_pool_cost: Option<Lovelace>,
@@ -959,7 +957,7 @@ pub struct ProtocolParamUpdate {
     pub drep_inactivity_period: Option<u64>,
 
     /// AKA min_fee_ref_script_cost_per_byte (Conway)
-    pub minfee_refscript_cost_per_byte: Option<UnitInterval>,
+    pub minfee_refscript_cost_per_byte: Option<RationalNumber>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -1009,7 +1007,7 @@ pub struct CommitteeChange {
     pub removed_committee_members: HashSet<CommitteeCredential>,
     #[serde_as(as = "Vec<(_, _)>")]
     pub new_committee_members: HashMap<CommitteeCredential, u64>,
-    pub terms: UnitInterval,
+    pub terms: RationalNumber,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
