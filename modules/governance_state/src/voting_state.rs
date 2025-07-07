@@ -8,9 +8,22 @@ use anyhow::Result;
 
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct VotingRegistrationState {
+    /// Total stake in all SPOs. This parameter is used for Hard Fork initiation voting,
+    /// see CIP-1694:
+    /// ... The SPO vote threshold which must be met as a certain threshold of the total 
+    /// active voting stake, excepting Hard Fork Governance Actions. Due to the need for 
+    /// robust consensus around Hard Fork initiations, these votes must be met as a percentage 
+    /// of the stake held by all stake pools. 
     total_spos: u64,
+
+    /// Total stake in active voting SPOs stake
     registered_spos: u64,
+
+    /// Total stake in registered DReps.
     registered_dreps: u64,
+
+    /// Number of committee members (0 is treated as no committee; that is, no valid committee
+    /// vote can pass if this value is 0).
     committee_size: u64,
 }
 
@@ -45,8 +58,8 @@ impl VotingRegistrationState {
         drep: &RationalNumber,
         comm: &RationalNumber,
     ) -> Result<(u64, u64)> {
-        let d = drep.proportion_of(self.registered_dreps)?.round_up();
-        let c = comm.proportion_of(self.committee_size)?.round_up();
+        let d = (drep * self.registered_dreps).ceil().to_integer();
+        let c = (comm * self.committee_size).ceil().to_integer();
         Ok((d, c))
     }
 
@@ -57,7 +70,7 @@ impl VotingRegistrationState {
         comm: &RationalNumber,
     ) -> Result<VotesCount> {
         let mut votes = VotesCount::zero();
-        votes.pool = pool.proportion_of(self.registered_spos)?.round_up();
+        votes.pool = (pool * self.registered_spos).ceil().to_integer();
         (votes.drep, votes.committee) = self.proportional_count_drep_comm(drep, comm)?;
         Ok(votes)
     }
@@ -69,7 +82,7 @@ impl VotingRegistrationState {
         comm: &RationalNumber,
     ) -> Result<VotesCount> {
         let mut votes = VotesCount::zero();
-        votes.pool = pool.proportion_of(self.total_spos)?.round_up();
+        votes.pool = (pool * self.total_spos).ceil().to_integer();
         (votes.drep, votes.committee) = self.proportional_count_drep_comm(drep, comm)?;
         Ok(votes)
     }
