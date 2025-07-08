@@ -14,7 +14,7 @@ use serde_json;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{debug, error, info};
+use tracing::{error, info};
 
 mod drep_distribution_publisher;
 use drep_distribution_publisher::DRepDistributionPublisher;
@@ -144,7 +144,7 @@ impl AccountsState {
 
                     state
                         .handle_withdrawals(withdrawals_msg)
-                        .inspect_err(|e| debug!("Withdrawals handling error: {e:#}"))
+                        .inspect_err(|e| error!("Withdrawals handling error: {e:#}"))
                         .ok();
                 }
 
@@ -167,7 +167,7 @@ impl AccountsState {
 
                     state
                         .handle_stake_deltas(deltas_msg)
-                        .inspect_err(|e| debug!("StakeAddressDeltas handling error: {e:#}"))
+                        .inspect_err(|e| error!("StakeAddressDeltas handling error: {e:#}"))
                         .ok();
                 }
 

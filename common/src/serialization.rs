@@ -1,3 +1,4 @@
+use bech32::{Bech32, Hrp};
 use serde::{ser::SerializeMap, Serializer};
 use serde_with::{ser::SerializeAsWrap, SerializeAs};
 
@@ -21,5 +22,17 @@ where
             )?;
         }
         map_ser.end()
+    }
+}
+
+pub trait ToBech32WithHrp {
+    fn to_bech32_with_hrp(&self, hrp: &str) -> String;
+}
+
+impl ToBech32WithHrp for Vec<u8> {
+    fn to_bech32_with_hrp(&self, hrp: &str) -> String {
+        let hrp: Hrp = Hrp::parse(hrp).unwrap();
+        bech32::encode::<Bech32>(hrp, self)
+            .unwrap_or_else(|e| format!("Cannot convert {:?} to bech32: {e}", self))
     }
 }

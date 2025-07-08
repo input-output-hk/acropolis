@@ -413,17 +413,9 @@ impl State {
     pub fn get_proposal_votes(
         &self,
         proposal_id: &GovActionId,
-    ) -> Result<Vec<(Voter, DataHash, VotingProcedure)>> {
+    ) -> Result<HashMap<Voter, (DataHash, VotingProcedure)>> {
         match self.votes.get(proposal_id) {
-            Some(all_votes) => {
-                let result = all_votes
-                    .iter()
-                    .map(|(voter, (transaction, voting_proc))| {
-                        (voter.clone(), transaction.clone(), voting_proc.clone())
-                    })
-                    .collect::<Vec<_>>();
-                Ok(result)
-            }
+            Some(all_votes) => Ok(all_votes.clone()),
             None => Err(anyhow::anyhow!(
                 "Governance action: {:?} not found",
                 proposal_id
