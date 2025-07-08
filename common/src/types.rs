@@ -2,10 +2,8 @@
 // We don't use these types in the acropolis_common crate itself
 #![allow(dead_code)]
 
-use crate::address::{Address, StakeAddress};
-use crate::rational_number::RationalNumber;
+use crate::{address::{Address, StakeAddress}, rational_number::RationalNumber};
 use anyhow::{anyhow, bail, Error};
-
 use bech32::{Bech32, Hrp};
 use bitmask_enum::bitmask;
 use chrono::{DateTime, Utc};
