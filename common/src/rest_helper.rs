@@ -49,23 +49,30 @@ pub fn handle_rest_with_parameter<F, Fut>(
     handler: F,
 ) -> JoinHandle<()>
 where
-    F: Fn(&str) -> Fut + Send + Sync + Clone + 'static,
+    F: Fn(&[&str]) -> Fut + Send + Sync + Clone + 'static,
     Fut: Future<Output = Result<RESTResponse>> + Send + 'static,
 {
+    let topic_owned = topic.to_string();
     context.handle(topic, move |message: Arc<Message>| {
         let handler = handler.clone();
+        let topic_owned = topic_owned.clone();
         async move {
             let response = match message.as_ref() {
                 Message::RESTRequest(request) => {
                     info!("REST received {} {}", request.method, request.path);
-                    match request.path_elements.get(1) {
-                        Some(param) => match handler(param).await {
+                    let params_vec =
+                        extract_params_from_topic_and_path(&topic_owned, &request.path_elements);
+                    let params_slice: Vec<&str> = params_vec.iter().map(|s| s.as_str()).collect();
+
+                    if params_slice.is_empty() {
+                        RESTResponse::with_text(400, "Parameters must be provided")
+                    } else {
+                        match handler(&params_slice).await {
                             Ok(response) => response,
                             Err(error) => {
                                 RESTResponse::with_text(500, &format!("{error:?}").to_string())
                             }
-                        },
-                        None => RESTResponse::with_text(400, "Parameter must be provided"),
+                        }
                     }
                 }
                 _ => {
@@ -77,4 +84,53 @@ where
             Arc::new(Message::RESTResponse(response))
         }
     })
+}
+
+/// Extract parameters from the request path based on the topic pattern.
+/// Skips the first 3 parts of the topic as these are never parameters
+fn extract_params_from_topic_and_path(topic: &str, path_elements: &[String]) -> Vec<String> {
+    let topic_parts: Vec<&str> = topic.split('.').collect();
+
+    // Find indexes of '*' in topic
+    let param_positions: Vec<usize> = topic_parts
+        .iter()
+        .enumerate()
+        .filter_map(|(i, &part)| if part == "*" { Some(i) } else { None })
+        .collect();
+
+    let offset = 3;
+
+    // Map topic '*' positions to corresponding path elements
+    param_positions
+        .iter()
+        .filter_map(|&pos| pos.checked_sub(offset).and_then(|idx| path_elements.get(idx)).cloned())
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_params_with_wildcards_and_path_elements() {
+        let topic = "rest.get.governance-state.proposal.*.votes";
+        let path_elements = vec![
+            "governance-state".to_string(),
+            "proposal".to_string(),
+            "gov_action1abcxyz".to_string(),
+            "votes".to_string(),
+        ];
+
+        let params = extract_params_from_topic_and_path(topic, &path_elements);
+        assert_eq!(params, vec!["gov_action1abcxyz"]);
+    }
+
+    #[test]
+    fn test_extract_params_with_wildcards_but_empty_path_elements() {
+        let topic = "rest.get.governance-state.proposal.*.votes";
+        let path_elements: Vec<String> = vec![];
+
+        let params = extract_params_from_topic_and_path(topic, &path_elements);
+        assert!(params.is_empty());
+    }
 }
