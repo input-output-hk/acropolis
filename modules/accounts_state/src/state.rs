@@ -266,9 +266,10 @@ impl State {
 
         // Pay the delegators - split remainder in proportional to delegated stake,
         // including owners pledge
+        let mut new_stake_addresses = self.stake_addresses.clone();
         self.stake_addresses
-            .values()
-            .for_each(|sas| {
+            .iter()
+            .for_each(|(key, sas)| {
                 if let Some(spo_id) = &sas.delegated_spo {
                     // Look up the SPO in the rewards map
                     match spo_stake_and_rewards.get(spo_id) {
@@ -282,17 +283,20 @@ impl State {
                             let to_pay = reward.with_scale(0).to_u64().unwrap_or(0);
 
                             // Transfer from reserves to this account
-                            // TODO!  Can't do this because it's immutable
-                            // - need .values_mut() above but can't do this with OrdMap
-                            // - need to switch to Arc<HashMap> and manage rollbacks differently
-                            // as was already decided
-                            // !!! sas.rewards += to_pay;
+                            // TODO this seems inefficient and stems from the fact that we
+                            // can't get a mutable entry.  Maybe indicate replacing imbl::OrdMap
+                            // with a simpler map and managing rollbacks manually
+                            let mut new_sas = sas.clone();
+                            new_sas.rewards += to_pay;
+                            new_stake_addresses = new_stake_addresses.update(key.clone(), new_sas);
                             self.pots.reserves -= to_pay;
                         }
                         None => error!("SPO ID {} not found in rewards map", hex::encode(spo_id))
                     }
                 }
             });
+
+        self.stake_addresses = new_stake_addresses;
 
         Ok(())
     }
