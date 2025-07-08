@@ -348,27 +348,11 @@ impl AccountsState {
 
         // Create history
         let history = Arc::new(Mutex::new(StateHistory::<State>::new("AccountsState")));
-        let history_stake = history.clone();
         let history_stake_single = history.clone();
         let history_spdd = history.clone();
         let history_pots = history.clone();
         let history_drdd = history.clone();
         let history_tick = history.clone();
-
-        // Handle requests for full state
-        handle_rest(context.clone(), &handle_stake_topic, move || {
-            let history = history_stake.clone();
-            async move {
-                if let Some(state) = history.lock().await.current().clone() {
-                    match serde_json::to_string(state) {
-                        Ok(body) => Ok(RESTResponse::with_json(200, &body)),
-                        Err(error) => Err(anyhow!("{:?}", error)),
-                    }
-                } else {
-                    Ok(RESTResponse::with_json(200, "{}"))
-                }
-            }
-        });
 
         let handle_single_stake_topic = handle_stake_topic + ".*";
 
