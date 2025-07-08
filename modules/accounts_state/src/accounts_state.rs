@@ -375,7 +375,7 @@ impl AccountsState {
         // Handle requests for single reward state based on stake address
         handle_rest_with_parameter(context.clone(), &handle_single_stake_topic, move |param| {
             let history = history_stake_single.clone();
-            let param = param.to_string();
+            let param = param[0].to_string();
 
             async move {
                 match Address::from_string(&param) {
@@ -392,7 +392,10 @@ impl AccountsState {
                         },
                         None => Err(anyhow!("No state")),
                     },
-                    _ => Ok(RESTResponse::with_text(400, "Not a stake address")),
+                    _ => Ok(RESTResponse::with_text(
+                        400,
+                        &format!("Not a stake address. Provided address: {}", param),
+                    )),
                 }
             }
         });
@@ -474,10 +477,9 @@ impl AccountsState {
             }
         });
 
-        let drep_publisher = DRepDistributionPublisher::new(context.clone(),
-                                                            drep_distribution_topic);
-        let spo_publisher = SPODistributionPublisher::new(context.clone(),
-                                                          spo_distribution_topic);
+        let drep_publisher =
+            DRepDistributionPublisher::new(context.clone(), drep_distribution_topic);
+        let spo_publisher = SPODistributionPublisher::new(context.clone(), spo_distribution_topic);
 
         // Subscribe
         let spos_subscription = context.subscribe(&spo_state_topic).await?;
