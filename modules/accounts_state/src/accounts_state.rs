@@ -392,7 +392,10 @@ impl AccountsState {
                         },
                         None => Err(anyhow!("No state")),
                     },
-                    _ => Ok(RESTResponse::with_text(400, "Not a stake address")),
+                    _ => Ok(RESTResponse::with_text(
+                        400,
+                        &format!("Not a stake address. Provided address: {}", param),
+                    )),
                 }
             }
         });

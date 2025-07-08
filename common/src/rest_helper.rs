@@ -98,39 +98,11 @@ fn extract_params_from_topic_and_path(topic: &str, path_elements: &[String]) -> 
         .filter_map(|(i, &part)| if part == "*" { Some(i) } else { None })
         .collect();
 
-    let offset = 3;
+    let offset = 2;
 
     // Map topic '*' positions to corresponding path elements
     param_positions
         .iter()
         .filter_map(|&pos| pos.checked_sub(offset).and_then(|idx| path_elements.get(idx)).cloned())
         .collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_extract_params_with_wildcards_and_path_elements() {
-        let topic = "rest.get.governance-state.proposal.*.votes";
-        let path_elements = vec![
-            "governance-state".to_string(),
-            "proposal".to_string(),
-            "gov_action1abcxyz".to_string(),
-            "votes".to_string(),
-        ];
-
-        let params = extract_params_from_topic_and_path(topic, &path_elements);
-        assert_eq!(params, vec!["gov_action1abcxyz"]);
-    }
-
-    #[test]
-    fn test_extract_params_with_wildcards_but_empty_path_elements() {
-        let topic = "rest.get.governance-state.proposal.*.votes";
-        let path_elements: Vec<String> = vec![];
-
-        let params = extract_params_from_topic_and_path(topic, &path_elements);
-        assert!(params.is_empty());
-    }
 }

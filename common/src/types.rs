@@ -4,7 +4,7 @@
 
 use crate::address::{Address, StakeAddress};
 use crate::rational_number::RationalNumber;
-use anyhow::anyhow;
+use anyhow::{anyhow, bail, Error};
 use bech32::{Bech32, Hrp};
 use bitmask_enum::bitmask;
 use chrono::{DateTime, Utc};
@@ -29,6 +29,36 @@ pub enum Era {
 impl Default for Era {
     fn default() -> Era {
         Era::Byron
+    }
+}
+
+impl From<Era> for u8 {
+    fn from(e: Era) -> u8 {
+        match e {
+            Era::Byron => 0,
+            Era::Shelley => 1,
+            Era::Allegra => 2,
+            Era::Mary => 3,
+            Era::Alonzo => 4,
+            Era::Babbage => 5,
+            Era::Conway => 6
+        }
+    }
+}
+
+impl TryFrom<u8> for Era {
+    type Error = anyhow::Error;
+    fn try_from(v: u8) -> Result<Era, Error> {
+        match v {
+            0 => Ok(Era::Byron),
+            1 => Ok(Era::Shelley),
+            2 => Ok(Era::Allegra),
+            3 => Ok(Era::Mary),
+            4 => Ok(Era::Alonzo),
+            5 => Ok(Era::Babbage),
+            6 => Ok(Era::Conway),
+            n => bail!("Impossilbe era {n}")
+        }
     }
 }
 
@@ -602,8 +632,6 @@ pub struct ExUnitPrices {
     pub step_price: RationalNumber,
 }
 
-pub type UnitInterval = RationalNumber;
-
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct GovActionId {
     pub transaction_id: DataHash,
@@ -667,25 +695,25 @@ pub struct CostModels {
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct PoolVotingThresholds {
-    pub motion_no_confidence: UnitInterval,
-    pub committee_normal: UnitInterval,
-    pub committee_no_confidence: UnitInterval,
-    pub hard_fork_initiation: UnitInterval,
-    pub security_voting_threshold: UnitInterval,
+    pub motion_no_confidence: RationalNumber,
+    pub committee_normal: RationalNumber,
+    pub committee_no_confidence: RationalNumber,
+    pub hard_fork_initiation: RationalNumber,
+    pub security_voting_threshold: RationalNumber,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct DRepVotingThresholds {
-    pub motion_no_confidence: UnitInterval,
-    pub committee_normal: UnitInterval,
-    pub committee_no_confidence: UnitInterval,
-    pub update_constitution: UnitInterval,
-    pub hard_fork_initiation: UnitInterval,
-    pub pp_network_group: UnitInterval,
-    pub pp_economic_group: UnitInterval,
-    pub pp_technical_group: UnitInterval,
-    pub pp_governance_group: UnitInterval,
-    pub treasury_withdrawal: UnitInterval,
+    pub motion_no_confidence: RationalNumber,
+    pub committee_normal: RationalNumber,
+    pub committee_no_confidence: RationalNumber,
+    pub update_constitution: RationalNumber,
+    pub hard_fork_initiation: RationalNumber,
+    pub pp_network_group: RationalNumber,
+    pub pp_economic_group: RationalNumber,
+    pub pp_technical_group: RationalNumber,
+    pub pp_governance_group: RationalNumber,
+    pub treasury_withdrawal: RationalNumber,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -889,10 +917,10 @@ pub struct ProtocolParamUpdate {
     pub pool_pledge_influence: Option<RationalNumber>,
 
     /// AKA rho, monetary_expansion (Shelley)
-    pub expansion_rate: Option<UnitInterval>,
+    pub expansion_rate: Option<RationalNumber>,
 
     /// AKA tau, treasury_cut (Shelley)
-    pub treasury_growth_rate: Option<UnitInterval>,
+    pub treasury_growth_rate: Option<RationalNumber>,
 
     /// (Shelley)
     pub min_pool_cost: Option<Lovelace>,
@@ -949,7 +977,7 @@ pub struct ProtocolParamUpdate {
     pub drep_inactivity_period: Option<u64>,
 
     /// AKA min_fee_ref_script_cost_per_byte (Conway)
-    pub minfee_refscript_cost_per_byte: Option<UnitInterval>,
+    pub minfee_refscript_cost_per_byte: Option<RationalNumber>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -999,7 +1027,7 @@ pub struct CommitteeChange {
     pub removed_committee_members: HashSet<CommitteeCredential>,
     #[serde_as(as = "Vec<(_, _)>")]
     pub new_committee_members: HashMap<CommitteeCredential, u64>,
-    pub terms: UnitInterval,
+    pub terms: RationalNumber,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -1240,6 +1268,24 @@ pub enum TxCertificate {
 mod tests {
     use super::*;
     use anyhow::Result;
+
+    #[test]
+    fn era_order() -> Result<()> {
+        assert_eq!(Era::default() as u8, 0);
+        assert_eq!(Era::Byron as u8, 0);
+        assert_eq!(Era::Conway as u8, 6);
+        assert!(!Era::try_from(7).is_ok());
+
+        for ei in 0..=6 {
+            for ej in 0..=6 {
+                assert_eq!(Era::try_from(ei).unwrap() < Era::try_from(ej).unwrap(), ei < ej);
+                assert_eq!(Era::try_from(ei).unwrap() > Era::try_from(ej).unwrap(), ei > ej);
+                assert_eq!(Era::try_from(ei).unwrap() == Era::try_from(ej).unwrap(), ei == ej);
+            }
+        }
+
+        Ok(())
+    }
 
     fn make_committee_credential(addr_key_hash: bool, val: u8) -> CommitteeCredential {
         if addr_key_hash {
