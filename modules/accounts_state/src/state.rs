@@ -484,7 +484,7 @@ mod tests {
         ConwayParams, Credential, DRepVotingThresholds, PoolVotingThresholds, Pot, PotDelta,
         ProtocolParams, Registration, StakeAddress, StakeAddressDelta, StakeAddressPayload,
         StakeAndVoteDelegation, StakeRegistrationAndStakeAndVoteDelegation,
-        StakeRegistrationAndVoteDelegation, UnitInterval, VoteDelegation, Withdrawal,
+        StakeRegistrationAndVoteDelegation, VoteDelegation, Withdrawal,
     };
 
     const STAKE_KEY_HASH: [u8; 3] = [0x99, 0x0f, 0x00];
@@ -886,23 +886,23 @@ mod tests {
         let params = ProtocolParams {
             conway: Some(ConwayParams {
                 pool_voting_thresholds: PoolVotingThresholds {
-                    motion_no_confidence: UnitInterval::ONE,
-                    committee_normal: UnitInterval::ZERO,
-                    committee_no_confidence: UnitInterval::ZERO,
-                    hard_fork_initiation: UnitInterval::ONE,
-                    security_voting_threshold: UnitInterval::ZERO,
+                    motion_no_confidence: RationalNumber::ONE,
+                    committee_normal: RationalNumber::ZERO,
+                    committee_no_confidence: RationalNumber::ZERO,
+                    hard_fork_initiation: RationalNumber::ONE,
+                    security_voting_threshold: RationalNumber::ZERO,
                 },
                 d_rep_voting_thresholds: DRepVotingThresholds {
-                    motion_no_confidence: UnitInterval::ONE,
-                    committee_normal: UnitInterval::ZERO,
-                    committee_no_confidence: UnitInterval::ZERO,
-                    update_constitution: UnitInterval::ONE,
-                    hard_fork_initiation: UnitInterval::ZERO,
-                    pp_network_group: UnitInterval::ZERO,
-                    pp_economic_group: UnitInterval::ZERO,
-                    pp_technical_group: UnitInterval::ZERO,
-                    pp_governance_group: UnitInterval::ZERO,
-                    treasury_withdrawal: UnitInterval::ONE,
+                    motion_no_confidence: RationalNumber::ONE,
+                    committee_normal: RationalNumber::ZERO,
+                    committee_no_confidence: RationalNumber::ZERO,
+                    update_constitution: RationalNumber::ONE,
+                    hard_fork_initiation: RationalNumber::ZERO,
+                    pp_network_group: RationalNumber::ZERO,
+                    pp_economic_group: RationalNumber::ZERO,
+                    pp_technical_group: RationalNumber::ZERO,
+                    pp_governance_group: RationalNumber::ZERO,
+                    treasury_withdrawal: RationalNumber::ONE,
                 },
                 committee_min_size: 42,
                 committee_max_term_length: 3,
@@ -910,7 +910,7 @@ mod tests {
                 gov_action_deposit: 500_000_000,
                 d_rep_deposit: 100_000_000,
                 d_rep_activity: 27,
-                min_fee_ref_script_cost_per_byte: RationalNumber::new(1, 42).unwrap(),
+                min_fee_ref_script_cost_per_byte: RationalNumber::new(1, 42),
                 plutus_v3_cost_model: Vec::new(),
                 constitution: Constitution {
                     anchor: Anchor {
@@ -921,7 +921,7 @@ mod tests {
                 },
                 committee: Committee {
                     members: std::collections::HashMap::new(),
-                    threshold: RationalNumber::new(5, 32).unwrap(),
+                    threshold: RationalNumber::new(5, 32),
                 },
             }),
 

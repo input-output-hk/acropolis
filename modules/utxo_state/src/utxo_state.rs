@@ -134,7 +134,10 @@ impl UTXOState {
                     None => {
                         return Ok(RESTResponse::with_text(
                             400,
-                            "Parameter must be in <tx_hash>:<index> format",
+                            &format!(
+                                "Parameter must be in <tx_hash>:<index> format. Provided param: {}",
+                                param
+                            ),
                         ));
                     }
                 };
@@ -166,7 +169,10 @@ impl UTXOState {
 
                                     Ok(RESTResponse::with_json(200, &json_response.to_string()))
                                 }
-                                Ok(None) => Ok(RESTResponse::with_text(404, "UTXO not found")),
+                                Ok(None) => Ok(RESTResponse::with_text(
+                                    404,
+                                    &format!("UTxO not found. Provided UTxO: {}", param),
+                                )),
                                 Err(error) => Err(anyhow!("{:?}", error)),
                             }
                         }

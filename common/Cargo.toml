@@ -23,6 +23,7 @@ gcd = "2.3"
 fraction = "0.15"
 hex = "0.4"
 lf-queue = "0.1.0"
+num-rational = { version = "0.4.2", features = ["serde"] }
 serde = { version = "1.0.214", features = ["derive"] }
 serde_json = "1.0"
 serde_with = { version = "3.12.0", features = ["hex"] }

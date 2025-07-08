@@ -1,5 +1,6 @@
 use acropolis_common::{
-    rational_number::RationalNumber, AlonzoParams, Anchor, BlockVersionData, ByronParams,
+    rational_number::{RationalNumber, rational_number_from_f32},
+    AlonzoParams, Anchor, BlockVersionData, ByronParams,
     Committee, Constitution, ConwayParams, Credential, DRepVotingThresholds, Era, ExUnitPrices,
     ExUnits, NetworkId, Nonce, NonceVariant, PoolVotingThresholds, ProtocolConsts, ProtocolVersion,
     ShelleyParams, ShelleyProtocolParams, SoftForkRule, TxFeePolicy,
@@ -10,23 +11,16 @@ use pallas::ledger::{configs::*, primitives};
 use serde::Deserialize;
 use std::collections::HashMap;
 
-const PREDEFINED_GENESIS: [(Era, &[u8]); 4] = [
-    (
-        Era::Byron,
-        include_bytes!("../downloads/mainnet-byron-genesis.json"),
-    ),
-    (
-        Era::Shelley,
-        include_bytes!("../downloads/mainnet-shelley-genesis.json"),
-    ),
-    (
-        Era::Alonzo,
-        include_bytes!("../downloads/mainnet-alonzo-genesis.json"),
-    ),
-    (
-        Era::Conway,
-        include_bytes!("../downloads/mainnet-conway-genesis.json"),
-    ),
+const PREDEFINED_GENESIS: [(&str, Era, &[u8]); 8] = [
+    ("sanchonet", Era::Byron, include_bytes!("../downloads/sanchonet-byron-genesis.json")),
+    ("sanchonet", Era::Shelley, include_bytes!("../downloads/sanchonet-shelley-genesis.json")),
+    ("sanchonet", Era::Alonzo, include_bytes!("../downloads/sanchonet-alonzo-genesis.json")),
+    ("sanchonet", Era::Conway, include_bytes!("../downloads/sanchonet-conway-genesis.json")),
+
+    ("mainnet", Era::Byron, include_bytes!("../downloads/mainnet-byron-genesis.json")),
+    ("mainnet", Era::Shelley, include_bytes!("../downloads/mainnet-shelley-genesis.json")),
+    ("mainnet", Era::Alonzo, include_bytes!("../downloads/mainnet-alonzo-genesis.json")),
+    ("mainnet", Era::Conway, include_bytes!("../downloads/mainnet-conway-genesis.json"))
 ];
 
 fn decode_hex_string(s: &str, len: usize) -> Result<Vec<u8>> {
@@ -50,34 +44,31 @@ fn map_anchor(anchor: &conway::Anchor) -> Result<Anchor> {
 }
 
 pub fn map_fraction(fraction: &conway::Fraction) -> RationalNumber {
-    RationalNumber {
-        numerator: fraction.numerator,
-        denominator: fraction.denominator,
-    }
+    RationalNumber::new(fraction.numerator, fraction.denominator)
 }
 
 fn map_pool_thresholds(thresholds: &conway::PoolVotingThresholds) -> Result<PoolVotingThresholds> {
     Ok(PoolVotingThresholds {
-        motion_no_confidence: RationalNumber::try_from(thresholds.motion_no_confidence)?,
-        committee_normal: RationalNumber::try_from(thresholds.committee_normal)?,
-        committee_no_confidence: RationalNumber::try_from(thresholds.committee_no_confidence)?,
-        hard_fork_initiation: RationalNumber::try_from(thresholds.hard_fork_initiation)?,
-        security_voting_threshold: RationalNumber::try_from(thresholds.pp_security_group)?,
+        motion_no_confidence: rational_number_from_f32(thresholds.motion_no_confidence)?,
+        committee_normal: rational_number_from_f32(thresholds.committee_normal)?,
+        committee_no_confidence: rational_number_from_f32(thresholds.committee_no_confidence)?,
+        hard_fork_initiation: rational_number_from_f32(thresholds.hard_fork_initiation)?,
+        security_voting_threshold: rational_number_from_f32(thresholds.pp_security_group)?,
     })
 }
 
 fn map_drep_thresholds(thresholds: &conway::DRepVotingThresholds) -> Result<DRepVotingThresholds> {
     Ok(DRepVotingThresholds {
-        motion_no_confidence: RationalNumber::try_from(thresholds.motion_no_confidence)?,
-        committee_normal: RationalNumber::try_from(thresholds.committee_normal)?,
-        committee_no_confidence: RationalNumber::try_from(thresholds.committee_normal)?,
-        update_constitution: RationalNumber::try_from(thresholds.update_to_constitution)?,
-        hard_fork_initiation: RationalNumber::try_from(thresholds.hard_fork_initiation)?,
-        pp_network_group: RationalNumber::try_from(thresholds.pp_network_group)?,
-        pp_economic_group: RationalNumber::try_from(thresholds.pp_economic_group)?,
-        pp_technical_group: RationalNumber::try_from(thresholds.pp_technical_group)?,
-        pp_governance_group: RationalNumber::try_from(thresholds.pp_gov_group)?,
-        treasury_withdrawal: RationalNumber::try_from(thresholds.treasury_withdrawal)?,
+        motion_no_confidence: rational_number_from_f32(thresholds.motion_no_confidence)?,
+        committee_normal: rational_number_from_f32(thresholds.committee_normal)?,
+        committee_no_confidence: rational_number_from_f32(thresholds.committee_normal)?,
+        update_constitution: rational_number_from_f32(thresholds.update_to_constitution)?,
+        hard_fork_initiation: rational_number_from_f32(thresholds.hard_fork_initiation)?,
+        pp_network_group: rational_number_from_f32(thresholds.pp_network_group)?,
+        pp_economic_group: rational_number_from_f32(thresholds.pp_economic_group)?,
+        pp_technical_group: rational_number_from_f32(thresholds.pp_technical_group)?,
+        pp_governance_group: rational_number_from_f32(thresholds.pp_gov_group)?,
+        treasury_withdrawal: rational_number_from_f32(thresholds.treasury_withdrawal)?,
     })
 }
 
@@ -128,7 +119,7 @@ fn map_ex_units(e: &alonzo::ExUnits) -> Result<ExUnits> {
 }
 
 fn map_alonzo_fraction(fr: &alonzo::Fraction) -> Result<RationalNumber> {
-    RationalNumber::new(fr.numerator, fr.denominator)
+    Ok(RationalNumber::new(fr.numerator, fr.denominator))
 }
 
 fn map_execution_prices(e: &alonzo::ExecutionPrices) -> Result<ExUnitPrices> {
@@ -165,10 +156,7 @@ fn map_alonzo(genesis: &alonzo::GenesisFile) -> Result<AlonzoParams> {
 }
 
 pub fn map_pallas_rational(r: &primitives::RationalNumber) -> RationalNumber {
-    RationalNumber {
-        numerator: r.numerator,
-        denominator: r.denominator,
-    }
+    RationalNumber::new(r.numerator, r.denominator)
 }
 
 fn map_network_id(id: &str) -> Result<NetworkId> {
@@ -286,32 +274,33 @@ fn map_byron(genesis: &byron::GenesisFile) -> Result<ByronParams> {
 }
 
 fn read_pdef_genesis<'a, PallasStruct: Deserialize<'a>, OurStruct>(
-    era: Era,
-    map: impl Fn(&PallasStruct) -> Result<OurStruct>,
+    network: &str, era: Era, map: impl Fn(&PallasStruct) -> Result<OurStruct>
 ) -> Result<OurStruct> {
-    let genesis = match PREDEFINED_GENESIS.iter().find(|(e, _g)| *e == era) {
+    let (_net,_era,genesis) = match PREDEFINED_GENESIS.iter().find(
+        |(n,e,_g)| *n == network && *e == era
+    ) {
         Some(eg) => eg,
         None => bail!("Genesis for {era} not defined"),
     };
 
-    match &serde_json::from_slice(genesis.1) {
+    match &serde_json::from_slice(genesis) {
         Ok(decoded) => map(decoded),
-        Err(e) => bail!("Cannot read JSON for {era} genesis: {e}"),
+        Err(e) => bail!("Cannot read JSON for {network} {era} genesis: {e}")
     }
 }
 
-pub fn read_byron_genesis() -> Result<ByronParams> {
-    read_pdef_genesis::<byron::GenesisFile, ByronParams>(Era::Byron, map_byron)
+pub fn read_byron_genesis(network: &str) -> Result<ByronParams> {
+    read_pdef_genesis::<byron::GenesisFile, ByronParams> (network, Era::Byron, map_byron)
 }
 
-pub fn read_shelley_genesis() -> Result<ShelleyParams> {
-    read_pdef_genesis::<shelley::GenesisFile, ShelleyParams>(Era::Shelley, map_shelley)
+pub fn read_shelley_genesis(network: &str) -> Result<ShelleyParams> {
+    read_pdef_genesis::<shelley::GenesisFile, ShelleyParams> (network, Era::Shelley, map_shelley)
 }
 
-pub fn read_alonzo_genesis() -> Result<AlonzoParams> {
-    read_pdef_genesis::<alonzo::GenesisFile, AlonzoParams>(Era::Alonzo, map_alonzo)
+pub fn read_alonzo_genesis(network: &str) -> Result<AlonzoParams> {
+    read_pdef_genesis::<alonzo::GenesisFile, AlonzoParams> (network, Era::Alonzo, map_alonzo)
 }
 
-pub fn read_conway_genesis() -> Result<ConwayParams> {
-    read_pdef_genesis::<conway::GenesisFile, ConwayParams>(Era::Conway, map_conway)
+pub fn read_conway_genesis(network: &str) -> Result<ConwayParams> {
+    read_pdef_genesis::<conway::GenesisFile, ConwayParams> (network, Era::Conway, map_conway)
 }

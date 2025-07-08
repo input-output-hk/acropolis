@@ -2,40 +2,21 @@
 
 use acropolis_common::{
     messages::{
-        CardanoMessage, DRepStakeDistributionMessage, GovernanceOutcomesMessage,
+        CardanoMessage, DRepStakeDistributionMessage, SPOStakeDistributionMessage,
+        GovernanceOutcomesMessage,
         GovernanceProceduresMessage, Message, ProtocolParamsMessage,
     },
-    rational_number::RationalNumber,
-    BlockInfo, ConwayParams, DRepCredential, DataHash, EnactStateElem, GovActionId,
+    BlockInfo, ConwayParams, DRepCredential, DataHash, EnactStateElem, Era, GovActionId,
     GovernanceAction, GovernanceOutcome, GovernanceOutcomeVariant, KeyHash, Lovelace,
-    ProposalProcedure, ProtocolParamType, ProtocolParamUpdate, SingleVoterVotes,
+    ProposalProcedure, SingleVoterVotes,
     TreasuryWithdrawalsAction, Voter, VotesCount, VotingOutcome, VotingProcedure,
 };
-use anyhow::{anyhow, Result};
+use crate::VotingRegistrationState;
+use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::Context;
 use hex::ToHex;
-use std::{cmp::max, collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 use tracing::{debug, error, info};
-
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
-pub struct VotingRegistrationState {
-    total_spos: u64,
-    registered_spos: u64,
-    registered_dreps: u64,
-    committee_size: u64,
-}
-
-impl VotingRegistrationState {
-    // At least one vote in each category is enough.
-    pub fn fake() -> Self {
-        Self {
-            total_spos: 1,
-            registered_spos: 1,
-            registered_dreps: 1,
-            committee_size: 1,
-        }
-    }
-}
 
 pub struct State {
     pub enact_state_topic: String,
@@ -47,10 +28,10 @@ pub struct State {
     pub votes_count: usize,
     pub drep_stake_messages_count: usize,
 
+    current_era: Era,
     conway: Option<ConwayParams>,
     drep_stake: HashMap<DRepCredential, Lovelace>,
     spo_stake: HashMap<KeyHash, u64>,
-    voting_state: VotingRegistrationState,
 
     proposals: HashMap<GovActionId, (u64, ProposalProcedure)>,
     votes: HashMap<GovActionId, HashMap<Voter, (DataHash, VotingProcedure)>>,
@@ -68,14 +49,18 @@ impl State {
             drep_stake_messages_count: 0,
 
             conway: None,
+            current_era: Era::default(),
 
             proposals: HashMap::new(),
             votes: HashMap::new(),
-            voting_state: VotingRegistrationState::fake(),
 
             drep_stake: HashMap::new(),
             spo_stake: HashMap::new(),
         }
+    }
+
+    pub fn advance_era(&mut self, new_era: &Era) {
+        self.current_era = new_era.clone();
     }
 
     pub async fn handle_protocol_parameters(
@@ -91,10 +76,13 @@ impl State {
 
     pub async fn handle_drep_stake(
         &mut self,
-        message: &DRepStakeDistributionMessage,
+        drep_message: &DRepStakeDistributionMessage,
+        spo_message: &SPOStakeDistributionMessage
     ) -> Result<()> {
         self.drep_stake_messages_count += 1;
-        self.drep_stake = HashMap::from_iter(message.dreps.iter().cloned());
+        self.drep_stake = HashMap::from_iter(drep_message.dreps.iter().cloned());
+        self.spo_stake = HashMap::from_iter(spo_message.spos.iter().cloned());
+
         Ok(())
     }
 
@@ -104,10 +92,13 @@ impl State {
         block: &BlockInfo,
         governance_message: &GovernanceProceduresMessage,
     ) -> Result<()> {
-        if block.new_epoch {
-            // TODO: move to governance_state.rs
-            let enact_state = self.process_new_epoch(block.epoch);
-            self.send(block, enact_state).await?;
+        if block.era < Era::Conway {
+            if !(governance_message.proposal_procedures.is_empty() &&
+                governance_message.voting_procedures.is_empty())
+            {
+                bail!("Non-empty governance message for pre-conway block {block:?}");
+            }
+            return Ok(())
         }
 
         for pproc in &governance_message.proposal_procedures {
@@ -130,6 +121,7 @@ impl State {
                 self.votes_count += voter_votes.voting_procedures.len();
             }
         }
+
         Ok(())
     }
 
@@ -182,191 +174,15 @@ impl State {
         Ok(())
     }
 
-    fn proportional_count_drep_comm(
-        &self,
-        drep: &RationalNumber,
-        comm: &RationalNumber,
-    ) -> Result<(u64, u64)> {
-        let d = drep.proportion_of(self.voting_state.registered_dreps)?.round_up();
-        let c = comm.proportion_of(self.voting_state.committee_size)?.round_up();
-        Ok((d, c))
-    }
-
-    fn proportional_count(
-        &self,
-        pool: &RationalNumber,
-        drep: &RationalNumber,
-        comm: &RationalNumber,
-    ) -> Result<VotesCount> {
-        let mut votes = VotesCount::zero();
-        votes.pool = pool.proportion_of(self.voting_state.registered_spos)?.round_up();
-        (votes.drep, votes.committee) = self.proportional_count_drep_comm(drep, comm)?;
-        Ok(votes)
-    }
-
-    fn full_count(
-        &self,
-        pool: &RationalNumber,
-        drep: &RationalNumber,
-        comm: &RationalNumber,
-    ) -> Result<VotesCount> {
-        let mut votes = VotesCount::zero();
-        votes.pool = pool.proportion_of(self.voting_state.total_spos)?.round_up();
-        (votes.drep, votes.committee) = self.proportional_count_drep_comm(drep, comm)?;
-        Ok(votes)
-    }
-
-    /// Returns protocol parameter types, needed to determine voting thresholds for
-    /// the parameter(s) updates.
-    fn get_protocol_param_types(&self, p: &ProtocolParamUpdate) -> ProtocolParamType {
-        let mut result = ProtocolParamType::none();
-
-        if p.max_block_body_size.is_some()
-            || p.max_block_header_size.is_some()
-            || p.max_transaction_size.is_some()
-            || p.max_value_size.is_some()
-            || p.max_block_ex_units.is_some()
-            || p.governance_action_deposit.is_some()
-            || p.ada_per_utxo_byte.is_some()
-            || p.minfee_refscript_cost_per_byte.is_some()
-            || p.minfee_a.is_some()
-            || p.minfee_b.is_some()
-        {
-            result |= ProtocolParamType::SecurityProperty;
-        }
-
-        if p.max_block_body_size.is_some()
-            || p.max_transaction_size.is_some()
-            || p.max_block_header_size.is_some()
-            || p.max_value_size.is_some()
-            || p.max_tx_ex_units.is_some()
-            || p.max_block_ex_units.is_some()
-            || p.max_collateral_inputs.is_some()
-        {
-            result |= ProtocolParamType::NetworkGroup;
-        }
-
-        if p.minfee_a.is_some()
-            || p.minfee_b.is_some()
-            || p.key_deposit.is_some()
-            || p.pool_deposit.is_some()
-            || p.expansion_rate.is_some()
-            || p.treasury_growth_rate.is_some()
-            || p.min_pool_cost.is_some()
-            || p.ada_per_utxo_byte.is_some()
-            || p.execution_costs.is_some()
-            || p.minfee_refscript_cost_per_byte.is_some()
-        {
-            result |= ProtocolParamType::EconomicGroup;
-        }
-
-        if p.pool_pledge_influence.is_some()
-            || p.maximum_epoch.is_some()
-            || p.desired_number_of_stake_pools.is_some()
-            || p.execution_costs.is_some()
-            || p.collateral_percentage.is_some()
-        {
-            result |= ProtocolParamType::TechnicalGroup;
-        }
-
-        if p.pool_voting_thresholds.is_some()
-            || p.drep_voting_thresholds.is_some()
-            || p.governance_action_validity_period.is_some()
-            || p.governance_action_deposit.is_some()
-            || p.drep_deposit.is_some()
-            || p.drep_inactivity_period.is_some()
-            || p.min_committee_size.is_some()
-            || p.committee_term_limit.is_some()
-        {
-            result |= ProtocolParamType::GovernanceGroup;
-        }
-
-        result
-    }
-
-    /// Computes necessary votes count to accept proposal `pp`, according to
-    /// actual parameters. The result is triple of votes' thresholds (as fraction of the
-    /// total corresponding votes count): (Pool, DRep, Committee)
-    fn get_action_thresholds(
-        &self,
-        pp: &ProposalProcedure,
-        thresholds: &ConwayParams,
-    ) -> Result<VotesCount> {
-        let d = &thresholds.d_rep_voting_thresholds;
-        let p = &thresholds.pool_voting_thresholds;
-        let c = &thresholds.committee;
-        let zero = &RationalNumber::ZERO;
-        let one = &RationalNumber::ONE;
-
-        match &pp.gov_action {
-            GovernanceAction::ParameterChange(action) => {
-                let param_types = self.get_protocol_param_types(&action.protocol_param_update);
-
-                let mut p_th = zero;
-                let mut d_th = zero;
-
-                if param_types.contains(ProtocolParamType::SecurityProperty) {
-                    p_th = &p.security_voting_threshold;
-                }
-                if param_types.contains(ProtocolParamType::EconomicGroup) {
-                    d_th = max(d_th, &d.pp_economic_group);
-                }
-                if param_types.contains(ProtocolParamType::NetworkGroup) {
-                    d_th = max(d_th, &d.pp_network_group);
-                }
-                if param_types.contains(ProtocolParamType::TechnicalGroup) {
-                    d_th = max(d_th, &d.pp_technical_group);
-                }
-                if param_types.contains(ProtocolParamType::GovernanceGroup) {
-                    d_th = max(d_th, &d.pp_governance_group);
-                }
-
-                self.proportional_count(p_th, d_th, &c.threshold)
-            }
-            GovernanceAction::HardForkInitiation(_) => self.full_count(
-                &p.hard_fork_initiation,
-                &d.hard_fork_initiation,
-                &c.threshold,
-            ),
-            GovernanceAction::TreasuryWithdrawals(_) => {
-                self.proportional_count(zero, &d.treasury_withdrawal, &c.threshold)
-            }
-            GovernanceAction::NoConfidence(_) => self.proportional_count(
-                &p.motion_no_confidence.clone(),
-                &d.motion_no_confidence.clone(),
-                zero,
-            ),
-            GovernanceAction::UpdateCommittee(_) => {
-                if thresholds.committee.is_empty() {
-                    self.proportional_count(
-                        &p.committee_no_confidence,
-                        &d.committee_no_confidence,
-                        zero,
-                    )
-                } else {
-                    self.proportional_count(&p.committee_normal, &d.committee_normal, zero)
-                }
-            }
-            GovernanceAction::NewConstitution(_) => {
-                self.proportional_count(zero, &d.update_constitution, &c.threshold)
-            }
-            GovernanceAction::Information => self.proportional_count(one, one, zero),
-        }
-    }
-
     /// Checks whether action_id can be considered finally accepted
-    fn is_finally_accepted(&self, action_id: &GovActionId) -> Result<VotingOutcome> {
+    fn is_finally_accepted(&self, voting_state: &VotingRegistrationState, action_id: &GovActionId) -> Result<VotingOutcome> {
         let (_epoch, proposal) = self
             .proposals
             .get(action_id)
             .ok_or_else(|| anyhow!("action {} not found", action_id))?;
+        let conway_params = self.get_conway_params()?;
+        let threshold = voting_state.get_action_thresholds(proposal, conway_params)?;
 
-        let conway_params = match &self.conway {
-            None => return Err(anyhow!("Conway params are not known, cannot count votes")),
-            Some(conway_params) => conway_params,
-        };
-
-        let threshold = self.get_action_thresholds(proposal, conway_params)?;
         let votes = self.get_actual_votes(action_id);
         let accepted = votes.majorizes(&threshold);
         info!("Proposal {action_id}: votes {votes}, thresholds {threshold}, result {accepted}");
@@ -460,9 +276,10 @@ impl State {
     fn process_one_proposal(
         &mut self,
         new_epoch: u64,
+        voting_state: &VotingRegistrationState,
         action_id: &GovActionId,
     ) -> Result<Option<VotingOutcome>> {
-        let outcome = self.is_finally_accepted(&action_id)?;
+        let outcome = self.is_finally_accepted(voting_state, &action_id)?;
         let expired = self.is_expired(new_epoch, &action_id)?;
         if outcome.accepted || expired {
             self.end_voting(&action_id)?;
@@ -476,9 +293,34 @@ impl State {
         Ok(None)
     }
 
+    fn recalculate_voting_state(&self) -> Result<VotingRegistrationState> {
+        let drep_stake = self.drep_stake.iter().map(|(_dr,lov)| lov).sum();
+
+        let committee_usize = self.get_conway_params()?.committee.members.len();
+        let committee = committee_usize.try_into().or_else(
+            |e| Err(anyhow!("Commitee size: conversion usize -> u64 failed, {e}"))
+        )?;
+
+        let spo_stake = self.spo_stake.iter().map(|(_sp,lov)| lov).sum();
+
+        Ok(VotingRegistrationState::new(spo_stake, spo_stake, drep_stake, committee))
+    }
+
     /// Loops through all actions and checks their status for the new_epoch
-    fn process_new_epoch(&mut self, new_epoch: u64) -> GovernanceOutcomesMessage {
+    /// All incoming data (parameters for the epoch, drep distribution, etc)
+    /// should already be actual at this moment.
+    pub fn process_new_epoch(&mut self, new_block: &BlockInfo) 
+        -> Result<GovernanceOutcomesMessage> 
+    {
         let mut output = GovernanceOutcomesMessage::default();
+        if self.current_era < Era::Conway {
+            // Processes new epoch acts on old events.
+            // However, there should be no governance events before
+            // Conway era start.
+            return Ok(output);
+        }
+
+        let voting_state = self.recalculate_voting_state()?;
 
         let actions = self.proposals.keys().map(|a| a.clone()).collect::<Vec<_>>();
         let mut wdr = 0;
@@ -486,8 +328,8 @@ impl State {
         let mut rej = 0;
 
         for action_id in actions.iter() {
-            info!("Epoch {}: processing action {}", new_epoch, action_id);
-            match self.process_one_proposal(new_epoch, &action_id) {
+            info!("Epoch {}: processing action {}", new_block.epoch, action_id);
+            match self.process_one_proposal(new_block.epoch, &voting_state, &action_id) {
                 Err(e) => error!("Error processing governance {action_id}: {e}"),
                 Ok(None) => (),
                 Ok(Some(out)) if out.accepted => {
@@ -517,16 +359,16 @@ impl State {
         }
 
         info!(
-            "Epoch {new_epoch}: total {} actions, {ens} enacts, {wdr} withdrawals, {rej} rejected",
-            output.outcomes.len()
+            "Epoch {} ({}): {}, total {} actions, {ens} enacts, {wdr} withdrawals, {rej} rejected",
+            voting_state, new_block.epoch, new_block.era, output.outcomes.len()
         );
-        return output;
+        return Ok(output);
     }
 
     async fn log_stats(&self) {
         info!("props: {}, props_with_id: {}, votes: {}, stored proposal procedures: {}, drep stake msgs (size): {} ({})",
             self.proposal_count, self.action_proposal_count, self.votes_count, self.proposals.len(),
-            self.drep_stake_messages_count, self.drep_stake.len()
+            self.drep_stake_messages_count, self.drep_stake.len(),
         );
 
         for (action_id, procedure) in self.votes.iter() {
@@ -539,7 +381,7 @@ impl State {
         }
     }
 
-    async fn send(&self, block: &BlockInfo, message: GovernanceOutcomesMessage) -> Result<()> {
+    pub async fn send(&self, block: &BlockInfo, message: GovernanceOutcomesMessage) -> Result<()> {
         let packed_message = Arc::new(Message::Cardano((
             block.clone(),
             CardanoMessage::GovernanceOutcomes(message),
