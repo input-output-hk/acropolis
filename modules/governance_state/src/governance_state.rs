@@ -3,16 +3,17 @@
 
 use acropolis_common::{
     messages::{
-        CardanoMessage, DRepStakeDistributionMessage, SPOStakeDistributionMessage,
-        GovernanceProceduresMessage, Message, ProtocolParamsMessage, RESTResponse,
+        CardanoMessage, DRepStakeDistributionMessage, GovernanceProceduresMessage, Message,
+        ProtocolParamsMessage, RESTResponse, SPOStakeDistributionMessage,
     },
     rest_helper::{handle_rest, handle_rest_with_parameter},
-    BlockInfo, GovActionId,
+    serialization::ToBech32WithHrp,
+    Anchor, BlockInfo, GovActionId, GovernanceAction, VotingProcedure,
 };
 use anyhow::{anyhow, Result};
 use caryatid_sdk::{message_bus::Subscription, module, Context, Module};
 use config::Config;
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 use tokio::sync::Mutex;
 use tracing::{error, info};
 
@@ -133,6 +134,28 @@ impl GovernanceState {
             config.enact_state_topic.clone(),
         )));
 
+        // Ticker to log stats
+        let state_tick = state.clone();
+        let mut subscription = context.subscribe("clock.tick").await?;
+        context.run(async move {
+            loop {
+                let Ok((_, message)) = subscription.read().await else {
+                    return;
+                };
+                if let Message::Clock(message) = message.as_ref() {
+                    if (message.number % 60) == 0 {
+                        state_tick
+                            .lock()
+                            .await
+                            .tick()
+                            .await
+                            .inspect_err(|e| error!("Tick error: {e}"))
+                            .ok();
+                    }
+                }
+            }
+        });
+
         // Handle REST requests for /governance-state/list
         let state_handle_list = state.clone();
         handle_rest(
@@ -173,27 +196,54 @@ impl GovernanceState {
                         Err(e) => {
                             return Ok(RESTResponse::with_text(
                                 400,
-                                &format!("Invalid Bech32 governance proposal: {param_string}. Error: {e}"),
+                                &format!(
+                            "Invalid Bech32 governance proposal: {param_string}. Error: {e}"
+                        ),
                             ));
                         }
                     };
 
                     let locked = state.lock().await;
                     match locked.get_proposal(&proposal_id) {
-                        Some(proposal) => match serde_json::to_string(&proposal) {
-                            Ok(json) => Ok(RESTResponse::with_json(200, &json)),
-                            Err(e) => Ok(RESTResponse::with_text(
-                                500,
-                                &format!("Serialization error: {:?}", e),
-                            )),
-                        },
+                        Some(proposal) => {
+                            #[derive(serde::Serialize)]
+                            struct ProposalProcedureRest {
+                                deposit: u64,
+                                reward_account: String,
+                                gov_action_id: String,
+                                gov_action: GovernanceAction,
+                                anchor: Anchor,
+                            }
+
+                            let hrp = match proposal.reward_account.first() {
+                                Some(0xe0) => "stake_test",
+                                Some(0xe1) => "stake",
+                                _ => "stake",
+                            };
+
+                            let proposal_rest = ProposalProcedureRest {
+                                deposit: proposal.deposit,
+                                reward_account: proposal.reward_account.to_bech32_with_hrp(hrp),
+                                gov_action_id: proposal.gov_action_id.to_bech32(),
+                                gov_action: proposal.gov_action.clone(),
+                                anchor: proposal.anchor.clone(),
+                            };
+
+                            match serde_json::to_string(&proposal_rest) {
+                                Ok(json) => Ok(RESTResponse::with_json(200, &json)),
+                                Err(e) => Ok(RESTResponse::with_text(
+                                    500,
+                                    &format!("Serialization error: {:?}", e),
+                                )),
+                            }
+                        }
                         None => Ok(RESTResponse::with_text(404, "Proposal not found")),
                     }
                 }
             },
         );
 
-        // Handle REST requests for /governance-state/proposal/<proposal_id>/votes
+        // Handle REST requests for /governance-state/proposal/<Bech32_GovActionId>/votes
         let state_handle_proposal_votes = state.clone();
         handle_rest_with_parameter(
             context.clone(),
@@ -214,35 +264,41 @@ impl GovernanceState {
 
                     let locked = state.lock().await;
                     match locked.get_proposal_votes(&proposal_id) {
-                        Ok(votes) => match serde_json::to_string(&votes) {
-                            Ok(json) => Ok(RESTResponse::with_json(200, &json)),
-                            Err(e) => Ok(RESTResponse::with_text(
-                                500,
-                                &format!("Serialization error: {:?}", e),
-                            )),
-                        },
+                        Ok(votes) => {
+                            #[derive(serde::Serialize)]
+                            struct VoteRest {
+                                transaction: String,
+                                voting_procedure: VotingProcedure,
+                            }
+
+                            let mut votes_map = BTreeMap::new();
+
+                            for (voter, (data_hash, voting_proc)) in votes {
+                                let voter_bech32 = voter.to_string();
+                                let transaction_hex = hex::encode(data_hash);
+
+                                votes_map.insert(
+                                    voter_bech32,
+                                    VoteRest {
+                                        transaction: transaction_hex,
+                                        voting_procedure: voting_proc,
+                                    },
+                                );
+                            }
+
+                            match serde_json::to_string(&votes_map) {
+                                Ok(json) => Ok(RESTResponse::with_json(200, &json)),
+                                Err(e) => Ok(RESTResponse::with_text(
+                                    500,
+                                    &format!("Serialization error: {:?}", e),
+                                )),
+                            }
+                        }
                         Err(e) => Ok(RESTResponse::with_text(404, &e.to_string())),
                     }
                 }
             },
         );
-
-        // Ticker to log stats
-        let state_tick = state.clone();
-        let mut subscription = context.subscribe("clock.tick").await?;
-        context.run(async move {
-            loop {
-                let Ok((_, message)) = subscription.read().await else {
-                    return;
-                };
-                if let Message::Clock(message) = message.as_ref() {
-                    if (message.number % 60) == 0 {
-                        state_tick.lock().await.tick().await
-                            .inspect_err(|e| error!("Tick error: {e}")).ok();
-                    }
-                }
-            }
-        });
 
         loop {
             let (blk_g, gov_procs) = Self::read_governance(&mut governance_s).await?;
@@ -280,11 +336,16 @@ impl GovernanceState {
 
                     let (blk_spo, d_spo) = Self::read_spo(&mut spo_s).await?;
                     if blk_g != blk_spo {
-                        error!("Governance {blk_g:?} and SPO distribution {blk_spo:?} are out of sync");
+                        error!(
+                            "Governance {blk_g:?} and SPO distribution {blk_spo:?} are out of sync"
+                        );
                     }
 
-                    if blk_spo.epoch != d_spo.epoch+1 {
-                        error!("SPO distibution {blk_spo:?} != SPO epoch + 1 ({})", d_spo.epoch);
+                    if blk_spo.epoch != d_spo.epoch + 1 {
+                        error!(
+                            "SPO distibution {blk_spo:?} != SPO epoch + 1 ({})",
+                            d_spo.epoch
+                        );
                     }
 
                     state.lock().await.handle_drep_stake(&d_drep, &d_spo).await?
