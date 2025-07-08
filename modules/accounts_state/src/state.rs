@@ -511,24 +511,28 @@ impl State {
                     };
 
                     // Add to this one
-                    Self::update_value_with_delta(&mut sas.rewards, *value)
-                        .with_context(|| format!("Updating stake {}", hex::encode(&hash)))?;
-
-                    // Immutably update it
-                    self.stake_addresses = self.stake_addresses.update(hash.clone(), sas);
+                    if let Err(e) = Self::update_value_with_delta(&mut sas.rewards, *value) {
+                        error!("Updating stake {}: {e}", hex::encode(&hash));
+                    } else {
+                        // Immutably update it
+                        self.stake_addresses = self.stake_addresses.update(hash.clone(), sas);
+                    }
 
                     // Update the source
-                    Self::update_value_with_delta(source, -*value)
-                        .with_context(|| format!("Updating {source_name}"))?;
+                    if let Err(e) = Self::update_value_with_delta(source, -*value) {
+                        error!("Updating {source_name}: {e}");
+                    }
                 }
             }
 
             InstantaneousRewardTarget::OtherAccountingPot(value) => {
                 // Transfer between pots
-                Self::update_value_with_delta(source, -(*value as i64))
-                    .with_context(|| format!("Updating {source_name}"))?;
-                Self::update_value_with_delta(other, *value as i64)
-                    .with_context(|| format!("Updating {other_name}"))?;
+                if let Err(e) = Self::update_value_with_delta(source, -(*value as i64)) {
+                    error!("Updating {source_name}: {e}");
+                }
+                if let Err(e) = Self::update_value_with_delta(other, *value as i64) {
+                    error!("Updating {other_name}: {e}");
+                }
             }
         }
 
@@ -622,17 +626,19 @@ impl State {
             // Get old stake address state - which must exist
             let mut sas = match self.stake_addresses.get(hash) {
                 Some(sas) => sas.clone(),
-                None => bail!(
-                    "Unknown stake address in withdrawal: {:?}",
-                    withdrawal.address
-                ),
+                None => {
+                    error!("Unknown stake address in withdrawal: {:?}", withdrawal.address);
+                    continue;
+                }
             };
 
             // Zero withdrawals are expected, as a way to validate stake addresses (per Pi)
             if withdrawal.value != 0 {
-                Self::update_value_with_delta(&mut sas.rewards, -(withdrawal.value as i64))
-                    .with_context(|| format!("Withdrawing from stake address {}",
-                                             hex::encode(hash)))?;
+                if let Err(e) = Self::update_value_with_delta(&mut sas.rewards,
+                                                              -(withdrawal.value as i64)) {
+                    error!("Withdrawing from stake address {}: {e}", hex::encode(hash));
+                    continue;
+                }
 
                 // Immutably create or update the stake address
                 self.stake_addresses = self.stake_addresses.update(hash.to_vec(), sas);
@@ -651,13 +657,11 @@ impl State {
                 Pot::Deposits => &mut self.pots.deposits,
             };
 
-            Self::update_value_with_delta(pot, pot_delta.delta)
-                .with_context(|| format!("Applying pot delta {pot_delta:?}"))?;
-
-            info!(
-                "Pot delta for {:?} {} => {}",
-                pot_delta.pot, pot_delta.delta, *pot
-            );
+            if let Err(e) = Self::update_value_with_delta(pot, pot_delta.delta) {
+                error!("Applying pot delta {pot_delta:?}: {e}");
+            } else {
+                info!("Pot delta for {:?} {} => {}", pot_delta.pot, pot_delta.delta, *pot);
+            }
         }
 
         Ok(())
@@ -677,8 +681,10 @@ impl State {
                 None => StakeAddressState::default(),
             };
 
-            Self::update_value_with_delta(&mut sas.utxo_value, delta.delta)
-                .with_context(|| format!("Updating stake {}", hex::encode(hash)))?;
+            if let Err(e) = Self::update_value_with_delta(&mut sas.utxo_value, delta.delta) {
+                error!("Updating stake address {}: {e}", hex::encode(hash));
+                continue;
+            }
 
             // Immutably create or update the stake address
             self.stake_addresses = self.stake_addresses.update(hash.to_vec(), sas);
