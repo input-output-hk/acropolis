@@ -2,8 +2,10 @@
 //! Accepts certificate events and derives the SPO state in memory
 
 use acropolis_common::{
-    messages::{CardanoMessage, Message, RESTResponse, SnapshotDumpMessage, SnapshotMessage,
-    SnapshotStateMessage},
+    messages::{
+        CardanoMessage, Message, RESTResponse, SnapshotDumpMessage, SnapshotMessage,
+        SnapshotStateMessage,
+    },
     rest_helper::{handle_rest, handle_rest_with_parameter},
 };
 use anyhow::Result;
@@ -153,7 +155,7 @@ impl SPOState {
         let handle_topic_single = format!("{handle_topic}.*");
         let state_handle_single = state.clone();
         handle_rest_with_parameter(context.clone(), &handle_topic_single, move |param| {
-            let param = param.to_string();
+            let param = param[0].to_string();
             let state = state_handle_single.clone();
             async move {
                 let pool_id = match hex::decode(param) {
