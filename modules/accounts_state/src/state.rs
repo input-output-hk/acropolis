@@ -16,7 +16,7 @@ use rayon::prelude::*;
 use serde_with::{hex::Hex, serde_as};
 use std::collections::BTreeMap;
 use std::sync::{atomic::AtomicU64, Arc};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 /// State of an individual stake address
 #[serde_as]
@@ -200,7 +200,7 @@ impl State {
                     // !TODO count rewards for this block
                 }
 
-                None => error!(
+                None => debug!(
                     "VRF vkey {} not found in SPO map",
                     hex::encode(vrf_vkey_hash)
                 ),
@@ -363,7 +363,7 @@ impl State {
                 }
 
                 TxCertificate::MoveInstantaneousReward(mir) => {
-                    self.handle_mir(&mir).unwrap_or_else(|e| error!("MIR failed: {e:#}"));
+                    self.handle_mir(&mir).unwrap_or_else(|e| debug!("MIR failed: {e:#}"));
                 }
 
                 TxCertificate::StakeDelegation(delegation) => {
@@ -413,7 +413,7 @@ impl State {
                 ),
             };
 
-            info!(
+            debug!(
                 "Withdrawal of {} from stake key {}",
                 withdrawal.value,
                 hex::encode(hash)

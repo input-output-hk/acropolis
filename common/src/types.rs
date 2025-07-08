@@ -9,7 +9,7 @@ use bech32::{Bech32, Hrp};
 use bitmask_enum::bitmask;
 use chrono::{DateTime, Utc};
 use hex::decode;
-use serde::{Deserialize, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 use serde_with::{hex::Hex, serde_as};
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
@@ -604,7 +604,7 @@ pub struct ExUnitPrices {
 
 pub type UnitInterval = RationalNumber;
 
-#[derive(Debug, Default, Clone, PartialEq, Eq, Hash, serde::Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct GovActionId {
     pub transaction_id: DataHash,
     pub action_index: u8,
@@ -647,17 +647,6 @@ impl GovActionId {
 
         self.action_index = action_index as u8;
         Ok(self)
-    }
-}
-
-impl Serialize for GovActionId {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        // Convert GovActionId to Bech32 before serializing
-        let bech32_str = self.to_bech32();
-        serializer.serialize_str(&bech32_str)
     }
 }
 

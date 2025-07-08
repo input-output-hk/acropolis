@@ -125,7 +125,7 @@ impl UTXOState {
 
         // Handle REST requests for utxo.<tx_hash>:<index>
         handle_rest_with_parameter(context.clone(), &rest_topic, move |param| {
-            let param = param.to_string();
+            let param = param[0].to_string();
             let state = state.clone();
             async move {
                 // Parse "<tx_hash>:<index>"

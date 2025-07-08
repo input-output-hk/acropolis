@@ -14,7 +14,7 @@ use serde_json;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 mod drep_distribution_publisher;
 use drep_distribution_publisher::DRepDistributionPublisher;
@@ -144,7 +144,7 @@ impl AccountsState {
 
                     state
                         .handle_withdrawals(withdrawals_msg)
-                        .inspect_err(|e| error!("Withdrawals handling error: {e:#}"))
+                        .inspect_err(|e| debug!("Withdrawals handling error: {e:#}"))
                         .ok();
                 }
 
@@ -167,7 +167,7 @@ impl AccountsState {
 
                     state
                         .handle_stake_deltas(deltas_msg)
-                        .inspect_err(|e| error!("StakeAddressDeltas handling error: {e:#}"))
+                        .inspect_err(|e| debug!("StakeAddressDeltas handling error: {e:#}"))
                         .ok();
                 }
 
@@ -375,7 +375,7 @@ impl AccountsState {
         // Handle requests for single reward state based on stake address
         handle_rest_with_parameter(context.clone(), &handle_single_stake_topic, move |param| {
             let history = history_stake_single.clone();
-            let param = param.to_string();
+            let param = param[0].to_string();
 
             async move {
                 match Address::from_string(&param) {
@@ -474,10 +474,9 @@ impl AccountsState {
             }
         });
 
-        let drep_publisher = DRepDistributionPublisher::new(context.clone(),
-                                                            drep_distribution_topic);
-        let spo_publisher = SPODistributionPublisher::new(context.clone(),
-                                                          spo_distribution_topic);
+        let drep_publisher =
+            DRepDistributionPublisher::new(context.clone(), drep_distribution_topic);
+        let spo_publisher = SPODistributionPublisher::new(context.clone(), spo_distribution_topic);
 
         // Subscribe
         let spos_subscription = context.subscribe(&spo_state_topic).await?;

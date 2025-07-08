@@ -122,9 +122,10 @@ impl GovernanceState {
                 let state = state_handle_list.clone();
                 async move {
                     let locked = state.lock().await;
-                    let props = locked.list_proposals();
+                    let props_bech32: Vec<String> =
+                        locked.list_proposals().iter().map(|id| id.to_bech32()).collect();
 
-                    match serde_json::to_string(&props) {
+                    match serde_json::to_string(&props_bech32) {
                         Ok(json) => Ok(RESTResponse::with_json(200, &json)),
                         Err(e) => {
                             // Handle serialization error
@@ -145,14 +146,14 @@ impl GovernanceState {
             "rest.get.governance-state.proposal.*",
             move |param| {
                 let state = state_handle_proposal_info.clone();
-                let param_string = param.to_string();
+                let param_string = param[0].to_string();
                 async move {
                     let proposal_id = match GovActionId::from_bech32(&param_string) {
                         Ok(id) => id,
                         Err(e) => {
                             return Ok(RESTResponse::with_text(
                                 400,
-                                &format!("Invalid Bech32 proposal_id: {e:?}"),
+                                &format!("Invalid Bech32 governance proposal: {param_string}. Error: {e}"),
                             ));
                         }
                     };
@@ -179,14 +180,14 @@ impl GovernanceState {
             "rest.get.governance-state.proposal.*.votes",
             move |param| {
                 let state = state_handle_proposal_votes.clone();
-                let param_string = param.to_string();
+                let param_string = param[0].to_string();
                 async move {
                     let proposal_id = match GovActionId::from_bech32(&param_string) {
                         Ok(id) => id,
                         Err(e) => {
                             return Ok(RESTResponse::with_text(
                                 400,
-                                &format!("Invalid Bech32 proposal_id: {e:?}"),
+                                &format!("Invalid Bech32 governance proposal: {param_string}. Error: {e}"),
                             ));
                         }
                     };
