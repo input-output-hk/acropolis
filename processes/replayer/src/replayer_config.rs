@@ -1,4 +1,4 @@
-use config::{Config, Environment, File};
+use config::Config;
 use std::sync::Arc;
 use tracing::info;
 
