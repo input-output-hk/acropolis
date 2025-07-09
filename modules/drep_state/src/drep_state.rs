@@ -1,12 +1,12 @@
 //! Acropolis DRep State module for Caryatid
 //! Accepts certificate events and derives the DRep State in memory
 
-use acropolis_common::messages::{DRepStateMessage, RESTResponse};
 use acropolis_common::{
-    messages::{CardanoMessage, Message},
-    DRepCredential,
+    messages::{CardanoMessage, DRepStateMessage, Message, RESTResponse},
+    rest_helper::{handle_rest, handle_rest_with_parameter},
+    Credential,
 };
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use caryatid_sdk::{module, Context, Module};
 use config::Config;
 use std::sync::Arc;
@@ -28,36 +28,6 @@ const DEFAULT_DREP_STATE_TOPIC: &str = "cardano.drep.state";
     description = "In-memory DRep State from certificate events"
 )]
 pub struct DRepState;
-
-fn decode_rest_drep_credential(id: &str) -> Result<DRepCredential> {
-    if let Some(stripped) = id.strip_prefix("script=") {
-        Ok(DRepCredential::ScriptHash(hex::decode(stripped)?))
-    } else if let Some(stripped) = id.strip_prefix("address=") {
-        Ok(DRepCredential::AddrKeyHash(hex::decode(stripped)?))
-    } else {
-        Err(anyhow!("Poorly formed url, 'script=<hex key hash>' or 'address=<hex key hash>' DRep credential should be provided"))
-    }
-}
-
-fn perform_rest_request(state: &State, path: &str) -> Result<String> {
-    let request = match path.rfind('/') {
-        None => return Err(anyhow!("Poorly formed url, '/' expected.")),
-        Some(suffix_start) => &path[suffix_start + 1..],
-    };
-
-    if request == "list" {
-        Ok(format!("DRep list: {:?}", state.list()))
-    } else {
-        let cred = decode_rest_drep_credential(request)?;
-        match state.get_drep(&cred) {
-            Some(drep) => Ok(format!(
-                "DRep {:?}: deposit={}, anchor={:?}",
-                cred, drep.deposit, drep.anchor
-            )),
-            None => Ok(format!("No DRep {:?}", cred)),
-        }
-    }
-}
 
 impl DRepState {
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
@@ -117,37 +87,72 @@ impl DRepState {
             }
         });
 
-        // Handle requests for single DRep state
-        let state2 = state.clone();
-        context.handle(&handle_topic, move |message: Arc<Message>| {
-            let state = state2.clone();
+        // Handle REST requests for /drep-state/list
+        let state_list = state.clone();
+        handle_rest(context.clone(), "rest.get.drep-state.list", move || {
+            let state = state_list.clone();
             async move {
-                let response = match message.as_ref() {
-                    Message::RESTRequest(request) => {
-                        info!("REST received {} {}", request.method, request.path);
-                        let state = state.lock().await;
+                let locked = state.lock().await;
 
-                        match perform_rest_request(&state, &request.path) {
-                            Ok(response) => RESTResponse::with_text(200, &response),
-                            Err(error) => {
-                                error!("DRep REST request error: {error:?}");
-                                RESTResponse::with_text(400, &format!("{error:?}"))
-                            }
-                        }
-                    }
-                    _ => {
-                        error!("Unexpected message type: {message:?}");
-                        RESTResponse::with_text(500, &format!("Unexpected message type"))
-                    }
-                };
+                let drep_list_bech32 = locked
+                    .list()
+                    .iter()
+                    .map(|cred| cred.to_drep_bech32())
+                    .collect::<Result<Vec<_>, _>>();
 
-                Arc::new(Message::RESTResponse(response))
+                match drep_list_bech32 {
+                    Ok(list) => match serde_json::to_string(&list) {
+                        Ok(json) => Ok(RESTResponse::with_json(200, &json)),
+                        Err(e) => Ok(RESTResponse::with_text(
+                            500,
+                            &format!("Serialization error: {e}"),
+                        )),
+                    },
+                    Err(e) => Ok(RESTResponse::with_text(
+                        500,
+                        &format!("Bech32 encoding error: {e}"),
+                    )),
+                }
             }
         });
 
+        // Handle REST requests for /drep-state/drep/<Bech32_DRepCredential>
+        let state_single = state.clone();
+        handle_rest_with_parameter(
+            context.clone(),
+            "rest.get.drep-state.drep.*",
+            move |param| {
+                let state = state_single.clone();
+                let cred_str = param[0].to_string();
+                async move {
+                    let cred = match Credential::from_drep_bech32(&cred_str) {
+                        Ok(c) => c,
+                        Err(e) => {
+                            return Ok(RESTResponse::with_text(
+                                400,
+                                &format!("Invalid credential: {cred_str}. Error: {e}"),
+                            ));
+                        }
+                    };
+
+                    let locked = state.lock().await;
+                    match locked.get_drep(&cred) {
+                        Some(drep_record) => match serde_json::to_string(drep_record) {
+                            Ok(json) => Ok(RESTResponse::with_json(200, &json)),
+                            Err(e) => Ok(RESTResponse::with_text(
+                                500,
+                                &format!("Serialization error: {e}"),
+                            )),
+                        },
+                        None => Ok(RESTResponse::with_text(404, "DRep not found")),
+                    }
+                }
+            },
+        );
+
         // Ticker to log stats
         let mut subscription = context.subscribe(&subscribe_topic).await?;
-        let state3 = state.clone();
+        let state2 = state.clone();
         context.run(async move {
             loop {
                 let Ok((_, message)) = subscription.read().await else {
@@ -155,7 +160,7 @@ impl DRepState {
                 };
                 if let Message::Clock(message) = message.as_ref() {
                     if (message.number % 60) == 0 {
-                        state3
+                        state2
                             .lock()
                             .await
                             .tick()

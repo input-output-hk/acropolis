@@ -41,7 +41,7 @@ impl From<Era> for u8 {
             Era::Mary => 3,
             Era::Alonzo => 4,
             Era::Babbage => 5,
-            Era::Conway => 6
+            Era::Conway => 6,
         }
     }
 }
@@ -57,7 +57,7 @@ impl TryFrom<u8> for Era {
             4 => Ok(Era::Alonzo),
             5 => Ok(Era::Babbage),
             6 => Ok(Era::Conway),
-            n => bail!("Impossilbe era {n}")
+            n => bail!("Impossilbe era {n}"),
         }
     }
 }
@@ -267,6 +267,40 @@ impl Credential {
             Self::ScriptHash(hash) => hash,
         }
         .clone()
+    }
+
+    pub fn from_drep_bech32(bech32_str: &str) -> Result<Self, anyhow::Error> {
+        let (hrp, data) = bech32::decode(bech32_str)?;
+        if data.len() != 28 {
+            return Err(anyhow!(
+                "Invalid payload length for DRep Bech32, expected 28 bytes, got {}",
+                data.len()
+            ));
+        }
+
+        let hash: KeyHash = data;
+
+        match hrp.as_str() {
+            "drep" => Ok(Credential::AddrKeyHash(hash)),
+            "drep_script" => Ok(Credential::ScriptHash(hash)),
+            _ => Err(anyhow!(
+                "Invalid HRP for DRep Bech32, expected 'drep' or 'drep_script', got '{}'",
+                hrp
+            )),
+        }
+    }
+
+    pub fn to_drep_bech32(&self) -> Result<String, anyhow::Error> {
+        let hrp = Hrp::parse(match self {
+            Credential::AddrKeyHash(_) => "drep",
+            Credential::ScriptHash(_) => "drep_script",
+        })
+        .map_err(|e| anyhow!("Bech32 HRP parse error: {e}"))?;
+
+        let data = self.get_hash();
+
+        bech32::encode::<Bech32>(hrp, data.as_slice())
+            .map_err(|e| anyhow!("Bech32 encoding error: {e}"))
     }
 }
 
@@ -1278,9 +1312,18 @@ mod tests {
 
         for ei in 0..=6 {
             for ej in 0..=6 {
-                assert_eq!(Era::try_from(ei).unwrap() < Era::try_from(ej).unwrap(), ei < ej);
-                assert_eq!(Era::try_from(ei).unwrap() > Era::try_from(ej).unwrap(), ei > ej);
-                assert_eq!(Era::try_from(ei).unwrap() == Era::try_from(ej).unwrap(), ei == ej);
+                assert_eq!(
+                    Era::try_from(ei).unwrap() < Era::try_from(ej).unwrap(),
+                    ei < ej
+                );
+                assert_eq!(
+                    Era::try_from(ei).unwrap() > Era::try_from(ej).unwrap(),
+                    ei > ej
+                );
+                assert_eq!(
+                    Era::try_from(ei).unwrap() == Era::try_from(ej).unwrap(),
+                    ei == ej
+                );
             }
         }
 
