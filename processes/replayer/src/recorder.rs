@@ -1,7 +1,7 @@
 //! Governance recorder module
 
-use anyhow::{anyhow, Error, Result};
-use caryatid_sdk::{module, Context, MessageBounds, Module, Subscription};
+use anyhow::{anyhow, Result};
+use caryatid_sdk::{module, Context, Module, Subscription};
 use acropolis_common::{BlockInfo, 
     messages::{
         Message, CardanoMessage, GovernanceProceduresMessage,
@@ -9,9 +9,7 @@ use acropolis_common::{BlockInfo,
     }
 };
 use config::Config;
-use std::fs::{File, read_to_string};
-use std::io::Write;
-use std::sync::Arc;
+use std::{fs::File, io::Write, sync::Arc};
 use tracing::{error, info};
 
 use crate::replayer_config::ReplayerConfig;

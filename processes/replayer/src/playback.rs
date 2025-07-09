@@ -1,7 +1,7 @@
 //! Caryatid Playback module
 
-use anyhow::{anyhow, bail, ensure, Error, Result};
-use caryatid_sdk::{module, Context, MessageBounds, Module};
+use anyhow::{anyhow, bail, ensure, Result};
+use caryatid_sdk::{module, Context, Module};
 use acropolis_common::{
     messages::{
         CardanoMessage, GovernanceProceduresMessage, 
@@ -13,9 +13,9 @@ use acropolis_common::{
 use config::Config;
 use std::collections::HashMap;
 use std::fs::read_to_string;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
-use tracing::{error, info};
+use tracing::info;
 
 use crate::replayer_config::ReplayerConfig;
 
@@ -132,7 +132,7 @@ impl PlaybackRunner {
 
     async fn send_message(&self, topic: &str, blk: &BlockInfo, msg: &CardanoMessage) -> Result<()> {
         let msg = Arc::new(Message::Cardano((blk.clone(), msg.clone())));
-        //debug!("Publishing {msg:?} to {topic}");
+        //info!("Publishing {msg:?} to {topic}");
         self.context.message_bus.publish(topic, msg).await
     }
 
@@ -197,7 +197,13 @@ impl PlaybackRunner {
             bail!("First replay block should be with number 1 instead of {prev_blk:?}")
         }
 
+        let mut granularity = 0;
         while let Some(pending_blk) = self.get_earliest_available_block() {
+            if granularity % 100 == 0 {
+                self.dump_state();
+                granularity += 1;
+            }
+
             for curr_block_num in prev_blk.number .. pending_blk.number {
                 let cur_blk = Self::gen_block_info(curr_block_num, &prev_blk, &pending_blk)?;
                 self.send_messages_to_all(&cur_blk).await?;
@@ -205,7 +211,6 @@ impl PlaybackRunner {
 
             self.send_messages_to_all(&pending_blk).await?;
             self.step_forward(&pending_blk)?;
-            self.dump_state();
 
             prev_blk = pending_blk;
         }
