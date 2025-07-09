@@ -234,27 +234,38 @@ impl State {
                   "Pool {}", hex::encode(spo.operator.clone()));
 
             // Subtract fixed costs
-            let margin = (&pool_rewards
-                          * BigDecimal::from(spo.margin.numerator)  // TODO should be RationalNumber
-                          / BigDecimal::from(spo.margin.denominator))
-                .with_scale(0);
-            let costs = BigDecimal::from(spo.cost) + margin;
-            let remainder = pool_rewards - &costs;
+            let fixed_cost = BigDecimal::from(spo.cost);
+            if pool_rewards <= fixed_cost {
+                // No margin or pledge reward if under cost - all goes to SPO
+                spo_earnings.insert(spo.reward_account.clone(),
+                                    pool_rewards.to_u64()
+                                    .ok_or(anyhow!("Non-integral pool rewards"))?);
+            } else {
+                // Enough left over for some margin split
+                let margin = ((&pool_rewards - &fixed_cost)
+                              * BigDecimal::from(spo.margin.numerator)  // TODO use RationalNumber
+                              / BigDecimal::from(spo.margin.denominator))
+                    .with_scale(0);
+                let costs = fixed_cost + margin;
+                let remainder = pool_rewards - &costs;
 
-            // Calculate the SPOs reward from their own pledge, too
-            let pledge_reward = (&remainder * BigDecimal::from(spo.pledge) / pool_stake)
-                .with_scale(0);
-            let spo_benefit = (costs + &pledge_reward)
-                .to_u64()
-                .ok_or(anyhow!("Non-integral costs"))?;
-            spo_earnings.insert(spo.reward_account.clone(), spo_benefit);
+                // TODO: Double check this against ledger spec p.61
 
-            // Keep remainder by SPO id
-            let to_delegators = (remainder - pledge_reward).to_u64()
-                .ok_or(anyhow!("Non-integral remainder"))?;
+                // Calculate the SPOs reward from their own pledge, too
+                let pledge_reward = (&remainder * BigDecimal::from(spo.pledge) / pool_stake)
+                    .with_scale(0);
+                let spo_benefit = (costs + &pledge_reward)
+                    .to_u64()
+                    .ok_or(anyhow!("Non-integral costs"))?;
+                spo_earnings.insert(spo.reward_account.clone(), spo_benefit);
 
-            spo_stake_and_rewards.insert(spo.operator.clone(),
-                                         (pool_stake_u64, to_delegators));
+                // Keep remainder by SPO id
+                let to_delegators = (&remainder - &pledge_reward).to_u64().ok_or(
+                    anyhow!("Non-integral remainder {remainder} or pledge_reward {pledge_reward}"))?;
+
+                spo_stake_and_rewards.insert(spo.operator.clone(),
+                                             (pool_stake_u64, to_delegators));
+            }
         }
 
         // Pay the SPOs from reserves
@@ -272,26 +283,24 @@ impl State {
             .for_each(|(key, sas)| {
                 if let Some(spo_id) = &sas.delegated_spo {
                     // Look up the SPO in the rewards map
-                    match spo_stake_and_rewards.get(spo_id) {
-                        Some((total_stake, rewards)) => {
-                            // Calculate proportion of total stake this delegator has
-                            let proportion = BigDecimal::from(sas.rewards)
-                                / BigDecimal::from(total_stake);
+                    // May be absent if they didn't meet their costs
+                    if let Some((total_stake, rewards)) = spo_stake_and_rewards.get(spo_id) {
+                        // Calculate proportion of total stake this delegator has
+                        let proportion = BigDecimal::from(sas.rewards)
+                            / BigDecimal::from(total_stake);
 
-                            // and hence how much of the total reward they get
-                            let reward = BigDecimal::from(rewards) * proportion;
-                            let to_pay = reward.with_scale(0).to_u64().unwrap_or(0);
+                        // and hence how much of the total reward they get
+                        let reward = BigDecimal::from(rewards) * proportion;
+                        let to_pay = reward.with_scale(0).to_u64().unwrap_or(0);
 
-                            // Transfer from reserves to this account
-                            // TODO this seems inefficient and stems from the fact that we
-                            // can't get a mutable entry.  Maybe indicate replacing imbl::OrdMap
-                            // with a simpler map and managing rollbacks manually
-                            let mut new_sas = sas.clone();
-                            new_sas.rewards += to_pay;
-                            new_stake_addresses = new_stake_addresses.update(key.clone(), new_sas);
-                            self.pots.reserves -= to_pay;
-                        }
-                        None => error!("SPO ID {} not found in rewards map", hex::encode(spo_id))
+                        // Transfer from reserves to this account
+                        // TODO this seems inefficient and stems from the fact that we
+                        // can't get a mutable entry.  Maybe indicate replacing imbl::OrdMap
+                        // with a simpler map and managing rollbacks manually
+                        let mut new_sas = sas.clone();
+                        new_sas.rewards += to_pay;
+                        new_stake_addresses = new_stake_addresses.update(key.clone(), new_sas);
+                        self.pots.reserves -= to_pay;
                     }
                 }
             });
