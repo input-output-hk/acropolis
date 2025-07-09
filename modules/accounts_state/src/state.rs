@@ -628,24 +628,22 @@ impl State {
             let hash = withdrawal.address.get_hash();
 
             // Get old stake address state - which must exist
-            let mut sas = match self.stake_addresses.get(hash) {
-                Some(sas) => sas.clone(),
-                None => {
-                    error!("Unknown stake address in withdrawal: {:?}", withdrawal.address);
-                    continue;
-                }
-            };
+            if let Some(sas) = self.stake_addresses.get(hash) {
 
-            // Zero withdrawals are expected, as a way to validate stake addresses (per Pi)
-            if withdrawal.value != 0 {
-                if let Err(e) = Self::update_value_with_delta(&mut sas.rewards,
-                                                              -(withdrawal.value as i64)) {
-                    error!("Withdrawing from stake address {}: {e}", hex::encode(hash));
-                    continue;
-                }
+                // Zero withdrawals are expected, as a way to validate stake addresses (per Pi)
+                if withdrawal.value != 0 {
+                    let mut sas = sas.clone();
+                    if let Err(e) = Self::update_value_with_delta(&mut sas.rewards,
+                                                                  -(withdrawal.value as i64)) {
+                        error!("Withdrawing from stake address {}: {e}", hex::encode(hash));
+                        continue;
+                    }
 
-                // Immutably create or update the stake address
-                self.stake_addresses = self.stake_addresses.update(hash.to_vec(), sas);
+                    // Immutably create or update the stake address
+                    self.stake_addresses = self.stake_addresses.update(hash.to_vec(), sas);
+                }
+            } else {
+                error!("Unknown stake address in withdrawal: {:?}", withdrawal.address);
             }
         }
 
