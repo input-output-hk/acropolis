@@ -56,7 +56,11 @@ impl Playback {
         let cfg = ReplayerConfig::new(&config);
         let mut playback_runner = PlaybackRunner::new(context, cfg);
 
-        playback_runner.run().await
+        tokio::spawn(async move {
+            playback_runner.run().await
+        });
+
+        Ok(())
     }
 }
 
@@ -137,8 +141,8 @@ impl PlaybackRunner {
     }
 
     async fn send_messages_to_all(&self, curr_blk: &BlockInfo) -> Result<()> {
-        for (topic, _prefix, epoch_bound, _skip_zero) in self.topics.iter() {
-            if !epoch_bound || curr_blk.new_epoch {
+        for (topic, _prefix, epoch_bound, skip_zero) in self.topics.iter() {
+            if (!skip_zero || curr_blk.epoch != 0) && (!epoch_bound || curr_blk.new_epoch) {
                 let msg = match self.next.get(topic) {
                     Some((blk,msg)) if blk == curr_blk => msg.clone(),
 
@@ -199,10 +203,10 @@ impl PlaybackRunner {
 
         let mut granularity = 0;
         while let Some(pending_blk) = self.get_earliest_available_block() {
-            if granularity % 100 == 0 {
+            //if granularity % 100 == 0 {
                 self.dump_state();
-                granularity += 1;
-            }
+            //    granularity += 1;
+            //}
 
             for curr_block_num in prev_blk.number .. pending_blk.number {
                 let cur_blk = Self::gen_block_info(curr_block_num, &prev_blk, &pending_blk)?;
