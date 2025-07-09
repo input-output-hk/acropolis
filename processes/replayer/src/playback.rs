@@ -203,10 +203,10 @@ impl PlaybackRunner {
 
         let mut granularity = 0;
         while let Some(pending_blk) = self.get_earliest_available_block() {
-            //if granularity % 100 == 0 {
+            if granularity % 100 == 0 {
                 self.dump_state();
-            //    granularity += 1;
-            //}
+                granularity += 1;
+            }
 
             for curr_block_num in prev_blk.number .. pending_blk.number {
                 let cur_blk = Self::gen_block_info(curr_block_num, &prev_blk, &pending_blk)?;
