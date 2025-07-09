@@ -103,6 +103,7 @@ impl PlaybackRunner {
             Err(error) => bail!("Failed to read file {filename:?}: {error}. Aborting playback")
         };
 
+        self.current_file.insert(topic.clone(), num+1);
         self.next.insert(topic, (id, message.clone()));
         Ok(Some(message))
     }
@@ -131,7 +132,7 @@ impl PlaybackRunner {
 
     async fn send_message(&self, topic: &str, blk: &BlockInfo, msg: &CardanoMessage) -> Result<()> {
         let msg = Arc::new(Message::Cardano((blk.clone(), msg.clone())));
-        info!("Publishing {msg:?} to {topic}");
+        //debug!("Publishing {msg:?} to {topic}");
         self.context.message_bus.publish(topic, msg).await
     }
 
@@ -171,6 +172,13 @@ impl PlaybackRunner {
         Ok(())
     }
 
+    fn dump_state(&self) {
+        let stats = self.next.iter().map(
+                |(topic, (blk, _msg))| format!("{topic}: {}:{}  ", blk.epoch, blk.number)
+            ).collect::<String>();
+        info!("Current replay state: {stats}");
+    }
+
     async fn run(&mut self) -> Result<()> {
         // Initializing message status
         for (topic, prefix, _epoch_bound, _skip_zero) in self.topics.clone().iter() {
@@ -197,6 +205,7 @@ impl PlaybackRunner {
 
             self.send_messages_to_all(&pending_blk).await?;
             self.step_forward(&pending_blk)?;
+            self.dump_state();
 
             prev_blk = pending_blk;
         }
