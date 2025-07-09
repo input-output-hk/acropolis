@@ -165,18 +165,21 @@ impl GovernanceState {
                 let state = state_handle_list.clone();
                 async move {
                     let locked = state.lock().await;
-                    let props_bech32: Vec<String> =
+                    let props_bech32: Result<Vec<String>, anyhow::Error> =
                         locked.list_proposals().iter().map(|id| id.to_bech32()).collect();
 
-                    match serde_json::to_string(&props_bech32) {
-                        Ok(json) => Ok(RESTResponse::with_json(200, &json)),
-                        Err(e) => {
-                            // Handle serialization error
-                            Ok(RESTResponse::with_text(
+                    match props_bech32 {
+                        Ok(vec) => match serde_json::to_string(&vec) {
+                            Ok(json) => Ok(RESTResponse::with_json(200, &json)),
+                            Err(e) => Ok(RESTResponse::with_text(
                                 500,
                                 &format!("Serialization error: {:?}", e),
-                            ))
-                        }
+                            )),
+                        },
+                        Err(e) => Ok(RESTResponse::with_text(
+                            500,
+                            &format!("Bech32 conversion error: {:?}", e),
+                        )),
                     }
                 }
             },
@@ -221,10 +224,33 @@ impl GovernanceState {
                                 _ => "stake",
                             };
 
+                            let reward_account_bech32 = match proposal
+                                .reward_account
+                                .to_bech32_with_hrp(hrp)
+                            {
+                                Ok(val) => val,
+                                Err(e) => {
+                                    return Ok(RESTResponse::with_text(
+                                        500,
+                                        &format!("Bech32 encoding error for reward_account: {e}"),
+                                    ));
+                                }
+                            };
+
+                            let gov_action_id_bech32 = match proposal.gov_action_id.to_bech32() {
+                                Ok(val) => val,
+                                Err(e) => {
+                                    return Ok(RESTResponse::with_text(
+                                        500,
+                                        &format!("Bech32 encoding error for gov_action_id: {e}"),
+                                    ));
+                                }
+                            };
+
                             let proposal_rest = ProposalProcedureRest {
                                 deposit: proposal.deposit,
-                                reward_account: proposal.reward_account.to_bech32_with_hrp(hrp),
-                                gov_action_id: proposal.gov_action_id.to_bech32(),
+                                reward_account: reward_account_bech32,
+                                gov_action_id: gov_action_id_bech32,
                                 gov_action: proposal.gov_action.clone(),
                                 anchor: proposal.anchor.clone(),
                             };
