@@ -54,10 +54,10 @@ impl PlaybackRunner {
 impl Playback {
     async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         let cfg = ReplayerConfig::new(&config);
-        let mut playback_runner = PlaybackRunner::new(context, cfg);
+        let mut playback_runner = PlaybackRunner::new(context.clone(), cfg);
 
-        tokio::spawn(async move {
-            playback_runner.run().await
+        context.run(async move {
+                playback_runner.run().await
         });
 
         Ok(())
