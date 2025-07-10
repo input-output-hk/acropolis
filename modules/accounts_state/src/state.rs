@@ -19,6 +19,8 @@ use tracing::{debug, error, info, warn};
 use bigdecimal::{BigDecimal, ToPrimitive, Zero, One};
 use std::cmp::min;
 
+const DEFAULT_POOL_DEPOSIT: u64 = 500_000_000;
+
 /// State of an individual stake address
 #[serde_as]
 #[derive(Debug, Default, Clone, serde::Serialize)]
@@ -267,8 +269,7 @@ impl State {
 
         // Pay the SPOs from reserves
         spo_earnings.into_iter().for_each(|(reward_account, reward)| {
-            self.add_to_reward(&reward_account, reward)
-                .unwrap_or_else(|e| error!("Can't update SPO reward account: {e}"));
+            self.add_to_reward(&reward_account, reward);
             self.pots.reserves -= reward;
         });
 
@@ -301,7 +302,7 @@ impl State {
     }
 
     /// Add a reward to a reward account
-    fn add_to_reward(&mut self, account: &RewardAccount, amount: Lovelace) -> Result<()> {
+    fn add_to_reward(&mut self, account: &RewardAccount, amount: Lovelace) {
         // Get old stake address state, or create one
         let mut stake_addresses = self.stake_addresses.lock().unwrap();
         let sas = stake_addresses.entry(account.clone()).or_default();
@@ -309,8 +310,6 @@ impl State {
         if let Err(e) = Self::update_value_with_delta(&mut sas.rewards, amount as i64) {
             error!("Updating stake {}: {e}", hex::encode(account));
         }
-
-        Ok(())
     }
 
     /// Derive the Stake Pool Delegation Distribution (SPDD) - a map of total stake value
@@ -438,13 +437,52 @@ impl State {
     pub fn handle_spo_state(&mut self, spo_msg: &SPOStateMessage) -> Result<()> {
 
         // Capture current SPOs, mapped by operator ID
-        self.spos = spo_msg
+        let new_spos: OrdMap<_, _> = spo_msg
             .spos
             .iter()
             .cloned()
             .map(|spo| (spo.operator.clone(), spo))
             .collect();
 
+        // Get pool deposit amount from parameters, or default
+        let deposit = self.protocol_parameters
+            .as_ref()
+            .and_then(|pp| pp.shelley.as_ref())
+            .map(|sp| sp.protocol_params.pool_deposit)
+            .unwrap_or(DEFAULT_POOL_DEPOSIT);
+
+        // Check for how many new SPOs
+        let new_count = new_spos
+            .keys()
+            .filter(|id| !self.spos.contains_key(*id))
+            .count();
+
+        // They've each paid their deposit, so increment that (the UTXO spend is taken
+        // care of in UTXOState)
+        let total_deposits = (new_count as u64) * deposit;
+        self.pots.deposits += total_deposits;
+        info!("{new_count} new SPOs, total new deposits {total_deposits}");
+
+        // Check for any SPOs that have retired and need deposit refunds
+        let mut refunds: Vec<RewardAccount> = Vec::new();
+        for (key, old_spo) in self.spos.iter() {
+            if !new_spos.contains_key(key) {
+                info!("SPO {} has retired - refunding their deposit to {}",
+                      hex::encode(key), hex::encode(&old_spo.reward_account));
+                refunds.push(old_spo.reward_account.clone());
+            }
+        }
+
+        // TODO - if their reward account has been deregistered, it goes to Treasury
+        // TODO - wipe any delegations to retired pools
+
+        // Send them their deposits back
+        for reward_account in refunds.iter() {
+            self.add_to_reward(&reward_account, deposit);
+            self.pots.deposits -= deposit;
+        }
+
+        self.spos = new_spos;
         Ok(())
     }
 

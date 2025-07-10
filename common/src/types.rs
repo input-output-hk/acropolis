@@ -373,7 +373,7 @@ pub struct PoolRegistration {
     /// Reward account
     #[serde_as(as = "Hex")]
     #[n(5)]
-    pub reward_account: Vec<u8>,
+    pub reward_account: RewardAccount,
 
     /// Pool owners by their key hash
     #[serde_as(as = "Vec<Hex>")]
