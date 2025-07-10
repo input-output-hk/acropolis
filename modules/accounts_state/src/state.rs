@@ -6,7 +6,7 @@ use acropolis_common::{
     },
     DRepChoice, DRepCredential, InstantaneousRewardSource, InstantaneousRewardTarget, KeyHash,
     Lovelace, MoveInstantaneousReward, PoolRegistration, Pot, ProtocolParams, RewardAccount,
-    StakeCredential, TxCertificate,
+    StakeAddress, StakeCredential, TxCertificate,
 };
 use anyhow::{bail, anyhow, Context, Result};
 use dashmap::DashMap;
@@ -464,12 +464,18 @@ impl State {
         info!("{new_count} new SPOs, total new deposits {total_deposits}");
 
         // Check for any SPOs that have retired and need deposit refunds
-        let mut refunds: Vec<RewardAccount> = Vec::new();
-        for (key, old_spo) in self.spos.iter() {
-            if !new_spos.contains_key(key) {
-                info!("SPO {} has retired - refunding their deposit to {}",
-                      hex::encode(key), hex::encode(&old_spo.reward_account));
-                refunds.push(old_spo.reward_account.clone());
+        let mut refunds: Vec<KeyHash> = Vec::new();
+        for (id, old_spo) in self.spos.iter() {
+            if !new_spos.contains_key(id) {
+                match StakeAddress::from_binary(&old_spo.reward_account) {
+                    Ok(stake_address) => {
+                        let keyhash = stake_address.get_hash();
+                        info!("SPO {} has retired - refunding their deposit to {}",
+                              hex::encode(id), hex::encode(keyhash));
+                        refunds.push(keyhash.to_vec());
+                    }
+                    Err(e) => error!("Error repaying SPO deposit: {e}")
+                }
             }
         }
 
@@ -477,8 +483,8 @@ impl State {
         // TODO - wipe any delegations to retired pools
 
         // Send them their deposits back
-        for reward_account in refunds.iter() {
-            self.add_to_reward(&reward_account, deposit);
+        for keyhash in refunds.iter() {
+            self.add_to_reward(&keyhash, deposit);
             self.pots.deposits -= deposit;
         }
 
