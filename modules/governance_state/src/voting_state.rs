@@ -8,9 +8,22 @@ use anyhow::Result;
 
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct VotingRegistrationState {
+    /// Total stake in all SPOs. This parameter is used for Hard Fork initiation voting,
+    /// see CIP-1694:
+    /// ... The SPO vote threshold which must be met as a certain threshold of the total 
+    /// active voting stake, excepting Hard Fork Governance Actions. Due to the need for 
+    /// robust consensus around Hard Fork initiations, these votes must be met as a percentage 
+    /// of the stake held by all stake pools. 
     total_spos: u64,
+
+    /// Total stake in active voting SPOs stake
     registered_spos: u64,
+
+    /// Total stake in registered DReps.
     registered_dreps: u64,
+
+    /// Number of committee members (0 is treated as no committee; that is, no valid committee
+    /// vote can pass if this value is 0).
     committee_size: u64,
 }
 
