@@ -4,26 +4,36 @@ use acropolis_common::messages::Message;
 use anyhow::Result;
 use caryatid_process::Process;
 use caryatid_sdk::ModuleRegistry;
-use config::{Config, Environment, File};
 use std::{env, sync::Arc};
 use tracing::info;
 use tracing_subscriber;
+use config::{Config, Environment, File};
 
 // External modules
+use acropolis_module_accounts_state::AccountsState;
 use acropolis_module_block_unpacker::BlockUnpacker;
+use acropolis_module_drep_state::DRepState;
+use acropolis_module_epoch_activity_counter::EpochActivityCounter;
 use acropolis_module_genesis_bootstrapper::GenesisBootstrapper;
+use acropolis_module_governance_state::GovernanceState;
 use acropolis_module_mithril_snapshot_fetcher::MithrilSnapshotFetcher;
+use acropolis_module_parameters_state::ParametersState;
+use acropolis_module_spo_state::SPOState;
+use acropolis_module_stake_delta_filter::StakeDeltaFilter;
 use acropolis_module_tx_unpacker::TxUnpacker;
 use acropolis_module_upstream_chain_fetcher::UpstreamChainFetcher;
-//use acropolis_module_utxo_state::UTXOState;
-use acropolis_module_drep_state::DRepState;
-use acropolis_module_governance_state::GovernanceState;
-use acropolis_module_spo_state::SPOState;
+use acropolis_module_utxo_state::UTXOState;
 
 use caryatid_module_clock::Clock;
-use caryatid_module_playback::Playback;
 use caryatid_module_rest_server::RESTServer;
 use caryatid_module_spy::Spy;
+
+mod playback;
+mod recorder;
+mod replayer_config;
+
+use playback::Playback;
+use recorder::Recorder;
 
 fn setup_governance_collect(process: &mut dyn ModuleRegistry<Message>) {
     GenesisBootstrapper::register(process);
@@ -31,6 +41,16 @@ fn setup_governance_collect(process: &mut dyn ModuleRegistry<Message>) {
     UpstreamChainFetcher::register(process);
     BlockUnpacker::register(process);
     TxUnpacker::register(process);
+    UTXOState::register(process);
+    SPOState::register(process);
+    DRepState::register(process);
+    GovernanceState::register(process);
+    ParametersState::register(process);
+    StakeDeltaFilter::register(process);
+    EpochActivityCounter::register(process);
+    AccountsState::register(process);
+
+    Recorder::register(process);
 
     Clock::<Message>::register(process);
     RESTServer::<Message>::register(process);
@@ -38,14 +58,11 @@ fn setup_governance_collect(process: &mut dyn ModuleRegistry<Message>) {
 }
 
 fn setup_governance_replay(process: &mut dyn ModuleRegistry<Message>) {
-    GenesisBootstrapper::register(process);
-
-    TxUnpacker::register(process);
-    SPOState::register(process);
-    DRepState::register(process);
+    //TxUnpacker::register(process);
     GovernanceState::register(process);
+    ParametersState::register(process);
 
-    Playback::<Message>::register(process);
+    Playback::register(process);
 
     Clock::<Message>::register(process);
     RESTServer::<Message>::register(process);
