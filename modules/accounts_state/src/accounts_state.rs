@@ -349,34 +349,18 @@ impl AccountsState {
 
         // Create history
         let history = Arc::new(Mutex::new(StateHistory::<State>::new("AccountsState")));
-        let history_stake = history.clone();
         let history_stake_single = history.clone();
         let history_spdd = history.clone();
         let history_pots = history.clone();
         let history_drdd = history.clone();
         let history_tick = history.clone();
 
-        // Handle requests for full state
-        handle_rest(context.clone(), &handle_stake_topic, move || {
-            let history = history_stake.clone();
-            async move {
-                if let Some(state) = history.lock().await.current().clone() {
-                    match serde_json::to_string(state) {
-                        Ok(body) => Ok(RESTResponse::with_json(200, &body)),
-                        Err(error) => Err(anyhow!("{:?}", error)),
-                    }
-                } else {
-                    Ok(RESTResponse::with_json(200, "{}"))
-                }
-            }
-        });
-
         let handle_single_stake_topic = handle_stake_topic + ".*";
 
         // Handle requests for single reward state based on stake address
         handle_rest_with_parameter(context.clone(), &handle_single_stake_topic, move |param| {
             let history = history_stake_single.clone();
-            let param = param.to_string();
+            let param = param[0].to_string();
 
             async move {
                 match Address::from_string(&param) {
@@ -393,7 +377,10 @@ impl AccountsState {
                         },
                         None => Err(anyhow!("No state")),
                     },
-                    _ => Ok(RESTResponse::with_text(400, "Not a stake address")),
+                    _ => Ok(RESTResponse::with_text(
+                        400,
+                        &format!("Not a stake address. Provided address: {}", param),
+                    )),
                 }
             }
         });
@@ -475,10 +462,9 @@ impl AccountsState {
             }
         });
 
-        let drep_publisher = DRepDistributionPublisher::new(context.clone(),
-                                                            drep_distribution_topic);
-        let spo_publisher = SPODistributionPublisher::new(context.clone(),
-                                                          spo_distribution_topic);
+        let drep_publisher =
+            DRepDistributionPublisher::new(context.clone(), drep_distribution_topic);
+        let spo_publisher = SPODistributionPublisher::new(context.clone(), spo_distribution_topic);
 
         // Subscribe
         let spos_subscription = context.subscribe(&spo_state_topic).await?;
