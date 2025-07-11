@@ -20,7 +20,7 @@ use parameters_updater::ParametersUpdater;
 use state::State;
 
 const DEFAULT_ENACT_STATE_TOPIC: (&str, &str) = ("enact-state-topic", "cardano.enact.state");
-const DEFAULT_HANDLE_TOPIC: (&str, &str) = ("handle-topic", "rest.get.governance-state.*");
+const DEFAULT_HANDLE_TOPIC: (&str, &str) = ("handle-topic", "rest.get.parameters-state.*");
 const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: (&str, &str) =
     ("publish-parameters-topic", "cardano.protocol.parameters");
 const DEFAULT_NETWORK_NAME: (&str, &str) = ("network-name", "mainnet");
