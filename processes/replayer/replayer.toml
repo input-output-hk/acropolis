@@ -1,6 +1,10 @@
 # Top-level configuration for Acropolis omnibus process
 
-[module.playback]
+[module.gov-playback]
+topic = "cardano.governance"
+path = "governance-logs"
+
+[module.gov-recorder]
 topic = "cardano.governance"
 path = "governance-logs"
 
@@ -19,10 +23,11 @@ magic-number = 764824073
 [module.block-unpacker]
 
 [module.tx-unpacker]
-#publish-utxo-deltas-topic = "cardano.utxo.deltas"
-#publish-certificates-topic = "cardano.certificates"
+publish-utxo-deltas-topic = "cardano.utxo.deltas"
+publish-withdrawals-topic = "cardano.withdrawals"
+publish-certificates-topic = "cardano.certificates"
 publish-governance-topic = "cardano.governance"
-governance-logs-dir = "governance-logs"
+publish-fees-topic = "cardano.block.fees"
 
 [module.utxo-state]
 store = "memory" # "memory", "dashmap", "fjall", "fjall-async", "sled", "sled-async", "fake"
@@ -34,6 +39,16 @@ address-delta-topic = "cardano.address.delta"
 
 [module.governance-state]
 subscribe-topic = "cardano.governance"
+
+[module.parameters-state]
+
+[module.stake-delta-filter]
+cache-mode = "predefined" # "predefined", "read", "write", "write-if-absent"
+write-full-cache = "false"
+
+[module.epoch-activity-counter]
+
+[module.accounts-state]
 
 [module.clock]
 
