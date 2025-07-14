@@ -21,7 +21,7 @@ tags:
     description: Endpoints related to UTxO state.
 
 paths:
-  /stake/{stake_address}:
+  /accounts/info/{stake_address}:
     get:
       tags:
         - Accounts
@@ -251,11 +251,11 @@ paths:
               schema:
                 type: string
                 example: "Internal server error while retrieving DReps"
-  /dreps/{drep_id}:
+  /dreps/info/{drep_id}:
     get:
       tags:
         - DReps
-      summary: Specific DRep
+      summary: Specific DRep info
       description: Returns information about a specific DRep.
       parameters:
         - in: path
@@ -344,11 +344,11 @@ paths:
               schema:
                 type: string
                 example: "Internal server error while retrieving governance list"
-  /governance/{proposal_id}:
+  /governance/info/{proposal_id}:
     get:
       tags:
         - Governance
-      summary: Specific proposal
+      summary: Specific proposal info
       description: Returns information about a specific active proposal.
       parameters:
       - in: path
@@ -426,7 +426,7 @@ paths:
               schema:
                 type: string
                 example: "Internal server error while retrieving proposal"
-  /governance/{proposal_id}/votes:
+  /governance/votes/{proposal_id}:
     get:
       tags:
         - Governance
@@ -559,11 +559,11 @@ paths:
               schema:
                 type: string
                 example: "Internal server error while retrieving stake pools"            
-  /pools/{pool_id}:
+  /pools/info/{pool_id}:
     get:
       tags:
         - Pools
-      summary: Specific stake pool
+      summary: Specific pool info
       description: Returns information about a specific stake pool.
       parameters:
       - in: path
@@ -753,4 +753,4 @@ paths:
             text/plain:
               schema:
                 type: string
-                example: "Internal server error while retrieving UTxO"                 
+                example: "Internal server error while retrieving UTxO"
