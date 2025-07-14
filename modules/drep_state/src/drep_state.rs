@@ -2,9 +2,8 @@
 //! Accepts certificate events and derives the DRep State in memory
 
 use acropolis_common::{
-    messages::{CardanoMessage, DRepStateMessage, Message, RESTResponse},
+    messages::{CardanoMessage, DRepStateMessage, Message},
     rest_helper::{handle_rest, handle_rest_with_parameter},
-    Credential,
 };
 use anyhow::Result;
 use caryatid_sdk::{module, Context, Module};
@@ -13,12 +12,14 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info};
 
+mod rest;
+use rest::{handle_drep, handle_list};
 mod state;
-
 use state::State;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.certificates";
-const DEFAULT_HANDLE_TOPIC: &str = "rest.get.drep-state.*";
+const LIST_HANDLE_TOPIC: (&str, &str) = ("handle-topic-drep-list", "rest.get.dreps.list");
+const DREP_HANDLE_TOPIC: (&str, &str) = ("handle-topic-drep-single", "rest.get.dreps.info.*");
 const DEFAULT_DREP_STATE_TOPIC: &str = "cardano.drep.state";
 
 /// DRep State module
@@ -36,9 +37,13 @@ impl DRepState {
             config.get_string("subscribe-topic").unwrap_or(DEFAULT_SUBSCRIBE_TOPIC.to_string());
         info!("Creating subscriber on '{subscribe_topic}'");
 
-        let handle_topic =
-            config.get_string("handle-topic").unwrap_or(DEFAULT_HANDLE_TOPIC.to_string());
-        info!("Creating request handler on '{handle_topic}'");
+        let handle_list_topic =
+            config.get_string(LIST_HANDLE_TOPIC.0).unwrap_or(LIST_HANDLE_TOPIC.1.to_string());
+        info!("Creating request handler on '{}'", handle_list_topic);
+
+        let handle_drep_topic =
+            config.get_string(DREP_HANDLE_TOPIC.0).unwrap_or(DREP_HANDLE_TOPIC.1.to_string());
+        info!("Creating request handler on '{}'", handle_drep_topic);
 
         let drep_state_topic = config
             .get_string("publish-drep-state-topic")
@@ -87,68 +92,16 @@ impl DRepState {
             }
         });
 
-        // Handle REST requests for /drep-state/list
         let state_list = state.clone();
-        handle_rest(context.clone(), "rest.get.drep-state.list", move || {
+        handle_rest(context.clone(), &handle_list_topic, move || {
             let state = state_list.clone();
-            async move {
-                let locked = state.lock().await;
-
-                let drep_list_bech32 = locked
-                    .list()
-                    .iter()
-                    .map(|cred| cred.to_drep_bech32())
-                    .collect::<Result<Vec<_>, _>>();
-
-                match drep_list_bech32 {
-                    Ok(list) => match serde_json::to_string(&list) {
-                        Ok(json) => Ok(RESTResponse::with_json(200, &json)),
-                        Err(e) => Ok(RESTResponse::with_text(
-                            500,
-                            &format!("Serialization error: {e}"),
-                        )),
-                    },
-                    Err(e) => Ok(RESTResponse::with_text(
-                        500,
-                        &format!("Bech32 encoding error: {e}"),
-                    )),
-                }
-            }
+            async move { Ok(handle_list(state).await) }
         });
 
-        // Handle REST requests for /drep-state/drep/<Bech32_DRepCredential>
         let state_single = state.clone();
-        handle_rest_with_parameter(
-            context.clone(),
-            "rest.get.drep-state.drep.*",
-            move |param| {
-                let state = state_single.clone();
-                let cred_str = param[0].to_string();
-                async move {
-                    let cred = match Credential::from_drep_bech32(&cred_str) {
-                        Ok(c) => c,
-                        Err(e) => {
-                            return Ok(RESTResponse::with_text(
-                                400,
-                                &format!("Invalid credential: {cred_str}. Error: {e}"),
-                            ));
-                        }
-                    };
-
-                    let locked = state.lock().await;
-                    match locked.get_drep(&cred) {
-                        Some(drep_record) => match serde_json::to_string(drep_record) {
-                            Ok(json) => Ok(RESTResponse::with_json(200, &json)),
-                            Err(e) => Ok(RESTResponse::with_text(
-                                500,
-                                &format!("Serialization error: {e}"),
-                            )),
-                        },
-                        None => Ok(RESTResponse::with_text(404, "DRep not found")),
-                    }
-                }
-            },
-        );
+        handle_rest_with_parameter(context.clone(), &handle_drep_topic, move |param| {
+            handle_drep(state_single.clone(), param[0].to_string())
+        });
 
         // Ticker to log stats
         let mut subscription = context.subscribe(&subscribe_topic).await?;
