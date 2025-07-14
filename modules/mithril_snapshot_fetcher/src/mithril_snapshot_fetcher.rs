@@ -243,8 +243,6 @@ impl MithrilSnapshotFetcher {
                         raw: header.cbor().to_vec(),
                     };
 
-                    // We use Qos::Bulk to avoid swamping all the queues and blocking downstream
-                    // modules from sending their own messages
                     let header_message_enum = Message::Cardano((
                         block_info.clone(),
                         CardanoMessage::BlockHeader(header_message),

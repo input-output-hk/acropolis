@@ -4,7 +4,7 @@
 
 use crate::address::{Address, StakeAddress};
 use crate::rational_number::RationalNumber;
-use anyhow::{anyhow, bail, Error};
+use anyhow::{anyhow, bail, Error, Result};
 use bech32::{Bech32, Hrp};
 use bitmask_enum::bitmask;
 use chrono::{DateTime, Utc};
@@ -228,7 +228,7 @@ pub enum Credential {
 }
 
 impl Credential {
-    fn hex_string_to_hash(hex_str: &str) -> anyhow::Result<KeyHash> {
+    fn hex_string_to_hash(hex_str: &str) -> Result<KeyHash> {
         let key_hash = decode(hex_str.to_owned().into_bytes())?;
         if key_hash.len() != 28 {
             Err(anyhow!(
@@ -240,7 +240,7 @@ impl Credential {
         }
     }
 
-    pub fn from_json_string(credential: &str) -> anyhow::Result<Self> {
+    pub fn from_json_string(credential: &str) -> Result<Self> {
         if let Some(hash) = credential.strip_prefix("scriptHash-") {
             Ok(Credential::ScriptHash(Self::hex_string_to_hash(hash)?))
         } else if let Some(hash) = credential.strip_prefix("keyHash-") {
