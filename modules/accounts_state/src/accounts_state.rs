@@ -5,7 +5,7 @@ use acropolis_common::{
     messages::{CardanoMessage, Message, RESTResponse},
     rest_helper::{handle_rest, handle_rest_with_parameter},
     state_history::StateHistory,
-    Address, BlockInfo, BlockStatus, Lovelace, StakeAddress, StakeAddressPayload,
+    Address, BlockInfo, BlockStatus, DelegatedStake, Lovelace, StakeAddress, StakeAddressPayload,
 };
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{message_bus::Subscription, module, Context, Module};
@@ -391,8 +391,11 @@ impl AccountsState {
             async move {
                 if let Some(state) = history.lock().await.current() {
                     // Use hex for SPO ID
-                    let spdd: HashMap<String, u64> =
-                        state.generate_spdd().iter().map(|(k, v)| (hex::encode(k), *v)).collect();
+                    let spdd: HashMap<String, DelegatedStake> =
+                        state.generate_spdd()
+                        .iter()
+                        .map(|(k, ds)| (hex::encode(k), ds.clone()))
+                        .collect();
                     match serde_json::to_string(&spdd) {
                         Ok(body) => Ok(RESTResponse::with_json(200, &body)),
                         Err(error) => Err(anyhow!("{:?}", error)),

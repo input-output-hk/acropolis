@@ -147,7 +147,7 @@ pub struct SPOStakeDistributionMessage {
     pub epoch: u64,
 
     /// SPO stake distribution by operator ID
-    pub spos: Vec<(KeyHash, Lovelace)>,
+    pub spos: Vec<(KeyHash, DelegatedStake)>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
