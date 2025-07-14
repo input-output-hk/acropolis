@@ -3,26 +3,39 @@
 
 use acropolis_common::{
     messages::{
-        CardanoMessage, DRepStakeDistributionMessage, SPOStakeDistributionMessage,
-        GovernanceProceduresMessage, Message, ProtocolParamsMessage, RESTResponse,
+        CardanoMessage, DRepStakeDistributionMessage, GovernanceProceduresMessage, Message,
+        ProtocolParamsMessage, SPOStakeDistributionMessage,
     },
+    rest_helper::{handle_rest, handle_rest_with_parameter},
     BlockInfo,
 };
 use anyhow::{anyhow, Result};
 use caryatid_sdk::{message_bus::Subscription, module, Context, Module};
 use config::Config;
-use hex::ToHex;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info};
 
+mod rest;
+use rest::{handle_list, handle_proposal, handle_votes};
 mod state;
 mod voting_state;
 use state::State;
 use voting_state::VotingRegistrationState;
 
 const DEFAULT_SUBSCRIBE_TOPIC: (&str, &str) = ("subscribe-topic", "cardano.governance");
-const DEFAULT_HANDLE_TOPIC: (&str, &str) = ("handle-topic", "rest.get.governance-state.*");
+const LIST_HANDLE_TOPIC: (&str, &str) = (
+    "handle-topic-proposal-list",
+    "rest.get.governance-state.list",
+);
+const PROPOSAL_HANDLE_TOPIC: (&str, &str) = (
+    "handle-topic-proposal-info",
+    "rest.get.governance-state.proposal.*",
+);
+const VOTES_HANDLE_TOPIC: (&str, &str) = (
+    "handle-topic-proposal-votes",
+    "rest.get.governance-state.proposal.*.votes",
+);
 const DEFAULT_DREP_DISTRIBUTION_TOPIC: (&str, &str) =
     ("stake-drep-distribution-topic", "cardano.drep.distribution");
 const DEFAULT_SPO_DISTRIBUTION_TOPIC: (&str, &str) =
@@ -41,7 +54,9 @@ pub struct GovernanceState;
 
 pub struct GovernanceStateConfig {
     subscribe_topic: String,
-    handle_topic: String,
+    handle_topic_list: String,
+    handle_topic_proposal: String,
+    handle_topic_proposal_votes: String,
     drep_distribution_topic: String,
     spo_distribution_topic: String,
     protocol_parameters_topic: String,
@@ -58,45 +73,14 @@ impl GovernanceStateConfig {
     pub fn new(config: &Arc<Config>) -> Arc<Self> {
         Arc::new(Self {
             subscribe_topic: Self::conf(config, DEFAULT_SUBSCRIBE_TOPIC),
-            handle_topic: Self::conf(config, DEFAULT_HANDLE_TOPIC),
+            handle_topic_list: Self::conf(config, LIST_HANDLE_TOPIC),
+            handle_topic_proposal: Self::conf(config, PROPOSAL_HANDLE_TOPIC),
+            handle_topic_proposal_votes: Self::conf(config, VOTES_HANDLE_TOPIC),
             drep_distribution_topic: Self::conf(config, DEFAULT_DREP_DISTRIBUTION_TOPIC),
             spo_distribution_topic: Self::conf(config, DEFAULT_SPO_DISTRIBUTION_TOPIC),
             protocol_parameters_topic: Self::conf(config, DEFAULT_PROTOCOL_PARAMETERS_TOPIC),
             enact_state_topic: Self::conf(config, DEFAULT_ENACT_STATE_TOPIC),
         })
-    }
-}
-
-fn perform_rest_request(state: &State, path: &str) -> Result<String> {
-    let request = match path.rfind('/') {
-        None => return Err(anyhow!("Poorly formed url, '/' expected.")),
-        Some(suffix_start) => &path[suffix_start + 1..],
-    };
-
-    if request == "list" {
-        let mut list_votes = Vec::new();
-        let mut list_props = Vec::new();
-
-        for (a, p) in state.list_proposals()?.into_iter() {
-            list_props.push(format!("{}: {:?}", a, p));
-        }
-
-        for (a, v, tx, vp) in state.list_votes()?.into_iter() {
-            list_votes.push(format!(
-                "{}: {} at {} voted as {:?}",
-                a,
-                v,
-                tx.encode_hex::<String>(),
-                vp
-            ));
-        }
-
-        Ok(format!(
-            "Governance proposals list: {:?}\nGovernance votes list: {:?}",
-            list_props, list_votes
-        ))
-    } else {
-        Err(anyhow!("Invalid action specified."))
     }
 }
 
@@ -165,40 +149,9 @@ impl GovernanceState {
             context.clone(),
             config.enact_state_topic.clone(),
         )));
-        let state_handle = state.clone();
-        let state_tick = state.clone();
-
-        // REST requests handling
-        context.handle(
-            &config.clone().handle_topic,
-            move |message: Arc<Message>| {
-                let state = state_handle.clone();
-                async move {
-                    let response = match message.as_ref() {
-                        Message::RESTRequest(request) => {
-                            info!("REST received {} {}", request.method, request.path);
-                            let lock = state.lock().await;
-
-                            match perform_rest_request(&lock, &request.path) {
-                                Ok(response) => RESTResponse::with_text(200, &response),
-                                Err(error) => {
-                                    error!("Governance State REST request error: {error:?}");
-                                    RESTResponse::with_text(400, &format!("{error:?}"))
-                                }
-                            }
-                        }
-                        _ => {
-                            error!("Unexpected message type: {message:?}");
-                            RESTResponse::with_text(500, &format!("Unexpected message type"))
-                        }
-                    };
-
-                    Arc::new(Message::RESTResponse(response))
-                }
-            },
-        );
 
         // Ticker to log stats
+        let state_tick = state.clone();
         let mut subscription = context.subscribe("clock.tick").await?;
         context.run(async move {
             loop {
@@ -207,12 +160,36 @@ impl GovernanceState {
                 };
                 if let Message::Clock(message) = message.as_ref() {
                     if (message.number % 60) == 0 {
-                        state_tick.lock().await.tick().await
-                            .inspect_err(|e| error!("Tick error: {e}")).ok();
+                        state_tick
+                            .lock()
+                            .await
+                            .tick()
+                            .await
+                            .inspect_err(|e| error!("Tick error: {e}"))
+                            .ok();
                     }
                 }
             }
         });
+
+        let state_list = state.clone();
+        handle_rest(context.clone(), &config.handle_topic_list, move || {
+            handle_list(state_list.clone())
+        });
+
+        let state_proposal = state.clone();
+        handle_rest_with_parameter(
+            context.clone(),
+            &config.handle_topic_proposal,
+            move |param| handle_proposal(state_proposal.clone(), param[0].to_string()),
+        );
+
+        let state_votes = state.clone();
+        handle_rest_with_parameter(
+            context.clone(),
+            &config.handle_topic_proposal_votes,
+            move |param| handle_votes(state_votes.clone(), param[0].to_string()),
+        );
 
         loop {
             let (blk_g, gov_procs) = Self::read_governance(&mut governance_s).await?;
@@ -250,11 +227,16 @@ impl GovernanceState {
 
                     let (blk_spo, d_spo) = Self::read_spo(&mut spo_s).await?;
                     if blk_g != blk_spo {
-                        error!("Governance {blk_g:?} and SPO distribution {blk_spo:?} are out of sync");
+                        error!(
+                            "Governance {blk_g:?} and SPO distribution {blk_spo:?} are out of sync"
+                        );
                     }
 
-                    if blk_spo.epoch != d_spo.epoch+1 {
-                        error!("SPO distibution {blk_spo:?} != SPO epoch + 1 ({})", d_spo.epoch);
+                    if blk_spo.epoch != d_spo.epoch + 1 {
+                        error!(
+                            "SPO distibution {blk_spo:?} != SPO epoch + 1 ({})",
+                            d_spo.epoch
+                        );
                     }
 
                     state.lock().await.handle_drep_stake(&d_drep, &d_spo).await?

@@ -40,7 +40,7 @@ impl From<Era> for u8 {
             Era::Mary => 3,
             Era::Alonzo => 4,
             Era::Babbage => 5,
-            Era::Conway => 6
+            Era::Conway => 6,
         }
     }
 }
@@ -56,7 +56,7 @@ impl TryFrom<u8> for Era {
             4 => Ok(Era::Alonzo),
             5 => Ok(Era::Babbage),
             6 => Ok(Era::Conway),
-            n => bail!("Impossilbe era {n}")
+            n => bail!("Impossilbe era {n}"),
         }
     }
 }
@@ -638,13 +638,34 @@ pub struct GovActionId {
 }
 
 impl GovActionId {
-    pub fn to_bech32(&self) -> String {
+    pub fn to_bech32(&self) -> Result<String, anyhow::Error> {
         let mut buf = self.transaction_id.clone();
         buf.push(self.action_index);
 
-        let gov_action_hrp: Hrp = Hrp::parse("gov_action").unwrap();
-        bech32::encode::<Bech32>(gov_action_hrp, &buf)
-            .unwrap_or_else(|e| format!("Cannot convert {:?} to bech32: {e}", self.transaction_id))
+        let gov_action_hrp = Hrp::parse("gov_action")?;
+        let encoded = bech32::encode::<Bech32>(gov_action_hrp, &buf)
+            .map_err(|e| anyhow!("Bech32 encoding error: {e}"))?;
+        Ok(encoded)
+    }
+
+    pub fn from_bech32(bech32_str: &str) -> Result<Self, anyhow::Error> {
+        let (hrp, data) = bech32::decode(bech32_str)?;
+
+        if hrp != Hrp::parse("gov_action")? {
+            return Err(anyhow!("Invalid HRP, expected 'gov_action', got: {}", hrp));
+        }
+
+        if data.len() < 33 {
+            return Err(anyhow!("Invalid Bech32 governance action"));
+        }
+
+        let transaction_id: DataHash = data[..32].to_vec();
+        let action_index = data[32];
+
+        Ok(GovActionId {
+            transaction_id,
+            action_index,
+        })
     }
 
     pub fn set_action_index(&mut self, action_index: usize) -> Result<&Self, anyhow::Error> {
@@ -659,7 +680,13 @@ impl GovActionId {
 
 impl Display for GovActionId {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.to_bech32())
+        match self.to_bech32() {
+            Ok(s) => write!(f, "{}", s),
+            Err(e) => {
+                tracing::error!("GovActionId to_bech32 failed: {:?}", e);
+                write!(f, "<invalid-govactionid>")
+            }
+        }
     }
 }
 
@@ -1257,9 +1284,18 @@ mod tests {
 
         for ei in 0..=6 {
             for ej in 0..=6 {
-                assert_eq!(Era::try_from(ei).unwrap() < Era::try_from(ej).unwrap(), ei < ej);
-                assert_eq!(Era::try_from(ei).unwrap() > Era::try_from(ej).unwrap(), ei > ej);
-                assert_eq!(Era::try_from(ei).unwrap() == Era::try_from(ej).unwrap(), ei == ej);
+                assert_eq!(
+                    Era::try_from(ei).unwrap() < Era::try_from(ej).unwrap(),
+                    ei < ej
+                );
+                assert_eq!(
+                    Era::try_from(ei).unwrap() > Era::try_from(ej).unwrap(),
+                    ei > ej
+                );
+                assert_eq!(
+                    Era::try_from(ei).unwrap() == Era::try_from(ej).unwrap(),
+                    ei == ej
+                );
             }
         }
 
