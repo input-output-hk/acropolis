@@ -10,6 +10,7 @@ use chrono::{DateTime, Utc};
 use hex::decode;
 use serde::{Deserialize, Serialize};
 use serde_with::{hex::Hex, serde_as};
+use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 
@@ -99,6 +100,18 @@ pub struct BlockInfo {
 
     /// Protocol era
     pub era: Era,
+}
+
+impl Ord for BlockInfo {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.number.cmp(&other.number)
+    }
+}
+
+impl PartialOrd for BlockInfo {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 /// Individual address balance change
