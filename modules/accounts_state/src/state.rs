@@ -4,6 +4,7 @@ use acropolis_common::{
         DRepStateMessage, EpochActivityMessage, PotDeltasMessage, ProtocolParamsMessage,
         SPOStateMessage, StakeAddressDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
     },
+    rational_number::RationalNumber,
     DRepChoice, DRepCredential, InstantaneousRewardSource, InstantaneousRewardTarget, KeyHash,
     Lovelace, MoveInstantaneousReward, PoolRegistration, Pot, ProtocolParams, RewardAccount,
     StakeAddress, StakeCredential, TxCertificate,
@@ -189,6 +190,10 @@ impl State {
             // Look up SPO in block counts, by VRF key
             let block_count = spo_block_counts.get(&spo.vrf_key_hash).unwrap_or(&0);
 
+            // Actual blocks produced as proportion of epoch (Beta)
+            let relative_blocks = BigDecimal::from(*block_count as u64)
+                / BigDecimal::from(total_blocks as u64);
+
             // and in SPDD to get active stake (sigma)
             let pool_stake_u64 = *(spdd.get(&spo.operator).unwrap_or(&0));
             if pool_stake_u64 == 0 {
@@ -224,16 +229,20 @@ impl State {
                 )
             ).with_scale(0);
 
-            // TODO! account for decentralisation_param >= 0.8 => performance = 1
-            let relative_blocks = BigDecimal::from(*block_count as u64)        // Beta
-                / BigDecimal::from(total_blocks as u64);
-            let pool_performance = relative_blocks.clone() / relative_pool_stake.clone();
+            // If decentralisation_param >= 0.8 => performance = 1
+            // Shelley Delegation Spec 3.8.3
+            let decentralisation = &shelley_params.protocol_params.decentralisation_param;
+            let pool_performance = if decentralisation >= &RationalNumber::new(8,10) {
+                BigDecimal::one()
+            } else {
+                relative_blocks.clone() / relative_pool_stake.clone()
+            };
 
             // Get actual pool rewards
             let pool_rewards = (&optimum_rewards * &pool_performance).with_scale(0);
 
-            debug!(%relative_pool_stake, %relative_blocks, %pool_performance, %optimum_rewards,
-                   %pool_rewards,
+            debug!(%block_count, %pool_stake, %relative_pool_stake, %relative_blocks,
+                  %pool_performance, %optimum_rewards, %pool_rewards,
                    "Pool {}", hex::encode(spo.operator.clone()));
 
             // Subtract fixed costs
@@ -281,23 +290,28 @@ impl State {
         // including owners pledge
         let mut stake_addresses = self.stake_addresses.lock().unwrap();
         stake_addresses
-            .values_mut()
-            .for_each(|sas| {
+            .iter_mut()
+            .for_each(|(hash, sas)| {
                 if let Some(spo_id) = &sas.delegated_spo {
                     // Look up the SPO in the rewards map
                     // May be absent if they didn't meet their costs
                     if let Some((total_stake, rewards)) = spo_stake_and_rewards.get(spo_id) {
                         // Calculate proportion of total stake this delegator has
-                        let proportion = BigDecimal::from(sas.rewards)
-                            / BigDecimal::from(total_stake);
+                        let this_stake = BigDecimal::from(sas.utxo_value + sas.rewards);
+                        if !this_stake.is_zero() {
+                            let proportion = &this_stake / BigDecimal::from(total_stake);
 
-                        // and hence how much of the total reward they get
-                        let reward = BigDecimal::from(rewards) * proportion;
-                        let to_pay = reward.with_scale(0).to_u64().unwrap_or(0);
+                            // and hence how much of the total reward they get
+                            let reward = BigDecimal::from(rewards) * &proportion;
+                            let to_pay = reward.with_scale(0).to_u64().unwrap_or(0);
 
-                        // Transfer from reserves to this account
-                        sas.rewards += to_pay;
-                        self.pots.reserves -= to_pay;
+                            debug!("Reward stake {this_stake} -> proportion {proportion} of SPO rewards {rewards} -> {to_pay} to hash {}",
+                                   hex::encode(&hash));
+
+                            // Transfer from reserves to this account
+                            sas.rewards += to_pay;
+                            self.pots.reserves -= to_pay;
+                        }
                     }
                 }
             });
