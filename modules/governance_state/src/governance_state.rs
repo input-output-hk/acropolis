@@ -4,26 +4,38 @@
 use acropolis_common::{
     messages::{
         CardanoMessage, DRepStakeDistributionMessage, GovernanceProceduresMessage, Message,
-        ProtocolParamsMessage, RESTResponse, SPOStakeDistributionMessage,
+        ProtocolParamsMessage, SPOStakeDistributionMessage,
     },
     rest_helper::{handle_rest, handle_rest_with_parameter},
-    serialization::ToBech32WithHrp,
-    Anchor, BlockInfo, GovActionId, GovernanceAction, VotingProcedure,
+    BlockInfo,
 };
 use anyhow::{anyhow, Result};
 use caryatid_sdk::{message_bus::Subscription, module, Context, Module};
 use config::Config;
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info};
 
+mod rest;
+use rest::{handle_list, handle_proposal, handle_votes};
 mod state;
 mod voting_state;
 use state::State;
 use voting_state::VotingRegistrationState;
 
 const DEFAULT_SUBSCRIBE_TOPIC: (&str, &str) = ("subscribe-topic", "cardano.governance");
-const DEFAULT_HANDLE_TOPIC: (&str, &str) = ("handle-topic", "rest.get.governance-state.*");
+const LIST_HANDLE_TOPIC: (&str, &str) = (
+    "handle-topic-proposal-list",
+    "rest.get.governance-state.list",
+);
+const PROPOSAL_HANDLE_TOPIC: (&str, &str) = (
+    "handle-topic-proposal-info",
+    "rest.get.governance-state.proposal.*",
+);
+const VOTES_HANDLE_TOPIC: (&str, &str) = (
+    "handle-topic-proposal-votes",
+    "rest.get.governance-state.proposal.*.votes",
+);
 const DEFAULT_DREP_DISTRIBUTION_TOPIC: (&str, &str) =
     ("stake-drep-distribution-topic", "cardano.drep.distribution");
 const DEFAULT_SPO_DISTRIBUTION_TOPIC: (&str, &str) =
@@ -42,7 +54,9 @@ pub struct GovernanceState;
 
 pub struct GovernanceStateConfig {
     subscribe_topic: String,
-    _handle_topic: String,
+    handle_topic_list: String,
+    handle_topic_proposal: String,
+    handle_topic_proposal_votes: String,
     drep_distribution_topic: String,
     spo_distribution_topic: String,
     protocol_parameters_topic: String,
@@ -59,7 +73,9 @@ impl GovernanceStateConfig {
     pub fn new(config: &Arc<Config>) -> Arc<Self> {
         Arc::new(Self {
             subscribe_topic: Self::conf(config, DEFAULT_SUBSCRIBE_TOPIC),
-            _handle_topic: Self::conf(config, DEFAULT_HANDLE_TOPIC),
+            handle_topic_list: Self::conf(config, LIST_HANDLE_TOPIC),
+            handle_topic_proposal: Self::conf(config, PROPOSAL_HANDLE_TOPIC),
+            handle_topic_proposal_votes: Self::conf(config, VOTES_HANDLE_TOPIC),
             drep_distribution_topic: Self::conf(config, DEFAULT_DREP_DISTRIBUTION_TOPIC),
             spo_distribution_topic: Self::conf(config, DEFAULT_SPO_DISTRIBUTION_TOPIC),
             protocol_parameters_topic: Self::conf(config, DEFAULT_PROTOCOL_PARAMETERS_TOPIC),
@@ -156,148 +172,23 @@ impl GovernanceState {
             }
         });
 
-        // Handle REST requests for /governance-state/list
-        let state_handle_list = state.clone();
-        handle_rest(
-            context.clone(),
-            "rest.get.governance-state.list",
-            move || {
-                let state = state_handle_list.clone();
-                async move {
-                    let locked = state.lock().await;
-                    let props_bech32: Vec<String> =
-                        locked.list_proposals().iter().map(|id| id.to_bech32()).collect();
+        let state_list = state.clone();
+        handle_rest(context.clone(), &config.handle_topic_list, move || {
+            handle_list(state_list.clone())
+        });
 
-                    match serde_json::to_string(&props_bech32) {
-                        Ok(json) => Ok(RESTResponse::with_json(200, &json)),
-                        Err(e) => {
-                            // Handle serialization error
-                            Ok(RESTResponse::with_text(
-                                500,
-                                &format!("Serialization error: {:?}", e),
-                            ))
-                        }
-                    }
-                }
-            },
-        );
-
-        // Handle REST requests for /governance-state/proposal/<Bech32_GovActionId>
-        let state_handle_proposal_info = state.clone();
+        let state_proposal = state.clone();
         handle_rest_with_parameter(
             context.clone(),
-            "rest.get.governance-state.proposal.*",
-            move |param| {
-                let state = state_handle_proposal_info.clone();
-                let param_string = param[0].to_string();
-                async move {
-                    let proposal_id = match GovActionId::from_bech32(&param_string) {
-                        Ok(id) => id,
-                        Err(e) => {
-                            return Ok(RESTResponse::with_text(
-                                400,
-                                &format!(
-                            "Invalid Bech32 governance proposal: {param_string}. Error: {e}"
-                        ),
-                            ));
-                        }
-                    };
-
-                    let locked = state.lock().await;
-                    match locked.get_proposal(&proposal_id) {
-                        Some(proposal) => {
-                            #[derive(serde::Serialize)]
-                            struct ProposalProcedureRest {
-                                deposit: u64,
-                                reward_account: String,
-                                gov_action_id: String,
-                                gov_action: GovernanceAction,
-                                anchor: Anchor,
-                            }
-
-                            let hrp = match proposal.reward_account.first() {
-                                Some(0xe0) => "stake_test",
-                                Some(0xe1) => "stake",
-                                _ => "stake",
-                            };
-
-                            let proposal_rest = ProposalProcedureRest {
-                                deposit: proposal.deposit,
-                                reward_account: proposal.reward_account.to_bech32_with_hrp(hrp),
-                                gov_action_id: proposal.gov_action_id.to_bech32(),
-                                gov_action: proposal.gov_action.clone(),
-                                anchor: proposal.anchor.clone(),
-                            };
-
-                            match serde_json::to_string(&proposal_rest) {
-                                Ok(json) => Ok(RESTResponse::with_json(200, &json)),
-                                Err(e) => Ok(RESTResponse::with_text(
-                                    500,
-                                    &format!("Serialization error: {:?}", e),
-                                )),
-                            }
-                        }
-                        None => Ok(RESTResponse::with_text(404, "Proposal not found")),
-                    }
-                }
-            },
+            &config.handle_topic_proposal,
+            move |param| handle_proposal(state_proposal.clone(), param[0].to_string()),
         );
 
-        // Handle REST requests for /governance-state/proposal/<Bech32_GovActionId>/votes
-        let state_handle_proposal_votes = state.clone();
+        let state_votes = state.clone();
         handle_rest_with_parameter(
             context.clone(),
-            "rest.get.governance-state.proposal.*.votes",
-            move |param| {
-                let state = state_handle_proposal_votes.clone();
-                let param_string = param[0].to_string();
-                async move {
-                    let proposal_id = match GovActionId::from_bech32(&param_string) {
-                        Ok(id) => id,
-                        Err(e) => {
-                            return Ok(RESTResponse::with_text(
-                                400,
-                                &format!("Invalid Bech32 governance proposal: {param_string}. Error: {e}"),
-                            ));
-                        }
-                    };
-
-                    let locked = state.lock().await;
-                    match locked.get_proposal_votes(&proposal_id) {
-                        Ok(votes) => {
-                            #[derive(serde::Serialize)]
-                            struct VoteRest {
-                                transaction: String,
-                                voting_procedure: VotingProcedure,
-                            }
-
-                            let mut votes_map = BTreeMap::new();
-
-                            for (voter, (data_hash, voting_proc)) in votes {
-                                let voter_bech32 = voter.to_string();
-                                let transaction_hex = hex::encode(data_hash);
-
-                                votes_map.insert(
-                                    voter_bech32,
-                                    VoteRest {
-                                        transaction: transaction_hex,
-                                        voting_procedure: voting_proc,
-                                    },
-                                );
-                            }
-
-                            match serde_json::to_string(&votes_map) {
-                                Ok(json) => Ok(RESTResponse::with_json(200, &json)),
-                                Err(e) => Ok(RESTResponse::with_text(
-                                    500,
-                                    &format!("Serialization error: {:?}", e),
-                                )),
-                            }
-                        }
-                        Err(e) => Ok(RESTResponse::with_text(404, &e.to_string())),
-                    }
-                }
-            },
+            &config.handle_topic_proposal_votes,
+            move |param| handle_votes(state_votes.clone(), param[0].to_string()),
         );
 
         loop {

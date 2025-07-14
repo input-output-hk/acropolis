@@ -2,8 +2,7 @@
 // We don't use these types in the acropolis_common crate itself
 #![allow(dead_code)]
 
-use crate::address::{Address, StakeAddress};
-use crate::rational_number::RationalNumber;
+use crate::{address::{Address, StakeAddress}, rational_number::RationalNumber};
 use anyhow::{anyhow, bail, Error};
 use bech32::{Bech32, Hrp};
 use bitmask_enum::bitmask;
@@ -11,6 +10,7 @@ use chrono::{DateTime, Utc};
 use hex::decode;
 use serde::{Deserialize, Serialize};
 use serde_with::{hex::Hex, serde_as};
+use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 
@@ -100,6 +100,18 @@ pub struct BlockInfo {
 
     /// Protocol era
     pub era: Era,
+}
+
+impl Ord for BlockInfo {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.number.cmp(&other.number)
+    }
+}
+
+impl PartialOrd for BlockInfo {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 /// Individual address balance change
@@ -673,13 +685,14 @@ pub struct GovActionId {
 }
 
 impl GovActionId {
-    pub fn to_bech32(&self) -> String {
+    pub fn to_bech32(&self) -> Result<String, anyhow::Error> {
         let mut buf = self.transaction_id.clone();
         buf.push(self.action_index);
 
-        let gov_action_hrp: Hrp = Hrp::parse("gov_action").unwrap();
-        bech32::encode::<Bech32>(gov_action_hrp, &buf)
-            .unwrap_or_else(|e| format!("Cannot convert {:?} to bech32: {e}", self.transaction_id))
+        let gov_action_hrp = Hrp::parse("gov_action")?;
+        let encoded = bech32::encode::<Bech32>(gov_action_hrp, &buf)
+            .map_err(|e| anyhow!("Bech32 encoding error: {e}"))?;
+        Ok(encoded)
     }
 
     pub fn from_bech32(bech32_str: &str) -> Result<Self, anyhow::Error> {
@@ -714,7 +727,13 @@ impl GovActionId {
 
 impl Display for GovActionId {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.to_bech32())
+        match self.to_bech32() {
+            Ok(s) => write!(f, "{}", s),
+            Err(e) => {
+                tracing::error!("GovActionId to_bech32 failed: {:?}", e);
+                write!(f, "<invalid-govactionid>")
+            }
+        }
     }
 }
 
