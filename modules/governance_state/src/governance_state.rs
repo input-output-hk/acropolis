@@ -24,18 +24,11 @@ use state::State;
 use voting_state::VotingRegistrationState;
 
 const DEFAULT_SUBSCRIBE_TOPIC: (&str, &str) = ("subscribe-topic", "cardano.governance");
-const LIST_HANDLE_TOPIC: (&str, &str) = (
-    "handle-topic-proposal-list",
-    "rest.get.governance-state.list",
-);
-const PROPOSAL_HANDLE_TOPIC: (&str, &str) = (
-    "handle-topic-proposal-info",
-    "rest.get.governance-state.proposal.*",
-);
-const VOTES_HANDLE_TOPIC: (&str, &str) = (
-    "handle-topic-proposal-votes",
-    "rest.get.governance-state.proposal.*.votes",
-);
+const DEFAULT_LIST_TOPIC: (&str, &str) = ("handle-topic-proposal-list", "rest.get.governance.list");
+const DEFAULT_PROPOSAL_TOPIC: (&str, &str) =
+    ("handle-topic-proposal-info", "rest.get.governance.info.*");
+const DEFAULT_VOTES_TOPIC: (&str, &str) =
+    ("handle-topic-proposal-votes", "rest.get.governance.votes.*");
 const DEFAULT_DREP_DISTRIBUTION_TOPIC: (&str, &str) =
     ("stake-drep-distribution-topic", "cardano.drep.distribution");
 const DEFAULT_SPO_DISTRIBUTION_TOPIC: (&str, &str) =
@@ -73,9 +66,9 @@ impl GovernanceStateConfig {
     pub fn new(config: &Arc<Config>) -> Arc<Self> {
         Arc::new(Self {
             subscribe_topic: Self::conf(config, DEFAULT_SUBSCRIBE_TOPIC),
-            handle_topic_list: Self::conf(config, LIST_HANDLE_TOPIC),
-            handle_topic_proposal: Self::conf(config, PROPOSAL_HANDLE_TOPIC),
-            handle_topic_proposal_votes: Self::conf(config, VOTES_HANDLE_TOPIC),
+            handle_topic_list: Self::conf(config, DEFAULT_LIST_TOPIC),
+            handle_topic_proposal: Self::conf(config, DEFAULT_PROPOSAL_TOPIC),
+            handle_topic_proposal_votes: Self::conf(config, DEFAULT_VOTES_TOPIC),
             drep_distribution_topic: Self::conf(config, DEFAULT_DREP_DISTRIBUTION_TOPIC),
             spo_distribution_topic: Self::conf(config, DEFAULT_SPO_DISTRIBUTION_TOPIC),
             protocol_parameters_topic: Self::conf(config, DEFAULT_PROTOCOL_PARAMETERS_TOPIC),
