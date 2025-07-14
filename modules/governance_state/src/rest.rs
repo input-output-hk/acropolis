@@ -29,7 +29,7 @@ pub struct VoteRest {
     pub voting_procedure: VotingProcedure,
 }
 
-/// Handles /governance-state/list
+/// Handles /governance/list
 pub async fn handle_list(state: Arc<Mutex<State>>) -> Result<RESTResponse> {
     let locked = state.lock().await;
     let props_bech32: Result<Vec<String>, anyhow::Error> =
@@ -40,17 +40,17 @@ pub async fn handle_list(state: Arc<Mutex<State>>) -> Result<RESTResponse> {
             Ok(json) => Ok(RESTResponse::with_json(200, &json)),
             Err(e) => Ok(RESTResponse::with_text(
                 500,
-                &format!("Serialization error: {:?}", e),
+                &format!("Internal server error while retrieving governance list: {e}"),
             )),
         },
         Err(e) => Ok(RESTResponse::with_text(
             500,
-            &format!("Bech32 conversion error: {:?}", e),
+            &format!("Internal server error while retrieving governance list: {e}"),
         )),
     }
 }
 
-/// Handles /governance-state/proposal/<Bech32_GovActionId>
+/// Handles /governance/info/<Bech32_GovActionId>
 pub async fn handle_proposal(
     state: Arc<Mutex<State>>,
     param_string: String,
@@ -79,7 +79,7 @@ pub async fn handle_proposal(
                 Err(e) => {
                     return Ok(RESTResponse::with_text(
                         500,
-                        &format!("Bech32 encoding error for reward_account: {e}"),
+                        &format!("Internal server error while retrieving proposal: {e}"),
                     ));
                 }
             };
@@ -89,7 +89,7 @@ pub async fn handle_proposal(
                 Err(e) => {
                     return Ok(RESTResponse::with_text(
                         500,
-                        &format!("Bech32 encoding error for gov_action_id: {e}"),
+                        &format!("Internal server error while retrieving proposal: {e}"),
                     ));
                 }
             };
@@ -106,7 +106,7 @@ pub async fn handle_proposal(
                 Ok(json) => Ok(RESTResponse::with_json(200, &json)),
                 Err(e) => Ok(RESTResponse::with_text(
                     500,
-                    &format!("Serialization error: {:?}", e),
+                    &format!("Internal server error while retrieving proposal: {e}"),
                 )),
             }
         }
@@ -114,7 +114,7 @@ pub async fn handle_proposal(
     }
 }
 
-/// Handles /governance-state/proposal/<Bech32_GovActionId>/votes
+/// Handles /governance/votes/<Bech32_GovActionId>
 pub async fn handle_votes(state: Arc<Mutex<State>>, param_string: String) -> Result<RESTResponse> {
     let proposal_id = match GovActionId::from_bech32(&param_string) {
         Ok(id) => id,
@@ -148,10 +148,10 @@ pub async fn handle_votes(state: Arc<Mutex<State>>, param_string: String) -> Res
                 Ok(json) => Ok(RESTResponse::with_json(200, &json)),
                 Err(e) => Ok(RESTResponse::with_text(
                     500,
-                    &format!("Serialization error: {:?}", e),
+                    &format!("Internal server error while retrieving proposal votes: {e}"),
                 )),
             }
         }
-        Err(e) => Ok(RESTResponse::with_text(404, &e.to_string())),
+        Err(_) => Ok(RESTResponse::with_text(404, "Proposal not found")),
     }
 }

@@ -2,7 +2,7 @@
 //! Accepts UTXO events and derives the current ledger state in memory
 
 use acropolis_common::{
-    messages::{CardanoMessage, Message, RESTResponse},
+    messages::{CardanoMessage, Message},
     rest_helper::handle_rest_with_parameter,
 };
 use caryatid_sdk::{module, Context, Module};
@@ -15,6 +15,8 @@ use tracing::{error, info};
 
 mod state;
 use state::{ImmutableUTXOStore, State};
+mod rest;
+use rest::handle_single_utxo;
 
 mod address_delta_publisher;
 mod volatile_index;
@@ -35,7 +37,7 @@ mod fake_immutable_utxo_store;
 use fake_immutable_utxo_store::FakeImmutableUTXOStore;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.utxo.deltas";
-const DEFAULT_REST_TOPIC: &str = "rest.get.utxo.*";
+const DEFAULT_SINGLE_UTXO_TOPIC: (&str, &str) = ("handle-topic-single-utxo", "rest.get.utxo.*");
 
 const DEFAULT_STORE: &str = "memory";
 
@@ -55,8 +57,10 @@ impl UTXOState {
             config.get_string("subscribe-topic").unwrap_or(DEFAULT_SUBSCRIBE_TOPIC.to_string());
         info!("Creating subscriber on '{subscribe_topic}'");
 
-        let rest_topic = config.get_string("rest-topic").unwrap_or(DEFAULT_REST_TOPIC.to_string());
-        info!("Creating REST handler on '{rest_topic}'");
+        let single_utxo_topic = config
+            .get_string(DEFAULT_SINGLE_UTXO_TOPIC.0)
+            .unwrap_or(DEFAULT_SINGLE_UTXO_TOPIC.1.to_string());
+        info!("Creating REST handler on '{single_utxo_topic}'");
 
         // Create store
         let store_type = config.get_string("store").unwrap_or(DEFAULT_STORE.to_string());
@@ -123,70 +127,8 @@ impl UTXOState {
             }
         });
 
-        // Handle REST requests for utxo.<tx_hash>:<index>
-        handle_rest_with_parameter(context.clone(), &rest_topic, move |param| {
-            let param = param[0].to_string();
-            let state = state.clone();
-            async move {
-                // Parse "<tx_hash>:<index>"
-                let (tx_hash_str, index_str) = match param.split_once(':') {
-                    Some((tx, idx)) => (tx, idx),
-                    None => {
-                        return Ok(RESTResponse::with_text(
-                            400,
-                            &format!(
-                                "Parameter must be in <tx_hash>:<index> format. Provided param: {}",
-                                param
-                            ),
-                        ));
-                    }
-                };
-
-                // Validate tx_hash and index, look up the UTXO, and return JSON or an error.
-                match hex::decode(tx_hash_str) {
-                    Ok(tx_hash_bytes) => match index_str.parse::<u64>() {
-                        Ok(index) => {
-                            let key = state::UTXOKey::new(&tx_hash_bytes, index);
-                            match state.lock().await.lookup_utxo(&key).await {
-                                Ok(Some(utxo)) => {
-                                    // Convert address to bech32 string
-                                    let address_text = match utxo.address.to_string() {
-                                        Ok(addr) => addr,
-                                        Err(e) => {
-                                            return Ok(RESTResponse::with_text(
-                                                500,
-                                                &format!(
-                                                    "Failed to convert address to string: {e}"
-                                                ),
-                                            ));
-                                        }
-                                    };
-
-                                    let json_response = serde_json::json!({
-                                        "address": address_text,
-                                        "value": utxo.value,
-                                    });
-
-                                    Ok(RESTResponse::with_json(200, &json_response.to_string()))
-                                }
-                                Ok(None) => Ok(RESTResponse::with_text(
-                                    404,
-                                    &format!("UTxO not found. Provided UTxO: {}", param),
-                                )),
-                                Err(error) => Err(anyhow!("{:?}", error)),
-                            }
-                        }
-                        Err(error) => Ok(RESTResponse::with_text(
-                            400,
-                            &format!("Invalid index: {error}"),
-                        )),
-                    },
-                    Err(error) => Ok(RESTResponse::with_text(
-                        400,
-                        &format!("Invalid tx_hash: {error}"),
-                    )),
-                }
-            }
+        handle_rest_with_parameter(context.clone(), &single_utxo_topic, move |param| {
+            handle_single_utxo(state.clone(), param[0].to_string())
         });
 
         Ok(())

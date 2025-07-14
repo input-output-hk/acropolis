@@ -2,16 +2,14 @@
 //! Manages stake and reward accounts state
 
 use acropolis_common::{
-    messages::{CardanoMessage, Message, RESTResponse},
+    messages::{CardanoMessage, Message},
     rest_helper::{handle_rest, handle_rest_with_parameter},
     state_history::StateHistory,
-    Address, BlockInfo, BlockStatus, Lovelace, StakeAddress, StakeAddressPayload,
+    BlockInfo, BlockStatus,
 };
-use anyhow::{anyhow, bail, Result};
+use anyhow::Result;
 use caryatid_sdk::{message_bus::Subscription, module, Context, Module};
 use config::Config;
-use serde_json;
-use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info};
@@ -22,6 +20,8 @@ mod spo_distribution_publisher;
 use spo_distribution_publisher::SPODistributionPublisher;
 mod state;
 use state::State;
+mod rest;
+use rest::{handle_drdd, handle_pots, handle_single_account, handle_spdd};
 
 const DEFAULT_SPO_STATE_TOPIC: &str = "cardano.spo.state";
 const DEFAULT_EPOCH_ACTIVITY_TOPIC: &str = "cardano.epoch.activity";
@@ -34,10 +34,11 @@ const DEFAULT_DREP_DISTRIBUTION_TOPIC: &str = "cardano.drep.distribution";
 const DEFAULT_SPO_DISTRIBUTION_TOPIC: &str = "cardano.spo.distribution";
 const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: &str = "cardano.protocol.parameters";
 
-const DEFAULT_HANDLE_STAKE_TOPIC: &str = "rest.get.stake";
-const DEFAULT_HANDLE_SPDD_TOPIC: &str = "rest.get.spdd";
-const DEFAULT_HANDLE_POTS_TOPIC: &str = "rest.get.pots";
-const DEFAULT_HANDLE_DRDD_TOPIC: &str = "rest.get.drdd";
+const DEFAULT_HANDLE_SINGLE_ACCOUNT_TOPIC: (&str, &str) =
+    ("handle-topic-account-single", "rest.get.accounts.info.*");
+const DEFAULT_HANDLE_SPDD_TOPIC: (&str, &str) = ("handle-topic-spdd", "rest.get.spdd");
+const DEFAULT_HANDLE_POTS_TOPIC: (&str, &str) = ("handle-topic-pots", "rest.get.pots");
+const DEFAULT_HANDLE_DRDD_TOPIC: (&str, &str) = ("handle-topic-drdd", "rest.get.drdd");
 
 /// Accounts State module
 #[module(
@@ -329,135 +330,55 @@ impl AccountsState {
             .unwrap_or(DEFAULT_SPO_DISTRIBUTION_TOPIC.to_string());
 
         // REST handler topics
-        let handle_stake_topic = config
-            .get_string("handle-stake-topic")
-            .unwrap_or(DEFAULT_HANDLE_STAKE_TOPIC.to_string());
-        info!("Creating request handler on '{handle_stake_topic}'");
+        let handle_single_account_topic = config
+            .get_string(DEFAULT_HANDLE_SINGLE_ACCOUNT_TOPIC.0)
+            .unwrap_or(DEFAULT_HANDLE_SINGLE_ACCOUNT_TOPIC.1.to_string());
+        info!(
+            "Creating request handler on '{}'",
+            handle_single_account_topic
+        );
 
-        let handle_spdd_topic =
-            config.get_string("handle-spdd-topic").unwrap_or(DEFAULT_HANDLE_SPDD_TOPIC.to_string());
-        info!("Creating request handler on '{handle_spdd_topic}'");
+        let handle_spdd_topic = config
+            .get_string(DEFAULT_HANDLE_SPDD_TOPIC.0)
+            .unwrap_or(DEFAULT_HANDLE_SPDD_TOPIC.1.to_string());
+        info!("Creating request handler on '{}'", handle_spdd_topic);
 
-        let handle_pots_topic =
-            config.get_string("handle-pots-topic").unwrap_or(DEFAULT_HANDLE_POTS_TOPIC.to_string());
-        info!("Creating request handler on '{handle_pots_topic}'");
+        let handle_pots_topic = config
+            .get_string(DEFAULT_HANDLE_POTS_TOPIC.0)
+            .unwrap_or(DEFAULT_HANDLE_POTS_TOPIC.1.to_string());
+        info!("Creating request handler on '{}'", handle_pots_topic);
 
-        let handle_drdd_topic =
-            config.get_string("handle-drdd-topic").unwrap_or(DEFAULT_HANDLE_DRDD_TOPIC.to_string());
-        info!("Creating request handler on '{handle_drdd_topic}'");
+        let handle_drdd_topic = config
+            .get_string(DEFAULT_HANDLE_DRDD_TOPIC.0)
+            .unwrap_or(DEFAULT_HANDLE_DRDD_TOPIC.1.to_string());
+        info!("Creating request handler on '{}'", handle_drdd_topic);
 
         // Create history
         let history = Arc::new(Mutex::new(StateHistory::<State>::new("AccountsState")));
-        let history_stake = history.clone();
-        let history_stake_single = history.clone();
+        let history_account_single = history.clone();
         let history_spdd = history.clone();
         let history_pots = history.clone();
         let history_drdd = history.clone();
         let history_tick = history.clone();
 
-        // Handle requests for full state
-        handle_rest(context.clone(), &handle_stake_topic, move || {
-            let history = history_stake.clone();
-            async move {
-                if let Some(state) = history.lock().await.current().clone() {
-                    match serde_json::to_string(state) {
-                        Ok(body) => Ok(RESTResponse::with_json(200, &body)),
-                        Err(error) => Err(anyhow!("{:?}", error)),
-                    }
-                } else {
-                    Ok(RESTResponse::with_json(200, "{}"))
-                }
-            }
-        });
+        handle_rest_with_parameter(
+            context.clone(),
+            &handle_single_account_topic,
+            move |param| {
+                handle_single_account(history_account_single.clone(), param[0].to_string())
+            },
+        );
 
-        let handle_single_stake_topic = handle_stake_topic + ".*";
-
-        // Handle requests for single reward state based on stake address
-        handle_rest_with_parameter(context.clone(), &handle_single_stake_topic, move |param| {
-            let history = history_stake_single.clone();
-            let param = param[0].to_string();
-
-            async move {
-                match Address::from_string(&param) {
-                    Ok(Address::Stake(StakeAddress {
-                        payload: StakeAddressPayload::StakeKeyHash(hash),
-                        ..
-                    })) => match history.lock().await.current() {
-                        Some(state) => match state.get_stake_state(&hash) {
-                            Some(stake) => match serde_json::to_string(&stake) {
-                                Ok(body) => Ok(RESTResponse::with_json(200, &body)),
-                                Err(error) => Err(anyhow!("{:?}", error)),
-                            },
-                            None => Ok(RESTResponse::with_text(404, "Stake address not found")),
-                        },
-                        None => Err(anyhow!("No state")),
-                    },
-                    _ => Ok(RESTResponse::with_text(
-                        400,
-                        &format!("Not a stake address. Provided address: {}", param),
-                    )),
-                }
-            }
-        });
-
-        // Handle requests for SPDD
         handle_rest(context.clone(), &handle_spdd_topic, move || {
-            let history = history_spdd.clone();
-            async move {
-                if let Some(state) = history.lock().await.current() {
-                    // Use hex for SPO ID
-                    let spdd: HashMap<String, u64> =
-                        state.generate_spdd().iter().map(|(k, v)| (hex::encode(k), *v)).collect();
-                    match serde_json::to_string(&spdd) {
-                        Ok(body) => Ok(RESTResponse::with_json(200, &body)),
-                        Err(error) => Err(anyhow!("{:?}", error)),
-                    }
-                } else {
-                    Ok(RESTResponse::with_json(200, "{}"))
-                }
-            }
+            handle_spdd(history_spdd.clone())
         });
 
-        // Handle requests for POTS
         handle_rest(context.clone(), &handle_pots_topic, move || {
-            let history = history_pots.clone();
-            async move {
-                if let Some(state) = history.lock().await.current() {
-                    let pots = state.get_pots();
-                    match serde_json::to_string(&pots) {
-                        Ok(body) => Ok(RESTResponse::with_json(200, &body)),
-                        Err(error) => Err(anyhow!("{:?}", error)),
-                    }
-                } else {
-                    Ok(RESTResponse::with_json(200, "{}"))
-                }
-            }
+            handle_pots(history_pots.clone())
         });
 
-        // Handle requests for DRDD
         handle_rest(context.clone(), &handle_drdd_topic, move || {
-            let history = history_drdd.clone();
-            async move {
-                let drdd = history
-                    .lock()
-                    .await
-                    .current()
-                    .map(|state| state.generate_drdd())
-                    .unwrap_or_default();
-                let drdd = APIDRepDelegationDistribution {
-                    abstain: drdd.abstain,
-                    no_confidence: drdd.no_confidence,
-                    dreps: drdd
-                        .dreps
-                        .into_iter()
-                        .map(|(cred, amount)| (cred.to_json_string(), amount))
-                        .collect(),
-                };
-                match serde_json::to_string(&drdd) {
-                    Ok(body) => Ok(RESTResponse::with_json(200, &body)),
-                    Err(error) => bail!("{:?}", error),
-                }
-            }
+            handle_drdd(history_drdd.clone())
         });
 
         // Ticker to log stats
@@ -512,11 +433,4 @@ impl AccountsState {
 
         Ok(())
     }
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-struct APIDRepDelegationDistribution {
-    pub abstain: Lovelace,
-    pub no_confidence: Lovelace,
-    pub dreps: Vec<(String, u64)>,
 }
