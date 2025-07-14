@@ -409,6 +409,16 @@ pub struct StakeDelegation {
     pub operator: KeyHash,
 }
 
+/// SPO total delegation data (for SPDD)
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DelegatedStake {
+    /// Active stake - UTXO values only (used for reward calcs)
+    pub active: Lovelace,
+
+    /// Total 'live' stake - UTXO values and rewards (used for VRF)
+    pub live: Lovelace,
+}
+
 /// Genesis key delegation
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenesisKeyDelegation {

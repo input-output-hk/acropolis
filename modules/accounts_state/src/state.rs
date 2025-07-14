@@ -5,6 +5,7 @@ use acropolis_common::{
         SPOStateMessage, StakeAddressDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
     },
     rational_number::RationalNumber,
+    DelegatedStake,
     DRepChoice, DRepCredential, InstantaneousRewardSource, InstantaneousRewardTarget, KeyHash,
     Lovelace, MoveInstantaneousReward, PoolRegistration, Pot, ProtocolParams, RewardAccount,
     StakeAddress, StakeCredential, TxCertificate,
@@ -55,13 +56,13 @@ pub struct DRepDelegationDistribution {
 #[derive(Debug, Default, Clone, serde::Serialize)]
 pub struct Pots {
     /// Unallocated reserves
-    reserves: u64,
+    reserves: Lovelace,
 
     /// Treasury
-    treasury: u64,
+    treasury: Lovelace,
 
     /// Deposits
-    deposits: u64,
+    deposits: Lovelace,
 }
 
 /// Overall state - stored per block
@@ -195,7 +196,7 @@ impl State {
                 / BigDecimal::from(total_blocks as u64);
 
             // and in SPDD to get active stake (sigma)
-            let pool_stake_u64 = *(spdd.get(&spo.operator).unwrap_or(&0));
+            let pool_stake_u64 = spdd.get(&spo.operator).map(|ds| ds.active).unwrap_or(0);
             if pool_stake_u64 == 0 {
                 error!("No pool stake in SPO {}", hex::encode(&spo.operator));
                 continue;
@@ -208,6 +209,8 @@ impl State {
                                                  &relative_pool_saturation_size);
 
             // Stake pledged by operator (s) and capped with 1/k (s')
+            // TODO!  We need to look at owners and find the actual pledge, not just
+            // the declared amount
             let relative_pool_pledge = BigDecimal::from(&spo.pledge) / &total_supply;
             let capped_relative_pool_pledge = min(&relative_pool_pledge,
                                                   &relative_pool_saturation_size);
@@ -297,7 +300,8 @@ impl State {
                     // May be absent if they didn't meet their costs
                     if let Some((total_stake, rewards)) = spo_stake_and_rewards.get(spo_id) {
                         // Calculate proportion of total stake this delegator has
-                        let this_stake = BigDecimal::from(sas.utxo_value + sas.rewards);
+                        // Note we use _active_ stake, not including rewards
+                        let this_stake = BigDecimal::from(sas.utxo_value);
                         if !this_stake.is_zero() {
                             let proportion = &this_stake / BigDecimal::from(total_stake);
 
@@ -330,24 +334,23 @@ impl State {
         }
     }
 
-    /// Derive the Stake Pool Delegation Distribution (SPDD) - a map of total stake value
-    /// (including both UTXO stake addresses and rewards) for each active SPO
+    /// Derive the Stake Pool Delegation Distribution (SPDD) - a map of total stake values
+    /// (both with and without rewards) for each active SPO
     /// Key of returned map is the SPO 'operator' ID
-    pub fn generate_spdd(&self) -> BTreeMap<KeyHash, u64> {
+    pub fn generate_spdd(&self) -> BTreeMap<KeyHash, DelegatedStake> {
         // Shareable Dashmap with referenced keys
-        let spo_stakes = Arc::new(DashMap::<KeyHash, u64>::new());
+        let spo_stakes = Arc::new(DashMap::<KeyHash, DelegatedStake>::new());
 
         // Total stake across all addresses in parallel, first collecting into a vector
         // because imbl::OrdMap doesn't work in Rayon
         let stake_addresses = self.stake_addresses.lock().unwrap();
 
-        // Collect the SPO keys and total values
-        let sas_data: Vec<(KeyHash, u64)> = stake_addresses
+        // Collect the SPO keys and UTXO, reward values
+        let sas_data: Vec<(KeyHash, (u64, u64))> = stake_addresses
             .values()
             .filter_map(|sas| {
-                sas.delegated_spo.as_ref().map(|spo| {
-                    (spo.clone(), sas.utxo_value + sas.rewards)
-                })
+                sas.delegated_spo.as_ref()
+                    .map(|spo| (spo.clone(), (sas.utxo_value, sas.rewards)))
             })
             .collect();
 
@@ -356,22 +359,19 @@ impl State {
             .par_iter() // Rayon multi-threaded iterator
             .for_each_init(
                 || Arc::clone(&spo_stakes),
-                |map, (spo, stake)| {
-                    map.entry(spo.clone()).and_modify(|v| *v += *stake).or_insert(*stake);
+                |map, (spo, (utxo_value, rewards))| {
+                    map.entry(spo.clone()).and_modify(|v| {
+                        v.active += *utxo_value;
+                        v.live += *utxo_value + *rewards;
+                    }).or_insert(DelegatedStake {
+                        active: *utxo_value,
+                        live: *utxo_value + *rewards
+                    });
                 },
             );
 
-        // Add pledges
-        self.spos
-            .values()
-            .for_each(|spo| {
-                spo_stakes.entry(spo.operator.clone())
-                    .and_modify(|v| *v += spo.pledge)
-                    .or_insert(spo.pledge);
-            });
-
         // Collect into a plain BTreeMap, so that it is ordered on output
-        spo_stakes.iter().map(|entry| (entry.key().clone(), *entry.value())).collect()
+        spo_stakes.iter().map(|entry| (entry.key().clone(), entry.value().clone())).collect()
     }
 
     /// Derive the DRep Delegation Distribution (SPDD) - the total amount
@@ -881,6 +881,9 @@ mod tests {
         assert!(spdd.is_empty());
     }
 
+    // TODO! Misnomer - pledge is not specifically included in spdd because it is handled
+    // by the owner's own staking.  What does need to be tested is the difference between
+    // 'active' and 'live' by adding rewards
     #[test]
     fn spdd_from_delegation_with_utxo_values_and_pledge() {
         let mut state = State::default();
@@ -952,9 +955,9 @@ mod tests {
         assert_eq!(spdd.len(), 2);
 
         let stake1 = spdd.get(&spo1).unwrap();
-        assert_eq!(*stake1, 26+42);
+        assert_eq!(stake1.active, 42);
         let stake2 = spdd.get(&spo2).unwrap();
-        assert_eq!(*stake2, 47+21);
+        assert_eq!(stake2.active, 21);
     }
 
     #[test]
