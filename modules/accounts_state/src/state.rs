@@ -10,7 +10,7 @@ use acropolis_common::{
     Lovelace, MoveInstantaneousReward, PoolRegistration, Pot, ProtocolParams, RewardAccount,
     StakeAddress, StakeCredential, TxCertificate,
 };
-use anyhow::{bail, anyhow, Context, Result};
+use anyhow::{bail, anyhow, Result};
 use dashmap::DashMap;
 use imbl::OrdMap;
 use std::collections::{HashMap, BTreeMap};
@@ -29,20 +29,20 @@ const DEFAULT_POOL_DEPOSIT: u64 = 500_000_000;
 #[derive(Debug, Default, Clone, serde::Serialize)]
 pub struct StakeAddressState {
     /// Is it registered (or only used in addresses)?
-    registered: bool,
+    pub registered: bool,
 
     /// Total value in UTXO addresses
-    utxo_value: u64,
+    pub utxo_value: u64,
 
     /// Value in reward account
-    rewards: u64,
+    pub rewards: u64,
 
     /// SPO ID they are delegated to ("operator" ID)
     #[serde_as(as = "Option<Hex>")]
-    delegated_spo: Option<KeyHash>,
+    pub delegated_spo: Option<KeyHash>,
 
     /// DRep they are delegated to
-    delegated_drep: Option<DRepChoice>,
+    pub delegated_drep: Option<DRepChoice>,
 }
 
 #[derive(Default, Debug, PartialEq, Eq)]
@@ -76,7 +76,7 @@ pub struct State {
 
     /// Map of staking address values
     /// Wrapped in an Arc so it doesn't get cloned in full by StateHistory
-    stake_addresses: Arc<Mutex<HashMap<Vec<u8>, StakeAddressState>>>,
+    stake_addresses: Arc<Mutex<HashMap<KeyHash, StakeAddressState>>>,
 
     /// Global account pots
     pots: Pots,
@@ -90,7 +90,7 @@ pub struct State {
 
 impl State {
     /// Get the stake address state for a give stake key
-    pub fn get_stake_state(&self, stake_key: &Vec<u8>) -> Option<StakeAddressState> {
+    pub fn get_stake_state(&self, stake_key: &KeyHash) -> Option<StakeAddressState> {
         self.stake_addresses.lock().unwrap().get(stake_key).cloned()
     }
 
