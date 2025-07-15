@@ -9,30 +9,33 @@ use crate::state::StakeAddressState;
 #[derive(Debug, Default)]
 pub struct StakeSnapshot {
     /// Map of SPOs by operator ID, with list of stake addresses and delegated stake values
-    spos: HashMap<KeyHash, Vec<(KeyHash, Lovelace)>>,
+    pub spos: HashMap<KeyHash, Vec<(KeyHash, Lovelace)>>,
 }
 
-/// Get a stake snapshot based the current stake addresses
-pub fn get_stake_snapshot(stake_addresses: &HashMap<KeyHash, StakeAddressState>) -> StakeSnapshot {
-    let mut snapshot = StakeSnapshot::default();
+impl StakeSnapshot {
 
-    // Scan all stake addresses and post to their delegated SPO's list
-    // Note this is _active_ stake, for reward calculations, and hence doesn't include rewards
-    for (hash, sas) in stake_addresses {
-        if sas.utxo_value > 0 {
-            if let Some(spo_id) = &sas.delegated_spo {
-                // Only clone if insertion is needed
-                if let Some(delegators) = snapshot.spos.get_mut(spo_id) {
-                    delegators.push((hash.clone(), sas.utxo_value));
-                } else {
-                    snapshot.spos
-                        .insert(spo_id.clone(), vec![(hash.clone(), sas.utxo_value)]);
+    /// Get a stake snapshot based the current stake addresses
+    pub fn new(stake_addresses: &HashMap<KeyHash, StakeAddressState>) -> Self {
+        let mut snapshot = Self::default();
+
+        // Scan all stake addresses and post to their delegated SPO's list
+        // Note this is _active_ stake, for reward calculations, and hence doesn't include rewards
+        for (hash, sas) in stake_addresses {
+            if sas.utxo_value > 0 {
+                if let Some(spo_id) = &sas.delegated_spo {
+                    // Only clone if insertion is needed
+                    if let Some(delegators) = snapshot.spos.get_mut(spo_id) {
+                        delegators.push((hash.clone(), sas.utxo_value));
+                    } else {
+                        snapshot.spos
+                            .insert(spo_id.clone(), vec![(hash.clone(), sas.utxo_value)]);
+                    }
                 }
             }
         }
-    }
 
-    snapshot
+        snapshot
+    }
 }
 
 #[cfg(test)]
@@ -65,13 +68,13 @@ mod tests {
             delegated_spo: Some(spo1.clone()),
             .. StakeAddressState::default()
         });
-        stake_addresses.insert(addr3.clone(), StakeAddressState {
+        stake_addresses.insert(addr4.clone(), StakeAddressState {
             utxo_value: 1000000,
             delegated_spo: None,
             .. StakeAddressState::default()
         });
 
-        let snapshot = get_stake_snapshot(&stake_addresses);
+        let snapshot = StakeSnapshot::new(&stake_addresses);
 
         assert_eq!(snapshot.spos.len(), 2);
 
