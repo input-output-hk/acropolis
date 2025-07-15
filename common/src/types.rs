@@ -280,6 +280,40 @@ impl Credential {
         }
         .clone()
     }
+
+    pub fn from_drep_bech32(bech32_str: &str) -> Result<Self, anyhow::Error> {
+        let (hrp, data) = bech32::decode(bech32_str)?;
+        if data.len() != 28 {
+            return Err(anyhow!(
+                "Invalid payload length for DRep Bech32, expected 28 bytes, got {}",
+                data.len()
+            ));
+        }
+
+        let hash: KeyHash = data;
+
+        match hrp.as_str() {
+            "drep" => Ok(Credential::AddrKeyHash(hash)),
+            "drep_script" => Ok(Credential::ScriptHash(hash)),
+            _ => Err(anyhow!(
+                "Invalid HRP for DRep Bech32, expected 'drep' or 'drep_script', got '{}'",
+                hrp
+            )),
+        }
+    }
+
+    pub fn to_drep_bech32(&self) -> Result<String, anyhow::Error> {
+        let hrp = Hrp::parse(match self {
+            Credential::AddrKeyHash(_) => "drep",
+            Credential::ScriptHash(_) => "drep_script",
+        })
+        .map_err(|e| anyhow!("Bech32 HRP parse error: {e}"))?;
+
+        let data = self.get_hash();
+
+        bech32::encode::<Bech32>(hrp, data.as_slice())
+            .map_err(|e| anyhow!("Bech32 encoding error: {e}"))
+    }
 }
 
 pub type StakeCredential = Credential;
