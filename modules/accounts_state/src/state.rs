@@ -10,6 +10,7 @@ use acropolis_common::{
     Lovelace, MoveInstantaneousReward, PoolRegistration, Pot, ProtocolParams, RewardAccount,
     StakeAddress, StakeCredential, TxCertificate,
 };
+use crate::rewards::StakeSnapshot;
 use anyhow::{bail, anyhow, Result};
 use dashmap::DashMap;
 use imbl::OrdMap;
@@ -77,6 +78,11 @@ pub struct State {
     /// Map of staking address values
     /// Wrapped in an Arc so it doesn't get cloned in full by StateHistory
     stake_addresses: Arc<Mutex<HashMap<KeyHash, StakeAddressState>>>,
+
+    /// Snapshots of stake taken at (epoch-2) and (epoch-1)
+    /// Arcs because we don't want them copied by StateHistory
+    previous_snapshot: Arc<StakeSnapshot>,
+    last_snapshot: Arc<StakeSnapshot>,
 
     /// Global account pots
     pots: Pots,
@@ -253,8 +259,11 @@ impl State {
             if pool_rewards <= fixed_cost {
                 // No margin or pledge reward if under cost - all goes to SPO
                 spo_earnings.insert(spo.reward_account.clone(),
-                                    pool_rewards.to_u64()
-                                    .ok_or(anyhow!("Non-integral pool rewards"))?);
+                                    pool_rewards.to_u64().unwrap_or_else(|| {
+                                        error!("Non-integral pool rewards {} for SPO {}",
+                                               pool_rewards, hex::encode(&spo.operator));
+                                        0
+                                    }));
             } else {
                 // Enough left over for some margin split
                 let margin = ((&pool_rewards - &fixed_cost)
@@ -289,36 +298,36 @@ impl State {
             self.pots.reserves -= reward;
         });
 
+        // Capture a new snapshot
+        let new_snapshot = StakeSnapshot::new(&self.stake_addresses.lock().unwrap());
+
         // Pay the delegators - split remainder in proportional to delegated stake,
-        // including owners pledge
-        let mut stake_addresses = self.stake_addresses.lock().unwrap();
-        stake_addresses
-            .iter_mut()
-            .for_each(|(hash, sas)| {
-                if let Some(spo_id) = &sas.delegated_spo {
-                    // Look up the SPO in the rewards map
-                    // May be absent if they didn't meet their costs
-                    if let Some((total_stake, rewards)) = spo_stake_and_rewards.get(spo_id) {
-                        // Calculate proportion of total stake this delegator has
-                        // Note we use _active_ stake, not including rewards
-                        let this_stake = BigDecimal::from(sas.utxo_value);
-                        if !this_stake.is_zero() {
-                            let proportion = &this_stake / BigDecimal::from(total_stake);
+        // * as it was 2 epochs ago *
+        // TODO: Although these are calculated now, they are *paid* at the next epoch
+        self.previous_snapshot.clone().spos.iter().for_each(|(spo_id, delegators)| {
+            // Look up the SPO in the rewards map
+            // May be absent if they didn't meet their costs
+            if let Some((total_stake, rewards)) = spo_stake_and_rewards.get(spo_id) {
+                for (hash, stake) in delegators {
+                    let proportion = BigDecimal::from(stake) / BigDecimal::from(total_stake);
 
-                            // and hence how much of the total reward they get
-                            let reward = BigDecimal::from(rewards) * &proportion;
-                            let to_pay = reward.with_scale(0).to_u64().unwrap_or(0);
+                    // and hence how much of the total reward they get
+                    let reward = BigDecimal::from(rewards) * &proportion;
+                    let to_pay = reward.with_scale(0).to_u64().unwrap_or(0);
 
-                            debug!("Reward stake {this_stake} -> proportion {proportion} of SPO rewards {rewards} -> {to_pay} to hash {}",
-                                   hex::encode(&hash));
+                    debug!("Reward stake {stake} -> proportion {proportion} of SPO rewards {rewards} -> {to_pay} to hash {}",
+                           hex::encode(&hash));
 
-                            // Transfer from reserves to this account
-                            sas.rewards += to_pay;
-                            self.pots.reserves -= to_pay;
-                        }
-                    }
+                    // Transfer from reserves to this account
+                    self.add_to_reward(&hash, to_pay);
+                    self.pots.reserves -= to_pay;
                 }
-            });
+            }
+        });
+
+        // Rotate the snapshots
+        self.previous_snapshot = self.last_snapshot.clone();
+        self.last_snapshot = Arc::new(new_snapshot);
 
         Ok(())
     }
@@ -327,7 +336,15 @@ impl State {
     fn add_to_reward(&mut self, account: &KeyHash, amount: Lovelace) {
         // Get old stake address state, or create one
         let mut stake_addresses = self.stake_addresses.lock().unwrap();
-        let sas = stake_addresses.entry(account.clone()).or_default();
+
+        // Get or create account entry, avoiding clone when existing
+        let sas = match stake_addresses.get_mut(account) {
+            Some(existing) => existing,
+            None => {
+                stake_addresses.insert(account.clone(), StakeAddressState::default());
+                stake_addresses.get_mut(account).unwrap()
+            }
+        };
 
         if let Err(e) = Self::update_value_with_delta(&mut sas.rewards, amount as i64) {
             error!("Adding to reward account {}: {e}", hex::encode(account));
