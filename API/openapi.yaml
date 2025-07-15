@@ -1,0 +1,756 @@
+openapi: 3.0.3
+info:
+  title: Acropolis ~ API Documentation
+  description: "Acropolis is a modular Cardano node architecture that allows developers to customize which on-chain data to index and expose, reducing resource requirements while maintaining deep chain observability.\n\nThis API exposes REST endpoints for querying stake accounts, DReps, stake pools, UTxOs, governance proposals, and protocol state. Endpoints are available only if their corresponding modules are enabled within Acropolis, allowing developers to tailor node functionality to their specific needs.\n\nAll endpoints return Bech32-encoded identifiers where applicable, aligning with Cardano best practices for human-readable and interoperable identifiers."
+  version: 0.1.1
+
+servers:
+  - url: http://127.0.0.1:4340/
+    description: Local Acropolis REST instance for development and testing
+
+tags:
+  - name: Accounts
+    description: Endpoints related to accounts state.
+  - name: Pools
+    description: Endpoints related to SPO state.
+  - name: Governance
+    description: Endpoints related to governance state.
+  - name: DReps
+    description: Endpoints related to DRep state.
+  - name: UTxOs
+    description: Endpoints related to UTxO state.
+
+paths:
+  /accounts/info/{stake_address}:
+    get:
+      tags:
+        - Accounts
+      summary: Specific account info
+      description: Returns information about a specific stake account.
+      parameters:
+      - in: path
+        name: stake_address
+        required: true
+        schema:
+          type: string
+        description: Bech32-encoded Cardano stake address to query.
+      responses:
+        "200":
+          description: JSON-encoded stake account state
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  utxo_value:
+                    type: integer
+                    format: uint64
+                    description: Combined Lovelace amount of all UTXOs
+                  rewards:
+                    type: integer
+                    format: uint64
+                    description: Lovelace amount in reward account
+                  delegated_spo:
+                    type: string
+                    nullable: true
+                    description: Hex-encoded pool id, if any
+                  delegated_drep:
+                    type: object
+                    nullable: true
+                    description: Selected DRep choice, if any
+                    properties:
+                      type:
+                        type: string
+                        enum: ["Key", "Script", "Abstain", "NoConfidence"]
+                        description: Type of DRep delegation
+                      value:
+                        type: string
+                        nullable: true
+                        description: Bech32-encoded DRep KeyHash if applicable; omitted for Abstain/NoConfidence
+                    required:
+                      - type
+                required:
+                  - utxo_value
+                  - rewards
+                example:
+                  utxo_value: 4200000
+                  rewards: 1337000
+                  delegated_spo: "pool1xyzabc..."
+                  delegated_drep:
+                    type: "Key"
+                    value: "drep1abcd..."
+        "400":
+          description: Invalid Bech32 stake address
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Not a stake address. Provided address: addr1qxyz..."
+        "404":
+          description: Stake address not found
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Stake address not found"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Internal server error while retrieving stake address"
+  /spdd:
+    get:
+      tags:
+        - Accounts
+      summary: Pool delegation distribution.
+      description: Returns the current stake pool delegation distribution.
+      responses:
+        "200":
+          description: JSON object mapping pool id to active stake
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: integer
+                  format: uint64
+                  description: Total Lovelace delegated to the SPO
+              example:
+                a1b2c3d4e5f6abcd1234abcd5678ef90abcdef12abcd3456abcd7890abcd1234: 1234567890
+                deadbeef9876543210abcdef56781234abcdabcdabcdabcdabcdabcdabcdabcd: 987654321
+              
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Internal server error while retrieving stake pool delegation distribution"
+  /drdd:
+    get:
+      tags:
+        - Accounts
+      summary: DRep delegation distribution.
+      description: Returns the current DRep delegation distribution.
+      responses:
+        "200":
+          description: JSON object containing the DRep delegation distribution, including abstain and no confidence
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  abstain:
+                    type: integer
+                    format: uint64
+                    description: Total Lovelace delegated to abstain
+                  no_confidence:
+                    type: integer
+                    format: uint64
+                    description: Total Lovelace delegated to no confidence
+                  dreps:
+                    type: array
+                    description: Array of [drep_key_hash, delegated_lovelace] pairs
+                    items:
+                      type: array
+                      minItems: 2
+                      maxItems: 2
+                      items:
+                        anyOf:
+                          - type: string
+                            description: DRep key hash
+                          - type: integer
+                            format: uint64
+                            description: Delegated Lovelace to this DRep
+                required:
+                  - abstain
+                  - no_confidence
+                  - dreps
+              example:
+                abstain: 2577998401882324
+                no_confidence: 198933961819408
+                dreps:
+                  - ["drep1xyz789...", 1836505196]
+                  - ["drep_script1abc123...", 26799877229]
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Internal server error while retrieving DRep delegation distribution"
+  /pots:
+    get:
+      tags:
+        - Accounts
+      summary: Pot balances.
+      description: Returns the current treasury, reserve, and deposit pot balances
+      responses:
+        "200":
+          description: JSON object containing pot balances in Lovelace
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reserves:
+                    type: integer
+                    format: uint64
+                    description: Current reserves pot balance in Lovelace
+                  treasury:
+                    type: integer
+                    format: uint64
+                    description: Current treasury pot balance in Lovelace
+                  deposits:
+                    type: integer
+                    format: uint64
+                    description: Current deposits pot balance in Lovelace
+                required:
+                  - reserves
+                  - treasury
+                  - deposits
+              example:
+                reserves: 46635632000000
+                treasury: 98635632000000
+                deposits: 125006953355
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Internal server error while retrieving pots"
+  /dreps/list:
+    get:
+      tags:
+        - DReps
+      summary: Active DReps
+      description: Returns the active DReps.
+      responses:
+        "200":
+          description: JSON array of active DRep IDs in Bech32 format
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+                  description: Bech32-encoded DRep ID (`drep1...`)
+              example:
+                - "drep1un3p8ygx8n5sng0p7s8cya7u5gfn8dccgfury89c9nl57k9wj7e"
+                - "drep_script1un3p8ygx8n5sng0p7s8cya7u5gfn8dccgfury89c9nl57k9wj7e"
+                - "drep1c6d0mus0edhnugp9z9fd68f7f87w0ft07367duh48ga9sy2a9am"
+                - "drep1kqakyccyrc8nns5hl6za3d9n84ce8sns3r2cm9z87ayljgzd4l3"
+                - "drep14ztwd5r95mqx7yks9ns475ht0zek8l68y4hstpjnczjrwn6n4x9"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Internal server error while retrieving DReps"
+  /dreps/info/{drep_id}:
+    get:
+      tags:
+        - DReps
+      summary: Specific DRep info
+      description: Returns information about a specific DRep.
+      parameters:
+        - in: path
+          name: drep_id
+          required: true
+          schema:
+            type: string
+          description: Bech32-encoded DRep ID to query.
+      responses:
+        "200":
+          description: JSON object containing DRep details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deposit:
+                    type: integer
+                    format: uint64
+                    description: Lovelace deposit amount associated with the DRep
+                  anchor:
+                    type: object
+                    nullable: true
+                    description: Anchor information associated with the DRep, or null if not provided
+                    properties:
+                      url:
+                        type: string
+                        description: IPFS or HTTP(S) URL containing the anchor data
+                      data_hash:
+                        type: string
+                        description: Hex-encoded hash of the anchor data
+                    required:
+                      - url
+                      - data_hash
+                required:
+                  - deposit
+              example:
+                deposit: 500000000
+                anchor:
+                  url: "https://raw.githubusercontent.com/taztaz1/TAZ/refs/heads/main/TAZ.jsonld"
+                  data_hash: "515746d9030a1e70ac437ed21ee1dfa9fccd21880ceb7f0bc2d81a65ffa413ed"
+        "400":
+          description: Invalid Bech32 DRep ID
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Invalid Bech32 DRep ID: drep1xyz... Error: no valid bech32 or bech32m checksum"
+        "404":
+          description: DRep not found
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "DRep not found"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Internal server error while retrieving DRep"
+  /governance/list:
+    get:
+      tags:
+        - Governance
+      summary: Active proposals
+      description: Returns the currently active governance actions. 
+      responses:
+        "200":
+          description: JSON array of active governance action IDs in Bech32 format
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+                  description: Bech32-encoded governance action ID (`gov_action1...`)
+              example:
+                - gov_action1n5sn54mgf47a7men2ryq6ppx88kta4wvenz2qkl4f9v6ppje8easqxwm88m
+                - gov_action1vrkk4dpuss8l3z9g4uc2rmf8ks0f7j534zvz9v4k85dlc54wa3zsqq68rx0
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Internal server error while retrieving governance list"
+  /governance/info/{proposal_id}:
+    get:
+      tags:
+        - Governance
+      summary: Specific proposal info
+      description: Returns information about a specific active proposal.
+      parameters:
+      - in: path
+        name: proposal_id
+        required: true
+        schema:
+          type: string
+        description: Bech32-encoded governance proposal (GovActionId) to query.
+      responses:
+        "200":
+          description: JSON object containing detailed information about a specific governance proposal
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deposit:
+                    type: integer
+                    format: uint64
+                    description: Lovelace deposit amount associated with the proposal
+                  reward_account:
+                    type: string
+                    description: Bech32-encoded stake address of the proposer
+                  gov_action_id:
+                    type: string
+                    description: Bech32-encoded governance action ID (`gov_action1...`)
+                  gov_action:
+                    type: string
+                    description: Governance action type
+                  anchor:
+                    type: object
+                    description: Anchor information for the governance action
+                    properties:
+                      url:
+                        type: string
+                        description: IPFS or HTTP(S) URL containing the proposal anchor data
+                      data_hash:
+                        type: string
+                        description: Hex-encoded hash of the anchor data
+                    required:
+                      - url
+                      - data_hash
+                required:
+                  - deposit
+                  - reward_account
+                  - gov_action_id
+                  - gov_action
+                  - anchor
+              example:
+                deposit: 100000000000
+                reward_account: "stake17y4l3fqtsyququwh78qm5dekctf6jenlkylrthqcvnchp5q57axa7"
+                gov_action_id: "gov_action1n5sn54mgf47a7men2ryq6ppx88kta4wvenz2qkl4f9v6ppje8easqxwm88m"
+                gov_action: "Information"
+                anchor:
+                  url: "ipfs://QmP9iDuML2VmoFigTJifBj87LxZ3DNnREyU27DE1MrpZDg"
+                  data_hash: "b3dc422b419a0e7beee4bf594bcfd344d87e2dc593d0fef5eb1fd218c0a6137b"
+        "400":
+          description: Invalid Bech32 governance proposal ID
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Invalid Bech32 governance proposal: gov_action1n5sn54mgf47a7men2ryq6ppx88kta4wvenz243dasg314af. Error: no valid bech32 or bech32m checksum"
+        "404":
+          description: Proposal not found
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Proposal not found"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Internal server error while retrieving proposal"
+  /governance/votes/{proposal_id}:
+    get:
+      tags:
+        - Governance
+      summary: Proposal votes
+      description: Returns voting information for a specific active governance proposal, showing how each DRep, pool, and CC member voted.
+      parameters:
+        - in: path
+          name: proposal_id
+          required: true
+          schema:
+            type: string
+          description: Bech32-encoded governance proposal ID (`gov_action1...`) to query.
+      responses:
+        "200":
+          description: JSON object mapping Voter identifiers to their vote and transaction hash for this proposal
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: object
+                  properties:
+                    transaction:
+                      type: string
+                      description: Transaction hash of the vote
+                    voting_procedure:
+                      type: object
+                      properties:
+                        vote:
+                          type: string
+                          enum: ["Yes", "No", "Abstain"]
+                          description: The vote cast for this proposal
+                        anchor:
+                          type: object
+                          nullable: true
+                          description: Anchor data with URL and hash, or null if not provided
+                          properties:
+                            url:
+                              type: string
+                              description: URL to additional voting context (IPFS or HTTP(S))
+                            data_hash:
+                              type: string
+                              description: Hex-encoded hash of the anchor data
+                          required:
+                            - url
+                            - data_hash
+                      required:
+                        - vote
+                        - anchor
+              example:
+                drep1xyz789...:
+                  transaction: "5cc79d5cbe76e46160ce9611117ab3da9c2a3b37e81bc4b1ee10ab70d6765991"
+                  voting_procedure:
+                    vote: "No"
+                    anchor:
+                      url: "https://most-brass-sun.quicknode-ipfs.com/ipfs/QmSEWEjczxjCga4eDHFzipJCsK4tYJGZ2ZDoWCt5j4rk8u"
+                      data_hash: "d40f474b48cc2dbd2e218bbf8c6bd22f543a14f86445d026d0df8b7ba07d4cc3"
+                drep1abc123...:
+                  transaction: "e1a545e7d1e4683160030ab84a13537f8015fc0cd78799b1bd356637ed7bdee4"
+                  voting_procedure:
+                    vote: "Yes"
+                    anchor: null
+        "400":
+          description: Invalid Bech32 governance proposal ID
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Invalid Bech32 governance proposal: gov_action1n5sn54mgf47a7men2ryq6ppx88kta4wvenz243dasg314af. Error: no valid bech32 or bech32m checksum"
+        "404":
+          description: Proposal not found
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Proposal not found"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Internal server error while retrieving proposal votes"
+
+  /pools/list:
+    get:
+      tags:
+        - Pools
+      summary: Active pools 
+      description: Returns the currently registered stake pools. 
+      responses:
+        "200":
+          description: A JSON object mapping Bech32 pool IDs to the pool's margin, pledge, and fixed cost. 
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: object
+                  properties:
+                    margin:
+                      type: number
+                      format: float
+                      description: Pool margin as a decimal (e.g., 0.03 for 3%)
+                    pledge:
+                      type: integer
+                      format: int64
+                      description: Pledge amount in lovelace
+                    fixed_cost:
+                      type: integer
+                      format: int64
+                      description: Fixed cost in lovelace  
+                  required:
+                    - margin
+                    - pledge
+                    - fixed_cost
+                example:
+                  "pool1xyzabcde1234567890":
+                    margin: 0.03
+                    pledge: 500000000000
+                    fixed_cost: 340000000
+                  "pool1fghijklm9876543210":
+                    margin: 0.05
+                    pledge: 1000000000000
+                    fixed_cost: 400000000
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Internal server error while retrieving stake pools"            
+  /pools/info/{pool_id}:
+    get:
+      tags:
+        - Pools
+      summary: Specific pool info
+      description: Returns information about a specific stake pool.
+      parameters:
+      - in: path
+        name: pool_id
+        required: true
+        schema:
+          type: string
+        description: Bech32 stake pool ID (`pool1...`)
+      responses:
+        "200":
+          description: JSON object containing detailed information about the specified stake pool
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  operator:
+                    type: string
+                    description: Bech32-encoded stake pool operator ID (`pool1...`)
+                  vrf_key_hash:
+                    type: string
+                    description: Hex-encoded VRF key hash
+                  pledge:
+                    type: integer
+                    format: uint64
+                    description: Pledge amount in Lovelace
+                  cost:
+                    type: integer
+                    format: uint64
+                    description: Fixed pool cost per epoch in Lovelace
+                  margin:
+                    type: object
+                    description: Pool margin as a fraction
+                    properties:
+                      numerator:
+                        type: integer
+                        description: Margin numerator
+                      denominator:
+                        type: integer
+                        description: Margin denominator
+                    required:
+                      - numerator
+                      - denominator
+                  reward_account:
+                    type: string
+                    description: Bech32-encoded reward stake address
+                  pool_owners:
+                    type: array
+                    description: List of Bech32-encoded pool owner stake addresses
+                    items:
+                      type: string
+                  relays:
+                    type: array
+                    description: List of pool relay information
+                    items:
+                      type: object
+                      description: Relay entry
+                      properties:
+                        SingleHostName:
+                          type: object
+                          properties:
+                            port:
+                              type: integer
+                              description: Port number
+                            dns_name:
+                              type: string
+                              description: DNS name or IP address (IPv4 or IPv6) of the relay
+                          required:
+                            - port
+                            - dns_name
+                  pool_metadata:
+                    type: object
+                    description: Pool metadata URL and hash
+                    properties:
+                      url:
+                        type: string
+                        description: URL to the pool metadata JSON
+                      hash:
+                        type: string
+                        description: Hex-encoded hash of the pool metadata JSON
+                    required:
+                      - url
+                      - hash
+                required:
+                  - operator
+                  - vrf_key_hash
+                  - pledge
+                  - cost
+                  - margin
+                  - reward_account
+                  - pool_owners
+                  - relays
+                  - pool_metadata
+              example:
+                operator: "pool16x5fslqfvgmsyra4vmpvuzq7p5fzeln240envdwfm2jps0j3rw2"
+                vrf_key_hash: "d9223c6cdaace93d606bc383020d4a1e32d5c65102a06fb0d2d3e787e8762858"
+                pledge: 500000000
+                cost: 170000000
+                margin:
+                  numerator: 0
+                  denominator: 1
+                reward_account: "stake1u829vpcs5jryc5g4uugg0mn4u2jewplxyvkc99azzys86xq0hrltm"
+                pool_owners:
+                  - "stake1u829vpcs5jryc5g4uugg0mn4u2jewplxyvkc99azzys86xq0hrltm"
+                relays:
+                  - SingleHostName:
+                      port: 3003
+                      dns_name: "r1.0fees.cardano.zerofeespool.com"
+                  - SingleHostName:
+                      port: 3003
+                      dns_name: "r2.0fees.cardano.zerofeespool.com"
+                pool_metadata:
+                  url: "https://www.zerofeespool.com/spo-cardano/0fees.json"
+                  hash: "dbd01979a1a01a8deb338f2b97e315f9e9c5d158935aa886eec6965bdb7a32c4"   
+        "400":
+          description: Invalid Bech32 stake pool ID
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Invalid Bech32 stake pool ID: pool16x5fslqfvgmsyra4vmpvuzq7p5fzeln240envdwfm2jps13441. Error: no valid bech32 or bech32m checksum"
+        "404":
+          description: Stake pool not found
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Stake pool not found"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Internal server error while retrieving stake pool information"
+  /utxos/{tx_hash:index}:
+    get:
+      tags:
+        - UTxOs
+      summary: UTxO balance.
+      description: Returns the balance of a specific UTxO
+      parameters:
+      - in: path
+        name: tx_hash:index
+        required: true
+        schema:
+          type: string
+        description: Transaction hash and output index in the form `tx_hash:index`, identifying the specific UTxO to query.
+      responses:
+        "200":
+          description: JSON object containing the address and balance for the specified UTxO
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  address:
+                    type: string
+                    description: Bech32-encoded Cardano address holding the UTxO
+                  value:
+                    type: integer
+                    format: uint64
+                    description: Lovelace amount in the UTxO
+                required:
+                  - address
+                  - value
+              example:
+                address: "addr1v8cwarljkvlwmwdegq5s0nkaut5jtvrs8u0ugph3243pr9ge9ksyt"
+                value: 2000000    
+        "400":
+          description: Invalid UTxO identifier format
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Parameter must be in <tx_hash>:<index> format. Provided param: abc123" 
+        "404":
+          description: UTxO not found
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "UTxO not found. Provided UTxO: abc123:0"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Internal server error while retrieving UTxO"
