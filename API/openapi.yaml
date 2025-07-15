@@ -1,4 +1,4 @@
-openapi: 3.0.4
+openapi: 3.0.3
 info:
   title: Acropolis ~ API Documentation
   description: "Acropolis is a modular Cardano node architecture that allows developers to customize which on-chain data to index and expose, reducing resource requirements while maintaining deep chain observability.\n\nThis API exposes REST endpoints for querying stake accounts, DReps, stake pools, UTxOs, governance proposals, and protocol state. Endpoints are available only if their corresponding modules are enabled within Acropolis, allowing developers to tailor node functionality to their specific needs.\n\nAll endpoints return Bech32-encoded identifiers where applicable, aligning with Cardano best practices for human-readable and interoperable identifiers."
