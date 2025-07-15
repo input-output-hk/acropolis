@@ -18,8 +18,8 @@ mod state;
 use state::State;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.certificates";
-const LIST_HANDLE_TOPIC: (&str, &str) = ("handle-topic-drep-list", "rest.get.dreps.list");
-const DREP_HANDLE_TOPIC: (&str, &str) = ("handle-topic-drep-single", "rest.get.dreps.info.*");
+const LIST_HANDLE_TOPIC: (&str, &str) = ("handle-topic-drep-list", "rest.get.dreps");
+const DREP_HANDLE_TOPIC: (&str, &str) = ("handle-topic-drep-single", "rest.get.dreps.*");
 const DEFAULT_DREP_STATE_TOPIC: &str = "cardano.drep.state";
 
 /// DRep State module

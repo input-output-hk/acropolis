@@ -3,7 +3,7 @@
 use std::{collections::BTreeMap, sync::Arc};
 
 use acropolis_common::{
-    messages::RESTResponse, serialization::ToBech32WithHrp, Anchor, GovActionId, GovernanceAction,
+    messages::RESTResponse, serialization::Bech32WithHrp, Anchor, GovActionId, GovernanceAction,
     VotingProcedure,
 };
 use anyhow::Result;
@@ -29,11 +29,15 @@ pub struct VoteRest {
     pub voting_procedure: VotingProcedure,
 }
 
-/// Handles /governance/list
+/// Handles /governance
 pub async fn handle_list(state: Arc<Mutex<State>>) -> Result<RESTResponse> {
     let locked = state.lock().await;
+    let props = locked.list_proposals();
+    if props.is_empty() {
+        return Ok(RESTResponse::with_json(200, "[]"));
+    }
     let props_bech32: Result<Vec<String>, anyhow::Error> =
-        locked.list_proposals().iter().map(|id| id.to_bech32()).collect();
+        props.iter().map(|id| id.to_bech32()).collect();
 
     match props_bech32 {
         Ok(vec) => match serde_json::to_string(&vec) {
@@ -50,7 +54,7 @@ pub async fn handle_list(state: Arc<Mutex<State>>) -> Result<RESTResponse> {
     }
 }
 
-/// Handles /governance/info/<Bech32_GovActionId>
+/// Handles /governance/{proposal_id}
 pub async fn handle_proposal(
     state: Arc<Mutex<State>>,
     param_string: String,
@@ -114,7 +118,7 @@ pub async fn handle_proposal(
     }
 }
 
-/// Handles /governance/votes/<Bech32_GovActionId>
+/// Handles /governance/{proposal_id}/votes
 pub async fn handle_votes(state: Arc<Mutex<State>>, param_string: String) -> Result<RESTResponse> {
     let proposal_id = match GovActionId::from_bech32(&param_string) {
         Ok(id) => id,
