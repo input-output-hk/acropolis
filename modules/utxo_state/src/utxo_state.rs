@@ -37,7 +37,7 @@ mod fake_immutable_utxo_store;
 use fake_immutable_utxo_store::FakeImmutableUTXOStore;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.utxo.deltas";
-const DEFAULT_SINGLE_UTXO_TOPIC: (&str, &str) = ("handle-topic-single-utxo", "rest.get.utxo.*");
+const DEFAULT_SINGLE_UTXO_TOPIC: (&str, &str) = ("handle-topic-single-utxo", "rest.get.utxos.*");
 
 const DEFAULT_STORE: &str = "memory";
 

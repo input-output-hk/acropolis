@@ -1,7 +1,8 @@
+//! REST handlers for Acropolis Accounts State module
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use acropolis_common::serialization::ToBech32WithHrp;
+use acropolis_common::serialization::Bech32WithHrp;
 use acropolis_common::DRepChoice;
 use anyhow::{anyhow, Result};
 use tokio::sync::Mutex;
@@ -12,13 +13,13 @@ use acropolis_common::{
     messages::RESTResponse, Address, Lovelace, StakeAddress, StakeAddressPayload,
 };
 
-/// REST response structure for /accounts/info/{stake_address}
+/// REST response structure for /accounts/{stake_address}
 #[derive(serde::Serialize)]
 pub struct APIStakeAccount {
     pub utxo_value: u64,
     pub rewards: u64,
     pub delegated_spo: Option<String>,
-    pub drep_choice: Option<APIDRepChoice>,
+    pub delegated_drep: Option<APIDRepChoice>,
 }
 #[derive(serde::Serialize)]
 pub struct APIDRepChoice {
@@ -26,7 +27,7 @@ pub struct APIDRepChoice {
     pub value: Option<String>,
 }
 
-/// REST response structure for /drdd
+/// Handles /drdd
 #[derive(serde::Serialize, serde::Deserialize)]
 struct APIDRepDelegationDistribution {
     pub abstain: Lovelace,
@@ -92,8 +93,8 @@ pub async fn handle_single_account(
     let response = APIStakeAccount {
         utxo_value: stake.utxo_value,
         rewards: stake.rewards,
-        delegated_spo,
-        drep_choice: delegated_drep,
+        delegated_spo: delegated_spo,
+        delegated_drep: delegated_drep,
     };
 
     match serde_json::to_string(&response) {
@@ -113,8 +114,14 @@ pub async fn handle_spdd(history: Arc<Mutex<StateHistory<State>>>) -> Result<RES
         None => return Ok(RESTResponse::with_json(200, "{}")),
     };
 
-    let spdd: HashMap<String, u64> =
-        state.generate_spdd().iter().map(|(k, v)| (hex::encode(k), *v)).collect();
+    let spdd: HashMap<String, u64> = state
+        .generate_spdd()
+        .iter()
+        .map(|(k, v)| {
+            let bech32 = k.to_bech32_with_hrp("pool").unwrap_or_else(|_| hex::encode(k));
+            (bech32, *v)
+        })
+        .collect();
 
     match serde_json::to_string(&spdd) {
         Ok(body) => Ok(RESTResponse::with_json(200, &body)),

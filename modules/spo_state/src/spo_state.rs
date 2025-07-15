@@ -3,25 +3,25 @@
 
 use acropolis_common::{
     messages::{
-        CardanoMessage, Message, RESTResponse, SnapshotDumpMessage, SnapshotMessage,
-        SnapshotStateMessage,
+        CardanoMessage, Message, SnapshotDumpMessage, SnapshotMessage, SnapshotStateMessage,
     },
     rest_helper::{handle_rest, handle_rest_with_parameter},
 };
 use anyhow::Result;
 use caryatid_sdk::{module, Context, Module};
 use config::Config;
-use serde_json;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info};
 
 mod state;
-
 use state::State;
+mod rest;
+use rest::{handle_list, handle_spo};
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.certificates";
-const DEFAULT_HANDLE_TOPIC: &str = "rest.get.spo-state";
+const DEFAULT_LIST_TOPIC: (&str, &str) = ("handle-topic-pool-list", "rest.get.pools");
+const DEFAULT_SINGLE_TOPIC: (&str, &str) = ("handle-topic-pool-info", "rest.get.pools.*");
 const DEFAULT_SPO_STATE_TOPIC: &str = "cardano.spo.state";
 
 /// SPO State module
@@ -44,9 +44,13 @@ impl SPOState {
             .ok()
             .inspect(|snapshot_topic| info!("Creating subscriber on '{snapshot_topic}'"));
 
-        let handle_topic =
-            config.get_string("handle-topic").unwrap_or(DEFAULT_HANDLE_TOPIC.to_string());
-        info!("Creating request handler on '{handle_topic}'");
+        let handle_list_topic =
+            config.get_string(DEFAULT_LIST_TOPIC.0).unwrap_or(DEFAULT_LIST_TOPIC.1.to_string());
+        info!("Creating request handler on '{handle_list_topic}'");
+
+        let handle_single_topic =
+            config.get_string(DEFAULT_SINGLE_TOPIC.0).unwrap_or(DEFAULT_SINGLE_TOPIC.1.to_string());
+        info!("Creating request handler on '{handle_single_topic}'");
 
         let spo_state_topic = config
             .get_string("publish-spo-state-topic")
@@ -132,51 +136,14 @@ impl SPOState {
         });
 
         // Handle REST requests for full SPO state
-        let state_handle_full = state.clone();
-        handle_rest(context.clone(), &handle_topic, move || {
-            let state = state_handle_full.clone();
-            async move {
-                let locked = state.lock().await;
-                let current_state = locked.current().clone();
-
-                let json = match current_state {
-                    Some(ref state) => serde_json::to_string(state),
-                    None => Ok("{}".to_owned()),
-                };
-
-                match json {
-                    Ok(body) => Ok(RESTResponse::with_json(200, &body)),
-                    Err(e) => Ok(RESTResponse::with_text(500, &format!("{e:?}"))),
-                }
-            }
+        let state_list = state.clone();
+        handle_rest(context.clone(), &handle_list_topic, move || {
+            handle_list(state_list.clone())
         });
 
-        // Handle REST requests for single SPO by ID
-        let handle_topic_single = format!("{handle_topic}.*");
-        let state_handle_single = state.clone();
-        handle_rest_with_parameter(context.clone(), &handle_topic_single, move |param| {
-            let param = param[0].to_string();
-            let state = state_handle_single.clone();
-            async move {
-                let pool_id = match hex::decode(param) {
-                    Ok(pool_id) => pool_id,
-                    Err(e) => {
-                        return Ok(RESTResponse::with_text(
-                            400,
-                            &format!("SPO operator id must be hex encoded: {e:?}"),
-                        ));
-                    }
-                };
-
-                let locked = state.lock().await;
-                match locked.get(&pool_id) {
-                    Some(spo) => match serde_json::to_string(spo) {
-                        Ok(body) => Ok(RESTResponse::with_json(200, &body)),
-                        Err(e) => Ok(RESTResponse::with_text(500, &format!("{e:?}"))),
-                    },
-                    None => Ok(RESTResponse::with_text(404, "SPO not found")),
-                }
-            }
+        let state_single = state.clone();
+        handle_rest_with_parameter(context.clone(), &handle_single_topic, move |param| {
+            handle_spo(state_single.clone(), param[0].to_string())
         });
 
         // Ticker to log stats

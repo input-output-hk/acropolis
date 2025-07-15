@@ -24,11 +24,11 @@ use state::State;
 use voting_state::VotingRegistrationState;
 
 const DEFAULT_SUBSCRIBE_TOPIC: (&str, &str) = ("subscribe-topic", "cardano.governance");
-const DEFAULT_LIST_TOPIC: (&str, &str) = ("handle-topic-proposal-list", "rest.get.governance.list");
+const DEFAULT_LIST_TOPIC: (&str, &str) = ("handle-topic-proposal-list", "rest.get.governance");
 const DEFAULT_PROPOSAL_TOPIC: (&str, &str) =
-    ("handle-topic-proposal-info", "rest.get.governance.info.*");
+    ("handle-topic-proposal-info", "rest.get.governance.*");
 const DEFAULT_VOTES_TOPIC: (&str, &str) =
-    ("handle-topic-proposal-votes", "rest.get.governance.votes.*");
+    ("handle-topic-proposal-votes", "rest.get.governance.*.votes");
 const DEFAULT_DREP_DISTRIBUTION_TOPIC: (&str, &str) =
     ("stake-drep-distribution-topic", "cardano.drep.distribution");
 const DEFAULT_SPO_DISTRIBUTION_TOPIC: (&str, &str) =

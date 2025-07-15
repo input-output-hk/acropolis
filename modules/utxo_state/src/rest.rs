@@ -7,7 +7,14 @@ use acropolis_common::messages::RESTResponse;
 use anyhow::Result;
 use tokio::sync::Mutex;
 
-// Handles /utxo/<tx_hash:index>
+/// REST response structure for single UTxO balance
+#[derive(serde::Serialize)]
+pub struct UTxOBalanceRest {
+    pub address: String,
+    pub value: u64,
+}
+
+/// Handles /utxos/{tx_hash:index}
 pub async fn handle_single_utxo(
     state: Arc<Mutex<State>>,
     param: String,
@@ -67,12 +74,12 @@ pub async fn handle_single_utxo(
                 }
             };
 
-            let json_response = serde_json::json!({
-                "address": address_text,
-                "value": utxo.value,
-            });
+            let response = UTxOBalanceRest {
+                address: address_text,
+                value: utxo.value,
+            };
 
-            match serde_json::to_string(&json_response) {
+            match serde_json::to_string(&response) {
                 Ok(body) => Ok(RESTResponse::with_json(200, &body)),
                 Err(e) => Ok(RESTResponse::with_text(
                     500,
