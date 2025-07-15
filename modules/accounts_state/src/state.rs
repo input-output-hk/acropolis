@@ -209,15 +209,26 @@ impl State {
             }
             let pool_stake = BigDecimal::from(pool_stake_u64);
 
+            // TODO!  We need to look at owners and find the actual pledge, not just
+            // the declared amount
+            let mut pool_pledge = BigDecimal::from(&spo.pledge);
+
+            // TODO! Given this we need to make sure we don't make the calculation below
+            // go negative if they haven't even got enough total stake to make their pledge
+            // Can't happen if we actually count owners' stake, of course
+            if pool_stake < pool_pledge {
+                error!("SPO {} has stake {} less than pledge {} - fenced pledge",
+                       hex::encode(&spo.operator), pool_stake, pool_pledge);
+                pool_pledge = pool_stake.clone();  // Fence for safety for now
+            }
+
             // Relative stake as fraction of total supply (sigma), and capped with 1/k (sigma')
             let relative_pool_stake = &pool_stake / &total_supply;
             let capped_relative_pool_stake = min(&relative_pool_stake,
                                                  &relative_pool_saturation_size);
 
             // Stake pledged by operator (s) and capped with 1/k (s')
-            // TODO!  We need to look at owners and find the actual pledge, not just
-            // the declared amount
-            let relative_pool_pledge = BigDecimal::from(&spo.pledge) / &total_supply;
+            let relative_pool_pledge = pool_pledge / &total_supply;
             let capped_relative_pool_pledge = min(&relative_pool_pledge,
                                                   &relative_pool_saturation_size);
 
@@ -284,11 +295,15 @@ impl State {
                 spo_earnings.insert(spo.reward_account.clone(), spo_benefit);
 
                 // Keep remainder by SPO id
-                let to_delegators = (&remainder - &pledge_reward).to_u64().ok_or(
-                    anyhow!("Non-integral remainder {remainder} or pledge_reward {pledge_reward}"))?;
+                let to_delegators = (&remainder - &pledge_reward).to_u64().unwrap_or_else(|| {
+                    error!("Non-integral remainder {remainder} or pledge_reward {pledge_reward}");
+                    0
+                });
 
-                spo_stake_and_rewards.insert(spo.operator.clone(),
-                                             (pool_stake_u64, to_delegators));
+                if to_delegators > 0 {
+                    spo_stake_and_rewards.insert(spo.operator.clone(),
+                                                 (pool_stake_u64, to_delegators));
+                }
             }
         }
 
