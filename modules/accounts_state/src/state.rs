@@ -204,7 +204,7 @@ impl State {
             // and in SPDD to get active stake (sigma)
             let pool_stake_u64 = spdd.get(&spo.operator).map(|ds| ds.active).unwrap_or(0);
             if pool_stake_u64 == 0 {
-                error!("No pool stake in SPO {}", hex::encode(&spo.operator));
+                warn!("No pool stake in SPO {}", hex::encode(&spo.operator));
                 continue;
             }
             let pool_stake = BigDecimal::from(pool_stake_u64);
@@ -217,8 +217,8 @@ impl State {
             // go negative if they haven't even got enough total stake to make their pledge
             // Can't happen if we actually count owners' stake, of course
             if pool_stake < pool_pledge {
-                error!("SPO {} has stake {} less than pledge {} - fenced pledge",
-                       hex::encode(&spo.operator), pool_stake, pool_pledge);
+                warn!("SPO {} has stake {} less than pledge {} - fenced pledge",
+                      hex::encode(&spo.operator), pool_stake, pool_pledge);
                 pool_pledge = pool_stake.clone();  // Fence for safety for now
             }
 
