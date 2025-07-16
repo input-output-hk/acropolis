@@ -32,7 +32,7 @@ impl SPODistributionPublisher {
                 Arc::new(Message::Cardano((
                     block.clone(),
                     CardanoMessage::SPOStakeDistribution(SPOStakeDistributionMessage {
-                        epoch: block.epoch,
+                        epoch: block.epoch-1,  // End of previous epoch
                         spos: spos.into_iter().collect(),
                     }),
                 ))),
