@@ -36,6 +36,7 @@ const DEFAULT_GENESIS_KEY: &str = r#"
 5b3139312c36362c3134302c3138352c3133382c31312c3233372c3230372c3235302c3134342c32
 372c322c3138382c33302c31322c38312c3135352c3230342c31302c3137392c37352c32332c3133
 382c3139362c3231372c352c31342c32302c35372c37392c33392c3137365d"#;
+const DEFAULT_PAUSE_EPOCH: i64 = -1;
 const DEFAULT_DIRECTORY: &str = "downloads";
 
 /// Mithril feedback receiver
@@ -160,6 +161,7 @@ impl MithrilSnapshotFetcher {
         let completion_topic =
             config.get_string("completion-topic").unwrap_or(DEFAULT_COMPLETION_TOPIC.to_string());
         let directory = config.get_string("directory").unwrap_or(DEFAULT_DIRECTORY.to_string());
+        let mut pause_epoch = load_pause_epoch(&config);
 
         // Path to immutable DB
         let path = Path::new(&directory).join("immutable");
@@ -215,6 +217,17 @@ impl MithrilSnapshotFetcher {
 
                     if new_epoch {
                         info!(epoch, number, slot, "New epoch");
+
+                        if let Some(pe) = pause_epoch {
+                            if epoch == pe {
+                                if prompt_epoch_pause(epoch).await {
+                                    info!("Continuing without further pauses...");
+                                    pause_epoch = None;
+                                } else {
+                                    pause_epoch = Some(epoch + 1);
+                                }
+                            }
+                        }
                     }
 
                     let era = match block.era() {
@@ -322,4 +335,28 @@ impl MithrilSnapshotFetcher {
 
         Ok(())
     }
+}
+
+/// Helper to parse pause_epoch from config
+fn load_pause_epoch(config: &Config) -> Option<u64> {
+    let pause_epoch = config.get_int("pause-epoch").unwrap_or(DEFAULT_PAUSE_EPOCH);
+    (pause_epoch >= 0).then(|| {
+        info!("Pausing enabled at epoch {pause_epoch}");
+        pause_epoch as u64
+    })
+}
+
+/// Async helper to prompt user for pause behavior
+async fn prompt_epoch_pause(epoch: u64) -> bool {
+    info!("Paused at epoch {epoch}. Press [Enter] to step to next epoch, or [c + Enter] to continue without pauses.");
+    tokio::task::spawn_blocking(|| {
+        use std::io::{self, BufRead};
+        let stdin = io::stdin();
+        let mut handle = stdin.lock();
+        let mut line = String::new();
+        handle.read_line(&mut line).unwrap();
+        line.trim().eq_ignore_ascii_case("c")
+    })
+    .await
+    .unwrap()
 }
