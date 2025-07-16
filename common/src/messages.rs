@@ -108,7 +108,7 @@ pub struct EpochActivityMessage {
     pub vrf_vkey_hashes: Vec<(KeyHash, usize)>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GovernanceProceduresMessage {
     /// Proposals
     pub proposal_procedures: Vec<ProposalProcedure>,
@@ -126,7 +126,7 @@ pub struct DRepStateMessage {
     pub dreps: Vec<(DRepCredential, Lovelace)>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DRepStakeDistributionMessage {
     /// Epoch which has ended
     pub epoch: u64,
@@ -141,7 +141,7 @@ pub struct DRepStakeDistributionMessage {
     pub dreps: Vec<(DRepCredential, Lovelace)>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SPOStakeDistributionMessage {
     /// Epoch which has ended
     pub epoch: u64,
@@ -223,9 +223,9 @@ pub enum SnapshotStateMessage {
 }
 
 // === Global message enum ===
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub enum Message {
-    None(()), // Just so we have a simple default
+    #[default] None, // Just so we have a simple default
 
     // Generic messages, get of jail free cards
     String(String),          // Simple string
@@ -241,12 +241,6 @@ pub enum Message {
 
     // Initialize state from a snapshot
     Snapshot(SnapshotMessage),
-}
-
-impl Default for Message {
-    fn default() -> Self {
-        Self::None(())
-    }
 }
 
 // Casts from specific Caryatid messages

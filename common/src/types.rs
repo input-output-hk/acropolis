@@ -2,8 +2,10 @@
 // We don't use these types in the acropolis_common crate itself
 #![allow(dead_code)]
 
-use crate::address::{Address, StakeAddress};
-use crate::rational_number::RationalNumber;
+use crate::{
+    address::{Address, StakeAddress},
+    rational_number::RationalNumber,
+};
 use anyhow::{anyhow, bail, Error, Result};
 use bech32::{Bech32, Hrp};
 use bitmask_enum::bitmask;
@@ -11,6 +13,7 @@ use chrono::{DateTime, Utc};
 use hex::decode;
 use serde::{Deserialize, Serialize};
 use serde_with::{hex::Hex, serde_as};
+use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 
@@ -41,7 +44,7 @@ impl From<Era> for u8 {
             Era::Mary => 3,
             Era::Alonzo => 4,
             Era::Babbage => 5,
-            Era::Conway => 6
+            Era::Conway => 6,
         }
     }
 }
@@ -57,7 +60,7 @@ impl TryFrom<u8> for Era {
             4 => Ok(Era::Alonzo),
             5 => Ok(Era::Babbage),
             6 => Ok(Era::Conway),
-            n => bail!("Impossible era {n}")
+            n => bail!("Impossible era {n}"),
         }
     }
 }
@@ -100,6 +103,18 @@ pub struct BlockInfo {
 
     /// Protocol era
     pub era: Era,
+}
+
+impl Ord for BlockInfo {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.number.cmp(&other.number)
+    }
+}
+
+impl PartialOrd for BlockInfo {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 /// Individual address balance change
@@ -267,6 +282,40 @@ impl Credential {
             Self::ScriptHash(hash) => hash,
         }
         .clone()
+    }
+
+    pub fn from_drep_bech32(bech32_str: &str) -> Result<Self, anyhow::Error> {
+        let (hrp, data) = bech32::decode(bech32_str)?;
+        if data.len() != 28 {
+            return Err(anyhow!(
+                "Invalid payload length for DRep Bech32, expected 28 bytes, got {}",
+                data.len()
+            ));
+        }
+
+        let hash: KeyHash = data;
+
+        match hrp.as_str() {
+            "drep" => Ok(Credential::AddrKeyHash(hash)),
+            "drep_script" => Ok(Credential::ScriptHash(hash)),
+            _ => Err(anyhow!(
+                "Invalid HRP for DRep Bech32, expected 'drep' or 'drep_script', got '{}'",
+                hrp
+            )),
+        }
+    }
+
+    pub fn to_drep_bech32(&self) -> Result<String, anyhow::Error> {
+        let hrp = Hrp::parse(match self {
+            Credential::AddrKeyHash(_) => "drep",
+            Credential::ScriptHash(_) => "drep_script",
+        })
+        .map_err(|e| anyhow!("Bech32 HRP parse error: {e}"))?;
+
+        let data = self.get_hash();
+
+        bech32::encode::<Bech32>(hrp, data.as_slice())
+            .map_err(|e| anyhow!("Bech32 encoding error: {e}"))
     }
 }
 
@@ -649,13 +698,34 @@ pub struct GovActionId {
 }
 
 impl GovActionId {
-    pub fn to_bech32(&self) -> String {
+    pub fn to_bech32(&self) -> Result<String, anyhow::Error> {
         let mut buf = self.transaction_id.clone();
         buf.push(self.action_index);
 
-        let gov_action_hrp: Hrp = Hrp::parse("gov_action").unwrap();
-        bech32::encode::<Bech32>(gov_action_hrp, &buf)
-            .unwrap_or_else(|e| format!("Cannot convert {:?} to bech32: {e}", self.transaction_id))
+        let gov_action_hrp = Hrp::parse("gov_action")?;
+        let encoded = bech32::encode::<Bech32>(gov_action_hrp, &buf)
+            .map_err(|e| anyhow!("Bech32 encoding error: {e}"))?;
+        Ok(encoded)
+    }
+
+    pub fn from_bech32(bech32_str: &str) -> Result<Self, anyhow::Error> {
+        let (hrp, data) = bech32::decode(bech32_str)?;
+
+        if hrp != Hrp::parse("gov_action")? {
+            return Err(anyhow!("Invalid HRP, expected 'gov_action', got: {}", hrp));
+        }
+
+        if data.len() < 33 {
+            return Err(anyhow!("Invalid Bech32 governance action"));
+        }
+
+        let transaction_id: DataHash = data[..32].to_vec();
+        let action_index = data[32];
+
+        Ok(GovActionId {
+            transaction_id,
+            action_index,
+        })
     }
 
     pub fn set_action_index(&mut self, action_index: usize) -> Result<&Self, anyhow::Error> {
@@ -670,7 +740,13 @@ impl GovActionId {
 
 impl Display for GovActionId {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.to_bech32())
+        match self.to_bech32() {
+            Ok(s) => write!(f, "{}", s),
+            Err(e) => {
+                tracing::error!("GovActionId to_bech32 failed: {:?}", e);
+                write!(f, "<invalid-govactionid>")
+            }
+        }
     }
 }
 
@@ -1268,9 +1344,18 @@ mod tests {
 
         for ei in 0..=6 {
             for ej in 0..=6 {
-                assert_eq!(Era::try_from(ei).unwrap() < Era::try_from(ej).unwrap(), ei < ej);
-                assert_eq!(Era::try_from(ei).unwrap() > Era::try_from(ej).unwrap(), ei > ej);
-                assert_eq!(Era::try_from(ei).unwrap() == Era::try_from(ej).unwrap(), ei == ej);
+                assert_eq!(
+                    Era::try_from(ei).unwrap() < Era::try_from(ej).unwrap(),
+                    ei < ej
+                );
+                assert_eq!(
+                    Era::try_from(ei).unwrap() > Era::try_from(ej).unwrap(),
+                    ei > ej
+                );
+                assert_eq!(
+                    Era::try_from(ei).unwrap() == Era::try_from(ej).unwrap(),
+                    ei == ej
+                );
             }
         }
 

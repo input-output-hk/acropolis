@@ -1,3 +1,5 @@
+use anyhow::anyhow;
+use bech32::{Bech32, Hrp};
 use serde::{ser::SerializeMap, Serializer};
 use serde_with::{ser::SerializeAsWrap, SerializeAs};
 
@@ -21,5 +23,31 @@ where
             )?;
         }
         map_ser.end()
+    }
+}
+
+pub trait Bech32WithHrp {
+    fn to_bech32_with_hrp(&self, hrp: &str) -> Result<String, anyhow::Error>;
+    fn from_bech32_with_hrp(s: &str, expected_hrp: &str) -> Result<Vec<u8>, anyhow::Error>;
+}
+
+impl Bech32WithHrp for Vec<u8> {
+    fn to_bech32_with_hrp(&self, hrp: &str) -> Result<String, anyhow::Error> {
+        let hrp = Hrp::parse(hrp).map_err(|e| anyhow!("Bech32 HRP parse error: {e}"))?;
+
+        bech32::encode::<Bech32>(hrp, self.as_slice())
+            .map_err(|e| anyhow!("Bech32 encoding error: {e}"))
+    }
+
+    fn from_bech32_with_hrp(s: &str, expected_hrp: &str) -> Result<Self, anyhow::Error> {
+        let (hrp, data) = bech32::decode(s).map_err(|e| anyhow!("Invalid Bech32 string: {e}"))?;
+
+        if hrp != Hrp::parse(expected_hrp)? {
+            return Err(anyhow!(
+                "Invalid HRP, expected '{expected_hrp}', got '{hrp}'"
+            ));
+        }
+
+        Ok(data.to_vec())
     }
 }
