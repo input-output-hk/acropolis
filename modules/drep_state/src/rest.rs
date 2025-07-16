@@ -8,7 +8,7 @@ use tokio::sync::Mutex;
 
 use crate::state::State;
 
-// Handle REST requests for /dreps/list
+/// Handles /dreps
 pub async fn handle_list(state: Arc<Mutex<State>>) -> RESTResponse {
     let locked = state.lock().await;
 
@@ -30,7 +30,7 @@ pub async fn handle_list(state: Arc<Mutex<State>>) -> RESTResponse {
     }
 }
 
-// Handle REST requests for /dreps/<Bech32_DRepCredential>
+// Handles /dreps/{drep_id}
 pub async fn handle_drep(state: Arc<Mutex<State>>, cred_str: String) -> Result<RESTResponse> {
     let cred = match Credential::from_drep_bech32(&cred_str) {
         Ok(c) => c,

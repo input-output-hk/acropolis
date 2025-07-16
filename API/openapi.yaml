@@ -21,7 +21,7 @@ tags:
     description: Endpoints related to UTxO state.
 
 paths:
-  /accounts/info/{stake_address}:
+  /accounts/{stake_address}:
     get:
       tags:
         - Accounts
@@ -108,7 +108,7 @@ paths:
       description: Returns the current stake pool delegation distribution.
       responses:
         "200":
-          description: JSON object mapping pool id to active stake
+          description: JSON object mapping bech32 pool ids to live stake
           content:
             application/json:
               schema:
@@ -118,8 +118,8 @@ paths:
                   format: uint64
                   description: Total Lovelace delegated to the SPO
               example:
-                a1b2c3d4e5f6abcd1234abcd5678ef90abcdef12abcd3456abcd7890abcd1234: 1234567890
-                deadbeef9876543210abcdef56781234abcdabcdabcdabcdabcdabcdabcdabcd: 987654321
+                pool13d4e5f6abcd1234abcd5678ef9kabcdef12abcd3456abcd7890abcd1234: 1234567890
+                pool1eef9876543210abcdef56781234abcdabcdabcdabcdabcdabcdabcdabcd: 987654321
               
         "500":
           description: Internal server error
@@ -152,7 +152,7 @@ paths:
                     description: Total Lovelace delegated to no confidence
                   dreps:
                     type: array
-                    description: Array of [drep_key_hash, delegated_lovelace] pairs
+                    description: Array of [bech32_drep_id, delegated_lovelace] pairs
                     items:
                       type: array
                       minItems: 2
@@ -160,7 +160,7 @@ paths:
                       items:
                         anyOf:
                           - type: string
-                            description: DRep key hash
+                            description: Bech32 drep id
                           - type: integer
                             format: uint64
                             description: Delegated Lovelace to this DRep
@@ -222,7 +222,7 @@ paths:
               schema:
                 type: string
                 example: "Internal server error while retrieving pots"
-  /dreps/list:
+  /dreps:
     get:
       tags:
         - DReps
@@ -239,11 +239,11 @@ paths:
                   type: string
                   description: Bech32-encoded DRep ID (`drep1...`)
               example:
-                - "drep1un3p8ygx8n5sng0p7s8cya7u5gfn8dccgfury89c9nl57k9wj7e"
-                - "drep_script1un3p8ygx8n5sng0p7s8cya7u5gfn8dccgfury89c9nl57k9wj7e"
-                - "drep1c6d0mus0edhnugp9z9fd68f7f87w0ft07367duh48ga9sy2a9am"
-                - "drep1kqakyccyrc8nns5hl6za3d9n84ce8sns3r2cm9z87ayljgzd4l3"
-                - "drep14ztwd5r95mqx7yks9ns475ht0zek8l68y4hstpjnczjrwn6n4x9"
+                - "drep1un3p8ygx8n5sng0p7s8cya7u5gfn8ducgfury89c9nl57k9wj7e"
+                - "drep_script1un3p8ygx8n5sng0p7s8cya7u5gfn8dccg08hry89c9nl57k9wj7e"
+                - "drep1c6d0mus0edhnugp9z9fd68f7f87w0ft087367duh48ga9sy2a9am"
+                - "drep1kqakyccyrc8nns5hl6za3d9n84ce8sns3r2cak287ayljgzd4l3"
+                - "drep14ztwd5r95mqx7yks9ns475ht0zeljl68y4hstpjnczjrwn6n4x9"
         "500":
           description: Internal server error
           content:
@@ -251,7 +251,7 @@ paths:
               schema:
                 type: string
                 example: "Internal server error while retrieving DReps"
-  /dreps/info/{drep_id}:
+  /dreps/{drep_id}:
     get:
       tags:
         - DReps
@@ -295,8 +295,8 @@ paths:
               example:
                 deposit: 500000000
                 anchor:
-                  url: "https://raw.githubusercontent.com/taztaz1/TAZ/refs/heads/main/TAZ.jsonld"
-                  data_hash: "515746d9030a1e70ac437ed21ee1dfa9fccd21880ceb7f0bc2d81a65ffa413ed"
+                  url: "https://example.com/test.jsonld"
+                  data_hash: "515746d9030a1e70ac437ed21e987dfa9fccd21880ceb7f0bc2d81a65ffa413ed"
         "400":
           description: Invalid Bech32 DRep ID
           content:
@@ -318,7 +318,7 @@ paths:
               schema:
                 type: string
                 example: "Internal server error while retrieving DRep"
-  /governance/list:
+  /governance:
     get:
       tags:
         - Governance
@@ -335,8 +335,8 @@ paths:
                   type: string
                   description: Bech32-encoded governance action ID (`gov_action1...`)
               example:
-                - gov_action1n5sn54mgf47a7men2ryq6ppx88kta4wvenz2qkl4f9v6ppje8easqxwm88m
-                - gov_action1vrkk4dpuss8l3z9g4uc2rmf8ks0f7j534zvz9v4k85dlc54wa3zsqq68rx0
+                - gov_action1n5sn54mgf47a7men2ryq6ppx88ktq9wvenz2qkl4f9v6ppje8easqxwm88m
+                - gov_action1vrkk4dpuss8l3z9g4uc2rmf8ks0f7j5klvz9v4k85dlc54wa3zsqq68rx0
         "500":
           description: Internal server error
           content:
@@ -344,7 +344,7 @@ paths:
               schema:
                 type: string
                 example: "Internal server error while retrieving governance list"
-  /governance/info/{proposal_id}:
+  /governance/{proposal_id}:
     get:
       tags:
         - Governance
@@ -399,19 +399,19 @@ paths:
                   - anchor
               example:
                 deposit: 100000000000
-                reward_account: "stake17y4l3fqtsyququwh78qm5dekctf6jenlkylrthqcvnchp5q57axa7"
-                gov_action_id: "gov_action1n5sn54mgf47a7men2ryq6ppx88kta4wvenz2qkl4f9v6ppje8easqxwm88m"
+                reward_account: "stake17y4l3fqtsyququwh78qm5dekct8ifarlkylrthqcvnchp5q57axa7"
+                gov_action_id: "gov_action1n5sn54mgf47a7men2ryq6ppxwomta4wvenz2qkl4f9v6ppje8easqxwm88m"
                 gov_action: "Information"
                 anchor:
                   url: "ipfs://QmP9iDuML2VmoFigTJifBj87LxZ3DNnREyU27DE1MrpZDg"
-                  data_hash: "b3dc422b419a0e7beee4bf594bcfd344d87e2dc593d0fef5eb1fd218c0a6137b"
+                  data_hash: "b3dc422b419a0e7beee4bf594bcfd344ah7e2dc593d0fef5eb1fd218c0a6137b"
         "400":
           description: Invalid Bech32 governance proposal ID
           content:
             text/plain:
               schema:
                 type: string
-                example: "Invalid Bech32 governance proposal: gov_action1n5sn54mgf47a7men2ryq6ppx88kta4wvenz243dasg314af. Error: no valid bech32 or bech32m checksum"
+                example: "Invalid Bech32 governance proposal: gov_action1n5sn54mgf47a7wom2ryq6ppx89jta4wvenz243dasg314af. Error: no valid bech32 or bech32m checksum"
         "404":
           description: Proposal not found
           content:
@@ -426,7 +426,7 @@ paths:
               schema:
                 type: string
                 example: "Internal server error while retrieving proposal"
-  /governance/votes/{proposal_id}:
+  /governance/{proposal_id}/votes:
     get:
       tags:
         - Governance
@@ -482,10 +482,10 @@ paths:
                   voting_procedure:
                     vote: "No"
                     anchor:
-                      url: "https://most-brass-sun.quicknode-ipfs.com/ipfs/QmSEWEjczxjCga4eDHFzipJCsK4tYJGZ2ZDoWCt5j4rk8u"
-                      data_hash: "d40f474b48cc2dbd2e218bbf8c6bd22f543a14f86445d026d0df8b7ba07d4cc3"
+                      url: "https://example.com/ipfs/QmSEWEjczxjHia4eDHFzipJCsK4tYJGZ2ZDoWCt5j4rk8u"
+                      data_hash: "d40f474b48cc2dbd2e218bbf9b6bd22f543a14f86445d026d0df8b7ba07d4cc3"
                 drep1abc123...:
-                  transaction: "e1a545e7d1e4683160030ab84a13537f8015fc0cd78799b1bd356637ed7bdee4"
+                  transaction: "e1a545e7d1e4683160030ab84a19837f8015fc0cd78799b1bd356637ed7bdee4"
                   voting_procedure:
                     vote: "Yes"
                     anchor: null
@@ -495,7 +495,7 @@ paths:
             text/plain:
               schema:
                 type: string
-                example: "Invalid Bech32 governance proposal: gov_action1n5sn54mgf47a7men2ryq6ppx88kta4wvenz243dasg314af. Error: no valid bech32 or bech32m checksum"
+                example: "Invalid Bech32 governance proposal: gov_action1n5sn54mgf47a7wom2ryq6ppx88kta4wvenz243dasg314af. Error: no valid bech32 or bech32m checksum"
         "404":
           description: Proposal not found
           content:
@@ -511,7 +511,7 @@ paths:
                 type: string
                 example: "Internal server error while retrieving proposal votes"
 
-  /pools/list:
+  /pools:
     get:
       tags:
         - Pools
@@ -559,7 +559,7 @@ paths:
               schema:
                 type: string
                 example: "Internal server error while retrieving stake pools"            
-  /pools/info/{pool_id}:
+  /pools/{pool_id}:
     get:
       tags:
         - Pools
@@ -580,9 +580,6 @@ paths:
               schema:
                 type: object
                 properties:
-                  operator:
-                    type: string
-                    description: Bech32-encoded stake pool operator ID (`pool1...`)
                   vrf_key_hash:
                     type: string
                     description: Hex-encoded VRF key hash
@@ -595,18 +592,9 @@ paths:
                     format: uint64
                     description: Fixed pool cost per epoch in Lovelace
                   margin:
-                    type: object
-                    description: Pool margin as a fraction
-                    properties:
-                      numerator:
-                        type: integer
-                        description: Margin numerator
-                      denominator:
-                        type: integer
-                        description: Margin denominator
-                    required:
-                      - numerator
-                      - denominator
+                    type: number
+                    format: float
+                    description: Pool margin as a decimal (e.g., 0.03 for 3%)
                   reward_account:
                     type: string
                     description: Bech32-encoded reward stake address
@@ -619,23 +607,51 @@ paths:
                     type: array
                     description: List of pool relay information
                     items:
-                      type: object
-                      description: Relay entry
-                      properties:
-                        SingleHostName:
-                          type: object
+                      oneOf:
+                        - type: object
                           properties:
-                            port:
-                              type: integer
-                              description: Port number
-                            dns_name:
-                              type: string
-                              description: DNS name or IP address (IPv4 or IPv6) of the relay
-                          required:
-                            - port
-                            - dns_name
+                            SingleHostAddr:
+                              type: object
+                              properties:
+                                port:
+                                  type: integer
+                                  description: Optional port number
+                                  nullable: true
+                                ipv4:
+                                  type: string
+                                  description: Optional IPv4 address (formatted as string)
+                                  nullable: true
+                                ipv6:
+                                  type: string
+                                  description: Optional IPv6 address (formatted as string)
+                                  nullable: true
+                        - type: object
+                          properties:
+                            SingleHostName:
+                              type: object
+                              properties:
+                                port:
+                                  type: integer
+                                  description: Optional port number
+                                  nullable: true
+                                dns_name:
+                                  type: string
+                                  description: DNS name of the relay
+                              required:
+                                - dns_name
+                        - type: object
+                          properties:
+                            MultiHostName:
+                              type: object
+                              properties:
+                                dns_name:
+                                  type: string
+                                  description: DNS name of the relay
+                              required:
+                                - dns_name
                   pool_metadata:
                     type: object
+                    nullable: true
                     description: Pool metadata URL and hash
                     properties:
                       url:
@@ -648,7 +664,6 @@ paths:
                       - url
                       - hash
                 required:
-                  - operator
                   - vrf_key_hash
                   - pledge
                   - cost
@@ -656,35 +671,31 @@ paths:
                   - reward_account
                   - pool_owners
                   - relays
-                  - pool_metadata
               example:
-                operator: "pool16x5fslqfvgmsyra4vmpvuzq7p5fzeln240envdwfm2jps0j3rw2"
-                vrf_key_hash: "d9223c6cdaace93d606bc383020d4a1e32d5c65102a06fb0d2d3e787e8762858"
+                vrf_key_hash: "d9223c6cdaace93d896bc383020d4a1e32d5c65103b06fb0d2d3e787e8762858"
                 pledge: 500000000
                 cost: 170000000
-                margin:
-                  numerator: 0
-                  denominator: 1
-                reward_account: "stake1u829vpcs5jryc5g4uugg0mn4u2jewplxyvkc99azzys86xq0hrltm"
+                margin: 0.03
+                reward_account: "stake1u829vpcs5jryc5g16ugg0mn4u2jewplxyvkc99azzys853q0hrltm"
                 pool_owners:
-                  - "stake1u829vpcs5jryc5g4uugg0mn4u2jewplxyvkc99azzys86xq0hrltm"
+                  - "stake1u829vpcs5jryc5g4uugg0mn4u2jreplxyvkc99azzyi96xq0hrltm"
                 relays:
                   - SingleHostName:
                       port: 3003
-                      dns_name: "r1.0fees.cardano.zerofeespool.com"
+                      dns_name: "r1.example.com"
                   - SingleHostName:
                       port: 3003
-                      dns_name: "r2.0fees.cardano.zerofeespool.com"
+                      dns_name: "r2.example.com"
                 pool_metadata:
-                  url: "https://www.zerofeespool.com/spo-cardano/0fees.json"
-                  hash: "dbd01979a1a01a8deb338f2b97e315f9e9c5d158935aa886eec6965bdb7a32c4"   
+                  url: "https://www.example.com/spo-cardano/meta.json"
+                  hash: "dbd01979a1a01a8deb338f2b97e145f9e9c5d158935aa886eec6965bdb7a32c4"   
         "400":
           description: Invalid Bech32 stake pool ID
           content:
             text/plain:
               schema:
                 type: string
-                example: "Invalid Bech32 stake pool ID: pool16x5fslqfvgmsyra4vmpvuzq7p5fzeln240envdwfm2jps13441. Error: no valid bech32 or bech32m checksum"
+                example: "Invalid Bech32 stake pool ID: pool16x5fslqfvgmsyra4vmpvuzq7p5fzeln240envdwfm2jms13441. Error: no valid bech32 or bech32m checksum"
         "404":
           description: Stake pool not found
           content:
@@ -731,7 +742,7 @@ paths:
                   - address
                   - value
               example:
-                address: "addr1v8cwarljkvlwmwdegq5s0nkaut5jtvrs8u0ugph3243pr9ge9ksyt"
+                address: "addr1v8cwarljkvlwmwdegq5s0nkaut58bvrv8u0ugph3243pr9ge9ksyt"
                 value: 2000000    
         "400":
           description: Invalid UTxO identifier format
