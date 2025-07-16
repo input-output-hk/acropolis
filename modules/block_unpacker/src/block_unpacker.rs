@@ -7,7 +7,7 @@ use caryatid_sdk::{module, Context, Module};
 use config::Config;
 use pallas::ledger::traverse::MultiEraBlock;
 use std::sync::Arc;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, Instrument, info_span};
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.block.body";
 const DEFAULT_PUBLISH_TOPIC: &str = "cardano.txs";
@@ -46,29 +46,33 @@ impl BlockUnpacker {
                         // Parse the body
                         match MultiEraBlock::decode(&body_msg.raw) {
                             Ok(block) => {
-                                if tracing::enabled!(tracing::Level::DEBUG) {
-                                    debug!(
-                                        "Decoded block number {} slot {} with {} txs",
-                                        block.number(),
-                                        block.slot(),
-                                        block.txs().len()
-                                    );
-                                }
+                                let span = info_span!("block_unpacker", block = block_info.number);
 
-                                // Encode the Tx into hex, and take ownership
-                                let txs: Vec<_> =
-                                    block.txs().into_iter().map(|tx| tx.encode()).collect();
+                                async {
+                                    if tracing::enabled!(tracing::Level::DEBUG) {
+                                        debug!(
+                                            "Decoded block number {} slot {} with {} txs",
+                                            block.number(),
+                                            block.slot(),
+                                            block.txs().len()
+                                        );
+                                    }
 
-                                let tx_message = RawTxsMessage { txs };
-                                let message_enum = Message::Cardano((
-                                    block_info.clone(),
-                                    CardanoMessage::ReceivedTxs(tx_message),
-                                ));
-                                context
-                                    .message_bus
-                                    .publish(&publish_topic, Arc::new(message_enum))
-                                    .await
-                                    .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+                                    // Encode the Tx into hex, and take ownership
+                                    let txs: Vec<_> =
+                                        block.txs().into_iter().map(|tx| tx.encode()).collect();
+
+                                    let tx_message = RawTxsMessage { txs };
+                                    let message_enum = Message::Cardano((
+                                        block_info.clone(),
+                                        CardanoMessage::ReceivedTxs(tx_message),
+                                    ));
+                                    context
+                                        .message_bus
+                                        .publish(&publish_topic, Arc::new(message_enum))
+                                        .await
+                                        .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+                                }.instrument(span).await;
                             }
 
                             Err(e) => error!("Can't decode block {}: {e}", block_info.number),

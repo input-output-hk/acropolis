@@ -12,7 +12,7 @@ use caryatid_sdk::{module, Context, Module};
 use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{error, info};
+use tracing::{error, info, info_span, Instrument};
 
 mod state;
 use state::State;
@@ -113,22 +113,25 @@ impl SPOState {
 
                 match message.as_ref() {
                     Message::Cardano((block, CardanoMessage::TxCertificates(tx_certs_msg))) => {
-                        // End of epoch?
-                        if block.new_epoch && block.epoch > 0 {
-                            let mut state = state_subscribe.lock().await;
-                            let msg = state.end_epoch(&block);
-                            context_subscribe
-                                .message_bus
-                                .publish(&spo_state_topic, msg)
-                                .await
-                                .unwrap_or_else(|e| error!("Failed to publish: {e}"));
-                        }
+                        let span = info_span!("spo_state.handle_tx_certs", block = block.number);
+                        async {
+                            // End of epoch?
+                            if block.new_epoch && block.epoch > 0 {
+                                let mut state = state_subscribe.lock().await;
+                                let msg = state.end_epoch(&block);
+                                context_subscribe
+                                    .message_bus
+                                    .publish(&spo_state_topic, msg)
+                                    .await
+                                    .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+                            }
 
-                        let mut state = state_subscribe.lock().await;
-                        state
-                            .handle_tx_certs(block, tx_certs_msg)
-                            .inspect_err(|e| error!("Messaging handling error: {e}"))
-                            .ok();
+                            let mut state = state_subscribe.lock().await;
+                            state
+                                .handle_tx_certs(block, tx_certs_msg)
+                                .inspect_err(|e| error!("Messaging handling error: {e}"))
+                                .ok();
+                        }.instrument(span).await;
                     }
                     _ => error!("Unexpected message type: {message:?}"),
                 }
@@ -156,13 +159,16 @@ impl SPOState {
                 };
                 if let Message::Clock(message) = message.as_ref() {
                     if (message.number % 60) == 0 {
-                        state_tick
-                            .lock()
-                            .await
-                            .tick()
-                            .await
-                            .inspect_err(|e| error!("Tick error: {e}"))
-                            .ok();
+                        let span = info_span!("spo_state.tick", number = message.number);
+                        async {
+                            state_tick
+                                .lock()
+                                .await
+                                .tick()
+                                .await
+                                .inspect_err(|e| error!("Tick error: {e}"))
+                                .ok();
+                        }.instrument(span).await;
                     }
                 }
             }

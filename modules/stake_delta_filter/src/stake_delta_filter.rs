@@ -11,7 +11,7 @@ use config::Config;
 use serde::Deserialize;
 use std::{path::Path, sync::Arc};
 use tokio::sync::Mutex;
-use tracing::{error, info};
+use tracing::{error, info, info_span, Instrument};
 
 const DEFAULT_ADDRESS_DELTA_TOPIC: (&str, &str) =
     ("subscription-address-delta-topic", "cardano.address.delta");
@@ -170,11 +170,14 @@ impl StakeDeltaFilter {
                 };
                 match message.as_ref() {
                     Message::Cardano((block_info, CardanoMessage::AddressDeltas(delta))) => {
-                        let msg = process_message(&cache, &delta, &block_info, None);
-                        publisher
-                            .publish(&block_info, msg)
-                            .await
-                            .unwrap_or_else(|e| error!("Publish error: {e}"))
+                        let span = info_span!("stake_delta_filter_stateless.handle_deltas", block = block_info.number);
+                        async {
+                            let msg = process_message(&cache, &delta, &block_info, None);
+                            publisher
+                                .publish(&block_info, msg)
+                                .await
+                                .unwrap_or_else(|e| error!("Publish error: {e}"))
+                        }.instrument(span).await;
                     }
 
                     msg => error!(
@@ -205,12 +208,15 @@ impl StakeDeltaFilter {
                 };
                 match message.as_ref() {
                     Message::Cardano((block_info, CardanoMessage::TxCertificates(tx_cert_msg))) => {
-                        let mut state = state_certs.lock().await;
-                        state
-                            .handle_certs(block_info, tx_cert_msg)
-                            .await
-                            .inspect_err(|e| error!("Messaging handling error: {e}"))
-                            .ok();
+                        let span = info_span!("stake_delta_filter.handle_certs", block = block_info.number);
+                        async {
+                            let mut state = state_certs.lock().await;
+                            state
+                                .handle_certs(block_info, tx_cert_msg)
+                                .await
+                                .inspect_err(|e| error!("Messaging handling error: {e}"))
+                                .ok();
+                        }.instrument(span).await;
                     }
 
                     _ => error!("Unexpected message type: {message:?}"),
@@ -229,12 +235,15 @@ impl StakeDeltaFilter {
                 };
                 match message.as_ref() {
                     Message::Cardano((block_info, CardanoMessage::AddressDeltas(deltas))) => {
-                        let mut state = state_deltas.lock().await;
-                        state
-                            .handle_deltas(block_info, deltas)
-                            .await
-                            .inspect_err(|e| error!("Messaging handling error: {e}"))
-                            .ok();
+                        let span = info_span!("stake_delta_filter.handle_deltas", block = block_info.number);
+                        async {
+                            let mut state = state_deltas.lock().await;
+                            state
+                                .handle_deltas(block_info, deltas)
+                                .await
+                                .inspect_err(|e| error!("Messaging handling error: {e}"))
+                                .ok();
+                        }.instrument(span).await;
                     }
 
                     _ => error!("Unexpected message type for {}: {message:?}", &topic),
@@ -252,13 +261,16 @@ impl StakeDeltaFilter {
                 };
                 if let Message::Clock(message) = message.as_ref() {
                     if (message.number % 60) == 0 {
-                        state_tick
-                            .lock()
-                            .await
-                            .tick()
-                            .await
-                            .inspect_err(|e| error!("Tick error: {e}"))
-                            .ok();
+                        let span = info_span!("stake_delta_filter.tick", number = message.number);
+                        async {
+                            state_tick
+                                .lock()
+                                .await
+                                .tick()
+                                .await
+                                .inspect_err(|e| error!("Tick error: {e}"))
+                                .ok();
+                        }.instrument(span).await;
                     }
                 }
             }

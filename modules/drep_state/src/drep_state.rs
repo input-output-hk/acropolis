@@ -10,7 +10,7 @@ use caryatid_sdk::{module, Context, Module};
 use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{error, info};
+use tracing::{error, info, info_span, Instrument};
 
 mod rest;
 use rest::{handle_drep, handle_list};
@@ -63,28 +63,31 @@ impl DRepState {
                 };
                 match message.as_ref() {
                     Message::Cardano((block_info, CardanoMessage::TxCertificates(tx_cert_msg))) => {
-                        let mut state = state1.lock().await;
-                        state
-                            .handle(&tx_cert_msg)
-                            .await
-                            .inspect_err(|e| error!("Messaging handling error: {e}"))
-                            .ok();
-
-                        if block_info.new_epoch && block_info.epoch > 0 {
-                            // publish DRep state at end of epoch
-                            let dreps = state.active_drep_list();
-                            let message = Message::Cardano((
-                                block_info.clone(),
-                                CardanoMessage::DRepState(DRepStateMessage {
-                                    epoch: block_info.epoch,
-                                    dreps,
-                                }),
-                            ));
-                            context_subscribe
-                                .publish(&drep_state_topic, Arc::new(message))
+                        let span = info_span!("drep_state.handle", block = block_info.number);
+                        async {
+                            let mut state = state1.lock().await;
+                            state
+                                .handle(&tx_cert_msg)
                                 .await
-                                .unwrap_or_else(|e| error!("Failed to publish: {e}"));
-                        }
+                                .inspect_err(|e| error!("Messaging handling error: {e}"))
+                                .ok();
+
+                            if block_info.new_epoch && block_info.epoch > 0 {
+                                // publish DRep state at end of epoch
+                                let dreps = state.active_drep_list();
+                                let message = Message::Cardano((
+                                    block_info.clone(),
+                                    CardanoMessage::DRepState(DRepStateMessage {
+                                        epoch: block_info.epoch,
+                                        dreps,
+                                    }),
+                                ));
+                                context_subscribe
+                                    .publish(&drep_state_topic, Arc::new(message))
+                                    .await
+                                    .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+                            }
+                        }.instrument(span).await;
                     }
 
                     _ => error!("Unexpected message type: {message:?}"),
@@ -113,13 +116,16 @@ impl DRepState {
                 };
                 if let Message::Clock(message) = message.as_ref() {
                     if (message.number % 60) == 0 {
-                        state2
-                            .lock()
-                            .await
-                            .tick()
-                            .await
-                            .inspect_err(|e| error!("Tick error: {e}"))
-                            .ok();
+                        let span = info_span!("drep_state.tick", number = message.number);
+                        async {
+                            state2
+                                .lock()
+                                .await
+                                .tick()
+                                .await
+                                .inspect_err(|e| error!("Tick error: {e}"))
+                                .ok();
+                        }.instrument(span).await;
                     }
                 }
             }

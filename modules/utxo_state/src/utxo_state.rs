@@ -11,7 +11,7 @@ use anyhow::{anyhow, Result};
 use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{error, info};
+use tracing::{error, info, info_span, Instrument};
 
 mod state;
 use state::{ImmutableUTXOStore, State};
@@ -92,12 +92,15 @@ impl UTXOState {
                 };
                 match message.as_ref() {
                     Message::Cardano((block, CardanoMessage::UTXODeltas(deltas_msg))) => {
-                        let mut state = state1.lock().await;
-                        state
-                            .handle(block, deltas_msg)
-                            .await
-                            .inspect_err(|e| error!("Messaging handling error: {e}"))
-                            .ok();
+                        let span = info_span!("utxo_state.handle", block = block.number);
+                        async {
+                            let mut state = state1.lock().await;
+                            state
+                                .handle(block, deltas_msg)
+                                .await
+                                .inspect_err(|e| error!("Messaging handling error: {e}"))
+                                .ok();
+                        }.instrument(span).await;
                     }
 
                     _ => error!("Unexpected message type: {message:?}"),
@@ -115,13 +118,16 @@ impl UTXOState {
                 };
                 if let Message::Clock(message) = message.as_ref() {
                     if (message.number % 60) == 0 {
-                        state2
-                            .lock()
-                            .await
-                            .tick()
-                            .await
-                            .inspect_err(|e| error!("Tick error: {e}"))
-                            .ok();
+                        let span = info_span!("utxo_state.tick", number = message.number);
+                        async {
+                            state2
+                                .lock()
+                                .await
+                                .tick()
+                                .await
+                                .inspect_err(|e| error!("Tick error: {e}"))
+                                .ok();
+                        }.instrument(span).await;
                     }
                 }
             }
