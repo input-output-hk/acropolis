@@ -465,8 +465,17 @@ impl State {
     /// Handle an ProtocolParamsMessage with the latest parameters at the start of a new
     /// epoch
     pub fn handle_parameters(&mut self, params_msg: &ProtocolParamsMessage) -> Result<()> {
+
+        let different = match &self.protocol_parameters {
+            Some(old_params) => old_params != &params_msg.params,
+            None => true
+        };
+
+        if different {
+            info!("New parameter set: {:?}", params_msg.params);
+        }
+
         self.protocol_parameters = Some(params_msg.params.clone());
-        info!("New parameter set: {:?}", self.protocol_parameters);
         Ok(())
     }
 
