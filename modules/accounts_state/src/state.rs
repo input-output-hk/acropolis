@@ -23,17 +23,17 @@ use tracing::{error, info, warn};
 #[derive(Debug, Default, Clone, serde::Serialize)]
 pub struct StakeAddressState {
     /// Total value in UTXO addresses
-    utxo_value: u64,
+    pub utxo_value: u64,
 
     /// Value in reward account
-    rewards: u64,
+    pub rewards: u64,
 
     /// SPO ID they are delegated to ("operator" ID)
     #[serde_as(as = "Option<Hex>")]
-    delegated_spo: Option<KeyHash>,
+    pub delegated_spo: Option<KeyHash>,
 
     /// DRep they are delegated to
-    delegated_drep: Option<DRepChoice>,
+    pub delegated_drep: Option<DRepChoice>,
 }
 
 #[derive(Default, Debug, PartialEq, Eq)]
