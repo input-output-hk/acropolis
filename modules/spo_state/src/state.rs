@@ -110,6 +110,10 @@ impl State {
         }
     }
 
+    pub fn list_pools_with_info(&self) -> Option<Vec<(&Vec<u8>, &PoolRegistration)>> {
+        self.current().map(|state| state.spos.iter().collect())
+    }
+
     async fn log_stats(&self) {
         if let Some(current) = self.current() {
             info!(
