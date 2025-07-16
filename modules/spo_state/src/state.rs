@@ -162,35 +162,14 @@ impl State {
         None
     }
 
-    // Handle end of epoch, returns message to be published
-    pub fn end_epoch(&mut self, block: &BlockInfo) -> Arc<Message> {
-        let current = self.get_previous_state(block.number);
-        info!(
-            epoch = block.epoch - 1,
-            spos = current.spos.len(),
-            "End of epoch"
-        );
-
-        // Flatten into vector of registrations
-        let spos = current.spos.values().cloned().collect();
-
-        let message = Arc::new(Message::Cardano((
-            block.clone(),
-            CardanoMessage::SPOState(SPOStateMessage {
-                epoch: block.epoch - 1,
-                spos,
-            }),
-        )));
-
-        message
-    }
-
     /// Handle TxCertificates with SPO registrations / de-registrations
+    /// Returns an optional state message for end of epoch
     pub fn handle_tx_certs(
         &mut self,
         block: &BlockInfo,
-        tx_certs_msg: &TxCertificatesMessage,
-    ) -> Result<()> {
+        tx_certs_msg: &TxCertificatesMessage) -> Result<Option<Arc<Message>>> {
+
+        let mut message: Option<Arc<Message>> = None;
         let mut current = self.get_previous_state(block.number);
         current.block = block.number;
 
@@ -198,11 +177,14 @@ impl State {
         if block.epoch > current.epoch {
             current.epoch = block.epoch;
 
+            info!(epoch = current.epoch, "New epoch");
+
             // Deregister any pending
-            let deregistrations = current.pending_deregistrations.remove(&current.epoch);
+            let deregistrations = current.pending_deregistrations.remove(&(current.epoch-1));
             match deregistrations {
                 Some(deregistrations) => {
                     for dr in deregistrations {
+                        info!("Retiring SPO {}", hex::encode(&dr));
                         match current.spos.remove(&dr) {
                             None => error!(
                                 "Retirement requested for unregistered SPO {}",
@@ -214,6 +196,16 @@ impl State {
                 }
                 None => (),
             };
+
+            // Flatten into vector of registrations
+            let spos = current.spos.values().cloned().collect();
+            message = Some(Arc::new(Message::Cardano((
+                block.clone(),
+                CardanoMessage::SPOState(SPOStateMessage {
+                    epoch: block.epoch - 1,
+                    spos,
+                }),
+            ))));
         }
 
         // Handle certificates
@@ -223,6 +215,8 @@ impl State {
                     current.spos.insert(reg.operator.clone(), reg.clone());
                 }
                 TxCertificate::PoolRetirement(ret) => {
+                    info!("SPO {} wants to retire at the end of epoch {}",
+                          hex::encode(&ret.operator), ret.epoch);
                     if ret.epoch <= current.epoch {
                         error!(
                             "SPO retirement received for current or past epoch {} for SPO {}",
@@ -263,7 +257,7 @@ impl State {
         }
         self.history.push_back(current);
 
-        Ok(())
+        Ok(message)
     }
 
     pub fn bootstrap(&mut self, state: SPOState) {
@@ -473,7 +467,7 @@ pub mod tests {
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
         let msg = new_msg();
         block.number = 2;
-        block.epoch = 1;
+        block.epoch = 2;  // Start of new epoch - retirement happens at the end of the requested one
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
         let current = state.current();
         assert!(!current.is_none());
@@ -520,7 +514,7 @@ pub mod tests {
         println!("{}", serde_json::to_string_pretty(&state.history).unwrap());
         let msg = new_msg();
         block.number = 2;
-        block.epoch = 1;
+        block.epoch = 2;  // Start of new epoch - retirement happens at the end of the requested one
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
         println!("{}", serde_json::to_string_pretty(&state.history).unwrap());
         let current = state.current();
