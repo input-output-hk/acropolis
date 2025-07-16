@@ -65,9 +65,10 @@ impl AccountsState {
         mut parameters_subscription: Box<dyn Subscription<Message>>,
     ) -> Result<()> {
         // Get the stake address deltas from the genesis bootstrap, which we know
-        // don't contain any stake
+        // don't contain any stake, plus an extra parameter state (!unexplained)
         // !TODO this seems overly specific to our startup process
         let _ = stake_subscription.read().await?;
+        let _ = parameters_subscription.read().await?;
 
         // Initialisation messages
         {
