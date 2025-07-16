@@ -26,7 +26,7 @@ use pallas::{
         traverse::{MultiEraCert, MultiEraTx},
     },
 };
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, info_span, Instrument};
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.txs";
 
@@ -738,217 +738,220 @@ impl TxUnpacker {
                 let Ok((_, message)) = subscription.read().await else { return; };
                 match message.as_ref() {
                     Message::Cardano((block, CardanoMessage::ReceivedTxs(txs_msg))) => {
-                        if tracing::enabled!(tracing::Level::DEBUG) {
-                            debug!("Received {} txs for slot {}",
-                                txs_msg.txs.len(), block.slot);
-                        }
+                        let span = info_span!("utxo_state.handle", block = block.number);
+                        async {
+                            if tracing::enabled!(tracing::Level::DEBUG) {
+                                debug!("Received {} txs for slot {}",
+                                    txs_msg.txs.len(), block.slot);
+                            }
 
-                        let mut deltas = Vec::new();
-                        let mut withdrawals = Vec::new();
-                        let mut certificates = Vec::new();
-                        let mut voting_procedures = Vec::new();
-                        let mut proposal_procedures = Vec::new();
-                        let mut total_fees: u64 = 0;
+                            let mut deltas = Vec::new();
+                            let mut withdrawals = Vec::new();
+                            let mut certificates = Vec::new();
+                            let mut voting_procedures = Vec::new();
+                            let mut proposal_procedures = Vec::new();
+                            let mut total_fees: u64 = 0;
 
-                        for (tx_index, raw_tx) in txs_msg.txs.iter().enumerate() {
-                            // Parse the tx
-                            match MultiEraTx::decode(&raw_tx) {
-                                Ok(tx) => {
-                                    let inputs = tx.consumes();
-                                    let outputs = tx.produces();
-                                    let certs = tx.certs();
-                                    let tx_withdrawals = tx.withdrawals_sorted_set();
-                                    let mut props = None;
-                                    let mut votes = None;
+                            for (tx_index, raw_tx) in txs_msg.txs.iter().enumerate() {
+                                // Parse the tx
+                                match MultiEraTx::decode(&raw_tx) {
+                                    Ok(tx) => {
+                                        let inputs = tx.consumes();
+                                        let outputs = tx.produces();
+                                        let certs = tx.certs();
+                                        let tx_withdrawals = tx.withdrawals_sorted_set();
+                                        let mut props = None;
+                                        let mut votes = None;
 
-                                    if let Some(conway) = tx.as_conway() {
-                                        if let Some(ref v) = conway.transaction_body.voting_procedures {
-                                            votes = Some(v);
+                                        if let Some(conway) = tx.as_conway() {
+                                            if let Some(ref v) = conway.transaction_body.voting_procedures {
+                                                votes = Some(v);
+                                            }
+
+                                            if let Some(ref p) = conway.transaction_body.proposal_procedures {
+                                                props = Some(p);
+                                            }
                                         }
 
-                                        if let Some(ref p) = conway.transaction_body.proposal_procedures {
-                                            props = Some(p);
-                                        }
-                                    }
-
-                                    if tracing::enabled!(tracing::Level::DEBUG) {
-                                        debug!("Decoded tx with {} inputs, {} outputs, {} certs",
-                                           inputs.len(), outputs.len(), certs.len());
-                                    }
-
-                                    if publish_utxo_deltas_topic.is_some() {
-                                        // Add all the inputs
-                                        for input in inputs {  // MultiEraInput
-
-                                            let oref = input.output_ref();
-
-                                            // Construct message
-                                            let tx_input = TxInput {
-                                                tx_hash: oref.hash().to_vec(),
-                                                index: oref.index(),
-                                            };
-
-                                            deltas.push(UTXODelta::Input(tx_input));
+                                        if tracing::enabled!(tracing::Level::DEBUG) {
+                                            debug!("Decoded tx with {} inputs, {} outputs, {} certs",
+                                               inputs.len(), outputs.len(), certs.len());
                                         }
 
-                                        // Add all the outputs
-                                        for (index, output) in outputs {  // MultiEraOutput
+                                        if publish_utxo_deltas_topic.is_some() {
+                                            // Add all the inputs
+                                            for input in inputs {  // MultiEraInput
 
-                                            match output.address() {
-                                                Ok(pallas_address) =>
-                                                {
-                                                    match Self::map_address(&pallas_address) {
-                                                        Ok(address) => {
-                                                            let tx_output = TxOutput {
-                                                                tx_hash: tx.hash().to_vec(),
-                                                                index: index as u64,
-                                                                address: address,
-                                                                value: output.value().coin(),
-                                                                // !!! datum
-                                                            };
+                                                let oref = input.output_ref();
 
-                                                            deltas.push(UTXODelta::Output(tx_output));
+                                                // Construct message
+                                                let tx_input = TxInput {
+                                                    tx_hash: oref.hash().to_vec(),
+                                                    index: oref.index(),
+                                                };
+
+                                                deltas.push(UTXODelta::Input(tx_input));
+                                            }
+
+                                            // Add all the outputs
+                                            for (index, output) in outputs {  // MultiEraOutput
+
+                                                match output.address() {
+                                                    Ok(pallas_address) =>
+                                                    {
+                                                        match Self::map_address(&pallas_address) {
+                                                            Ok(address) => {
+                                                                let tx_output = TxOutput {
+                                                                    tx_hash: tx.hash().to_vec(),
+                                                                    index: index as u64,
+                                                                    address: address,
+                                                                    value: output.value().coin(),
+                                                                    // !!! datum
+                                                                };
+
+                                                                deltas.push(UTXODelta::Output(tx_output));
+                                                            }
+
+                                                            Err(e) =>
+                                                                error!("Output {index} in tx ignored: {e}")
                                                         }
+                                                    }
 
-                                                        Err(e) =>
-                                                            error!("Output {index} in tx ignored: {e}")
+                                                    Err(e) =>
+                                                        error!("Can't parse output {index} in tx: {e}")
+                                                }
+                                            }
+                                        }
+
+                                        if publish_certificates_topic.is_some() {
+                                            for ( cert_index, cert) in certs.iter().enumerate() {
+                                                match Self::map_certificate(&cert, tx_index, cert_index) {
+                                                    Ok(tx_cert) => {
+                                                        certificates.push(tx_cert);
+                                                    },
+                                                    Err(_e) => {
+                                                        // TODO error unexpected
+                                                        //error!("{e}");
                                                     }
                                                 }
-
-                                                Err(e) =>
-                                                    error!("Can't parse output {index} in tx: {e}")
                                             }
                                         }
-                                    }
 
-                                    if publish_certificates_topic.is_some() {
-                                        for ( cert_index, cert) in certs.iter().enumerate() {
-                                            match Self::map_certificate(&cert, tx_index, cert_index) {
-                                                Ok(tx_cert) => {
-                                                    certificates.push(tx_cert);
-                                                },
-                                                Err(_e) => {
-                                                    // TODO error unexpected
-                                                    //error!("{e}");
-                                                }
-                                            }
-                                        }
-                                    }
+                                        if publish_withdrawals_topic.is_some() {
+                                            for (key, value) in tx_withdrawals {
+                                                match StakeAddress::from_binary(key) {
+                                                    Ok(stake_address) => {
+                                                        withdrawals.push(Withdrawal {
+                                                            address: stake_address,
+                                                            value,
+                                                        });
+                                                    }
 
-                                    if publish_withdrawals_topic.is_some() {
-                                        for (key, value) in tx_withdrawals {
-                                            match StakeAddress::from_binary(key) {
-                                                Ok(stake_address) => {
-                                                    withdrawals.push(Withdrawal {
-                                                        address: stake_address,
-                                                        value,
-                                                    });
-                                                }
-
-                                                Err(e) => error!("Bad stake address: {e:#}"),
-                                            }
-                                        }
-                                    }
-
-                                    if publish_governance_procedures_topic.is_some() {
-                                        if let Some(pp) = props {
-                                            // Nonempty set -- governance_message.proposal_procedures will not be empty
-                                            let mut proc_id = GovActionId { transaction_id: tx.hash().to_vec(), action_index: 0 };
-                                            for (action_index, pallas_governance_proposals) in pp.iter().enumerate() {
-                                                match proc_id.set_action_index(action_index)
-                                                    .and_then (|proc_id| Self::map_governance_proposals_procedures(&proc_id, &pallas_governance_proposals))
-                                                {
-                                                    Ok(g) => proposal_procedures.push(g),
-                                                    Err(e) => error!("Cannot decode governance proposal procedure {} idx {} in slot {}: {e}", proc_id, action_index, block.slot)
+                                                    Err(e) => error!("Bad stake address: {e:#}"),
                                                 }
                                             }
                                         }
 
-                                        if let Some(pallas_vp) = votes {
-                                            // Nonempty set -- governance_message.voting_procedures will not be empty
-                                            match Self::map_all_governance_voting_procedures(pallas_vp) {
-                                                Ok(vp) => voting_procedures.push((tx.hash().to_vec(), vp)),
-                                                Err(e) => error!("Cannot decode governance voting procedures in slot {}: {e}", block.slot)
+                                        if publish_governance_procedures_topic.is_some() {
+                                            if let Some(pp) = props {
+                                                // Nonempty set -- governance_message.proposal_procedures will not be empty
+                                                let mut proc_id = GovActionId { transaction_id: tx.hash().to_vec(), action_index: 0 };
+                                                for (action_index, pallas_governance_proposals) in pp.iter().enumerate() {
+                                                    match proc_id.set_action_index(action_index)
+                                                        .and_then (|proc_id| Self::map_governance_proposals_procedures(&proc_id, &pallas_governance_proposals))
+                                                    {
+                                                        Ok(g) => proposal_procedures.push(g),
+                                                        Err(e) => error!("Cannot decode governance proposal procedure {} idx {} in slot {}: {e}", proc_id, action_index, block.slot)
+                                                    }
+                                                }
+                                            }
+
+                                            if let Some(pallas_vp) = votes {
+                                                // Nonempty set -- governance_message.voting_procedures will not be empty
+                                                match Self::map_all_governance_voting_procedures(pallas_vp) {
+                                                    Ok(vp) => voting_procedures.push((tx.hash().to_vec(), vp)),
+                                                    Err(e) => error!("Cannot decode governance voting procedures in slot {}: {e}", block.slot)
+                                                }
                                             }
                                         }
-                                    }
 
-                                    // Capture the fees
-                                    if let Some(fee) = tx.fee() {
-                                        total_fees += fee;
-                                    }
-                                },
+                                        // Capture the fees
+                                        if let Some(fee) = tx.fee() {
+                                            total_fees += fee;
+                                        }
+                                    },
 
-                                Err(e) => error!("Can't decode transaction in slot {}: {e}",
-                                                 block.slot)
+                                    Err(e) => error!("Can't decode transaction in slot {}: {e}",
+                                                     block.slot)
+                                }
                             }
-                        }
 
-                        // Publish messages in parallel
-                        let mut futures = Vec::new();
-                        if let Some(ref topic) = publish_utxo_deltas_topic {
-                            let msg = Message::Cardano((
-                                block.clone(),
-                                CardanoMessage::UTXODeltas(UTXODeltasMessage {
-                                    deltas,
-                                })
-                            ));
-
-                            futures.push(context.message_bus.publish(&topic, Arc::new(msg)));
-                        }
-
-                        if let Some(ref topic) = publish_withdrawals_topic {
-                            let msg = Message::Cardano((
-                                block.clone(),
-                                CardanoMessage::Withdrawals(WithdrawalsMessage {
-                                    withdrawals,
-                                })
-                            ));
-
-                            futures.push(context.message_bus.publish(&topic, Arc::new(msg)));
-                        }
-
-                        if let Some(ref topic) = publish_certificates_topic {
-                            let msg = Message::Cardano((
-                                block.clone(),
-                                CardanoMessage::TxCertificates(TxCertificatesMessage {
-                                    certificates,
-                                })
-                            ));
-
-                            futures.push(context.message_bus.publish(&topic, Arc::new(msg)));
-                        }
-
-                        if let Some(ref topic) = publish_governance_procedures_topic {
-                            let governance_msg = Arc::new(Message::Cardano((
-                                block.clone(),
-                                CardanoMessage::GovernanceProcedures(
-                                    GovernanceProceduresMessage {
-                                        voting_procedures,
-                                        proposal_procedures,
+                            // Publish messages in parallel
+                            let mut futures = Vec::new();
+                            if let Some(ref topic) = publish_utxo_deltas_topic {
+                                let msg = Message::Cardano((
+                                    block.clone(),
+                                    CardanoMessage::UTXODeltas(UTXODeltasMessage {
+                                        deltas,
                                     })
-                            )));
+                                ));
 
-                            futures.push(context.message_bus.publish(&topic,
-                                                                     governance_msg.clone()));
-                        }
+                                futures.push(context.message_bus.publish(&topic, Arc::new(msg)));
+                            }
 
-                        if let Some(ref topic) = publish_fees_topic {
-                            let msg = Message::Cardano((
-                                block.clone(),
-                                CardanoMessage::BlockFees(BlockFeesMessage {
-                                    total_fees
-                                })
-                            ));
+                            if let Some(ref topic) = publish_withdrawals_topic {
+                                let msg = Message::Cardano((
+                                    block.clone(),
+                                    CardanoMessage::Withdrawals(WithdrawalsMessage {
+                                        withdrawals,
+                                    })
+                                ));
 
-                            futures.push(context.message_bus.publish(&topic, Arc::new(msg)));
-                        }
+                                futures.push(context.message_bus.publish(&topic, Arc::new(msg)));
+                            }
 
-                        join_all(futures)
-                            .await
-                            .into_iter()
-                            .filter_map(Result::err)
-                            .for_each(|e| error!("Failed to publish: {e}"));
+                            if let Some(ref topic) = publish_certificates_topic {
+                                let msg = Message::Cardano((
+                                    block.clone(),
+                                    CardanoMessage::TxCertificates(TxCertificatesMessage {
+                                        certificates,
+                                    })
+                                ));
+
+                                futures.push(context.message_bus.publish(&topic, Arc::new(msg)));
+                            }
+
+                            if let Some(ref topic) = publish_governance_procedures_topic {
+                                let governance_msg = Arc::new(Message::Cardano((
+                                    block.clone(),
+                                    CardanoMessage::GovernanceProcedures(
+                                        GovernanceProceduresMessage {
+                                            voting_procedures,
+                                            proposal_procedures,
+                                        })
+                                )));
+
+                                futures.push(context.message_bus.publish(&topic,
+                                                                         governance_msg.clone()));
+                            }
+
+                            if let Some(ref topic) = publish_fees_topic {
+                                let msg = Message::Cardano((
+                                    block.clone(),
+                                    CardanoMessage::BlockFees(BlockFeesMessage {
+                                        total_fees
+                                    })
+                                ));
+
+                                futures.push(context.message_bus.publish(&topic, Arc::new(msg)));
+                            }
+
+                            join_all(futures)
+                                .await
+                                .into_iter()
+                                .filter_map(Result::err)
+                                .for_each(|e| error!("Failed to publish: {e}"));
+                        }.instrument(span).await;
                     }
 
                     _ => error!("Unexpected message type: {message:?}")

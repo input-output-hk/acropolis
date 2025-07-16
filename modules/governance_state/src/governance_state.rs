@@ -14,7 +14,7 @@ use caryatid_sdk::{message_bus::Subscription, module, Context, Module};
 use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{error, info};
+use tracing::{error, info, info_span, Instrument};
 
 mod rest;
 use rest::{handle_list, handle_proposal, handle_votes};
@@ -153,13 +153,16 @@ impl GovernanceState {
                 };
                 if let Message::Clock(message) = message.as_ref() {
                     if (message.number % 60) == 0 {
-                        state_tick
-                            .lock()
-                            .await
-                            .tick()
-                            .await
-                            .inspect_err(|e| error!("Tick error: {e}"))
-                            .ok();
+                        let span = info_span!("governance_state.tick", number = message.number);
+                        async {
+                            state_tick
+                                .lock()
+                                .await
+                                .tick()
+                                .await
+                                .inspect_err(|e| error!("Tick error: {e}"))
+                                .ok();
+                        }.instrument(span).await;
                     }
                 }
             }
@@ -187,58 +190,62 @@ impl GovernanceState {
         loop {
             let (blk_g, gov_procs) = Self::read_governance(&mut governance_s).await?;
 
-            if blk_g.new_epoch {
-                // New governance from new epoch means that we must prepare all governance
-                // outcome for the previous epoch.
-                let mut state = state.lock().await;
-                let governance_outcomes = state.process_new_epoch(&blk_g)?;
-                state.send(&blk_g, governance_outcomes).await?;
-            }
-
-            {
-                state.lock().await.handle_governance(&blk_g, &gov_procs).await?;
-            }
-
-            if blk_g.new_epoch {
-                let (blk_p, params) = Self::read_parameters(&mut protocol_s).await?;
-                if blk_g != blk_p {
-                    error!(
-                        "Governance {blk_g:?} and protocol parameters {blk_p:?} are out of sync"
-                    );
+            let span = info_span!("governance_state.handle", block = blk_g.number);
+            async {
+                if blk_g.new_epoch {
+                    // New governance from new epoch means that we must prepare all governance
+                    // outcome for the previous epoch.
+                    let mut state = state.lock().await;
+                    let governance_outcomes = state.process_new_epoch(&blk_g)?;
+                    state.send(&blk_g, governance_outcomes).await?;
                 }
 
                 {
-                    state.lock().await.handle_protocol_parameters(&params).await?;
+                    state.lock().await.handle_governance(&blk_g, &gov_procs).await?;
                 }
 
-                if blk_g.epoch > 0 {
-                    // TODO: make sync more stable
-                    let (blk_drep, d_drep) = Self::read_drep(&mut drep_s).await?;
-                    if blk_g != blk_drep {
-                        error!("Governance {blk_g:?} and DRep distribution {blk_drep:?} are out of sync");
-                    }
-
-                    let (blk_spo, d_spo) = Self::read_spo(&mut spo_s).await?;
-                    if blk_g != blk_spo {
+                if blk_g.new_epoch {
+                    let (blk_p, params) = Self::read_parameters(&mut protocol_s).await?;
+                    if blk_g != blk_p {
                         error!(
-                            "Governance {blk_g:?} and SPO distribution {blk_spo:?} are out of sync"
+                            "Governance {blk_g:?} and protocol parameters {blk_p:?} are out of sync"
                         );
                     }
 
-                    if blk_spo.epoch != d_spo.epoch + 1 {
-                        error!(
-                            "SPO distibution {blk_spo:?} != SPO epoch + 1 ({})",
-                            d_spo.epoch
-                        );
+                    {
+                        state.lock().await.handle_protocol_parameters(&params).await?;
                     }
 
-                    state.lock().await.handle_drep_stake(&d_drep, &d_spo).await?
-                }
+                    if blk_g.epoch > 0 {
+                        // TODO: make sync more stable
+                        let (blk_drep, d_drep) = Self::read_drep(&mut drep_s).await?;
+                        if blk_g != blk_drep {
+                            error!("Governance {blk_g:?} and DRep distribution {blk_drep:?} are out of sync");
+                        }
 
-                {
-                    state.lock().await.advance_era(&blk_g.era);
+                        let (blk_spo, d_spo) = Self::read_spo(&mut spo_s).await?;
+                        if blk_g != blk_spo {
+                            error!(
+                                "Governance {blk_g:?} and SPO distribution {blk_spo:?} are out of sync"
+                            );
+                        }
+
+                        if blk_spo.epoch != d_spo.epoch + 1 {
+                            error!(
+                                "SPO distibution {blk_spo:?} != SPO epoch + 1 ({})",
+                                d_spo.epoch
+                            );
+                        }
+
+                        state.lock().await.handle_drep_stake(&d_drep, &d_spo).await?
+                    }
+
+                    {
+                        state.lock().await.advance_era(&blk_g.era);
+                    }
                 }
-            }
+                Ok::<(), anyhow::Error>(())
+            }.instrument(span).await?;
         }
     }
 
