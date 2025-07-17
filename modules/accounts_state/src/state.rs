@@ -228,7 +228,7 @@ impl State {
                                                  &relative_pool_saturation_size);
 
             // Stake pledged by operator (s) and capped with 1/k (s')
-            let relative_pool_pledge = pool_pledge / &total_supply;
+            let relative_pool_pledge = &pool_pledge / &total_supply;
             let capped_relative_pool_pledge = min(&relative_pool_pledge,
                                                   &relative_pool_saturation_size);
 
@@ -287,7 +287,7 @@ impl State {
                 // TODO: Double check this against ledger spec p.61
 
                 // Calculate the SPOs reward from their own pledge, too
-                let pledge_reward = (&remainder * BigDecimal::from(spo.pledge) / pool_stake)
+                let pledge_reward = (&remainder * &pool_pledge / pool_stake)
                     .with_scale(0);
                 let spo_benefit = (costs + &pledge_reward)
                     .to_u64()
