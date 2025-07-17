@@ -5,14 +5,14 @@ use acropolis_common::{
     messages::{CardanoMessage, Message, SPOStateMessage, TxCertificatesMessage},
     params::{SECURITY_PARAMETER_K, TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH},
     serialization::SerializeMapAs,
-    BlockInfo, PoolRegistration, TxCertificate,
+    BlockInfo, KeyHash, PoolRegistration, TxCertificate,
 };
 use anyhow::Result;
 use imbl::HashMap;
 use serde_with::{hex::Hex, serde_as};
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
-use tracing::{error, info};
+use tracing::{debug, info, error};
 
 #[serde_as]
 #[derive(Debug, Clone, serde::Serialize)]
@@ -177,33 +177,37 @@ impl State {
         if block.epoch > current.epoch {
             current.epoch = block.epoch;
 
-            info!(epoch = current.epoch, "New epoch");
+            debug!(epoch = current.epoch, "New epoch");
+
+            // Flatten into vector of registrations, before retirement so retiring ones
+            // are still included
+            let spos = current.spos.values().cloned().collect();
 
             // Deregister any pending
-            let deregistrations = current.pending_deregistrations.remove(&(current.epoch-1));
+            let mut retired_spos: Vec<KeyHash> = Vec::new();
+            let deregistrations = current.pending_deregistrations.remove(&current.epoch);
             match deregistrations {
                 Some(deregistrations) => {
                     for dr in deregistrations {
-                        info!("Retiring SPO {}", hex::encode(&dr));
+                        debug!("Retiring SPO {}", hex::encode(&dr));
                         match current.spos.remove(&dr) {
                             None => error!(
                                 "Retirement requested for unregistered SPO {}",
                                 hex::encode(&dr)
                             ),
-                            _ => (),
+                            _ => retired_spos.push(dr.clone())
                         };
                     }
                 }
                 None => (),
             };
 
-            // Flatten into vector of registrations
-            let spos = current.spos.values().cloned().collect();
             message = Some(Arc::new(Message::Cardano((
                 block.clone(),
                 CardanoMessage::SPOState(SPOStateMessage {
                     epoch: block.epoch - 1,
                     spos,
+                    retired_spos,
                 }),
             ))));
         }
@@ -215,8 +219,8 @@ impl State {
                     current.spos.insert(reg.operator.clone(), reg.clone());
                 }
                 TxCertificate::PoolRetirement(ret) => {
-                    info!("SPO {} wants to retire at the end of epoch {}",
-                          hex::encode(&ret.operator), ret.epoch);
+                    debug!("SPO {} wants to retire at the end of epoch {} (cert in block number {})",
+                          hex::encode(&ret.operator), ret.epoch, block.number);
                     if ret.epoch <= current.epoch {
                         error!(
                             "SPO retirement received for current or past epoch {} for SPO {}",
@@ -467,7 +471,7 @@ pub mod tests {
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
         let msg = new_msg();
         block.number = 2;
-        block.epoch = 2;  // Start of new epoch - retirement happens at the end of the requested one
+        block.epoch = 1;  // SPO get retired at the start of the epoch it requests
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
         let current = state.current();
         assert!(!current.is_none());
@@ -514,7 +518,7 @@ pub mod tests {
         println!("{}", serde_json::to_string_pretty(&state.history).unwrap());
         let msg = new_msg();
         block.number = 2;
-        block.epoch = 2;  // Start of new epoch - retirement happens at the end of the requested one
+        block.epoch = 1;
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
         println!("{}", serde_json::to_string_pretty(&state.history).unwrap());
         let current = state.current();
