@@ -31,11 +31,13 @@ impl State {
     }
 
     // Handle a block minting, taking the SPO's VRF vkey
-    pub fn handle_mint(&mut self, _block: &BlockInfo, vrf_vkey: &[u8]) {
+    pub fn handle_mint(&mut self, _block: &BlockInfo, vrf_vkey: Option<&[u8]>) {
         self.total_blocks += 1;
 
-        // Count one on this hash
-        *(self.vrf_vkey_hashes.entry(keyhash(vrf_vkey)).or_insert(0)) += 1;
+        if let Some(vrf_vkey) = vrf_vkey {
+            // Count one on this hash
+            *(self.vrf_vkey_hashes.entry(keyhash(vrf_vkey)).or_insert(0)) += 1;
+        }
     }
 
     // Handle block fees
@@ -104,8 +106,8 @@ mod tests {
         let mut state = State::new();
         let vrf = b"vrf_key";
         let block = make_block(100);
-        state.handle_mint(&block, vrf);
-        state.handle_mint(&block, vrf);
+        state.handle_mint(&block, Some(vrf));
+        state.handle_mint(&block, Some(vrf));
 
         assert_eq!(state.total_blocks, 2);
         assert_eq!(state.vrf_vkey_hashes.len(), 1);
@@ -116,9 +118,9 @@ mod tests {
     fn handle_mint_multiple_vrf_records_counts() {
         let mut state = State::new();
         let block = make_block(100);
-        state.handle_mint(&block, b"vrf_1");
-        state.handle_mint(&block, b"vrf_2");
-        state.handle_mint(&block, b"vrf_2");
+        state.handle_mint(&block, Some(b"vrf_1"));
+        state.handle_mint(&block, Some(b"vrf_2"));
+        state.handle_mint(&block, Some(b"vrf_2"));
 
         assert_eq!(state.total_blocks, 3);
         assert_eq!(state.vrf_vkey_hashes.len(), 2);
@@ -146,7 +148,7 @@ mod tests {
     fn end_epoch_resets_and_returns_message() {
         let mut state = State::new();
         let block = make_block(101);
-        state.handle_mint(&block, b"vrf_1");
+        state.handle_mint(&block, Some(b"vrf_1"));
         state.handle_fees(&block, 123);
 
         // Check the message returned
