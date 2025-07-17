@@ -79,10 +79,8 @@ impl EpochActivityCounter {
                     // are suppressed upstream
                     match MultiEraHeader::decode(variant, None, &header_msg.raw) {
                         Ok(header) => {
-                            if let Some(vrf_vkey) = header.vrf_vkey() {
-                                let mut state = state.lock().await;
-                                state.handle_mint(&block, vrf_vkey);
-                            }
+                            let mut state = state.lock().await;
+                            state.handle_mint(&block, header.vrf_vkey());
                         }
 
                         Err(e) => error!("Can't decode header {}: {e}", block.slot),
@@ -92,7 +90,7 @@ impl EpochActivityCounter {
                 _ => error!("Unexpected message type: {message:?}"),
             }
 
-            // Handle block fees second - this is what generates the EpochActivity message
+            // Handle block fees second so new epoch's fees don't get counted in the last one
             let (_, message) = fees_message_f.await?;
             match message.as_ref() {
                 Message::Cardano((block, CardanoMessage::BlockFees(fees_msg))) => {
