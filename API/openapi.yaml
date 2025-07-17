@@ -19,6 +19,8 @@ tags:
     description: Endpoints related to DRep state.
   - name: UTxOs
     description: Endpoints related to UTxO state.
+  - name: Epochs
+    description: Endpoints related to epoch activity state.
 
 paths:
   /accounts/{stake_address}:
@@ -765,3 +767,134 @@ paths:
               schema:
                 type: string
                 example: "Internal server error while retrieving UTxO"
+  /epoch:
+    get:
+      tags:
+        - Epochs
+      summary: Current epoch info
+      description: Returns information about the current epoch including total blocks, fees, and VRF key counts.
+      responses:
+        "200":
+          description: JSON object containing the current epoch and block statistics.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  epoch:
+                    type: integer
+                    format: uint64
+                    description: Current epoch number.
+                  total_blocks:
+                    type: integer
+                    description: Total number of blocks seen in the current epoch.
+                  total_fees:
+                    type: integer
+                    format: uint64
+                    description: Total fees collected in the current epoch.
+                  vrf_vkey_hashes:
+                    type: array
+                    description: List of VRF key hashes and block counts.
+                    items:
+                      type: array
+                      items:
+                        - type: string
+                          description: Hex-encoded VRF verification key hash.
+                        - type: integer
+                          description: Number of blocks minted by this VRF key.
+                required:
+                  - epoch
+                  - total_blocks
+                  - total_fees
+                  - vrf_vkey_hashes
+              example:
+                epoch: 312
+                total_blocks: 21556
+                total_fees: 10670212208
+                vrf_vkey_hashes:
+                  - ["aba81e764b71006c515986bf7b37a72fbb5554f78e6775f08e384dbd572a4b32", 3079]
+                  - ["63ef48bc5355f3e7973100c371d6a095251c80ceb40559f4750aa7014a6fb6db", 3080]
+
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                type: string
+                example: "Internal server error while retrieving current epoch"
+  /epochs/{epoch_number}:
+    get:
+      tags:
+        - Epochs
+      summary: Historical epoch info
+      description: Returns information about the specified epoch including total blocks, fees, and VRF key counts.
+      responses:
+        "200":
+          description: JSON object containing the specified epoch and block statistics.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  epoch:
+                    type: integer
+                    format: uint64
+                    description: Specified epoch number.
+                  total_blocks:
+                    type: integer
+                    description: Total number of blocks seen in the specified epoch.
+                  total_fees:
+                    type: integer
+                    format: uint64
+                    description: Total fees collected in the specified epoch.
+                  vrf_vkey_hashes:
+                    type: array
+                    description: List of VRF key hashes and block counts for the specified epoch.
+                    items:
+                      type: array
+                      items:
+                        - type: string
+                          description: Hex-encoded VRF verification key hash.
+                        - type: integer
+                          description: Number of blocks minted by this VRF key in the specified epoch.
+                required:
+                  - epoch
+                  - total_blocks
+                  - total_fees
+                  - vrf_vkey_hashes
+              example:
+                epoch: 210
+                total_blocks: 21556
+                total_fees: 10670212208
+                vrf_vkey_hashes:
+                  - ["aba81e764b71006c515986bf7b37a72fbb5554f78e6775f08e384dbd572a4b32", 3109]
+                  - ["63ef48bc5355f3e7973100c371d6a095251c80ceb40559f4750aa7014a6fb6db", 3076]
+        "400":
+          description: Invalid epoch number
+          content:
+            application/json:
+              schema:
+                type: string
+                example: "Invalid epoch number: -1"
+        "404":
+          description: Epoch not found
+          content:
+            application/json:
+              schema:
+                type: string
+                example: "Epoch 724 not found"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                type: string
+                example: "Internal server error while retrieving epoch 204"
+        "501":
+          description: Not enabled
+          content:
+            application/json:
+              schema:
+                type: string
+                example: "Historical epoch storage not enabled"
+
