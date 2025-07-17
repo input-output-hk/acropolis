@@ -796,11 +796,13 @@ paths:
                     type: array
                     description: List of VRF key hashes and block counts.
                     items:
-                      type: array
-                      items:
-                        - type: string
+                      type: object
+                      properties:
+                        vrf_key_hash:
+                          type: string
                           description: Hex-encoded VRF verification key hash.
-                        - type: integer
+                        block_count:
+                          type: integer
                           description: Number of blocks minted by this VRF key.
                 required:
                   - epoch
@@ -812,9 +814,10 @@ paths:
                 total_blocks: 21556
                 total_fees: 10670212208
                 vrf_vkey_hashes:
-                  - ["aba81e764b71006c515986bf7b37a72fbb5554f78e6775f08e384dbd572a4b32", 3079]
-                  - ["63ef48bc5355f3e7973100c371d6a095251c80ceb40559f4750aa7014a6fb6db", 3080]
-
+                  - vrf_key_hash: "aba81e764b71006c515986bf7b37a72fbb5554f78e6775f08e384dbd572a4b32"
+                    block_count: 3079
+                  - vrf_key_hash: "63ef48bc5355f3e7973100c371d6a095251c80ceb40559f4750aa7014a6fb6db"
+                    block_count: 3080
         "500":
           description: Internal server error
           content:
@@ -828,6 +831,14 @@ paths:
         - Epochs
       summary: Historical epoch info
       description: Returns information about the specified epoch including total blocks, fees, and VRF key counts.
+      parameters:
+        - name: epoch_number
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: uint64
+          description: The epoch number to query.
       responses:
         "200":
           description: JSON object containing the specified epoch and block statistics.
@@ -851,12 +862,14 @@ paths:
                     type: array
                     description: List of VRF key hashes and block counts for the specified epoch.
                     items:
-                      type: array
-                      items:
-                        - type: string
+                      type: object
+                      properties:
+                        vrf_key_hash:
+                          type: string
                           description: Hex-encoded VRF verification key hash.
-                        - type: integer
-                          description: Number of blocks minted by this VRF key in the specified epoch.
+                        block_count:
+                          type: integer
+                          description: Number of blocks minted by this VRF key.
                 required:
                   - epoch
                   - total_blocks
@@ -867,8 +880,10 @@ paths:
                 total_blocks: 21556
                 total_fees: 10670212208
                 vrf_vkey_hashes:
-                  - ["aba81e764b71006c515986bf7b37a72fbb5554f78e6775f08e384dbd572a4b32", 3109]
-                  - ["63ef48bc5355f3e7973100c371d6a095251c80ceb40559f4750aa7014a6fb6db", 3076]
+                  - vrf_key_hash: "aba81e764b71006c515986bf7b37a72fbb5554f78e6775f08e384dbd572a4b32"
+                    block_count: 3079
+                  - vrf_key_hash: "63ef48bc5355f3e7973100c371d6a095251c80ceb40559f4750aa7014a6fb6db"
+                    block_count: 3080
         "400":
           description: Invalid epoch number
           content:
