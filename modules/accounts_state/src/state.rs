@@ -79,10 +79,14 @@ pub struct State {
     /// Wrapped in an Arc so it doesn't get cloned in full by StateHistory
     stake_addresses: Arc<Mutex<HashMap<KeyHash, StakeAddressState>>>,
 
-    /// Snapshots of stake taken at (epoch-2) and (epoch-1)
-    /// Arcs because we don't want them copied by StateHistory
-    previous_snapshot: Arc<StakeSnapshot>,
-    last_snapshot: Arc<StakeSnapshot>,
+    // Snapshots: Arcs because we don't want them copied by StateHistory
+    // Mark, Set, Go naming - mark is the current one
+
+    /// Snapshot of stake taken at (epoch-2), "go"
+    go_snapshot: Arc<StakeSnapshot>,
+
+    /// Snapshot of stake taken at (epoch-1), "set"
+    set_snapshot: Arc<StakeSnapshot>,
 
     /// Global account pots
     pots: Pots,
@@ -130,9 +134,8 @@ impl State {
             _ => return Ok(())
         };
 
-        // For each pool, calculate the total stake, including its own and
-        // from other stake addresses
-        let spdd = self.generate_spdd();
+        // Get the 'go' snapshot from two epochs ago
+        let go_snapshot = self.go_snapshot.clone();
 
         // Calculate total supply (total in circulation + treasury) or
         // equivalently max-supply - reserves - this is the denominator
@@ -187,9 +190,8 @@ impl State {
         // Note: Accumulated then spent to avoid borrow horrors on self
         let mut spo_earnings: HashMap<RewardAccount, Lovelace> = HashMap::new();
 
-        // Map of SPO operator ID to total stake and rewards to split to delegators (not
-        // including the SPO itself, which has already been taken)
-        let mut spo_stake_and_rewards: HashMap<KeyHash, (Lovelace, Lovelace)> = HashMap::new();
+        // Map of SPO operator ID to rewards to split to delegators
+        let mut spo_rewards: HashMap<KeyHash, Lovelace> = HashMap::new();
 
         // Calculate for every registered SPO (even those who didn't participate in this epoch)
         for spo in self.spos.values() {
@@ -201,10 +203,12 @@ impl State {
             let relative_blocks = BigDecimal::from(*block_count as u64)
                 / BigDecimal::from(total_blocks as u64);
 
-            // and in SPDD to get active stake (sigma)
-            let pool_stake_u64 = spdd.get(&spo.operator).map(|ds| ds.active).unwrap_or(0);
+            // and in snapshot to get active stake (sigma)
+            let pool_stake_u64 = go_snapshot.spos.get(&spo.operator)
+                .map(|spo| spo.total_stake)
+                .unwrap_or(0);
             if pool_stake_u64 == 0 {
-                warn!("No pool stake in SPO {}", hex::encode(&spo.operator));
+                // No stake, no rewards or earnings
                 continue;
             }
             let pool_stake = BigDecimal::from(pool_stake_u64);
@@ -283,26 +287,21 @@ impl State {
                     .with_scale(0);
                 let costs = fixed_cost + margin;
                 let remainder = pool_rewards - &costs;
-
-                // TODO: Double check this against ledger spec p.61
-
-                // Calculate the SPOs reward from their own pledge, too
-                let pledge_reward = (&remainder * &pool_pledge / pool_stake)
-                    .with_scale(0);
-                let spo_benefit = (costs + &pledge_reward)
-                    .to_u64()
-                    .ok_or(anyhow!("Non-integral costs"))?;
+                let spo_benefit = costs.to_u64().unwrap_or_else(|| {
+                    error!("Non-integral costs {costs} for SPO {}", hex::encode(&spo.operator));
+                    0
+                });
                 spo_earnings.insert(spo.reward_account.clone(), spo_benefit);
 
                 // Keep remainder by SPO id
-                let to_delegators = (&remainder - &pledge_reward).to_u64().unwrap_or_else(|| {
-                    error!("Non-integral remainder {remainder} or pledge_reward {pledge_reward}");
+                let to_delegators = remainder.to_u64().unwrap_or_else(|| {
+                    error!("Non-integral remainder {remainder} in SPO {}",
+                           hex::encode(&spo.operator));
                     0
                 });
 
                 if to_delegators > 0 {
-                    spo_stake_and_rewards.insert(spo.operator.clone(),
-                                                 (pool_stake_u64, to_delegators));
+                    spo_rewards.insert(spo.operator.clone(), to_delegators);
                 }
             }
         }
@@ -313,18 +312,16 @@ impl State {
             self.pots.reserves -= reward;
         });
 
-        // Capture a new snapshot
-        let new_snapshot = StakeSnapshot::new(&self.stake_addresses.lock().unwrap());
-
         // Pay the delegators - split remainder in proportional to delegated stake,
         // * as it was 2 epochs ago *
         // TODO: Although these are calculated now, they are *paid* at the next epoch
-        self.previous_snapshot.clone().spos.iter().for_each(|(spo_id, spo)| {
+        go_snapshot.spos.iter().for_each(|(spo_id, spo)| {
             // Look up the SPO in the rewards map
             // May be absent if they didn't meet their costs
-            if let Some((total_stake, rewards)) = spo_stake_and_rewards.get(spo_id) {
+            if let Some(rewards) = spo_rewards.get(spo_id) {
+                let total_stake = BigDecimal::from(spo.total_stake);
                 for (hash, stake) in &spo.delegators {
-                    let proportion = BigDecimal::from(stake) / BigDecimal::from(total_stake);
+                    let proportion = BigDecimal::from(stake) / &total_stake;
 
                     // and hence how much of the total reward they get
                     let reward = BigDecimal::from(rewards) * &proportion;
@@ -340,9 +337,12 @@ impl State {
             }
         });
 
+        // Capture a new snapshot
+        let mark_snapshot = Arc::new(StakeSnapshot::new(&self.stake_addresses.lock().unwrap()));
+
         // Rotate the snapshots
-        self.previous_snapshot = self.last_snapshot.clone();
-        self.last_snapshot = Arc::new(new_snapshot);
+        self.go_snapshot = self.set_snapshot.clone();
+        self.set_snapshot = mark_snapshot;
 
         Ok(())
     }
