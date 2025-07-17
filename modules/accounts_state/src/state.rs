@@ -319,11 +319,11 @@ impl State {
         // Pay the delegators - split remainder in proportional to delegated stake,
         // * as it was 2 epochs ago *
         // TODO: Although these are calculated now, they are *paid* at the next epoch
-        self.previous_snapshot.clone().spos.iter().for_each(|(spo_id, delegators)| {
+        self.previous_snapshot.clone().spos.iter().for_each(|(spo_id, spo)| {
             // Look up the SPO in the rewards map
             // May be absent if they didn't meet their costs
             if let Some((total_stake, rewards)) = spo_stake_and_rewards.get(spo_id) {
-                for (hash, stake) in delegators {
+                for (hash, stake) in &spo.delegators {
                     let proportion = BigDecimal::from(stake) / BigDecimal::from(total_stake);
 
                     // and hence how much of the total reward they get
