@@ -86,7 +86,10 @@ dependencies = [
  "anyhow",
  "caryatid_sdk",
  "config",
+ "hex",
  "pallas",
+ "serde",
+ "serde_json",
  "tokio",
  "tracing",
 ]
