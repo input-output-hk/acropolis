@@ -496,7 +496,7 @@ impl State {
     pub fn handle_spo_state(&mut self, spo_msg: &SPOStateMessage) -> Result<()> {
 
         // Capture current SPOs, mapped by operator ID
-        let new_spos: OrdMap<_, _> = spo_msg
+        let mut new_spos: OrdMap<KeyHash, PoolRegistration> = spo_msg
             .spos
             .iter()
             .cloned()
@@ -520,22 +520,33 @@ impl State {
         // care of in UTXOState)
         let total_deposits = (new_count as u64) * deposit;
         self.pots.deposits += total_deposits;
-        info!("{new_count} new SPOs, total new deposits {total_deposits}");
 
-        // Check for any SPOs that have retired and need deposit refunds
+        if new_count > 0 {
+            info!("{new_count} new SPOs, total new deposits {total_deposits}");
+        }
+
+        // Check for any SPOs that have retired this epoch and need deposit refunds
         let mut refunds: Vec<KeyHash> = Vec::new();
-        for (id, old_spo) in self.spos.iter() {
-            if !new_spos.contains_key(id) {
-                match StakeAddress::from_binary(&old_spo.reward_account) {
+        for id in &spo_msg.retired_spos {
+            if let Some(retired_spo) = new_spos.get(id) {
+                match StakeAddress::from_binary(&retired_spo.reward_account) {
                     Ok(stake_address) => {
                         let keyhash = stake_address.get_hash();
-                        info!("SPO {} has retired - refunding their deposit to {}",
+                        debug!("SPO {} has retired - refunding their deposit to {}",
                               hex::encode(id), hex::encode(keyhash));
                         refunds.push(keyhash.to_vec());
                     }
                     Err(e) => error!("Error repaying SPO deposit: {e}")
                 }
+
+                // Remove from our list
+                new_spos.remove(id);
             }
+        }
+
+        if !refunds.is_empty() {
+            info!("{} retiring SPOs, total refunds {}", refunds.len(),
+                  (refunds.len() as u64) * deposit);
         }
 
         // TODO - if their reward account has been deregistered, it goes to Treasury
@@ -959,6 +970,7 @@ mod tests {
                     pool_metadata: None
                 },
             ],
+            retired_spos: vec![],
         }).unwrap();
 
         // Delegate
