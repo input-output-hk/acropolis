@@ -48,6 +48,27 @@ impl StakeSnapshot {
 
         snapshot
     }
+
+    /// Get the total stake held by a vector of stake addresses for a particular SPO (by ID)
+    pub fn get_stake_delegated_to_spo_by_addresses(&self, spo: &KeyHash,
+                                                   addresses: &[KeyHash]) -> Lovelace {
+        let Some(snapshot_spo) = self.spos.get(spo) else {
+            return 0;
+        };
+
+        let addr_set: std::collections::HashSet<_> = addresses.iter().collect();
+        snapshot_spo
+            .delegators
+            .iter()
+            .filter_map(|(addr, amount)| {
+                if addr_set.contains(addr) {
+                    Some(*amount)
+                } else {
+                    None
+                }
+            })
+            .sum()
+    }
 }
 
 #[cfg(test)]
@@ -103,5 +124,79 @@ mod tests {
         assert_eq!(*hash2, addr2);
         assert_eq!(*value2, 99);
         assert_eq!(spod2.total_stake, 99);
+    }
+
+    #[test]
+    fn get_stake_delegated_to_spo_by_addresses_when_some_match_is_correct() {
+        let mut snapshot = StakeSnapshot::default();
+        let spo1: KeyHash = vec![0x01];
+
+        let addr1: KeyHash = vec![0x11];
+        let addr2: KeyHash = vec![0x12];
+        let addr3: KeyHash = vec![0x13];
+        let addr4: KeyHash = vec![0x14];
+
+        snapshot.spos.insert(
+            spo1.clone(),
+            StakeSnapshotSPO {
+                delegators: vec![
+                    (addr1.clone(), 100),
+                    (addr2.clone(), 200),
+                    (addr3.clone(), 300),
+                ],
+                total_stake: 600,
+            },
+        );
+
+        let addresses = vec![addr2, addr3, addr4];
+        let result = snapshot.get_stake_delegated_to_spo_by_addresses(&spo1, &addresses);
+        assert_eq!(result, 500);
+    }
+
+    #[test]
+    fn get_stake_delegated_to_spo_by_addresses_with_no_match_is_0() {
+        let mut snapshot = StakeSnapshot::default();
+        let spo1: KeyHash = vec![0x01];
+
+        let addr1: KeyHash = vec![0x11];
+        let addr_x: KeyHash = vec![0x99];
+
+        snapshot.spos.insert(
+            spo1.clone(),
+            StakeSnapshotSPO {
+                delegators: vec![(addr1.clone(), 100)],
+                total_stake: 100,
+            },
+        );
+
+        let addresses = vec![addr_x];
+        let result = snapshot.get_stake_delegated_to_spo_by_addresses(&spo1, &addresses);
+        assert_eq!(result, 0);
+    }
+
+    #[test]
+    fn get_stake_delegated_to_spo_by_addresses_with_unknown_spo_is_0() {
+        let snapshot = StakeSnapshot::default();
+        let spo_unknown: KeyHash = vec![0xFF];
+        let result = snapshot.get_stake_delegated_to_spo_by_addresses(&spo_unknown, &[]);
+        assert_eq!(result, 0);
+    }
+
+    #[test]
+    fn get_stake_delegated_to_spo_by_addresses_with_empty_addresses_is_0() {
+        let mut snapshot = StakeSnapshot::default();
+        let spo1: KeyHash = vec![0x01];
+        let addr1: KeyHash = vec![0x11];
+
+        snapshot.spos.insert(
+            spo1.clone(),
+            StakeSnapshotSPO {
+                delegators: vec![(addr1.clone(), 100)],
+                total_stake: 100,
+            },
+        );
+
+        let result = snapshot.get_stake_delegated_to_spo_by_addresses(&spo1, &[]);
+        assert_eq!(result, 0);
     }
 }

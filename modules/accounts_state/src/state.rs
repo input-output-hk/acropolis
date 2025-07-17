@@ -213,18 +213,18 @@ impl State {
             }
             let pool_stake = BigDecimal::from(pool_stake_u64);
 
-            // TODO!  We need to look at owners and find the actual pledge, not just
-            // the declared amount
-            let mut pool_pledge = BigDecimal::from(&spo.pledge);
+            // Get the stake actually delegated by the owners accounts to this SPO
+            let pool_owner_stake = go_snapshot.get_stake_delegated_to_spo_by_addresses(
+                &spo.operator, &spo.pool_owners);
 
-            // TODO! Given this we need to make sure we don't make the calculation below
-            // go negative if they haven't even got enough total stake to make their pledge
-            // Can't happen if we actually count owners' stake, of course
-            if pool_stake < pool_pledge {
-                warn!("SPO {} has stake {} less than pledge {} - fenced pledge",
-                      hex::encode(&spo.operator), pool_stake, pool_pledge);
-                pool_pledge = pool_stake.clone();  // Fence for safety for now
+            // If they haven't met their pledge, no dice
+            if pool_owner_stake < spo.pledge {
+                warn!("SPO {} has owner stake {} less than pledge {} - skipping",
+                      hex::encode(&spo.operator), pool_owner_stake, spo.pledge);
+                continue;
             }
+
+            let pool_pledge = BigDecimal::from(&spo.pledge);
 
             // Relative stake as fraction of total supply (sigma), and capped with 1/k (sigma')
             let relative_pool_stake = &pool_stake / &total_supply;
