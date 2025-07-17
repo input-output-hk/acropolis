@@ -42,45 +42,14 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  utxo_value:
-                    type: integer
-                    format: uint64
-                    description: Combined Lovelace amount of all UTXOs
-                  rewards:
-                    type: integer
-                    format: uint64
-                    description: Lovelace amount in reward account
-                  delegated_spo:
-                    type: string
-                    nullable: true
-                    description: Hex-encoded pool id, if any
-                  delegated_drep:
-                    type: object
-                    nullable: true
-                    description: Selected DRep choice, if any
-                    properties:
-                      type:
-                        type: string
-                        enum: ["Key", "Script", "Abstain", "NoConfidence"]
-                        description: Type of DRep delegation
-                      value:
-                        type: string
-                        nullable: true
-                        description: Bech32-encoded DRep KeyHash if applicable; omitted for Abstain/NoConfidence
-                    required:
-                      - type
-                required:
-                  - utxo_value
-                  - rewards
-                example:
-                  utxo_value: 4200000
-                  rewards: 1337000
-                  delegated_spo: "pool1xyzabc..."
-                  delegated_drep:
-                    type: "Key"
-                    value: "drep1abcd..."
+                $ref: '#/components/schemas/AccountState'
+              example:
+                utxo_value: 4200000
+                rewards: 1337000
+                delegated_spo: "pool1xyzabc..."
+                delegated_drep:
+                  type: "Key"
+                  value: "drep1abcd..."
         "400":
           description: Invalid Bech32 stake address
           content:
@@ -142,34 +111,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  abstain:
-                    type: integer
-                    format: uint64
-                    description: Total Lovelace delegated to abstain
-                  no_confidence:
-                    type: integer
-                    format: uint64
-                    description: Total Lovelace delegated to no confidence
-                  dreps:
-                    type: array
-                    description: Array of [bech32_drep_id, delegated_lovelace] pairs
-                    items:
-                      type: array
-                      minItems: 2
-                      maxItems: 2
-                      items:
-                        anyOf:
-                          - type: string
-                            description: Bech32 drep id
-                          - type: integer
-                            format: uint64
-                            description: Delegated Lovelace to this DRep
-                required:
-                  - abstain
-                  - no_confidence
-                  - dreps
+                 $ref: '#/components/schemas/DRepDelegationDistribution'
               example:
                 abstain: 2577998401882324
                 no_confidence: 198933961819408
@@ -195,24 +137,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  reserves:
-                    type: integer
-                    format: uint64
-                    description: Current reserves pot balance in Lovelace
-                  treasury:
-                    type: integer
-                    format: uint64
-                    description: Current treasury pot balance in Lovelace
-                  deposits:
-                    type: integer
-                    format: uint64
-                    description: Current deposits pot balance in Lovelace
-                required:
-                  - reserves
-                  - treasury
-                  - deposits
+                $ref: '#/components/schemas/PotBalances'
               example:
                 reserves: 46635632000000
                 treasury: 98635632000000
@@ -236,10 +161,7 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  type: string
-                  description: Bech32-encoded DRep ID (`drep1...`)
+                $ref: '#/components/schemas/ActiveDReps'
               example:
                 - "drep1un3p8ygx8n5sng0p7s8cya7u5gfn8ducgfury89c9nl57k9wj7e"
                 - "drep_script1un3p8ygx8n5sng0p7s8cya7u5gfn8dccg08hry89c9nl57k9wj7e"
@@ -272,28 +194,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  deposit:
-                    type: integer
-                    format: uint64
-                    description: Lovelace deposit amount associated with the DRep
-                  anchor:
-                    type: object
-                    nullable: true
-                    description: Anchor information associated with the DRep, or null if not provided
-                    properties:
-                      url:
-                        type: string
-                        description: IPFS or HTTP(S) URL containing the anchor data
-                      data_hash:
-                        type: string
-                        description: Hex-encoded hash of the anchor data
-                    required:
-                      - url
-                      - data_hash
-                required:
-                  - deposit
+                $ref: '#/components/schemas/DRepInfo'
               example:
                 deposit: 500000000
                 anchor:
@@ -332,10 +233,7 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  type: string
-                  description: Bech32-encoded governance action ID (`gov_action1...`)
+                $ref: '#/components/schemas/ActiveGovernanceActions'
               example:
                 - gov_action1n5sn54mgf47a7men2ryq6ppx88ktq9wvenz2qkl4f9v6ppje8easqxwm88m
                 - gov_action1vrkk4dpuss8l3z9g4uc2rmf8ks0f7j5klvz9v4k85dlc54wa3zsqq68rx0
@@ -447,37 +345,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties:
-                  type: object
-                  properties:
-                    transaction:
-                      type: string
-                      description: Transaction hash of the vote
-                    voting_procedure:
-                      type: object
-                      properties:
-                        vote:
-                          type: string
-                          enum: ["Yes", "No", "Abstain"]
-                          description: The vote cast for this proposal
-                        anchor:
-                          type: object
-                          nullable: true
-                          description: Anchor data with URL and hash, or null if not provided
-                          properties:
-                            url:
-                              type: string
-                              description: URL to additional voting context (IPFS or HTTP(S))
-                            data_hash:
-                              type: string
-                              description: Hex-encoded hash of the anchor data
-                          required:
-                            - url
-                            - data_hash
-                      required:
-                        - vote
-                        - anchor
+                $ref: '#/components/schemas/GovernanceProposal'
               example:
                 drep1xyz789...:
                   transaction: "5cc79d5cbe76e46160ce9611117ab3da9c2a3b37e81bc4b1ee10ab70d6765991"
@@ -512,7 +380,6 @@ paths:
               schema:
                 type: string
                 example: "Internal server error while retrieving proposal votes"
-
   /pools:
     get:
       tags:
@@ -525,35 +392,16 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties:
-                  type: object
-                  properties:
-                    margin:
-                      type: number
-                      format: float
-                      description: Pool margin as a decimal (e.g., 0.03 for 3%)
-                    pledge:
-                      type: integer
-                      format: int64
-                      description: Pledge amount in lovelace
-                    fixed_cost:
-                      type: integer
-                      format: int64
-                      description: Fixed cost in lovelace  
-                  required:
-                    - margin
-                    - pledge
-                    - fixed_cost
-                example:
-                  "pool1xyzabcde1234567890":
-                    margin: 0.03
-                    pledge: 500000000000
-                    fixed_cost: 340000000
-                  "pool1fghijklm9876543210":
-                    margin: 0.05
-                    pledge: 1000000000000
-                    fixed_cost: 400000000
+                $ref: '#/components/schemas/PoolSummaryMap'
+              example:
+                "pool1xyzabcde1234567890":
+                  margin: 0.03
+                  pledge: 500000000000
+                  fixed_cost: 340000000
+                "pool1fghijklm9876543210":
+                  margin: 0.05
+                  pledge: 1000000000000
+                  fixed_cost: 400000000
         "500":
           description: Internal server error
           content:
@@ -580,99 +428,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  vrf_key_hash:
-                    type: string
-                    description: Hex-encoded VRF key hash
-                  pledge:
-                    type: integer
-                    format: uint64
-                    description: Pledge amount in Lovelace
-                  cost:
-                    type: integer
-                    format: uint64
-                    description: Fixed pool cost per epoch in Lovelace
-                  margin:
-                    type: number
-                    format: float
-                    description: Pool margin as a decimal (e.g., 0.03 for 3%)
-                  reward_account:
-                    type: string
-                    description: Bech32-encoded reward stake address
-                  pool_owners:
-                    type: array
-                    description: List of Bech32-encoded pool owner stake addresses
-                    items:
-                      type: string
-                  relays:
-                    type: array
-                    description: List of pool relay information
-                    items:
-                      oneOf:
-                        - type: object
-                          properties:
-                            SingleHostAddr:
-                              type: object
-                              properties:
-                                port:
-                                  type: integer
-                                  description: Optional port number
-                                  nullable: true
-                                ipv4:
-                                  type: string
-                                  description: Optional IPv4 address (formatted as string)
-                                  nullable: true
-                                ipv6:
-                                  type: string
-                                  description: Optional IPv6 address (formatted as string)
-                                  nullable: true
-                        - type: object
-                          properties:
-                            SingleHostName:
-                              type: object
-                              properties:
-                                port:
-                                  type: integer
-                                  description: Optional port number
-                                  nullable: true
-                                dns_name:
-                                  type: string
-                                  description: DNS name of the relay
-                              required:
-                                - dns_name
-                        - type: object
-                          properties:
-                            MultiHostName:
-                              type: object
-                              properties:
-                                dns_name:
-                                  type: string
-                                  description: DNS name of the relay
-                              required:
-                                - dns_name
-                  pool_metadata:
-                    type: object
-                    nullable: true
-                    description: Pool metadata URL and hash
-                    properties:
-                      url:
-                        type: string
-                        description: URL to the pool metadata JSON
-                      hash:
-                        type: string
-                        description: Hex-encoded hash of the pool metadata JSON
-                    required:
-                      - url
-                      - hash
-                required:
-                  - vrf_key_hash
-                  - pledge
-                  - cost
-                  - margin
-                  - reward_account
-                  - pool_owners
-                  - relays
+                $ref: '#/components/schemas/PoolInfo'
               example:
                 vrf_key_hash: "d9223c6cdaace93d896bc383020d4a1e32d5c65103b06fb0d2d3e787e8762858"
                 pledge: 500000000
@@ -731,18 +487,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  address:
-                    type: string
-                    description: Bech32-encoded Cardano address holding the UTxO
-                  value:
-                    type: integer
-                    format: uint64
-                    description: Lovelace amount in the UTxO
-                required:
-                  - address
-                  - value
+                $ref: '#/components/schemas/UTxO'
               example:
                 address: "addr1v8cwarljkvlwmwdegq5s0nkaut58bvrv8u0ugph3243pr9ge9ksyt"
                 value: 2000000    
@@ -779,36 +524,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  epoch:
-                    type: integer
-                    format: uint64
-                    description: Current epoch number.
-                  total_blocks:
-                    type: integer
-                    description: Total number of blocks seen in the current epoch.
-                  total_fees:
-                    type: integer
-                    format: uint64
-                    description: Total fees collected in the current epoch.
-                  vrf_vkey_hashes:
-                    type: array
-                    description: List of VRF key hashes and block counts.
-                    items:
-                      type: object
-                      properties:
-                        vrf_key_hash:
-                          type: string
-                          description: Hex-encoded VRF verification key hash.
-                        block_count:
-                          type: integer
-                          description: Number of blocks minted by this VRF key.
-                required:
-                  - epoch
-                  - total_blocks
-                  - total_fees
-                  - vrf_vkey_hashes
+                $ref: '#/components/schemas/EpochActivity'
               example:
                 epoch: 312
                 total_blocks: 21556
@@ -845,36 +561,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  epoch:
-                    type: integer
-                    format: uint64
-                    description: Specified epoch number.
-                  total_blocks:
-                    type: integer
-                    description: Total number of blocks seen in the specified epoch.
-                  total_fees:
-                    type: integer
-                    format: uint64
-                    description: Total fees collected in the specified epoch.
-                  vrf_vkey_hashes:
-                    type: array
-                    description: List of VRF key hashes and block counts for the specified epoch.
-                    items:
-                      type: object
-                      properties:
-                        vrf_key_hash:
-                          type: string
-                          description: Hex-encoded VRF verification key hash.
-                        block_count:
-                          type: integer
-                          description: Number of blocks minted by this VRF key.
-                required:
-                  - epoch
-                  - total_blocks
-                  - total_fees
-                  - vrf_vkey_hashes
+                $ref: '#/components/schemas/EpochActivity'
               example:
                 epoch: 210
                 total_blocks: 21556
@@ -912,4 +599,312 @@ paths:
               schema:
                 type: string
                 example: "Historical epoch storage not enabled"
-
+components:
+  schemas:
+    DelegatedDRep:
+      type: object
+      nullable: true
+      description: Selected DRep choice, if any
+      properties:
+        type:
+          type: string
+          enum: ["Key", "Script", "Abstain", "NoConfidence"]
+          description: Type of DRep delegation
+        value:
+          type: string
+          nullable: true
+          description: Bech32-encoded DRep KeyHash if applicable; omitted for Abstain/NoConfidence
+      required:
+        - type
+    AccountState:
+      type: object
+      description: JSON-encoded stake account state
+      properties:
+        utxo_value:
+          type: integer
+          format: uint64
+          description: Combined Lovelace amount of all UTXOs
+        rewards:
+          type: integer
+          format: uint64
+          description: Lovelace amount in reward account
+        delegated_spo:
+          type: string
+          nullable: true
+          description: Hex-encoded pool id, if any
+        delegated_drep:
+          $ref: '#/components/schemas/DelegatedDRep'
+      required:
+        - utxo_value
+        - rewards
+    PoolDelegationDistribution:
+      type: object
+      description: Mapping of Bech32 pool IDs to live delegated stake in Lovelace
+      additionalProperties:
+        type: integer
+        format: uint64
+        description: Total Lovelace delegated to the SPO
+    DRepDelegationDistribution:
+      type: object
+      properties:
+        abstain:
+          type: integer
+          format: uint64
+          description: Total Lovelace delegated to abstain
+        no_confidence:
+          type: integer
+          format: uint64
+          description: Total Lovelace delegated to no confidence
+        dreps:
+          type: array
+          description: Array of [bech32_drep_id, delegated_lovelace] pairs
+          items:
+            type: array
+            minItems: 2
+            maxItems: 2
+            items:
+              anyOf:
+                - type: string
+                  description: Bech32 DRep ID
+                - type: integer
+                  format: uint64
+                  description: Lovelace delegated to the DRep
+      required:
+        - abstain
+        - no_confidence
+        - dreps
+    PotBalances:
+      type: object
+      description: Current treasury, reserve, and deposit pot balances in Lovelace
+      properties:
+        reserves:
+          type: integer
+          format: uint64
+          description: Current reserves pot balance in Lovelace
+        treasury:
+          type: integer
+          format: uint64
+          description: Current treasury pot balance in Lovelace
+        deposits:
+          type: integer
+          format: uint64
+          description: Current deposits pot balance in Lovelace
+      required:
+        - reserves
+        - treasury
+        - deposits
+    ActiveDReps:
+      type: array
+      description: List of Bech32-encoded active DRep IDs
+      items:
+        type: string
+        description: Bech32-encoded DRep ID (`drep1...`)
+    Anchor:
+      type: object
+      description: Anchor information (reference URL and data hash)
+      properties:
+        url:
+          type: string
+          description: IPFS or HTTP(S) URL containing anchor data
+        data_hash:
+          type: string
+          description: Hex-encoded hash of the anchor data
+      required: [url, data_hash]
+    DRepInfo:
+      type: object
+      description: Information about a DRep
+      properties:
+        deposit:
+          type: integer
+          format: uint64
+          description: Lovelace deposit amount associated with the DRep
+        anchor:
+          $ref: '#/components/schemas/Anchor'
+      required:
+        - deposit
+    ActiveGovernanceActions:
+      type: array
+      description: List of Bech32-encoded active governance action IDs
+      items:
+        type: string
+        description: Bech32-encoded governance action ID (`gov_action1...`)
+    GovernanceProposal:
+      type: object
+      description: Detailed information about a specific governance proposal
+      properties:
+        deposit:
+          type: integer
+          format: uint64
+          description: Lovelace deposit amount associated with the proposal
+        reward_account:
+          type: string
+          description: Bech32-encoded stake address of the proposer
+        gov_action_id:
+          type: string
+          description: Bech32-encoded governance action ID (`gov_action1...`)
+        gov_action:
+          type: string
+          description: Governance action type
+        anchor:
+          $ref: '#/components/schemas/Anchor'
+      required:
+        - deposit
+        - reward_account
+        - gov_action_id
+        - gov_action
+        - anchor
+    PoolSummary:
+      type: object
+      description: Summary of a stake pool’s basic financial parameters
+      properties:
+        margin:
+          type: number
+          format: float
+          description: Pool margin as a decimal (e.g., 0.03 for 3%)
+        pledge:
+          type: integer
+          format: int64
+          description: Pledge amount in Lovelace
+        fixed_cost:
+          type: integer
+          format: int64
+          description: Fixed cost in Lovelace
+      required: [margin, pledge, fixed_cost]
+    PoolSummaryMap:
+      type: object
+      additionalProperties:
+        $ref: '#/components/schemas/PoolSummary'
+      description: Mapping of Bech32 pool IDs to their basic financial information
+    Relay:
+      type: object
+      description: Pool relay information
+      oneOf:
+        - type: object
+          properties:
+            SingleHostAddr:
+              type: object
+              properties:
+                port:
+                  type: integer
+                  nullable: true
+                ipv4:
+                  type: string
+                  nullable: true
+                ipv6:
+                  type: string
+                  nullable: true
+        - type: object
+          properties:
+            SingleHostName:
+              type: object
+              properties:
+                port:
+                  type: integer
+                  nullable: true
+                dns_name:
+                  type: string
+              required: [dns_name]
+        - type: object
+          properties:
+            MultiHostName:
+              type: object
+              properties:
+                dns_name:
+                  type: string
+              required: [dns_name]
+    PoolMetadata:
+      type: object
+      nullable: true
+      properties:
+        url:
+          type: string
+        hash:
+          type: string
+      required: [url, hash]
+    PoolInfo:
+      type: object
+      description: Detailed information about a specific stake pool
+      properties:
+        vrf_key_hash:
+          type: string
+        pledge:
+          type: integer
+          format: uint64
+        cost:
+          type: integer
+          format: uint64
+        margin:
+          type: number
+          format: float
+        reward_account:
+          type: string
+        pool_owners:
+          type: array
+          items:
+            type: string
+        relays:
+          type: array
+          items:
+            $ref: '#/components/schemas/Relay'
+        pool_metadata:
+          $ref: '#/components/schemas/PoolMetadata'
+      required:
+        - vrf_key_hash
+        - pledge
+        - cost
+        - margin
+        - reward_account
+        - pool_owners
+        - relays
+    UTxO:
+      type: object
+      description: Basic UTxO information including address and value.
+      properties:
+        address:
+          type: string
+          description: Bech32-encoded Cardano address holding the UTxO
+        value:
+          type: integer
+          format: uint64
+          description: Lovelace amount in the UTxO
+      required:
+        - address
+        - value
+    VRFKeyCount:
+      type: object
+      description: VRF verification key and block count
+      properties:
+        vrf_key_hash:
+          type: string
+          description: Hex-encoded VRF verification key hash
+        block_count:
+          type: integer
+          description: Number of blocks minted by this VRF key
+      required:
+        - vrf_key_hash
+        - block_count
+    EpochActivity:
+      type: object
+      description: Current or historical epoch statistics
+      properties:
+        epoch:
+          type: integer
+          format: uint64
+          description: Epoch number
+        total_blocks:
+          type: integer
+          description: Total number of blocks in this epoch
+        total_fees:
+          type: integer
+          format: uint64
+          description: Total fees collected in Lovelace
+        vrf_vkey_hashes:
+          type: array
+          description: List of VRF key hashes and their block counts
+          items:
+            $ref: '#/components/schemas/VRFKeyCount'
+      required:
+        - epoch
+        - total_blocks
+        - total_fees
+        - vrf_vkey_hashes

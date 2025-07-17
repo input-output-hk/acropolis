@@ -65,12 +65,7 @@ impl State {
             "End of epoch"
         );
 
-        let epoch_activity = EpochActivityMessage {
-            epoch: epoch,
-            total_blocks: self.total_blocks,
-            total_fees: self.total_fees,
-            vrf_vkey_hashes: self.vrf_vkey_hashes.drain().collect(),
-        };
+        let epoch_activity = self.get_current_epoch();
 
         if let Some(history) = &mut self.epoch_history {
             history.insert(epoch, epoch_activity.clone());
@@ -81,9 +76,10 @@ impl State {
             CardanoMessage::EpochActivity(epoch_activity),
         )));
 
-        self.total_blocks = 0;
-        self.total_fees = 0;
         self.current_epoch = epoch + 1;
+        self.total_blocks = 0;
+        self.vrf_vkey_hashes.clear();
+        self.total_fees = 0;
 
         message
     }
