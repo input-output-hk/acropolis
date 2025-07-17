@@ -10,7 +10,12 @@ pub struct EpochActivityRest {
     pub epoch: u64,
     pub total_blocks: usize,
     pub total_fees: u64,
-    pub vrf_vkey_hashes: Vec<(String, usize)>,
+    pub vrf_vkey_hashes: Vec<VRFKeyCount>,
+}
+#[derive(Serialize)]
+pub struct VRFKeyCount {
+    pub vrf_key_hash: String,
+    pub block_count: usize,
 }
 
 /// Handles /epoch
@@ -25,7 +30,10 @@ pub async fn handle_epoch(state: Arc<Mutex<State>>) -> Result<RESTResponse> {
         vrf_vkey_hashes: epoch_data
             .vrf_vkey_hashes
             .iter()
-            .map(|(key, count)| (hex::encode(key), *count))
+            .map(|(key, count)| VRFKeyCount {
+                vrf_key_hash: hex::encode(key),
+                block_count: *count,
+            })
             .collect(),
     };
 
@@ -70,7 +78,10 @@ pub async fn handle_historical_epoch(
                 vrf_vkey_hashes: epoch_data
                     .vrf_vkey_hashes
                     .iter()
-                    .map(|(key, count)| (hex::encode(key), *count))
+                    .map(|(key, count)| VRFKeyCount {
+                        vrf_key_hash: hex::encode(key),
+                        block_count: *count,
+                    })
                     .collect(),
             };
             let json = match serde_json::to_string(&response) {
