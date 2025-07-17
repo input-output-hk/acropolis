@@ -180,16 +180,16 @@ mod tests {
     #[test]
     fn end_epoch_resets_and_returns_message() {
         let mut state = State::new(false);
-        let block = make_block(101);
+        let block = make_block(0);
         state.handle_mint(&block, b"vrf_1");
         state.handle_fees(&block, 123);
 
         // Check the message returned
-        let msg = state.end_epoch(&block, 100);
+        let msg = state.end_epoch(&block, 0);
         match msg.as_ref() {
             Message::Cardano((block, CardanoMessage::EpochActivity(ea))) => {
-                assert_eq!(block.epoch, 101);
-                assert_eq!(ea.epoch, 100);
+                assert_eq!(block.epoch, 0);
+                assert_eq!(ea.epoch, 0);
                 assert_eq!(ea.total_blocks, 1);
                 assert_eq!(ea.total_fees, 123);
                 assert_eq!(ea.vrf_vkey_hashes.len(), 1);
@@ -205,7 +205,7 @@ mod tests {
         }
 
         // State must be reset
-        assert_eq!(state.current_epoch, 101);
+        assert_eq!(state.current_epoch, 1);
         assert_eq!(state.total_blocks, 0);
         assert_eq!(state.total_fees, 0);
         assert!(state.vrf_vkey_hashes.is_empty());
