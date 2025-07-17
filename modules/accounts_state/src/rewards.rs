@@ -1,15 +1,24 @@
 //! Acropolis AccountsState: rewards calculations
 
-use bigdecimal::BigDecimal;
 use std::collections::HashMap;
 use acropolis_common::{Lovelace, KeyHash};
 use crate::state::StakeAddressState;
 
+/// SPO data for stake snapshot
+#[derive(Debug, Default)]
+pub struct StakeSnapshotSPO {
+    /// List of delegator stake addresses and amounts
+    pub delegators: Vec<(KeyHash, Lovelace)>,
+
+    /// Total stake delegated
+    pub total_stake: Lovelace,
+}
+
 /// Snapshot of stake distribution taken at a particular epoch
 #[derive(Debug, Default)]
 pub struct StakeSnapshot {
-    /// Map of SPOs by operator ID, with list of stake addresses and delegated stake values
-    pub spos: HashMap<KeyHash, Vec<(KeyHash, Lovelace)>>,
+    /// Map of SPOs by operator ID
+    pub spos: HashMap<KeyHash, StakeSnapshotSPO>,
 }
 
 impl StakeSnapshot {
@@ -24,11 +33,14 @@ impl StakeSnapshot {
             if sas.utxo_value > 0 {
                 if let Some(spo_id) = &sas.delegated_spo {
                     // Only clone if insertion is needed
-                    if let Some(delegators) = snapshot.spos.get_mut(spo_id) {
-                        delegators.push((hash.clone(), sas.utxo_value));
+                    if let Some(spo) = snapshot.spos.get_mut(spo_id) {
+                        spo.delegators.push((hash.clone(), sas.utxo_value));
+                        spo.total_stake += sas.utxo_value;
                     } else {
-                        snapshot.spos
-                            .insert(spo_id.clone(), vec![(hash.clone(), sas.utxo_value)]);
+                        snapshot.spos.insert(spo_id.clone(), StakeSnapshotSPO {
+                            delegators: vec![(hash.clone(), sas.utxo_value)],
+                            total_stake: sas.utxo_value,
+                        });
                     }
                 }
             }
@@ -78,16 +90,18 @@ mod tests {
 
         assert_eq!(snapshot.spos.len(), 2);
 
-        let delegates1 = snapshot.spos.get(&spo1).unwrap();
-        assert_eq!(delegates1.len(), 1);
-        let (hash1, value1) = &delegates1[0];
+        let spod1 = snapshot.spos.get(&spo1).unwrap();
+        assert_eq!(spod1.delegators.len(), 1);
+        let (hash1, value1) = &spod1.delegators[0];
         assert_eq!(*hash1, addr1);
         assert_eq!(*value1, 42);
+        assert_eq!(spod1.total_stake, 42);
 
-        let delegates2 = snapshot.spos.get(&spo2).unwrap();
-        assert_eq!(delegates2.len(), 1);
-        let (hash2, value2) = &delegates2[0];
+        let spod2 = snapshot.spos.get(&spo2).unwrap();
+        assert_eq!(spod2.delegators.len(), 1);
+        let (hash2, value2) = &spod2.delegators[0];
         assert_eq!(*hash2, addr2);
         assert_eq!(*value2, 99);
+        assert_eq!(spod2.total_stake, 99);
     }
 }
