@@ -76,7 +76,6 @@ impl State {
             params: self.current_params.get_params(),
         };
 
-        self.active_epoch = block.epoch;
         if let Some(history) = self.parameter_history.as_mut() {
             let last = history.range(..block.epoch).next_back();
 
@@ -87,6 +86,7 @@ impl State {
 
             if should_store {
                 history.insert(block.epoch, params_message.clone());
+                self.active_epoch = block.epoch;
             }
         }
 
