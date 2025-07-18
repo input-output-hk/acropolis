@@ -772,20 +772,20 @@ pub struct DRepVotingThresholds {
     pub treasury_withdrawal: RationalNumber,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct SoftForkRule {
     pub init_thd: u64,
     pub min_thd: u64,
     pub thd_decrement: u64,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TxFeePolicy {
     pub multiplier: u64,
     pub summand: u64,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct BlockVersionData {
     pub script_version: u16,
     pub heavy_del_thd: u64,
@@ -805,7 +805,7 @@ pub struct BlockVersionData {
     pub update_vote_thd: u64,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ProtocolConsts {
     pub k: usize,
     pub protocol_magic: u32,
@@ -813,25 +813,25 @@ pub struct ProtocolConsts {
     pub vss_min_ttl: Option<u32>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ProtocolVersion {
     pub minor: u64,
     pub major: u64,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum NonceVariant {
     NeutralNonce,
     Nonce,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Nonce {
     pub tag: NonceVariant,
     pub hash: Option<Vec<u8>>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ShelleyProtocolParams {
     pub protocol_version: ProtocolVersion,
     pub max_tx_size: u32,
@@ -863,7 +863,7 @@ pub struct ShelleyProtocolParams {
     pub pool_pledge_influence: RationalNumber,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct AlonzoParams {
     pub lovelace_per_utxo_word: u64,
     pub execution_prices: ExUnitPrices,
@@ -876,7 +876,7 @@ pub struct AlonzoParams {
     pub plutus_v2_cost_model: Option<CostModel>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ByronParams {
     pub block_version_data: BlockVersionData,
     pub fts_seed: Option<Vec<u8>>,
@@ -884,13 +884,14 @@ pub struct ByronParams {
     pub start_time: u64,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum NetworkId {
     Testnet,
     Mainnet,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ShelleyParams {
     pub active_slots_coeff: f32,
     pub epoch_length: u32,
@@ -906,7 +907,7 @@ pub struct ShelleyParams {
     pub update_quorum: u32,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ConwayParams {
     pub pool_voting_thresholds: PoolVotingThresholds,
     pub d_rep_voting_thresholds: DRepVotingThresholds,
@@ -922,7 +923,7 @@ pub struct ConwayParams {
     pub committee: Committee,
 }
 
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ProtocolParams {
     pub alonzo: Option<AlonzoParams>,
     pub byron: Option<ByronParams>,
@@ -1036,14 +1037,14 @@ pub struct ProtocolParamUpdate {
     pub minfee_refscript_cost_per_byte: Option<RationalNumber>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, PartialEq, Deserialize, Debug, Clone)]
 pub struct Constitution {
     pub anchor: Anchor,
     pub guardrail_script: Option<ScriptHash>,
 }
 
 #[serde_as]
-#[derive(Serialize, Debug, Deserialize, Clone)]
+#[derive(Serialize, PartialEq, Debug, Deserialize, Clone)]
 pub struct Committee {
     #[serde_as(as = "Vec<(_, _)>")]
     pub members: HashMap<CommitteeCredential, u64>,
