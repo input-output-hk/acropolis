@@ -33,6 +33,7 @@ address-delta-topic = "cardano.address.delta"
 [module.governance-state]
 
 [module.parameters-state]
+store-history = true
 
 [module.stake-delta-filter]
 cache-mode = "predefined" # "predefined", "read", "write", "write-if-absent"
