@@ -3,7 +3,7 @@ use crate::state::State;
 use acropolis_common::{
     messages::RESTResponse, rest_helper::ToCheckedF64, AlonzoParams, Anchor, BlockVersionData,
     ByronParams, Committee, Constitution, ConwayParams, DRepVotingThresholds, ExUnitPrices,
-    ExUnits, NetworkId, Nonce, PoolVotingThresholds, ProtocolConsts, ProtocolParams,
+    ExUnits, NetworkId, Nonce, NonceVariant, PoolVotingThresholds, ProtocolConsts, ProtocolParams,
     ProtocolVersion, ShelleyParams, ShelleyProtocolParams,
 };
 use anyhow::Result;
@@ -74,7 +74,8 @@ pub struct ShelleyProtocolParamsRest {
     pub min_pool_cost: u64,
 
     pub pool_retire_max_epoch: u64,
-    pub extra_entropy: Nonce,
+    /// hex encoded hash
+    pub extra_entropy: NonceRest,
     /// decentralisation_param as float
     pub decentralisation_param: f64,
 
@@ -86,6 +87,12 @@ pub struct ShelleyProtocolParamsRest {
 
     /// pool_pledge_influence as float
     pub pool_pledge_influence: f64,
+}
+
+#[derive(Serialize)]
+pub struct NonceRest {
+    pub tag: NonceVariant,
+    pub hash: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -225,19 +232,19 @@ pub async fn handle_historical(state: Arc<Mutex<State>>, epoch: String) -> Resul
                     Ok(json) => Ok(RESTResponse::with_json(200, &json)),
                     Err(e) => Ok(RESTResponse::with_text(
                         500,
-                        &format!("Internal server error while serializing parameters for epoch {epoch_found}: {e}"),
+                        &format!("Internal server error while retrieving parameters for epoch {epoch_found}: {e}"),
                     )),
                 },
                 Err(e) => Ok(RESTResponse::with_text(
                     500,
-                    &format!("Internal server error while converting parameters for epoch {epoch_found}: {e}"),
+                    &format!("Internal server error while retrieving parameters for epoch {epoch_found}: {e}"),
                 )),
             },
             None => Ok(RESTResponse::with_text(404, "Epoch not found")),
         },
         None => Ok(RESTResponse::with_text(
             501,
-            "Parameter history not enabled",
+            "Historical parameter storage not enabled",
         )),
     }
 }
@@ -326,7 +333,7 @@ impl TryFrom<&ShelleyProtocolParams> for ShelleyProtocolParamsRest {
             stake_pool_target_num: params.stake_pool_target_num,
             min_pool_cost: params.min_pool_cost,
             pool_retire_max_epoch: params.pool_retire_max_epoch,
-            extra_entropy: params.extra_entropy.clone(),
+            extra_entropy: NonceRest::from(&params.extra_entropy),
             decentralisation_param: params
                 .decentralisation_param
                 .to_checked_f64("decentralisation_param")?,
@@ -336,6 +343,15 @@ impl TryFrom<&ShelleyProtocolParams> for ShelleyProtocolParamsRest {
                 .pool_pledge_influence
                 .to_checked_f64("pool_pledge_influence")?,
         })
+    }
+}
+
+impl From<&Nonce> for NonceRest {
+    fn from(nonce: &Nonce) -> Self {
+        Self {
+            tag: nonce.tag.clone(),
+            hash: nonce.hash.as_ref().map(hex::encode),
+        }
     }
 }
 
