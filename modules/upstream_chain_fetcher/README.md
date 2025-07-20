@@ -23,13 +23,36 @@ node-address = "backbone.cardano.iog.io:3001"
 magic-number = 764824073
 
 # Initial sync point
-sync-point = "snapshot"   # or "origin", "tip"
+sync-point = "snapshot"   # or "origin", "tip", "cache"
 
 # Message topics
 header-topic = "cardano.block.header"
 body-topic = "cardano.block.body"
 snapshot-complete-topic = "cardano.snapshot.complete"
 ```
+
+### Sync point modes (`sync-point` parameter)
+
+Upstream fetching is very slow, so it may be an acceptable optimisation 
+to take the initial part of the blockchain (which is produced long time ago and 
+cannot be changed anymore) from another (off-chain) source.
+In another words, fetching may start not from the origin but from a different
+synchronisation point. Here are the possible variants:
+
+* Fetch from the origin (`origin`, `tip` modes). No optimisations.
+
+* Fetch after snapshot is replayed (`snapshot`). Snapshot is downloaded 
+by other module, and when all snapshot messages are processed, that module 
+sends `SnapshotComplete` message in `snapshot-complete-topic` topic.
+The last snapshot message then serves as the synchronisation point, after
+which fetching is started.
+
+* Fetch after cache is replayed (`cache`). Similar to `origin` mode, 
+but the received messages are saved on disk into directory, specified 
+in `cache-dir` parameter (`upload-cache` is the default value).
+When the node is restarted, the cached messages are not downloaded 
+again, but are taken from the directory instead. The last message in 
+cache serves as the synchronisation point.
 
 ## Messages
 
@@ -88,4 +111,3 @@ Note that the chain fetcher currently assumes everything is volatile.
 If it gets a RollBackward from the upstream, it will remember this and
 the next header and body message generated on RollForward will be
 tagged with status `RolledBack`.
-
