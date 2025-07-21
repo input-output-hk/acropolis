@@ -144,6 +144,8 @@ impl State {
         // TODO - do we calculate this before or after reducing reserves?
         let total_supply = BigDecimal::from(shelley_params.max_lovelace_supply - self.pots.reserves);
 
+        info!(epoch, reserves=self.pots.reserves, %total_supply, "Supply:");
+
         // Total blocks
         let total_blocks: usize = spo_block_counts.values().sum();
         if total_blocks == 0 {
@@ -160,7 +162,7 @@ impl State {
             .sum();
 
         let total_non_obft_blocks = total_blocks - total_obft_blocks;
-        info!(total_blocks, total_non_obft_blocks, "Block counts");
+        info!(total_blocks, total_non_obft_blocks, "Block counts:");
 
         // Calculate 'eta' - ratio of blocks produced during the epoch vs expected
         let decentralisation = &shelley_params.protocol_params.decentralisation_param;
@@ -198,15 +200,19 @@ impl State {
                                  * BigDecimal::from(treasury_cut.numer())
                                  / BigDecimal::from(treasury_cut.denom()))
             .with_scale(0);
-        self.pots.treasury += treasury_increase.to_u64()
+
+        let new_treasury = self.pots.treasury + treasury_increase.to_u64()
             .ok_or(anyhow!("Can't calculate integral treasury cut"))?;
 
-        // Calculate the total rewards available for stake (R)
-        let total_rewards = total_reward_pot.clone() - treasury_increase.clone();
+        info!(before=self.pots.treasury, increase=%treasury_increase, after=new_treasury,
+              "Treasury:");
+        self.pots.treasury = new_treasury;
 
-        info!(epoch, %eta, %monetary_expansion, %total_reward_pot,
-              %treasury_increase, %total_rewards, %total_supply,
-              "Reward calculations");
+        // Calculate the total rewards available for stake (R)
+        let stake_rewards = total_reward_pot.clone() - treasury_increase.clone();
+
+        info!(%eta, %monetary_expansion, %total_reward_pot, %stake_rewards,
+              "Reward calculations:");
 
         // Relative pool saturation size (z0)
         let k = BigDecimal::from(&shelley_params.protocol_params.stake_pool_target_num);
@@ -271,7 +277,7 @@ impl State {
 
             // Get the optimum reward for this pool
             let optimum_rewards = (
-                (&total_rewards / (BigDecimal::one() + &pledge_influence_factor))
+                (&stake_rewards / (BigDecimal::one() + &pledge_influence_factor))
                 *
                 (
                     capped_relative_pool_stake + (
@@ -697,6 +703,7 @@ impl State {
         match &mir.target {
             InstantaneousRewardTarget::StakeCredentials(deltas) => {
                 // Transfer to (in theory also from) stake addresses from (to) a pot
+                let mut total_value: u64 = 0;
                 for (credential, value) in deltas.iter() {
                     let hash = credential.get_hash();
 
@@ -713,7 +720,12 @@ impl State {
                     if let Err(e) = Self::update_value_with_delta(source, -*value) {
                         error!("MIR from {source_name}: {e}");
                     }
+
+                    let _ = Self::update_value_with_delta(&mut total_value, *value);
                 }
+
+                info!("MIR of {total_value} to {} stake addresses from {source_name}",
+                      deltas.len());
             }
 
             InstantaneousRewardTarget::OtherAccountingPot(value) => {
@@ -724,9 +736,12 @@ impl State {
                 if let Err(e) = Self::update_value_with_delta(other, *value as i64) {
                     error!("MIR to {other_name}: {e}");
                 }
+
+                info!("MIR of {value} from {source_name} to {other_name}");
             }
         }
 
+        info!(reserves=self.pots.reserves, treasury=self.pots.treasury, "New pots:");
         Ok(())
     }
 
