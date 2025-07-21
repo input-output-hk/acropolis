@@ -36,7 +36,7 @@ const DEFAULT_GENESIS_KEY: &str = r#"
 5b3139312c36362c3134302c3138352c3133382c31312c3233372c3230372c3235302c3134342c32
 372c322c3138382c33302c31322c38312c3135352c3230342c31302c3137392c37352c32332c3133
 382c3139362c3231372c352c31342c32302c35372c37392c33392c3137365d"#;
-const DEFAULT_PAUSE_EPOCH: i64 = -1;
+const DEFAULT_PAUSE_EPOCH: (&str, i64) = ("pause-epoch", -1);
 const DEFAULT_DIRECTORY: &str = "downloads";
 
 /// Mithril feedback receiver
@@ -287,6 +287,8 @@ impl MithrilSnapshotFetcher {
 
         // Send completion message
         if let Some(last_block_info) = last_block_info {
+            info!("Finished shapshot at block {}, epoch {}",
+                  last_block_info.number, last_block_info.epoch);
             let message_enum =
                 Message::Cardano((last_block_info, CardanoMessage::SnapshotComplete));
             context
@@ -339,7 +341,7 @@ impl MithrilSnapshotFetcher {
 
 /// Helper to parse pause_epoch from config
 fn load_pause_epoch(config: &Config) -> Option<u64> {
-    let pause_epoch = config.get_int("pause-epoch").unwrap_or(DEFAULT_PAUSE_EPOCH);
+    let pause_epoch = config.get_int(DEFAULT_PAUSE_EPOCH.0).unwrap_or(DEFAULT_PAUSE_EPOCH.1);
     (pause_epoch >= 0).then(|| {
         info!("Pausing enabled at epoch {pause_epoch}");
         pause_epoch as u64
