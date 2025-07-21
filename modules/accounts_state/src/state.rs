@@ -14,13 +14,14 @@ use crate::rewards::StakeSnapshot;
 use anyhow::{bail, anyhow, Result};
 use dashmap::DashMap;
 use imbl::OrdMap;
-use std::collections::{HashMap, BTreeMap};
+use std::collections::{HashMap, BTreeMap, HashSet};
 use rayon::prelude::*;
 use serde_with::{hex::Hex, serde_as};
 use std::sync::{atomic::AtomicU64, Arc, Mutex};
 use tracing::{debug, error, info, warn};
 use bigdecimal::{BigDecimal, ToPrimitive, Zero, One};
 use std::cmp::min;
+use std::str::FromStr;
 
 const DEFAULT_KEY_DEPOSIT: u64 = 2_000_000;
 const DEFAULT_POOL_DEPOSIT: u64 = 500_000_000;
@@ -143,37 +144,69 @@ impl State {
         // TODO - do we calculate this before or after reducing reserves?
         let total_supply = BigDecimal::from(shelley_params.max_lovelace_supply - self.pots.reserves);
 
-        // Handle monetary expansion - movement from reserves to rewards and treasury
-        let monetary_expansion_factor = &shelley_params.protocol_params.monetary_expansion; // Rho
-        let monetary_expansion = (BigDecimal::from(self.pots.reserves)
-                                  * BigDecimal::from(monetary_expansion_factor.numer())
-                                  / BigDecimal::from(monetary_expansion_factor.denom()))
-            .with_scale(0);
-        self.pots.reserves -= monetary_expansion.to_u64()
-            .ok_or(anyhow!("Can't calculate integral monetary expansion"))?;
-
-        // Top-slice some for treasury
-        let treasury_cut = &shelley_params.protocol_params.treasury_cut;  // Tau
-        let treasury_increase = (&monetary_expansion
-                                 * BigDecimal::from(treasury_cut.numer())
-                                 / BigDecimal::from(treasury_cut.denom()))
-            .with_scale(0);
-        self.pots.treasury += treasury_increase.to_u64()
-            .ok_or(anyhow!("Can't calculate integral treasury cut"))?;
-
-        // Calculate the total rewards available (R) - fees + monetary expansion left over
-        // after treasury cut
-        let total_rewards = BigDecimal::from(total_fees) + monetary_expansion.clone()
-            - treasury_increase.clone();
-
         // Total blocks
         let total_blocks: usize = spo_block_counts.values().sum();
         if total_blocks == 0 {
             bail!("No blocks produced");
         }
 
-        info!(epoch, %monetary_expansion, %treasury_increase, %total_rewards, %total_supply,
-              total_blocks, "Reward calculations");
+        // Filter the block counts for SPOs that are registered - treating any we don't know
+        // as 'OBFT' style (the legacy nodes)
+        let known_vrf_keys: HashSet<_> = self.spos.values().map(|spo| &spo.vrf_key_hash).collect();
+        let total_obft_blocks: usize = spo_block_counts
+            .iter()
+            .filter(|(vrf_key, _)| !known_vrf_keys.contains(vrf_key))
+            .map(|(_, count)| count)
+            .sum();
+
+        let total_non_obft_blocks = total_blocks - total_obft_blocks;
+        info!(total_blocks, total_non_obft_blocks, "Block counts");
+
+        // Calculate 'eta' - ratio of blocks produced during the epoch vs expected
+        let decentralisation = &shelley_params.protocol_params.decentralisation_param;
+        let active_slots_coeff = BigDecimal::from_str(
+            &shelley_params.active_slots_coeff.to_string())?;
+        let epoch_length = BigDecimal::from(shelley_params.epoch_length);
+
+        let eta = if decentralisation >= &RationalNumber::new(8,10) {
+            BigDecimal::one()
+        } else {
+            let expected_blocks = epoch_length * active_slots_coeff *
+                (BigDecimal::one() - BigDecimal::from(decentralisation.numer())
+                                   / BigDecimal::from(decentralisation.denom()));
+
+            (BigDecimal::from(total_non_obft_blocks as u64) / expected_blocks)
+                .min(BigDecimal::one())
+        };
+
+        // Handle monetary expansion - movement from reserves to rewards and treasury
+        let monetary_expansion_factor = &shelley_params.protocol_params.monetary_expansion; // Rho
+        let monetary_expansion = (BigDecimal::from(self.pots.reserves)
+                                  * &eta
+                                  * BigDecimal::from(monetary_expansion_factor.numer())
+                                  / BigDecimal::from(monetary_expansion_factor.denom()))
+            .with_scale(0);
+        self.pots.reserves -= monetary_expansion.to_u64()
+            .ok_or(anyhow!("Can't calculate integral monetary expansion"))?;
+
+        // Total rewards available is monetary expansion plus fees
+        let total_reward_pot = &monetary_expansion + BigDecimal::from(total_fees);
+
+        // Top-slice some for treasury
+        let treasury_cut = &shelley_params.protocol_params.treasury_cut;  // Tau
+        let treasury_increase = (&total_reward_pot
+                                 * BigDecimal::from(treasury_cut.numer())
+                                 / BigDecimal::from(treasury_cut.denom()))
+            .with_scale(0);
+        self.pots.treasury += treasury_increase.to_u64()
+            .ok_or(anyhow!("Can't calculate integral treasury cut"))?;
+
+        // Calculate the total rewards available for stake (R)
+        let total_rewards = total_reward_pot.clone() - treasury_increase.clone();
+
+        info!(epoch, %eta, %monetary_expansion, %total_reward_pot,
+              %treasury_increase, %total_rewards, %total_supply,
+              "Reward calculations");
 
         // Relative pool saturation size (z0)
         let k = BigDecimal::from(&shelley_params.protocol_params.stake_pool_target_num);
@@ -255,7 +288,6 @@ impl State {
 
             // If decentralisation_param >= 0.8 => performance = 1
             // Shelley Delegation Spec 3.8.3
-            let decentralisation = &shelley_params.protocol_params.decentralisation_param;
             let pool_performance = if decentralisation >= &RationalNumber::new(8,10) {
                 BigDecimal::one()
             } else {
