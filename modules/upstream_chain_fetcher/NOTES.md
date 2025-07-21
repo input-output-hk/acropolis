@@ -9,6 +9,6 @@ Sanchonet has the following stats:
 Epoch 750
 Block Height 3203471
 
-100 blocks per minute
-3203 minutes to sync
-50 hours to sync
+100 (400) blocks per minute
+32030 (8000) minutes to sync
+500 (150) hours to sync

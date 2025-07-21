@@ -22,8 +22,8 @@ pub struct FileStorage {
 }
 
 impl FileStorage {
-    pub fn new(path: String) -> Self {
-        Self { path }
+    pub fn new(path: &str) -> Self {
+        Self { path: path.to_string() }
     }
 
     fn get_file_name(&self, chunk_no: usize) -> String {
@@ -34,7 +34,7 @@ impl FileStorage {
 pub type UpstreamCache = UpstreamCacheImpl<FileStorage>;
 
 impl UpstreamCache {
-    pub fn new(path: String) -> Self {
+    pub fn new(path: &str) -> Self {
         UpstreamCache::new_impl(FileStorage::new(path))
     }
 }
@@ -56,8 +56,6 @@ pub struct UpstreamCacheImpl<S: Storage> {
 
     // Reader/writer functions --- to abstract actual struct encoder/storage from chunk logic
     storage: S
-    //read_chunk: Fn(chunk_no: usize) -> Result<Vec<UpstreamCacheRecord>>,
-    //write_chunk: Fn(chunk_no: usize, chunk: &Vec<UpsreamCacheRecord>) -> Result<()>
 }
 
 impl<S: Storage> UpstreamCacheImpl<S> {

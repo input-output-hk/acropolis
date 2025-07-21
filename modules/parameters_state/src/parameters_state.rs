@@ -15,6 +15,7 @@ use tracing::{error, info};
 mod genesis_params;
 mod parameters_updater;
 mod state;
+mod alonzo_genesis;
 
 use parameters_updater::ParametersUpdater;
 use state::State;
