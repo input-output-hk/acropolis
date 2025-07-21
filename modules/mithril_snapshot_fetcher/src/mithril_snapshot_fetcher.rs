@@ -287,6 +287,8 @@ impl MithrilSnapshotFetcher {
 
         // Send completion message
         if let Some(last_block_info) = last_block_info {
+            info!("Finished shapshot at block {}, epoch {}",
+                  last_block_info.number, last_block_info.epoch);
             let message_enum =
                 Message::Cardano((last_block_info, CardanoMessage::SnapshotComplete));
             context
