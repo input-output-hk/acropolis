@@ -10,6 +10,7 @@ license = "Apache-2.0"
 
 [dependencies]
 caryatid_sdk = "0.12"
+crossbeam = "0.8.4"
 acropolis_common = { path = "../../common" }
 pallas = "0.32.1"
 anyhow = "1.0"
