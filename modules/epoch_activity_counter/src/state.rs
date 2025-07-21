@@ -5,11 +5,14 @@ use acropolis_common::{
     messages::{CardanoMessage, EpochActivityMessage, Message},
     BlockInfo, KeyHash,
 };
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use tracing::info;
 
 pub struct State {
+    // Current epoch number
+    current_epoch: u64,
+
     // Map of counts by VRF key hashes
     vrf_vkey_hashes: HashMap<KeyHash, usize>,
 
@@ -18,15 +21,24 @@ pub struct State {
 
     // Total fees seen this epoch
     total_fees: u64,
+
+    // History of epochs (disabled by default)
+    epoch_history: Option<BTreeMap<u64, EpochActivityMessage>>,
 }
 
 impl State {
     // Constructor
-    pub fn new() -> Self {
+    pub fn new(store_history: bool) -> Self {
         Self {
+            current_epoch: 0,
             vrf_vkey_hashes: HashMap::new(),
             total_blocks: 0,
             total_fees: 0,
+            epoch_history: if store_history {
+                Some(BTreeMap::new())
+            } else {
+                None
+            },
         }
     }
 
@@ -55,20 +67,43 @@ impl State {
             "End of epoch"
         );
 
+        let epoch_activity = self.get_current_epoch();
+
+        if let Some(history) = &mut self.epoch_history {
+            history.insert(epoch, epoch_activity.clone());
+        }
+
         let message = Arc::new(Message::Cardano((
             block.clone(),
-            CardanoMessage::EpochActivity(EpochActivityMessage {
-                epoch: epoch,
-                total_blocks: self.total_blocks,
-                total_fees: self.total_fees,
-                vrf_vkey_hashes: self.vrf_vkey_hashes.drain().collect(),
-            }),
+            CardanoMessage::EpochActivity(epoch_activity),
         )));
 
+        self.current_epoch = epoch + 1;
         self.total_blocks = 0;
+        self.vrf_vkey_hashes.clear();
         self.total_fees = 0;
 
         message
+    }
+
+    pub fn get_current_epoch(&self) -> EpochActivityMessage {
+        EpochActivityMessage {
+            epoch: self.current_epoch,
+            total_blocks: self.total_blocks,
+            total_fees: self.total_fees,
+            vrf_vkey_hashes: self.vrf_vkey_hashes.iter().map(|(k, v)| (k.clone(), *v)).collect(),
+        }
+    }
+
+    pub fn get_historical_epoch(
+        &self,
+        epoch: u64,
+    ) -> Result<Option<&EpochActivityMessage>, anyhow::Error> {
+        let history = self
+            .epoch_history
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Historical epoch storage is disabled"))?;
+        Ok(history.get(&epoch))
     }
 }
 
@@ -95,7 +130,7 @@ mod tests {
 
     #[test]
     fn initial_state_is_zeroed() {
-        let state = State::new();
+        let state = State::new(false);
         assert_eq!(state.total_blocks, 0);
         assert_eq!(state.total_fees, 0);
         assert!(state.vrf_vkey_hashes.is_empty());
@@ -103,7 +138,7 @@ mod tests {
 
     #[test]
     fn handle_mint_single_vrf_records_counts() {
-        let mut state = State::new();
+        let mut state = State::new(false);
         let vrf = b"vrf_key";
         let block = make_block(100);
         state.handle_mint(&block, Some(vrf));
@@ -116,7 +151,7 @@ mod tests {
 
     #[test]
     fn handle_mint_multiple_vrf_records_counts() {
-        let mut state = State::new();
+        let mut state = State::new(false);
         let block = make_block(100);
         state.handle_mint(&block, Some(b"vrf_1"));
         state.handle_mint(&block, Some(b"vrf_2"));
@@ -136,7 +171,7 @@ mod tests {
 
     #[test]
     fn handle_fees_counts_fees() {
-        let mut state = State::new();
+        let mut state = State::new(false);
         let block = make_block(100);
         state.handle_fees(&block, 100);
         state.handle_fees(&block, 250);
@@ -146,17 +181,17 @@ mod tests {
 
     #[test]
     fn end_epoch_resets_and_returns_message() {
-        let mut state = State::new();
-        let block = make_block(101);
+        let mut state = State::new(false);
+        let block = make_block(0);
         state.handle_mint(&block, Some(b"vrf_1"));
         state.handle_fees(&block, 123);
 
         // Check the message returned
-        let msg = state.end_epoch(&block, 100);
+        let msg = state.end_epoch(&block, 0);
         match msg.as_ref() {
             Message::Cardano((block, CardanoMessage::EpochActivity(ea))) => {
-                assert_eq!(block.epoch, 101);
-                assert_eq!(ea.epoch, 100);
+                assert_eq!(block.epoch, 0);
+                assert_eq!(ea.epoch, 0);
                 assert_eq!(ea.total_blocks, 1);
                 assert_eq!(ea.total_fees, 123);
                 assert_eq!(ea.vrf_vkey_hashes.len(), 1);
@@ -172,8 +207,28 @@ mod tests {
         }
 
         // State must be reset
+        assert_eq!(state.current_epoch, 1);
         assert_eq!(state.total_blocks, 0);
         assert_eq!(state.total_fees, 0);
         assert!(state.vrf_vkey_hashes.is_empty());
+    }
+
+    #[test]
+    fn end_epoch_saves_history() {
+        let mut state = State::new(true);
+        let block = make_block(200);
+        state.handle_mint(&block, Some(b"vrf_1"));
+        state.handle_fees(&block, 50);
+
+        state.end_epoch(&block, 199);
+
+        // Use the public API method
+        let history = state
+            .get_historical_epoch(199)
+            .expect("history disabled in test")
+            .expect("epoch history missing");
+
+        assert_eq!(history.total_blocks, 1);
+        assert_eq!(history.total_fees, 50);
     }
 }
