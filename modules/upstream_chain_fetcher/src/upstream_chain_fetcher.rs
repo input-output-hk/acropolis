@@ -7,13 +7,13 @@ use acropolis_common::{
     BlockInfo, 
 };
 use anyhow::{anyhow, bail, Result};
-use caryatid_sdk::{module, Context, Module};
+use caryatid_sdk::{module, Context, Module, Subscription};
 use crossbeam::channel::{TrySendError, bounded};
 use config::Config;
 use pallas::{
     ledger::traverse::MultiEraHeader,
     network::{
-        facades::PeerClient,
+        facades::PeerClient, 
         miniprotocols::{
             chainsync::{NextResponse, Tip},
             Point,
@@ -141,7 +141,22 @@ impl UpstreamChainFetcher {
         Ok(last_block)
     }
 
-    async fn run_chain_sync(cfg: Arc<FetcherConfig>) -> Result<()> {
+    async fn wait_snapshot_completion(subscription: &mut Box<dyn Subscription<Message>>) 
+        -> Result<Option<BlockInfo>>
+    {
+        let Ok((_, message)) = subscription.read().await else {
+            return Ok(None);
+        };
+
+        match message.as_ref() {
+            Message::Cardano((blk, CardanoMessage::SnapshotComplete)) => Ok(Some(blk.clone())),
+            msg => bail!("Unexpected message in completion topic: {msg:?}")
+        }
+    }
+
+    async fn run_chain_sync(cfg: Arc<FetcherConfig>,
+        snapshot_complete: &mut Option<Box<dyn Subscription<Message>>>
+    ) -> Result<()> {
         let peer = Arc::new(Mutex::new(utils::peer_connect(cfg.clone(), "header fetcher").await?));
 
         match cfg.sync_point {
@@ -167,30 +182,21 @@ impl UpstreamChainFetcher {
                 Self::sync_to_point(cfg, peer.clone(), Some(upstream_cache), point).await?;
             }
             SyncPoint::Snapshot => {
-                // Subscribe to snapshotter and sync to its point
                 info!("Waiting for snapshot completion on {}", cfg.snapshot_completion_topic);
+                let mut topic = snapshot_complete.as_mut()
+                    .ok_or_else(|| anyhow!("Snapshot topic missing"))?;
 
-                let mut subscription = cfg.context.subscribe(&cfg.snapshot_completion_topic).await?;
-                let cfg_clone = cfg.clone();
-                cfg.context.clone().run(async move {
-                    let Ok((_, message)) = subscription.read().await else {
-                        return;
-                    };
-                    match message.as_ref() {
-                        Message::Cardano((block, CardanoMessage::SnapshotComplete)) => {
-                            info!(
-                                "Notified snapshot complete at slot {} block number {}",
-                                block.slot, block.number
-                            );
-                            let point = Point::Specific(block.slot, block.hash.clone());
-
-                            Self::sync_to_point(cfg_clone, peer, None, point)
-                                .await
-                                .unwrap_or_else(|e| error!("Can't sync: {e}"));
-                        }
-                        _ => error!("Unexpected message type: {message:?}"),
+                match Self::wait_snapshot_completion(&mut topic).await? {
+                    Some(block) => {
+                        info!(
+                            "Notified snapshot complete at slot {} block number {}",
+                            block.slot, block.number
+                        );
+                        let point = Point::Specific(block.slot, block.hash.clone());
+                        Self::sync_to_point(cfg, peer, None, point).await?;
                     }
-                });
+                    None => info!("Completion not received. Exiting ...")
+                }
             }
         }
         Ok(())
@@ -199,10 +205,15 @@ impl UpstreamChainFetcher {
     /// Main init function
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         let cfg = FetcherConfig::new(context.clone(), config)?;
+        let mut subscription = match cfg.sync_point {
+            SyncPoint::Snapshot => 
+                Some(cfg.context.subscribe(&cfg.snapshot_completion_topic).await?),
+            _ => None
+        };
 
         context.clone().run(async move {
-            // TODO Multiple peers
-            Self::run_chain_sync(cfg).await.unwrap_or_else(|e| error!("Chain sync failed: {e}"));
+            Self::run_chain_sync(cfg, &mut subscription).await
+                .unwrap_or_else(|e| error!("Chain sync failed: {e}"));
         });
 
         Ok(())
