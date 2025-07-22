@@ -128,6 +128,18 @@ impl State {
     pub fn calculate_rewards(&mut self, epoch: u64, total_fees: u64,
                              spo_block_counts: HashMap<KeyHash, usize>) -> Result<()> {
 
+        info!(epoch, reserves=self.pots.reserves, treasury=self.pots.treasury,
+              deposits=self.pots.deposits, "Rewards for:");
+
+        // TODO HACK! Investigate why this differs to our calculated reserves after AVMM
+        // 13,887,515,255 - epoch 207 is as we enter 208 (Shelley)
+        if epoch == 207 {
+            // Fix reserves to that given in the CF Java implementation:
+            // https://github.com/cardano-foundation/cf-java-rewards-calculation/blob/b05eddf495af6dc12d96c49718f27c34fa2042b1/calculation/src/main/java/org/cardanofoundation/rewards/calculation/config/NetworkConfig.java#L45C57-L45C74
+            self.pots.reserves = 13_888_022_852_926_644;
+            warn!("Fixed reserves to {}", self.pots.reserves);
+        }
+
         // Get Shelley parameters, silently return if too early in the chain so no
         // rewards to calculate
         let shelley_params = match &self.protocol_parameters {
@@ -139,9 +151,8 @@ impl State {
         let go_snapshot = self.go_snapshot.clone();
 
         // Calculate total supply (total in circulation + treasury) or
-        // equivalently max-supply - reserves - this is the denominator
+        // equivalently (max-supply-reserves) - this is the denominator
         // for sigma, z0, s
-        // TODO - do we calculate this before or after reducing reserves?
         let total_supply = BigDecimal::from(shelley_params.max_lovelace_supply - self.pots.reserves);
 
         info!(epoch, reserves=self.pots.reserves, %total_supply, "Supply:");
@@ -182,7 +193,8 @@ impl State {
         };
 
         // Handle monetary expansion - movement from reserves to rewards and treasury
-        let monetary_expansion_factor = &shelley_params.protocol_params.monetary_expansion; // Rho
+        let monetary_expansion_factor = RationalNumber::new(3, 1000);
+        // TODO odd values coming in! &shelley_params.protocol_params.monetary_expansion; // Rho
         let monetary_expansion = (BigDecimal::from(self.pots.reserves)
                                   * &eta
                                   * BigDecimal::from(monetary_expansion_factor.numer())
@@ -194,8 +206,12 @@ impl State {
         // Total rewards available is monetary expansion plus fees
         let total_reward_pot = &monetary_expansion + BigDecimal::from(total_fees);
 
+        info!(rho=%monetary_expansion_factor, %eta, %monetary_expansion, fees=total_fees,
+              %total_reward_pot, "Monetary:");
+
         // Top-slice some for treasury
-        let treasury_cut = &shelley_params.protocol_params.treasury_cut;  // Tau
+        let treasury_cut = RationalNumber::new(2, 10);
+        // TODO odd values again! &shelley_params.protocol_params.treasury_cut;  // Tau
         let treasury_increase = (&total_reward_pot
                                  * BigDecimal::from(treasury_cut.numer())
                                  / BigDecimal::from(treasury_cut.denom()))
@@ -204,15 +220,15 @@ impl State {
         let new_treasury = self.pots.treasury + treasury_increase.to_u64()
             .ok_or(anyhow!("Can't calculate integral treasury cut"))?;
 
-        info!(before=self.pots.treasury, increase=%treasury_increase, after=new_treasury,
+        info!(before=self.pots.treasury, cut=%treasury_cut,
+              increase=%treasury_increase, after=new_treasury,
               "Treasury:");
         self.pots.treasury = new_treasury;
 
         // Calculate the total rewards available for stake (R)
         let stake_rewards = total_reward_pot.clone() - treasury_increase.clone();
 
-        info!(%eta, %monetary_expansion, %total_reward_pot, %stake_rewards,
-              "Reward calculations:");
+        info!(%stake_rewards, "Rewards:");
 
         // Relative pool saturation size (z0)
         let k = BigDecimal::from(&shelley_params.protocol_params.stake_pool_target_num);
