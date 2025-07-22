@@ -154,7 +154,8 @@ impl UpstreamChainFetcher {
         }
     }
 
-    async fn run_chain_sync(cfg: Arc<FetcherConfig>,
+    async fn run_chain_sync(
+        cfg: Arc<FetcherConfig>,
         snapshot_complete: &mut Option<Box<dyn Subscription<Message>>>
     ) -> Result<()> {
         let peer = Arc::new(Mutex::new(utils::peer_connect(cfg.clone(), "header fetcher").await?));
@@ -183,10 +184,10 @@ impl UpstreamChainFetcher {
             }
             SyncPoint::Snapshot => {
                 info!("Waiting for snapshot completion on {}", cfg.snapshot_completion_topic);
-                let mut topic = snapshot_complete.as_mut()
+                let mut completion_subscription = snapshot_complete.as_mut()
                     .ok_or_else(|| anyhow!("Snapshot topic missing"))?;
 
-                match Self::wait_snapshot_completion(&mut topic).await? {
+                match Self::wait_snapshot_completion(&mut completion_subscription).await? {
                     Some(block) => {
                         info!(
                             "Notified snapshot complete at slot {} block number {}",
