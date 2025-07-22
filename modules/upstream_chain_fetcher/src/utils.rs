@@ -49,14 +49,16 @@ impl FetcherConfig {
         actual
     }
 
-    fn conf_enum<'a, T: Deserialize<'a>>(config: &Arc<Config>, keydef: (&str, T)) -> Result<T> {
-        if config.get_string(keydef.0).is_ok() {
+    fn conf_enum<'a, T: Deserialize<'a> + std::fmt::Debug>(config: &Arc<Config>, keydef: (&str, T)) -> Result<T> {
+        let actual = if config.get_string(keydef.0).is_ok() {
             config
                 .get::<T>(keydef.0)
-                .or_else(|e| Err(anyhow!("cannot parse {} value: {e}", keydef.0)))
+                .or_else(|e| Err(anyhow!("cannot parse {} value: {e}", keydef.0)))?
         } else {
-            Ok(keydef.1)
-        }
+            keydef.1
+        };
+        info!("Parameter value '{actual:?}' for {}", keydef.0);
+        Ok(actual)
     }
 
     pub fn new(context: Arc<Context<Message>>, config: Arc<Config>) -> Result<Arc<Self>> {
