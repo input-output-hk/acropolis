@@ -144,3 +144,18 @@ pub async fn handle_spo(state: Arc<Mutex<State>>, param: String) -> Result<RESTR
         None => Ok(RESTResponse::with_text(404, "Stake pool not found")),
     }
 }
+
+/// Handles /pools/retiring
+pub async fn handle_retiring_pools(state: Arc<Mutex<State>>) -> Result<RESTResponse> {
+    let locked = state.lock().await;
+    match locked.get_retiring_pools() {
+        Some(retiring_pools) => match serde_json::to_string(&retiring_pools) {
+            Ok(body) => Ok(RESTResponse::with_json(200, &body)),
+            Err(e) => Ok(RESTResponse::with_text(
+                500,
+                &format!("Internal server error retrieving retiring pools: {e}"),
+            )),
+        },
+        None => Ok(RESTResponse::with_text(200, "[]")),
+    }
+}
