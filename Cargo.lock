@@ -23,6 +23,7 @@ dependencies = [
  "lf-queue",
  "minicbor 0.26.5",
  "num-rational",
+ "num-traits",
  "serde",
  "serde_json",
  "serde_with 3.14.0",
@@ -86,7 +87,10 @@ dependencies = [
  "anyhow",
  "caryatid_sdk",
  "config",
+ "hex",
  "pallas",
+ "serde",
+ "serde_json",
  "tokio",
  "tracing",
 ]
