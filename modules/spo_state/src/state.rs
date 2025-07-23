@@ -5,7 +5,7 @@ use acropolis_common::{
     messages::{CardanoMessage, Message, SPOStateMessage, TxCertificatesMessage},
     params::{SECURITY_PARAMETER_K, TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH},
     serialization::SerializeMapAs,
-    BlockInfo, PoolRegistration, TxCertificate,
+    BlockInfo, PoolRegistration, PoolRetirement, TxCertificate,
 };
 use anyhow::Result;
 use imbl::HashMap;
@@ -112,6 +112,24 @@ impl State {
 
     pub fn list_pools_with_info(&self) -> Option<Vec<(&Vec<u8>, &PoolRegistration)>> {
         self.current().map(|state| state.spos.iter().collect())
+    }
+
+    /// Get pools that will be retired in the next epoch
+    pub fn get_retiring_pools(&self) -> Option<Vec<PoolRetirement>> {
+        self.current().map(|state: &BlockState| {
+            let current_epoch = state.epoch;
+            state
+                .pending_deregistrations
+                .iter()
+                .filter(|(&epoch, _)| epoch > current_epoch)
+                .flat_map(|(&epoch, retiring_operators)| {
+                    retiring_operators.iter().map(move |operator| PoolRetirement {
+                        operator: operator.clone(),
+                        epoch,
+                    })
+                })
+                .collect()
+        })
     }
 
     async fn log_stats(&self) {
