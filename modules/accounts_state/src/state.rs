@@ -21,6 +21,7 @@ use std::sync::{atomic::AtomicU64, Arc, Mutex};
 use tracing::{debug, error, info, warn};
 use bigdecimal::{BigDecimal, ToPrimitive, Zero, One};
 use std::cmp::min;
+use std::mem::take;
 use std::str::FromStr;
 
 const DEFAULT_KEY_DEPOSIT: u64 = 2_000_000;
@@ -94,6 +95,12 @@ pub struct State {
 
     /// Protocol parameters that apply during this epoch
     protocol_parameters: Option<ProtocolParams>,
+
+    /// Pool refunds to apply next epoch (list of reward accounts to refund to)
+    pool_refunds: Vec<KeyHash>,
+
+    // Stake address refunds to apply next epoch
+    stake_refunds: Vec<(KeyHash, Lovelace)>,
 }
 
 impl State {
@@ -404,7 +411,51 @@ impl State {
         });
 
         self.capture_snapshot(epoch, total_fees);
+
+        // Pay the refunds ready for next time
+        self.pay_pool_refunds();
+        self.pay_stake_refunds();
+
         Ok(())
+    }
+
+    /// Pay pool refunds
+    fn pay_pool_refunds(&mut self) {
+        // Get pool deposit amount from parameters, or default
+        let deposit = self.protocol_parameters
+            .as_ref()
+            .and_then(|pp| pp.shelley.as_ref())
+            .map(|sp| sp.protocol_params.pool_deposit)
+            .unwrap_or(DEFAULT_POOL_DEPOSIT);
+
+        let refunds = take(&mut self.pool_refunds);
+        if !refunds.is_empty() {
+            info!("{} retiring SPOs, total refunds {}", refunds.len(),
+                  (refunds.len() as u64) * deposit);
+        }
+
+        // TODO - if their reward account has been deregistered, it goes to Treasury
+
+        // Send them their deposits back
+        for keyhash in refunds {
+            self.add_to_reward(&keyhash, deposit);
+            self.pots.deposits -= deposit;
+        }
+    }
+
+    /// Pay stake address refunds
+    fn pay_stake_refunds(&mut self) {
+        let refunds = take(&mut self.stake_refunds);
+        if !refunds.is_empty() {
+            info!("{} deregistered stake addresses, total refunds {}", refunds.len(),
+                  refunds.iter().map(|(_, n)| n).sum::<Lovelace>());
+        }
+
+        // Send them their deposits back
+        for (keyhash, deposit) in refunds {
+            self.add_to_reward(&keyhash, deposit);
+            self.pots.deposits -= deposit;
+        }
     }
 
     /// Add a reward to a reward account (by hash)
@@ -584,7 +635,7 @@ impl State {
         }
 
         // Check for any SPOs that have retired this epoch and need deposit refunds
-        let mut refunds: Vec<KeyHash> = Vec::new();
+        self.pool_refunds = Vec::new();
         for id in &spo_msg.retired_spos {
             if let Some(retired_spo) = new_spos.get(id) {
                 match StakeAddress::from_binary(&retired_spo.reward_account) {
@@ -592,28 +643,15 @@ impl State {
                         let keyhash = stake_address.get_hash();
                         debug!("SPO {} has retired - refunding their deposit to {}",
                               hex::encode(id), hex::encode(keyhash));
-                        refunds.push(keyhash.to_vec());
+                        self.pool_refunds.push(keyhash.to_vec());
                     }
                     Err(e) => error!("Error repaying SPO deposit: {e}")
                 }
 
                 // Remove from our list
                 new_spos.remove(id);
+                // TODO - wipe any delegations to retired pools
             }
-        }
-
-        if !refunds.is_empty() {
-            info!("{} retiring SPOs, total refunds {}", refunds.len(),
-                  (refunds.len() as u64) * deposit);
-        }
-
-        // TODO - if their reward account has been deregistered, it goes to Treasury
-        // TODO - wipe any delegations to retired pools
-
-        // Send them their deposits back
-        for keyhash in refunds.iter() {
-            self.add_to_reward(&keyhash, deposit);
-            self.pots.deposits -= deposit;
         }
 
         self.spos = new_spos;
