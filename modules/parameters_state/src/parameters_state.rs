@@ -17,6 +17,7 @@ mod genesis_params;
 mod parameters_updater;
 mod rest;
 mod state;
+mod alonzo_genesis;
 
 use parameters_updater::ParametersUpdater;
 use rest::handle_current;
