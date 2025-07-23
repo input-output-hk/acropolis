@@ -212,8 +212,6 @@ impl State {
                                   * BigDecimal::from(monetary_expansion_factor.numer())
                                   / BigDecimal::from(monetary_expansion_factor.denom()))
             .with_scale(0);
-        self.pots.reserves -= monetary_expansion.to_u64()
-            .ok_or(anyhow!("Can't calculate integral monetary expansion"))?;
 
         // Total rewards available is monetary expansion plus fees from previous epoch
         let total_reward_pot = &monetary_expansion + BigDecimal::from(self.set_snapshot.fees);
@@ -236,6 +234,8 @@ impl State {
               increase=%treasury_increase, after=new_treasury,
               "Treasury:");
         self.pots.treasury = new_treasury;
+        self.pots.reserves -= treasury_increase.to_u64()
+            .ok_or(anyhow!("Can't calculate integral treasury increase"))?;
 
         // Calculate the total rewards available for stake (R)
         let stake_rewards = total_reward_pot.clone() - treasury_increase.clone();
