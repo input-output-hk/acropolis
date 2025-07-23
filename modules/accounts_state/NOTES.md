@@ -22,22 +22,12 @@ treasury(epoch) = treasury(epoch-1)
 treasury_increase = total_rewards * tau ( 0.2 )
 ```
 
-epoch 208:
-    reserves at start: 13888022852926644
-    fees: 10670212208 OK (ada_pots)
-    mirs: 593529326186446 OK (ada_pots 'rewards' + reward_rest)
 
-epoch 209:
-    reserves at start: 13286160713028443 (ada pots)
-                       13294493526740198 (acropolis)
-                 diff: 8332813711755 = treasury from ada pots!
+deposits:
+    Difference of 998 ADA in 208
+    We are 998 too low
+    998 = 2 * 500 (SPO) - 2 (one stake address?)
 
-
-reserves(208) * rho * tau = 8332813711755 = db sync treasury cut
-
-therefore:
-  fees are actually taken from epoch-2 (as per Java code, not spec)
-  reserves captured *before* MIRs of the previous epoch
-  ada_pots shows reserves *after* treasury taken
-
- => mark/set/go needs to include fees, pot values
+    Total tx deposits in 208:  448512 A
+    Listed in ada_pots:        441012
+    Ours:                      440014
