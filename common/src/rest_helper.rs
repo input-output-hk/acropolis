@@ -1,9 +1,10 @@
 //! Helper functions for REST handlers
 
 use crate::messages::{Message, RESTResponse};
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
 use futures::future::Future;
+use num_traits::ToPrimitive;
 use std::sync::Arc;
 use tokio::task::JoinHandle;
 use tracing::{error, info};
@@ -105,4 +106,14 @@ fn extract_params_from_topic_and_path(topic: &str, path_elements: &[String]) -> 
         .iter()
         .filter_map(|&pos| pos.checked_sub(offset).and_then(|idx| path_elements.get(idx)).cloned())
         .collect()
+}
+
+pub trait ToCheckedF64 {
+    fn to_checked_f64(&self, name: &str) -> Result<f64>;
+}
+
+impl<T: ToPrimitive> ToCheckedF64 for T {
+    fn to_checked_f64(&self, name: &str) -> Result<f64> {
+        self.to_f64().ok_or_else(|| anyhow!("Failed to convert {name} to f64"))
+    }
 }
