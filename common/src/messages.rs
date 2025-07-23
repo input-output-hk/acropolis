@@ -225,7 +225,8 @@ pub enum SnapshotStateMessage {
 // === Global message enum ===
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub enum Message {
-    #[default] None, // Just so we have a simple default
+    #[default]
+    None, // Just so we have a simple default
 
     // Generic messages, get of jail free cards
     String(String),          // Simple string
@@ -241,6 +242,10 @@ pub enum Message {
 
     // Initialize state from a snapshot
     Snapshot(SnapshotMessage),
+
+    // State query messages
+    StateQuery(StateQuery),
+    StateQueryResponse(StateQueryResponse),
 }
 
 // Casts from specific Caryatid messages
@@ -271,4 +276,24 @@ impl GetRESTResponse for Message {
             None
         }
     }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum StateQuery {
+    GetAccountInfo { stake_key: Vec<u8> },
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum StateQueryResponse {
+    AccountInfo(AccountInfo),
+    NotFound,
+    Error(String),
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AccountInfo {
+    pub utxo_value: u64,
+    pub rewards: u64,
+    pub delegated_spo: Option<KeyHash>,
+    pub delegated_drep: Option<DRepChoice>,
 }

@@ -17,6 +17,7 @@ use acropolis_module_genesis_bootstrapper::GenesisBootstrapper;
 use acropolis_module_governance_state::GovernanceState;
 use acropolis_module_mithril_snapshot_fetcher::MithrilSnapshotFetcher;
 use acropolis_module_parameters_state::ParametersState;
+use acropolis_module_rest_blockfrost::BlockfrostREST;
 use acropolis_module_spo_state::SPOState;
 use acropolis_module_stake_delta_filter::StakeDeltaFilter;
 use acropolis_module_tx_unpacker::TxUnpacker;
@@ -70,6 +71,7 @@ pub async fn main() -> Result<()> {
 
     Clock::<Message>::register(&mut process);
     RESTServer::<Message>::register(&mut process);
+    BlockfrostREST::register(&mut process);
     Spy::<Message>::register(&mut process);
 
     // Run it
