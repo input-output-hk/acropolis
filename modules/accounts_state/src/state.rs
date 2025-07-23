@@ -10,7 +10,7 @@ use acropolis_common::{
     Lovelace, MoveInstantaneousReward, PoolRegistration, Pot, ProtocolParams, RewardAccount,
     StakeAddress, StakeCredential, TxCertificate,
 };
-use crate::rewards::StakeSnapshot;
+use crate::rewards::Snapshot;
 use anyhow::{bail, anyhow, Result};
 use dashmap::DashMap;
 use imbl::OrdMap;
@@ -58,21 +58,18 @@ pub struct DRepDelegationDistribution {
 #[derive(Debug, Default, Clone, serde::Serialize)]
 pub struct Pots {
     /// Unallocated reserves
-    reserves: Lovelace,
+    pub reserves: Lovelace,
 
     /// Treasury
-    treasury: Lovelace,
+    pub treasury: Lovelace,
 
     /// Deposits
-    deposits: Lovelace,
+    pub deposits: Lovelace,
 }
 
 /// Overall state - stored per block
 #[derive(Debug, Default, Clone)]
 pub struct State {
-    /// Epoch this state is for
-    epoch: u64,
-
     /// Map of active SPOs by operator ID
     spos: OrdMap<KeyHash, PoolRegistration>,
 
@@ -84,10 +81,10 @@ pub struct State {
     // Mark, Set, Go naming - mark is the current one
 
     /// Snapshot of stake taken at (epoch-2), "go"
-    go_snapshot: Arc<StakeSnapshot>,
+    go_snapshot: Arc<Snapshot>,
 
     /// Snapshot of stake taken at (epoch-1), "set"
-    set_snapshot: Arc<StakeSnapshot>,
+    set_snapshot: Arc<Snapshot>,
 
     /// Global account pots
     pots: Pots,
@@ -121,15 +118,24 @@ impl State {
         Ok(())
     }
 
+    /// Capture and rotate snapshots
+    fn capture_snapshot(&mut self, epoch: u64, total_fees: u64) {
+        // Capture a new snapshot
+        let mark_snapshot = Arc::new(Snapshot::new(epoch,
+                                                   &self.stake_addresses.lock().unwrap(),
+                                                   &self.pots, total_fees));
+
+        // Rotate the snapshots
+        self.go_snapshot = self.set_snapshot.clone();
+        self.set_snapshot = mark_snapshot;
+    }
+
     /// Calculate rewards given
     ///   total_fees: Total fees taken in this epoch
     ///   spo_block_counts: Count of blocks minted by VRF key
     // Follows the general scheme in https://docs.cardano.org/about-cardano/learn/pledging-rewards
-    pub fn calculate_rewards(&mut self, epoch: u64, total_fees: u64,
-                             spo_block_counts: HashMap<KeyHash, usize>) -> Result<()> {
-
-        info!(epoch, reserves=self.pots.reserves, treasury=self.pots.treasury,
-              deposits=self.pots.deposits, "Rewards for:");
+    fn calculate_rewards(&mut self, epoch: u64, total_fees: u64,
+                         spo_block_counts: HashMap<KeyHash, usize>) -> Result<()> {
 
         // TODO HACK! Investigate why this differs to our calculated reserves after AVMM
         // 13,887,515,255 - epoch 207 is as we enter 208 (Shelley)
@@ -144,7 +150,10 @@ impl State {
         // rewards to calculate
         let shelley_params = match &self.protocol_parameters {
             Some(ProtocolParams { shelley: Some(sp), .. }) => sp,
-            _ => return Ok(())
+            _ => {
+                self.capture_snapshot(epoch, total_fees);
+                return Ok(())
+            }
         };
 
         // Get the 'go' snapshot from two epochs ago
@@ -153,9 +162,12 @@ impl State {
         // Calculate total supply (total in circulation + treasury) or
         // equivalently (max-supply-reserves) - this is the denominator
         // for sigma, z0, s
-        let total_supply = BigDecimal::from(shelley_params.max_lovelace_supply - self.pots.reserves);
+        // Note reserves comes from the previous epoch *before* any MIRs are processed
+        // from the one we're handling now
+        let total_supply = BigDecimal::from(shelley_params.max_lovelace_supply
+                                            - self.set_snapshot.pots.reserves);
 
-        info!(epoch, reserves=self.pots.reserves, %total_supply, "Supply:");
+        info!(epoch, reserves=self.set_snapshot.pots.reserves, %total_supply, "Supply:");
 
         // Total blocks
         let total_blocks: usize = spo_block_counts.values().sum();
@@ -195,7 +207,7 @@ impl State {
         // Handle monetary expansion - movement from reserves to rewards and treasury
         let monetary_expansion_factor = RationalNumber::new(3, 1000);
         // TODO odd values coming in! &shelley_params.protocol_params.monetary_expansion; // Rho
-        let monetary_expansion = (BigDecimal::from(self.pots.reserves)
+        let monetary_expansion = (BigDecimal::from(self.set_snapshot.pots.reserves)
                                   * &eta
                                   * BigDecimal::from(monetary_expansion_factor.numer())
                                   / BigDecimal::from(monetary_expansion_factor.denom()))
@@ -203,11 +215,11 @@ impl State {
         self.pots.reserves -= monetary_expansion.to_u64()
             .ok_or(anyhow!("Can't calculate integral monetary expansion"))?;
 
-        // Total rewards available is monetary expansion plus fees
-        let total_reward_pot = &monetary_expansion + BigDecimal::from(total_fees);
+        // Total rewards available is monetary expansion plus fees from previous epoch
+        let total_reward_pot = &monetary_expansion + BigDecimal::from(self.set_snapshot.fees);
 
-        info!(rho=%monetary_expansion_factor, %eta, %monetary_expansion, fees=total_fees,
-              %total_reward_pot, "Monetary:");
+        info!(rho=%monetary_expansion_factor, %eta, %monetary_expansion,
+              fees=self.set_snapshot.fees, %total_reward_pot, "Monetary:");
 
         // Top-slice some for treasury
         let treasury_cut = RationalNumber::new(2, 10);
@@ -391,13 +403,7 @@ impl State {
             }
         });
 
-        // Capture a new snapshot
-        let mark_snapshot = Arc::new(StakeSnapshot::new(&self.stake_addresses.lock().unwrap()));
-
-        // Rotate the snapshots
-        self.go_snapshot = self.set_snapshot.clone();
-        self.set_snapshot = mark_snapshot;
-
+        self.capture_snapshot(epoch, total_fees);
         Ok(())
     }
 
@@ -536,12 +542,10 @@ impl State {
     /// Handle an EpochActivityMessage giving total fees and block counts by VRF key for
     /// the just-ended epoch
     pub fn handle_epoch_activity(&mut self, ea_msg: &EpochActivityMessage) -> Result<()> {
-        self.epoch = ea_msg.epoch;
-
         // Create a HashMap of the spo count data, for quick access
         let spo_block_counts: HashMap<KeyHash, usize> =
             ea_msg.vrf_vkey_hashes.iter().map(|(k, v)| (k.clone(), *v)).collect();
-        self.calculate_rewards(self.epoch, ea_msg.total_fees, spo_block_counts)?;
+        self.calculate_rewards(ea_msg.epoch, ea_msg.total_fees, spo_block_counts)?;
         Ok(())
     }
 

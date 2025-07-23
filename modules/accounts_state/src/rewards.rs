@@ -2,11 +2,12 @@
 
 use std::collections::HashMap;
 use acropolis_common::{Lovelace, KeyHash};
-use crate::state::StakeAddressState;
+use crate::state::{StakeAddressState, Pots};
+use tracing::info;
 
 /// SPO data for stake snapshot
 #[derive(Debug, Default)]
-pub struct StakeSnapshotSPO {
+pub struct SnapshotSPO {
     /// List of delegator stake addresses and amounts
     pub delegators: Vec<(KeyHash, Lovelace)>,
 
@@ -16,19 +17,35 @@ pub struct StakeSnapshotSPO {
 
 /// Snapshot of stake distribution taken at a particular epoch
 #[derive(Debug, Default)]
-pub struct StakeSnapshot {
+pub struct Snapshot {
+    /// Epoch it's for
+    pub _epoch: u64,
+
     /// Map of SPOs by operator ID
-    pub spos: HashMap<KeyHash, StakeSnapshotSPO>,
+    pub spos: HashMap<KeyHash, SnapshotSPO>,
+
+    /// Persistent pot values
+    pub pots: Pots,
+
+    /// Fees
+    pub fees: Lovelace,
 }
 
-impl StakeSnapshot {
+impl Snapshot {
 
     /// Get a stake snapshot based the current stake addresses
-    pub fn new(stake_addresses: &HashMap<KeyHash, StakeAddressState>) -> Self {
-        let mut snapshot = Self::default();
+    pub fn new(epoch: u64, stake_addresses: &HashMap<KeyHash, StakeAddressState>,
+               pots: &Pots, fees: Lovelace) -> Self {
+        let mut snapshot = Self {
+            _epoch: epoch,
+            pots: pots.clone(),
+            fees,
+            ..Self::default()
+        };
 
         // Scan all stake addresses and post to their delegated SPO's list
         // Note this is _active_ stake, for reward calculations, and hence doesn't include rewards
+        let mut total_stake: Lovelace = 0;
         for (hash, sas) in stake_addresses {
             if sas.utxo_value > 0 {
                 if let Some(spo_id) = &sas.delegated_spo {
@@ -37,14 +54,18 @@ impl StakeSnapshot {
                         spo.delegators.push((hash.clone(), sas.utxo_value));
                         spo.total_stake += sas.utxo_value;
                     } else {
-                        snapshot.spos.insert(spo_id.clone(), StakeSnapshotSPO {
+                        snapshot.spos.insert(spo_id.clone(), SnapshotSPO {
                             delegators: vec![(hash.clone(), sas.utxo_value)],
                             total_stake: sas.utxo_value,
                         });
                     }
                 }
+                total_stake += sas.utxo_value;
             }
         }
+
+        info!(epoch, reserves=pots.reserves, treasury=pots.treasury, deposits=pots.deposits,
+              total_stake, spos=snapshot.spos.len(), fees, "Snapshot");
 
         snapshot
     }
@@ -107,7 +128,7 @@ mod tests {
             .. StakeAddressState::default()
         });
 
-        let snapshot = StakeSnapshot::new(&stake_addresses);
+        let snapshot = Snapshot::new(42, &stake_addresses, &Pots::default(), 0);
 
         assert_eq!(snapshot.spos.len(), 2);
 
@@ -128,7 +149,7 @@ mod tests {
 
     #[test]
     fn get_stake_delegated_to_spo_by_addresses_when_some_match_is_correct() {
-        let mut snapshot = StakeSnapshot::default();
+        let mut snapshot = Snapshot::default();
         let spo1: KeyHash = vec![0x01];
 
         let addr1: KeyHash = vec![0x11];
@@ -138,7 +159,7 @@ mod tests {
 
         snapshot.spos.insert(
             spo1.clone(),
-            StakeSnapshotSPO {
+            SnapshotSPO {
                 delegators: vec![
                     (addr1.clone(), 100),
                     (addr2.clone(), 200),
@@ -155,7 +176,7 @@ mod tests {
 
     #[test]
     fn get_stake_delegated_to_spo_by_addresses_with_no_match_is_0() {
-        let mut snapshot = StakeSnapshot::default();
+        let mut snapshot = Snapshot::default();
         let spo1: KeyHash = vec![0x01];
 
         let addr1: KeyHash = vec![0x11];
@@ -163,7 +184,7 @@ mod tests {
 
         snapshot.spos.insert(
             spo1.clone(),
-            StakeSnapshotSPO {
+            SnapshotSPO {
                 delegators: vec![(addr1.clone(), 100)],
                 total_stake: 100,
             },
@@ -176,7 +197,7 @@ mod tests {
 
     #[test]
     fn get_stake_delegated_to_spo_by_addresses_with_unknown_spo_is_0() {
-        let snapshot = StakeSnapshot::default();
+        let snapshot = Snapshot::default();
         let spo_unknown: KeyHash = vec![0xFF];
         let result = snapshot.get_stake_delegated_to_spo_by_addresses(&spo_unknown, &[]);
         assert_eq!(result, 0);
@@ -184,13 +205,13 @@ mod tests {
 
     #[test]
     fn get_stake_delegated_to_spo_by_addresses_with_empty_addresses_is_0() {
-        let mut snapshot = StakeSnapshot::default();
+        let mut snapshot = Snapshot::default();
         let spo1: KeyHash = vec![0x01];
         let addr1: KeyHash = vec![0x11];
 
         snapshot.spos.insert(
             spo1.clone(),
-            StakeSnapshotSPO {
+            SnapshotSPO {
                 delegators: vec![(addr1.clone(), 100)],
                 total_stake: 100,
             },
