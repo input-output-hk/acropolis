@@ -216,7 +216,20 @@ impl State {
         for tx_cert in tx_certs_msg.certificates.iter() {
             match tx_cert {
                 TxCertificate::PoolRegistration(reg) => {
+                    debug!(block=block.number, "Registering SPO {}", hex::encode(&reg.operator));
                     current.spos.insert(reg.operator.clone(), reg.clone());
+
+                    // Remove any existing queued deregistrations
+                    for (epoch, deregistrations) in
+                        &mut current.pending_deregistrations.iter_mut()
+                    {
+                        let old_len = deregistrations.len();
+                        deregistrations.retain(|d| *d != reg.operator);
+                        if deregistrations.len() != old_len {
+                            debug!("Removed pending deregistration of SPO {} from epoch {}",
+                                  hex::encode(&reg.operator), epoch);
+                        }
+                    }
                 }
                 TxCertificate::PoolRetirement(ret) => {
                     debug!("SPO {} wants to retire at the end of epoch {} (cert in block number {})",
@@ -235,13 +248,11 @@ impl State {
                         for (epoch, deregistrations) in
                             &mut current.pending_deregistrations.iter_mut()
                         {
+                            let old_len = deregistrations.len();
                             deregistrations.retain(|d| *d != ret.operator);
-                            if deregistrations.len() != deregistrations.len() {
-                                info!(
-                                    "Removed pending deregistration of SPO {} from epoch {}",
-                                    hex::encode(&ret.operator),
-                                    epoch
-                                );
+                            if deregistrations.len() != old_len {
+                                debug!("Replaced pending deregistration of SPO {} from epoch {}",
+                                      hex::encode(&ret.operator), epoch);
                             }
                         }
                         current
