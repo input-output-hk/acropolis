@@ -106,76 +106,23 @@ impl AccountsState {
             let certs_message_f = certs_subscription.read();
             let stake_message_f = stake_subscription.read();
             let withdrawals_message_f = withdrawals_subscription.read();
-            let mut new_epoch = false;
             let mut current_block: Option<BlockInfo> = None;
 
-            // Handle certificates
-            let (_, message) = certs_message_f.await?;
-            match message.as_ref() {
-                Message::Cardano((block_info, CardanoMessage::TxCertificates(tx_certs_msg))) => {
+            // Use certs_message as the synchroniser, but we have to handle it after the
+            // epoch things, because they apply to the new epoch, not the last
+            let (_, certs_message) = certs_message_f.await?;
+            let new_epoch = match certs_message.as_ref() {
+                Message::Cardano((block_info, _)) => {
                     // Handle rollbacks on this topic only
                     if block_info.status == BlockStatus::RolledBack {
                         state = history.lock().await.get_rolled_back_state(&block_info);
                     }
 
-                    state
-                        .handle_tx_certificates(tx_certs_msg)
-                        .inspect_err(|e| error!("TxCertificates handling error: {e:#}"))
-                        .ok();
-                    if block_info.new_epoch && block_info.epoch > 0 {
-                        new_epoch = true;
-                    }
                     current_block = Some(block_info.clone());
+                    block_info.new_epoch && block_info.epoch > 0
                 }
-
-                _ => error!("Unexpected message type: {message:?}"),
-            }
-
-            // Handle withdrawals
-            let (_, message) = withdrawals_message_f.await?;
-            match message.as_ref() {
-                Message::Cardano((block_info, CardanoMessage::Withdrawals(withdrawals_msg))) => {
-                    if let Some(ref block) = current_block {
-                        if block.number != block_info.number {
-                            error!(
-                                expected = block.number,
-                                received = block_info.number,
-                                "Certificate and withdrawals messages re-ordered!"
-                            );
-                        }
-                    }
-
-                    state
-                        .handle_withdrawals(withdrawals_msg)
-                        .inspect_err(|e| error!("Withdrawals handling error: {e:#}"))
-                        .ok();
-                }
-
-                _ => error!("Unexpected message type: {message:?}"),
-            }
-
-            // Handle stake address deltas
-            let (_, message) = stake_message_f.await?;
-            match message.as_ref() {
-                Message::Cardano((block_info, CardanoMessage::StakeAddressDeltas(deltas_msg))) => {
-                    if let Some(ref block) = current_block {
-                        if block.number != block_info.number {
-                            error!(
-                                expected = block.number,
-                                received = block_info.number,
-                                "Certificate and deltas messages re-ordered!"
-                            );
-                        }
-                    }
-
-                    state
-                        .handle_stake_deltas(deltas_msg)
-                        .inspect_err(|e| error!("StakeAddressDeltas handling error: {e:#}"))
-                        .ok();
-                }
-
-                _ => error!("Unexpected message type: {message:?}"),
-            }
+                _ => false
+            };
 
             // Read from epoch-boundary messages only when it's a new epoch
             if new_epoch {
@@ -188,6 +135,7 @@ impl AccountsState {
                 let (_, message) = dreps_message_f.await?;
                 match message.as_ref() {
                     Message::Cardano((block_info, CardanoMessage::DRepState(dreps_msg))) => {
+                        Self::check_sync(&current_block, &block_info);
                         state.handle_drep_state(&dreps_msg);
 
                         let drdd = state.generate_drdd();
@@ -203,16 +151,7 @@ impl AccountsState {
                 let (_, message) = spos_message_f.await?;
                 match message.as_ref() {
                     Message::Cardano((block_info, CardanoMessage::SPOState(spo_msg))) => {
-                        if let Some(ref block) = current_block {
-                            if block.number != block_info.number {
-                                error!(
-                                    expected = block.number,
-                                    received = block_info.number,
-                                    "Certificate and epoch SPOs messages re-ordered!"
-                                );
-                            }
-                        }
-
+                        Self::check_sync(&current_block, &block_info);
                         state
                             .handle_spo_state(spo_msg)
                             .inspect_err(|e| error!("SPOState handling error: {e:#}"))
@@ -231,16 +170,7 @@ impl AccountsState {
                 let (_, message) = ea_message_f.await?;
                 match message.as_ref() {
                     Message::Cardano((block_info, CardanoMessage::EpochActivity(ea_msg))) => {
-                        if let Some(ref block) = current_block {
-                            if block.number != block_info.number {
-                                error!(
-                                    expected = block.number,
-                                    received = block_info.number,
-                                    "Certificate and epoch activity messages re-ordered!"
-                                );
-                            }
-                        }
-
+                        Self::check_sync(&current_block, &block_info);
                         state
                             .handle_epoch_activity(ea_msg)
                             .inspect_err(|e| error!("EpochActivity handling error: {e:#}"))
@@ -255,16 +185,7 @@ impl AccountsState {
                 let (_, message) = params_message_f.await?;
                 match message.as_ref() {
                     Message::Cardano((block_info, CardanoMessage::ProtocolParams(params_msg))) => {
-                        if let Some(ref block) = current_block {
-                            if block.number != block_info.number {
-                                error!(
-                                    expected = block.number,
-                                    received = block_info.number,
-                                    "Certificate and parameters messages re-ordered!"
-                                );
-                            }
-                        }
-
+                        Self::check_sync(&current_block, &block_info);
                         state
                             .handle_parameters(params_msg)
                             .inspect_err(|e| error!("Messaging handling error: {e}"))
@@ -275,9 +196,63 @@ impl AccountsState {
                 }
             }
 
+            // Now handle the certs_message properly
+            match certs_message.as_ref() {
+                Message::Cardano((block_info, CardanoMessage::TxCertificates(tx_certs_msg))) => {
+                    Self::check_sync(&current_block, &block_info);
+                    state
+                        .handle_tx_certificates(tx_certs_msg)
+                        .inspect_err(|e| error!("TxCertificates handling error: {e:#}"))
+                        .ok();
+                }
+
+                _ => error!("Unexpected message type: {certs_message:?}"),
+            }
+
+            // Handle withdrawals
+            let (_, message) = withdrawals_message_f.await?;
+            match message.as_ref() {
+                Message::Cardano((block_info, CardanoMessage::Withdrawals(withdrawals_msg))) => {
+                    Self::check_sync(&current_block, &block_info);
+                    state
+                        .handle_withdrawals(withdrawals_msg)
+                        .inspect_err(|e| error!("Withdrawals handling error: {e:#}"))
+                        .ok();
+                }
+
+                _ => error!("Unexpected message type: {message:?}"),
+            }
+
+            // Handle stake address deltas
+            let (_, message) = stake_message_f.await?;
+            match message.as_ref() {
+                Message::Cardano((block_info, CardanoMessage::StakeAddressDeltas(deltas_msg))) => {
+                    Self::check_sync(&current_block, &block_info);
+                    state
+                        .handle_stake_deltas(deltas_msg)
+                        .inspect_err(|e| error!("StakeAddressDeltas handling error: {e:#}"))
+                        .ok();
+                }
+
+                _ => error!("Unexpected message type: {message:?}"),
+            }
+
+
             // Commit the new state
             if let Some(block_info) = current_block {
                 history.lock().await.commit(&block_info, state);
+            }
+        }
+    }
+
+    /// Check for synchronisation
+    fn check_sync(expected: &Option<BlockInfo>, actual: &BlockInfo) {
+        if let Some(ref block) = expected {
+            if block.number != actual.number {
+                error!(
+                    expected = block.number,
+                    actual = actual.number,
+                    "Messages out of sync");
             }
         }
     }

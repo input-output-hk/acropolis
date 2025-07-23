@@ -410,11 +410,12 @@ impl State {
             }
         });
 
-        self.capture_snapshot(epoch, total_fees);
-
         // Pay the refunds ready for next time
         self.pay_pool_refunds();
         self.pay_stake_refunds();
+
+        // Capture and rotate snapshots
+        self.capture_snapshot(epoch, total_fees);
 
         Ok(())
     }

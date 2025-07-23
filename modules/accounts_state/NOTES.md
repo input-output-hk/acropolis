@@ -30,4 +30,7 @@ deposits:
 
     Total tx deposits in 208:  448512 A
     Listed in ada_pots:        441012
-    Ours:                      440014
+    Ours:                      440012
+
+    The 2 is because we were including the first Tx in the new epoch
+    Leaving 1000 = missing 2 SPOs?
