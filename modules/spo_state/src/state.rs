@@ -114,7 +114,7 @@ impl State {
         self.current().map(|state| state.spos.iter().collect())
     }
 
-    /// Get pools that will be retired in the next epoch
+    /// Get pools that will be retired in the upcoming epochs
     pub fn get_retiring_pools(&self) -> Option<Vec<PoolRetirement>> {
         self.current().map(|state: &BlockState| {
             let current_epoch = state.epoch;
