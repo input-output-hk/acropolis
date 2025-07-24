@@ -1,9 +1,10 @@
 //! Acropolis AccountsState: rewards calculations
 
 use std::collections::HashMap;
-use acropolis_common::{Lovelace, KeyHash};
+use acropolis_common::{Lovelace, KeyHash, PoolRegistration, Ratio};
 use crate::state::{StakeAddressState, Pots};
-use tracing::info;
+use tracing::{info, error};
+use imbl::OrdMap;
 
 /// SPO data for stake snapshot
 #[derive(Debug, Default)]
@@ -13,6 +14,18 @@ pub struct SnapshotSPO {
 
     /// Total stake delegated
     pub total_stake: Lovelace,
+
+    /// Pledge
+    pub pledge: Lovelace,
+
+    /// Fixed cost
+    pub fixed_cost: Lovelace,
+
+    /// Margin
+    pub margin: Ratio,
+
+    /// Blocks produced
+    pub blocks_produced: usize,
 }
 
 /// Snapshot of stake distribution taken at a particular epoch
@@ -35,6 +48,8 @@ impl Snapshot {
 
     /// Get a stake snapshot based the current stake addresses
     pub fn new(epoch: u64, stake_addresses: &HashMap<KeyHash, StakeAddressState>,
+               spos: &OrdMap<KeyHash, PoolRegistration>,
+               spo_block_counts: &HashMap<KeyHash, usize>,
                pots: &Pots, fees: Lovelace) -> Self {
         let mut snapshot = Self {
             _epoch: epoch,
@@ -50,13 +65,25 @@ impl Snapshot {
             if sas.utxo_value > 0 {
                 if let Some(spo_id) = &sas.delegated_spo {
                     // Only clone if insertion is needed
-                    if let Some(spo) = snapshot.spos.get_mut(spo_id) {
-                        spo.delegators.push((hash.clone(), sas.utxo_value));
-                        spo.total_stake += sas.utxo_value;
+                    if let Some(snap_spo) = snapshot.spos.get_mut(spo_id) {
+                        snap_spo.delegators.push((hash.clone(), sas.utxo_value));
+                        snap_spo.total_stake += sas.utxo_value;
                     } else {
+                        // Find in the SPO list
+                        let Some(spo) = spos.get(spo_id) else {
+                            error!("Referenced SPO {} not found", hex::encode(spo_id));
+                            continue;
+                        };
+
+                        // See how many blocks produced
+                        let blocks_produced = spo_block_counts.get(spo_id).copied().unwrap_or(0);
                         snapshot.spos.insert(spo_id.clone(), SnapshotSPO {
                             delegators: vec![(hash.clone(), sas.utxo_value)],
                             total_stake: sas.utxo_value,
+                            pledge: spo.pledge,
+                            fixed_cost: spo.cost,
+                            margin: spo.margin.clone(),
+                            blocks_produced,
                         });
                     }
                 }
@@ -128,7 +155,12 @@ mod tests {
             .. StakeAddressState::default()
         });
 
-        let snapshot = Snapshot::new(42, &stake_addresses, &Pots::default(), 0);
+        let mut spos: OrdMap<KeyHash, PoolRegistration> = OrdMap::new();
+        spos.insert(spo1.clone(), PoolRegistration::default());
+        spos.insert(spo2.clone(), PoolRegistration::default());
+        let spo_block_counts: HashMap<KeyHash, usize> = HashMap::new();
+        let snapshot = Snapshot::new(42, &stake_addresses, &spos, &spo_block_counts,
+                                     &Pots::default(), 0);
 
         assert_eq!(snapshot.spos.len(), 2);
 
@@ -166,6 +198,7 @@ mod tests {
                     (addr3.clone(), 300),
                 ],
                 total_stake: 600,
+                ..SnapshotSPO::default()
             },
         );
 
@@ -187,6 +220,7 @@ mod tests {
             SnapshotSPO {
                 delegators: vec![(addr1.clone(), 100)],
                 total_stake: 100,
+                ..SnapshotSPO::default()
             },
         );
 
@@ -214,6 +248,7 @@ mod tests {
             SnapshotSPO {
                 delegators: vec![(addr1.clone(), 100)],
                 total_stake: 100,
+                ..SnapshotSPO::default()
             },
         );
 

@@ -126,10 +126,12 @@ impl State {
     }
 
     /// Capture and rotate snapshots
-    fn capture_snapshot(&mut self, epoch: u64, total_fees: u64) {
+    fn capture_snapshot(&mut self, epoch: u64, total_fees: u64,
+                        spo_block_counts: &HashMap<KeyHash, usize>) {
         // Capture a new snapshot
         let mark_snapshot = Arc::new(Snapshot::new(epoch,
                                                    &self.stake_addresses.lock().unwrap(),
+                                                   &self.spos, spo_block_counts,
                                                    &self.pots, total_fees));
 
         // Rotate the snapshots
@@ -158,7 +160,7 @@ impl State {
         let shelley_params = match &self.protocol_parameters {
             Some(ProtocolParams { shelley: Some(sp), .. }) => sp,
             _ => {
-                self.capture_snapshot(epoch, total_fees);
+                self.capture_snapshot(epoch, total_fees, &spo_block_counts);
                 return Ok(())
             }
         };
@@ -432,7 +434,7 @@ impl State {
         self.pay_stake_refunds();
 
         // Capture and rotate snapshots
-        self.capture_snapshot(epoch, total_fees);
+        self.capture_snapshot(epoch, total_fees, &spo_block_counts);
 
         Ok(())
     }

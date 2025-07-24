@@ -196,7 +196,7 @@ pub type Lovelace = u64;
 pub type LovelaceDelta = i64;
 
 /// Rational number = numerator / denominator
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Eq, PartialEq)]
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize, Eq, PartialEq)]
 pub struct Ratio {
     pub numerator: u64,
     pub denominator: u64,
@@ -388,6 +388,7 @@ pub type RewardAccount = Vec<u8>;
 #[serde_as]
 #[derive(
     Debug,
+    Default,
     Clone,
     serde::Serialize,
     serde::Deserialize,
