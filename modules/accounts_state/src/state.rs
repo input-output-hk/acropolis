@@ -211,6 +211,13 @@ impl State {
                 .min(BigDecimal::one())
         };
 
+        // Account fees from previous snapshot to reserves to start
+        // with - we will spend them to treasury and rewards later.
+        // Note this is the live reserves, not the snapshot, so won't
+        // affect the monetary expansion coming up
+        let fees = self.set_snapshot.fees;
+        self.pots.reserves += fees;
+
         // Handle monetary expansion - movement from reserves to rewards and treasury
         let monetary_expansion_factor = RationalNumber::new(3, 1000);
         // TODO odd values coming in! &shelley_params.protocol_params.monetary_expansion; // Rho
@@ -221,7 +228,7 @@ impl State {
             .with_scale(0);
 
         // Total rewards available is monetary expansion plus fees from previous epoch
-        let total_reward_pot = &monetary_expansion + BigDecimal::from(self.set_snapshot.fees);
+        let total_reward_pot = &monetary_expansion + BigDecimal::from(fees);
 
         info!(rho=%monetary_expansion_factor, %eta, %monetary_expansion,
               fees=self.set_snapshot.fees, %total_reward_pot, "Monetary:");
