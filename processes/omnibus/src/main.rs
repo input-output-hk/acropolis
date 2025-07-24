@@ -68,10 +68,10 @@ pub async fn main() -> Result<()> {
     StakeDeltaFilter::register(&mut process);
     EpochActivityCounter::register(&mut process);
     AccountsState::register(&mut process);
+    BlockfrostREST::register(&mut process);
 
     Clock::<Message>::register(&mut process);
     RESTServer::<Message>::register(&mut process);
-    BlockfrostREST::register(&mut process);
     Spy::<Message>::register(&mut process);
 
     // Run it

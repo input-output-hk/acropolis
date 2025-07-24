@@ -34,8 +34,6 @@ const DEFAULT_DREP_DISTRIBUTION_TOPIC: &str = "cardano.drep.distribution";
 const DEFAULT_SPO_DISTRIBUTION_TOPIC: &str = "cardano.spo.distribution";
 const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: &str = "cardano.protocol.parameters";
 
-const DEFAULT_HANDLE_SINGLE_ACCOUNT_TOPIC: (&str, &str) =
-    ("handle-topic-account-single", "rest.get.accounts.*");
 const DEFAULT_HANDLE_SPDD_TOPIC: (&str, &str) = ("handle-topic-spdd", "rest.get.spdd");
 const DEFAULT_HANDLE_POTS_TOPIC: (&str, &str) = ("handle-topic-pots", "rest.get.pots");
 const DEFAULT_HANDLE_DRDD_TOPIC: (&str, &str) = ("handle-topic-drdd", "rest.get.drdd");
