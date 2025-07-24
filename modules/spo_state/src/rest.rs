@@ -182,6 +182,6 @@ pub async fn handle_retiring_pools(state: Arc<Mutex<State>>) -> Result<RESTRespo
                 )),
             }
         }
-        None => Ok(RESTResponse::with_text(200, "[]")),
+        None => Ok(RESTResponse::with_json(200, "[]")),
     }
 }
