@@ -468,7 +468,7 @@ paths:
               schema:
                 type: string
                 example: "Internal server error while retrieving stake pool information"
-  /pools/retiring:
+  /pools_retiring:
     get:
       tags:
         - Pools
