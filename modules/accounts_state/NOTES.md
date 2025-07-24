@@ -47,3 +47,15 @@ deposits 594636000000        match
 fees     7770532273          match
 
 
+From rewards table:
+
+select sum(amount) from reward where earned_epoch = <EPOCH> and type='member';
+208: None
+209: None
+210: None
+211: 6,749,423,042,570
+
+we have for epoch 210:
+31,873,807,203,788
+
+

@@ -345,13 +345,14 @@ impl State {
             // Get actual pool rewards
             let pool_rewards = (&optimum_rewards * &pool_performance).with_scale(0);
 
-            debug!(%block_count, %pool_stake, %relative_pool_stake, %relative_blocks,
+            info!(%block_count, %pool_stake, %relative_pool_stake, %relative_blocks,
                   %pool_performance, %optimum_rewards, %pool_rewards,
                    "Pool {}", hex::encode(spo.operator.clone()));
 
             // Subtract fixed costs
             let fixed_cost = BigDecimal::from(spo.cost);
             if pool_rewards <= fixed_cost {
+                info!("Rewards < cost - all paid to SPO");
                 // No margin or pledge reward if under cost - all goes to SPO
                 spo_earnings.insert(spo.reward_account.clone(),
                                     pool_rewards.to_u64().unwrap_or_else(|| {
@@ -365,8 +366,8 @@ impl State {
                               * BigDecimal::from(spo.margin.numerator)  // TODO use RationalNumber
                               / BigDecimal::from(spo.margin.denominator))
                     .with_scale(0);
-                let costs = fixed_cost + margin;
-                let remainder = pool_rewards - &costs;
+                let costs = &fixed_cost + &margin;
+                let remainder = &pool_rewards - &costs;
                 let spo_benefit = costs.to_u64().unwrap_or_else(|| {
                     error!("Non-integral costs {costs} for SPO {}", hex::encode(&spo.operator));
                     0
@@ -383,6 +384,8 @@ impl State {
                 if to_delegators > 0 {
                     spo_rewards.insert(spo.operator.clone(), to_delegators);
                 }
+
+                info!(%fixed_cost, %margin, to_delegators, "Reward split:");
             }
         }
 
@@ -395,6 +398,8 @@ impl State {
         // Pay the delegators - split remainder in proportional to delegated stake,
         // * as it was 2 epochs ago *
         // TODO: Although these are calculated now, they are *paid* at the next epoch
+        let mut num_rewards_paid: usize = 0;
+        let mut total_rewards_paid: Lovelace = 0;
         go_snapshot.spos.iter().for_each(|(spo_id, spo)| {
             // Look up the SPO in the rewards map
             // May be absent if they didn't meet their costs
@@ -412,10 +417,15 @@ impl State {
 
                     // Transfer from reserves to this account
                     self.add_to_reward(&hash, to_pay);
-                    self.pots.reserves -= to_pay;
+                    num_rewards_paid += 1;
+                    total_rewards_paid += to_pay;
                 }
+
+                self.pots.reserves -= rewards;
             }
         });
+
+        info!(num_rewards_paid, total_rewards_paid, "Paid to delegators:");
 
         // Pay the refunds ready for next time
         self.pay_pool_refunds();
@@ -807,7 +817,6 @@ impl State {
             }
         }
 
-        info!(reserves=self.pots.reserves, treasury=self.pots.treasury, "New pots:");
         Ok(())
     }
 
