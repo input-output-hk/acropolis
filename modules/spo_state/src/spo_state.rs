@@ -22,7 +22,8 @@ use rest::{handle_list, handle_retiring_pools, handle_spo};
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.certificates";
 const DEFAULT_LIST_TOPIC: (&str, &str) = ("handle-topic-pool-list", "rest.get.pools");
 const DEFAULT_SINGLE_TOPIC: (&str, &str) = ("handle-topic-pool-info", "rest.get.pools.*");
-const DEFAULT_RETIRED_POOLS_TOPIC: (&str, &str) = ("handle-topic-retiring-pools", "rest.get.pools.retiring");
+const DEFAULT_RETIRING_POOLS_TOPIC: (&str, &str) =
+    ("handle-topic-retiring-pools", "rest.get.pools_retiring");
 const DEFAULT_SPO_STATE_TOPIC: &str = "cardano.spo.state";
 
 /// SPO State module
@@ -53,8 +54,9 @@ impl SPOState {
             config.get_string(DEFAULT_SINGLE_TOPIC.0).unwrap_or(DEFAULT_SINGLE_TOPIC.1.to_string());
         info!("Creating request handler on '{handle_single_topic}'");
 
-        let handle_retiring_pools_topic =
-            config.get_string(DEFAULT_RETIRED_POOLS_TOPIC.0).unwrap_or(DEFAULT_RETIRED_POOLS_TOPIC.1.to_string());
+        let handle_retiring_pools_topic = config
+            .get_string(DEFAULT_RETIRING_POOLS_TOPIC.0)
+            .unwrap_or(DEFAULT_RETIRING_POOLS_TOPIC.1.to_string());
         info!("Creating request handler on '{handle_retiring_pools_topic}'");
 
         let spo_state_topic = config
@@ -151,6 +153,7 @@ impl SPOState {
             handle_spo(state_single.clone(), param[0].to_string())
         });
 
+        // Handle REST requests for retiring pools
         let state_retiring_pools = state.clone();
         handle_rest(context.clone(), &handle_retiring_pools_topic, move || {
             handle_retiring_pools(state_retiring_pools.clone())
