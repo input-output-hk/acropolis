@@ -481,7 +481,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PoolRetirement'
+                type: array
+                items:
+                  $ref: '#/components/schemas/PoolRetirement'
               example:
                 - pool_id: "pool19u64770wqp6s95gkajc8udheske5e6ljmpq33awxk326zjaza0q"
                   epoch: 225
@@ -946,6 +948,20 @@ components:
         - reward_account
         - pool_owners
         - relays
+    PoolRetirement:
+      type: object
+      description: Pool retirement information
+      properties:
+        pool_id:
+          type: string
+          description: Bech32-encoded pool ID
+        epoch:
+          type: integer
+          format: uint64
+          description: Epoch number when the pool is retired
+      required:
+        - pool_id
+        - epoch
     UTxO:
       type: object
       description: Basic UTxO information including address and value.
