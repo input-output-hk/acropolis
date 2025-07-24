@@ -1,0 +1,27 @@
+# Acropolis Blockfrost-Compatible REST Module
+
+[package]
+name = "acropolis_module_rest_blockfrost"
+version = "0.1.0"
+edition = "2021"
+authors = ["William Hankins <william@sundae.fi>"]
+description = "Blockfrost-compatible REST API for Acropolis"
+license = "Apache-2.0"
+
+[dependencies]
+acropolis_common = { path = "../../common" }
+anyhow = "1.0"
+async-trait = "0.1"
+bech32 = "0.11"
+caryatid_sdk = "0.12"
+caryatid_module_rest_server = "0.13"
+config = "0.15.11"
+hex = "0.4.3"
+serde = { version = "1.0.214", features = ["derive"] }
+serde_json = "1.0"
+serde_with = { version = "3.12.0", features = ["hex"] }
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1.40"
+
+[lib]
+path = "src/rest_blockfrost.rs"
