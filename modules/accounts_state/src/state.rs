@@ -4,14 +4,14 @@ use acropolis_common::{
         DRepStateMessage, EpochActivityMessage, PotDeltasMessage, ProtocolParamsMessage,
         SPOStateMessage, StakeAddressDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
     },
-    rational_number::RationalNumber,
     DelegatedStake,
     DRepChoice, DRepCredential, InstantaneousRewardSource, InstantaneousRewardTarget, KeyHash,
-    Lovelace, MoveInstantaneousReward, PoolRegistration, Pot, ProtocolParams, RewardAccount,
+    Lovelace, MoveInstantaneousReward, PoolRegistration, Pot, ProtocolParams,
     StakeAddress, StakeCredential, TxCertificate,
 };
-use crate::rewards::Snapshot;
-use anyhow::{bail, anyhow, Result};
+use crate::snapshot::Snapshot;
+use crate::rewards::RewardsState;
+use anyhow::{bail, Result};
 use dashmap::DashMap;
 use imbl::OrdMap;
 use std::collections::{HashMap, BTreeMap, HashSet};
@@ -19,10 +19,7 @@ use rayon::prelude::*;
 use serde_with::{hex::Hex, serde_as};
 use std::sync::{atomic::AtomicU64, Arc, Mutex};
 use tracing::{debug, error, info, warn};
-use bigdecimal::{BigDecimal, ToPrimitive, Zero, One};
-use std::cmp::min;
 use std::mem::take;
-use std::str::FromStr;
 
 const DEFAULT_KEY_DEPOSIT: u64 = 2_000_000;
 const DEFAULT_POOL_DEPOSIT: u64 = 500_000_000;
@@ -78,14 +75,8 @@ pub struct State {
     /// Wrapped in an Arc so it doesn't get cloned in full by StateHistory
     stake_addresses: Arc<Mutex<HashMap<KeyHash, StakeAddressState>>>,
 
-    // Snapshots: Arcs because we don't want them copied by StateHistory
-    // Mark, Set, Go naming - mark is the current one
-
-    /// Snapshot of stake taken at (epoch-2), "go"
-    go_snapshot: Arc<Snapshot>,
-
-    /// Snapshot of stake taken at (epoch-1), "set"
-    set_snapshot: Arc<Snapshot>,
+    /// Reward state - short history of snapshots
+    rewards_state: RewardsState,
 
     /// Global account pots
     pots: Pots,
@@ -125,20 +116,6 @@ impl State {
         Ok(())
     }
 
-    /// Capture and rotate snapshots
-    fn capture_snapshot(&mut self, epoch: u64, total_fees: u64,
-                        spo_block_counts: &HashMap<KeyHash, usize>) {
-        // Capture a new snapshot
-        let mark_snapshot = Arc::new(Snapshot::new(epoch,
-                                                   &self.stake_addresses.lock().unwrap(),
-                                                   &self.spos, spo_block_counts,
-                                                   &self.pots, total_fees));
-
-        // Rotate the snapshots
-        self.go_snapshot = self.set_snapshot.clone();
-        self.set_snapshot = mark_snapshot;
-    }
-
     /// Calculate rewards given
     ///   total_fees: Total fees taken in this epoch
     ///   spo_block_counts: Count of blocks minted by VRF key
@@ -155,286 +132,45 @@ impl State {
             warn!("Fixed reserves to {}", self.pots.reserves);
         }
 
-        // Get Shelley parameters, silently return if too early in the chain so no
-        // rewards to calculate
-        let shelley_params = match &self.protocol_parameters {
-            Some(ProtocolParams { shelley: Some(sp), .. }) => sp,
-            _ => {
-                self.capture_snapshot(epoch, total_fees, &spo_block_counts);
-                return Ok(())
-            }
-        };
-
-        // Get the 'go' snapshot from two epochs ago
-        let go_snapshot = self.go_snapshot.clone();
-
-        // Calculate total supply (total in circulation + treasury) or
-        // equivalently (max-supply-reserves) - this is the denominator
-        // for sigma, z0, s
-        // Note reserves comes from the previous epoch *before* any MIRs are processed
-        // from the one we're handling now
-        let total_supply = BigDecimal::from(shelley_params.max_lovelace_supply
-                                            - self.set_snapshot.pots.reserves);
-
-        info!(epoch, reserves=self.set_snapshot.pots.reserves, %total_supply, "Supply:");
-
-        // Total blocks
-        let total_blocks: usize = spo_block_counts.values().sum();
-        if total_blocks == 0 {
-            bail!("No blocks produced");
-        }
-
         // Filter the block counts for SPOs that are registered - treating any we don't know
         // as 'OBFT' style (the legacy nodes)
         let known_vrf_keys: HashSet<_> = self.spos.values().map(|spo| &spo.vrf_key_hash).collect();
-        let total_obft_blocks: usize = spo_block_counts
+        let obft_block_count: usize = spo_block_counts
             .iter()
             .filter(|(vrf_key, _)| !known_vrf_keys.contains(vrf_key))
             .map(|(_, count)| count)
             .sum();
 
-        let total_non_obft_blocks = total_blocks - total_obft_blocks;
-        info!(total_blocks, total_non_obft_blocks, "Block counts:");
+        // Capture a new snapshot and push it to state
+        let snapshot = Snapshot::new(epoch, &self.stake_addresses.lock().unwrap(),
+                                     &self.spos, &spo_block_counts, obft_block_count,
+                                     &self.pots, total_fees);
+        self.rewards_state.push(snapshot);
 
-        // Calculate 'eta' - ratio of blocks produced during the epoch vs expected
-        let decentralisation = &shelley_params.protocol_params.decentralisation_param;
-        let active_slots_coeff = BigDecimal::from_str(
-            &shelley_params.active_slots_coeff.to_string())?;
-        let epoch_length = BigDecimal::from(shelley_params.epoch_length);
-
-        let eta = if decentralisation >= &RationalNumber::new(8,10) {
-            BigDecimal::one()
-        } else {
-            let expected_blocks = epoch_length * active_slots_coeff *
-                (BigDecimal::one() - BigDecimal::from(decentralisation.numer())
-                                   / BigDecimal::from(decentralisation.denom()));
-
-            (BigDecimal::from(total_non_obft_blocks as u64) / expected_blocks)
-                .min(BigDecimal::one())
+        // Get Shelley parameters, silently return if too early in the chain so no
+        // rewards to calculate
+        let shelley_params = match &self.protocol_parameters {
+            Some(ProtocolParams { shelley: Some(sp), .. }) => sp,
+            _ => {
+                return Ok(())
+            }
         };
 
-        // Account fees from previous snapshot to reserves to start
-        // with - we will spend them to treasury and rewards later.
-        // Note this is the live reserves, not the snapshot, so won't
-        // affect the monetary expansion coming up
-        let fees = self.set_snapshot.fees;
-        self.pots.reserves += fees;
+        // Calculate reward payouts and reserves/treasury changes
+        let reward_result = self.rewards_state.calculate_rewards(epoch, &shelley_params)?;
 
-        // Handle monetary expansion - movement from reserves to rewards and treasury
-        let monetary_expansion_factor = RationalNumber::new(3, 1000);
-        // TODO odd values coming in! &shelley_params.protocol_params.monetary_expansion; // Rho
-        let monetary_expansion = (BigDecimal::from(self.set_snapshot.pots.reserves)
-                                  * &eta
-                                  * BigDecimal::from(monetary_expansion_factor.numer())
-                                  / BigDecimal::from(monetary_expansion_factor.denom()))
-            .with_scale(0);
-
-        // Total rewards available is monetary expansion plus fees from previous epoch
-        let total_reward_pot = &monetary_expansion + BigDecimal::from(fees);
-
-        info!(rho=%monetary_expansion_factor, %eta, %monetary_expansion,
-              fees=self.set_snapshot.fees, %total_reward_pot, "Monetary:");
-
-        // Top-slice some for treasury
-        let treasury_cut = RationalNumber::new(2, 10);
-        // TODO odd values again! &shelley_params.protocol_params.treasury_cut;  // Tau
-        let treasury_increase = (&total_reward_pot
-                                 * BigDecimal::from(treasury_cut.numer())
-                                 / BigDecimal::from(treasury_cut.denom()))
-            .with_scale(0);
-
-        let new_treasury = self.pots.treasury + treasury_increase.to_u64()
-            .ok_or(anyhow!("Can't calculate integral treasury cut"))?;
-
-        info!(before=self.pots.treasury, cut=%treasury_cut,
-              increase=%treasury_increase, after=new_treasury,
-              "Treasury:");
-        self.pots.treasury = new_treasury;
-        self.pots.reserves -= treasury_increase.to_u64()
-            .ok_or(anyhow!("Can't calculate integral treasury increase"))?;
-
-        // Calculate the total rewards available for stake (R)
-        let stake_rewards = total_reward_pot.clone() - treasury_increase.clone();
-
-        info!(%stake_rewards, "Rewards:");
-
-        // Relative pool saturation size (z0)
-        let k = BigDecimal::from(&shelley_params.protocol_params.stake_pool_target_num);
-        if k.is_zero() {
-            bail!("k is zero!");
-        }
-        let relative_pool_saturation_size = k.inverse();
-
-        // Pledge influence factor (a0)
-        let a0 = &shelley_params.protocol_params.pool_pledge_influence;
-        let pledge_influence_factor = BigDecimal::from(a0.numer()) / BigDecimal::from(a0.denom());
-
-        // Map of SPO reward account to amount earned this epoch
-        // Note: Accumulated then spent to avoid borrow horrors on self
-        let mut spo_earnings: HashMap<RewardAccount, Lovelace> = HashMap::new();
-
-        // Map of SPO operator ID to rewards to split to delegators
-        let mut spo_rewards: HashMap<KeyHash, Lovelace> = HashMap::new();
-
-        // Calculate for every registered SPO (even those who didn't participate in this epoch)
-        for spo in self.spos.values() {
-
-            // Look up SPO in block counts, by VRF key
-            let block_count = spo_block_counts.get(&spo.vrf_key_hash).unwrap_or(&0);
-
-            // Actual blocks produced as proportion of epoch (Beta)
-            let relative_blocks = BigDecimal::from(*block_count as u64)
-                / BigDecimal::from(total_blocks as u64);
-
-            // and in snapshot to get active stake (sigma)
-            let pool_stake_u64 = go_snapshot.spos.get(&spo.operator)
-                .map(|spo| spo.total_stake)
-                .unwrap_or(0);
-            if pool_stake_u64 == 0 {
-                // No stake, no rewards or earnings
-                continue;
-            }
-            let pool_stake = BigDecimal::from(pool_stake_u64);
-
-            // Get the stake actually delegated by the owners accounts to this SPO
-            let pool_owner_stake = go_snapshot.get_stake_delegated_to_spo_by_addresses(
-                &spo.operator, &spo.pool_owners);
-
-            // If they haven't met their pledge, no dice
-            if pool_owner_stake < spo.pledge {
-                warn!("SPO {} has owner stake {} less than pledge {} - skipping",
-                      hex::encode(&spo.operator), pool_owner_stake, spo.pledge);
-                continue;
-            }
-
-            let pool_pledge = BigDecimal::from(&spo.pledge);
-
-            // Relative stake as fraction of total supply (sigma), and capped with 1/k (sigma')
-            let relative_pool_stake = &pool_stake / &total_supply;
-            let capped_relative_pool_stake = min(&relative_pool_stake,
-                                                 &relative_pool_saturation_size);
-
-            // Stake pledged by operator (s) and capped with 1/k (s')
-            let relative_pool_pledge = &pool_pledge / &total_supply;
-            let capped_relative_pool_pledge = min(&relative_pool_pledge,
-                                                  &relative_pool_saturation_size);
-
-            // Get the optimum reward for this pool
-            let optimum_rewards = (
-                (&stake_rewards / (BigDecimal::one() + &pledge_influence_factor))
-                *
-                (
-                    capped_relative_pool_stake + (
-                        capped_relative_pool_pledge * &pledge_influence_factor * (
-                            capped_relative_pool_stake - (
-                                capped_relative_pool_pledge * (
-                                    (&relative_pool_saturation_size - capped_relative_pool_stake)
-                                        / &relative_pool_saturation_size)
-                            )
-                        )
-                    ) / &relative_pool_saturation_size
-                )
-            ).with_scale(0);
-
-            // If decentralisation_param >= 0.8 => performance = 1
-            // Shelley Delegation Spec 3.8.3
-            let pool_performance = if decentralisation >= &RationalNumber::new(8,10) {
-                BigDecimal::one()
-            } else {
-                relative_blocks.clone() / relative_pool_stake.clone()
-            };
-
-            // Get actual pool rewards
-            let pool_rewards = (&optimum_rewards * &pool_performance).with_scale(0);
-
-            info!(%block_count, %pool_stake, %relative_pool_stake, %relative_blocks,
-                  %pool_performance, %optimum_rewards, %pool_rewards,
-                   "Pool {}", hex::encode(spo.operator.clone()));
-
-            // Subtract fixed costs
-            let fixed_cost = BigDecimal::from(spo.cost);
-            if pool_rewards <= fixed_cost {
-                info!("Rewards < cost - all paid to SPO");
-                // No margin or pledge reward if under cost - all goes to SPO
-                spo_earnings.insert(spo.reward_account.clone(),
-                                    pool_rewards.to_u64().unwrap_or_else(|| {
-                                        error!("Non-integral pool rewards {} for SPO {}",
-                                               pool_rewards, hex::encode(&spo.operator));
-                                        0
-                                    }));
-            } else {
-                // Enough left over for some margin split
-                let margin = ((&pool_rewards - &fixed_cost)
-                              * BigDecimal::from(spo.margin.numerator)  // TODO use RationalNumber
-                              / BigDecimal::from(spo.margin.denominator))
-                    .with_scale(0);
-                let costs = &fixed_cost + &margin;
-                let remainder = &pool_rewards - &costs;
-                let spo_benefit = costs.to_u64().unwrap_or_else(|| {
-                    error!("Non-integral costs {costs} for SPO {}", hex::encode(&spo.operator));
-                    0
-                });
-                spo_earnings.insert(spo.reward_account.clone(), spo_benefit);
-
-                // Keep remainder by SPO id
-                let to_delegators = remainder.to_u64().unwrap_or_else(|| {
-                    error!("Non-integral remainder {remainder} in SPO {}",
-                           hex::encode(&spo.operator));
-                    0
-                });
-
-                if to_delegators > 0 {
-                    spo_rewards.insert(spo.operator.clone(), to_delegators);
-                }
-
-                info!(%fixed_cost, %margin, to_delegators, "Reward split:");
-            }
+        // Pay the rewards
+        for (account, amount) in reward_result.rewards {
+            self.add_to_reward(&account, amount);
         }
 
-        // Pay the SPOs from reserves
-        spo_earnings.into_iter().for_each(|(reward_account, reward)| {
-            self.add_to_reward(&reward_account, reward);
-            self.pots.reserves -= reward;
-        });
-
-        // Pay the delegators - split remainder in proportional to delegated stake,
-        // * as it was 2 epochs ago *
-        // TODO: Although these are calculated now, they are *paid* at the next epoch
-        let mut num_rewards_paid: usize = 0;
-        let mut total_rewards_paid: Lovelace = 0;
-        go_snapshot.spos.iter().for_each(|(spo_id, spo)| {
-            // Look up the SPO in the rewards map
-            // May be absent if they didn't meet their costs
-            if let Some(rewards) = spo_rewards.get(spo_id) {
-                let total_stake = BigDecimal::from(spo.total_stake);
-                for (hash, stake) in &spo.delegators {
-                    let proportion = BigDecimal::from(stake) / &total_stake;
-
-                    // and hence how much of the total reward they get
-                    let reward = BigDecimal::from(rewards) * &proportion;
-                    let to_pay = reward.with_scale(0).to_u64().unwrap_or(0);
-
-                    debug!("Reward stake {stake} -> proportion {proportion} of SPO rewards {rewards} -> {to_pay} to hash {}",
-                           hex::encode(&hash));
-
-                    // Transfer from reserves to this account
-                    self.add_to_reward(&hash, to_pay);
-                    num_rewards_paid += 1;
-                    total_rewards_paid += to_pay;
-                }
-
-                self.pots.reserves -= rewards;
-            }
-        });
-
-        info!(num_rewards_paid, total_rewards_paid, "Paid to delegators:");
+        // Adjust the pots
+        Self::update_value_with_delta(&mut self.pots.reserves, reward_result.reserves_delta)?;
+        Self::update_value_with_delta(&mut self.pots.treasury, reward_result.treasury_delta)?;
 
         // Pay the refunds ready for next time
         self.pay_pool_refunds();
         self.pay_stake_refunds();
-
-        // Capture and rotate snapshots
-        self.capture_snapshot(epoch, total_fees, &spo_block_counts);
 
         Ok(())
     }
@@ -613,10 +349,26 @@ impl State {
     /// Handle an EpochActivityMessage giving total fees and block counts by VRF key for
     /// the just-ended epoch
     pub fn handle_epoch_activity(&mut self, ea_msg: &EpochActivityMessage) -> Result<()> {
+
+        // Reverse map of VRF key to SPO operator ID
+        let vrf_to_operator: HashMap<KeyHash, KeyHash> = self.spos
+            .iter()
+            .map(|(id, spo)| (spo.vrf_key_hash.clone(), id.clone()))
+            .collect();
+
         // Create a HashMap of the spo count data, for quick access
         let spo_block_counts: HashMap<KeyHash, usize> =
-            ea_msg.vrf_vkey_hashes.iter().map(|(k, v)| (k.clone(), *v)).collect();
-        self.calculate_rewards(ea_msg.epoch, ea_msg.total_fees, spo_block_counts)?;
+            ea_msg.vrf_vkey_hashes
+            .iter()
+            .filter_map(|(vrf, count)| {
+                vrf_to_operator.get(vrf).map(|operator| (operator.clone(), *count))
+                    .or_else(|| {
+                        warn!("Unknown VRF key {}", hex::encode(vrf));
+                        None
+                    })
+            })
+            .collect();
+        self.calculate_rewards(ea_msg.epoch+1, ea_msg.total_fees, spo_block_counts)?;
         Ok(())
     }
 
@@ -762,6 +514,8 @@ impl State {
     }
 
     /// Handle an MoveInstantaneousReward (pre-Conway only)
+    // TODO MIRs should be queued and handled *after* the monetary_expansion is done,
+    // in a similar way to how we handle deposits
     pub fn handle_mir(&mut self, mir: &MoveInstantaneousReward) -> Result<()> {
         let (source, source_name, other, other_name) = match &mir.source {
             InstantaneousRewardSource::Reserves => (

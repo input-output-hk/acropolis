@@ -20,6 +20,7 @@ mod spo_distribution_publisher;
 use spo_distribution_publisher::SPODistributionPublisher;
 mod state;
 use state::State;
+mod snapshot;
 mod rewards;
 mod rest;
 use rest::{handle_drdd, handle_pots, handle_single_account, handle_spdd};
