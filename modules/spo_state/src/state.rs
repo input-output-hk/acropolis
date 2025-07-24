@@ -115,8 +115,8 @@ impl State {
     }
 
     /// Get pools that will be retired in the upcoming epochs
-    pub fn get_retiring_pools(&self) -> Option<Vec<PoolRetirement>> {
-        self.current().map(|state: &BlockState| {
+    pub fn get_retiring_pools(&self) -> Vec<PoolRetirement> {
+        self.current().map_or(Vec::new(), |state: &BlockState| {
             let current_epoch = state.epoch;
             state
                 .pending_deregistrations

@@ -155,33 +155,28 @@ pub async fn handle_spo(state: Arc<Mutex<State>>, param: String) -> Result<RESTR
 /// Handles /pools/retiring
 pub async fn handle_retiring_pools(state: Arc<Mutex<State>>) -> Result<RESTResponse> {
     let locked = state.lock().await;
-    match locked.get_retiring_pools() {
-        Some(retiring_pools) => {
-            let mut response: Vec<PoolRetirementRest> = Vec::new();
-            for retiring_pool in retiring_pools {
-                let pool_id = match retiring_pool.operator.to_bech32_with_hrp("pool") {
-                    Ok(val) => val,
-                    Err(e) => {
-                        return Ok(RESTResponse::with_text(
-                            500,
-                            &format!("Internal server error retrieving retiring pools: {e}"),
-                        ));
-                    }
-                };
-                response.push(PoolRetirementRest {
-                    pool_id,
-                    epoch: retiring_pool.epoch,
-                });
-            }
-
-            match serde_json::to_string(&response) {
-                Ok(body) => Ok(RESTResponse::with_json(200, &body)),
-                Err(e) => Ok(RESTResponse::with_text(
+    let mut response: Vec<PoolRetirementRest> = Vec::new();
+    for retiring_pool in locked.get_retiring_pools() {
+        let pool_id = match retiring_pool.operator.to_bech32_with_hrp("pool") {
+            Ok(val) => val,
+            Err(e) => {
+                return Ok(RESTResponse::with_text(
                     500,
                     &format!("Internal server error retrieving retiring pools: {e}"),
-                )),
+                ));
             }
-        }
-        None => Ok(RESTResponse::with_json(200, "[]")),
+        };
+        response.push(PoolRetirementRest {
+            pool_id,
+            epoch: retiring_pool.epoch,
+        });
+    }
+
+    match serde_json::to_string(&response) {
+        Ok(body) => Ok(RESTResponse::with_json(200, &body)),
+        Err(e) => Ok(RESTResponse::with_text(
+            500,
+            &format!("Internal server error retrieving retiring pools: {e}"),
+        )),
     }
 }
