@@ -559,4 +559,37 @@ pub mod tests {
             assert!(!spo.is_none());
         };
     }
+
+    #[tokio::test]
+    async fn get_retiring_pools_returns_empty_when_state_is_new() {
+        let state = State::new();
+        assert!(state.get_retiring_pools().is_empty());
+    }
+
+    #[tokio::test]
+    async fn get_retiring_pools_returns_pools() {
+        let mut state = State::new();
+        let mut msg = new_msg();
+        msg.certificates.push(TxCertificate::PoolRetirement(PoolRetirement {
+            operator: vec![0],
+            epoch: 2,
+        }));
+        let mut block = new_block();
+        assert!(state.handle_tx_certs(&block, &msg).is_ok());
+        let mut msg = new_msg();
+        block.number = 1;
+        msg.certificates.push(TxCertificate::PoolRetirement(PoolRetirement {
+            operator: vec![1],
+            epoch: 3,
+        }));
+        assert!(state.handle_tx_certs(&block, &msg).is_ok());
+        let current = state.current();
+        assert!(!current.is_none());
+        let retiring_pools = state.get_retiring_pools();
+        assert_eq!(2, retiring_pools.len());
+        assert_eq!(&vec![0], &retiring_pools[0].operator);
+        assert_eq!(2, retiring_pools[0].epoch);
+        assert_eq!(&vec![1], &retiring_pools[1].operator);
+        assert_eq!(3, retiring_pools[1].epoch);
+    }
 }
