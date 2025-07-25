@@ -27,6 +27,13 @@ use caryatid_module_clock::Clock;
 use caryatid_module_rest_server::RESTServer;
 use caryatid_module_spy::Spy;
 
+use opentelemetry::trace::TracerProvider as _;
+use opentelemetry_otlp::SpanExporter;
+use opentelemetry_sdk::trace::SdkTracerProvider;
+use tracing_opentelemetry::OpenTelemetryLayer;
+use tracing_subscriber::prelude::*;
+use tracing_subscriber::{filter, fmt, EnvFilter, Registry};
+
 #[cfg(not(target_env = "msvc"))]
 use tikv_jemallocator::Jemalloc;
 #[cfg(not(target_env = "msvc"))]
@@ -36,8 +43,27 @@ static GLOBAL: Jemalloc = Jemalloc;
 /// Standard main
 #[tokio::main]
 pub async fn main() -> Result<()> {
-    // Initialise tracing
-    tracing_subscriber::fmt::init();
+    // Standard logging using RUST_LOG for log levels default to INFO for events only
+    let fmt_layer = fmt::layer()
+        .with_filter(EnvFilter::from_default_env().add_directive(filter::LevelFilter::INFO.into()))
+        .with_filter(filter::filter_fn(|meta| meta.is_event()));
+
+    // Only turn on tracing if some OTEL environemtn variables exist
+    if std::env::vars().any(|(name, _)| name.starts_with("OTEL_")) {
+        // Send span tracing to opentelemetry
+        // Should pick up standard OTEL_* environment variables
+        let otel_exporter = SpanExporter::builder().with_tonic().build()?;
+        let otel_tracer = SdkTracerProvider::builder()
+            .with_batch_exporter(otel_exporter)
+            .build()
+            .tracer("rust-otel-otlp");
+        let otel_layer = OpenTelemetryLayer::new(otel_tracer)
+            .with_filter(EnvFilter::from_default_env().add_directive(filter::LevelFilter::INFO.into()))
+            .with_filter(filter::filter_fn(|meta| meta.is_span()));
+        Registry::default().with(fmt_layer).with(otel_layer).init();
+    } else {
+        Registry::default().with(fmt_layer).init();
+    }
 
     info!("Acropolis omnibus process");
 
@@ -77,5 +103,6 @@ pub async fn main() -> Result<()> {
 
     // Bye!
     info!("Exiting");
+
     Ok(())
 }
