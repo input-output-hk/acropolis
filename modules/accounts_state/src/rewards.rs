@@ -56,14 +56,6 @@ impl RewardsState {
                              -> Result<RewardsResult> {
         let mut result = RewardsResult::default();
 
-        // Calculate total supply (total in circulation + treasury) or
-        // equivalently (max-supply-reserves) - this is the denominator
-        // for sigma, z0, s
-        let total_supply = BigDecimal::from(params.max_lovelace_supply
-                                            - self.mark.pots.reserves);
-
-        info!(%total_supply, "Supply:");
-
         // Total blocks
         let total_blocks: usize = self.mark.spos.values().map(|s| s.blocks_produced).sum();
         if total_blocks == 0 {
@@ -71,44 +63,27 @@ impl RewardsState {
             return Ok(result);
         }
 
-        let total_non_obft_blocks = total_blocks - self.mark.obft_block_count;
-        info!(total_blocks, total_non_obft_blocks, "Block counts:");
-
-        // Calculate 'eta' - ratio of blocks produced during the epoch vs expected
-        let decentralisation = &params.protocol_params.decentralisation_param;
-        let active_slots_coeff = BigDecimal::from_str(
-            &params.active_slots_coeff.to_string())?;
-        let epoch_length = BigDecimal::from(params.epoch_length);
-
-        let eta = if decentralisation >= &RationalNumber::new(8,10) {
-            BigDecimal::one()
-        } else {
-            let expected_blocks = epoch_length * active_slots_coeff *
-                (BigDecimal::one() - BigDecimal::from(decentralisation.numer())
-                                   / BigDecimal::from(decentralisation.denom()));
-
-            (BigDecimal::from(total_non_obft_blocks as u64) / expected_blocks)
-                .min(BigDecimal::one())
-        };
+        // Calculate total supply (total in circulation + treasury) or
+        // equivalently (max-supply-reserves) - this is the denominator
+        // for sigma, z0, s
+        let total_supply = BigDecimal::from(params.max_lovelace_supply - self.mark.pots.reserves);
+        info!(epoch, %total_supply, "Calculating rewards:");
 
         // Account fees from previous epoch to reserves to start
         // with - we will spend them to treasury and rewards later.
         result.reserves_delta += self.mark.fees as i64;
 
+        // Count real SPO blocks and calculate 'eta'
+        let total_non_obft_blocks = total_blocks - self.mark.obft_block_count;
+        let eta = Self::calculate_eta(&params, total_non_obft_blocks)?;
+        info!(total_blocks, total_non_obft_blocks, %eta, "Block counts:");
+
         // Handle monetary expansion - movement from reserves to rewards and treasury
-        let monetary_expansion_factor = RationalNumber::new(3, 1000);
-        // TODO odd values coming in! &params.protocol_params.monetary_expansion; // Rho
-        let monetary_expansion = (BigDecimal::from(self.mark.pots.reserves)
-                                  * &eta
-                                  * BigDecimal::from(monetary_expansion_factor.numer())
-                                  / BigDecimal::from(monetary_expansion_factor.denom()))
-            .with_scale(0);
+        let monetary_expansion = Self::calculate_monetary_expansion(&params, self.mark.pots.reserves,
+                                                                    &eta);
 
         // Total rewards available is monetary expansion plus fees from previous epoch
         let total_reward_pot = &monetary_expansion + BigDecimal::from(self.mark.fees);
-
-        info!(rho=%monetary_expansion_factor, %eta, %monetary_expansion,
-              fees=self.mark.fees, %total_reward_pot, "Monetary:");
 
         // Top-slice some for treasury
         let treasury_cut = RationalNumber::new(2, 10);
@@ -122,7 +97,8 @@ impl RewardsState {
             .to_i64()
             .ok_or(anyhow!("Can't calculate integral treasury cut"))?;
 
-        info!(cut=%treasury_cut, increase=treasury_increase_i64, "Treasury:");
+        info!(total_rewards=%total_reward_pot, cut=%treasury_cut, increase=treasury_increase_i64,
+              "Treasury:");
 
         result.treasury_delta += treasury_increase_i64;
         result.reserves_delta -= treasury_increase_i64;
@@ -203,6 +179,7 @@ impl RewardsState {
 
             // If decentralisation_param >= 0.8 => performance = 1
             // Shelley Delegation Spec 3.8.3
+            let decentralisation = &params.protocol_params.decentralisation_param;
             let pool_performance = if decentralisation >= &RationalNumber::new(8,10) {
                 BigDecimal::one()
             } else {
@@ -280,5 +257,42 @@ impl RewardsState {
         info!(num_rewards_paid, total_rewards_paid, "Paid to delegators:");
 
         Ok(result)
+    }
+
+    // Calculate 'eta' - ratio of blocks produced during the epoch vs expected
+    fn calculate_eta(params: &ShelleyParams, total_non_obft_blocks: usize) -> Result<BigDecimal> {
+        let decentralisation = &params.protocol_params.decentralisation_param;
+        let active_slots_coeff = BigDecimal::from_str(
+            &params.active_slots_coeff.to_string())?;
+        let epoch_length = BigDecimal::from(params.epoch_length);
+
+        let eta = if decentralisation >= &RationalNumber::new(8,10) {
+            BigDecimal::one()
+        } else {
+            let expected_blocks = epoch_length * active_slots_coeff *
+                (BigDecimal::one() - BigDecimal::from(decentralisation.numer())
+                                   / BigDecimal::from(decentralisation.denom()));
+
+            (BigDecimal::from(total_non_obft_blocks as u64) / expected_blocks)
+                .min(BigDecimal::one())
+        };
+
+        Ok(eta)
+    }
+
+    // Calculate monetary expansion based on current reserves
+    fn calculate_monetary_expansion(params: &ShelleyParams, reserves: Lovelace, eta: &BigDecimal)
+                                    -> BigDecimal {
+        let monetary_expansion_factor = RationalNumber::new(3, 1000);
+        // TODO odd values coming in! &params.protocol_params.monetary_expansion; // Rho
+        let monetary_expansion = (BigDecimal::from(reserves)
+                                  * eta
+                                  * BigDecimal::from(monetary_expansion_factor.numer())
+                                  / BigDecimal::from(monetary_expansion_factor.denom()))
+            .with_scale(0);
+
+        info!(rho=%monetary_expansion_factor, %monetary_expansion, "Monetary:");
+
+        monetary_expansion
     }
 }
