@@ -62,12 +62,13 @@ impl RewardsState {
         let total_supply = BigDecimal::from(params.max_lovelace_supply
                                             - self.mark.pots.reserves);
 
-        info!(epoch, reserves=self.mark.pots.reserves, %total_supply, "Supply:");
+        info!(%total_supply, "Supply:");
 
         // Total blocks
         let total_blocks: usize = self.mark.spos.values().map(|s| s.blocks_produced).sum();
         if total_blocks == 0 {
-            bail!("No blocks produced");
+            // Before Shelley - expected
+            return Ok(result);
         }
 
         let total_non_obft_blocks = total_blocks - self.mark.obft_block_count;

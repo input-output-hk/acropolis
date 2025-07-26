@@ -92,6 +92,9 @@ pub struct State {
 
     // Stake address refunds to apply next epoch
     stake_refunds: Vec<(KeyHash, Lovelace)>,
+
+    // MIRs to pay next epoch
+    mirs: Vec<MoveInstantaneousReward>,
 }
 
 impl State {
@@ -116,14 +119,15 @@ impl State {
         Ok(())
     }
 
-    /// Calculate rewards given
-    ///   total_fees: Total fees taken in this epoch
-    ///   spo_block_counts: Count of blocks minted by VRF key
+    /// Process entry into a new epoch
+    ///   epoch: Number of epoch we are entering
+    ///   total_fees: Total fees taken in previous epoch
+    ///   spo_block_counts: Count of blocks minted by operator ID in previous epoch
     // Follows the general scheme in https://docs.cardano.org/about-cardano/learn/pledging-rewards
-    fn calculate_rewards(&mut self, epoch: u64, total_fees: u64,
-                         spo_block_counts: HashMap<KeyHash, usize>) -> Result<()> {
+    fn enter_epoch(&mut self, epoch: u64, total_fees: u64,
+                   spo_block_counts: HashMap<KeyHash, usize>) -> Result<()> {
 
-        // TODO HACK! Investigate why this differs to our calculated reserves after AVMM
+        // TODO HACK! Investigate why this differs to our calculated reserves after AVVM
         // 13,887,515,255 - epoch 207 is as we enter 208 (Shelley)
         if epoch == 207 {
             // Fix reserves to that given in the CF Java implementation:
@@ -168,9 +172,10 @@ impl State {
         Self::update_value_with_delta(&mut self.pots.reserves, reward_result.reserves_delta)?;
         Self::update_value_with_delta(&mut self.pots.treasury, reward_result.treasury_delta)?;
 
-        // Pay the refunds ready for next time
+        // Pay the refunds and MIRs ready for next time
         self.pay_pool_refunds();
         self.pay_stake_refunds();
+        self.pay_mirs();
 
         Ok(())
     }
@@ -211,6 +216,68 @@ impl State {
         for (keyhash, deposit) in refunds {
             self.add_to_reward(&keyhash, deposit);
             self.pots.deposits -= deposit;
+        }
+    }
+
+    /// Pay MIRs
+    fn pay_mirs(&mut self) {
+        let mirs = take(&mut self.mirs);
+        for mir in mirs {
+            let (source, source_name, other, other_name) = match &mir.source {
+                InstantaneousRewardSource::Reserves => (
+                    &mut self.pots.reserves,
+                    "reserves",
+                    &mut self.pots.treasury,
+                    "treasury",
+                ),
+                InstantaneousRewardSource::Treasury => (
+                    &mut self.pots.treasury,
+                    "treasury",
+                    &mut self.pots.reserves,
+                    "reserves",
+                ),
+            };
+
+            match &mir.target {
+                InstantaneousRewardTarget::StakeCredentials(deltas) => {
+                    // Transfer to (in theory also from) stake addresses from (to) a pot
+                    let mut total_value: u64 = 0;
+                    for (credential, value) in deltas.iter() {
+                        let hash = credential.get_hash();
+
+                        // Get old stake address state, or create one
+                        let mut stake_addresses = self.stake_addresses.lock().unwrap();
+                        let sas = stake_addresses.entry(hash.clone()).or_default();
+
+                        // Add to this one
+                        if let Err(e) = Self::update_value_with_delta(&mut sas.rewards, *value) {
+                            error!("MIR to stake hash {}: {e}", hex::encode(hash));
+                        }
+
+                        // Update the source
+                        if let Err(e) = Self::update_value_with_delta(source, -*value) {
+                            error!("MIR from {source_name}: {e}");
+                        }
+
+                        let _ = Self::update_value_with_delta(&mut total_value, *value);
+                    }
+
+                    info!("MIR of {total_value} to {} stake addresses from {source_name}",
+                          deltas.len());
+                }
+
+                InstantaneousRewardTarget::OtherAccountingPot(value) => {
+                    // Transfer between pots
+                    if let Err(e) = Self::update_value_with_delta(source, -(*value as i64)) {
+                        error!("MIR from {source_name}: {e}");
+                    }
+                    if let Err(e) = Self::update_value_with_delta(other, *value as i64) {
+                        error!("MIR to {other_name}: {e}");
+                    }
+
+                    info!("MIR of {value} from {source_name} to {other_name}");
+                }
+            }
         }
     }
 
@@ -356,7 +423,7 @@ impl State {
             .map(|(id, spo)| (spo.vrf_key_hash.clone(), id.clone()))
             .collect();
 
-        // Create a HashMap of the spo count data, for quick access
+        // Create a map of operator ID to block count
         let spo_block_counts: HashMap<KeyHash, usize> =
             ea_msg.vrf_vkey_hashes
             .iter()
@@ -368,8 +435,9 @@ impl State {
                     })
             })
             .collect();
-        self.calculate_rewards(ea_msg.epoch+1, ea_msg.total_fees, spo_block_counts)?;
-        Ok(())
+
+        // Enter epoch - note the message specifies the epoch that has just *ended*
+        self.enter_epoch(ea_msg.epoch+1, ea_msg.total_fees, spo_block_counts)
     }
 
     /// Handle an SPOStateMessage with the full set of SPOs valid at the end of the last
@@ -514,65 +582,8 @@ impl State {
     }
 
     /// Handle an MoveInstantaneousReward (pre-Conway only)
-    // TODO MIRs should be queued and handled *after* the monetary_expansion is done,
-    // in a similar way to how we handle deposits
     pub fn handle_mir(&mut self, mir: &MoveInstantaneousReward) -> Result<()> {
-        let (source, source_name, other, other_name) = match &mir.source {
-            InstantaneousRewardSource::Reserves => (
-                &mut self.pots.reserves,
-                "reserves",
-                &mut self.pots.treasury,
-                "treasury",
-            ),
-            InstantaneousRewardSource::Treasury => (
-                &mut self.pots.treasury,
-                "treasury",
-                &mut self.pots.reserves,
-                "reserves",
-            ),
-        };
-
-        match &mir.target {
-            InstantaneousRewardTarget::StakeCredentials(deltas) => {
-                // Transfer to (in theory also from) stake addresses from (to) a pot
-                let mut total_value: u64 = 0;
-                for (credential, value) in deltas.iter() {
-                    let hash = credential.get_hash();
-
-                    // Get old stake address state, or create one
-                    let mut stake_addresses = self.stake_addresses.lock().unwrap();
-                    let sas = stake_addresses.entry(hash.clone()).or_default();
-
-                    // Add to this one
-                    if let Err(e) = Self::update_value_with_delta(&mut sas.rewards, *value) {
-                        error!("MIR to stake hash {}: {e}", hex::encode(hash));
-                    }
-
-                    // Update the source
-                    if let Err(e) = Self::update_value_with_delta(source, -*value) {
-                        error!("MIR from {source_name}: {e}");
-                    }
-
-                    let _ = Self::update_value_with_delta(&mut total_value, *value);
-                }
-
-                info!("MIR of {total_value} to {} stake addresses from {source_name}",
-                      deltas.len());
-            }
-
-            InstantaneousRewardTarget::OtherAccountingPot(value) => {
-                // Transfer between pots
-                if let Err(e) = Self::update_value_with_delta(source, -(*value as i64)) {
-                    error!("MIR from {source_name}: {e}");
-                }
-                if let Err(e) = Self::update_value_with_delta(other, *value as i64) {
-                    error!("MIR to {other_name}: {e}");
-                }
-
-                info!("MIR of {value} from {source_name} to {other_name}");
-            }
-        }
-
+        self.mirs.push(mir.clone());
         Ok(())
     }
 
@@ -902,9 +913,7 @@ mod tests {
     #[test]
     fn pot_delta_updates_pots() {
         let mut state = State::default();
-
-        // Send in a MIR reserves->42->treasury
-        let mir = PotDeltasMessage {
+        let pot_deltas = PotDeltasMessage {
             deltas: vec![
                 PotDelta {
                     pot: Pot::Reserves,
@@ -925,7 +934,7 @@ mod tests {
             ],
         };
 
-        state.handle_pot_deltas(&mir).unwrap();
+        state.handle_pot_deltas(&pot_deltas).unwrap();
         assert_eq!(state.pots.reserves, 42);
         assert_eq!(state.pots.treasury, 99);
         assert_eq!(state.pots.deposits, 77);
@@ -945,6 +954,7 @@ mod tests {
         };
 
         state.handle_mir(&mir).unwrap();
+        state.pay_mirs();
         assert_eq!(state.pots.reserves, 58);
         assert_eq!(state.pots.treasury, 42);
         assert_eq!(state.pots.deposits, 0);
@@ -956,6 +966,7 @@ mod tests {
         };
 
         state.handle_mir(&mir).unwrap();
+        state.pay_mirs();
         assert_eq!(state.pots.reserves, 68);
         assert_eq!(state.pots.treasury, 32);
         assert_eq!(state.pots.deposits, 0);
@@ -997,6 +1008,7 @@ mod tests {
         };
 
         state.handle_mir(&mir).unwrap();
+        state.pay_mirs();
         assert_eq!(state.pots.reserves, 58);
         assert_eq!(state.pots.treasury, 0);
         assert_eq!(state.pots.deposits, 2_000_000);  // Paid deposit
@@ -1044,6 +1056,7 @@ mod tests {
         };
 
         state.handle_mir(&mir).unwrap();
+        state.pay_mirs();
         assert_eq!(state.pots.reserves, 58);
 
         {
