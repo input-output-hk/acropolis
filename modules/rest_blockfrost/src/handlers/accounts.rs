@@ -2,6 +2,7 @@
 use std::sync::Arc;
 
 use acropolis_common::messages::{Message, RESTResponse, StateQuery, StateQueryResponse};
+use acropolis_common::queries::accounts::{AccountsStateQuery, AccountsStateQueryResponse};
 use acropolis_common::serialization::Bech32WithHrp;
 use acropolis_common::{Address, DRepChoice, StakeAddress, StakeAddressPayload};
 use anyhow::{anyhow, Result};
@@ -24,10 +25,17 @@ pub struct DRepChoiceRest {
 /// Handle `/accounts/{stake_address}` Blockfrost-compatible endpoint
 pub async fn handle_single_account_blockfrost(
     context: Arc<Context<Message>>,
-    param: String,
+    params: Vec<String>,
 ) -> Result<RESTResponse> {
+    let Some(stake_address) = params.get(0) else {
+        return Ok(RESTResponse::with_text(
+            400,
+            "Missing stake address parameter",
+        ));
+    };
+
     // Convert Bech32 stake address to StakeCredential
-    let stake_key = match Address::from_string(&param) {
+    let stake_key = match Address::from_string(&stake_address) {
         Ok(Address::Stake(StakeAddress {
             payload: StakeAddressPayload::StakeKeyHash(hash),
             ..
@@ -35,15 +43,15 @@ pub async fn handle_single_account_blockfrost(
         _ => {
             return Ok(RESTResponse::with_text(
                 400,
-                &format!("Not a valid stake address: {param}"),
+                &format!("Not a valid stake address: {stake_address}"),
             ));
         }
     };
 
     // Prepare the message
-    let msg = Arc::new(Message::StateQuery(StateQuery::GetAccountInfo {
-        stake_key,
-    }));
+    let msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
+        AccountsStateQuery::GetAccountInfo { stake_key },
+    )));
 
     // Send message via message bus
     let raw = context.message_bus.request("accounts-state", msg).await?;
@@ -52,16 +60,25 @@ pub async fn handle_single_account_blockfrost(
     let message = Arc::try_unwrap(raw).unwrap_or_else(|arc| (*arc).clone());
 
     let account = match message {
-        Message::StateQueryResponse(StateQueryResponse::AccountInfo(account)) => account,
-        Message::StateQueryResponse(StateQueryResponse::NotFound) => {
+        Message::StateQueryResponse(StateQueryResponse::Accounts(
+            AccountsStateQueryResponse::AccountInfo(account),
+        )) => account,
+
+        Message::StateQueryResponse(StateQueryResponse::Accounts(
+            AccountsStateQueryResponse::NotFound,
+        )) => {
             return Ok(RESTResponse::with_text(404, "Stake address not found"));
         }
-        Message::StateQueryResponse(StateQueryResponse::Error(e)) => {
+
+        Message::StateQueryResponse(StateQueryResponse::Accounts(
+            AccountsStateQueryResponse::Error(e),
+        )) => {
             return Ok(RESTResponse::with_text(
                 500,
                 &format!("Internal server error: {e}"),
             ));
         }
+
         _ => return Ok(RESTResponse::with_text(500, "Unexpected message type")),
     };
 

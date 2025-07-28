@@ -43,7 +43,7 @@ where
     })
 }
 
-/// Handle a simple REST request with one path parameter
+/// Handle a REST request with path parameters
 pub fn handle_rest_with_parameter<F, Fut>(
     context: Arc<Context<Message>>,
     topic: &str,
@@ -65,14 +65,10 @@ where
                         extract_params_from_topic_and_path(&topic_owned, &request.path_elements);
                     let params_slice: Vec<&str> = params_vec.iter().map(|s| s.as_str()).collect();
 
-                    if params_slice.is_empty() {
-                        RESTResponse::with_text(400, "Parameters must be provided")
-                    } else {
-                        match handler(&params_slice).await {
-                            Ok(response) => response,
-                            Err(error) => {
-                                RESTResponse::with_text(500, &format!("{error:?}").to_string())
-                            }
+                    match handler(&params_slice).await {
+                        Ok(response) => response,
+                        Err(error) => {
+                            RESTResponse::with_text(500, &format!("{error:?}").to_string())
                         }
                     }
                 }

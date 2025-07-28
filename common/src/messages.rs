@@ -4,6 +4,21 @@
 #![allow(dead_code)]
 
 use crate::ledger_state::SPOState;
+use crate::queries::{
+    accounts::{AccountsStateQuery, AccountsStateQueryResponse},
+    addresses::{AddressStateQuery, AddressStateQueryResponse},
+    assets::{AssetsStateQuery, AssetsStateQueryResponse},
+    blocks::{BlocksStateQuery, BlocksStateQueryResponse},
+    epochs::{EpochsStateQuery, EpochsStateQueryResponse},
+    governance::{GovernanceStateQuery, GovernanceStateQueryResponse},
+    ledger::{LedgerStateQuery, LedgerStateQueryResponse},
+    mempool::{MempoolStateQuery, MempoolStateQueryResponse},
+    metadata::{MetadataStateQuery, MetadataStateQueryResponse},
+    network::{NetworkStateQuery, NetworkStateQueryResponse},
+    pools::{PoolsStateQuery, PoolsStateQueryResponse},
+    scripts::{ScriptsStateQuery, ScriptsStateQueryResponse},
+    transactions::{TransactionsStateQuery, TransactionsStateQueryResponse},
+};
 
 use crate::types::*;
 
@@ -280,20 +295,34 @@ impl GetRESTResponse for Message {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum StateQuery {
-    GetAccountInfo { stake_key: Vec<u8> },
+    Accounts(AccountsStateQuery),
+    Addresses(AddressStateQuery),
+    Assets(AssetsStateQuery),
+    Blocks(BlocksStateQuery),
+    Epochs(EpochsStateQuery),
+    Governance(GovernanceStateQuery),
+    Ledger(LedgerStateQuery),
+    Mempool(MempoolStateQuery),
+    Metadata(MetadataStateQuery),
+    Network(NetworkStateQuery),
+    Pools(PoolsStateQuery),
+    Scripts(ScriptsStateQuery),
+    Transactions(TransactionsStateQuery),
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum StateQueryResponse {
-    AccountInfo(AccountInfo),
-    NotFound,
-    Error(String),
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct AccountInfo {
-    pub utxo_value: u64,
-    pub rewards: u64,
-    pub delegated_spo: Option<KeyHash>,
-    pub delegated_drep: Option<DRepChoice>,
+    Accounts(AccountsStateQueryResponse),
+    Addresses(AddressStateQueryResponse),
+    Assets(AssetsStateQueryResponse),
+    Blocks(BlocksStateQueryResponse),
+    Epochs(EpochsStateQueryResponse),
+    Governance(GovernanceStateQueryResponse),
+    Ledger(LedgerStateQueryResponse),
+    Mempool(MempoolStateQueryResponse),
+    Metadata(MetadataStateQueryResponse),
+    Network(NetworkStateQueryResponse),
+    Pools(PoolsStateQueryResponse),
+    Scripts(ScriptsStateQueryResponse),
+    Transactions(TransactionsStateQueryResponse),
 }

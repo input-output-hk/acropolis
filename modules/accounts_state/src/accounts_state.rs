@@ -21,6 +21,9 @@ use spo_distribution_publisher::SPODistributionPublisher;
 mod state;
 use state::State;
 mod rest;
+use acropolis_common::queries::accounts::{
+    AccountInfo, AccountsStateQuery, AccountsStateQueryResponse,
+};
 use rest::{handle_drdd, handle_pots, handle_spdd};
 
 const DEFAULT_SPO_STATE_TOPIC: &str = "cardano.spo.state";
@@ -354,41 +357,47 @@ impl AccountsState {
         context.handle("accounts-state", move |message| {
             let history = history_account_single.clone();
             async move {
-                let response = match message.as_ref() {
-                    Message::StateQuery(StateQuery::GetAccountInfo { stake_key }) => {
-                        let key = stake_key.clone();
+                let Message::StateQuery(StateQuery::Accounts(query)) = message.as_ref() else {
+                    return Arc::new(Message::StateQueryResponse(StateQueryResponse::Accounts(
+                        AccountsStateQueryResponse::Error(
+                            "Invalid message for accounts-state".into(),
+                        ),
+                    )));
+                };
 
-                        let guard = history.lock().await;
-                        let state = match guard.current() {
-                            Some(s) => s,
-                            None => {
-                                return Arc::new(Message::StateQueryResponse(
-                                    StateQueryResponse::NotFound,
-                                ));
-                            }
-                        };
+                let guard = history.lock().await;
+                let state = match guard.current() {
+                    Some(s) => s,
+                    None => {
+                        return Arc::new(Message::StateQueryResponse(
+                            StateQueryResponse::Accounts(AccountsStateQueryResponse::NotFound),
+                        ));
+                    }
+                };
 
-                        if let Some(account) = state.get_stake_state(&key) {
-                            let account_info = acropolis_common::messages::AccountInfo {
+                let response = match query {
+                    AccountsStateQuery::GetAccountInfo { stake_key } => {
+                        if let Some(account) = state.get_stake_state(stake_key) {
+                            AccountsStateQueryResponse::AccountInfo(AccountInfo {
                                 utxo_value: account.utxo_value,
                                 rewards: account.rewards,
                                 delegated_spo: account.delegated_spo.clone(),
                                 delegated_drep: account.delegated_drep.clone(),
-                            };
-
-                            Arc::new(Message::StateQueryResponse(
-                                StateQueryResponse::AccountInfo(account_info),
-                            ))
+                            })
                         } else {
-                            Arc::new(Message::StateQueryResponse(StateQueryResponse::NotFound))
+                            AccountsStateQueryResponse::NotFound
                         }
                     }
-                    _ => Arc::new(Message::StateQueryResponse(StateQueryResponse::Error(
-                        "Invalid message for accounts-state".into(),
-                    ))),
+
+                    _ => AccountsStateQueryResponse::Error(format!(
+                        "Unimplemented query variant: {:?}",
+                        query
+                    )),
                 };
 
-                response
+                Arc::new(Message::StateQueryResponse(StateQueryResponse::Accounts(
+                    response,
+                )))
             }
         });
 
