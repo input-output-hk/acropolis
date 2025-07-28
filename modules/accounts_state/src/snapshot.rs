@@ -101,7 +101,7 @@ impl Snapshot {
         }
 
         info!(epoch, reserves=pots.reserves, treasury=pots.treasury, deposits=pots.deposits,
-              total_stake, spos=snapshot.spos.len(), "Snapshot");
+              total_stake, spos=snapshot.spos.len(), fees, "Snapshot");
 
         snapshot
     }
