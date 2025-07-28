@@ -585,11 +585,12 @@ pub mod tests {
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
         let current = state.current();
         assert!(!current.is_none());
-        let retiring_pools = state.get_retiring_pools();
+        let mut retiring_pools = state.get_retiring_pools();
+        retiring_pools.sort_by_key(|p| p.epoch);
         assert_eq!(2, retiring_pools.len());
-        assert_eq!(&vec![0], &retiring_pools[0].operator);
+        assert_eq!(vec![0], retiring_pools[0].operator);
         assert_eq!(2, retiring_pools[0].epoch);
-        assert_eq!(&vec![1], &retiring_pools[1].operator);
+        assert_eq!(vec![1], retiring_pools[1].operator);
         assert_eq!(3, retiring_pools[1].epoch);
     }
 }
