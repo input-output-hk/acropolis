@@ -11,6 +11,7 @@ use acropolis_common::{
 };
 use crate::snapshot::Snapshot;
 use crate::rewards::RewardsState;
+use crate::monetary::calculate_monetary_change;
 use anyhow::{bail, Result};
 use dashmap::DashMap;
 use imbl::OrdMap;
@@ -128,28 +129,15 @@ impl State {
                    spo_block_counts: HashMap<KeyHash, usize>) -> Result<()> {
 
         // TODO HACK! Investigate why this differs to our calculated reserves after AVVM
-        // 13,887,515,255 - epoch 207 is as we enter 208 (Shelley)
-        if epoch == 207 {
+        // 13,887,515,255 - as we enter 208 (Shelley)
+        if epoch == 208 {
             // Fix reserves to that given in the CF Java implementation:
             // https://github.com/cardano-foundation/cf-java-rewards-calculation/blob/b05eddf495af6dc12d96c49718f27c34fa2042b1/calculation/src/main/java/org/cardanofoundation/rewards/calculation/config/NetworkConfig.java#L45C57-L45C74
+            let old_reserves = self.pots.reserves;
             self.pots.reserves = 13_888_022_852_926_644;
-            warn!("Fixed reserves to {}", self.pots.reserves);
+            warn!(new=self.pots.reserves, old=old_reserves, diff=self.pots.reserves-old_reserves,
+                  "Fixed reserves");
         }
-
-        // Filter the block counts for SPOs that are registered - treating any we don't know
-        // as 'OBFT' style (the legacy nodes)
-        let known_vrf_keys: HashSet<_> = self.spos.values().map(|spo| &spo.vrf_key_hash).collect();
-        let obft_block_count: usize = spo_block_counts
-            .iter()
-            .filter(|(vrf_key, _)| !known_vrf_keys.contains(vrf_key))
-            .map(|(_, count)| count)
-            .sum();
-
-        // Capture a new snapshot and push it to state
-        let snapshot = Snapshot::new(epoch, &self.stake_addresses.lock().unwrap(),
-                                     &self.spos, &spo_block_counts, obft_block_count,
-                                     &self.pots, total_fees);
-        self.rewards_state.push(snapshot);
 
         // Get Shelley parameters, silently return if too early in the chain so no
         // rewards to calculate
@@ -158,24 +146,49 @@ impl State {
             _ => {
                 return Ok(())
             }
-        };
+        }.clone();
 
-        // Calculate reward payouts and reserves/treasury changes
-        let reward_result = self.rewards_state.calculate_rewards(epoch, &shelley_params)?;
+        // Filter the block counts for SPOs that are registered - treating any we don't know
+        // as 'OBFT' style (the legacy nodes)
+        let total_blocks: usize = spo_block_counts.values().sum();
+        let known_vrf_keys: HashSet<_> = self.spos.values().map(|spo| &spo.vrf_key_hash).collect();
+        let obft_block_count: usize = spo_block_counts
+            .iter()
+            .filter(|(vrf_key, _)| !known_vrf_keys.contains(vrf_key))
+            .map(|(_, count)| count)
+            .sum();
+        let total_non_obft_blocks = total_blocks - obft_block_count;
+        info!(total_blocks, total_non_obft_blocks, "Block counts:");
+
+        // Update the reserves and treasury (monetary.rs)
+        // !!! TODO why are fees backdated like this?  Matches DBSync values but I can't see why
+        let monetary_change = calculate_monetary_change(&shelley_params, &self.pots,
+                                                        self.rewards_state.set.fees,
+                                                        total_non_obft_blocks)?;
+        self.pots = monetary_change.pots;
+
+        // Pay the refunds and MIRs
+        self.pay_pool_refunds();
+        self.pay_stake_refunds();
+        self.pay_mirs();
+
+        // Capture a new snapshot and push it to state
+        let snapshot = Snapshot::new(epoch, &self.stake_addresses.lock().unwrap(),
+                                     &self.spos, &spo_block_counts, &self.pots, total_fees);
+        self.rewards_state.push(snapshot);
+
+        // Calculate reward payouts
+        let reward_result = self.rewards_state.calculate_rewards(epoch, &shelley_params,
+                                                                 total_blocks,
+                                                                 monetary_change.stake_rewards)?;
 
         // Pay the rewards
         for (account, amount) in reward_result.rewards {
             self.add_to_reward(&account, amount);
         }
 
-        // Adjust the pots
+        // Adjust the reserves for next time
         Self::update_value_with_delta(&mut self.pots.reserves, reward_result.reserves_delta)?;
-        Self::update_value_with_delta(&mut self.pots.treasury, reward_result.treasury_delta)?;
-
-        // Pay the refunds and MIRs ready for next time
-        self.pay_pool_refunds();
-        self.pay_stake_refunds();
-        self.pay_mirs();
 
         Ok(())
     }

@@ -46,11 +46,8 @@ pub struct Snapshot {
     /// Persistent pot values
     pub pots: Pots,
 
-    /// Fees from previous epoch
+    /// Fees
     pub fees: Lovelace,
-
-    /// Blocks produced by OBFT nodes in previous epoch
-    pub obft_block_count: usize,
 }
 
 impl Snapshot {
@@ -59,13 +56,12 @@ impl Snapshot {
     pub fn new(epoch: u64, stake_addresses: &HashMap<KeyHash, StakeAddressState>,
                spos: &OrdMap<KeyHash, PoolRegistration>,
                spo_block_counts: &HashMap<KeyHash, usize>,
-               obft_block_count: usize,
-               pots: &Pots, fees: Lovelace) -> Self {
+               pots: &Pots,
+               fees: Lovelace) -> Self {
         let mut snapshot = Self {
             _epoch: epoch,
             pots: pots.clone(),
             fees,
-            obft_block_count,
             ..Self::default()
         };
 
@@ -105,7 +101,7 @@ impl Snapshot {
         }
 
         info!(epoch, reserves=pots.reserves, treasury=pots.treasury, deposits=pots.deposits,
-              total_stake, spos=snapshot.spos.len(), fees, "Snapshot");
+              total_stake, spos=snapshot.spos.len(), "Snapshot");
 
         snapshot
     }
@@ -172,7 +168,7 @@ mod tests {
         spos.insert(spo1.clone(), PoolRegistration::default());
         spos.insert(spo2.clone(), PoolRegistration::default());
         let spo_block_counts: HashMap<KeyHash, usize> = HashMap::new();
-        let snapshot = Snapshot::new(42, &stake_addresses, &spos, &spo_block_counts, 0,
+        let snapshot = Snapshot::new(42, &stake_addresses, &spos, &spo_block_counts,
                                      &Pots::default(), 0);
 
         assert_eq!(snapshot.spos.len(), 2);
