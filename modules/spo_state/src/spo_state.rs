@@ -17,7 +17,7 @@ use tracing::{error, info, info_span, Instrument};
 mod state;
 use state::State;
 mod rest;
-use rest::{handle_list, handle_retiring_pools, handle_spo};
+use rest::{handle_list, handle_spo};
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.certificates";
 const DEFAULT_LIST_TOPIC: (&str, &str) = ("handle-topic-pool-list", "rest.get.pools");
@@ -146,20 +146,15 @@ impl SPOState {
         });
 
         // Handle REST requests for full SPO state
-        let state_list = state.clone();
+        let state_list: Arc<Mutex<State>> = state.clone();
         handle_rest(context.clone(), &handle_list_topic, move || {
             handle_list(state_list.clone())
         });
 
+        // Handle REST requests for single SPO state and retiring pools
         let state_single = state.clone();
         handle_rest_with_parameter(context.clone(), &handle_single_topic, move |param| {
             handle_spo(state_single.clone(), param[0].to_string())
-        });
-
-        // Handle REST requests for retiring pools
-        let state_retiring_pools = state.clone();
-        handle_rest(context.clone(), &handle_retiring_pools_topic, move || {
-            handle_retiring_pools(state_retiring_pools.clone())
         });
 
         // Ticker to log stats
