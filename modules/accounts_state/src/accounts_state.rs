@@ -22,6 +22,7 @@ mod state;
 use state::State;
 mod snapshot;
 mod rewards;
+mod monetary;
 mod rest;
 use rest::{handle_drdd, handle_pots, handle_single_account, handle_spdd};
 

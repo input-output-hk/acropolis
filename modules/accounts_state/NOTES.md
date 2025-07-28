@@ -33,15 +33,15 @@ deposits 441012000000        match
 fees     10670212208         match
 
 e210:
-reserves 13278197552770393   match
-treasury 16306644182013      match
+reserves 13278197552770393   X
+treasury 16306644182013      X
 rewards  277915861250199     ?? not stake, no MIRs, where do they come from?
 deposits 533870000000        match
 fees     7666346424          match
 
 e211:
 reserves 13270236767315870   X -3.26MA
-treasury 24275595982960      match
+treasury 24275595982960      X
 rewards  164918966125973     X
 deposits 594636000000        match
 fees     7770532273          match

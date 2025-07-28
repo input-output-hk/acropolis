@@ -6,10 +6,9 @@ use acropolis_common::{
 };
 use crate::snapshot::Snapshot;
 use std::sync::Arc;
-use anyhow::{Result, bail, anyhow};
+use anyhow::{Result, bail};
 use tracing::{debug, info, warn};
 use bigdecimal::{BigDecimal, ToPrimitive, Zero, One};
-use std::str::FromStr;
 use std::cmp::min;
 use std::collections::HashMap;
 
@@ -18,9 +17,6 @@ use std::collections::HashMap;
 pub struct RewardsResult {
     /// Change to reserves
     pub reserves_delta: i64,
-
-    /// Change to treasury
-    pub treasury_delta: i64,
 
     /// Rewards to be paid
     pub rewards: Vec<(RewardAccount, Lovelace)>,
@@ -52,61 +48,16 @@ impl RewardsState {
     /// The epoch is the one we are now entering - we assume the snapshot for this has already been
     /// taken.
     /// Note immutable - only state change allowed is to push a new snapshot
-    pub fn calculate_rewards(&self, epoch: u64, params: &ShelleyParams)
-                             -> Result<RewardsResult> {
+    pub fn calculate_rewards(&self, epoch: u64, params: &ShelleyParams,
+                             total_blocks: usize,
+                             stake_rewards: BigDecimal) -> Result<RewardsResult> {
         let mut result = RewardsResult::default();
-
-        // Total blocks
-        let total_blocks: usize = self.mark.spos.values().map(|s| s.blocks_produced).sum();
-        if total_blocks == 0 {
-            // Before Shelley - expected
-            return Ok(result);
-        }
 
         // Calculate total supply (total in circulation + treasury) or
         // equivalently (max-supply-reserves) - this is the denominator
         // for sigma, z0, s
         let total_supply = BigDecimal::from(params.max_lovelace_supply - self.mark.pots.reserves);
-        info!(epoch, %total_supply, "Calculating rewards:");
-
-        // Account fees from previous epoch to reserves to start
-        // with - we will spend them to treasury and rewards later.
-        result.reserves_delta += self.mark.fees as i64;
-
-        // Count real SPO blocks and calculate 'eta'
-        let total_non_obft_blocks = total_blocks - self.mark.obft_block_count;
-        let eta = Self::calculate_eta(&params, total_non_obft_blocks)?;
-        info!(total_blocks, total_non_obft_blocks, %eta, "Block counts:");
-
-        // Handle monetary expansion - movement from reserves to rewards and treasury
-        let monetary_expansion = Self::calculate_monetary_expansion(&params, self.mark.pots.reserves,
-                                                                    &eta);
-
-        // Total rewards available is monetary expansion plus fees from previous epoch
-        let total_reward_pot = &monetary_expansion + BigDecimal::from(self.mark.fees);
-
-        // Top-slice some for treasury
-        let treasury_cut = RationalNumber::new(2, 10);
-        // TODO odd values again! &params.protocol_params.treasury_cut;  // Tau
-        let treasury_increase = (&total_reward_pot
-                                 * BigDecimal::from(treasury_cut.numer())
-                                 / BigDecimal::from(treasury_cut.denom()))
-            .with_scale(0);
-
-        let treasury_increase_i64 = treasury_increase
-            .to_i64()
-            .ok_or(anyhow!("Can't calculate integral treasury cut"))?;
-
-        info!(total_rewards=%total_reward_pot, cut=%treasury_cut, increase=treasury_increase_i64,
-              "Treasury:");
-
-        result.treasury_delta += treasury_increase_i64;
-        result.reserves_delta -= treasury_increase_i64;
-
-        // Calculate the total rewards available for stake (R)
-        let stake_rewards = total_reward_pot.clone() - treasury_increase.clone();
-
-        info!(%stake_rewards, "Rewards:");
+        info!(epoch, %total_supply, %stake_rewards, "Calculating rewards:");
 
         // Relative pool saturation size (z0)
         let k = BigDecimal::from(&params.protocol_params.stake_pool_target_num);
@@ -257,42 +208,5 @@ impl RewardsState {
         info!(num_rewards_paid, total_rewards_paid, "Paid to delegators:");
 
         Ok(result)
-    }
-
-    // Calculate 'eta' - ratio of blocks produced during the epoch vs expected
-    fn calculate_eta(params: &ShelleyParams, total_non_obft_blocks: usize) -> Result<BigDecimal> {
-        let decentralisation = &params.protocol_params.decentralisation_param;
-        let active_slots_coeff = BigDecimal::from_str(
-            &params.active_slots_coeff.to_string())?;
-        let epoch_length = BigDecimal::from(params.epoch_length);
-
-        let eta = if decentralisation >= &RationalNumber::new(8,10) {
-            BigDecimal::one()
-        } else {
-            let expected_blocks = epoch_length * active_slots_coeff *
-                (BigDecimal::one() - BigDecimal::from(decentralisation.numer())
-                                   / BigDecimal::from(decentralisation.denom()));
-
-            (BigDecimal::from(total_non_obft_blocks as u64) / expected_blocks)
-                .min(BigDecimal::one())
-        };
-
-        Ok(eta)
-    }
-
-    // Calculate monetary expansion based on current reserves
-    fn calculate_monetary_expansion(params: &ShelleyParams, reserves: Lovelace, eta: &BigDecimal)
-                                    -> BigDecimal {
-        let monetary_expansion_factor = RationalNumber::new(3, 1000);
-        // TODO odd values coming in! &params.protocol_params.monetary_expansion; // Rho
-        let monetary_expansion = (BigDecimal::from(reserves)
-                                  * eta
-                                  * BigDecimal::from(monetary_expansion_factor.numer())
-                                  / BigDecimal::from(monetary_expansion_factor.denom()))
-            .with_scale(0);
-
-        info!(rho=%monetary_expansion_factor, %monetary_expansion, "Monetary:");
-
-        monetary_expansion
     }
 }
