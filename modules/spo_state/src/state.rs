@@ -5,7 +5,7 @@ use acropolis_common::{
     messages::{CardanoMessage, Message, SPOStateMessage, TxCertificatesMessage},
     params::{SECURITY_PARAMETER_K, TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH},
     serialization::SerializeMapAs,
-    BlockInfo, PoolRegistration, TxCertificate,
+    BlockInfo, PoolRegistration, PoolRetirement, TxCertificate,
 };
 use anyhow::Result;
 use imbl::HashMap;
@@ -112,6 +112,24 @@ impl State {
 
     pub fn list_pools_with_info(&self) -> Option<Vec<(&Vec<u8>, &PoolRegistration)>> {
         self.current().map(|state| state.spos.iter().collect())
+    }
+
+    /// Get pools that will be retired in the upcoming epochs
+    pub fn get_retiring_pools(&self) -> Vec<PoolRetirement> {
+        self.current().map_or(Vec::new(), |state: &BlockState| {
+            let current_epoch = state.epoch;
+            state
+                .pending_deregistrations
+                .iter()
+                .filter(|(&epoch, _)| epoch > current_epoch)
+                .flat_map(|(&epoch, retiring_operators)| {
+                    retiring_operators.iter().map(move |operator| PoolRetirement {
+                        operator: operator.clone(),
+                        epoch,
+                    })
+                })
+                .collect()
+        })
     }
 
     async fn log_stats(&self) {
@@ -540,5 +558,39 @@ pub mod tests {
             let spo = current.spos.get(&vec![0u8]);
             assert!(!spo.is_none());
         };
+    }
+
+    #[tokio::test]
+    async fn get_retiring_pools_returns_empty_when_state_is_new() {
+        let state = State::new();
+        assert!(state.get_retiring_pools().is_empty());
+    }
+
+    #[tokio::test]
+    async fn get_retiring_pools_returns_pools() {
+        let mut state = State::new();
+        let mut msg = new_msg();
+        msg.certificates.push(TxCertificate::PoolRetirement(PoolRetirement {
+            operator: vec![0],
+            epoch: 2,
+        }));
+        let mut block = new_block();
+        assert!(state.handle_tx_certs(&block, &msg).is_ok());
+        let mut msg = new_msg();
+        block.number = 1;
+        msg.certificates.push(TxCertificate::PoolRetirement(PoolRetirement {
+            operator: vec![1],
+            epoch: 3,
+        }));
+        assert!(state.handle_tx_certs(&block, &msg).is_ok());
+        let current = state.current();
+        assert!(!current.is_none());
+        let mut retiring_pools = state.get_retiring_pools();
+        retiring_pools.sort_by_key(|p| p.epoch);
+        assert_eq!(2, retiring_pools.len());
+        assert_eq!(vec![0], retiring_pools[0].operator);
+        assert_eq!(2, retiring_pools[0].epoch);
+        assert_eq!(vec![1], retiring_pools[1].operator);
+        assert_eq!(3, retiring_pools[1].epoch);
     }
 }

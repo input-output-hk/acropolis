@@ -468,6 +468,36 @@ paths:
               schema:
                 type: string
                 example: "Internal server error while retrieving stake pool information"
+  /pools/retiring:
+    get:
+      tags:
+        - Pools
+      summary: List of stake pools retiring in the upcoming epochs
+      description: Return the pool information content
+      parameters:
+      responses:
+        "200":
+          description: JSON object containing list of stake pools retiring in the upcoming epochs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PoolRetirement'
+              example:
+                - pool_id: "pool19u64770wqp6s95gkajc8udheske5e6ljmpq33awxk326zjaza0q"
+                  epoch: 225
+                - pool_id: "pool1dvla4zq98hpvacv20snndupjrqhuc79zl6gjap565nku6et5zdx"
+                  epoch: 215
+                - pool_id: "pool1wvccajt4eugjtf3k0ja3exjqdj7t8egsujwhcw4tzj4rzsxzw5w"
+                  epoch: 231
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Internal server error while retrieving retiring pools"
   /utxos/{tx_hash:index}:
     get:
       tags:
@@ -918,6 +948,20 @@ components:
         - reward_account
         - pool_owners
         - relays
+    PoolRetirement:
+      type: object
+      description: Pool retirement information
+      properties:
+        pool_id:
+          type: string
+          description: Bech32-encoded pool ID
+        epoch:
+          type: integer
+          format: uint64
+          description: Epoch number when the pool is retired
+      required:
+        - pool_id
+        - epoch
     UTxO:
       type: object
       description: Basic UTxO information including address and value.
