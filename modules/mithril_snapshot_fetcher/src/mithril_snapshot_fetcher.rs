@@ -25,6 +25,9 @@ use std::time::Duration;
 use tokio::{join, sync::Mutex};
 use tracing::{debug, error, info, info_span, Instrument};
 
+mod pause;
+use pause::PauseType;
+
 const DEFAULT_STARTUP_TOPIC: &str = "cardano.sequence.bootstrapped";
 const DEFAULT_HEADER_TOPIC: &str = "cardano.block.header";
 const DEFAULT_BODY_TOPIC: &str = "cardano.block.body";
@@ -36,7 +39,7 @@ const DEFAULT_GENESIS_KEY: &str = r#"
 5b3139312c36362c3134302c3138352c3133382c31312c3233372c3230372c3235302c3134342c32
 372c322c3138382c33302c31322c38312c3135352c3230342c31302c3137392c37352c32332c3133
 382c3139362c3231372c352c31342c32302c35372c37392c33392c3137365d"#;
-const DEFAULT_PAUSE_EPOCH: (&str, i64) = ("pause-epoch", -1);
+const DEFAULT_PAUSE: (&str, PauseType) = ("pause", PauseType::NoPause);
 const DEFAULT_DIRECTORY: &str = "downloads";
 
 /// Mithril feedback receiver
@@ -161,7 +164,8 @@ impl MithrilSnapshotFetcher {
         let completion_topic =
             config.get_string("completion-topic").unwrap_or(DEFAULT_COMPLETION_TOPIC.to_string());
         let directory = config.get_string("directory").unwrap_or(DEFAULT_DIRECTORY.to_string());
-        let mut pause_epoch = load_pause_epoch(&config);
+        let mut pause_constraint =
+            PauseType::from_config(&config, DEFAULT_PAUSE).unwrap_or(PauseType::NoPause);
 
         // Path to immutable DB
         let path = Path::new(&directory).join("immutable");
@@ -219,17 +223,6 @@ impl MithrilSnapshotFetcher {
 
                         if new_epoch {
                             info!(epoch, number, slot, "New epoch");
-
-                            if let Some(pe) = pause_epoch {
-                                if epoch == pe {
-                                    if prompt_epoch_pause(epoch).await {
-                                        info!("Continuing without further pauses...");
-                                        pause_epoch = None;
-                                    } else {
-                                        pause_epoch = Some(epoch + 1);
-                                    }
-                                }
-                            }
                         }
 
                         let era = match block.era() {
@@ -252,6 +245,19 @@ impl MithrilSnapshotFetcher {
                             era,
                         };
 
+                        // Check pause constraint
+                        if pause_constraint.should_pause(&block_info) {
+                            let description = pause_constraint.get_description();
+                            let next_pause_constraint = pause_constraint.get_next();
+                            let next_description = next_pause_constraint.get_description();
+                            if prompt_pause(description, next_description).await {
+                                info!("Continuing without further pauses...");
+                                pause_constraint = PauseType::NoPause;
+                            } else {
+                                pause_constraint = next_pause_constraint;
+                            }
+                        }
+
                         // Send the block header message
                         let header = block.header();
                         let header_message = BlockHeaderMessage {
@@ -262,8 +268,9 @@ impl MithrilSnapshotFetcher {
                             block_info.clone(),
                             CardanoMessage::BlockHeader(header_message),
                         ));
-                        let header_future =
-                            context.message_bus.publish(&header_topic, Arc::new(header_message_enum));
+                        let header_future = context
+                            .message_bus
+                            .publish(&header_topic, Arc::new(header_message_enum));
 
                         // Send the block body message
                         let body_message = BlockBodyMessage { raw: raw_block };
@@ -281,7 +288,9 @@ impl MithrilSnapshotFetcher {
 
                         last_block_info = Some(block_info);
                         Ok::<(), anyhow::Error>(())
-                    }.instrument(span).await?;
+                    }
+                    .instrument(span)
+                    .await?;
                 }
                 Err(e) => error!("Error reading block: {e}"),
             }
@@ -289,8 +298,10 @@ impl MithrilSnapshotFetcher {
 
         // Send completion message
         if let Some(last_block_info) = last_block_info {
-            info!("Finished shapshot at block {}, epoch {}",
-                  last_block_info.number, last_block_info.epoch);
+            info!(
+                "Finished shapshot at block {}, epoch {}",
+                last_block_info.number, last_block_info.epoch
+            );
             let message_enum =
                 Message::Cardano((last_block_info, CardanoMessage::SnapshotComplete));
             context
@@ -341,18 +352,11 @@ impl MithrilSnapshotFetcher {
     }
 }
 
-/// Helper to parse pause_epoch from config
-fn load_pause_epoch(config: &Config) -> Option<u64> {
-    let pause_epoch = config.get_int(DEFAULT_PAUSE_EPOCH.0).unwrap_or(DEFAULT_PAUSE_EPOCH.1);
-    (pause_epoch >= 0).then(|| {
-        info!("Pausing enabled at epoch {pause_epoch}");
-        pause_epoch as u64
-    })
-}
-
 /// Async helper to prompt user for pause behavior
-async fn prompt_epoch_pause(epoch: u64) -> bool {
-    info!("Paused at epoch {epoch}. Press [Enter] to step to next epoch, or [c + Enter] to continue without pauses.");
+async fn prompt_pause(description: String, next_description: String) -> bool {
+    info!(
+        "Paused at {description}. Press [Enter] to step to {next_description}, or [c + Enter] to continue without pauses."
+    );
     tokio::task::spawn_blocking(|| {
         use std::io::{self, BufRead};
         let stdin = io::stdin();
