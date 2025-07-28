@@ -2,8 +2,10 @@
 //! Accepts certificate events and derives the DRep State in memory
 
 use acropolis_common::{
-    messages::{CardanoMessage, DRepStateMessage, Message},
-    rest_helper::{handle_rest, handle_rest_with_parameter},
+    messages::{CardanoMessage, DRepStateMessage, Message, StateQuery, StateQueryResponse},
+    queries::governance::{
+        DRepInfo, DRepsList, GovernanceStateQuery, GovernanceStateQueryResponse,
+    },
 };
 use anyhow::Result;
 use caryatid_sdk::{module, Context, Module};
@@ -12,14 +14,10 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info};
 
-mod rest;
-use rest::{handle_drep, handle_list};
 mod state;
 use state::State;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.certificates";
-const LIST_HANDLE_TOPIC: (&str, &str) = ("handle-topic-drep-list", "rest.get.dreps");
-const DREP_HANDLE_TOPIC: (&str, &str) = ("handle-topic-drep-single", "rest.get.dreps.*");
 const DEFAULT_DREP_STATE_TOPIC: &str = "cardano.drep.state";
 
 /// DRep State module
@@ -36,14 +34,6 @@ impl DRepState {
         let subscribe_topic =
             config.get_string("subscribe-topic").unwrap_or(DEFAULT_SUBSCRIBE_TOPIC.to_string());
         info!("Creating subscriber on '{subscribe_topic}'");
-
-        let handle_list_topic =
-            config.get_string(LIST_HANDLE_TOPIC.0).unwrap_or(LIST_HANDLE_TOPIC.1.to_string());
-        info!("Creating request handler on '{}'", handle_list_topic);
-
-        let handle_drep_topic =
-            config.get_string(DREP_HANDLE_TOPIC.0).unwrap_or(DREP_HANDLE_TOPIC.1.to_string());
-        info!("Creating request handler on '{}'", handle_drep_topic);
 
         let drep_state_topic = config
             .get_string("publish-drep-state-topic")
@@ -92,15 +82,43 @@ impl DRepState {
             }
         });
 
-        let state_list = state.clone();
-        handle_rest(context.clone(), &handle_list_topic, move || {
-            let state = state_list.clone();
-            async move { Ok(handle_list(state).await) }
-        });
+        let query_state = state.clone();
+        context.handle("drep-state", move |message| {
+            let state_handle = query_state.clone(); // your shared Arc<Mutex<State>>
+            async move {
+                let Message::StateQuery(StateQuery::Governance(query)) = message.as_ref() else {
+                    return Arc::new(Message::StateQueryResponse(StateQueryResponse::Governance(
+                        GovernanceStateQueryResponse::Error(
+                            "Invalid message for governance-state".into(),
+                        ),
+                    )));
+                };
 
-        let state_single = state.clone();
-        handle_rest_with_parameter(context.clone(), &handle_drep_topic, move |param| {
-            handle_drep(state_single.clone(), param[0].to_string())
+                let locked = state_handle.lock().await;
+
+                let response = match query {
+                    GovernanceStateQuery::GetDRepsList => {
+                        let dreps = locked.list();
+                        GovernanceStateQueryResponse::DRepsList(DRepsList { dreps })
+                    }
+                    GovernanceStateQuery::GetDRepInfo { drep_credential } => {
+                        match locked.get_drep(&drep_credential) {
+                            Some(record) => GovernanceStateQueryResponse::DRepInfo(DRepInfo {
+                                deposit: record.deposit,
+                                anchor: record.anchor.clone(),
+                            }),
+                            None => GovernanceStateQueryResponse::NotFound,
+                        }
+                    }
+                    _ => GovernanceStateQueryResponse::Error(format!(
+                        "Unimplemented governance query: {query:?}"
+                    )),
+                };
+
+                Arc::new(Message::StateQueryResponse(StateQueryResponse::Governance(
+                    response,
+                )))
+            }
         });
 
         // Ticker to log stats
