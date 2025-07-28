@@ -75,3 +75,30 @@ impl PauseType {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    const DEFAULT_PAUSE: (&str, PauseType) = ("pause", PauseType::NoPause);
+
+    #[test]
+    fn test_pause_type_from_config_epoch() {
+        let config = Config::builder().set_override("pause", "epoch:100").unwrap().build().unwrap();
+        let pause_type = PauseType::from_config(&config, DEFAULT_PAUSE);
+        assert_eq!(pause_type, Some(PauseType::Epoch(100)));
+    }
+
+    #[test]
+    fn test_pause_type_from_config_block() {
+        let config = Config::builder().set_override("pause", "block:100").unwrap().build().unwrap();
+        let pause_type = PauseType::from_config(&config, DEFAULT_PAUSE);
+        assert_eq!(pause_type, Some(PauseType::Block(100)));
+    }
+
+    #[test]
+    fn test_pause_type_from_config_invalid() {
+        let config = Config::builder().set_override("pause", "invalid").unwrap().build().unwrap();
+        let pause_type = PauseType::from_config(&config, DEFAULT_PAUSE);
+        assert_eq!(pause_type, None);
+    }
+}
