@@ -24,16 +24,22 @@ pub struct MonetaryResult {
 /// Calculate monetary change at the start of an epoch, returning updated pots and total
 /// available for stake rewards
 pub fn calculate_monetary_change(params: &ShelleyParams,
-                                 old_pots: &Pots, total_fees: Lovelace,
+                                 old_pots: &Pots,
+                                 total_fees_last_epoch: Lovelace,
                                  total_non_obft_blocks: usize) -> Result<MonetaryResult> {
     let mut new_pots = old_pots.clone();
+
+    // Add fees to reserves to start with - they will get allocated to treasury and stake
+    // later
+    new_pots.reserves += total_fees_last_epoch;
 
     // Handle monetary expansion - movement from reserves to rewards and treasury
     let eta = calculate_eta(params, total_non_obft_blocks)?;
     let monetary_expansion = calculate_monetary_expansion(&params, old_pots.reserves, &eta);
 
-    // Total rewards available is monetary expansion plus fees from previous epoch
-    let total_reward_pot = &monetary_expansion + BigDecimal::from(total_fees);
+    // Total rewards available is monetary expansion plus fees from last epoch
+    // TODO not sure why this is one epoch behind
+    let total_reward_pot = &monetary_expansion + BigDecimal::from(total_fees_last_epoch);
 
     // Top-slice some for treasury
     let treasury_cut = RationalNumber::new(2, 10);
@@ -47,15 +53,18 @@ pub fn calculate_monetary_change(params: &ShelleyParams,
         .to_u64()
         .ok_or(anyhow!("Can't calculate integral treasury cut"))?;
 
-    info!(total_rewards=%total_reward_pot, cut=%treasury_cut, increase=treasury_increase_u64,
-          "Treasury:");
-
     new_pots.treasury += treasury_increase_u64;
     new_pots.reserves -= treasury_increase_u64;
 
+    // Remainder goes to stakeholders
+    let stake_rewards = &total_reward_pot - &treasury_increase;
+
+    info!(total_rewards=%total_reward_pot, cut=%treasury_cut, increase=treasury_increase_u64,
+          %stake_rewards, "Treasury:");
+
     Ok(MonetaryResult {
         pots: new_pots,
-        stake_rewards: total_reward_pot - treasury_increase,
+        stake_rewards,
     })
 }
 

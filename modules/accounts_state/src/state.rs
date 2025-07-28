@@ -161,9 +161,9 @@ impl State {
         info!(total_blocks, total_non_obft_blocks, "Block counts:");
 
         // Update the reserves and treasury (monetary.rs)
-        // !!! TODO why are fees backdated like this?  Matches DBSync values but I can't see why
+        // TODO note using last-but-one epoch's fees for reward pot - why?
         let monetary_change = calculate_monetary_change(&shelley_params, &self.pots,
-                                                        self.rewards_state.set.fees,
+                                                        self.rewards_state.mark.fees,
                                                         total_non_obft_blocks)?;
         self.pots = monetary_change.pots;
 
@@ -177,6 +177,11 @@ impl State {
                                      &self.spos, &spo_block_counts, &self.pots, total_fees);
         self.rewards_state.push(snapshot);
 
+        // Stop here if no blocks to pay out on
+        if total_blocks == 0 {
+            return Ok(());
+        }
+
         // Calculate reward payouts
         let reward_result = self.rewards_state.calculate_rewards(epoch, &shelley_params,
                                                                  total_blocks,
@@ -187,7 +192,7 @@ impl State {
             self.add_to_reward(&account, amount);
         }
 
-        // Adjust the reserves for next time
+        // Adjust the reserves for next time with amount actually paid
         Self::update_value_with_delta(&mut self.pots.reserves, reward_result.reserves_delta)?;
 
         Ok(())
