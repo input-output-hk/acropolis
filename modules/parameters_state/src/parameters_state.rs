@@ -11,7 +11,7 @@ use caryatid_sdk::{message_bus::Subscription, module, Context, Module};
 use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{error, info};
+use tracing::{error, info, info_span, Instrument};
 
 mod genesis_params;
 mod parameters_updater;
@@ -112,9 +112,13 @@ impl ParametersState {
         loop {
             match enact_s.read().await?.1.as_ref() {
                 Message::Cardano((block, CardanoMessage::GovernanceOutcomes(gov))) => {
-                    let mut locked = state.lock().await;
-                    let new_params = locked.handle_enact_state(&block, &gov).await?;
-                    Self::publish_update(&config, &block, new_params)?;
+                    let span = info_span!("parameters_state.handle", block = block.number);
+                    async {
+                        let mut locked = state.lock().await;
+                        let new_params = locked.handle_enact_state(&block, &gov).await?;
+                        Self::publish_update(&config, &block, new_params)?;
+                        Ok::<(), anyhow::Error>(())
+                    }.instrument(span).await?;
                 }
                 msg => error!("Unexpected message {msg:?} for enact state topic"),
             }
