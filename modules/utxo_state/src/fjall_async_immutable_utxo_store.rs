@@ -118,6 +118,6 @@ impl ImmutableUTXOStore for FjallAsyncImmutableUTXOStore {
 
     async fn len(&self) -> Result<usize> {
         let partition = self.partition.clone();
-        Ok(task::spawn_blocking(move || Ok::<_, anyhow::Error>(partition.len()?)).await??)
+        Ok(task::spawn_blocking(move || Ok::<_, anyhow::Error>(partition.approximate_len())).await??)
     }
 }
