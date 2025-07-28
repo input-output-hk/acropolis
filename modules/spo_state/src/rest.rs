@@ -84,7 +84,13 @@ pub async fn handle_list(state: Arc<Mutex<State>>) -> Result<RESTResponse> {
 }
 
 /// Handles /pools/{pool_id}
+/// Handles /pools/retiring
 pub async fn handle_spo(state: Arc<Mutex<State>>, param: String) -> Result<RESTResponse> {
+    // check if param is "retiring"
+    if param == "retiring" {
+        return handle_retiring_pools(state).await;
+    }
+
     let pool_id = match Vec::<u8>::from_bech32_with_hrp(&param, "pool") {
         Ok(id) => id,
         Err(e) => {
@@ -153,7 +159,7 @@ pub async fn handle_spo(state: Arc<Mutex<State>>, param: String) -> Result<RESTR
 }
 
 /// Handles /pools/retiring
-pub async fn handle_retiring_pools(state: Arc<Mutex<State>>) -> Result<RESTResponse> {
+async fn handle_retiring_pools(state: Arc<Mutex<State>>) -> Result<RESTResponse> {
     let locked = state.lock().await;
     let mut response: Vec<PoolRetirementRest> = Vec::new();
     for retiring_pool in locked.get_retiring_pools() {
