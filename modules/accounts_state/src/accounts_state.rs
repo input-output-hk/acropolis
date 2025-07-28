@@ -12,7 +12,7 @@ use caryatid_sdk::{message_bus::Subscription, module, Context, Module};
 use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{error, info};
+use tracing::{error, info, info_span, Instrument};
 
 mod drep_distribution_publisher;
 use drep_distribution_publisher::DRepDistributionPublisher;
@@ -111,19 +111,22 @@ impl AccountsState {
             let (_, message) = certs_message_f.await?;
             match message.as_ref() {
                 Message::Cardano((block_info, CardanoMessage::TxCertificates(tx_certs_msg))) => {
-                    // Handle rollbacks on this topic only
-                    if block_info.status == BlockStatus::RolledBack {
-                        state = history.lock().await.get_rolled_back_state(&block_info);
-                    }
+                    let span = info_span!("account_state.handle_certs", block = block_info.number);
+                    async {
+                        // Handle rollbacks on this topic only
+                        if block_info.status == BlockStatus::RolledBack {
+                            state = history.lock().await.get_rolled_back_state(&block_info);
+                        }
 
-                    state
-                        .handle_tx_certificates(tx_certs_msg)
-                        .inspect_err(|e| error!("TxCertificates handling error: {e:#}"))
-                        .ok();
-                    if block_info.new_epoch && block_info.epoch > 0 {
-                        new_epoch = true;
-                    }
-                    current_block = Some(block_info.clone());
+                        state
+                            .handle_tx_certificates(tx_certs_msg)
+                            .inspect_err(|e| error!("TxCertificates handling error: {e:#}"))
+                            .ok();
+                        if block_info.new_epoch && block_info.epoch > 0 {
+                            new_epoch = true;
+                        }
+                        current_block = Some(block_info.clone());
+                    }.instrument(span).await;
                 }
 
                 _ => error!("Unexpected message type: {message:?}"),
@@ -133,20 +136,23 @@ impl AccountsState {
             let (_, message) = withdrawals_message_f.await?;
             match message.as_ref() {
                 Message::Cardano((block_info, CardanoMessage::Withdrawals(withdrawals_msg))) => {
-                    if let Some(ref block) = current_block {
-                        if block.number != block_info.number {
-                            error!(
-                                expected = block.number,
-                                received = block_info.number,
-                                "Certificate and withdrawals messages re-ordered!"
-                            );
+                    let span = info_span!("account_state.handle_withdrawals", block = block_info.number);
+                    async {
+                        if let Some(ref block) = current_block {
+                            if block.number != block_info.number {
+                                error!(
+                                    expected = block.number,
+                                    received = block_info.number,
+                                    "Certificate and withdrawals messages re-ordered!"
+                                );
+                            }
                         }
-                    }
 
-                    state
-                        .handle_withdrawals(withdrawals_msg)
-                        .inspect_err(|e| error!("Withdrawals handling error: {e:#}"))
-                        .ok();
+                        state
+                            .handle_withdrawals(withdrawals_msg)
+                            .inspect_err(|e| error!("Withdrawals handling error: {e:#}"))
+                            .ok();
+                    }.instrument(span).await;
                 }
 
                 _ => error!("Unexpected message type: {message:?}"),
@@ -156,20 +162,23 @@ impl AccountsState {
             let (_, message) = stake_message_f.await?;
             match message.as_ref() {
                 Message::Cardano((block_info, CardanoMessage::StakeAddressDeltas(deltas_msg))) => {
-                    if let Some(ref block) = current_block {
-                        if block.number != block_info.number {
-                            error!(
-                                expected = block.number,
-                                received = block_info.number,
-                                "Certificate and deltas messages re-ordered!"
-                            );
+                    let span = info_span!("account_state.handle_stake_deltas", block = block_info.number);
+                    async {
+                        if let Some(ref block) = current_block {
+                            if block.number != block_info.number {
+                                error!(
+                                    expected = block.number,
+                                    received = block_info.number,
+                                    "Certificate and deltas messages re-ordered!"
+                                );
+                            }
                         }
-                    }
 
-                    state
-                        .handle_stake_deltas(deltas_msg)
-                        .inspect_err(|e| error!("StakeAddressDeltas handling error: {e:#}"))
-                        .ok();
+                        state
+                            .handle_stake_deltas(deltas_msg)
+                            .inspect_err(|e| error!("StakeAddressDeltas handling error: {e:#}"))
+                            .ok();
+                    }.instrument(span).await;
                 }
 
                 _ => error!("Unexpected message type: {message:?}"),
@@ -186,12 +195,15 @@ impl AccountsState {
                 let (_, message) = dreps_message_f.await?;
                 match message.as_ref() {
                     Message::Cardano((block_info, CardanoMessage::DRepState(dreps_msg))) => {
-                        state.handle_drep_state(&dreps_msg);
+                        let span = info_span!("account_state.handle_drep_state", block = block_info.number);
+                        async {
+                            state.handle_drep_state(&dreps_msg);
 
-                        let drdd = state.generate_drdd();
-                        if let Err(e) = drep_publisher.publish_drdd(block_info, drdd).await {
-                            error!("Error publishing drep voting stake distribution: {e:#}")
-                        }
+                            let drdd = state.generate_drdd();
+                            if let Err(e) = drep_publisher.publish_drdd(block_info, drdd).await {
+                                error!("Error publishing drep voting stake distribution: {e:#}")
+                            }
+                        }.instrument(span).await;
                     }
 
                     _ => error!("Unexpected message type: {message:?}"),
@@ -201,25 +213,28 @@ impl AccountsState {
                 let (_, message) = spos_message_f.await?;
                 match message.as_ref() {
                     Message::Cardano((block_info, CardanoMessage::SPOState(spo_msg))) => {
-                        if let Some(ref block) = current_block {
-                            if block.number != block_info.number {
-                                error!(
-                                    expected = block.number,
-                                    received = block_info.number,
-                                    "Certificate and epoch SPOs messages re-ordered!"
-                                );
+                        let span = info_span!("account_state.handle_spo_state", block = block_info.number);
+                        async {
+                            if let Some(ref block) = current_block {
+                                if block.number != block_info.number {
+                                    error!(
+                                        expected = block.number,
+                                        received = block_info.number,
+                                        "Certificate and epoch SPOs messages re-ordered!"
+                                    );
+                                }
                             }
-                        }
 
-                        state
-                            .handle_spo_state(spo_msg)
-                            .inspect_err(|e| error!("SPOState handling error: {e:#}"))
-                            .ok();
+                            state
+                                .handle_spo_state(spo_msg)
+                                .inspect_err(|e| error!("SPOState handling error: {e:#}"))
+                                .ok();
 
-                        let spdd = state.generate_spdd();
-                        if let Err(e) = spo_publisher.publish_spdd(block_info, spdd).await {
-                            error!("Error publishing SPO stake distribution: {e:#}")
-                        }
+                            let spdd = state.generate_spdd();
+                            if let Err(e) = spo_publisher.publish_spdd(block_info, spdd).await {
+                                error!("Error publishing SPO stake distribution: {e:#}")
+                            }
+                        }.instrument(span).await;
                     }
 
                     _ => error!("Unexpected message type: {message:?}"),
@@ -229,20 +244,23 @@ impl AccountsState {
                 let (_, message) = ea_message_f.await?;
                 match message.as_ref() {
                     Message::Cardano((block_info, CardanoMessage::EpochActivity(ea_msg))) => {
-                        if let Some(ref block) = current_block {
-                            if block.number != block_info.number {
-                                error!(
-                                    expected = block.number,
-                                    received = block_info.number,
-                                    "Certificate and epoch activity messages re-ordered!"
-                                );
+                        let span = info_span!("account_state.handle_epoch_activity", block = block_info.number);
+                        async {
+                            if let Some(ref block) = current_block {
+                                if block.number != block_info.number {
+                                    error!(
+                                        expected = block.number,
+                                        received = block_info.number,
+                                        "Certificate and epoch activity messages re-ordered!"
+                                    );
+                                }
                             }
-                        }
 
-                        state
-                            .handle_epoch_activity(ea_msg)
-                            .inspect_err(|e| error!("EpochActivity handling error: {e:#}"))
-                            .ok();
+                            state
+                                .handle_epoch_activity(ea_msg)
+                                .inspect_err(|e| error!("EpochActivity handling error: {e:#}"))
+                                .ok();
+                        }.instrument(span).await;
                     }
 
                     _ => error!("Unexpected message type: {message:?}"),
@@ -253,20 +271,23 @@ impl AccountsState {
                 let (_, message) = params_message_f.await?;
                 match message.as_ref() {
                     Message::Cardano((block_info, CardanoMessage::ProtocolParams(params_msg))) => {
-                        if let Some(ref block) = current_block {
-                            if block.number != block_info.number {
-                                error!(
-                                    expected = block.number,
-                                    received = block_info.number,
-                                    "Certificate and parameters messages re-ordered!"
-                                );
+                        let span = info_span!("account_state.handle_parameters", block = block_info.number);
+                        async {
+                            if let Some(ref block) = current_block {
+                                if block.number != block_info.number {
+                                    error!(
+                                        expected = block.number,
+                                        received = block_info.number,
+                                        "Certificate and parameters messages re-ordered!"
+                                    );
+                                }
                             }
-                        }
 
-                        state
-                            .handle_parameters(params_msg)
-                            .inspect_err(|e| error!("Messaging handling error: {e}"))
-                            .ok();
+                            state
+                                .handle_parameters(params_msg)
+                                .inspect_err(|e| error!("Messaging handling error: {e}"))
+                                .ok();
+                        }.instrument(span).await;
                     }
 
                     _ => error!("Unexpected message type: {message:?}"),
@@ -390,9 +411,12 @@ impl AccountsState {
                 };
                 if let Message::Clock(message) = message.as_ref() {
                     if (message.number % 60) == 0 {
-                        if let Some(state) = history_tick.lock().await.current() {
-                            state.tick().await.inspect_err(|e| error!("Tick error: {e}")).ok();
-                        }
+                        let span = info_span!("accounts_state.tick", number = message.number);
+                        async {
+                            if let Some(state) = history_tick.lock().await.current() {
+                                state.tick().await.inspect_err(|e| error!("Tick error: {e}")).ok();
+                            }
+                        }.instrument(span).await;
                     }
                 }
             }

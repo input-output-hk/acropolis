@@ -23,7 +23,7 @@ use std::sync::Arc;
 use std::thread::sleep;
 use std::time::Duration;
 use tokio::{join, sync::Mutex};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, info_span, Instrument};
 
 mod pause;
 use pause::PauseType;
@@ -186,106 +186,111 @@ impl MithrilSnapshotFetcher {
         for raw_block in blocks {
             match raw_block {
                 Ok(raw_block) => {
-                    // Decode it
-                    // TODO - can we avoid this and still get the slot & number?
-                    let block = MultiEraBlock::decode(&raw_block)?;
-                    let slot = block.slot();
-                    let number = block.number();
+                    let span = info_span!("mithril_snapshot_fetcher.raw_block");
+                    async {
+                        // Decode it
+                        // TODO - can we avoid this and still get the slot & number?
+                        let block = MultiEraBlock::decode(&raw_block)?;
+                        let slot = block.slot();
+                        let number = block.number();
 
-                    if tracing::enabled!(tracing::Level::DEBUG) {
-                        debug!(number, slot);
-                    }
-
-                    // Skip EBBs
-                    match block {
-                        MultiEraBlock::EpochBoundary(_) => continue,
-                        _ => {}
-                    }
-
-                    // Error and ignore any out of sequence
-                    if number <= last_block_number && last_block_number != 0 {
-                        error!(
-                            number,
-                            last_block_number, "Rewind of block number in Mithril! Skipped..."
-                        );
-                        continue;
-                    }
-                    last_block_number = number;
-
-                    let epoch = slot_to_epoch(slot);
-                    let new_epoch = match last_epoch {
-                        Some(last_epoch) => epoch != last_epoch,
-                        None => true,
-                    };
-                    last_epoch = Some(epoch);
-
-                    if new_epoch {
-                        info!(epoch, number, slot, "New epoch");
-                    }
-
-                    let era = match block.era() {
-                        PallasEra::Byron => Era::Byron,
-                        PallasEra::Shelley => Era::Shelley,
-                        PallasEra::Allegra => Era::Allegra,
-                        PallasEra::Mary => Era::Mary,
-                        PallasEra::Alonzo => Era::Alonzo,
-                        PallasEra::Babbage => Era::Babbage,
-                        _ => Era::Conway,
-                    };
-
-                    let block_info = BlockInfo {
-                        status: BlockStatus::Immutable,
-                        slot,
-                        number,
-                        hash: block.hash().to_vec(),
-                        epoch,
-                        new_epoch,
-                        era,
-                    };
-
-                    // Check pause constraint
-                    if pause_constraint.should_pause(&block_info) {
-                        let description = pause_constraint.get_description();
-                        let next_pause_constraint = pause_constraint.get_next();
-                        let next_description = next_pause_constraint.get_description();
-                        if prompt_pause(description, next_description).await {
-                            info!("Continuing without further pauses...");
-                            pause_constraint = PauseType::NoPause;
-                        } else {
-                            pause_constraint = next_pause_constraint;
+                        if tracing::enabled!(tracing::Level::DEBUG) {
+                            debug!(number, slot);
                         }
+
+                        // Skip EBBs
+                        match block {
+                            MultiEraBlock::EpochBoundary(_) => return Ok::<(), anyhow::Error>(()),
+                            _ => {}
+                        }
+
+                        // Error and ignore any out of sequence
+                        if number <= last_block_number && last_block_number != 0 {
+                            error!(
+                                number,
+                                last_block_number, "Rewind of block number in Mithril! Skipped..."
+                            );
+                            return Ok::<(), anyhow::Error>(());
+                        }
+                        last_block_number = number;
+
+                        let epoch = slot_to_epoch(slot);
+                        let new_epoch = match last_epoch {
+                            Some(last_epoch) => epoch != last_epoch,
+                            None => true,
+                        };
+                        last_epoch = Some(epoch);
+
+                        if new_epoch {
+                            info!(epoch, number, slot, "New epoch");
+                        }
+
+                        let era = match block.era() {
+                            PallasEra::Byron => Era::Byron,
+                            PallasEra::Shelley => Era::Shelley,
+                            PallasEra::Allegra => Era::Allegra,
+                            PallasEra::Mary => Era::Mary,
+                            PallasEra::Alonzo => Era::Alonzo,
+                            PallasEra::Babbage => Era::Babbage,
+                            _ => Era::Conway,
+                        };
+
+                        let block_info = BlockInfo {
+                            status: BlockStatus::Immutable,
+                            slot,
+                            number,
+                            hash: block.hash().to_vec(),
+                            epoch,
+                            new_epoch,
+                            era,
+                        };
+
+                        // Check pause constraint
+                        if pause_constraint.should_pause(&block_info) {
+                            let description = pause_constraint.get_description();
+                            let next_pause_constraint = pause_constraint.get_next();
+                            let next_description = next_pause_constraint.get_description();
+                            if prompt_pause(description, next_description).await {
+                                info!("Continuing without further pauses...");
+                                pause_constraint = PauseType::NoPause;
+                            } else {
+                                pause_constraint = next_pause_constraint;
+                            }
+                        }
+
+                        // Send the block header message
+                        let header = block.header();
+                        let header_message = BlockHeaderMessage {
+                            raw: header.cbor().to_vec(),
+                        };
+
+                        let header_message_enum = Message::Cardano((
+                            block_info.clone(),
+                            CardanoMessage::BlockHeader(header_message),
+                        ));
+                        let header_future = context
+                            .message_bus
+                            .publish(&header_topic, Arc::new(header_message_enum));
+
+                        // Send the block body message
+                        let body_message = BlockBodyMessage { raw: raw_block };
+
+                        let body_message_enum = Message::Cardano((
+                            block_info.clone(),
+                            CardanoMessage::BlockBody(body_message),
+                        ));
+                        let body_future =
+                            context.message_bus.publish(&body_topic, Arc::new(body_message_enum));
+
+                        let (header_result, body_result) = join!(header_future, body_future);
+                        header_result.unwrap_or_else(|e| error!("Failed to publish header: {e}"));
+                        body_result.unwrap_or_else(|e| error!("Failed to publish body: {e}"));
+
+                        last_block_info = Some(block_info);
+                        Ok::<(), anyhow::Error>(())
                     }
-
-                    // Send the block header message
-                    let header = block.header();
-                    let header_message = BlockHeaderMessage {
-                        raw: header.cbor().to_vec(),
-                    };
-
-                    // We use Qos::Bulk to avoid swamping all the queues and blocking downstream
-                    // modules from sending their own messages
-                    let header_message_enum = Message::Cardano((
-                        block_info.clone(),
-                        CardanoMessage::BlockHeader(header_message),
-                    ));
-                    let header_future =
-                        context.message_bus.publish(&header_topic, Arc::new(header_message_enum));
-
-                    // Send the block body message
-                    let body_message = BlockBodyMessage { raw: raw_block };
-
-                    let body_message_enum = Message::Cardano((
-                        block_info.clone(),
-                        CardanoMessage::BlockBody(body_message),
-                    ));
-                    let body_future =
-                        context.message_bus.publish(&body_topic, Arc::new(body_message_enum));
-
-                    let (header_result, body_result) = join!(header_future, body_future);
-                    header_result.unwrap_or_else(|e| error!("Failed to publish header: {e}"));
-                    body_result.unwrap_or_else(|e| error!("Failed to publish body: {e}"));
-
-                    last_block_info = Some(block_info);
+                    .instrument(span)
+                    .await?;
                 }
                 Err(e) => error!("Error reading block: {e}"),
             }
