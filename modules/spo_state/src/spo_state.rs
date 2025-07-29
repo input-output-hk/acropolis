@@ -12,7 +12,7 @@ use caryatid_sdk::{module, Context, Module};
 use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{error, info};
+use tracing::{error, info, info_span, Instrument};
 
 mod state;
 use state::State;
@@ -22,6 +22,8 @@ use rest::{handle_list, handle_spo};
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.certificates";
 const DEFAULT_LIST_TOPIC: (&str, &str) = ("handle-topic-pool-list", "rest.get.pools");
 const DEFAULT_SINGLE_TOPIC: (&str, &str) = ("handle-topic-pool-info", "rest.get.pools.*");
+const DEFAULT_RETIRING_POOLS_TOPIC: (&str, &str) =
+    ("handle-topic-retiring-pools", "rest.get.pools_retiring");
 const DEFAULT_SPO_STATE_TOPIC: &str = "cardano.spo.state";
 
 /// SPO State module
@@ -51,6 +53,11 @@ impl SPOState {
         let handle_single_topic =
             config.get_string(DEFAULT_SINGLE_TOPIC.0).unwrap_or(DEFAULT_SINGLE_TOPIC.1.to_string());
         info!("Creating request handler on '{handle_single_topic}'");
+
+        let handle_retiring_pools_topic = config
+            .get_string(DEFAULT_RETIRING_POOLS_TOPIC.0)
+            .unwrap_or(DEFAULT_RETIRING_POOLS_TOPIC.1.to_string());
+        info!("Creating request handler on '{handle_retiring_pools_topic}'");
 
         let spo_state_topic = config
             .get_string("publish-spo-state-topic")
@@ -103,7 +110,6 @@ impl SPOState {
 
         // Subscribe for certificate messages
         let mut subscription = context.subscribe(&subscribe_topic).await?;
-        let context_subscribe = context.clone();
         let state_subscribe = state.clone();
         context.run(async move {
             loop {
@@ -113,19 +119,14 @@ impl SPOState {
 
                 match message.as_ref() {
                     Message::Cardano((block, CardanoMessage::TxCertificates(tx_certs_msg))) => {
-                        let mut state = state_subscribe.lock().await;
-                        let maybe_message = state
-                            .handle_tx_certs(block, tx_certs_msg)
-                            .inspect_err(|e| error!("Messaging handling error: {e}"))
-                            .ok();
-
-                        if let Some(Some(message)) = maybe_message {
-                            context_subscribe
-                                .message_bus
-                                .publish(&spo_state_topic, message)
-                                .await
-                                .unwrap_or_else(|e| error!("Failed to publish: {e}"));
-                        }
+                        let span = info_span!("spo_state.handle_tx_certs", block = block.number);
+                        async {
+                            let mut state = state_subscribe.lock().await;
+                            state
+                                .handle_tx_certs(block, tx_certs_msg)
+                                .inspect_err(|e| error!("Messaging handling error: {e}"))
+                                .ok();
+                        }.instrument(span).await;
                     }
                     _ => error!("Unexpected message type: {message:?}"),
                 }
@@ -133,11 +134,12 @@ impl SPOState {
         });
 
         // Handle REST requests for full SPO state
-        let state_list = state.clone();
+        let state_list: Arc<Mutex<State>> = state.clone();
         handle_rest(context.clone(), &handle_list_topic, move || {
             handle_list(state_list.clone())
         });
 
+        // Handle REST requests for single SPO state and retiring pools
         let state_single = state.clone();
         handle_rest_with_parameter(context.clone(), &handle_single_topic, move |param| {
             handle_spo(state_single.clone(), param[0].to_string())
@@ -153,13 +155,16 @@ impl SPOState {
                 };
                 if let Message::Clock(message) = message.as_ref() {
                     if (message.number % 60) == 0 {
-                        state_tick
-                            .lock()
-                            .await
-                            .tick()
-                            .await
-                            .inspect_err(|e| error!("Tick error: {e}"))
-                            .ok();
+                        let span = info_span!("spo_state.tick", number = message.number);
+                        async {
+                            state_tick
+                                .lock()
+                                .await
+                                .tick()
+                                .await
+                                .inspect_err(|e| error!("Tick error: {e}"))
+                                .ok();
+                        }.instrument(span).await;
                     }
                 }
             }

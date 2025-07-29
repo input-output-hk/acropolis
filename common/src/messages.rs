@@ -4,6 +4,21 @@
 #![allow(dead_code)]
 
 use crate::ledger_state::SPOState;
+use crate::queries::{
+    accounts::{AccountsStateQuery, AccountsStateQueryResponse},
+    addresses::{AddressStateQuery, AddressStateQueryResponse},
+    assets::{AssetsStateQuery, AssetsStateQueryResponse},
+    blocks::{BlocksStateQuery, BlocksStateQueryResponse},
+    epochs::{EpochsStateQuery, EpochsStateQueryResponse},
+    governance::{GovernanceStateQuery, GovernanceStateQueryResponse},
+    ledger::{LedgerStateQuery, LedgerStateQueryResponse},
+    mempool::{MempoolStateQuery, MempoolStateQueryResponse},
+    metadata::{MetadataStateQuery, MetadataStateQueryResponse},
+    network::{NetworkStateQuery, NetworkStateQueryResponse},
+    pools::{PoolsStateQuery, PoolsStateQueryResponse},
+    scripts::{ScriptsStateQuery, ScriptsStateQueryResponse},
+    transactions::{TransactionsStateQuery, TransactionsStateQueryResponse},
+};
 
 use crate::types::*;
 
@@ -228,7 +243,8 @@ pub enum SnapshotStateMessage {
 // === Global message enum ===
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub enum Message {
-    #[default] None, // Just so we have a simple default
+    #[default]
+    None, // Just so we have a simple default
 
     // Generic messages, get of jail free cards
     String(String),          // Simple string
@@ -244,6 +260,10 @@ pub enum Message {
 
     // Initialize state from a snapshot
     Snapshot(SnapshotMessage),
+
+    // State query messages
+    StateQuery(StateQuery),
+    StateQueryResponse(StateQueryResponse),
 }
 
 // Casts from specific Caryatid messages
@@ -274,4 +294,38 @@ impl GetRESTResponse for Message {
             None
         }
     }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum StateQuery {
+    Accounts(AccountsStateQuery),
+    Addresses(AddressStateQuery),
+    Assets(AssetsStateQuery),
+    Blocks(BlocksStateQuery),
+    Epochs(EpochsStateQuery),
+    Governance(GovernanceStateQuery),
+    Ledger(LedgerStateQuery),
+    Mempool(MempoolStateQuery),
+    Metadata(MetadataStateQuery),
+    Network(NetworkStateQuery),
+    Pools(PoolsStateQuery),
+    Scripts(ScriptsStateQuery),
+    Transactions(TransactionsStateQuery),
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum StateQueryResponse {
+    Accounts(AccountsStateQueryResponse),
+    Addresses(AddressStateQueryResponse),
+    Assets(AssetsStateQueryResponse),
+    Blocks(BlocksStateQueryResponse),
+    Epochs(EpochsStateQueryResponse),
+    Governance(GovernanceStateQueryResponse),
+    Ledger(LedgerStateQueryResponse),
+    Mempool(MempoolStateQueryResponse),
+    Metadata(MetadataStateQueryResponse),
+    Network(NetworkStateQueryResponse),
+    Pools(PoolsStateQueryResponse),
+    Scripts(ScriptsStateQueryResponse),
+    Transactions(TransactionsStateQueryResponse),
 }

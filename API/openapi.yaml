@@ -468,6 +468,36 @@ paths:
               schema:
                 type: string
                 example: "Internal server error while retrieving stake pool information"
+  /pools/retiring:
+    get:
+      tags:
+        - Pools
+      summary: List of stake pools retiring in the upcoming epochs
+      description: Return the pool information content
+      parameters:
+      responses:
+        "200":
+          description: JSON object containing list of stake pools retiring in the upcoming epochs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PoolRetirement'
+              example:
+                - pool_id: "pool19u64770wqp6s95gkajc8udheske5e6ljmpq33awxk326zjaza0q"
+                  epoch: 225
+                - pool_id: "pool1dvla4zq98hpvacv20snndupjrqhuc79zl6gjap565nku6et5zdx"
+                  epoch: 215
+                - pool_id: "pool1wvccajt4eugjtf3k0ja3exjqdj7t8egsujwhcw4tzj4rzsxzw5w"
+                  epoch: 231
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Internal server error while retrieving retiring pools"
   /utxos/{tx_hash:index}:
     get:
       tags:
@@ -541,6 +571,26 @@ paths:
               schema:
                 type: string
                 example: "Internal server error while retrieving current epoch"
+  /epoch/parameters:
+    get:
+      tags: 
+        - Epochs
+      summary: Current protocol parameters
+      description: Returns the current protocol parameters by era.
+      responses: 
+        "200":
+          description: JSON object containing protocol parameters and the epoch they were enacted.
+          content:
+            application/json:
+                schema:
+                  $ref: '#/components/schemas/ProtocolParameters'
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                type: string
+                example: "Internal server error while retrieving parameters for current epoch"
   /epochs/{epoch_number}:
     get:
       tags:
@@ -599,6 +649,48 @@ paths:
               schema:
                 type: string
                 example: "Historical epoch storage not enabled"
+  /epochs/{epoch_number}/parameters:
+    get:
+      tags: 
+        - Epochs
+      summary: Historical protocol parameters
+      description: Returns the protocol active at the specified epoch.
+      parameters:
+        - name: epoch_number
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: uint64
+          description: The epoch number to query.
+      responses: 
+        "200":
+          description: JSON object containing protocol parameters and the epoch they were enacted.
+          content:
+            application/json:
+                schema:
+                  $ref: '#/components/schemas/ProtocolParameters'
+        "400":
+          description: Invalid epoch number
+          content:
+            application/json:
+              schema:
+                type: string
+                example: "Invalid epoch number: -1"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                type: string
+                example: "Internal server error while retrieving parameters for epoch 8"
+        "501":
+          description: Not enabled
+          content:
+            application/json:
+              schema:
+                type: string
+                example: "Historical parameter storage not enabled"
 components:
   schemas:
     DelegatedDRep:
@@ -856,6 +948,20 @@ components:
         - reward_account
         - pool_owners
         - relays
+    PoolRetirement:
+      type: object
+      description: Pool retirement information
+      properties:
+        pool_id:
+          type: string
+          description: Bech32-encoded pool ID
+        epoch:
+          type: integer
+          format: uint64
+          description: Epoch number when the pool is retired
+      required:
+        - pool_id
+        - epoch
     UTxO:
       type: object
       description: Basic UTxO information including address and value.
@@ -908,3 +1014,583 @@ components:
         - total_blocks
         - total_fees
         - vrf_vkey_hashes
+    ProtocolParameters:
+      type: object
+      description: Protocol parameters along with the epoch they became effective
+      properties:
+        active_epoch:
+          type: integer
+          format: uint64
+          description: Epoch in which these parameters became active
+        params:
+          type: object
+          description: Protocol parameters split by Cardano era
+          properties:
+            byron:
+              type: object
+              description: Protocol parameters from the Byron era
+              nullable: true
+              properties:
+                block_version_data:
+                  type: object
+                  description: Byron era block version parameters defining size limits, fees, and thresholds
+                  properties:
+                    script_version:
+                      type: integer
+                      format: uint16
+                      description: Plutus script version used in the Byron era
+                    heavy_del_thd:
+                      type: integer
+                      format: uint64
+                      description: Heavy delegation threshold
+                    max_block_size:
+                      type: integer
+                      format: uint64
+                      description: Maximum block size
+                    max_header_size:
+                      type: integer
+                      format: uint64
+                      description: Maximum block header size
+                    max_proposal_size:
+                      type: integer
+                      format: uint64
+                      description: Maximum proposal update size
+                    max_tx_size:
+                      type: integer
+                      format: uint64
+                      description: Maximum transaction size
+                    mpc_thd:
+                      type: integer
+                      format: uint64
+                      description: Multi-party computation (MPC) threshold
+                    slot_duration:
+                      type: integer
+                      format: uint64
+                      description: Slot duration
+                    softfork_rule:
+                      type: object
+                      description: Softfork adoption threshold configuration
+                      properties:
+                        init_thd:
+                          type: integer
+                          format: uint64
+                          description: Initial threshold for softfork adoption
+                        min_thd:
+                          type: integer
+                          format: uint64
+                          description: Minimum threshold for softfork adoption
+                        thd_decrement:
+                          type: integer
+                          format: uint64
+                          description: Decrement step for the softfork threshold
+                    tx_fee_policy:
+                      type: object
+                      description: Transaction fee calculation policy
+                      properties:
+                        multiplier:
+                          type: integer
+                          format: uint64
+                          description: Multiplier coefficient in transaction fee calculation
+                        summand:
+                          type: integer
+                          format: uint64
+                          description: Constant summand in transaction fee calculation
+                    unlock_stake_epoch:
+                      type: integer
+                      format: uint64
+                      description: Epoch after which locked stake becomes available
+                    update_implicit:
+                      type: integer
+                      format: uint64
+                      description: Implicit period in slots for update proposals
+                    update_proposal_thd:
+                      type: integer
+                      format: uint64
+                      description: Threshold required to submit an update proposal
+                    update_vote_thd:
+                      type: integer
+                      format: uint64
+                      description: Threshold required to vote on an update proposal
+                fts_seed:
+                  type: string
+                  description: Hex-encoded FTS seed used in Byron consensus
+                protocol_consts:
+                  type: object
+                  description: Byron protocol constants
+                  properties:
+                    k:
+                      type: integer
+                      description: Security parameter k, defining the maximum number of blocks that can be rolled back
+                    protocol_magic:
+                      type: integer
+                      description: Protocol magic number identifying the network
+                    vss_max_ttl:
+                      type: integer
+                      description: Maximum ttl for VSS certificates in epochs
+                      nullable: true
+                    vss_min_ttl:
+                      type: integer
+                      description: Minimum ttl for VSS certificates in epochs
+                      nullable: true
+                start_time:
+                  type: integer
+                  format: uint64
+                  description: Genesis start time (UNIX timestamp)
+            shelley:
+              type: object
+              description: Protocol parameters from the Shelley era
+              nullable: true
+              properties:
+                active_slots_coeff:
+                  type: number
+                  format: float
+                  description: The proportion of slots in which blocks should be issued
+                epoch_length:
+                  type: integer
+                  description: Number of slots in an epoch
+                max_kes_evolutions:
+                  type: integer
+                  description: The maximum number of time a KES key can be evolved before a pool operator must create a new operational certificate
+                max_lovelace_supply:
+                  type: integer
+                  format: uint64
+                  description: The total number of lovelace in the system
+                network_id:
+                  type: string
+                  description: Network identifier string
+                  enum:
+                    - mainnet
+                    - testnet
+                network_magic:
+                  type: integer
+                  description: Network identifier integer
+                protocol_params:
+                  type: object
+                  description: Protocol parameter details for Shelley
+                  properties:
+                    protocol_version:
+                      type: object
+                      description: Protocol version with major and minor numbers
+                      properties:
+                        major:
+                          type: integer
+                          format: uint64
+                          description: Accepted protocol major version
+                        minor:
+                          type: integer
+                          format: uint64
+                          description: Accepted protocol minor version
+                      required:
+                        - major
+                        - minor
+                    max_tx_size:
+                      type: integer
+                      description: Maximum transaction size
+                    max_block_body_size:
+                      type: integer
+                      description: Maximum block body size
+                    max_block_header_size:
+                      type: integer
+                      description: Maximum block header size
+                    key_deposit:
+                      type: integer
+                      format: uint64
+                      description: The amount of a key registration deposit in Lovelaces
+                    min_utxo_value:
+                      type: integer
+                      format: uint64
+                      description: Minimum UTXO value. Use `lovelace_per_utxo_word` for Alonzo and later eras
+                      deprecated: true
+                    minfee_a:
+                      type: integer
+                      description: The linear factor for the minimum fee calculation
+                    minfee_b:
+                      type: integer
+                      description: The constant factor for the minimum fee calculation
+                    pool_deposit:
+                      type: integer
+                      format: uint64
+                      description: The amount of a pool registration deposit in Lovelaces
+                    stake_pool_target_num:
+                      type: integer
+                      description: Desired number of pools, n_opt (k)
+                    min_pool_cost:
+                      type: integer
+                      format: uint64
+                      description: Minimum fixed pool fee
+                    pool_retire_max_epoch:
+                      type: integer
+                      format: uint64
+                      description: Epoch bound on pool retirement
+                    extra_entropy:
+                      type: object
+                      description: Extra entropy nonce used in protocol randomness
+                      properties:
+                        tag:
+                          type: string
+                          enum:
+                            - NeutralNonce
+                            - Nonce
+                          description: Indicates whether the nonce contains additional entropy
+                        hash:
+                          type: string
+                          format: byte
+                          nullable: true
+                          description: Hex-encoded hash associated with the nonce
+                    decentralisation_param:
+                      type: number
+                      format: float
+                      description: Percentage of blocks produced by federated nodes
+                    monetary_expansion:
+                      type: number
+                      format: float
+                      description: Monetary expansion rate (rho)
+                    treasury_cut:
+                      type: number
+                      format: float
+                      description: Fraction of rewards allocated to treasury (tau)
+                    pool_pledge_influence:
+                      type: number
+                      format: float
+                      description: Influence of pool pledge on rewards (a0)
+                security_param:
+                  type: integer
+                  description: Maximum rollback depth in blocks
+                slot_length:
+                  type: integer
+                  description: Duration of a slot in seconds
+                slots_per_kes_period:
+                  type: integer
+                  description: Number of slots per KES period
+                system_start:
+                  type: integer
+                  format: uint64
+                  description: System start timestamp (UNIX)
+                update_quorum:
+                  type: integer
+                  description: Required number of votes for protocol updates
+            alonzo:
+              type: object
+              description: Protocol parameters from the Alonzo era
+              nullable: true
+              properties:
+                lovelace_per_utxo_word:
+                  type: integer
+                  format: uint64
+                  description: Lovelace per UTxO word
+                execution_prices:
+                  type: object
+                  description: Cost per execution unit for Plutus scripts
+                  properties:
+                    mem_price:
+                      type: number
+                      format: float
+                      description: The cost per word of script memory usage
+                    step_price:
+                      type: number
+                      format: float
+                      description: The cost of script execution step usage
+                    max_tx_ex_units:
+                      type: object
+                      description: "Execution unit limits specifying memory and computational steps"
+                      properties:
+                        mem:
+                          type: integer
+                          format: uint64
+                          description: Memory units
+                        steps:
+                          type: integer
+                          format: uint64
+                          description: Computation steps
+                      required:
+                        - mem
+                        - steps
+                    max_block_ex_units:
+                      type: object
+                      description: "Execution unit limits specifying memory and computational steps"
+                      properties:
+                        mem:
+                          type: integer
+                          format: uint64
+                          description: Memory units
+                        steps:
+                          type: integer
+                          format: uint64
+                          description: Computation steps
+                      required:
+                        - mem
+                        - steps
+                max_value_size:
+                  type: integer
+                  description: Maximum size of a transaction output Value, including Lovelaces and all multi-assets
+                collateral_percentage:
+                  type: integer
+                  description: The percentage of the transactions fee which must be provided as collateral when including non-native scripts
+                max_collateral_inputs:
+                  type: integer
+                  description: The maximum number of collateral inputs allowed in a transaction
+                plutus_v1_cost_model:
+                  type: array
+                  description: Cost model coefficients for Plutus V1 scripts, in canonical order
+                  nullable: true
+                  items:
+                    type: integer
+                    format: int64
+                plutus_v2_cost_model:
+                  type: array
+                  description: Cost model coefficients for Plutus V2 scripts, in canonical order
+                  nullable: true
+                  items:
+                    type: integer
+                    format: int64
+            conway:
+              type: object
+              description: Protocol parameters from the Conway era
+              nullable: true
+              properties:
+                pool_voting_thresholds:
+                  type: object
+                  description: Pool voting thresholds for governance actions
+                  properties:
+                    motion_no_confidence:
+                      type: number
+                      format: float
+                      description: Pool voting threshold for motion of no-confidence
+                    committee_normal:
+                      type: number
+                      format: float
+                      description: Pool voting threshold for new committee/threshold (normal state)
+                    committee_no_confidence:
+                      type: number
+                      format: float
+                      description: Pool voting threshold for new committee/threshold (state of no-confidence)
+                    hard_fork_initiation:
+                      type: number
+                      format: float
+                      description: Pool voting threshold for hard-fork initiation
+                    security_voting_threshold:
+                      type: number
+                      format: float
+                      description: Pool voting threshold for security-related governance votes
+                d_rep_voting_thresholds:
+                  type: object
+                  description: DRep voting thresholds for governance actions
+                  properties:
+                    motion_no_confidence:
+                      type: number
+                      format: float
+                      description: DRep voting threshold for motion of no-confidence
+                    committee_normal:
+                      type: number
+                      format: float
+                      description: DRep voting threshold for new committee/threshold (normal state)
+                    committee_no_confidence:
+                      type: number
+                      format: float
+                      description: DRep voting threshold for new committee/threshold (state of no-confidence)
+                    update_constitution:
+                      type: number
+                      format: float
+                      description: DRep voting threshold for updating on-chain constitution
+                    hard_fork_initiation:
+                      type: number
+                      format: float
+                      description: DRep voting threshold for hardfork initiation
+                    pp_network_group:
+                      type: number
+                      format: float
+                      description: DRep voting threshold for updating network protocol parameters
+                    pp_economic_group:
+                      type: number
+                      format: float
+                      description: DRep voting threshold for updating economic protocol parameters
+                    pp_technical_group:
+                      type: number
+                      format: float
+                      description: DRep voting threshold for updating technical protocol parameters
+                    pp_governance_group:
+                      type: number
+                      format: float
+                      description: DRep voting threshold for updating governance protocol parameters
+                    treasury_withdrawal:
+                      type: number
+                      format: float
+                      description: DRep voting threshold for approving treasury withdrawals
+                committee_min_size:
+                  type: integer
+                  format: uint64
+                  description: Minimum constitutional committee size
+                committee_max_term_length:
+                  type: integer
+                  description: Maximum constitutional committee term length in epochs
+                gov_action_lifetime:
+                  type: integer
+                  description: Number of epochs a governance action remains active
+                gov_action_deposit:
+                  type: integer
+                  format: uint64
+                  description: Deposit required to propose a governance action in Lovelaces
+                d_rep_deposit:
+                  type: integer
+                  format: uint64
+                  description: Deposit required to register as a DRep in Lovelaces
+                d_rep_activity:
+                  type: integer
+                  description: Number of epochs before an inactive DRep is no longer counted toward active voting stake
+                min_fee_ref_script_cost_per_byte:
+                  type: number
+                  format: float
+                  description: Minimum fee for reference script storage
+                plutus_v3_cost_model:
+                  type: array
+                  description: Cost model coefficients for Plutus V3 scripts, in canonical order
+                  nullable: true
+                  items:
+                    type: integer
+                    format: int64
+                constitution:
+                  type: object
+                  description: Current constitution reference and optional guardrail script
+                  properties:
+                    anchor:
+                      $ref: '#/components/schemas/Anchor'
+                    guardrail_script:
+                      type: string
+                      description: Hex-encoded Plutus script hash that enforces guardrails on governance actions
+                      nullable: true
+                committee:
+                  type: object
+                  description: Current constitutional committee members and voting threshold as defined in CIP-1694.
+                  properties:
+                    members:
+                      type: object
+                      description: Mapping of constitutional committee member identifiers to their voting power
+                      additionalProperties:
+                        type: integer
+                        format: uint64
+                    threshold:
+                      type: number
+                      format: float
+                      description: Constitutional committee voting threshold for governance actions
+      example:
+        active_epoch: 541
+        params:
+          byron:
+            block_version_data:
+              script_version: 0
+              heavy_del_thd: 300000000000
+              max_block_size: 2000000
+              max_header_size: 2000000
+              max_proposal_size: 700
+              max_tx_size: 4096
+              mpc_thd: 20000000000000
+              slot_duration: 20000
+              softfork_rule:
+                init_thd: 900000000000000
+                min_thd: 600000000000000
+                thd_decrement: 50000000000000
+              tx_fee_policy:
+                multiplier: 43946000000
+                summand: 155381000000000
+              unlock_stake_epoch: 18446744073709551615
+              update_implicit: 10000
+              update_proposal_thd: 100000000000000
+              update_vote_thd: 1000000000000
+            fts_seed: "76617361206f7061736120736b6f766f726f64612047677572646120626f726f64612070726f766f6461"
+            protocol_consts:
+              k: 2160
+              protocol_magic: 764824073
+              vss_max_ttl: 6
+              vss_min_ttl: 2
+            start_time: 1506203091
+          shelley:
+            active_slots_coeff: 0.05
+            epoch_length: 432000
+            max_kes_evolutions: 62
+            max_lovelace_supply: 45000000000000000
+            network_id: "mainnet"
+            network_magic: 764824073
+            protocol_params:
+              protocol_version:
+                minor: 0
+                major: 2
+              max_tx_size: 16384
+              max_block_body_size: 65536
+              max_block_header_size: 1100
+              key_deposit: 2000000
+              min_utxo_value: 1000000
+              minfee_a: 44
+              minfee_b: 155381
+              pool_deposit: 500000000
+              stake_pool_target_num: 150
+              min_pool_cost: 340000000
+              pool_retire_max_epoch: 18
+              extra_entropy:
+                tag: "NeutralNonce"
+                hash: null
+              decentralisation_param: 1.0
+              monetary_expansion: 0.003000000026077032
+              treasury_cut: 0.20000000298023224
+              pool_pledge_influence: 0.30000001192092896
+            security_param: 2160
+            slot_length: 1
+            slots_per_kes_period: 129600
+            system_start: 1506203091
+            update_quorum: 5
+          alonzo:
+            lovelace_per_utxo_word: 34482
+            execution_prices:
+              mem_price: 0.0577
+              step_price: 0.0000721
+            max_tx_ex_units:
+              mem: 10000000
+              steps: 10000000000
+            max_block_ex_units:
+              mem: 50000000
+              steps: 40000000000
+            max_value_size: 5000
+            collateral_percentage: 150
+            max_collateral_inputs: 3
+            plutus_v1_cost_model: [0, 82363, 29773, 32, 100, 150000, 148000, 2477736, 497, 100, 150000, 248, 1, 32, 100, 100, 425507, 247, 150000, 112536, 4, 32, 1, 29773, 150000, 179690, 1, 32, 0, 425507, 150000, 150000, 32, 150000, 32, 0, 1000, 4, 150000, 145276, 197209, 1, 1, 2477736, 32, 150000, 148000, 1, 29773, 8, 100, 0, 150000, 29773, 0, 1000, 32, 103599, 150000, 0, 248, 425507, 150000, 150000, 0, 118, 4, 1, 1, 32, 100, 32, 150000, 150000, 1, 1, 150000, 0, 4, 148000, 1000, 32, 1, 150000, 0, 150000, 1, 29175, 1326, 3345831, 150000, 150000, 29773, 150000, 150000, 1, 118, 32, 1, 1000, 1, 1, 32, 1, 148000, 150000, 136542, 1, 1, 103599, 32, 1, 1000, 1, 0, 0, 1, 150000, 150000, 8, 150000, 150000, 150000, 1366, 32, 150000, 150000, 32, 0, 10000, 32, 29175, 32, 1, 1, 1, 197209, 32, 118, 621, 1, 0, 1, 11218, 100, 396231, 1000, 61516, 100, 1, 5000, 425507, 1, 150000, 32, 29773, 118, 32, 32, 150000, 29773, 100, 0, 150000, 32, 1]
+            plutus_v2_cost_model: null
+          conway:
+            pool_voting_thresholds:
+              motion_no_confidence: 0.51
+              committee_normal: 0.51
+              committee_no_confidence: 0.51
+              hard_fork_initiation: 0.51
+              security_voting_threshold: 0.51
+            d_rep_voting_thresholds:
+              motion_no_confidence: 0.67
+              committee_normal: 0.67
+              committee_no_confidence: 0.67
+              update_constitution: 0.75
+              hard_fork_initiation: 0.6
+              pp_network_group: 0.67
+              pp_economic_group: 0.67
+              pp_technical_group: 0.67
+              pp_governance_group: 0.75
+              treasury_withdrawal: 0.67
+            committee_min_size: 7
+            committee_max_term_length: 146
+            gov_action_lifetime: 6
+            gov_action_deposit: 100000000000
+            d_rep_deposit: 500000000
+            d_rep_activity: 20
+            min_fee_ref_script_cost_per_byte: 15.0
+            plutus_v3_cost_model: [100788, 420, 1, 1, 1000, 173, 0, 1, 1000, 59957, 4, 1, 11183, 32, 201305, 8356, 4, 16000, 100, 16000, 100, 16000, 100, 16000, 100, 16000, 100, 100, 100, 16000, 100, 94375, 32, 132994, 32, 61462, 4, 72010, 178, 0, 1, 22151, 32, 91189, 769, 4, 2, 85848, 123203, 7305, -900, 1716, 549, 57, 85848, 0, 1, 1, 1000, 42921, 4, 2, 24548, 29498, 38, 1, 898148, 27279, 1, 51775, 558, 1, 39184, 1000, 60594, 1, 141895, 32, 83150, 32, 15299, 32, 76049, 1, 13169, 4, 22100, 10, 28999, 74, 1, 28999, 74, 1, 43285, 552, 1, 44749, 541, 1, 33852, 32, 68246, 32, 72362, 32, 7243, 32, 7391, 32, 11546, 32, 85848, 123203, 7305, -900, 1716, 549, 57, 85848, 0, 1, 90434, 519, 0, 1, 74433, 32, 85848, 123203, 7305, -900, 1716, 549, 57, 85848, 0, 1, 1, 85848, 123203, 7305, -900, 1716, 549, 57, 85848, 0, 1, 955506, 213312, 0, 2, 270652, 22588, 4, 1457325, 64566, 4, 20467, 1, 4, 0, 141992, 32, 100788, 420, 1, 1, 81663, 32, 59498, 32, 20142, 32, 24588, 32, 20744, 32, 25933, 32, 24623, 32, 43053543, 10, 53384111, 14333, 10, 43574283, 26308, 10, 16000, 100, 16000, 100, 962335, 18, 2780678, 6, 442008, 1, 52538055, 3756, 18, 267929, 18, 76433006, 8868, 18, 52948122, 18, 1995836, 36, 3227919, 12, 901022, 1, 166917843, 4307, 36, 284546, 36, 158221314, 26549, 36, 74698472, 36, 333849714, 1, 254006273, 72, 2174038, 72, 2261318, 64571, 4, 207616, 8310, 4, 1293828, 28716, 63, 0, 1, 1006041, 43623, 251, 0, 1, 100181, 726, 719, 0, 1, 100181, 726, 719, 0, 1, 100181, 726, 719, 0, 1, 107878, 680, 0, 1, 95336, 1, 281145, 18848, 0, 1, 180194, 159, 1, 1, 158519, 8942, 0, 1, 159378, 8813, 0, 1, 107490, 3298, 1, 106057, 655, 1, 1964219, 24520, 3]
+            constitution:
+                anchor:
+                  url: "ipfs://bafkreiazhhawe7sjwuthcfgl3mmv2swec7sukvclu3oli7qdyz4uhhuvmy"
+                  data_hash: "2a61e2f4b63442978140c77a70daab3961b22b12b63b13949a390c097214d1c5"
+                guardrail_script: "fa24fb305126805cf2164c161d852a0e7330cf988f1fe558cf7d4a64"
+            committee:
+              members:
+                scriptHash-84aebcfd3e00d0f87af918fc4b5e00135f407e379893df7e7d392c6a: 580
+                scriptHash-f0dc2c00d92a45521267be2d5de1c485f6f9d14466d7e16062897cf7: 580
+                scriptHash-df0e83bde65416dade5b1f97e7f115cc1ff999550ad968850783fe50: 580
+                scriptHash-e8165b3328027ee0d74b1f07298cb092fd99aa7697a1436f5997f625: 580
+                scriptHash-b6012034ba0a7e4afbbf2c7a1432f8824aee5299a48e38e41a952686: 580
+                scriptHash-ce8b37a72b178a37bbd3236daa7b2c158c9d3604e7aa667e6c6004b7: 580
+                scriptHash-349e55f83e9af24813e6cb368df6a80d38951b2a334dfcdf26815558: 580
+              threshold: 0.6666666666666666

@@ -896,6 +896,7 @@ pub struct ByronParams {
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum NetworkId {
     Testnet,
     Mainnet,
@@ -1047,14 +1048,14 @@ pub struct ProtocolParamUpdate {
     pub minfee_refscript_cost_per_byte: Option<RationalNumber>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, PartialEq, Deserialize, Debug, Clone)]
 pub struct Constitution {
     pub anchor: Anchor,
     pub guardrail_script: Option<ScriptHash>,
 }
 
 #[serde_as]
-#[derive(Serialize, Debug, Deserialize, Clone, PartialEq)]
+#[derive(Serialize, PartialEq, Debug, Deserialize, Clone)]
 pub struct Committee {
     #[serde_as(as = "Vec<(_, _)>")]
     pub members: HashMap<CommitteeCredential, u64>,

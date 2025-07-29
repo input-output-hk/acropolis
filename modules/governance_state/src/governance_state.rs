@@ -4,9 +4,12 @@
 use acropolis_common::{
     messages::{
         CardanoMessage, DRepStakeDistributionMessage, GovernanceProceduresMessage, Message,
-        ProtocolParamsMessage, SPOStakeDistributionMessage,
+        ProtocolParamsMessage, SPOStakeDistributionMessage, StateQuery, StateQueryResponse,
     },
-    rest_helper::{handle_rest, handle_rest_with_parameter},
+    queries::governance::{
+        GovernanceStateQuery, GovernanceStateQueryResponse, ProposalInfo, ProposalVotes,
+        ProposalsList,
+    },
     BlockInfo,
 };
 use anyhow::{anyhow, Result};
@@ -14,21 +17,14 @@ use caryatid_sdk::{message_bus::Subscription, module, Context, Module};
 use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{error, info};
+use tracing::{error, info, info_span, Instrument};
 
-mod rest;
-use rest::{handle_list, handle_proposal, handle_votes};
 mod state;
 mod voting_state;
 use state::State;
 use voting_state::VotingRegistrationState;
 
 const DEFAULT_SUBSCRIBE_TOPIC: (&str, &str) = ("subscribe-topic", "cardano.governance");
-const DEFAULT_LIST_TOPIC: (&str, &str) = ("handle-topic-proposal-list", "rest.get.governance");
-const DEFAULT_PROPOSAL_TOPIC: (&str, &str) =
-    ("handle-topic-proposal-info", "rest.get.governance.*");
-const DEFAULT_VOTES_TOPIC: (&str, &str) =
-    ("handle-topic-proposal-votes", "rest.get.governance.*.votes");
 const DEFAULT_DREP_DISTRIBUTION_TOPIC: (&str, &str) =
     ("stake-drep-distribution-topic", "cardano.drep.distribution");
 const DEFAULT_SPO_DISTRIBUTION_TOPIC: (&str, &str) =
@@ -47,9 +43,6 @@ pub struct GovernanceState;
 
 pub struct GovernanceStateConfig {
     subscribe_topic: String,
-    handle_topic_list: String,
-    handle_topic_proposal: String,
-    handle_topic_proposal_votes: String,
     drep_distribution_topic: String,
     spo_distribution_topic: String,
     protocol_parameters_topic: String,
@@ -66,9 +59,6 @@ impl GovernanceStateConfig {
     pub fn new(config: &Arc<Config>) -> Arc<Self> {
         Arc::new(Self {
             subscribe_topic: Self::conf(config, DEFAULT_SUBSCRIBE_TOPIC),
-            handle_topic_list: Self::conf(config, DEFAULT_LIST_TOPIC),
-            handle_topic_proposal: Self::conf(config, DEFAULT_PROPOSAL_TOPIC),
-            handle_topic_proposal_votes: Self::conf(config, DEFAULT_VOTES_TOPIC),
             drep_distribution_topic: Self::conf(config, DEFAULT_DREP_DISTRIBUTION_TOPIC),
             spo_distribution_topic: Self::conf(config, DEFAULT_SPO_DISTRIBUTION_TOPIC),
             protocol_parameters_topic: Self::conf(config, DEFAULT_PROTOCOL_PARAMETERS_TOPIC),
@@ -153,92 +143,129 @@ impl GovernanceState {
                 };
                 if let Message::Clock(message) = message.as_ref() {
                     if (message.number % 60) == 0 {
-                        state_tick
-                            .lock()
-                            .await
-                            .tick()
-                            .await
-                            .inspect_err(|e| error!("Tick error: {e}"))
-                            .ok();
+                        let span = info_span!("governance_state.tick", number = message.number);
+                        async {
+                            state_tick
+                                .lock()
+                                .await
+                                .tick()
+                                .await
+                                .inspect_err(|e| error!("Tick error: {e}"))
+                                .ok();
+                        }.instrument(span).await;
                     }
                 }
             }
         });
 
-        let state_list = state.clone();
-        handle_rest(context.clone(), &config.handle_topic_list, move || {
-            handle_list(state_list.clone())
+        let query_state = state.clone();
+        context.handle("governance-state", move |message| {
+            let state_handle = query_state.clone();
+            async move {
+                let Message::StateQuery(StateQuery::Governance(query)) = message.as_ref() else {
+                    return Arc::new(Message::StateQueryResponse(StateQueryResponse::Governance(
+                        GovernanceStateQueryResponse::Error(
+                            "Invalid message for governance-state".into(),
+                        ),
+                    )));
+                };
+
+                let locked = state_handle.lock().await;
+
+                let response = match query {
+                    GovernanceStateQuery::GetProposalsList => {
+                        let proposals = locked.list_proposals();
+                        GovernanceStateQueryResponse::ProposalsList(ProposalsList { proposals })
+                    }
+
+                    GovernanceStateQuery::GetProposalInfo { proposal } => {
+                        match locked.get_proposal(proposal) {
+                            Some(proc) => {
+                                GovernanceStateQueryResponse::ProposalInfo(ProposalInfo {
+                                    procedure: proc.clone(),
+                                })
+                            }
+                            None => GovernanceStateQueryResponse::NotFound,
+                        }
+                    }
+                    GovernanceStateQuery::GetProposalVotes { proposal } => {
+                        match locked.get_proposal_votes(&proposal) {
+                            Ok(votes) => {
+                                GovernanceStateQueryResponse::ProposalVotes(ProposalVotes { votes })
+                            }
+                            Err(_) => GovernanceStateQueryResponse::NotFound,
+                        }
+                    }
+                    _ => GovernanceStateQueryResponse::Error(format!(
+                        "Unimplemented governance query: {query:?}"
+                    )),
+                };
+
+                Arc::new(Message::StateQueryResponse(StateQueryResponse::Governance(
+                    response,
+                )))
+            }
         });
-
-        let state_proposal = state.clone();
-        handle_rest_with_parameter(
-            context.clone(),
-            &config.handle_topic_proposal,
-            move |param| handle_proposal(state_proposal.clone(), param[0].to_string()),
-        );
-
-        let state_votes = state.clone();
-        handle_rest_with_parameter(
-            context.clone(),
-            &config.handle_topic_proposal_votes,
-            move |param| handle_votes(state_votes.clone(), param[0].to_string()),
-        );
 
         loop {
             let (blk_g, gov_procs) = Self::read_governance(&mut governance_s).await?;
 
-            if blk_g.new_epoch {
-                // New governance from new epoch means that we must prepare all governance
-                // outcome for the previous epoch.
-                let mut state = state.lock().await;
-                let governance_outcomes = state.process_new_epoch(&blk_g)?;
-                state.send(&blk_g, governance_outcomes).await?;
-            }
-
-            {
-                state.lock().await.handle_governance(&blk_g, &gov_procs).await?;
-            }
-
-            if blk_g.new_epoch {
-                let (blk_p, params) = Self::read_parameters(&mut protocol_s).await?;
-                if blk_g != blk_p {
-                    error!(
-                        "Governance {blk_g:?} and protocol parameters {blk_p:?} are out of sync"
-                    );
+            let span = info_span!("governance_state.handle", block = blk_g.number);
+            async {
+                if blk_g.new_epoch {
+                    // New governance from new epoch means that we must prepare all governance
+                    // outcome for the previous epoch.
+                    let mut state = state.lock().await;
+                    let governance_outcomes = state.process_new_epoch(&blk_g)?;
+                    state.send(&blk_g, governance_outcomes).await?;
                 }
 
                 {
-                    state.lock().await.handle_protocol_parameters(&params).await?;
+                    state.lock().await.handle_governance(&blk_g, &gov_procs).await?;
                 }
 
-                if blk_g.epoch > 0 {
-                    // TODO: make sync more stable
-                    let (blk_drep, d_drep) = Self::read_drep(&mut drep_s).await?;
-                    if blk_g != blk_drep {
-                        error!("Governance {blk_g:?} and DRep distribution {blk_drep:?} are out of sync");
-                    }
-
-                    let (blk_spo, d_spo) = Self::read_spo(&mut spo_s).await?;
-                    if blk_g != blk_spo {
+                if blk_g.new_epoch {
+                    let (blk_p, params) = Self::read_parameters(&mut protocol_s).await?;
+                    if blk_g != blk_p {
                         error!(
-                            "Governance {blk_g:?} and SPO distribution {blk_spo:?} are out of sync"
+                            "Governance {blk_g:?} and protocol parameters {blk_p:?} are out of sync"
                         );
                     }
 
-                    if blk_spo.epoch != d_spo.epoch + 1 {
-                        error!(
-                            "SPO distibution {blk_spo:?} != SPO epoch + 1 ({})",
-                            d_spo.epoch
-                        );
+                    {
+                        state.lock().await.handle_protocol_parameters(&params).await?;
                     }
 
-                    state.lock().await.handle_drep_stake(&d_drep, &d_spo).await?
-                }
+                    if blk_g.epoch > 0 {
+                        // TODO: make sync more stable
+                        let (blk_drep, d_drep) = Self::read_drep(&mut drep_s).await?;
+                        if blk_g != blk_drep {
+                            error!("Governance {blk_g:?} and DRep distribution {blk_drep:?} are out of sync");
+                        }
 
-                {
-                    state.lock().await.advance_era(&blk_g.era);
+                        let (blk_spo, d_spo) = Self::read_spo(&mut spo_s).await?;
+                        if blk_g != blk_spo {
+                            error!(
+                                "Governance {blk_g:?} and SPO distribution {blk_spo:?} are out of sync"
+                            );
+                        }
+
+                        if blk_spo.epoch != d_spo.epoch + 1 {
+                            error!(
+                                "SPO distibution {blk_spo:?} != SPO epoch + 1 ({})",
+                                d_spo.epoch
+                            );
+                        }
+
+                        state.lock().await.handle_drep_stake(&d_drep, &d_spo).await?
+                    }
+
+                    {
+                        state.lock().await.advance_era(&blk_g.era);
+                    }
                 }
-            }
+                Ok::<(), anyhow::Error>(())
+            }.instrument(span).await?;
         }
     }
 
