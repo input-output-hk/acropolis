@@ -4,9 +4,12 @@
 use acropolis_common::{
     messages::{
         CardanoMessage, DRepStakeDistributionMessage, GovernanceProceduresMessage, Message,
-        ProtocolParamsMessage, SPOStakeDistributionMessage,
+        ProtocolParamsMessage, SPOStakeDistributionMessage, StateQuery, StateQueryResponse,
     },
-    rest_helper::{handle_rest, handle_rest_with_parameter},
+    queries::governance::{
+        GovernanceStateQuery, GovernanceStateQueryResponse, ProposalInfo, ProposalVotes,
+        ProposalsList,
+    },
     BlockInfo,
 };
 use anyhow::{anyhow, Result};
@@ -16,19 +19,12 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, info_span, Instrument};
 
-mod rest;
-use rest::{handle_list, handle_proposal, handle_votes};
 mod state;
 mod voting_state;
 use state::State;
 use voting_state::VotingRegistrationState;
 
 const DEFAULT_SUBSCRIBE_TOPIC: (&str, &str) = ("subscribe-topic", "cardano.governance");
-const DEFAULT_LIST_TOPIC: (&str, &str) = ("handle-topic-proposal-list", "rest.get.governance");
-const DEFAULT_PROPOSAL_TOPIC: (&str, &str) =
-    ("handle-topic-proposal-info", "rest.get.governance.*");
-const DEFAULT_VOTES_TOPIC: (&str, &str) =
-    ("handle-topic-proposal-votes", "rest.get.governance.*.votes");
 const DEFAULT_DREP_DISTRIBUTION_TOPIC: (&str, &str) =
     ("stake-drep-distribution-topic", "cardano.drep.distribution");
 const DEFAULT_SPO_DISTRIBUTION_TOPIC: (&str, &str) =
@@ -47,9 +43,6 @@ pub struct GovernanceState;
 
 pub struct GovernanceStateConfig {
     subscribe_topic: String,
-    handle_topic_list: String,
-    handle_topic_proposal: String,
-    handle_topic_proposal_votes: String,
     drep_distribution_topic: String,
     spo_distribution_topic: String,
     protocol_parameters_topic: String,
@@ -66,9 +59,6 @@ impl GovernanceStateConfig {
     pub fn new(config: &Arc<Config>) -> Arc<Self> {
         Arc::new(Self {
             subscribe_topic: Self::conf(config, DEFAULT_SUBSCRIBE_TOPIC),
-            handle_topic_list: Self::conf(config, DEFAULT_LIST_TOPIC),
-            handle_topic_proposal: Self::conf(config, DEFAULT_PROPOSAL_TOPIC),
-            handle_topic_proposal_votes: Self::conf(config, DEFAULT_VOTES_TOPIC),
             drep_distribution_topic: Self::conf(config, DEFAULT_DREP_DISTRIBUTION_TOPIC),
             spo_distribution_topic: Self::conf(config, DEFAULT_SPO_DISTRIBUTION_TOPIC),
             protocol_parameters_topic: Self::conf(config, DEFAULT_PROTOCOL_PARAMETERS_TOPIC),
@@ -168,24 +158,54 @@ impl GovernanceState {
             }
         });
 
-        let state_list = state.clone();
-        handle_rest(context.clone(), &config.handle_topic_list, move || {
-            handle_list(state_list.clone())
+        let query_state = state.clone();
+        context.handle("governance-state", move |message| {
+            let state_handle = query_state.clone();
+            async move {
+                let Message::StateQuery(StateQuery::Governance(query)) = message.as_ref() else {
+                    return Arc::new(Message::StateQueryResponse(StateQueryResponse::Governance(
+                        GovernanceStateQueryResponse::Error(
+                            "Invalid message for governance-state".into(),
+                        ),
+                    )));
+                };
+
+                let locked = state_handle.lock().await;
+
+                let response = match query {
+                    GovernanceStateQuery::GetProposalsList => {
+                        let proposals = locked.list_proposals();
+                        GovernanceStateQueryResponse::ProposalsList(ProposalsList { proposals })
+                    }
+
+                    GovernanceStateQuery::GetProposalInfo { proposal } => {
+                        match locked.get_proposal(proposal) {
+                            Some(proc) => {
+                                GovernanceStateQueryResponse::ProposalInfo(ProposalInfo {
+                                    procedure: proc.clone(),
+                                })
+                            }
+                            None => GovernanceStateQueryResponse::NotFound,
+                        }
+                    }
+                    GovernanceStateQuery::GetProposalVotes { proposal } => {
+                        match locked.get_proposal_votes(&proposal) {
+                            Ok(votes) => {
+                                GovernanceStateQueryResponse::ProposalVotes(ProposalVotes { votes })
+                            }
+                            Err(_) => GovernanceStateQueryResponse::NotFound,
+                        }
+                    }
+                    _ => GovernanceStateQueryResponse::Error(format!(
+                        "Unimplemented governance query: {query:?}"
+                    )),
+                };
+
+                Arc::new(Message::StateQueryResponse(StateQueryResponse::Governance(
+                    response,
+                )))
+            }
         });
-
-        let state_proposal = state.clone();
-        handle_rest_with_parameter(
-            context.clone(),
-            &config.handle_topic_proposal,
-            move |param| handle_proposal(state_proposal.clone(), param[0].to_string()),
-        );
-
-        let state_votes = state.clone();
-        handle_rest_with_parameter(
-            context.clone(),
-            &config.handle_topic_proposal_votes,
-            move |param| handle_votes(state_votes.clone(), param[0].to_string()),
-        );
 
         loop {
             let (blk_g, gov_procs) = Self::read_governance(&mut governance_s).await?;
