@@ -1,8 +1,6 @@
 //! REST handlers for Acropolis Accounts State module
-use std::collections::HashMap;
 use std::sync::Arc;
 
-use acropolis_common::serialization::Bech32WithHrp;
 use anyhow::Result;
 use tokio::sync::Mutex;
 
@@ -10,52 +8,12 @@ use crate::state::State;
 use acropolis_common::state_history::StateHistory;
 use acropolis_common::{messages::RESTResponse, Lovelace};
 
-/// REST response structure for /accounts/{stake_address}
-#[derive(serde::Serialize)]
-pub struct APIStakeAccount {
-    pub utxo_value: u64,
-    pub rewards: u64,
-    pub delegated_spo: Option<String>,
-    pub delegated_drep: Option<APIDRepChoice>,
-}
-#[derive(serde::Serialize)]
-pub struct APIDRepChoice {
-    pub drep_type: String,
-    pub value: Option<String>,
-}
-
 /// Handles /drdd
 #[derive(serde::Serialize, serde::Deserialize)]
 struct APIDRepDelegationDistribution {
     pub abstain: Lovelace,
     pub no_confidence: Lovelace,
     pub dreps: Vec<(String, u64)>,
-}
-
-/// Handles /spdd
-pub async fn handle_spdd(history: Arc<Mutex<StateHistory<State>>>) -> Result<RESTResponse> {
-    let locked = history.lock().await;
-    let state = match locked.current() {
-        Some(state) => state,
-        None => return Ok(RESTResponse::with_json(200, "{}")),
-    };
-
-    let spdd: HashMap<String, u64> = state
-        .generate_spdd()
-        .iter()
-        .map(|(k, v)| {
-            let bech32 = k.to_bech32_with_hrp("pool").unwrap_or_else(|_| hex::encode(k));
-            (bech32, *v)
-        })
-        .collect();
-
-    match serde_json::to_string(&spdd) {
-        Ok(body) => Ok(RESTResponse::with_json(200, &body)),
-        Err(e) => Ok(RESTResponse::with_text(
-            500,
-            &format!("Internal server error retrieving stake pool delegation distribution: {e}"),
-        )),
-    }
 }
 
 /// Handles /pots

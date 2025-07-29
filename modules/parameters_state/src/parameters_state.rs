@@ -3,7 +3,7 @@
 
 use acropolis_common::{
     messages::{CardanoMessage, Message, ProtocolParamsMessage},
-    rest_helper::{handle_rest, handle_rest_with_parameter},
+    rest_helper::{handle_rest, handle_rest_with_path_parameter},
     BlockInfo,
 };
 use anyhow::Result;
@@ -13,11 +13,11 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, info_span, Instrument};
 
+mod alonzo_genesis;
 mod genesis_params;
 mod parameters_updater;
 mod rest;
 mod state;
-mod alonzo_genesis;
 
 use parameters_updater::ParametersUpdater;
 use rest::handle_current;
@@ -118,7 +118,9 @@ impl ParametersState {
                         let new_params = locked.handle_enact_state(&block, &gov).await?;
                         Self::publish_update(&config, &block, new_params)?;
                         Ok::<(), anyhow::Error>(())
-                    }.instrument(span).await?;
+                    }
+                    .instrument(span)
+                    .await?;
                 }
                 msg => error!("Unexpected message {msg:?} for enact state topic"),
             }
@@ -139,7 +141,7 @@ impl ParametersState {
         });
 
         let state_handle_historical = state.clone();
-        handle_rest_with_parameter(
+        handle_rest_with_path_parameter(
             cfg.context.clone(),
             &cfg.handle_historical_topic,
             move |param| handle_historical(state_handle_historical.clone(), param[0].to_string()),

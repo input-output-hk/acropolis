@@ -44,7 +44,7 @@ where
 }
 
 /// Handle a REST request with path parameters
-pub fn handle_rest_with_parameter<F, Fut>(
+pub fn handle_rest_with_path_parameter<F, Fut>(
     context: Arc<Context<Message>>,
     topic: &str,
     handler: F,
@@ -82,6 +82,35 @@ where
         }
     })
 }
+/*
+// Handle a REST request with query parameters
+pub fn handle_rest_with_query_parameter<F, Fut>(
+    context: Arc<Context<Message>>,
+    topic: &str,
+    handler: F,
+) -> JoinHandle<()>
+where
+    F: Fn(&[&str]) -> Fut + Send + Sync + Clone + 'static,
+    Fut: Future<Output = Result<RESTResponse>> + Send + 'static,
+{
+    context.handle(topic, move |message: Arc<Message>| {
+        let handler = handler.clone();
+        async move {
+            let response = match message.as_ref() {
+                Message::RESTRequest(request) => {
+                    let params = request.query_parameters.clone();
+                    match handler(params).await {
+                        Ok(response) => response,
+                        Err(error) => RESTResponse::with_text(500, &format!("{error:?}")),
+                    }
+                }
+                _ => RESTResponse::with_text(500, "Unexpected message in REST request"),
+            };
+
+            Arc::new(Message::RESTResponse(response))
+        }
+    })
+}*/
 
 /// Extract parameters from the request path based on the topic pattern.
 /// Skips the first 3 parts of the topic as these are never parameters
