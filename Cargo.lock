@@ -136,6 +136,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "caryatid_sdk",
+ "chrono",
  "config",
  "mithril-client",
  "pallas",
