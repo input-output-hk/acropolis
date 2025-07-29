@@ -15,8 +15,8 @@ use std::collections::HashMap;
 /// Result of a rewards calculation
 #[derive(Debug, Default)]
 pub struct RewardsResult {
-    /// Change to reserves
-    pub reserves_delta: i64,
+    /// Total rewards paid
+    pub total_paid: u64,
 
     /// Rewards to be paid
     pub rewards: Vec<(RewardAccount, Lovelace)>,
@@ -75,6 +75,7 @@ impl RewardsState {
 
         // Calculate for every registered SPO (even those who didn't participate in this epoch)
         // from epoch (i-2) "Go"
+        let mut total_paid_to_pools: Lovelace = 0;
         for (operator_id, spo) in self.go.spos.iter() {
 
             // Actual blocks produced as proportion of epoch (Beta)
@@ -146,12 +147,11 @@ impl RewardsState {
 
             // Subtract fixed costs
             let fixed_cost = BigDecimal::from(spo.fixed_cost);
-            if pool_rewards <= fixed_cost {
+            let spo_benefit = if pool_rewards <= fixed_cost {
                 info!("Rewards < cost - all paid to SPO");
+
                 // No margin or pledge reward if under cost - all goes to SPO
-                let spo_benefit = pool_rewards.to_u64().unwrap_or(0);
-                result.rewards.push((spo.reward_account.clone(), spo_benefit));
-                result.reserves_delta -= spo_benefit as i64;
+                pool_rewards.to_u64().unwrap_or(0)
             } else {
                 // Enough left over for some margin split
                 let margin = ((&pool_rewards - &fixed_cost)
@@ -160,10 +160,6 @@ impl RewardsState {
                     .with_scale(0);
                 let costs = &fixed_cost + &margin;
                 let remainder = &pool_rewards - &costs;
-                let spo_benefit = costs.to_u64().unwrap_or(0);
-
-                result.rewards.push((spo.reward_account.clone(), spo_benefit));
-                result.reserves_delta -= spo_benefit as i64;
 
                 // Keep remainder by SPO id
                 let to_delegators = remainder.to_u64().unwrap_or(0);
@@ -172,13 +168,19 @@ impl RewardsState {
                 }
 
                 info!(%fixed_cost, %margin, to_delegators, "Reward split:");
-            }
+
+                costs.to_u64().unwrap_or(0)
+            };
+
+            result.rewards.push((spo.reward_account.clone(), spo_benefit));
+            result.total_paid += spo_benefit;
+            total_paid_to_pools += spo_benefit;
         }
 
         // Pay the delegators - split remainder in proportional to delegated stake,
         // * as it was 2 epochs ago *
-        let mut num_rewards_paid: usize = 0;
-        let mut total_rewards_paid: Lovelace = 0;
+        let mut num_delegators_paid: usize = 0;
+        let mut total_paid_to_delegators: Lovelace = 0;
         self.go.spos.iter().for_each(|(spo_id, spo)| {
             // Look up the SPO in the rewards map
             // May be absent if they didn't meet their costs
@@ -197,15 +199,16 @@ impl RewardsState {
                     // Transfer from reserves to this account
                     result.rewards.push((hash.clone(), to_pay));
 
-                    num_rewards_paid += 1;
-                    total_rewards_paid += to_pay;
+                    num_delegators_paid += 1;
+                    total_paid_to_delegators += to_pay;
                 }
 
-                result.reserves_delta -= *rewards as i64;
+                result.total_paid += *rewards;
             }
         });
 
-        info!(num_rewards_paid, total_rewards_paid, "Paid to delegators:");
+        info!(num_delegators_paid, total_paid_to_delegators, total_paid_to_pools,
+              total=result.total_paid, "Rewards actually paid:");
 
         Ok(result)
     }

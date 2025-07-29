@@ -193,7 +193,7 @@ impl State {
         }
 
         // Adjust the reserves for next time with amount actually paid
-        Self::update_value_with_delta(&mut self.pots.reserves, reward_result.reserves_delta)?;
+        self.pots.reserves -= reward_result.total_paid;
 
         Ok(())
     }
