@@ -38,6 +38,7 @@ dependencies = [
  "anyhow",
  "bigdecimal",
  "caryatid_sdk",
+ "chrono",
  "config",
  "dashmap",
  "hex",
