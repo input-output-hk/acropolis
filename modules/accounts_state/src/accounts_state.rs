@@ -2,8 +2,8 @@
 //! Manages stake and reward accounts state
 
 use acropolis_common::{
-    messages::{CardanoMessage, Message},
-    rest_helper::{handle_rest, handle_rest_with_parameter},
+    messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
+    rest_helper::handle_rest,
     state_history::StateHistory,
     BlockInfo, BlockStatus,
 };
@@ -21,7 +21,10 @@ use spo_distribution_publisher::SPODistributionPublisher;
 mod state;
 use state::State;
 mod rest;
-use rest::{handle_drdd, handle_pots, handle_single_account, handle_spdd};
+use acropolis_common::queries::accounts::{
+    AccountInfo, AccountsStateQuery, AccountsStateQueryResponse,
+};
+use rest::{handle_drdd, handle_pots, handle_spdd};
 
 const DEFAULT_SPO_STATE_TOPIC: &str = "cardano.spo.state";
 const DEFAULT_EPOCH_ACTIVITY_TOPIC: &str = "cardano.epoch.activity";
@@ -34,8 +37,6 @@ const DEFAULT_DREP_DISTRIBUTION_TOPIC: &str = "cardano.drep.distribution";
 const DEFAULT_SPO_DISTRIBUTION_TOPIC: &str = "cardano.spo.distribution";
 const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: &str = "cardano.protocol.parameters";
 
-const DEFAULT_HANDLE_SINGLE_ACCOUNT_TOPIC: (&str, &str) =
-    ("handle-topic-account-single", "rest.get.accounts.*");
 const DEFAULT_HANDLE_SPDD_TOPIC: (&str, &str) = ("handle-topic-spdd", "rest.get.spdd");
 const DEFAULT_HANDLE_POTS_TOPIC: (&str, &str) = ("handle-topic-pots", "rest.get.pots");
 const DEFAULT_HANDLE_DRDD_TOPIC: (&str, &str) = ("handle-topic-drdd", "rest.get.drdd");
@@ -351,14 +352,6 @@ impl AccountsState {
             .unwrap_or(DEFAULT_SPO_DISTRIBUTION_TOPIC.to_string());
 
         // REST handler topics
-        let handle_single_account_topic = config
-            .get_string(DEFAULT_HANDLE_SINGLE_ACCOUNT_TOPIC.0)
-            .unwrap_or(DEFAULT_HANDLE_SINGLE_ACCOUNT_TOPIC.1.to_string());
-        info!(
-            "Creating request handler on '{}'",
-            handle_single_account_topic
-        );
-
         let handle_spdd_topic = config
             .get_string(DEFAULT_HANDLE_SPDD_TOPIC.0)
             .unwrap_or(DEFAULT_HANDLE_SPDD_TOPIC.1.to_string());
@@ -382,13 +375,52 @@ impl AccountsState {
         let history_drdd = history.clone();
         let history_tick = history.clone();
 
-        handle_rest_with_parameter(
-            context.clone(),
-            &handle_single_account_topic,
-            move |param| {
-                handle_single_account(history_account_single.clone(), param[0].to_string())
-            },
-        );
+        context.handle("accounts-state", move |message| {
+            let history = history_account_single.clone();
+            async move {
+                let Message::StateQuery(StateQuery::Accounts(query)) = message.as_ref() else {
+                    return Arc::new(Message::StateQueryResponse(StateQueryResponse::Accounts(
+                        AccountsStateQueryResponse::Error(
+                            "Invalid message for accounts-state".into(),
+                        ),
+                    )));
+                };
+
+                let guard = history.lock().await;
+                let state = match guard.current() {
+                    Some(s) => s,
+                    None => {
+                        return Arc::new(Message::StateQueryResponse(
+                            StateQueryResponse::Accounts(AccountsStateQueryResponse::NotFound),
+                        ));
+                    }
+                };
+
+                let response = match query {
+                    AccountsStateQuery::GetAccountInfo { stake_key } => {
+                        if let Some(account) = state.get_stake_state(stake_key) {
+                            AccountsStateQueryResponse::AccountInfo(AccountInfo {
+                                utxo_value: account.utxo_value,
+                                rewards: account.rewards,
+                                delegated_spo: account.delegated_spo.clone(),
+                                delegated_drep: account.delegated_drep.clone(),
+                            })
+                        } else {
+                            AccountsStateQueryResponse::NotFound
+                        }
+                    }
+
+                    _ => AccountsStateQueryResponse::Error(format!(
+                        "Unimplemented query variant: {:?}",
+                        query
+                    )),
+                };
+
+                Arc::new(Message::StateQueryResponse(StateQueryResponse::Accounts(
+                    response,
+                )))
+            }
+        });
 
         handle_rest(context.clone(), &handle_spdd_topic, move || {
             handle_spdd(history_spdd.clone())
