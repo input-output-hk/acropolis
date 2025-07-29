@@ -53,15 +53,23 @@ rewards  147882943225525     match
 deposits 626252000000        match
 fees     6517886228          match
 
-From rewards table:
+e213:
+reserves 13247093198353459   X - too low by 491kA   \
+treasury 40198464232058      X - too low by 4.6kA   |-  Sums almost match
+rewards  133110645284460     X - too high by 496kA  /
+deposits 651738000000        match
+fees     5578218279          match
 
-select sum(amount) from reward where earned_epoch = <EPOCH> and type='member';
-208: None
-209: None
-210: None
-211: 6,749,423,042,570
 
-we have for epoch 210:
-31,873,807,203,788
+Per-SPO rewards table for an epoch:
 
+ SELECT
+    encode(ph.hash_raw, 'hex') AS pool_id_hex,
+    SUM(CASE WHEN r.type = 'member' THEN r.amount ELSE 0 END) AS member_rewards,
+    SUM(CASE WHEN r.type = 'leader' THEN r.amount ELSE 0 END) AS leader_rewards
+FROM reward r
+JOIN pool_hash ph ON r.pool_id = ph.id
+WHERE r.spendable_epoch = 213
+GROUP BY ph.hash_raw
+ORDER BY pool_id_hex;
 
