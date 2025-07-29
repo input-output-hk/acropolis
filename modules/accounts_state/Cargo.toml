@@ -23,6 +23,7 @@ imbl = { version = "5.0.0", features = ["serde"] }
 bigdecimal = "0.4.8"
 rayon = "1.10.0"
 dashmap = "6.1.0"
+chrono = "0.4.41"
 
 [lib]
 path = "src/accounts_state.rs"
