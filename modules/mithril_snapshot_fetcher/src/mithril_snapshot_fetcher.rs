@@ -438,3 +438,92 @@ async fn prompt_pause(description: String, next_description: String) -> bool {
     .await
     .unwrap()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn can_save_and_load_snapshot_metadata() {
+        let snapshot = Snapshot::dummy();
+        let path = Path::new("/tmp/snapshot_metadata.json");
+        let result = MithrilSnapshotFetcher::save_snapshot_metadata(&snapshot, path);
+        assert!(result.is_ok());
+        let result = MithrilSnapshotFetcher::load_snapshot_metadata(path);
+        assert!(result.is_ok());
+        let loaded_snapshot = result.unwrap();
+        assert_eq!(snapshot.digest, loaded_snapshot.digest);
+        assert_eq!(snapshot.created_at, loaded_snapshot.created_at);
+        assert_eq!(snapshot.size, loaded_snapshot.size);
+    }
+
+    #[test]
+    fn test_never_skip_download() {
+        let old_snapshot_metadata = Snapshot::dummy();
+        let download_max_age = 0;
+        let latest_snapshot_metadata = Snapshot::dummy();
+        assert!(!MithrilSnapshotFetcher::should_skip_download(
+            &old_snapshot_metadata,
+            download_max_age,
+            &latest_snapshot_metadata
+        ));
+    }
+
+    #[test]
+    fn test_should_skip_download_if_not_expired() {
+        let old_snapshot_metadata = Snapshot {
+            created_at: Utc::now() - Duration::hours(2),
+            ..Snapshot::dummy()
+        };
+        let download_max_age = 8;
+        let latest_snapshot_metadata = Snapshot {
+            created_at: Utc::now(),
+            ..Snapshot::dummy()
+        };
+        assert!(MithrilSnapshotFetcher::should_skip_download(
+            &old_snapshot_metadata,
+            download_max_age,
+            &latest_snapshot_metadata
+        ));
+    }
+
+    #[test]
+    fn test_should_skip_download_if_no_new_snapshot_available() {
+        let old_snapshot_metadata = Snapshot {
+            created_at: Utc::now() - Duration::hours(10),
+            digest: "old_snapshot_digest".to_string(),
+            ..Snapshot::dummy()
+        };
+        let download_max_age = 8;
+        let latest_snapshot_metadata = Snapshot {
+            created_at: Utc::now() - Duration::hours(10),
+            digest: "old_snapshot_digest".to_string(),
+            ..Snapshot::dummy()
+        };
+        assert!(MithrilSnapshotFetcher::should_skip_download(
+            &old_snapshot_metadata,
+            download_max_age,
+            &latest_snapshot_metadata
+        ));
+    }
+
+    #[test]
+    fn test_should_not_skip_download_if_new_snapshot_available() {
+        let old_snapshot_metadata = Snapshot {
+            created_at: Utc::now() - Duration::hours(10),
+            digest: "old_snapshot_digest".to_string(),
+            ..Snapshot::dummy()
+        };
+        let download_max_age = 8;
+        let latest_snapshot_metadata = Snapshot {
+            created_at: Utc::now() - Duration::hours(2),
+            digest: "new_snapshot_digest".to_string(),
+            ..Snapshot::dummy()
+        };
+        assert!(!MithrilSnapshotFetcher::should_skip_download(
+            &old_snapshot_metadata,
+            download_max_age,
+            &latest_snapshot_metadata
+        ));
+    }
+}
