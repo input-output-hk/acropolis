@@ -48,6 +48,8 @@ store-history = false
 
 [module.accounts-state]
 
+[module.spdd-state]
+
 [module.clock]
 
 [module.rest-server]

@@ -18,6 +18,7 @@ use acropolis_module_governance_state::GovernanceState;
 use acropolis_module_mithril_snapshot_fetcher::MithrilSnapshotFetcher;
 use acropolis_module_parameters_state::ParametersState;
 use acropolis_module_rest_blockfrost::BlockfrostREST;
+use acropolis_module_spdd_state::SPDDState;
 use acropolis_module_spo_state::SPOState;
 use acropolis_module_stake_delta_filter::StakeDeltaFilter;
 use acropolis_module_tx_unpacker::TxUnpacker;
@@ -59,7 +60,9 @@ pub async fn main() -> Result<()> {
             .build()
             .tracer("rust-otel-otlp");
         let otel_layer = OpenTelemetryLayer::new(otel_tracer)
-            .with_filter(EnvFilter::from_default_env().add_directive(filter::LevelFilter::INFO.into()))
+            .with_filter(
+                EnvFilter::from_default_env().add_directive(filter::LevelFilter::INFO.into()),
+            )
             .with_filter(filter::filter_fn(|meta| meta.is_span()));
         Registry::default().with(fmt_layer).with(otel_layer).init();
     } else {
@@ -95,6 +98,7 @@ pub async fn main() -> Result<()> {
     EpochActivityCounter::register(&mut process);
     AccountsState::register(&mut process);
     BlockfrostREST::register(&mut process);
+    SPDDState::register(&mut process);
 
     Clock::<Message>::register(&mut process);
     RESTServer::<Message>::register(&mut process);
