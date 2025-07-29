@@ -8,20 +8,22 @@ use acropolis_common::{
 };
 use anyhow::{anyhow, Result};
 use caryatid_sdk::{module, Context, Module};
+use chrono::{Duration, Utc};
 use config::Config;
 use mithril_client::{
     feedback::{FeedbackReceiver, MithrilEvent},
-    ClientBuilder, MessageBuilder,
+    ClientBuilder, MessageBuilder, Snapshot,
 };
 use pallas::{
     ledger::traverse::{Era as PallasEra, MultiEraBlock},
     storage::hardano,
 };
-use std::fs;
+use std::fs::{self, File};
+use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
 use std::thread::sleep;
-use std::time::Duration;
+use std::time::Duration as SystemDuration;
 use tokio::{join, sync::Mutex};
 use tracing::{debug, error, info, info_span, Instrument};
 
@@ -40,7 +42,9 @@ const DEFAULT_GENESIS_KEY: &str = r#"
 372c322c3138382c33302c31322c38312c3135352c3230342c31302c3137392c37352c32332c3133
 382c3139362c3231372c352c31342c32302c35372c37392c33392c3137365d"#;
 const DEFAULT_PAUSE: (&str, PauseType) = ("pause", PauseType::NoPause);
+const DEFAULT_DOWNLOAD_MAX_AGE: &str = "download-max-age";
 const DEFAULT_DIRECTORY: &str = "downloads";
+const SNAPSHOT_METADATA_FILE: &str = "snapshot_metadata.json";
 
 /// Mithril feedback receiver
 struct FeedbackLogger {
@@ -109,6 +113,63 @@ impl FeedbackReceiver for FeedbackLogger {
 pub struct MithrilSnapshotFetcher;
 
 impl MithrilSnapshotFetcher {
+    fn load_snapshot_metadata(path: &Path) -> Result<Snapshot> {
+        let snapshot_metadata_file = File::open(path)?;
+        let snapshot_metadata = serde_json::from_reader::<_, Snapshot>(snapshot_metadata_file)?;
+        Ok(snapshot_metadata)
+    }
+
+    fn save_snapshot_metadata(snapshot: &Snapshot, path: &Path) -> Result<()> {
+        let stringified_snapshot = serde_json::to_string_pretty(snapshot)?;
+        let mut snapshot_metadata_file = File::create(path)?;
+        snapshot_metadata_file.write_all(stringified_snapshot.as_bytes())?;
+        snapshot_metadata_file.flush()?;
+
+        Ok(())
+    }
+
+    fn should_skip_download(
+        old_snapshot_metadata: &Snapshot,
+        latest_snapshot_metadata: &Snapshot,
+        config: &Config,
+    ) -> bool {
+        let download_max_age = config.get::<u64>(DEFAULT_DOWNLOAD_MAX_AGE);
+
+        match download_max_age {
+            Ok(download_max_age) => {
+                if download_max_age == 0 {
+                    info!("Always download snapshot. Download max age is 0");
+                    return false;
+                }
+
+                let now = Utc::now();
+                if (now - old_snapshot_metadata.created_at)
+                    > Duration::hours(download_max_age as i64)
+                {
+                    info!("Snapshot is expired by download max age: {download_max_age} hours");
+                    if latest_snapshot_metadata.digest != old_snapshot_metadata.digest
+                        && latest_snapshot_metadata.created_at > old_snapshot_metadata.created_at
+                    {
+                        info!("Latest snapshot is available and newer than the old snapshot");
+                        false
+                    } else {
+                        info!("SKIP DOWNLOAD: Newer snapshot is not available");
+                        true
+                    }
+                } else {
+                    info!(
+                        "SKIP DOWNLOAD: Snapshot is not expired by download max age: {download_max_age} hours"
+                    );
+                    true
+                }
+            }
+            Err(error) => {
+                info!("SKIP DOWNLOAD: Download max age is not set or invalid: {error:?}");
+                true
+            }
+        }
+    }
+
     /// Fetch and unpack a snapshot
     async fn download_snapshot(config: Arc<Config>) -> Result<()> {
         let aggregator_url =
@@ -116,6 +177,7 @@ impl MithrilSnapshotFetcher {
         let genesis_key =
             config.get_string("genesis-key").unwrap_or(DEFAULT_GENESIS_KEY.to_string());
         let directory = config.get_string("directory").unwrap_or(DEFAULT_DIRECTORY.to_string());
+        let snapshot_metadata_path = Path::new(&directory).join(SNAPSHOT_METADATA_FILE);
 
         let feedback_logger = Arc::new(FeedbackLogger::new());
         let client = ClientBuilder::aggregator(&aggregator_url, &genesis_key)
@@ -130,8 +192,17 @@ impl MithrilSnapshotFetcher {
             .get(&latest_snapshot.digest)
             .await?
             .ok_or(anyhow!("No snapshot for digest {}", latest_snapshot.digest))?;
-        info!("Using Mithril snapshot {snapshot:?}");
 
+        // Check if the snapshot is expired by download max age
+        let old_snapshot = Self::load_snapshot_metadata(&snapshot_metadata_path);
+        if let Ok(old_snapshot) = old_snapshot {
+            if Self::should_skip_download(&old_snapshot, &snapshot, &config) {
+                info!("Using old Mithril snapshot {old_snapshot:?}");
+                return Ok(());
+            }
+        }
+
+        info!("Using Mithril snapshot {snapshot:?}");
         // Verify the certificate chain
         let certificate = client.certificate().verify_chain(&snapshot.certificate_hash).await?;
 
@@ -144,6 +215,11 @@ impl MithrilSnapshotFetcher {
         if let Err(e) = client.cardano_database().add_statistics(&snapshot).await {
             error!("Could not increment snapshot download statistics: {:?}", e);
             // But that doesn't affect us...
+        }
+
+        // Save snapshot metadata as JSON
+        if let Err(e) = Self::save_snapshot_metadata(&snapshot, &snapshot_metadata_path) {
+            error!("Failed to save snapshot metadata: {e}");
         }
 
         // Verify the snapshot
@@ -326,20 +402,18 @@ impl MithrilSnapshotFetcher {
             };
             info!("Received startup message");
 
-            if config.get_bool("download").unwrap_or(true) {
-                let mut delay = 1;
-                loop {
-                    match Self::download_snapshot(config.clone()).await {
-                        Err(e) => error!("Failed to fetch Mithril snapshot: {e}"),
-                        _ => {
-                            break;
-                        }
+            let mut delay = 1;
+            loop {
+                match Self::download_snapshot(config.clone()).await {
+                    Err(e) => error!("Failed to fetch Mithril snapshot: {e}"),
+                    _ => {
+                        break;
                     }
-                    info!("Will retry in {delay}s");
-                    sleep(Duration::from_secs(delay));
-                    info!("Retrying snapshot download");
-                    delay = (delay * 2).min(60);
                 }
+                info!("Will retry in {delay}s");
+                sleep(SystemDuration::from_secs(delay));
+                info!("Retrying snapshot download");
+                delay = (delay * 2).min(60);
             }
 
             match Self::process_snapshot(context, config).await {
@@ -367,4 +441,97 @@ async fn prompt_pause(description: String, next_description: String) -> bool {
     })
     .await
     .unwrap()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn can_save_and_load_snapshot_metadata() {
+        let snapshot = Snapshot::dummy();
+        let path = Path::new("/tmp/snapshot_metadata.json");
+        let result = MithrilSnapshotFetcher::save_snapshot_metadata(&snapshot, path);
+        assert!(result.is_ok());
+        let result = MithrilSnapshotFetcher::load_snapshot_metadata(path);
+        assert!(result.is_ok());
+        let loaded_snapshot = result.unwrap();
+        assert_eq!(snapshot.digest, loaded_snapshot.digest);
+        assert_eq!(snapshot.created_at, loaded_snapshot.created_at);
+        assert_eq!(snapshot.size, loaded_snapshot.size);
+    }
+
+    #[test]
+    fn test_never_skip_download() {
+        let old_snapshot_metadata = Snapshot::dummy();
+        let config =
+            Config::builder().set_override("download-max-age", 0).unwrap().build().unwrap();
+        let latest_snapshot_metadata = Snapshot::dummy();
+        assert!(!MithrilSnapshotFetcher::should_skip_download(
+            &old_snapshot_metadata,
+            &latest_snapshot_metadata,
+            &config
+        ));
+    }
+
+    #[test]
+    fn test_should_skip_download_if_not_expired() {
+        let old_snapshot_metadata = Snapshot {
+            created_at: Utc::now() - Duration::hours(2),
+            ..Snapshot::dummy()
+        };
+        let config =
+            Config::builder().set_override("download-max-age", 8).unwrap().build().unwrap();
+        let latest_snapshot_metadata = Snapshot {
+            created_at: Utc::now(),
+            ..Snapshot::dummy()
+        };
+        assert!(MithrilSnapshotFetcher::should_skip_download(
+            &old_snapshot_metadata,
+            &latest_snapshot_metadata,
+            &config
+        ));
+    }
+
+    #[test]
+    fn test_should_skip_download_if_no_new_snapshot_available() {
+        let old_snapshot_metadata = Snapshot {
+            created_at: Utc::now() - Duration::hours(10),
+            digest: "old_snapshot_digest".to_string(),
+            ..Snapshot::dummy()
+        };
+        let config =
+            Config::builder().set_override("download-max-age", 8).unwrap().build().unwrap();
+        let latest_snapshot_metadata = Snapshot {
+            created_at: Utc::now() - Duration::hours(10),
+            digest: "old_snapshot_digest".to_string(),
+            ..Snapshot::dummy()
+        };
+        assert!(MithrilSnapshotFetcher::should_skip_download(
+            &old_snapshot_metadata,
+            &latest_snapshot_metadata,
+            &config
+        ));
+    }
+
+    #[test]
+    fn test_should_not_skip_download_if_new_snapshot_available() {
+        let old_snapshot_metadata = Snapshot {
+            created_at: Utc::now() - Duration::hours(10),
+            digest: "old_snapshot_digest".to_string(),
+            ..Snapshot::dummy()
+        };
+        let config =
+            Config::builder().set_override("download-max-age", 8).unwrap().build().unwrap();
+        let latest_snapshot_metadata = Snapshot {
+            created_at: Utc::now() - Duration::hours(2),
+            digest: "new_snapshot_digest".to_string(),
+            ..Snapshot::dummy()
+        };
+        assert!(!MithrilSnapshotFetcher::should_skip_download(
+            &old_snapshot_metadata,
+            &latest_snapshot_metadata,
+            &config
+        ));
+    }
 }
