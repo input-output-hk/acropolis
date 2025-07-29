@@ -213,11 +213,23 @@ impl State {
                   (refunds.len() as u64) * deposit);
         }
 
-        // TODO - if their reward account has been deregistered, it goes to Treasury
-
         // Send them their deposits back
         for keyhash in refunds {
-            self.add_to_reward(&keyhash, deposit);
+            // If their reward account has been deregistered, it goes to Treasury
+            if {
+                let stake_addresses = self.stake_addresses.lock().unwrap();
+                match stake_addresses.get(&keyhash) {
+                    Some(sas) => sas.registered,
+                    None => false
+                }
+            } {
+                self.add_to_reward(&keyhash, deposit);
+            } else {
+                warn!("SPO reward account {} deregistered - paying refund to treasury",
+                      hex::encode(keyhash));
+                self.pots.treasury += deposit;
+            }
+
             self.pots.deposits -= deposit;
         }
     }
