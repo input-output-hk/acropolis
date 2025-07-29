@@ -28,28 +28,28 @@ e208:    13888022852926644   from Java implementation - can't replicate
 e209:
 reserves 13286160713028443   match
 treasury 8332813711755       match
-rewards  593536826186446     match from MIRs, no stake rewards
+rewards  593536826186446     match
 deposits 441012000000        match
 fees     10670212208         match
 
 e210:
 reserves 13278197552770393   match
 treasury 16306644182013      match
-rewards  277915861250199     ?? not stake, no MIRs, where do they come from?
+rewards  277915861250199     match
 deposits 533870000000        match
 fees     7666346424          match
 
 e211:
 reserves 13270236767315870   match
 treasury 24275595982960      match
-rewards  164918966125973     X
+rewards  164918966125973     match
 deposits 594636000000        match
 fees     7770532273          match
 
 e212:
 reserves 13262280841681299   match
 treasury 32239292149804      match
-rewards  147882943225525     X
+rewards  147882943225525     match
 deposits 626252000000        match
 fees     6517886228          match
 
