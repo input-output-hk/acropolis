@@ -130,36 +130,48 @@ impl MithrilSnapshotFetcher {
 
     fn should_skip_download(
         old_snapshot_metadata: &Snapshot,
-        download_max_age: u64,
         latest_snapshot_metadata: &Snapshot,
+        config: &Config,
     ) -> bool {
-        if download_max_age == 0 {
-            info!("Always download snapshot. Download max age is 0");
-            return false;
-        }
+        let download_max_age = config.get::<u64>(DEFAULT_DOWNLOAD_MAX_AGE);
 
-        let now = Utc::now();
-        if (now - old_snapshot_metadata.created_at) > Duration::hours(download_max_age as i64) {
-            info!("Snapshot is expired by download max age: {download_max_age} hours");
-            if latest_snapshot_metadata.digest != old_snapshot_metadata.digest
-                && latest_snapshot_metadata.created_at > old_snapshot_metadata.created_at
-            {
-                info!("Latest snapshot is available and newer than the old snapshot");
-                false
-            } else {
-                info!("SKIP DOWNLOAD: Newer snapshot is not available");
+        match download_max_age {
+            Ok(download_max_age) => {
+                if download_max_age == 0 {
+                    info!("Always download snapshot. Download max age is 0");
+                    return false;
+                }
+
+                let now = Utc::now();
+                if (now - old_snapshot_metadata.created_at)
+                    > Duration::hours(download_max_age as i64)
+                {
+                    info!("Snapshot is expired by download max age: {download_max_age} hours");
+                    if latest_snapshot_metadata.digest != old_snapshot_metadata.digest
+                        && latest_snapshot_metadata.created_at > old_snapshot_metadata.created_at
+                    {
+                        info!("Latest snapshot is available and newer than the old snapshot");
+                        false
+                    } else {
+                        info!("SKIP DOWNLOAD: Newer snapshot is not available");
+                        true
+                    }
+                } else {
+                    info!(
+                        "SKIP DOWNLOAD: Snapshot is not expired by download max age: {download_max_age} hours"
+                    );
+                    true
+                }
+            }
+            Err(error) => {
+                info!("SKIP DOWNLOAD: Download max age is not set: {error:?}");
                 true
             }
-        } else {
-            info!(
-                "SKIP DOWNLOAD: Snapshot is not expired by download max age: {download_max_age} hours"
-            );
-            true
         }
     }
 
     /// Fetch and unpack a snapshot
-    async fn download_snapshot(config: Arc<Config>, download_max_age: u64) -> Result<()> {
+    async fn download_snapshot(config: Arc<Config>) -> Result<()> {
         let aggregator_url =
             config.get_string("aggregator-url").unwrap_or(DEFAULT_AGGREGATOR_URL.to_string());
         let genesis_key =
@@ -184,7 +196,7 @@ impl MithrilSnapshotFetcher {
         // Check if the snapshot is expired by download max age
         let old_snapshot = Self::load_snapshot_metadata(&snapshot_metadata_path);
         if let Ok(old_snapshot) = old_snapshot {
-            if Self::should_skip_download(&old_snapshot, download_max_age, &snapshot) {
+            if Self::should_skip_download(&old_snapshot, &snapshot, &config) {
                 info!("Using old Mithril snapshot {old_snapshot:?}");
                 return Ok(());
             }
@@ -390,31 +402,23 @@ impl MithrilSnapshotFetcher {
             };
             info!("Received startup message");
 
-            let download_max_age = config.get::<u64>(DEFAULT_DOWNLOAD_MAX_AGE);
-
-            if let Ok(download_max_age) = download_max_age {
-                info!("Download max age: {download_max_age} hours");
-
-                let mut delay = 1;
-                loop {
-                    match Self::download_snapshot(config.clone(), download_max_age).await {
-                        Err(e) => error!("Failed to fetch Mithril snapshot: {e}"),
-                        _ => {
-                            break;
-                        }
+            let mut delay = 1;
+            loop {
+                match Self::download_snapshot(config.clone()).await {
+                    Err(e) => error!("Failed to fetch Mithril snapshot: {e}"),
+                    _ => {
+                        break;
                     }
-                    info!("Will retry in {delay}s");
-                    sleep(SystemDuration::from_secs(delay));
-                    info!("Retrying snapshot download");
-                    delay = (delay * 2).min(60);
                 }
+                info!("Will retry in {delay}s");
+                sleep(SystemDuration::from_secs(delay));
+                info!("Retrying snapshot download");
+                delay = (delay * 2).min(60);
+            }
 
-                match Self::process_snapshot(context, config).await {
-                    Err(e) => error!("Failed to process Mithril snapshot: {e}"),
-                    _ => {}
-                }
-            } else {
-                error!("SKIP DOWNLOAD: Download max age is not set or invalid");
+            match Self::process_snapshot(context, config).await {
+                Err(e) => error!("Failed to process Mithril snapshot: {e}"),
+                _ => {}
             }
         });
 
@@ -460,12 +464,13 @@ mod tests {
     #[test]
     fn test_never_skip_download() {
         let old_snapshot_metadata = Snapshot::dummy();
-        let download_max_age = 0;
+        let config =
+            Config::builder().set_override("download-max-age", 0).unwrap().build().unwrap();
         let latest_snapshot_metadata = Snapshot::dummy();
         assert!(!MithrilSnapshotFetcher::should_skip_download(
             &old_snapshot_metadata,
-            download_max_age,
-            &latest_snapshot_metadata
+            &latest_snapshot_metadata,
+            &config
         ));
     }
 
@@ -475,15 +480,16 @@ mod tests {
             created_at: Utc::now() - Duration::hours(2),
             ..Snapshot::dummy()
         };
-        let download_max_age = 8;
+        let config =
+            Config::builder().set_override("download-max-age", 8).unwrap().build().unwrap();
         let latest_snapshot_metadata = Snapshot {
             created_at: Utc::now(),
             ..Snapshot::dummy()
         };
         assert!(MithrilSnapshotFetcher::should_skip_download(
             &old_snapshot_metadata,
-            download_max_age,
-            &latest_snapshot_metadata
+            &latest_snapshot_metadata,
+            &config
         ));
     }
 
@@ -494,7 +500,8 @@ mod tests {
             digest: "old_snapshot_digest".to_string(),
             ..Snapshot::dummy()
         };
-        let download_max_age = 8;
+        let config =
+            Config::builder().set_override("download-max-age", 8).unwrap().build().unwrap();
         let latest_snapshot_metadata = Snapshot {
             created_at: Utc::now() - Duration::hours(10),
             digest: "old_snapshot_digest".to_string(),
@@ -502,8 +509,8 @@ mod tests {
         };
         assert!(MithrilSnapshotFetcher::should_skip_download(
             &old_snapshot_metadata,
-            download_max_age,
-            &latest_snapshot_metadata
+            &latest_snapshot_metadata,
+            &config
         ));
     }
 
@@ -514,7 +521,8 @@ mod tests {
             digest: "old_snapshot_digest".to_string(),
             ..Snapshot::dummy()
         };
-        let download_max_age = 8;
+        let config =
+            Config::builder().set_override("download-max-age", 8).unwrap().build().unwrap();
         let latest_snapshot_metadata = Snapshot {
             created_at: Utc::now() - Duration::hours(2),
             digest: "new_snapshot_digest".to_string(),
@@ -522,8 +530,8 @@ mod tests {
         };
         assert!(!MithrilSnapshotFetcher::should_skip_download(
             &old_snapshot_metadata,
-            download_max_age,
-            &latest_snapshot_metadata
+            &latest_snapshot_metadata,
+            &config
         ));
     }
 }
