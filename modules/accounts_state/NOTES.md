@@ -41,7 +41,7 @@ fees     7666346424          match
 
 e211:
 reserves 13270236767315870   match
-treasury 24275595982960      X - we are too low by 500 ADA - retired pool without reward acc?
+treasury 24275595982960      match
 rewards  164918966125973     X
 deposits 594636000000        match
 fees     7770532273          match
