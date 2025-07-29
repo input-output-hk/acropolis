@@ -459,10 +459,6 @@ impl State {
             .iter()
             .filter_map(|(vrf, count)| {
                 vrf_to_operator.get(vrf).map(|operator| (operator.clone(), *count))
-                    .or_else(|| {
-                        warn!("Unknown VRF key {}", hex::encode(vrf));
-                        None
-                    })
             })
             .collect();
 

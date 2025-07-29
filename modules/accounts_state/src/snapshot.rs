@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use acropolis_common::{Lovelace, KeyHash, PoolRegistration, Ratio, RewardAccount};
 use crate::state::{StakeAddressState, Pots};
-use tracing::{info, error};
+use tracing::info;
 use imbl::OrdMap;
 
 /// SPO data for stake snapshot
@@ -78,7 +78,7 @@ impl Snapshot {
                     } else {
                         // Find in the SPO list
                         let Some(spo) = spos.get(spo_id) else {
-                            error!("Referenced SPO {} not found", hex::encode(spo_id));
+                            // SPO has retired - this stake is simply ignored
                             continue;
                         };
 
@@ -100,8 +100,16 @@ impl Snapshot {
             }
         }
 
-        info!(epoch, reserves=pots.reserves, treasury=pots.treasury, deposits=pots.deposits,
-              total_stake, spos=snapshot.spos.len(), fees, "Snapshot");
+        // Calculate the total rewards just for logging & comparison
+        let total_rewards: u64 = stake_addresses
+            .values()
+            .map(|sas| sas.rewards)
+            .sum();
+
+        // Log to be comparable with DBSync ada_pots table
+        info!(epoch, treasury=pots.treasury, reserves=pots.reserves, rewards=total_rewards,
+              deposits=pots.deposits, total_stake, spos=snapshot.spos.len(), fees,
+              "Snapshot");
 
         snapshot
     }
