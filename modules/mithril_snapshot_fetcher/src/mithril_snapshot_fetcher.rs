@@ -164,7 +164,7 @@ impl MithrilSnapshotFetcher {
                 }
             }
             Err(error) => {
-                info!("SKIP DOWNLOAD: Download max age is not set: {error:?}");
+                info!("SKIP DOWNLOAD: Download max age is not set or invalid: {error:?}");
                 true
             }
         }
