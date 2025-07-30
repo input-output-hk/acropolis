@@ -95,6 +95,9 @@ impl ParametersUpdater {
         self.sh_u32(|sp| &mut sp.minfee_a, &p.minfee_a)?;
         self.sh_u32(|sp| &mut sp.minfee_b, &p.minfee_b)?;
         self.sh_u32(|sp| &mut sp.stake_pool_target_num, &p.desired_number_of_stake_pools)?;
+        self.sh_chameleon(|sp| &mut sp.decentralisation_param, &p.decentralisation_constant)?;
+        self.sh_upd(|sp| &mut sp.protocol_version, &p.protocol_version)?;
+        self.sh_upd(|sp| &mut sp.extra_entropy, &p.extra_enthropy)?;
         Ok(())
     }
 
