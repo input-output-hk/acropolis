@@ -3,17 +3,14 @@ use acropolis_common::{
     AlonzoParams, Anchor, BlockVersionData, ByronParams, CostModel,
     Committee, Constitution, ConwayParams, Credential, DRepVotingThresholds, Era,
     PoolVotingThresholds, ProtocolConsts, SoftForkRule, TxFeePolicy,
-    protocol_params::{
-        NetworkId, Nonce, NonceVariant, ProtocolVersion, ShelleyParams, ShelleyProtocolParams
-    }
+    protocol_params::ShelleyParams
 };
 use anyhow::{anyhow, bail, Result};
 use hex::decode;
-use pallas::ledger::{configs::*, primitives};
+use pallas::ledger::configs::*;
 use serde::Deserialize;
 use crate::alonzo_genesis;
 use std::collections::HashMap;
-use acropolis_common::protocol_params::ChameleonFraction;
 
 const PREDEFINED_GENESIS: [(&str, Era, &[u8]); 8] = [
     ("sanchonet", Era::Byron, include_bytes!("../downloads/sanchonet-byron-genesis.json")),
@@ -114,84 +111,6 @@ fn map_conway(genesis: &conway::GenesisFile) -> Result<ConwayParams> {
         committee: map_committee(&genesis.committee)?,
     })
 }
-
-/*
-pub fn map_pallas_rational(r: &primitives::RationalNumber) -> ChameleonFraction {
-    ChameleonFraction::new_rational(r.numerator, r.denominator)
-}
-
-fn map_network_id(id: &str) -> Result<NetworkId> {
-    match id {
-        "Testnet" => Ok(NetworkId::Testnet),
-        "Mainnet" => Ok(NetworkId::Mainnet),
-        n => Err(anyhow!("Network id {n} is unknown")),
-    }
-}
-
-fn map_shelley_nonce(e: &shelley::ExtraEntropy) -> Result<Nonce> {
-    Ok(Nonce {
-        tag: match &e.tag {
-            shelley::NonceVariant::NeutralNonce => NonceVariant::NeutralNonce,
-            shelley::NonceVariant::Nonce => NonceVariant::Nonce,
-        },
-        hash: e.hash.as_ref().map(|h| decode_hex_string(h, 32)).transpose()?,
-    })
-}
-
-fn map_shelley_protocol_params(p: &shelley::ProtocolParams) -> Result<ShelleyProtocolParams> {
-    Ok(ShelleyProtocolParams {
-        protocol_version: ProtocolVersion {
-            minor: p.protocol_version.minor,
-            major: p.protocol_version.major,
-        },
-        max_tx_size: p.max_tx_size,
-        max_block_body_size: p.max_block_body_size,
-        max_block_header_size: p.max_block_header_size,
-        key_deposit: p.key_deposit,
-        min_utxo_value: p.min_utxo_value,
-        minfee_a: p.min_fee_a,
-        minfee_b: p.min_fee_b,
-        pool_deposit: p.pool_deposit,
-        stake_pool_target_num: p.n_opt,
-        min_pool_cost: p.min_pool_cost,
-        pool_retire_max_epoch: p.e_max,
-        extra_entropy: map_shelley_nonce(&p.extra_entropy)?,
-        decentralisation_param: map_pallas_rational(&p.decentralisation_param),
-        monetary_expansion: map_pallas_rational(&p.rho),
-        treasury_cut: map_pallas_rational(&p.tau),
-        pool_pledge_influence: map_pallas_rational(&p.a0),
-    })
-}
-
-fn unw<T: Clone>(p: &Option<T>, n: &str) -> Result<T> {
-    p.as_ref().ok_or_else(
-        || anyhow!("Empty parameter {n}, invalidating shelley genesis")
-    ).cloned()
-}
-
-fn map_shelley(genesis: &shelley::GenesisFile) -> Result<ShelleyParams> {
-    Ok(ShelleyParams {
-        active_slots_coeff: unw(
-            &genesis.active_slots_coeff.map(ChameleonFraction::from_f32), "active_slots_coeff"
-        )?,
-        epoch_length: unw(&genesis.epoch_length, "epoch_length")?,
-        max_kes_evolutions: unw(&genesis.max_kes_evolutions, "max_kes_evolutions")?,
-        max_lovelace_supply: unw(&genesis.max_lovelace_supply, "max_lovelace_supply")?,
-        network_id: unw(
-            &genesis.network_id.as_deref().map(map_network_id).transpose()?, "network_id"
-        )?,
-        network_magic: unw(&genesis.network_magic, "network_magic")?,
-        protocol_params: map_shelley_protocol_params(&genesis.protocol_params)?,
-        security_param: unw(&genesis.security_param, "security_param")?,
-        slot_length: unw(&genesis.slot_length, "slot_length")?,
-        slots_per_kes_period: unw(&genesis.slots_per_kes_period, "slots_per_kes_period")?,
-        system_start: unw(
-            &genesis.system_start.as_ref().map(|s| s.parse()).transpose()?, "system_start"
-        )?,
-        update_quorum: unw(&genesis.update_quorum, "update_quorum")?,
-    })
-}
- */
 
 fn map_block_version_data(bvd: &byron::BlockVersionData) -> Result<BlockVersionData> {
     Ok(BlockVersionData {

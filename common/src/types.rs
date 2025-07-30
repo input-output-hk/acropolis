@@ -10,7 +10,6 @@ use crate::{
 use anyhow::{anyhow, bail, Error};
 use bech32::{Bech32, Hrp};
 use bitmask_enum::bitmask;
-use chrono::{DateTime, Utc};
 use hex::decode;
 use serde::{Deserialize, Serialize};
 use serde_with::{hex::Hex, serde_as};

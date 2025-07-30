@@ -2,32 +2,20 @@
 //! Performs conversion from Pallas library data to Acropolis
 
 use anyhow::{anyhow, bail, Result};
-use pallas::{
-    ledger::*,
-    ledger::{
-        primitives::{
-            alonzo, conway, Nullable, Relay as PallasRelay, ScriptHash,
-            StakeCredential as PallasStakeCredential,
-        },
-        traverse::{MultiEraCert, MultiEraTx}, traverse
+use pallas::ledger::{
+    primitives::{
+        alonzo, conway, Nullable, Relay as PallasRelay, ScriptHash,
+        StakeCredential as PallasStakeCredential,
     },
+    traverse::MultiEraCert, *
 };
 
 use acropolis_common::{
     rational_number::RationalNumber,
-    messages::{
-        BlockFeesMessage, CardanoMessage, GovernanceProceduresMessage, Message,
-        TxCertificatesMessage, UTXODeltasMessage, WithdrawalsMessage,
-    },
-    protocol_params::{
-        NetworkId, Nonce, NonceVariant, ProtocolVersion, ShelleyProtocolParams, ShelleyParams
-    },
+    protocol_params::{Nonce, NonceVariant, ProtocolVersion},
     *,
 };
-use caryatid_sdk::{module, Context, Module};
-use std::collections::HashSet;
-use std::{collections::HashMap, sync::Arc};
-use tracing::{debug, error, info};
+use std::collections::{HashMap, HashSet};
 
 /// Map Pallas Network to our AddressNetwork
 pub fn map_network(network: addresses::Network) -> Result<AddressNetwork> {

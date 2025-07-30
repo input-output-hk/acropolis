@@ -1,5 +1,10 @@
 use crate::genesis_params;
-use acropolis_common::{messages::GovernanceOutcomesMessage, AlonzoParams, Committee, CommitteeChange, ConwayParams, EnactStateElem, Era, GovernanceOutcomeVariant, ProtocolParamUpdate, ProtocolParams, protocol_params::ShelleyParams, rational_number::RationalNumber, AlonzoVotingOutcome};
+use acropolis_common::{
+    messages::GovernanceOutcomesMessage, 
+    AlonzoParams, Committee, CommitteeChange, ConwayParams, EnactStateElem, Era, 
+    GovernanceOutcomeVariant, ProtocolParamUpdate, ProtocolParams, 
+    rational_number::RationalNumber, AlonzoVotingOutcome
+};
 use anyhow::{anyhow, bail, Result};
 use tracing::error;
 use acropolis_common::protocol_params::{ChameleonFraction, ShelleyProtocolParams};
