@@ -49,7 +49,7 @@ pub async fn main() -> Result<()> {
         .with_filter(EnvFilter::from_default_env().add_directive(filter::LevelFilter::INFO.into()))
         .with_filter(filter::filter_fn(|meta| meta.is_event()));
 
-    // Only turn on tracing if some OTEL environemtn variables exist
+    // Only turn on tracing if some OTEL environment variables exist
     if std::env::vars().any(|(name, _)| name.starts_with("OTEL_")) {
         // Send span tracing to opentelemetry
         // Should pick up standard OTEL_* environment variables
