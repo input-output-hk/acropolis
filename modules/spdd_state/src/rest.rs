@@ -6,12 +6,38 @@ use std::{collections::HashMap, sync::Arc};
 use tokio::sync::Mutex;
 
 /// Handles /spdd
-pub async fn handle_spdd(state: Arc<Mutex<State>>, params: Vec<String>) -> Result<RESTResponse> {
-    let locked = state.lock().await;
+pub async fn handle_spdd(
+    state: Option<Arc<Mutex<State>>>,
+    params: HashMap<String, String>,
+) -> Result<RESTResponse> {
+    let locked = match state.as_ref() {
+        Some(state) => state.lock().await,
+        None => {
+            return Ok(RESTResponse::with_text(
+                503,
+                "SPDD storage is disabled by configuration",
+            ));
+        }
+    };
 
-    let spdd_opt = if params.len() == 1 {
-        match params[0].parse::<u64>() {
-            Ok(epoch) => locked.get_epoch(epoch),
+    let spdd_opt = if let Some(epoch_str) = params.get("epoch") {
+        if params.len() > 1 {
+            return Ok(RESTResponse::with_text(
+                400,
+                "Only 'epoch' is a valid query parameter",
+            ));
+        }
+
+        match epoch_str.parse::<u64>() {
+            Ok(epoch) => match locked.get_epoch(epoch) {
+                Some(spdd) => Some(spdd),
+                None => {
+                    return Ok(RESTResponse::with_text(
+                        404,
+                        &format!("SPDD not found for epoch {}", epoch),
+                    ));
+                }
+            },
             Err(_) => {
                 return Ok(RESTResponse::with_text(
                     400,
@@ -19,8 +45,13 @@ pub async fn handle_spdd(state: Arc<Mutex<State>>, params: Vec<String>) -> Resul
                 ));
             }
         }
-    } else {
+    } else if params.is_empty() {
         locked.get_latest()
+    } else {
+        return Ok(RESTResponse::with_text(
+            400,
+            "Unexpected query parameter: only 'epoch' is allowed",
+        ));
     };
 
     if let Some(spdd) = spdd_opt {

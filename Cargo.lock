@@ -210,7 +210,6 @@ dependencies = [
  "caryatid_sdk",
  "config",
  "hex",
- "imbl",
  "serde_json",
  "tokio",
  "tracing",
@@ -1101,9 +1100,9 @@ dependencies = [
 
 [[package]]
 name = "caryatid_module_rest_server"
-version = "0.13.0"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32a545635a30944ab96b41397be9ae36cf15d48d398db2aaff268067a08c31d8"
+checksum = "04b3369fd37cc7c395feea110e0fc60075cb9fbc3c3470a4d3b0988da1606b72"
 dependencies = [
  "anyhow",
  "axum",

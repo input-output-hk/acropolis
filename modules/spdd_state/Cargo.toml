@@ -15,7 +15,6 @@ anyhow = "1.0"
 acropolis_common = { path = "../../common" }
 tracing = "0.1.40"
 tokio = { version = "1", features = ["full"] }
-imbl = { version = "5.0.0", features = ["serde"] }
 serde_json = "1.0.132"
 hex = "0.4.3"
 
