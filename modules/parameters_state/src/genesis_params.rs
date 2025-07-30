@@ -1,9 +1,11 @@
 use acropolis_common::{
     rational_number::{RationalNumber, rational_number_from_f32},
-    AlonzoParams, Anchor, BlockVersionData, ByronParams,
+    AlonzoParams, Anchor, BlockVersionData, ByronParams, CostModel,
     Committee, Constitution, ConwayParams, Credential, DRepVotingThresholds, Era,
-    NetworkId, Nonce, NonceVariant, PoolVotingThresholds, ProtocolConsts, ProtocolVersion,
-    ShelleyParams, ShelleyProtocolParams, SoftForkRule, TxFeePolicy,
+    PoolVotingThresholds, ProtocolConsts, SoftForkRule, TxFeePolicy,
+    protocol_params::{
+        NetworkId, Nonce, NonceVariant, ProtocolVersion, ShelleyParams, ShelleyProtocolParams
+    }
 };
 use anyhow::{anyhow, bail, Result};
 use hex::decode;
@@ -11,6 +13,7 @@ use pallas::ledger::{configs::*, primitives};
 use serde::Deserialize;
 use crate::alonzo_genesis;
 use std::collections::HashMap;
+use acropolis_common::protocol_params::ChameleonFraction;
 
 const PREDEFINED_GENESIS: [(&str, Era, &[u8]); 8] = [
     ("sanchonet", Era::Byron, include_bytes!("../downloads/sanchonet-byron-genesis.json")),
@@ -106,14 +109,15 @@ fn map_conway(genesis: &conway::GenesisFile) -> Result<ConwayParams> {
         min_fee_ref_script_cost_per_byte: RationalNumber::from(
             genesis.min_fee_ref_script_cost_per_byte,
         ),
-        plutus_v3_cost_model: genesis.plutus_v3_cost_model.clone(),
+        plutus_v3_cost_model: CostModel::new(genesis.plutus_v3_cost_model.clone()),
         constitution: map_constitution(&genesis.constitution)?,
         committee: map_committee(&genesis.committee)?,
     })
 }
 
-pub fn map_pallas_rational(r: &primitives::RationalNumber) -> RationalNumber {
-    RationalNumber::new(r.numerator, r.denominator)
+/*
+pub fn map_pallas_rational(r: &primitives::RationalNumber) -> ChameleonFraction {
+    ChameleonFraction::new_rational(r.numerator, r.denominator)
 }
 
 fn map_network_id(id: &str) -> Result<NetworkId> {
@@ -167,7 +171,9 @@ fn unw<T: Clone>(p: &Option<T>, n: &str) -> Result<T> {
 
 fn map_shelley(genesis: &shelley::GenesisFile) -> Result<ShelleyParams> {
     Ok(ShelleyParams {
-        active_slots_coeff: unw(&genesis.active_slots_coeff, "active_slots_coeff")?,
+        active_slots_coeff: unw(
+            &genesis.active_slots_coeff.map(ChameleonFraction::from_f32), "active_slots_coeff"
+        )?,
         epoch_length: unw(&genesis.epoch_length, "epoch_length")?,
         max_kes_evolutions: unw(&genesis.max_kes_evolutions, "max_kes_evolutions")?,
         max_lovelace_supply: unw(&genesis.max_lovelace_supply, "max_lovelace_supply")?,
@@ -185,6 +191,7 @@ fn map_shelley(genesis: &shelley::GenesisFile) -> Result<ShelleyParams> {
         update_quorum: unw(&genesis.update_quorum, "update_quorum")?,
     })
 }
+ */
 
 fn map_block_version_data(bvd: &byron::BlockVersionData) -> Result<BlockVersionData> {
     Ok(BlockVersionData {
@@ -251,7 +258,7 @@ pub fn read_byron_genesis(network: &str) -> Result<ByronParams> {
 }
 
 pub fn read_shelley_genesis(network: &str) -> Result<ShelleyParams> {
-    read_pdef_genesis::<shelley::GenesisFile, ShelleyParams> (network, Era::Shelley, map_shelley)
+    read_pdef_genesis::<ShelleyParams, ShelleyParams> (network, Era::Shelley, |x| Ok(x.clone()))
 }
 
 pub fn read_alonzo_genesis(network: &str) -> Result<AlonzoParams> {
@@ -262,4 +269,26 @@ pub fn read_alonzo_genesis(network: &str) -> Result<AlonzoParams> {
 
 pub fn read_conway_genesis(network: &str) -> Result<ConwayParams> {
     read_pdef_genesis::<conway::GenesisFile, ConwayParams> (network, Era::Conway, map_conway)
+}
+
+#[cfg(test)]
+mod test {
+    use anyhow::{anyhow, bail, Result};
+    use std::collections::HashSet;
+    use crate::genesis_params;
+
+    #[test]
+    fn test_read_genesis() -> Result<()> {
+        let networks = HashSet::<&str>::from_iter(
+            genesis_params::PREDEFINED_GENESIS.iter().map(|p| p.0)
+        );
+
+        for net in networks.iter() {
+            println!("{:?}", genesis_params::read_byron_genesis(net)?);
+            println!("{:?}", genesis_params::read_shelley_genesis(net)?);
+            println!("{:?}", genesis_params::read_alonzo_genesis(net)?);
+            println!("{:?}", genesis_params::read_conway_genesis(net)?);
+        }
+        Ok(())
+    }
 }

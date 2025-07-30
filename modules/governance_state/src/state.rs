@@ -1,22 +1,19 @@
 //! Acropolis Governance State: State storage
 
-use acropolis_common::{
-    messages::{
-        CardanoMessage, DRepStakeDistributionMessage, SPOStakeDistributionMessage,
-        GovernanceOutcomesMessage,
-        GovernanceProceduresMessage, Message, ProtocolParamsMessage,
-    },
-    BlockInfo, ConwayParams, DRepCredential, DataHash, EnactStateElem, Era, GovActionId,
-    GovernanceAction, GovernanceOutcome, GovernanceOutcomeVariant, KeyHash, Lovelace,
-    ProposalProcedure, SingleVoterVotes,
-    TreasuryWithdrawalsAction, Voter, VotesCount, VotingOutcome, VotingProcedure,
-};
+use acropolis_common::{messages::{
+    CardanoMessage, DRepStakeDistributionMessage, SPOStakeDistributionMessage,
+    GovernanceOutcomesMessage,
+    GovernanceProceduresMessage, Message, ProtocolParamsMessage,
+}, AlonzoParams, BlockInfo, ConwayParams, DRepCredential, DataHash, EnactStateElem, Era, GovActionId, GovernanceAction, GovernanceOutcome, GovernanceOutcomeVariant, GenesisKeyhash, KeyHash, Lovelace, ProposalProcedure, ProtocolParamUpdate, SingleVoterVotes, TreasuryWithdrawalsAction, Voter, VotesCount, VotingOutcome, VotingProcedure, calculations::SLOTS_PER_24HOURS, AlonzoVotingOutcome};
 use crate::VotingRegistrationState;
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::Context;
 use hex::ToHex;
 use std::{collections::HashMap, sync::Arc};
+use std::ops::Index;
 use tracing::{debug, error, info};
+
+const GENESIS_KEYS_VOTES_THRESHOLD: u64 = 5;
 
 pub struct State {
     pub enact_state_topic: String,
@@ -29,10 +26,12 @@ pub struct State {
     pub drep_stake_messages_count: usize,
 
     current_era: Era,
+    current_epoch_start_slot: u64,
     conway: Option<ConwayParams>,
     drep_stake: HashMap<DRepCredential, Lovelace>,
     spo_stake: HashMap<KeyHash, u64>,
 
+    alonzo_proposals: HashMap<GenesisKeyhash, Box<ProtocolParamUpdate>>,
     proposals: HashMap<GovActionId, (u64, ProposalProcedure)>,
     votes: HashMap<GovActionId, HashMap<Voter, (DataHash, VotingProcedure)>>,
 }
@@ -50,7 +49,9 @@ impl State {
 
             conway: None,
             current_era: Era::default(),
+            current_epoch_start_slot: 0,
 
+            alonzo_proposals: HashMap::new(),
             proposals: HashMap::new(),
             votes: HashMap::new(),
 
@@ -59,8 +60,11 @@ impl State {
         }
     }
 
-    pub fn advance_era(&mut self, new_era: &Era) {
-        self.current_era = new_era.clone();
+    pub fn advance_block(&mut self, new_blk: &BlockInfo) {
+        self.current_era = new_blk.era.clone();
+        if new_blk.new_epoch {
+            self.current_epoch_start_slot = new_blk.slot;
+        }
     }
 
     pub async fn handle_protocol_parameters(
@@ -98,7 +102,16 @@ impl State {
             {
                 bail!("Non-empty governance message for pre-conway block {block:?}");
             }
-            return Ok(())
+
+            if !governance_message.alonzo_updates.is_empty() {
+                if let Err(e) = self.process_alonzo_updates(
+                    block, &governance_message.alonzo_updates
+                ) {
+                    error!("Error handling governance_message: '{}'", e);
+                }
+            }
+
+            return Ok(());
         }
 
         for pproc in &governance_message.proposal_procedures {
@@ -123,6 +136,60 @@ impl State {
         }
 
         Ok(())
+    }
+
+    fn process_alonzo_updates(&mut self,
+        block_info: &BlockInfo, list: &Vec<(GenesisKeyhash, Box<ProtocolParamUpdate>)>
+    ) -> Result<()> {
+        // CIP-9 instructs us to check:
+        // 1. Parameter changes are submitted within first 24 hours of new epoch
+        // 2. Parameter changes are endorsed by a sufficient quorum: 5 Genesis Keys (TODO)
+
+        // 1 slot = 1 second
+        if block_info.slot - self.current_epoch_start_slot >= SLOTS_PER_24HOURS {
+            error!(
+                "Alonzo-compatible update must be submitted in 24 hours from epoch start; \
+                epoch start slot {}, update block {:?}", self.current_epoch_start_slot, block_info
+            );
+            return Ok(())
+        }
+
+        for (k,p) in list.iter() {
+            self.alonzo_proposals.insert(k.clone(), p.clone());
+        }
+
+        Ok(())
+    }
+
+    fn finalize_alonzo_voting(&mut self) -> Result<Vec<AlonzoVotingOutcome>> {
+        let mut proposals = self.alonzo_proposals.values().collect::<Vec<_>>();
+
+        let outcomes: Vec<_> = proposals.into_iter().map(|parameter_update| {
+            let votes: Vec<_> = self.alonzo_proposals.iter().filter_map(|(k, v)|
+                if v == parameter_update {
+                    Some(k.clone())
+                } else {
+                    None
+                }
+            ).collect();
+            let votes_len = votes.len() as u64;
+
+            AlonzoVotingOutcome {
+                votes_threshold: GENESIS_KEYS_VOTES_THRESHOLD,
+                voting: votes,
+                accepted: votes_len >= GENESIS_KEYS_VOTES_THRESHOLD,
+                parameter_update: parameter_update.clone(),
+            }
+        }).collect();
+        self.alonzo_proposals.clear();
+
+        for x in outcomes.iter() {
+            if x.accepted {
+                info!("Accepted proposal {x:?}");
+            }
+        }
+
+        Ok(outcomes)
     }
 
     pub fn get_conway_params(&self) -> Result<&ConwayParams> {
@@ -314,8 +381,13 @@ impl State {
     {
         let mut output = GovernanceOutcomesMessage::default();
         if self.current_era < Era::Conway {
+            info!("Epoch: {}", self.current_era);
+            let mut alonzo_votes = self.finalize_alonzo_voting()?;
+            info!("Alonzo finalized: {:?}", alonzo_votes);
+            output.alonzo_outcomes.append(&mut alonzo_votes);
+
             // Processes new epoch acts on old events.
-            // However, there should be no governance events before
+            // However, there should be no conway governance events before
             // Conway era start.
             return Ok(output);
         }
@@ -343,14 +415,14 @@ impl State {
                         wdr += 1;
                     }
 
-                    output.outcomes.push(GovernanceOutcome {
+                    output.conway_outcomes.push(GovernanceOutcome {
                         voting: out,
                         action_to_perform,
                     })
                 }
                 Ok(Some(out)) => {
                     rej += 1;
-                    output.outcomes.push(GovernanceOutcome {
+                    output.conway_outcomes.push(GovernanceOutcome {
                         voting: out,
                         action_to_perform: GovernanceOutcomeVariant::NoAction,
                     })
@@ -360,7 +432,7 @@ impl State {
 
         info!(
             "Epoch {} ({}): {}, total {} actions, {ens} enacts, {wdr} withdrawals, {rej} rejected",
-            voting_state, new_block.epoch, new_block.era, output.outcomes.len()
+            voting_state, new_block.epoch, new_block.era, output.conway_outcomes.len()
         );
         return Ok(output);
     }
