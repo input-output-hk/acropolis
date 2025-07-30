@@ -36,53 +36,6 @@ pub struct PoolRetirementRest {
     pub epoch: u64,
 }
 
-/// Handles /pools
-pub async fn handle_list(state: Arc<Mutex<State>>) -> Result<RESTResponse> {
-    let locked = state.lock().await;
-
-    match locked.list_pools_with_info() {
-        Some(pools) => {
-            let mut response: HashMap<String, PoolParamsRest> = HashMap::new();
-
-            for (operator, reg) in pools {
-                let operator_id = match operator.to_bech32_with_hrp("pool") {
-                    Ok(val) => val,
-                    Err(e) => {
-                        return Ok(RESTResponse::with_text(
-                            500,
-                            &format!("Internal server error retrieving pools list: {e}"),
-                        ));
-                    }
-                };
-
-                let margin = if reg.margin.denominator == 0 {
-                    0.0
-                } else {
-                    reg.margin.numerator as f64 / reg.margin.denominator as f64
-                };
-
-                response.insert(
-                    operator_id,
-                    PoolParamsRest {
-                        margin,
-                        pledge: reg.pledge,
-                        fixed_cost: reg.cost,
-                    },
-                );
-            }
-
-            match serde_json::to_string(&response) {
-                Ok(json) => Ok(RESTResponse::with_json(200, &json)),
-                Err(e) => Ok(RESTResponse::with_text(
-                    500,
-                    &format!("Internal server error while retrieving pools list: {e}"),
-                )),
-            }
-        }
-        None => Ok(RESTResponse::with_text(200, "{}")),
-    }
-}
-
 /// Handles /pools/{pool_id}
 /// Handles /pools/retiring
 pub async fn handle_spo(state: Arc<Mutex<State>>, param: String) -> Result<RESTResponse> {

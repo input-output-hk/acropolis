@@ -4,8 +4,10 @@
 use acropolis_common::{
     messages::{
         CardanoMessage, Message, SnapshotDumpMessage, SnapshotMessage, SnapshotStateMessage,
+        StateQuery, StateQueryResponse,
     },
-    rest_helper::{handle_rest, handle_rest_with_parameter},
+    queries::pools::{PoolsList, PoolsStateQuery, PoolsStateQueryResponse},
+    rest_helper::handle_rest_with_parameter,
 };
 use anyhow::Result;
 use caryatid_sdk::{module, Context, Module};
@@ -17,10 +19,9 @@ use tracing::{error, info, info_span, Instrument};
 mod state;
 use state::State;
 mod rest;
-use rest::{handle_list, handle_spo};
+use rest::handle_spo;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.certificates";
-const DEFAULT_LIST_TOPIC: (&str, &str) = ("handle-topic-pool-list", "rest.get.pools");
 const DEFAULT_SINGLE_TOPIC: (&str, &str) = ("handle-topic-pool-info", "rest.get.pools.*");
 const DEFAULT_RETIRING_POOLS_TOPIC: (&str, &str) =
     ("handle-topic-retiring-pools", "rest.get.pools_retiring");
@@ -46,10 +47,6 @@ impl SPOState {
             .ok()
             .inspect(|snapshot_topic| info!("Creating subscriber on '{snapshot_topic}'"));
 
-        let handle_list_topic =
-            config.get_string(DEFAULT_LIST_TOPIC.0).unwrap_or(DEFAULT_LIST_TOPIC.1.to_string());
-        info!("Creating request handler on '{handle_list_topic}'");
-
         let handle_single_topic =
             config.get_string(DEFAULT_SINGLE_TOPIC.0).unwrap_or(DEFAULT_SINGLE_TOPIC.1.to_string());
         info!("Creating request handler on '{handle_single_topic}'");
@@ -65,6 +62,38 @@ impl SPOState {
         info!("Creating SPO state publisher on '{spo_state_topic}'");
 
         let state = Arc::new(Mutex::new(State::new()));
+
+        // handle pools-state
+        let state_rest_blockfrost = state.clone();
+        context.handle("pools-state", move |message| {
+            let state = state_rest_blockfrost.clone();
+            async move {
+                let Message::StateQuery(StateQuery::Pools(query)) = message.as_ref() else {
+                    return Arc::new(Message::StateQueryResponse(StateQueryResponse::Pools(
+                        PoolsStateQueryResponse::Error("Invalid message for pools-state".into()),
+                    )));
+                };
+
+                let guard = state.lock().await;
+
+                let response = match query {
+                    PoolsStateQuery::GetPoolsList => {
+                        let pools_list = PoolsList {
+                            pool_operators: guard.list_pool_operators(),
+                        };
+                        PoolsStateQueryResponse::PoolsList(pools_list)
+                    }
+                    _ => PoolsStateQueryResponse::Error(format!(
+                        "Unimplemented query variant: {:?}",
+                        query
+                    )),
+                };
+
+                Arc::new(Message::StateQueryResponse(StateQueryResponse::Pools(
+                    response,
+                )))
+            }
+        });
 
         // Subscribe for snapshot messages, if allowed
         if let Some(snapshot_topic) = maybe_snapshot_topic {
@@ -138,17 +167,13 @@ impl SPOState {
                                 .handle_tx_certs(block, tx_certs_msg)
                                 .inspect_err(|e| error!("Messaging handling error: {e}"))
                                 .ok();
-                        }.instrument(span).await;
+                        }
+                        .instrument(span)
+                        .await;
                     }
                     _ => error!("Unexpected message type: {message:?}"),
                 }
             }
-        });
-
-        // Handle REST requests for full SPO state
-        let state_list: Arc<Mutex<State>> = state.clone();
-        handle_rest(context.clone(), &handle_list_topic, move || {
-            handle_list(state_list.clone())
         });
 
         // Handle REST requests for single SPO state and retiring pools
@@ -176,7 +201,9 @@ impl SPOState {
                                 .await
                                 .inspect_err(|e| error!("Tick error: {e}"))
                                 .ok();
-                        }.instrument(span).await;
+                        }
+                        .instrument(span)
+                        .await;
                     }
                 }
             }

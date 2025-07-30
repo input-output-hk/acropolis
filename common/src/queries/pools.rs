@@ -33,7 +33,9 @@ pub enum PoolsStateQueryResponse {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PoolsList {}
+pub struct PoolsList {
+    pub pool_operators: Vec<Vec<u8>>,
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PoolsListExtended {}
