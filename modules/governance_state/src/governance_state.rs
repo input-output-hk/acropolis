@@ -236,7 +236,7 @@ impl GovernanceState {
                 }
 
                 {
-                    state.lock().await.advance_era(&blk_g.era);
+                    state.lock().await.advance_block(&blk_g);
                 }
             }
         }

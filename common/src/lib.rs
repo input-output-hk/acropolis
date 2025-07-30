@@ -12,6 +12,7 @@ pub mod rest_helper;
 pub mod serialization;
 pub mod state_history;
 pub mod types;
+pub mod protocol_params;
 
 // Flattened re-exports
 pub use self::address::*;

@@ -16,7 +16,7 @@ use rayon::prelude::*;
 use serde_with::{hex::Hex, serde_as};
 use std::collections::BTreeMap;
 use std::sync::{atomic::AtomicU64, Arc};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 /// State of an individual stake address
 #[serde_as]
@@ -413,7 +413,7 @@ impl State {
                 ),
             };
 
-            info!(
+            debug!(
                 "Withdrawal of {} from stake key {}",
                 withdrawal.value,
                 hex::encode(hash)
@@ -479,13 +479,7 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acropolis_common::{
-        rational_number::RationalNumber, AddressNetwork, Anchor, Committee, Constitution,
-        ConwayParams, Credential, DRepVotingThresholds, PoolVotingThresholds, Pot, PotDelta,
-        ProtocolParams, Registration, StakeAddress, StakeAddressDelta, StakeAddressPayload,
-        StakeAndVoteDelegation, StakeRegistrationAndStakeAndVoteDelegation,
-        StakeRegistrationAndVoteDelegation, VoteDelegation, Withdrawal,
-    };
+    use acropolis_common::{rational_number::RationalNumber, AddressNetwork, Anchor, Committee, Constitution, ConwayParams, CostModel, Credential, DRepVotingThresholds, PoolVotingThresholds, Pot, PotDelta, ProtocolParams, Registration, StakeAddress, StakeAddressDelta, StakeAddressPayload, StakeAndVoteDelegation, StakeRegistrationAndStakeAndVoteDelegation, StakeRegistrationAndVoteDelegation, VoteDelegation, Withdrawal};
 
     const STAKE_KEY_HASH: [u8; 3] = [0x99, 0x0f, 0x00];
     const DREP_HASH: [u8; 4] = [0xca, 0xfe, 0xd0, 0x0d];
@@ -911,7 +905,7 @@ mod tests {
                 d_rep_deposit: 100_000_000,
                 d_rep_activity: 27,
                 min_fee_ref_script_cost_per_byte: RationalNumber::new(1, 42),
-                plutus_v3_cost_model: Vec::new(),
+                plutus_v3_cost_model: CostModel::new(Vec::new()),
                 constitution: Constitution {
                     anchor: Anchor {
                         url: "constitution.cardano.org".to_string(),

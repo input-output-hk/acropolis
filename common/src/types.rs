@@ -5,6 +5,7 @@
 use crate::{
     address::{Address, StakeAddress},
     rational_number::RationalNumber,
+    protocol_params
 };
 use anyhow::{anyhow, bail, Error};
 use bech32::{Bech32, Hrp};
@@ -187,6 +188,8 @@ pub type ScriptHash = KeyHash;
 
 /// Address key hash
 pub type AddrKeyhash = KeyHash;
+
+pub type GenesisKeyhash = Vec<u8>;
 
 /// Data hash used for metadata, anchors (SHA256)
 pub type DataHash = Vec<u8>;
@@ -740,7 +743,12 @@ impl Display for GovActionId {
     }
 }
 
-type CostModel = Vec<i64>;
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
+pub struct CostModel (Vec<i64>);
+
+impl CostModel {
+    pub fn new(m: Vec<i64>) -> Self { CostModel(m) }
+}
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct CostModels {
@@ -814,56 +822,6 @@ pub struct ProtocolConsts {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ProtocolVersion {
-    pub minor: u64,
-    pub major: u64,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub enum NonceVariant {
-    NeutralNonce,
-    Nonce,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct Nonce {
-    pub tag: NonceVariant,
-    pub hash: Option<Vec<u8>>,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ShelleyProtocolParams {
-    pub protocol_version: ProtocolVersion,
-    pub max_tx_size: u32,
-    pub max_block_body_size: u32,
-    pub max_block_header_size: u32,
-    pub key_deposit: u64,
-    pub min_utxo_value: u64,
-
-    pub minfee_a: u32,
-    pub minfee_b: u32,
-    pub pool_deposit: u64,
-
-    /// AKA desired_number_of_stake_pools, n_opt, k parameter
-    pub stake_pool_target_num: u32,
-    pub min_pool_cost: u64,
-
-    /// AKA eMax, e_max
-    pub pool_retire_max_epoch: u64,
-    pub extra_entropy: Nonce,
-    pub decentralisation_param: RationalNumber,
-
-    /// AKA Rho, expansion_rate
-    pub monetary_expansion: RationalNumber,
-
-    /// AKA Tau, treasury_growth_rate
-    pub treasury_cut: RationalNumber,
-
-    /// AKA a0
-    pub pool_pledge_influence: RationalNumber,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AlonzoParams {
     pub lovelace_per_utxo_word: u64,
     pub execution_prices: ExUnitPrices,
@@ -884,27 +842,6 @@ pub struct ByronParams {
     pub start_time: u64,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub enum NetworkId {
-    Testnet,
-    Mainnet,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ShelleyParams {
-    pub active_slots_coeff: f32,
-    pub epoch_length: u32,
-    pub max_kes_evolutions: u32,
-    pub max_lovelace_supply: u64,
-    pub network_id: NetworkId,
-    pub network_magic: u32,
-    pub protocol_params: ShelleyProtocolParams,
-    pub security_param: u32,
-    pub slot_length: u32,
-    pub slots_per_kes_period: u32,
-    pub system_start: DateTime<Utc>,
-    pub update_quorum: u32,
-}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ConwayParams {
@@ -926,7 +863,7 @@ pub struct ConwayParams {
 pub struct ProtocolParams {
     pub alonzo: Option<AlonzoParams>,
     pub byron: Option<ByronParams>,
-    pub shelley: Option<ShelleyParams>,
+    pub shelley: Option<protocol_params::ShelleyParams>,
     pub conway: Option<ConwayParams>,
 }
 
@@ -940,8 +877,9 @@ pub enum ProtocolParamType {
     SecurityProperty,
 }
 
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ProtocolParamUpdate {
+    /// The following are the fields from Conway ProtocolParamUpdate structure
     /// AKA txFeePerByte, tx_fee_per_byte (Shelley)
     pub minfee_a: Option<u64>,
 
@@ -1034,6 +972,17 @@ pub struct ProtocolParamUpdate {
 
     /// AKA min_fee_ref_script_cost_per_byte (Conway)
     pub minfee_refscript_cost_per_byte: Option<RationalNumber>,
+
+    /// The following are the fields from Alonzo-compatible ProtocolParamUpdate
+    /// structure, not present in Conway.
+    /// (Shelley)
+    pub decentralisation_constant: Option<RationalNumber>,
+
+    /// (Shelley)
+    pub extra_enthropy: Option<protocol_params::Nonce>,
+
+    /// (Shelley)
+    pub protocol_version: Option<protocol_params::ProtocolVersion>
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -1234,6 +1183,14 @@ pub enum GovernanceOutcomeVariant {
     EnactStateElem(EnactStateElem),
     TreasuryWithdrawal(TreasuryWithdrawalsAction),
     NoAction,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AlonzoVotingOutcome {
+    pub voting: Vec<GenesisKeyhash>,
+    pub votes_threshold: u64,
+    pub accepted: bool,
+    pub parameter_update: Box<ProtocolParamUpdate>
 }
 
 /// The structure has info about outcome of a single governance action.
