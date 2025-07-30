@@ -2,7 +2,6 @@
 //! Unpacks transaction bodies into UTXO events
 
 use acropolis_common::{
-    rational_number::RationalNumber,
     messages::{
         BlockFeesMessage, CardanoMessage, GovernanceProceduresMessage, Message,
         TxCertificatesMessage, UTXODeltasMessage, WithdrawalsMessage,
@@ -10,22 +9,13 @@ use acropolis_common::{
     *,
 };
 use caryatid_sdk::{module, Context, Module};
-use std::collections::HashSet;
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use config::Config;
 use futures::future::join_all;
-use pallas::{
-    ledger::*,
-    ledger::{
-        primitives::{
-            alonzo, conway, Nullable, Relay as PallasRelay, ScriptHash,
-            StakeCredential as PallasStakeCredential,
-        },
-        traverse::{MultiEraCert, MultiEraTx}, traverse
-    },
-};
+use pallas::ledger::{traverse::MultiEraTx, traverse};
+use hex::ToHex;
 use tracing::{debug, error, info};
 
 mod map_parameters;
@@ -102,10 +92,14 @@ impl TxUnpacker {
                                         if let Some(alonzo_update) = update.as_alonzo() {
                                             for (hash,vote) in alonzo_update.proposed_protocol_parameter_updates.iter() {
                                                 match map_parameters::map_alonzo_protocol_param_update(vote) {
-                                                    Ok(upd) => alonzo_updates.push((hash.to_vec(), upd)),
+                                                    Ok(upd) =>
+                                                        alonzo_updates.push((hash.to_vec(), upd)),
                                                     Err(e) => error!("Cannot convert alonzo protocol param update {vote:?}: {e}")
                                                 }
                                             }
+                                            info!("Alonzo updates: {:?} txs, hash {}", 
+                                                alonzo_updates, alonzo.hash().encode_hex::<String>()
+                                            );
                                         }
                                     }
                                 }

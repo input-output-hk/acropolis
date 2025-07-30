@@ -3,7 +3,7 @@
 //! is incompatible with SanchoNet genesis)
 
 use acropolis_common::{
-    rational_number::{RationalNumber, rational_number_from_f32},
+    rational_number::RationalNumber,
     AlonzoParams, CostModel, ExUnits, ExUnitPrices,
     protocol_params::ChameleonFraction
 };
