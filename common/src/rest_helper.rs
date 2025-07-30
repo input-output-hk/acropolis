@@ -5,7 +5,7 @@ use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
 use futures::future::Future;
 use num_traits::ToPrimitive;
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 use tokio::task::JoinHandle;
 use tracing::{error, info};
 
@@ -82,7 +82,7 @@ where
         }
     })
 }
-/*
+
 // Handle a REST request with query parameters
 pub fn handle_rest_with_query_parameter<F, Fut>(
     context: Arc<Context<Message>>,
@@ -90,7 +90,7 @@ pub fn handle_rest_with_query_parameter<F, Fut>(
     handler: F,
 ) -> JoinHandle<()>
 where
-    F: Fn(&[&str]) -> Fut + Send + Sync + Clone + 'static,
+    F: Fn(HashMap<String, String>) -> Fut + Send + Sync + Clone + 'static,
     Fut: Future<Output = Result<RESTResponse>> + Send + 'static,
 {
     context.handle(topic, move |message: Arc<Message>| {
@@ -110,7 +110,7 @@ where
             Arc::new(Message::RESTResponse(response))
         }
     })
-}*/
+}
 
 /// Extract parameters from the request path based on the topic pattern.
 /// Skips the first 3 parts of the topic as these are never parameters

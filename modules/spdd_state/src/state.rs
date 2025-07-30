@@ -1,16 +1,15 @@
 use acropolis_common::KeyHash;
-use imbl::OrdMap;
 use std::collections::BTreeMap;
 use tracing::info;
 
 pub struct State {
-    historical_distributions: OrdMap<u64, BTreeMap<KeyHash, u64>>,
+    historical_distributions: BTreeMap<u64, BTreeMap<KeyHash, u64>>,
 }
 
 impl State {
     pub fn new() -> Self {
         Self {
-            historical_distributions: OrdMap::new(),
+            historical_distributions: BTreeMap::new(),
         }
     }
 
@@ -19,7 +18,7 @@ impl State {
     }
 
     pub fn get_latest(&self) -> Option<BTreeMap<KeyHash, u64>> {
-        self.historical_distributions.iter().last().map(|(_, map)| map.clone())
+        self.historical_distributions.last_key_value().map(|(_, map)| map.clone())
     }
 
     pub fn get_epoch(&self, epoch: u64) -> Option<BTreeMap<KeyHash, u64>> {
@@ -36,7 +35,7 @@ impl State {
                 num_epochs,
                 latest_epoch = *epoch,
                 spo_count,
-                "SPDD state: tracking {num_epochs} epochs, latest is {epoch} with {spo_count} SPOs"
+                "Tracking {num_epochs} epochs, latest is {epoch} with {spo_count} SPOs"
             );
         } else {
             info!("SPDD state: no data yet");

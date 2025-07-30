@@ -49,6 +49,7 @@ store-history = false
 [module.accounts-state]
 
 [module.spdd-state]
+store-spdd = false
 
 [module.clock]
 
