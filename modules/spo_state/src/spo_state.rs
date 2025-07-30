@@ -110,6 +110,7 @@ impl SPOState {
 
         // Subscribe for certificate messages
         let mut subscription = context.subscribe(&subscribe_topic).await?;
+        let context_subscribe = context.clone();
         let state_subscribe = state.clone();
         context.run(async move {
             loop {
@@ -122,10 +123,18 @@ impl SPOState {
                         let span = info_span!("spo_state.handle_tx_certs", block = block.number);
                         async {
                             let mut state = state_subscribe.lock().await;
-                            state
+                            let maybe_message = state
                                 .handle_tx_certs(block, tx_certs_msg)
                                 .inspect_err(|e| error!("Messaging handling error: {e}"))
                                 .ok();
+
+                            if let Some(Some(message)) = maybe_message {
+                                context_subscribe
+                                    .message_bus
+                                    .publish(&spo_state_topic, message)
+                                    .await
+                                    .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+                            }
                         }.instrument(span).await;
                     }
                     _ => error!("Unexpected message type: {message:?}"),
