@@ -6,10 +6,11 @@ use acropolis_common::{
         GovernanceOutcomesMessage,
         GovernanceProceduresMessage, Message, ProtocolParamsMessage,
     },
-    BlockInfo, ConwayParams, DRepCredential, DataHash, EnactStateElem, Era, GovActionId,
-    GovernanceAction, GovernanceOutcome, GovernanceOutcomeVariant, KeyHash, Lovelace,
-    ProposalProcedure, SingleVoterVotes,
+    BlockInfo, ConwayParams, DRepCredential, DataHash, EnactStateElem, Era,
+    GovActionId, GovernanceAction, GovernanceOutcome, GovernanceOutcomeVariant,
+    GenesisKeyhash, KeyHash, Lovelace, ProposalProcedure, ProtocolParamUpdate, SingleVoterVotes,
     TreasuryWithdrawalsAction, Voter, VotesCount, VotingOutcome, VotingProcedure,
+    calculations::SLOTS_PER_24HOURS, AlonzoVotingOutcome
 };
 use crate::VotingRegistrationState;
 use anyhow::{anyhow, bail, Result};
@@ -17,6 +18,8 @@ use caryatid_sdk::Context;
 use hex::ToHex;
 use std::{collections::HashMap, sync::Arc};
 use tracing::{debug, error, info};
+
+const GENESIS_KEYS_VOTES_THRESHOLD: u64 = 5;
 
 pub struct State {
     pub enact_state_topic: String,
@@ -29,10 +32,12 @@ pub struct State {
     pub drep_stake_messages_count: usize,
 
     current_era: Era,
+    current_epoch_start_slot: u64,
     conway: Option<ConwayParams>,
     drep_stake: HashMap<DRepCredential, Lovelace>,
     spo_stake: HashMap<KeyHash, u64>,
 
+    alonzo_proposals: HashMap<GenesisKeyhash, Box<ProtocolParamUpdate>>,
     proposals: HashMap<GovActionId, (u64, ProposalProcedure)>,
     votes: HashMap<GovActionId, HashMap<Voter, (DataHash, VotingProcedure)>>,
 }
@@ -50,7 +55,9 @@ impl State {
 
             conway: None,
             current_era: Era::default(),
+            current_epoch_start_slot: 0,
 
+            alonzo_proposals: HashMap::new(),
             proposals: HashMap::new(),
             votes: HashMap::new(),
 
@@ -59,8 +66,15 @@ impl State {
         }
     }
 
-    pub fn advance_era(&mut self, new_era: &Era) {
-        self.current_era = new_era.clone();
+    /// Update current fields to new epoch values. The function should be called
+    /// after all block processing is done.
+    pub fn advance_epoch(&mut self, epoch_blk: &BlockInfo) -> Result<()> {
+        if !epoch_blk.new_epoch {
+            bail!("Block {epoch_blk:?} must start a new epoch");
+        }
+        self.current_era = epoch_blk.era.clone(); // If era is the same -- no problem
+        self.current_epoch_start_slot = epoch_blk.slot;
+        Ok(())
     }
 
     pub async fn handle_protocol_parameters(
@@ -98,7 +112,16 @@ impl State {
             {
                 bail!("Non-empty governance message for pre-conway block {block:?}");
             }
-            return Ok(())
+
+            if !governance_message.alonzo_updates.is_empty() {
+                if let Err(e) = self.process_alonzo_updates(
+                    block, &governance_message.alonzo_updates
+                ) {
+                    error!("Error handling governance_message: '{}'", e);
+                }
+            }
+
+            return Ok(());
         }
 
         for pproc in &governance_message.proposal_procedures {
@@ -125,6 +148,54 @@ impl State {
         Ok(())
     }
 
+    fn process_alonzo_updates(&mut self,
+        block_info: &BlockInfo, list: &Vec<(GenesisKeyhash, Box<ProtocolParamUpdate>)>
+    ) -> Result<()> {
+        if list.is_empty() {
+            return Ok(())
+        }
+
+        // CIP-9 instructs us to check:
+        // 1. Parameter changes are submitted within first 24 hours of new epoch
+        // 2. Parameter changes are endorsed by a sufficient quorum: 5 Genesis Keys (TODO)
+
+        // 1 slot = 1 second
+        if block_info.slot - self.current_epoch_start_slot >= SLOTS_PER_24HOURS {
+            error!(
+                "Alonzo-compatible update must be submitted in 24 hours from epoch start; \
+                epoch start slot {}, update block {:?}", self.current_epoch_start_slot, block_info
+            );
+            return Ok(())
+        }
+
+        for (k,p) in list.iter() {
+            self.alonzo_proposals.insert(k.clone(), p.clone());
+        }
+
+        Ok(())
+    }
+
+    fn finalize_alonzo_voting(&mut self) -> Result<Vec<AlonzoVotingOutcome>> {
+        let proposals = self.alonzo_proposals.values().collect::<Vec<_>>();
+
+        let outcomes: Vec<_> = proposals.into_iter().map(|parameter_update| {
+            let votes: Vec<_> = self.alonzo_proposals.iter().filter_map(|(k, v)|
+                (v == parameter_update).then(|| k.clone())
+            ).collect();
+            let votes_len = votes.len() as u64;
+
+            AlonzoVotingOutcome {
+                votes_threshold: GENESIS_KEYS_VOTES_THRESHOLD,
+                voting: votes,
+                accepted: votes_len >= GENESIS_KEYS_VOTES_THRESHOLD,
+                parameter_update: parameter_update.clone(),
+            }
+        }).collect();
+        self.alonzo_proposals.clear();
+
+        Ok(outcomes)
+    }
+
     pub fn get_conway_params(&self) -> Result<&ConwayParams> {
         self.conway.as_ref().ok_or_else(|| anyhow!("Conway parameters not available"))
     }
@@ -137,7 +208,6 @@ impl State {
     /// Update proposals memory cache
     fn insert_proposal_procedure(&mut self, epoch: u64, proc: &ProposalProcedure) -> Result<()> {
         self.action_proposal_count += 1;
-        info!("Inserting proposal procedure: {:?}", proc);
         let prev = self.proposals.insert(proc.gov_action_id.clone(), (epoch, proc.clone()));
         if let Some(prev) = prev {
             return Err(anyhow!(
@@ -293,6 +363,43 @@ impl State {
         Ok(None)
     }
 
+    fn finalize_conway_voting(
+        &mut self, new_block: &BlockInfo, voting_state: &VotingRegistrationState
+    ) -> Result<Vec<GovernanceOutcome>> {
+        let mut outcome = Vec::<GovernanceOutcome>::new();
+        let actions = self.proposals.keys().map(|a| a.clone()).collect::<Vec<_>>();
+
+        for action_id in actions.iter() {
+            info!("Epoch {}: processing action {}", new_block.epoch, action_id);
+            match self.process_one_proposal(new_block.epoch, &voting_state, &action_id) {
+                Err(e) => error!("Error processing governance {action_id}: {e}"),
+                Ok(None) => (),
+                Ok(Some(out)) if out.accepted => {
+                    let mut action_to_perform = GovernanceOutcomeVariant::NoAction;
+
+                    if let Some(elem) = Self::pack_as_enact_state_elem(&out.procedure) {
+                        action_to_perform = GovernanceOutcomeVariant::EnactStateElem(elem);
+                    } else if let Some(wt) = Self::retrieve_withdrawal(&out.procedure) {
+                        action_to_perform = GovernanceOutcomeVariant::TreasuryWithdrawal(wt);
+                    }
+
+                    outcome.push(GovernanceOutcome {
+                        voting: out,
+                        action_to_perform,
+                    })
+                }
+                Ok(Some(out)) => {
+                    outcome.push(GovernanceOutcome {
+                        voting: out,
+                        action_to_perform: GovernanceOutcomeVariant::NoAction,
+                    })
+                }
+            }
+        }
+
+        Ok(outcome)
+    }
+
     fn recalculate_voting_state(&self) -> Result<VotingRegistrationState> {
         let drep_stake = self.drep_stake.iter().map(|(_dr,lov)| lov).sum();
 
@@ -314,54 +421,32 @@ impl State {
     {
         let mut output = GovernanceOutcomesMessage::default();
         if self.current_era < Era::Conway {
+            output.alonzo_outcomes = self.finalize_alonzo_voting()?;
+
             // Processes new epoch acts on old events.
-            // However, there should be no governance events before
+            // However, there should be no conway governance events before
             // Conway era start.
-            return Ok(output);
-        }
-
-        let voting_state = self.recalculate_voting_state()?;
-
-        let actions = self.proposals.keys().map(|a| a.clone()).collect::<Vec<_>>();
-        let mut wdr = 0;
-        let mut ens = 0;
-        let mut rej = 0;
-
-        for action_id in actions.iter() {
-            info!("Epoch {}: processing action {}", new_block.epoch, action_id);
-            match self.process_one_proposal(new_block.epoch, &voting_state, &action_id) {
-                Err(e) => error!("Error processing governance {action_id}: {e}"),
-                Ok(None) => (),
-                Ok(Some(out)) if out.accepted => {
-                    let mut action_to_perform = GovernanceOutcomeVariant::NoAction;
-
-                    if let Some(elem) = Self::pack_as_enact_state_elem(&out.procedure) {
-                        action_to_perform = GovernanceOutcomeVariant::EnactStateElem(elem);
-                        ens += 1;
-                    } else if let Some(wt) = Self::retrieve_withdrawal(&out.procedure) {
-                        action_to_perform = GovernanceOutcomeVariant::TreasuryWithdrawal(wt);
-                        wdr += 1;
-                    }
-
-                    output.outcomes.push(GovernanceOutcome {
-                        voting: out,
-                        action_to_perform,
-                    })
-                }
-                Ok(Some(out)) => {
-                    rej += 1;
-                    output.outcomes.push(GovernanceOutcome {
-                        voting: out,
-                        action_to_perform: GovernanceOutcomeVariant::NoAction,
-                    })
-                }
+            if !self.proposals.is_empty() {
+                error!("Conway era is not started, altough {} proposals are present",
+                    self.proposals.len()
+                );
             }
-        }
 
-        info!(
-            "Epoch {} ({}): {}, total {} actions, {ens} enacts, {wdr} withdrawals, {rej} rejected",
-            voting_state, new_block.epoch, new_block.era, output.outcomes.len()
-        );
+            info!("Alonzo-compatible voting, epoch {} ({}): {:?}",
+                new_block.epoch, new_block.era, output.alonzo_outcomes
+            );
+        }
+        else {
+            let voting_state = self.recalculate_voting_state()?;
+            let outcome = self.finalize_conway_voting(&new_block, &voting_state)?;
+            let acc = outcome.iter().filter(|oc| oc.voting.accepted).count();
+
+            info!(
+                "Conway voting, epoch {} ({}): {voting_state}, total {} actions, {acc} accepted",
+                new_block.epoch, new_block.era, outcome.len()
+            );
+            output.conway_outcomes = outcome;
+        }
         return Ok(output);
     }
 
