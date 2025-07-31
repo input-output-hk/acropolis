@@ -24,7 +24,7 @@ mod rest;
 use acropolis_common::queries::accounts::{
     AccountInfo, AccountsStateQuery, AccountsStateQueryResponse,
 };
-use rest::{handle_drdd, handle_pots};
+use rest::handle_pots;
 
 const DEFAULT_SPO_STATE_TOPIC: &str = "cardano.spo.state";
 const DEFAULT_EPOCH_ACTIVITY_TOPIC: &str = "cardano.epoch.activity";
@@ -38,7 +38,6 @@ const DEFAULT_SPO_DISTRIBUTION_TOPIC: &str = "cardano.spo.distribution";
 const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: &str = "cardano.protocol.parameters";
 
 const DEFAULT_HANDLE_POTS_TOPIC: (&str, &str) = ("handle-topic-pots", "rest.get.pots");
-const DEFAULT_HANDLE_DRDD_TOPIC: (&str, &str) = ("handle-topic-drdd", "rest.get.drdd");
 
 /// Accounts State module
 #[module(
@@ -386,16 +385,10 @@ impl AccountsState {
             .unwrap_or(DEFAULT_HANDLE_POTS_TOPIC.1.to_string());
         info!("Creating request handler on '{}'", handle_pots_topic);
 
-        let handle_drdd_topic = config
-            .get_string(DEFAULT_HANDLE_DRDD_TOPIC.0)
-            .unwrap_or(DEFAULT_HANDLE_DRDD_TOPIC.1.to_string());
-        info!("Creating request handler on '{}'", handle_drdd_topic);
-
         // Create history
         let history = Arc::new(Mutex::new(StateHistory::<State>::new("AccountsState")));
         let history_account_single = history.clone();
         let history_pots = history.clone();
-        let history_drdd = history.clone();
         let history_tick = history.clone();
 
         context.handle("accounts-state", move |message| {
@@ -447,10 +440,6 @@ impl AccountsState {
 
         handle_rest(context.clone(), &handle_pots_topic, move || {
             handle_pots(history_pots.clone())
-        });
-
-        handle_rest(context.clone(), &handle_drdd_topic, move || {
-            handle_drdd(history_drdd.clone())
         });
 
         // Ticker to log stats

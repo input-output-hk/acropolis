@@ -33,6 +33,8 @@ acropolis_module_epoch_activity_counter = { path = "../../modules/epoch_activity
 acropolis_module_accounts_state = { path = "../../modules/accounts_state" }
 acropolis_module_rest_blockfrost = { path = "../../modules/rest_blockfrost" }
 acropolis_module_spdd_state = { path = "../../modules/spdd_state" }
+acropolis_module_drdd_state = { path = "../../modules/drdd_state" }
+
 anyhow = "1.0"
 config = "0.15.11"
 tracing = "0.1.40"
