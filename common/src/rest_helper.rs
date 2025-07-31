@@ -1,9 +1,10 @@
 //! Helper functions for REST handlers
 
 use crate::messages::{Message, RESTResponse};
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
 use futures::future::Future;
+use num_traits::ToPrimitive;
 use std::sync::Arc;
 use tokio::task::JoinHandle;
 use tracing::{error, info};
@@ -42,7 +43,7 @@ where
     })
 }
 
-/// Handle a simple REST request with one path parameter
+/// Handle a REST request with path parameters
 pub fn handle_rest_with_parameter<F, Fut>(
     context: Arc<Context<Message>>,
     topic: &str,
@@ -64,14 +65,10 @@ where
                         extract_params_from_topic_and_path(&topic_owned, &request.path_elements);
                     let params_slice: Vec<&str> = params_vec.iter().map(|s| s.as_str()).collect();
 
-                    if params_slice.is_empty() {
-                        RESTResponse::with_text(400, "Parameters must be provided")
-                    } else {
-                        match handler(&params_slice).await {
-                            Ok(response) => response,
-                            Err(error) => {
-                                RESTResponse::with_text(500, &format!("{error:?}").to_string())
-                            }
+                    match handler(&params_slice).await {
+                        Ok(response) => response,
+                        Err(error) => {
+                            RESTResponse::with_text(500, &format!("{error:?}").to_string())
                         }
                     }
                 }
@@ -105,4 +102,14 @@ fn extract_params_from_topic_and_path(topic: &str, path_elements: &[String]) -> 
         .iter()
         .filter_map(|&pos| pos.checked_sub(offset).and_then(|idx| path_elements.get(idx)).cloned())
         .collect()
+}
+
+pub trait ToCheckedF64 {
+    fn to_checked_f64(&self, name: &str) -> Result<f64>;
+}
+
+impl<T: ToPrimitive> ToCheckedF64 for T {
+    fn to_checked_f64(&self, name: &str) -> Result<f64> {
+        self.to_f64().ok_or_else(|| anyhow!("Failed to convert {name} to f64"))
+    }
 }
