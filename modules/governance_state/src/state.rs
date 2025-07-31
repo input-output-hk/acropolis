@@ -66,11 +66,15 @@ impl State {
         }
     }
 
-    pub fn advance_block(&mut self, new_blk: &BlockInfo) {
-        self.current_era = new_blk.era.clone();
-        if new_blk.new_epoch {
-            self.current_epoch_start_slot = new_blk.slot;
+    /// Update current fields to new epoch values. The function should be called
+    /// after all block processing is done.
+    pub fn advance_epoch(&mut self, epoch_blk: &BlockInfo) -> Result<()> {
+        if !epoch_blk.new_epoch {
+            bail!("Block {epoch_blk:?} must start a new epoch");
         }
+        self.current_era = epoch_blk.era.clone(); // If era is the same -- no problem
+        self.current_epoch_start_slot = epoch_blk.slot;
+        Ok(())
     }
 
     pub async fn handle_protocol_parameters(

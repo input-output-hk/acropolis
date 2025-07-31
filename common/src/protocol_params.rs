@@ -1,8 +1,9 @@
 use chrono::{DateTime, Utc};
+use num_traits::ToPrimitive;
 use serde::{Serialize, Deserialize};
 use crate::rational_number::{rational_number_from_f32, RationalNumber};
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 #[serde(untagged)]
 pub enum ChameleonFraction {
     Float(f32),
@@ -37,6 +38,32 @@ impl ChameleonFraction {
     }
 }
 
+impl ToPrimitive for ChameleonFraction {
+    fn to_i64(&self) -> Option<i64> {
+        match self {
+            ChameleonFraction::Float(f) => f.to_i64(),
+            ChameleonFraction::Fraction { numerator: n, denominator: d } =>
+                (*d > 0 && n % d == 0).then(|| (n / d).try_into().ok()).flatten()
+        }
+    }
+
+    fn to_u64(&self) -> Option<u64> {
+        match self {
+            ChameleonFraction::Float(f) => f.to_u64(),
+            ChameleonFraction::Fraction { numerator: n, denominator: d } =>
+                (*d > 0 && n % d == 0).then_some(n / d)
+        }
+    }
+
+    fn to_f64(&self) -> Option<f64> {
+        match self {
+            ChameleonFraction::Float(v) => Some(*v as f64),
+            ChameleonFraction::Fraction{numerator: n, denominator: d} =>
+                RationalNumber::new(*n, *d).to_f64()
+        }
+    }
+}
+
 //
 // Shelley protocol parameters
 //
@@ -62,7 +89,7 @@ pub struct Nonce {
     pub hash: Option<Vec<u8>>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ShelleyProtocolParams {
     pub protocol_version: ProtocolVersion,
@@ -104,13 +131,13 @@ pub struct ShelleyProtocolParams {
     pub pool_pledge_influence: ChameleonFraction,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum NetworkId {
     Testnet,
     Mainnet,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ShelleyParams {
     pub active_slots_coeff: ChameleonFraction,
@@ -125,4 +152,26 @@ pub struct ShelleyParams {
     pub slots_per_kes_period: u32,
     pub system_start: DateTime<Utc>,
     pub update_quorum: u32,
+}
+
+#[cfg(test)]
+mod tests {
+    use anyhow::Result;
+    use super::*;
+
+    #[test]
+    fn test_chameleon_serialization() -> Result<()> {
+        let ch = [
+            &ChameleonFraction::Float(0.003),
+            &ChameleonFraction::Fraction{numerator: 3, denominator: 1000}
+        ];
+
+        for elem in ch {
+            let elem_str = serde_json::to_string(elem).unwrap();
+            let elem_back = serde_json::from_str::<ChameleonFraction>(&elem_str).unwrap();
+            println!("{elem:?} => '{elem_str}'");
+            assert_eq!(elem, &elem_back);
+        }
+        Ok(())
+    }
 }

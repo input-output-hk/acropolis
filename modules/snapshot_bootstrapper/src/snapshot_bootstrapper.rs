@@ -7,7 +7,7 @@ use acropolis_common::{
 use anyhow::{Context as AnyhowContext, Result};
 use caryatid_sdk::{module, Context, Module};
 use config::Config;
-use tracing::{error, info};
+use tracing::{error, info, info_span, Instrument};
 
 const DEFAULT_SNAPSHOT_TOPIC: &str = "cardano.snapshot";
 const DEFAULT_STARTUP_TOPIC: &str = "cardano.sequence.start";
@@ -42,14 +42,17 @@ impl SnapshotBootstrapper {
             };
             info!("Received startup message");
 
-            let spo_state_message = Message::Snapshot(SnapshotMessage::Bootstrap(
-                SnapshotStateMessage::SPOState(ledger_state.spo_state),
-            ));
-            context
-                .message_bus
-                .publish(&snapshot_topic, Arc::new(spo_state_message))
-                .await
-                .unwrap_or_else(|e| error!("failed to publish: {e}"));
+            let span = info_span!("snapshot_bootstrapper.handle");
+            async {
+                let spo_state_message = Message::Snapshot(SnapshotMessage::Bootstrap(
+                    SnapshotStateMessage::SPOState(ledger_state.spo_state),
+                ));
+                context
+                    .message_bus
+                    .publish(&snapshot_topic, Arc::new(spo_state_message))
+                    .await
+                    .unwrap_or_else(|e| error!("failed to publish: {e}"));
+            }.instrument(span).await;
         });
 
         Ok(())

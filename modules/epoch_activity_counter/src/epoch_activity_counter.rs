@@ -12,7 +12,7 @@ use config::Config;
 use pallas::ledger::traverse::MultiEraHeader;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{error, info};
+use tracing::{error, info, info_span, Instrument};
 
 mod state;
 use state::State;
@@ -57,40 +57,43 @@ impl EpochActivityCounter {
             let (_, message) = headers_message_f.await?;
             match message.as_ref() {
                 Message::Cardano((block, CardanoMessage::BlockHeader(header_msg))) => {
-                    // End of epoch?
-                    if block.new_epoch && block.epoch > 0 {
-                        let mut state = state.lock().await;
-                        let msg = state.end_epoch(&block, block.epoch - 1);
-                        context
-                            .message_bus
-                            .publish(&publish_topic, msg)
-                            .await
-                            .unwrap_or_else(|e| error!("Failed to publish: {e}"));
-                    }
-
-                    // Derive the variant from the era - just enough to make
-                    // MultiEraHeader::decode() work.
-                    let variant = match block.era {
-                        Era::Byron => 0,
-                        Era::Shelley => 1,
-                        Era::Allegra => 2,
-                        Era::Mary => 3,
-                        Era::Alonzo => 4,
-                        _ => 5,
-                    };
-
-                    // Parse the header - note we ignore the subtag because EBBs
-                    // are suppressed upstream
-                    match MultiEraHeader::decode(variant, None, &header_msg.raw) {
-                        Ok(header) => {
-                            if let Some(vrf_vkey) = header.vrf_vkey() {
-                                let mut state = state.lock().await;
-                                state.handle_mint(&block, vrf_vkey);
-                            }
+                    let span = info_span!("epoch_activity_counter.handle_block_header", block = block.number);
+                    async {
+                        // End of epoch?
+                        if block.new_epoch && block.epoch > 0 {
+                            let mut state = state.lock().await;
+                            let msg = state.end_epoch(&block, block.epoch - 1);
+                            context
+                                .message_bus
+                                .publish(&publish_topic, msg)
+                                .await
+                                .unwrap_or_else(|e| error!("Failed to publish: {e}"));
                         }
 
-                        Err(e) => error!("Can't decode header {}: {e}", block.slot),
-                    }
+                        // Derive the variant from the era - just enough to make
+                        // MultiEraHeader::decode() work.
+                        let variant = match block.era {
+                            Era::Byron => 0,
+                            Era::Shelley => 1,
+                            Era::Allegra => 2,
+                            Era::Mary => 3,
+                            Era::Alonzo => 4,
+                            _ => 5,
+                        };
+
+                        // Parse the header - note we ignore the subtag because EBBs
+                        // are suppressed upstream
+                        match MultiEraHeader::decode(variant, None, &header_msg.raw) {
+                            Ok(header) => {
+                                if let Some(vrf_vkey) = header.vrf_vkey() {
+                                    let mut state = state.lock().await;
+                                    state.handle_mint(&block, vrf_vkey);
+                                }
+                            }
+
+                            Err(e) => error!("Can't decode header {}: {e}", block.slot),
+                        }
+                    }.instrument(span).await;
                 }
 
                 _ => error!("Unexpected message type: {message:?}"),
@@ -100,8 +103,11 @@ impl EpochActivityCounter {
             let (_, message) = fees_message_f.await?;
             match message.as_ref() {
                 Message::Cardano((block, CardanoMessage::BlockFees(fees_msg))) => {
-                    let mut state = state.lock().await;
-                    state.handle_fees(&block, fees_msg.total_fees);
+                    let span = info_span!("epoch_activity_counter.handle_block_fees", block = block.number);
+                    async {
+                        let mut state = state.lock().await;
+                        state.handle_fees(&block, fees_msg.total_fees);
+                    }.instrument(span).await;
                 }
 
                 _ => error!("Unexpected message type: {message:?}"),
