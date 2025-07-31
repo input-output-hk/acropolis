@@ -5,7 +5,7 @@ use acropolis_common::{
     messages::{
         CardanoMessage, Message, SnapshotDumpMessage, SnapshotMessage, SnapshotStateMessage,
     },
-    rest_helper::{handle_rest, handle_rest_with_parameter},
+    rest_helper::{handle_rest, handle_rest_with_path_parameter},
 };
 use anyhow::Result;
 use caryatid_sdk::{module, Context, Module};
@@ -138,7 +138,9 @@ impl SPOState {
                                 .handle_tx_certs(block, tx_certs_msg)
                                 .inspect_err(|e| error!("Messaging handling error: {e}"))
                                 .ok();
-                        }.instrument(span).await;
+                        }
+                        .instrument(span)
+                        .await;
                     }
                     _ => error!("Unexpected message type: {message:?}"),
                 }
@@ -153,7 +155,7 @@ impl SPOState {
 
         // Handle REST requests for single SPO state and retiring pools
         let state_single = state.clone();
-        handle_rest_with_parameter(context.clone(), &handle_single_topic, move |param| {
+        handle_rest_with_path_parameter(context.clone(), &handle_single_topic, move |param| {
             handle_spo(state_single.clone(), param[0].to_string())
         });
 
@@ -176,7 +178,9 @@ impl SPOState {
                                 .await
                                 .inspect_err(|e| error!("Tick error: {e}"))
                                 .ok();
-                        }.instrument(span).await;
+                        }
+                        .instrument(span)
+                        .await;
                     }
                 }
             }
