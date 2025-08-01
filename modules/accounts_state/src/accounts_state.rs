@@ -187,6 +187,7 @@ impl AccountsState {
                             Self::check_sync(&current_block, &block_info);
                             state
                                 .handle_epoch_activity(ea_msg)
+                                .await
                                 .inspect_err(|e| error!("EpochActivity handling error: {e:#}"))
                                 .ok();
                         }.instrument(span).await;
