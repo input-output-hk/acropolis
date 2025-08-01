@@ -8,7 +8,9 @@ use tokio::sync::Mutex;
 
 use crate::state::State;
 use acropolis_common::state_history::StateHistory;
-use acropolis_common::{messages::RESTResponse, Lovelace};
+use acropolis_common::{
+    messages::RESTResponse, DelegatedStake, Lovelace,
+};
 
 /// REST response structure for /accounts/{stake_address}
 #[derive(serde::Serialize)]
@@ -40,12 +42,12 @@ pub async fn handle_spdd(history: Arc<Mutex<StateHistory<State>>>) -> Result<RES
         None => return Ok(RESTResponse::with_json(200, "{}")),
     };
 
-    let spdd: HashMap<String, u64> = state
+    let spdd: HashMap<String, DelegatedStake> = state
         .generate_spdd()
         .iter()
-        .map(|(k, v)| {
+        .map(|(k, ds)| {
             let bech32 = k.to_bech32_with_hrp("pool").unwrap_or_else(|_| hex::encode(k));
-            (bech32, *v)
+            (bech32, ds.clone())
         })
         .collect();
 
