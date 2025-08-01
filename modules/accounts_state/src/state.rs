@@ -10,7 +10,7 @@ use acropolis_common::{
     StakeAddress, StakeCredential, TxCertificate,
 };
 use crate::snapshot::Snapshot;
-use crate::rewards::RewardsState;
+use crate::rewards::{RewardsResult, RewardsState};
 use crate::monetary::calculate_monetary_change;
 use anyhow::{bail, Result};
 use dashmap::DashMap;
@@ -21,6 +21,7 @@ use serde_with::{hex::Hex, serde_as};
 use std::sync::{atomic::AtomicU64, Arc, Mutex};
 use tracing::{debug, error, info, warn};
 use std::mem::take;
+use tokio::task::{spawn_blocking, JoinHandle};
 
 const DEFAULT_KEY_DEPOSIT: u64 = 2_000_000;
 const DEFAULT_POOL_DEPOSIT: u64 = 500_000_000;
@@ -96,6 +97,9 @@ pub struct State {
 
     // MIRs to pay next epoch
     mirs: Vec<MoveInstantaneousReward>,
+
+    // Task for rewards calculation if necessary
+    epoch_rewards_task: Arc<Mutex<Option<JoinHandle<Result<RewardsResult>>>>>,
 }
 
 impl State {
@@ -182,18 +186,11 @@ impl State {
             return Ok(());
         }
 
-        // Calculate reward payouts
-        let reward_result = self.rewards_state.calculate_rewards(epoch, &shelley_params,
-                                                                 total_blocks,
-                                                                 monetary_change.stake_rewards)?;
-
-        // Pay the rewards
-        for (account, amount) in reward_result.rewards {
-            self.add_to_reward(&account, amount);
-        }
-
-        // Adjust the reserves for next time with amount actually paid
-        self.pots.reserves -= reward_result.total_paid;
+        let rs = self.rewards_state.clone();
+        self.epoch_rewards_task = Arc::new(Mutex::new(Some(spawn_blocking(move || {
+            // Calculate reward payouts
+            rs.calculate_rewards(epoch, &shelley_params, total_blocks, monetary_change.stake_rewards)
+        }))));
 
         Ok(())
     }
@@ -445,7 +442,7 @@ impl State {
 
     /// Handle an EpochActivityMessage giving total fees and block counts by VRF key for
     /// the just-ended epoch
-    pub fn handle_epoch_activity(&mut self, ea_msg: &EpochActivityMessage) -> Result<()> {
+    pub async fn handle_epoch_activity(&mut self, ea_msg: &EpochActivityMessage) -> Result<()> {
 
         // Reverse map of VRF key to SPO operator ID
         let vrf_to_operator: HashMap<KeyHash, KeyHash> = self.spos
@@ -462,6 +459,31 @@ impl State {
             })
             .collect();
 
+        // Check previous epoch work is done
+        let mut task = {
+            match self.epoch_rewards_task.lock() {
+                Ok(mut task) => task.take(),
+                Err(_) => {
+                    error!("Failed to lock epoch rewards task");
+                    None
+                },
+            }
+        };
+        // If rewards have been calculated, save the results
+        if let Some(task) = task.take() {
+            match task.await {
+                Ok(Ok(reward_result)) => {
+                    // Pay the rewards
+                    for (account, amount) in reward_result.rewards {
+                        self.add_to_reward(&account, amount);
+                    }
+
+                    // Adjust the reserves for next time with amount actually paid
+                    self.pots.reserves -= reward_result.total_paid;
+                }
+                _ => (),
+            }
+        };
         // Enter epoch - note the message specifies the epoch that has just *ended*
         self.enter_epoch(ea_msg.epoch+1, ea_msg.total_fees, spo_block_counts)
     }
