@@ -90,7 +90,7 @@ impl EpochActivityCounter {
                             Ok(header) => {
                                 if let Some(vrf_vkey) = header.vrf_vkey() {
                                     let mut state = state.lock().await;
-                                    state.handle_mint(&block, vrf_vkey);
+                                    state.handle_mint(&block, Some(vrf_vkey));
                                 }
                             }
 
@@ -104,7 +104,7 @@ impl EpochActivityCounter {
                 _ => error!("Unexpected message type: {message:?}"),
             }
 
-            // Handle block fees second - this is what generates the EpochActivity message
+            // Handle block fees second so new epoch's fees don't get counted in the last one
             let (_, message) = fees_message_f.await?;
             match message.as_ref() {
                 Message::Cardano((block, CardanoMessage::BlockFees(fees_msg))) => {

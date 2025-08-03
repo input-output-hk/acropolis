@@ -37,7 +37,9 @@ version = "0.1.0"
 dependencies = [
  "acropolis_common",
  "anyhow",
+ "bigdecimal",
  "caryatid_sdk",
+ "chrono",
  "config",
  "dashmap",
  "hex",
@@ -891,6 +893,19 @@ name = "bech32"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d965446196e3b7decd44aa7ee49e31d630118f90ef12f97900f262eb915c951d"
+
+[[package]]
+name = "bigdecimal"
+version = "0.4.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1a22f228ab7a1b23027ccc6c350b72868017af7ea8356fbdf19f8d991c690013"
+dependencies = [
+ "autocfg",
+ "libm",
+ "num-bigint",
+ "num-integer",
+ "num-traits",
+]
 
 [[package]]
 name = "binary-layout"

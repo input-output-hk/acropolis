@@ -6,7 +6,7 @@ use crate::{
     address::{Address, StakeAddress},
     rational_number::RationalNumber,
 };
-use anyhow::{anyhow, bail, Error};
+use anyhow::{anyhow, bail, Error, Result};
 use bech32::{Bech32, Hrp};
 use bitmask_enum::bitmask;
 use chrono::{DateTime, Utc};
@@ -60,7 +60,7 @@ impl TryFrom<u8> for Era {
             4 => Ok(Era::Alonzo),
             5 => Ok(Era::Babbage),
             6 => Ok(Era::Conway),
-            n => bail!("Impossilbe era {n}"),
+            n => bail!("Impossible era {n}"),
         }
     }
 }
@@ -196,7 +196,7 @@ pub type Lovelace = u64;
 pub type LovelaceDelta = i64;
 
 /// Rational number = numerator / denominator
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Eq, PartialEq)]
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize, Eq, PartialEq)]
 pub struct Ratio {
     pub numerator: u64,
     pub denominator: u64,
@@ -243,7 +243,7 @@ pub enum Credential {
 }
 
 impl Credential {
-    fn hex_string_to_hash(hex_str: &str) -> anyhow::Result<KeyHash> {
+    fn hex_string_to_hash(hex_str: &str) -> Result<KeyHash> {
         let key_hash = decode(hex_str.to_owned().into_bytes())?;
         if key_hash.len() != 28 {
             Err(anyhow!(
@@ -255,7 +255,7 @@ impl Credential {
         }
     }
 
-    pub fn from_json_string(credential: &str) -> anyhow::Result<Self> {
+    pub fn from_json_string(credential: &str) -> Result<Self> {
         if let Some(hash) = credential.strip_prefix("scriptHash-") {
             Ok(Credential::ScriptHash(Self::hex_string_to_hash(hash)?))
         } else if let Some(hash) = credential.strip_prefix("keyHash-") {
@@ -388,6 +388,7 @@ pub type RewardAccount = Vec<u8>;
 #[serde_as]
 #[derive(
     Debug,
+    Default,
     Clone,
     serde::Serialize,
     serde::Deserialize,
@@ -422,7 +423,7 @@ pub struct PoolRegistration {
     /// Reward account
     #[serde_as(as = "Hex")]
     #[n(5)]
-    pub reward_account: Vec<u8>,
+    pub reward_account: RewardAccount,
 
     /// Pool owners by their key hash
     #[serde_as(as = "Vec<Hex>")]
@@ -456,6 +457,16 @@ pub struct StakeDelegation {
 
     /// Pool ID to delegate to
     pub operator: KeyHash,
+}
+
+/// SPO total delegation data (for SPDD)
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+pub struct DelegatedStake {
+    /// Active stake - UTXO values only (used for reward calcs)
+    pub active: Lovelace,
+
+    /// Total 'live' stake - UTXO values and rewards (used for VRF)
+    pub live: Lovelace,
 }
 
 /// Genesis key delegation

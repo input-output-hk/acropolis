@@ -1,9 +1,9 @@
-use acropolis_common::KeyHash;
+use acropolis_common::{DelegatedStake, KeyHash};
 use std::collections::BTreeMap;
 use tracing::info;
 
 pub struct State {
-    historical_distributions: BTreeMap<u64, BTreeMap<KeyHash, u64>>,
+    historical_distributions: BTreeMap<u64, BTreeMap<KeyHash, DelegatedStake>>,
 }
 
 impl State {
@@ -13,15 +13,15 @@ impl State {
         }
     }
 
-    pub fn insert_spdd(&mut self, epoch: u64, spdd: BTreeMap<KeyHash, u64>) {
+    pub fn insert_spdd(&mut self, epoch: u64, spdd: BTreeMap<KeyHash, DelegatedStake>) {
         self.historical_distributions.insert(epoch, spdd);
     }
 
-    pub fn get_latest(&self) -> Option<BTreeMap<KeyHash, u64>> {
+    pub fn get_latest(&self) -> Option<BTreeMap<KeyHash, DelegatedStake>> {
         self.historical_distributions.last_key_value().map(|(_, map)| map.clone())
     }
 
-    pub fn get_epoch(&self, epoch: u64) -> Option<BTreeMap<KeyHash, u64>> {
+    pub fn get_epoch(&self, epoch: u64) -> Option<BTreeMap<KeyHash, DelegatedStake>> {
         self.historical_distributions.get(&epoch).cloned()
     }
 
