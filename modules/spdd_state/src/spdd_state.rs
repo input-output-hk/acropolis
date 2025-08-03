@@ -3,7 +3,7 @@
 use acropolis_common::{
     messages::{CardanoMessage, Message},
     rest_helper::handle_rest_with_query_parameter,
-    KeyHash,
+    DelegatedStake, KeyHash,
 };
 use anyhow::Result;
 use caryatid_sdk::{module, Context, Module};
@@ -60,7 +60,7 @@ impl SPDDState {
                             async {
                                 let mut state = state_handler.lock().await;
 
-                                let spdd: BTreeMap<KeyHash, u64> =
+                                let spdd: BTreeMap<KeyHash, DelegatedStake> =
                                     msg.spos.iter().map(|(k, v)| (k.clone(), *v)).collect();
 
                                 state.insert_spdd(msg.epoch, spdd);
