@@ -129,68 +129,6 @@ impl AccountsState {
                 _ => false,
             };
 
-            // Handle withdrawals
-            let (_, message) = withdrawals_message_f.await?;
-            match message.as_ref() {
-                Message::Cardano((block_info, CardanoMessage::Withdrawals(withdrawals_msg))) => {
-                    let span = info_span!(
-                        "account_state.handle_withdrawals",
-                        block = block_info.number
-                    );
-                    async {
-                        if let Some(ref block) = current_block {
-                            if block.number != block_info.number {
-                                error!(
-                                    expected = block.number,
-                                    received = block_info.number,
-                                    "Certificate and withdrawals messages re-ordered!"
-                                );
-                            }
-                        }
-
-                        state
-                            .handle_withdrawals(withdrawals_msg)
-                            .inspect_err(|e| error!("Withdrawals handling error: {e:#}"))
-                            .ok();
-                    }
-                    .instrument(span)
-                    .await;
-                }
-
-                _ => error!("Unexpected message type: {message:?}"),
-            }
-
-            // Handle stake address deltas
-            let (_, message) = stake_message_f.await?;
-            match message.as_ref() {
-                Message::Cardano((block_info, CardanoMessage::StakeAddressDeltas(deltas_msg))) => {
-                    let span = info_span!(
-                        "account_state.handle_stake_deltas",
-                        block = block_info.number
-                    );
-                    async {
-                        if let Some(ref block) = current_block {
-                            if block.number != block_info.number {
-                                error!(
-                                    expected = block.number,
-                                    received = block_info.number,
-                                    "Certificate and deltas messages re-ordered!"
-                                );
-                            }
-                        }
-
-                        state
-                            .handle_stake_deltas(deltas_msg)
-                            .inspect_err(|e| error!("StakeAddressDeltas handling error: {e:#}"))
-                            .ok();
-                    }
-                    .instrument(span)
-                    .await;
-                }
-
-                _ => error!("Unexpected message type: {message:?}"),
-            }
-
             // Read from epoch-boundary messages only when it's a new epoch
             if new_epoch {
                 let dreps_message_f = drep_state_subscription.read();
