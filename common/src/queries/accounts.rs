@@ -13,6 +13,9 @@ pub enum AccountsStateQuery {
     GetAccountAssets { stake_key: Vec<u8> },
     GetAccountAssetsTotals { stake_key: Vec<u8> },
     GetAccountUTxOs { stake_key: Vec<u8> },
+
+    // Pools related queries
+    GetPoolsLiveStakes { pool_operators: Vec<Vec<u8>> },
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -28,6 +31,10 @@ pub enum AccountsStateQueryResponse {
     AccountAssets(AccountAssets),
     AccountAssetsTotals(AccountAssetsTotals),
     AccountUTxOs(AccountUTxOs),
+
+    // Pools related responses
+    PoolsLiveStakes(Vec<u64>),
+
     NotFound,
     Error(String),
 }

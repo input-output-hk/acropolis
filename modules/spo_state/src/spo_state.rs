@@ -6,8 +6,7 @@ use acropolis_common::{
         CardanoMessage, Message, SnapshotDumpMessage, SnapshotMessage, SnapshotStateMessage,
         StateQuery, StateQueryResponse,
     },
-    queries::pools::{PoolsList, PoolsStateQuery, PoolsStateQueryResponse},
-    rest_helper::handle_rest_with_parameter,
+    queries::pools::{PoolsList, PoolsListWithInfo, PoolsStateQuery, PoolsStateQueryResponse},
 };
 use anyhow::Result;
 use caryatid_sdk::{module, Context, Module};
@@ -19,14 +18,10 @@ use tracing::{error, info, info_span, Instrument};
 mod state;
 use state::State;
 mod rest;
-use rest::handle_spo;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.certificates";
-const DEFAULT_SINGLE_TOPIC: (&str, &str) = ("handle-topic-pool-info", "rest.get.pools.*");
-const DEFAULT_RETIRING_POOLS_TOPIC: (&str, &str) =
-    ("handle-topic-retiring-pools", "rest.get.pools_retiring");
 const DEFAULT_SPO_STATE_TOPIC: &str = "cardano.spo.state";
-
+const POOLS_STATE_TOPIC: &str = "pools-state";
 /// SPO State module
 #[module(
     message_type(Message),
@@ -47,15 +42,6 @@ impl SPOState {
             .ok()
             .inspect(|snapshot_topic| info!("Creating subscriber on '{snapshot_topic}'"));
 
-        let handle_single_topic =
-            config.get_string(DEFAULT_SINGLE_TOPIC.0).unwrap_or(DEFAULT_SINGLE_TOPIC.1.to_string());
-        info!("Creating request handler on '{handle_single_topic}'");
-
-        let handle_retiring_pools_topic = config
-            .get_string(DEFAULT_RETIRING_POOLS_TOPIC.0)
-            .unwrap_or(DEFAULT_RETIRING_POOLS_TOPIC.1.to_string());
-        info!("Creating request handler on '{handle_retiring_pools_topic}'");
-
         let spo_state_topic = config
             .get_string("publish-spo-state-topic")
             .unwrap_or(DEFAULT_SPO_STATE_TOPIC.to_string());
@@ -65,7 +51,7 @@ impl SPOState {
 
         // handle pools-state
         let state_rest_blockfrost = state.clone();
-        context.handle("pools-state", move |message| {
+        context.handle(POOLS_STATE_TOPIC, move |message| {
             let state = state_rest_blockfrost.clone();
             async move {
                 let Message::StateQuery(StateQuery::Pools(query)) = message.as_ref() else {
@@ -82,6 +68,12 @@ impl SPOState {
                             pool_operators: guard.list_pool_operators(),
                         };
                         PoolsStateQueryResponse::PoolsList(pools_list)
+                    }
+                    PoolsStateQuery::GetPoolsListWithInfo => {
+                        let pools_list_with_info = PoolsListWithInfo {
+                            pools: guard.list_pools_with_info(),
+                        };
+                        PoolsStateQueryResponse::PoolsListWithInfo(pools_list_with_info)
                     }
                     _ => PoolsStateQueryResponse::Error(format!(
                         "Unimplemented query variant: {:?}",
@@ -174,12 +166,6 @@ impl SPOState {
                     _ => error!("Unexpected message type: {message:?}"),
                 }
             }
-        });
-
-        // Handle REST requests for single SPO state and retiring pools
-        let state_single = state.clone();
-        handle_rest_with_parameter(context.clone(), &handle_single_topic, move |param| {
-            handle_spo(state_single.clone(), param[0].to_string())
         });
 
         // Ticker to log stats

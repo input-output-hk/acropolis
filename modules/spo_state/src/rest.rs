@@ -4,7 +4,6 @@ use acropolis_common::{messages::RESTResponse, serialization::Bech32WithHrp};
 use acropolis_common::{PoolMetadata, Relay};
 use anyhow::Result;
 use serde::Serialize;
-use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 

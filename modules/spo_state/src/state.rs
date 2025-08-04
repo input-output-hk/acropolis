@@ -114,8 +114,10 @@ impl State {
         self.current().map(|state| state.spos.keys().cloned().collect()).unwrap_or_default()
     }
 
-    pub fn list_pools_with_info(&self) -> Vec<(&Vec<u8>, &PoolRegistration)> {
-        self.current().map(|state| state.spos.iter().collect()).unwrap_or_default()
+    pub fn list_pools_with_info(&self) -> Vec<(Vec<u8>, PoolRegistration)> {
+        self.current()
+            .map(|state| state.spos.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+            .unwrap_or_default()
     }
 
     /// Get pools that will be retired in the upcoming epochs

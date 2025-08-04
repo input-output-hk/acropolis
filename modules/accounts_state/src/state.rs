@@ -14,8 +14,8 @@ use dashmap::DashMap;
 use imbl::OrdMap;
 use rayon::prelude::*;
 use serde_with::{hex::Hex, serde_as};
-use std::collections::BTreeMap;
 use std::sync::{atomic::AtomicU64, Arc};
+use std::{collections::BTreeMap, sync::Mutex};
 use tracing::{error, info, warn};
 
 /// State of an individual stake address
@@ -90,6 +90,33 @@ impl State {
     /// Get the current pot balances
     pub fn get_pots(&self) -> Pots {
         self.pots.clone()
+    }
+
+    /// Get Pools Live stake
+    pub fn get_pools_live_stakes(&self, pools_operators: &Vec<Vec<u8>>) -> Vec<u64> {
+        // Pre-build a HashMap for O(1) pool operator lookup
+        let live_stakes_map = Arc::new(DashMap::<&Vec<u8>, u64>::from_iter(
+            pools_operators.iter().map(|op| (op, 0)),
+        ));
+
+        // Use parallel iteration to process stake addresses
+        // Collect values first because OrdMap doesn't work with Rayon's par_iter
+        self.stake_addresses
+            .values()
+            .collect::<Vec<_>>() // Vec<&StakeAddressState>
+            .par_iter() // Rayon multi-threaded iterator
+            .for_each_init(
+                || Arc::clone(&live_stakes_map),
+                |map, sas| {
+                    // Check if this stake address is delegated to a pool operator
+                    if let Some(delegated_spo) = &sas.delegated_spo {
+                        map.entry(delegated_spo).and_modify(|v| *v += sas.utxo_value);
+                    }
+                },
+            );
+
+        // Convert DashMap back to ordered Vec
+        live_stakes_map.iter().map(|entry| *entry.value()).collect()
     }
 
     /// Log statistics

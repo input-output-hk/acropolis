@@ -41,6 +41,8 @@ const DEFAULT_HANDLE_SPDD_TOPIC: (&str, &str) = ("handle-topic-spdd", "rest.get.
 const DEFAULT_HANDLE_POTS_TOPIC: (&str, &str) = ("handle-topic-pots", "rest.get.pots");
 const DEFAULT_HANDLE_DRDD_TOPIC: (&str, &str) = ("handle-topic-drdd", "rest.get.drdd");
 
+const ACCOUNTS_STATE_TOPIC: &str = "accounts-state";
+
 /// Accounts State module
 #[module(
     message_type(Message),
@@ -405,7 +407,7 @@ impl AccountsState {
         let history_drdd = history.clone();
         let history_tick = history.clone();
 
-        context.handle("accounts-state", move |message| {
+        context.handle(ACCOUNTS_STATE_TOPIC, move |message| {
             let history = history_account_single.clone();
             async move {
                 let Message::StateQuery(StateQuery::Accounts(query)) = message.as_ref() else {
@@ -438,6 +440,12 @@ impl AccountsState {
                         } else {
                             AccountsStateQueryResponse::NotFound
                         }
+                    }
+
+                    AccountsStateQuery::GetPoolsLiveStakes { pool_operators } => {
+                        AccountsStateQueryResponse::PoolsLiveStakes(
+                            state.get_pools_live_stakes(pool_operators),
+                        )
                     }
 
                     _ => AccountsStateQueryResponse::Error(format!(
