@@ -3,13 +3,15 @@
 
 use acropolis_common::{
     messages::{
-        CardanoMessage, Message, SnapshotDumpMessage, SnapshotMessage, SnapshotStateMessage,
-        StateQuery, StateQueryResponse,
+        CardanoMessage, Message, SPOStakeDistributionMessage, SnapshotDumpMessage, SnapshotMessage,
+        SnapshotStateMessage, StateQuery, StateQueryResponse,
     },
-    queries::pools::{PoolsList, PoolsListWithInfo, PoolsStateQuery, PoolsStateQueryResponse},
+    queries::pools::{
+        PoolsActiveStakes, PoolsList, PoolsListWithInfo, PoolsStateQuery, PoolsStateQueryResponse,
+    },
 };
 use anyhow::Result;
-use caryatid_sdk::{module, Context, Module};
+use caryatid_sdk::{module, Context, Module, Subscription};
 use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -20,7 +22,10 @@ use state::State;
 mod rest;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.certificates";
+const DEFAULT_CLOCK_TICK_TOPIC: &str = "clock.tick";
 const DEFAULT_SPO_STATE_TOPIC: &str = "cardano.spo.state";
+const DEFAULT_SPDD_SUBSCRIBE_TOPIC: &str = "cardano.spo.distribution";
+
 const POOLS_STATE_TOPIC: &str = "pools-state";
 /// SPO State module
 #[module(
@@ -31,11 +36,88 @@ const POOLS_STATE_TOPIC: &str = "pools-state";
 pub struct SPOState;
 
 impl SPOState {
+    /// Async run loop
+    async fn run(
+        context: Arc<Context<Message>>,
+        state: Arc<Mutex<State>>,
+        mut certs_subscription: Box<dyn Subscription<Message>>,
+        mut clock_tick_subscription: Box<dyn Subscription<Message>>,
+        mut spdd_subscription: Box<dyn Subscription<Message>>,
+        spo_state_topic: String,
+    ) -> Result<()> {
+        loop {
+            let mut state = state.lock().await;
+            let context = context.clone();
+            let certs_message_f = certs_subscription.read();
+            let tick_message_f = clock_tick_subscription.read();
+            let spdd_message_f = spdd_subscription.read();
+
+            // Subscribe to certificate messages
+            let (_, certs_message) = certs_message_f.await?;
+            match certs_message.as_ref() {
+                Message::Cardano((block, CardanoMessage::TxCertificates(tx_certs_msg))) => {
+                    let span = info_span!("spo_state.handle_tx_certs", block = block.number);
+                    async {
+                        let maybe_message = state
+                            .handle_tx_certs(block, tx_certs_msg)
+                            .inspect_err(|e| error!("Messaging handling error: {e}"))
+                            .ok();
+
+                        if let Some(Some(message)) = maybe_message {
+                            context
+                                .message_bus
+                                .publish(&spo_state_topic, message)
+                                .await
+                                .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+                        }
+                    }
+                    .instrument(span)
+                    .await;
+                }
+                _ => error!("Unexpected message type: {certs_message:?}"),
+            }
+
+            // Subscribe to clock tick messages
+            let (_, tick_message) = tick_message_f.await?;
+            if let Message::Clock(tick_message) = tick_message.as_ref() {
+                if (tick_message.number % 60) == 0 {
+                    let span = info_span!("spo_state.tick", number = tick_message.number);
+                    async {
+                        state.tick().await.inspect_err(|e| error!("Tick error: {e}")).ok();
+                    }
+                    .instrument(span)
+                    .await;
+                }
+            }
+
+            // Subscribe to accounts-state's SPDD messsages
+            let (_, spdd_message) = spdd_message_f.await?;
+            if let Message::Cardano((
+                block_info,
+                CardanoMessage::SPOStakeDistribution(SPOStakeDistributionMessage {
+                    spos,
+                    epoch: _epoch,
+                }),
+            )) = spdd_message.as_ref()
+            {
+                state.handle_spdd(block_info.epoch, spos)
+            }
+        }
+    }
+
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // Get configuration
         let subscribe_topic =
             config.get_string("subscribe-topic").unwrap_or(DEFAULT_SUBSCRIBE_TOPIC.to_string());
         info!("Creating subscriber on '{subscribe_topic}'");
+
+        let clock_tick_topic =
+            config.get_string("clock-tick-topic").unwrap_or(DEFAULT_CLOCK_TICK_TOPIC.to_string());
+        info!("Creating subscriber on '{clock_tick_topic}'");
+
+        let spdd_topic =
+            config.get_string("spdd-topic").unwrap_or(DEFAULT_SPDD_SUBSCRIBE_TOPIC.to_string());
+        info!("Creating subscriber on '{spdd_topic}'");
 
         let maybe_snapshot_topic = config
             .get_string("snapshot-topic")
@@ -75,6 +157,17 @@ impl SPOState {
                         };
                         PoolsStateQueryResponse::PoolsListWithInfo(pools_list_with_info)
                     }
+
+                    PoolsStateQuery::GetPoolsActiveStakes {
+                        epoch,
+                        pools_operators,
+                    } => {
+                        let active_stakes = guard.get_pools_active_stakes(*epoch, pools_operators);
+                        PoolsStateQueryResponse::PoolsActiveStakes(PoolsActiveStakes {
+                            active_stakes,
+                        })
+                    }
+
                     _ => PoolsStateQueryResponse::Error(format!(
                         "Unimplemented query variant: {:?}",
                         query
@@ -129,67 +222,24 @@ impl SPOState {
             });
         }
 
-        // Subscribe for certificate messages
-        let mut subscription = context.subscribe(&subscribe_topic).await?;
-        let context_subscribe = context.clone();
-        let state_subscribe = state.clone();
+        // Subscriptions
+        let certs_subscription = context.subscribe(&subscribe_topic).await?;
+        let clock_tick_subscription = context.subscribe(&clock_tick_topic).await?;
+        let spdd_subscription: Box<dyn Subscription<Message>> =
+            context.subscribe(&spdd_topic).await?;
+
+        // Start run task
+        let run_context = context.clone();
+        let run_state = state.clone();
         context.run(async move {
-            loop {
-                let Ok((_, message)) = subscription.read().await else {
-                    return;
-                };
-
-                match message.as_ref() {
-                    Message::Cardano((block, CardanoMessage::TxCertificates(tx_certs_msg))) => {
-                        let span = info_span!("spo_state.handle_tx_certs", block = block.number);
-                        async {
-                            let mut state = state_subscribe.lock().await;
-                            let maybe_message = state
-                                .handle_tx_certs(block, tx_certs_msg)
-                                .inspect_err(|e| error!("Messaging handling error: {e}"))
-                                .ok();
-
-                            if let Some(Some(message)) = maybe_message {
-                                context_subscribe
-                                    .message_bus
-                                    .publish(&spo_state_topic, message)
-                                    .await
-                                    .unwrap_or_else(|e| error!("Failed to publish: {e}"));
-                            }
-                        }
-                        .instrument(span)
-                        .await;
-                    }
-                    _ => error!("Unexpected message type: {message:?}"),
-                }
-            }
-        });
-
-        // Ticker to log stats
-        let state_tick = state.clone();
-        let mut subscription = context.subscribe("clock.tick").await?;
-        context.run(async move {
-            loop {
-                let Ok((_, message)) = subscription.read().await else {
-                    return;
-                };
-                if let Message::Clock(message) = message.as_ref() {
-                    if (message.number % 60) == 0 {
-                        let span = info_span!("spo_state.tick", number = message.number);
-                        async {
-                            state_tick
-                                .lock()
-                                .await
-                                .tick()
-                                .await
-                                .inspect_err(|e| error!("Tick error: {e}"))
-                                .ok();
-                        }
-                        .instrument(span)
-                        .await;
-                    }
-                }
-            }
+            Self::run(
+                run_context,
+                run_state,
+                certs_subscription,
+                clock_tick_subscription,
+                spdd_subscription,
+                spo_state_topic,
+            )
         });
 
         Ok(())

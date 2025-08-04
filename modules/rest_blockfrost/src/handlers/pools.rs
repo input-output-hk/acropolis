@@ -132,7 +132,7 @@ async fn handle_pools_extended_blockfrost(context: Arc<Context<Message>>) -> Res
     // Get live stake for each pool
     let pools_live_stakes_msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
         AccountsStateQuery::GetPoolsLiveStakes {
-            pool_operators: pools_operators.iter().map(|&op| op.clone()).collect(),
+            pools_operators: pools_operators.iter().map(|&op| op.clone()).collect(),
         },
     )));
 
@@ -145,7 +145,7 @@ async fn handle_pools_extended_blockfrost(context: Arc<Context<Message>>) -> Res
     let pools_live_stakes = match pools_live_stakes_message {
         Message::StateQueryResponse(StateQueryResponse::Accounts(
             AccountsStateQueryResponse::PoolsLiveStakes(pools_live_stakes),
-        )) => pools_live_stakes,
+        )) => pools_live_stakes.live_stakes,
 
         Message::StateQueryResponse(StateQueryResponse::Accounts(
             AccountsStateQueryResponse::Error(e),
@@ -158,6 +158,8 @@ async fn handle_pools_extended_blockfrost(context: Arc<Context<Message>>) -> Res
 
         _ => return Ok(RESTResponse::with_text(500, "Unexpected message type")),
     };
+
+    // Get active stake for each pool
 
     let pools_extened_rest_results: Result<Vec<PoolExtendedRest>, anyhow::Error> =
         pools_list_with_info
