@@ -114,13 +114,10 @@ impl State {
 
     /// Get Pools Live stake
     pub fn get_pools_live_stakes(&self, pools_operators: &Vec<KeyHash>) -> Vec<u64> {
-        // Pre-build a HashMap for O(1) pool operator lookup
         let live_stakes_map = Arc::new(DashMap::<KeyHash, u64>::from_iter(
             pools_operators.iter().map(|op| (op.clone(), 0)),
         ));
 
-        // Total stake across all addresses in parallel, first collecting into a vector
-        // because imbl::OrdMap doesn't work in Rayon
         let stake_addresses = self.stake_addresses.lock().unwrap();
 
         // Collect the SPO keys and UTXO, reward values

@@ -6,6 +6,7 @@ pub enum PoolsStateQuery {
     GetPoolsListWithInfo,
     GetPoolsRetiredList,
     GetPoolsRetiringList,
+    GetPoolsActiveStakes { epoch: u64, pools_operators: Vec<Vec<u8>> },
     GetPoolInfo { pool_id: Vec<u8> },
     GetPoolHistory { pool_id: Vec<u8> },
     GetPoolMetadata { pool_id: Vec<u8> },
@@ -22,6 +23,7 @@ pub enum PoolsStateQueryResponse {
     PoolsListWithInfo(PoolsListWithInfo),
     PoolsRetiredList(PoolsRetiredList),
     PoolsRetiringList(PoolsRetiringList),
+    PoolsActiveStakes(PoolsActiveStakes),
     PoolInfo(PoolInfo),
     PoolHistory(PoolHistory),
     PoolMetadata(PoolMetadata),
@@ -49,6 +51,12 @@ pub struct PoolsRetiredList {}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PoolsRetiringList {}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PoolsActiveStakes {
+    // this is in same order of pools_operator from PoolsStateQuery::GetPoolsActiveStakes
+    pub active_stakes: Vec<u64>,
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PoolInfo {}
