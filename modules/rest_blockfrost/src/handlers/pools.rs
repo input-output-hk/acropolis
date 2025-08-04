@@ -1,12 +1,20 @@
 //! REST handlers for Acropolis Blockfrost /pools endpoints
 use acropolis_common::{
     messages::{Message, RESTResponse, StateQuery, StateQueryResponse},
-    queries::pools::{PoolsStateQuery, PoolsStateQueryResponse},
+    queries::{
+        accounts::{AccountsStateQuery, AccountsStateQueryResponse},
+        pools::{PoolsStateQuery, PoolsStateQueryResponse},
+    },
     serialization::Bech32WithHrp,
 };
 use anyhow::Result;
 use caryatid_sdk::Context;
 use std::sync::Arc;
+
+use crate::types::{PoolExtendedRest, PoolMetadataRest};
+
+const ACCOUNTS_STATE_TOPIC: &str = "accounts-state";
+const POOLS_STATE_TOPIC: &str = "pools-state";
 
 /// Handle `/pools` Blockfrost-compatible endpoint
 pub async fn handle_pools_list_blockfrost(
@@ -19,7 +27,7 @@ pub async fn handle_pools_list_blockfrost(
     )));
 
     // Send message via message bus
-    let raw = context.message_bus.request("pools-state", msg).await?;
+    let raw = context.message_bus.request(POOLS_STATE_TOPIC, msg).await?;
 
     // Unwrap and match
     let message = Arc::try_unwrap(raw).unwrap_or_else(|arc| (*arc).clone());
@@ -61,9 +69,151 @@ pub async fn handle_pools_list_blockfrost(
     }
 }
 
+/// Handle `/pools/extended` `/pools/retired` `/pools/retiring` `/pools/{pool_id}` Blockfrost-compatible endpoint
 pub async fn handle_pools_extended_retired_retiring_single_blockfrost(
-    _context: Arc<Context<Message>>,
-    _params: Vec<String>,
+    context: Arc<Context<Message>>,
+    params: Vec<String>,
+) -> Result<RESTResponse> {
+    let param = match params.as_slice() {
+        [param] => param,
+        _ => return Ok(RESTResponse::with_text(400, "Invalid parameters")),
+    };
+
+    match param.as_str() {
+        "extended" => return handle_pools_extended_blockfrost(context.clone()).await,
+        "retired" => return handle_pools_retired_blockfrost(context.clone()).await,
+        "retiring" => return handle_pools_retiring_blockfrost(context.clone()).await,
+        _ => match Vec::<u8>::from_bech32_with_hrp(param, "pool") {
+            Ok(pool_id) => return handle_pools_spo_blockfrost(context.clone(), pool_id).await,
+            Err(e) => {
+                return Ok(RESTResponse::with_text(
+                    400,
+                    &format!("Invalid Bech32 stake pool ID: {param}. Error: {e}"),
+                ));
+            }
+        },
+    }
+}
+
+async fn handle_pools_extended_blockfrost(context: Arc<Context<Message>>) -> Result<RESTResponse> {
+    // Prepare Message
+    let pools_list_with_info_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
+        PoolsStateQuery::GetPoolsListWithInfo,
+    )));
+
+    // Send message via message bus
+    let pools_list_with_info_raw: Arc<Message> =
+        context.message_bus.request(POOLS_STATE_TOPIC, pools_list_with_info_msg).await?;
+
+    // Unwrap and match
+    let pools_list_with_info_message =
+        Arc::try_unwrap(pools_list_with_info_raw).unwrap_or_else(|arc| (*arc).clone());
+
+    let pools_list_with_info = match pools_list_with_info_message {
+        Message::StateQueryResponse(StateQueryResponse::Pools(
+            PoolsStateQueryResponse::PoolsListWithInfo(pools_list_with_info),
+        )) => pools_list_with_info.pools,
+
+        Message::StateQueryResponse(StateQueryResponse::Pools(PoolsStateQueryResponse::Error(
+            e,
+        ))) => {
+            return Ok(RESTResponse::with_text(
+                500,
+                &format!("Internal server error while retrieving pools list: {e}"),
+            ));
+        }
+
+        _ => return Ok(RESTResponse::with_text(500, "Unexpected message type")),
+    };
+
+    let pools_operators =
+        pools_list_with_info.iter().map(|(pool_operator, _)| pool_operator).collect::<Vec<_>>();
+
+    // Get live stake for each pool
+    let pools_live_stakes_msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
+        AccountsStateQuery::GetPoolsLiveStakes {
+            pool_operators: pools_operators.iter().map(|&op| op.clone()).collect(),
+        },
+    )));
+
+    let pools_live_stakes_raw: Arc<Message> =
+        context.message_bus.request(ACCOUNTS_STATE_TOPIC, pools_live_stakes_msg).await?;
+
+    let pools_live_stakes_message =
+        Arc::try_unwrap(pools_live_stakes_raw).unwrap_or_else(|arc| (*arc).clone());
+
+    let pools_live_stakes = match pools_live_stakes_message {
+        Message::StateQueryResponse(StateQueryResponse::Accounts(
+            AccountsStateQueryResponse::PoolsLiveStakes(pools_live_stakes),
+        )) => pools_live_stakes,
+
+        Message::StateQueryResponse(StateQueryResponse::Accounts(
+            AccountsStateQueryResponse::Error(e),
+        )) => {
+            return Ok(RESTResponse::with_text(
+                500,
+                &format!("Internal server error while retrieving pools live stakes: {e}"),
+            ));
+        }
+
+        _ => return Ok(RESTResponse::with_text(500, "Unexpected message type")),
+    };
+
+    let pools_extened_rest_results: Result<Vec<PoolExtendedRest>, anyhow::Error> =
+        pools_list_with_info
+            .iter()
+            .zip(pools_live_stakes.iter())
+            .map(|((pool_operator, pool_registration), live_stake)| {
+                Ok(PoolExtendedRest {
+                    pool_id: pool_operator.to_bech32_with_hrp("pool")?,
+                    hex: hex::encode(pool_operator),
+                    active_stake: 0,
+                    live_stake: live_stake.to_string(),
+                    blocks_minted: 0,
+                    live_saturation: 0.0,
+                    declared_pledge: "0".to_string(),
+                    margin_cost: 0.0,
+                    fixed_cost: "0".to_string(),
+                    metadata: pool_registration.pool_metadata.as_ref().map(|metadata| {
+                        PoolMetadataRest {
+                            url: metadata.url.clone(),
+                            hash: hex::encode(metadata.hash.clone()),
+                            ticker: "ticker".to_string(),
+                            name: "name".to_string(),
+                            description: "description".to_string(),
+                            homepage: "homepage".to_string(),
+                        }
+                    }),
+                })
+            })
+            .collect();
+
+    match pools_extened_rest_results {
+        Ok(pools_extened_rest) => match serde_json::to_string(&pools_extened_rest) {
+            Ok(json) => Ok(RESTResponse::with_json(200, &json)),
+            Err(e) => Ok(RESTResponse::with_text(
+                500,
+                &format!("Internal server error while extended retrieving pools list: {e}"),
+            )),
+        },
+        Err(e) => Ok(RESTResponse::with_text(
+            500,
+            &format!("Internal server error while extended retrieving pools list: {e}"),
+        )),
+    }
+}
+
+async fn handle_pools_retired_blockfrost(context: Arc<Context<Message>>) -> Result<RESTResponse> {
+    Ok(RESTResponse::with_text(501, "Not implemented"))
+}
+
+async fn handle_pools_retiring_blockfrost(context: Arc<Context<Message>>) -> Result<RESTResponse> {
+    Ok(RESTResponse::with_text(501, "Not implemented"))
+}
+
+async fn handle_pools_spo_blockfrost(
+    context: Arc<Context<Message>>,
+    pool_operator: Vec<u8>,
 ) -> Result<RESTResponse> {
     Ok(RESTResponse::with_text(501, "Not implemented"))
 }
