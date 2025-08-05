@@ -190,9 +190,9 @@ async fn handle_pools_extended_blockfrost(context: Arc<Context<Message>>) -> Res
                         live_stake: live_stake.to_string(),
                         blocks_minted: 0,
                         live_saturation: 0.0,
-                        declared_pledge: "0".to_string(),
-                        margin_cost: 0.0,
-                        fixed_cost: "0".to_string(),
+                        declared_pledge: pool_registration.pledge.to_string(),
+                        margin_cost: pool_registration.margin.to_f32(),
+                        fixed_cost: pool_registration.cost.to_string(),
                         metadata: pool_registration.pool_metadata.as_ref().map(|metadata| {
                             PoolMetadataRest {
                                 url: metadata.url.clone(),
