@@ -20,6 +20,8 @@ use tracing::{error, info, info_span, Instrument};
 mod state;
 use state::State;
 mod rest;
+mod spo_state_publisher;
+use crate::spo_state_publisher::SPOStatePublisher;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.certificates";
 const DEFAULT_CLOCK_TICK_TOPIC: &str = "clock.tick";
@@ -38,16 +40,16 @@ pub struct SPOState;
 impl SPOState {
     /// Async run loop
     async fn run(
-        context: Arc<Context<Message>>,
         state: Arc<Mutex<State>>,
+        mut spo_state_publisher: SPOStatePublisher,
         mut certs_subscription: Box<dyn Subscription<Message>>,
         mut clock_tick_subscription: Box<dyn Subscription<Message>>,
         mut spdd_subscription: Box<dyn Subscription<Message>>,
-        spo_state_topic: String,
     ) -> Result<()> {
+        info!("SPO State module started");
         loop {
+            info!("SPO State Module Loop starting...");
             let mut state = state.lock().await;
-            let context = context.clone();
             let certs_message_f = certs_subscription.read();
             let tick_message_f = clock_tick_subscription.read();
             let spdd_message_f = spdd_subscription.read();
@@ -64,11 +66,9 @@ impl SPOState {
                             .ok();
 
                         if let Some(Some(message)) = maybe_message {
-                            context
-                                .message_bus
-                                .publish(&spo_state_topic, message)
-                                .await
-                                .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+                            if let Err(e) = spo_state_publisher.publish(message).await {
+                                error!("Error publishing SPO State: {e:#}")
+                            }
                         }
                     }
                     .instrument(span)
@@ -102,6 +102,7 @@ impl SPOState {
             {
                 state.handle_spdd(block_info.epoch, spos)
             }
+            info!("SPO State Module Loop finished");
         }
     }
 
@@ -222,6 +223,9 @@ impl SPOState {
             });
         }
 
+        // Publishers
+        let spo_state_publisher = SPOStatePublisher::new(context.clone(), spo_state_topic);
+
         // Subscriptions
         let certs_subscription = context.subscribe(&subscribe_topic).await?;
         let clock_tick_subscription = context.subscribe(&clock_tick_topic).await?;
@@ -229,17 +233,16 @@ impl SPOState {
             context.subscribe(&spdd_topic).await?;
 
         // Start run task
-        let run_context = context.clone();
-        let run_state = state.clone();
         context.run(async move {
             Self::run(
-                run_context,
-                run_state,
+                state,
+                spo_state_publisher,
                 certs_subscription,
                 clock_tick_subscription,
                 spdd_subscription,
-                spo_state_topic,
             )
+            .await
+            .unwrap_or_else(|e| error!("Failed: {e}"));
         });
 
         Ok(())
