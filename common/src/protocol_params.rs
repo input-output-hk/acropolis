@@ -1,6 +1,8 @@
 use chrono::{DateTime, Utc};
 use num_traits::ToPrimitive;
+use bigdecimal::BigDecimal;
 use serde::{Serialize, Deserialize};
+use std::str::FromStr;
 use crate::rational_number::{rational_number_from_f32, RationalNumber};
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
@@ -10,12 +12,35 @@ pub enum ChameleonFraction {
     Fraction {numerator: u64, denominator: u64}
 }
 
+
 impl ChameleonFraction {
+    const MAX_ROUND_DECIMAL: u64 = 10_000_000_000_000_000_000u64;
+
+    fn div_dec_00(d: u64) -> bool {
+        Self::MAX_ROUND_DECIMAL % d == 0
+    }
+
     pub fn get_rational(&self) -> anyhow::Result<RationalNumber> {
         match self {
             ChameleonFraction::Fraction { numerator: n, denominator: d } =>
                 Ok(RationalNumber::new(*n, *d)),
             ChameleonFraction::Float(v) => rational_number_from_f32(*v)
+        }
+    }
+
+    pub fn get_big_decimal(&self) -> anyhow::Result<BigDecimal> {
+        match self {
+            ChameleonFraction::Fraction { denominator: d, .. } if !Self::div_dec_00(*d) =>
+                anyhow::bail!("Denominator {d} must divide {}", Self::MAX_ROUND_DECIMAL),
+            _ => self.get_approx_big_decimal()
+        }
+    }
+
+    pub fn get_approx_big_decimal(&self) -> anyhow::Result<BigDecimal> {
+        match self {
+            ChameleonFraction::Fraction { numerator: n, denominator: d } =>
+                Ok(BigDecimal::from(n) / BigDecimal::from(d)),
+            ChameleonFraction::Float(v) => Ok(BigDecimal::from_str(&v.to_string())?)
         }
     }
 
@@ -161,17 +186,65 @@ mod tests {
 
     #[test]
     fn test_chameleon_serialization() -> Result<()> {
-        let ch = [
-            &ChameleonFraction::Float(0.003),
-            &ChameleonFraction::Fraction{numerator: 3, denominator: 1000}
-        ];
+        for n in 0..=1000 {
+            let ch = [
+                &ChameleonFraction::Float(f32::from_str(&format!("0.{:03}", n))?),
+                &ChameleonFraction::Fraction{numerator: n, denominator: 1000}
+            ];
 
-        for elem in ch {
-            let elem_str = serde_json::to_string(elem).unwrap();
-            let elem_back = serde_json::from_str::<ChameleonFraction>(&elem_str).unwrap();
-            println!("{elem:?} => '{elem_str}'");
-            assert_eq!(elem, &elem_back);
+            for elem in ch {
+                let elem_str = serde_json::to_string(elem).unwrap();
+                let elem_back = serde_json::from_str::<ChameleonFraction>(&elem_str).unwrap();
+                println!("{elem:?} => '{elem_str}'");
+                assert_eq!(elem, &elem_back);
+            }
         }
+        Ok(())
+    }
+
+    #[test]
+    fn test_big_decimal() -> Result<(), anyhow::Error> {
+        for n in 0..=1000 {
+            assert_eq!(
+                ChameleonFraction::Fraction{numerator: n, denominator: 1000}
+                    .get_big_decimal()?*1000,
+                BigDecimal::from(n)
+            );
+        }
+
+        let mut twos = 1;
+        for _t in 0..=19 {
+            let mut fives = 1;
+            for _f in 0..=19 {
+                assert_eq!(
+                    ChameleonFraction::Fraction{numerator: 777, denominator: twos*fives}
+                        .get_big_decimal()?*BigDecimal::from(twos*fives),
+                    BigDecimal::from(777)
+                );
+                fives *= 5;
+            }
+            twos *= 2;
+        }
+
+        Ok(())
+    }
+
+    // ChameleonFraction does not work for non 10^n denomniators
+    #[test]
+    fn test_non_round_denominator() -> Result<(), anyhow::Error> {
+        let fraction777 = ChameleonFraction::Fraction{numerator: 3, denominator: 777};
+        if let Ok(v) = fraction777.get_big_decimal() {
+            anyhow::bail!(
+                "{fraction777:?} cannot be represented in big decimal, although we have {v:?}"
+            );
+        }
+
+        assert_ne!(
+            ChameleonFraction::Fraction{numerator: 3, denominator: 777}
+                .get_approx_big_decimal()?*777,
+            BigDecimal::from(3)
+        );
+
         Ok(())
     }
 }
