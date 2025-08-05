@@ -4,6 +4,7 @@ use acropolis_common::{
     queries::{
         accounts::{AccountsStateQuery, AccountsStateQueryResponse},
         pools::{PoolsStateQuery, PoolsStateQueryResponse},
+        utils::query_state,
     },
     serialization::Bech32WithHrp,
 };
@@ -96,98 +97,115 @@ pub async fn handle_pools_extended_retired_retiring_single_blockfrost(
 }
 
 async fn handle_pools_extended_blockfrost(context: Arc<Context<Message>>) -> Result<RESTResponse> {
-    // Prepare Message
+    // Get pools info from spo-state
     let pools_list_with_info_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
         PoolsStateQuery::GetPoolsListWithInfo,
     )));
-
-    // Send message via message bus
-    let pools_list_with_info_raw: Arc<Message> =
-        context.message_bus.request(POOLS_STATE_TOPIC, pools_list_with_info_msg).await?;
-
-    // Unwrap and match
-    let pools_list_with_info_message =
-        Arc::try_unwrap(pools_list_with_info_raw).unwrap_or_else(|arc| (*arc).clone());
-
-    let pools_list_with_info = match pools_list_with_info_message {
-        Message::StateQueryResponse(StateQueryResponse::Pools(
-            PoolsStateQueryResponse::PoolsListWithInfo(pools_list_with_info),
-        )) => pools_list_with_info.pools,
-
-        Message::StateQueryResponse(StateQueryResponse::Pools(PoolsStateQueryResponse::Error(
-            e,
-        ))) => {
-            return Ok(RESTResponse::with_text(
-                500,
-                &format!("Internal server error while retrieving pools list: {e}"),
-            ));
-        }
-
-        _ => return Ok(RESTResponse::with_text(500, "Unexpected message type")),
-    };
-
+    let pools_list_with_info = query_state(
+        &context,
+        POOLS_STATE_TOPIC,
+        pools_list_with_info_msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::PoolsListWithInfo(pools_list_with_info),
+            )) => Ok(pools_list_with_info.pools),
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::Error(e),
+            )) => {
+                return Err(anyhow::anyhow!(
+                    "Internal server error while retrieving pools list: {e}"
+                ));
+            }
+            _ => return Err(anyhow::anyhow!("Unexpected message type")),
+        },
+    )
+    .await?;
     let pools_operators =
         pools_list_with_info.iter().map(|(pool_operator, _)| pool_operator).collect::<Vec<_>>();
 
-    // Get live stake for each pool
+    // Get active stake for each pool from spo-state
+    let pools_active_stakes_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
+        PoolsStateQuery::GetPoolsActiveStakes {
+            pools_operators: pools_operators.iter().map(|&op| op.clone()).collect(),
+        },
+    )));
+    let pools_active_stakes = query_state(
+        &context,
+        POOLS_STATE_TOPIC,
+        pools_active_stakes_msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::PoolsActiveStakes(pools_active_stakes),
+            )) => Ok(pools_active_stakes.active_stakes),
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::Error(e),
+            )) => {
+                return Err(anyhow::anyhow!(
+                    "Internal server error while retrieving pools active stakes: {e}"
+                ));
+            }
+            _ => return Err(anyhow::anyhow!("Unexpected message type")),
+        },
+    )
+    .await?;
+
+    // Get live stake for each pool from accounts-state
     let pools_live_stakes_msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
         AccountsStateQuery::GetPoolsLiveStakes {
             pools_operators: pools_operators.iter().map(|&op| op.clone()).collect(),
         },
     )));
+    let pools_live_stakes = query_state(
+        &context,
+        ACCOUNTS_STATE_TOPIC,
+        pools_live_stakes_msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Accounts(
+                AccountsStateQueryResponse::PoolsLiveStakes(pools_live_stakes),
+            )) => Ok(pools_live_stakes.live_stakes),
 
-    let pools_live_stakes_raw: Arc<Message> =
-        context.message_bus.request(ACCOUNTS_STATE_TOPIC, pools_live_stakes_msg).await?;
+            Message::StateQueryResponse(StateQueryResponse::Accounts(
+                AccountsStateQueryResponse::Error(e),
+            )) => {
+                return Err(anyhow::anyhow!(
+                    "Internal server error while retrieving pools live stakes: {e}"
+                ));
+            }
 
-    let pools_live_stakes_message =
-        Arc::try_unwrap(pools_live_stakes_raw).unwrap_or_else(|arc| (*arc).clone());
-
-    let pools_live_stakes = match pools_live_stakes_message {
-        Message::StateQueryResponse(StateQueryResponse::Accounts(
-            AccountsStateQueryResponse::PoolsLiveStakes(pools_live_stakes),
-        )) => pools_live_stakes.live_stakes,
-
-        Message::StateQueryResponse(StateQueryResponse::Accounts(
-            AccountsStateQueryResponse::Error(e),
-        )) => {
-            return Ok(RESTResponse::with_text(
-                500,
-                &format!("Internal server error while retrieving pools live stakes: {e}"),
-            ));
-        }
-
-        _ => return Ok(RESTResponse::with_text(500, "Unexpected message type")),
-    };
-
-    // Get active stake for each pool
+            _ => return Err(anyhow::anyhow!("Unexpected message type")),
+        },
+    )
+    .await?;
 
     let pools_extened_rest_results: Result<Vec<PoolExtendedRest>, anyhow::Error> =
         pools_list_with_info
             .iter()
-            .zip(pools_live_stakes.iter())
-            .map(|((pool_operator, pool_registration), live_stake)| {
-                Ok(PoolExtendedRest {
-                    pool_id: pool_operator.to_bech32_with_hrp("pool")?,
-                    hex: hex::encode(pool_operator),
-                    active_stake: 0,
-                    live_stake: live_stake.to_string(),
-                    blocks_minted: 0,
-                    live_saturation: 0.0,
-                    declared_pledge: "0".to_string(),
-                    margin_cost: 0.0,
-                    fixed_cost: "0".to_string(),
-                    metadata: pool_registration.pool_metadata.as_ref().map(|metadata| {
-                        PoolMetadataRest {
-                            url: metadata.url.clone(),
-                            hash: hex::encode(metadata.hash.clone()),
-                            ticker: "ticker".to_string(),
-                            name: "name".to_string(),
-                            description: "description".to_string(),
-                            homepage: "homepage".to_string(),
-                        }
-                    }),
-                })
-            })
+            .zip(pools_active_stakes.iter().zip(pools_live_stakes.iter()))
+            .map(
+                |((pool_operator, pool_registration), (&active_stake, &live_stake))| {
+                    Ok(PoolExtendedRest {
+                        pool_id: pool_operator.to_bech32_with_hrp("pool")?,
+                        hex: hex::encode(pool_operator),
+                        active_stake: active_stake.to_string(),
+                        live_stake: live_stake.to_string(),
+                        blocks_minted: 0,
+                        live_saturation: 0.0,
+                        declared_pledge: "0".to_string(),
+                        margin_cost: 0.0,
+                        fixed_cost: "0".to_string(),
+                        metadata: pool_registration.pool_metadata.as_ref().map(|metadata| {
+                            PoolMetadataRest {
+                                url: metadata.url.clone(),
+                                hash: hex::encode(metadata.hash.clone()),
+                                ticker: "ticker".to_string(),
+                                name: "name".to_string(),
+                                description: "description".to_string(),
+                                homepage: "homepage".to_string(),
+                            }
+                        }),
+                    })
+                },
+            )
             .collect();
 
     match pools_extened_rest_results {

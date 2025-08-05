@@ -130,7 +130,10 @@ impl State {
     }
 
     /// Get Pools Active stake from history
-    pub fn get_pools_active_stakes(&self, epoch: u64, pools_operators: &Vec<KeyHash>) -> Vec<u64> {
+    pub fn get_pools_active_stakes(&self, pools_operators: &Vec<KeyHash>) -> Vec<u64> {
+        // get current epoch
+        let epoch = self.current().unwrap().epoch;
+
         let all_active_stakes = {
             let guard = self.active_stake_history.lock().unwrap();
             guard.get(&epoch).cloned()

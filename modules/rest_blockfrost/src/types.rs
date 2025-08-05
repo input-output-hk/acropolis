@@ -12,7 +12,7 @@ pub struct VoteRest {
 pub struct PoolExtendedRest {
     pub pool_id: String,
     pub hex: String,
-    pub active_stake: u64,  // u64 in string
+    pub active_stake: String,  // u64 in string
     pub live_stake: String, // u64 in string
     pub blocks_minted: u32,
     pub live_saturation: f32,
