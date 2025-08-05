@@ -154,8 +154,8 @@ impl Storage for FileStorage {
 
 #[cfg(test)]
 mod test {
-    use anyhow::{anyhow, bail, Result};
-    use std::{collections::HashMap, path::Path, sync::Arc};
+    use anyhow::Result;
+    use std::{collections::HashMap, sync::Arc};
     use acropolis_common::{
         messages::{BlockHeaderMessage, BlockBodyMessage},
         BlockInfo, BlockStatus, Era

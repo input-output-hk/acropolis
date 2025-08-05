@@ -107,7 +107,10 @@ fn calculate_monetary_expansion(params: &ShelleyParams, reserves: Lovelace, eta:
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acropolis_common::{ NetworkId, Nonce, NonceVariant, ProtocolVersion, ShelleyProtocolParams };
+    use acropolis_common::protocol_params::{ 
+        ChameleonFraction, 
+        NetworkId, Nonce, NonceVariant, ProtocolVersion, ShelleyProtocolParams
+    };
     use chrono::{DateTime, Utc};
 
     // Known values at start of Shelley - from Java reference and DBSync
@@ -128,7 +131,7 @@ mod tests {
 
     fn shelley_params() -> ShelleyParams {
         ShelleyParams {
-            active_slots_coeff: 0.05,
+            active_slots_coeff: ChameleonFraction::Float(0.05),
             epoch_length: 432000,
             max_kes_evolutions: 62,
             max_lovelace_supply: 45_000_000_000_000_000,
@@ -154,10 +157,10 @@ mod tests {
                     tag: NonceVariant::NeutralNonce,
                     hash: None
                 },
-                decentralisation_param: RationalNumber::new(1, 1),
-                monetary_expansion: RationalNumber::new(3, 1000),
-                treasury_cut: RationalNumber::new(2, 10),
-                pool_pledge_influence: RationalNumber::new(3, 10)
+                decentralisation_param: ChameleonFraction::new_rational(1, 1),
+                monetary_expansion: ChameleonFraction::new_rational(3, 1000),
+                treasury_cut: ChameleonFraction::new_rational(2, 10),
+                pool_pledge_influence: ChameleonFraction::new_rational(3, 10)
             },
             security_param: 2160,
             slot_length: 1,
