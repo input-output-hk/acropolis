@@ -6,9 +6,10 @@ use acropolis_common::{
         GovernanceOutcomesMessage,
         GovernanceProceduresMessage, Message, ProtocolParamsMessage,
     },
-    BlockInfo, ConwayParams, DRepCredential, DataHash, EnactStateElem, Era,
-    GovActionId, GovernanceAction, GovernanceOutcome, GovernanceOutcomeVariant,
-    GenesisKeyhash, KeyHash, Lovelace, ProposalProcedure, ProtocolParamUpdate, SingleVoterVotes,
+    BlockInfo, ConwayParams, DelegatedStake, DRepCredential, DataHash, 
+    EnactStateElem, Era, GovActionId, 
+    GovernanceAction, GovernanceOutcome, GovernanceOutcomeVariant, GenesisKeyhash,
+    KeyHash, Lovelace, ProtocolParamUpdate, ProposalProcedure, SingleVoterVotes,
     TreasuryWithdrawalsAction, Voter, VotesCount, VotingOutcome, VotingProcedure,
     calculations::SLOTS_PER_24HOURS, AlonzoVotingOutcome
 };
@@ -35,7 +36,7 @@ pub struct State {
     current_epoch_start_slot: u64,
     conway: Option<ConwayParams>,
     drep_stake: HashMap<DRepCredential, Lovelace>,
-    spo_stake: HashMap<KeyHash, u64>,
+    spo_stake: HashMap<KeyHash, DelegatedStake>,
 
     alonzo_proposals: HashMap<GenesisKeyhash, Box<ProtocolParamUpdate>>,
     proposals: HashMap<GovActionId, (u64, ProposalProcedure)>,
@@ -292,7 +293,7 @@ impl State {
                             .inspect(|v| votes.drep += *v);
                     }
                     Voter::StakePoolKey(pool) => {
-                        self.spo_stake.get(pool).inspect(|v| votes.pool += *v);
+                        self.spo_stake.get(pool).inspect(|ds| votes.pool += ds.live);
                     }
                 }
             }
@@ -408,7 +409,7 @@ impl State {
             |e| Err(anyhow!("Commitee size: conversion usize -> u64 failed, {e}"))
         )?;
 
-        let spo_stake = self.spo_stake.iter().map(|(_sp,lov)| lov).sum();
+        let spo_stake = self.spo_stake.iter().map(|(_sp,ds)| ds.live).sum();
 
         Ok(VotingRegistrationState::new(spo_stake, spo_stake, drep_stake, committee))
     }
