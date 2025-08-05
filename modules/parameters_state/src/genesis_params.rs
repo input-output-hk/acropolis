@@ -192,7 +192,7 @@ pub fn read_conway_genesis(network: &str) -> Result<ConwayParams> {
 
 #[cfg(test)]
 mod test {
-    use anyhow::{anyhow, bail, Result};
+    use anyhow::Result;
     use std::collections::HashSet;
     use crate::genesis_params;
 

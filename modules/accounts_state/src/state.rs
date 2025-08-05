@@ -805,9 +805,9 @@ mod tests {
     use super::*;
     use acropolis_common::{
         rational_number::RationalNumber, AddressNetwork, Anchor, Committee, Constitution,
-        ConwayParams, Credential, DRepVotingThresholds, PoolVotingThresholds, Pot, PotDelta,
-        ProtocolParams, Ratio, Registration, StakeAddress, StakeAddressDelta, StakeAddressPayload,
-        StakeAndVoteDelegation, StakeRegistrationAndStakeAndVoteDelegation,
+        CostModel, ConwayParams, Credential, DRepVotingThresholds, PoolVotingThresholds, 
+        Pot, PotDelta, ProtocolParams, Ratio, Registration, StakeAddress, StakeAddressDelta, 
+        StakeAddressPayload, StakeAndVoteDelegation, StakeRegistrationAndStakeAndVoteDelegation,
         StakeRegistrationAndVoteDelegation, VoteDelegation, Withdrawal,
     };
 
