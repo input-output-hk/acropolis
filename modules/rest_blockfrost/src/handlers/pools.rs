@@ -129,14 +129,14 @@ async fn handle_pools_extended_blockfrost(context: Arc<Context<Message>>) -> Res
             pools_operators: pools_operators.iter().map(|&op| op.clone()).collect(),
         },
     )));
-    let pools_active_stakes = query_state(
+    let (pools_active_stakes, total_active_stake) = query_state(
         &context,
         POOLS_STATE_TOPIC,
         pools_active_stakes_msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Pools(
-                PoolsStateQueryResponse::PoolsActiveStakes(pools_active_stakes),
-            )) => Ok(pools_active_stakes.active_stakes),
+                PoolsStateQueryResponse::PoolsActiveStakes(res),
+            )) => Ok((res.active_stakes, res.total_active_stake)),
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::Error(e),
             )) => {

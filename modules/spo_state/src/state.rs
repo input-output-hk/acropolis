@@ -92,9 +92,9 @@ pub struct State {
     /// Volatile states, one per volatile block
     history: VecDeque<BlockState>,
     /// SPOs Active Stake history (per epoch)
-    active_stake_history: Arc<Mutex<HashMap<u64, HashMap<Vec<u8>, u64>>>>,
+    active_stake_history: Arc<Mutex<HashMap<u64, HashMap<KeyHash, u64>>>>,
     /// SPOs Blocks minted history (per epoch)
-    blocks_minted_history: Arc<Mutex<HashMap<u64, HashMap<Vec<u8>, u64>>>>,
+    blocks_minted_history: Arc<Mutex<HashMap<u64, HashMap<KeyHash, u64>>>>,
 }
 
 impl State {
@@ -111,7 +111,7 @@ impl State {
         self.history.back()
     }
 
-    pub fn get(&self, operator: &Vec<u8>) -> Option<&PoolRegistration> {
+    pub fn get(&self, operator: &KeyHash) -> Option<&PoolRegistration> {
         if let Some(current) = self.current() {
             current.spos.get(operator)
         } else {
@@ -119,32 +119,36 @@ impl State {
         }
     }
 
-    pub fn list_pool_operators(&self) -> Vec<Vec<u8>> {
+    pub fn list_pool_operators(&self) -> Vec<KeyHash> {
         self.current().map(|state| state.spos.keys().cloned().collect()).unwrap_or_default()
     }
 
-    pub fn list_pools_with_info(&self) -> Vec<(Vec<u8>, PoolRegistration)> {
+    pub fn list_pools_with_info(&self) -> Vec<(KeyHash, PoolRegistration)> {
         self.current()
             .map(|state| state.spos.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
             .unwrap_or_default()
     }
 
     /// Get Pools Active stake from history
-    pub fn get_pools_active_stakes(&self, pools_operators: &Vec<KeyHash>) -> Vec<u64> {
+    /// Returns Vec of active stake for each pool_operator
+    /// and total_active_stake for current epoch
+    pub fn get_pools_active_stakes(&self, pools_operators: &Vec<KeyHash>) -> (Vec<u64>, u64) {
         // get current epoch
         let epoch = self.current().unwrap().epoch;
 
+        // Get active stakes for current epoch
         let all_active_stakes = {
             let guard = self.active_stake_history.lock().unwrap();
-            guard.get(&epoch).cloned()
+            guard.get(&epoch).cloned().unwrap_or_default()
         };
 
-        pools_operators
+        let pools_active_stakes = pools_operators
             .iter()
-            .map(|spo| {
-                all_active_stakes.as_ref().and_then(|stakes| stakes.get(spo)).cloned().unwrap_or(0)
-            })
-            .collect()
+            .map(|spo| all_active_stakes.get(spo).cloned().unwrap_or(0))
+            .collect();
+        let total_active_stake = all_active_stakes.values().sum();
+
+        (pools_active_stakes, total_active_stake)
     }
 
     /// Get pools that will be retired in the upcoming epochs
