@@ -56,6 +56,8 @@ pub struct PoolsRetiringList {}
 pub struct PoolsActiveStakes {
     // this is in same order of pools_operator from PoolsStateQuery::GetPoolsActiveStakes
     pub active_stakes: Vec<u64>,
+    // this is total active stake for current epoch
+    pub total_active_stake: u64,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
