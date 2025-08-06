@@ -14,7 +14,7 @@ anyhow = "1.0"
 async-trait = "0.1"
 bech32 = "0.11"
 caryatid_sdk = "0.12"
-caryatid_module_rest_server = "0.13"
+caryatid_module_rest_server = "0.14"
 config = "0.15.11"
 hex = "0.4.3"
 serde = { version = "1.0.214", features = ["derive"] }

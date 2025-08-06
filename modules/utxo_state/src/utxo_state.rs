@@ -3,7 +3,7 @@
 
 use acropolis_common::{
     messages::{CardanoMessage, Message},
-    rest_helper::handle_rest_with_parameter,
+    rest_helper::handle_rest_with_path_parameter,
 };
 use caryatid_sdk::{module, Context, Module};
 
@@ -100,7 +100,9 @@ impl UTXOState {
                                 .await
                                 .inspect_err(|e| error!("Messaging handling error: {e}"))
                                 .ok();
-                        }.instrument(span).await;
+                        }
+                        .instrument(span)
+                        .await;
                     }
 
                     _ => error!("Unexpected message type: {message:?}"),
@@ -127,13 +129,15 @@ impl UTXOState {
                                 .await
                                 .inspect_err(|e| error!("Tick error: {e}"))
                                 .ok();
-                        }.instrument(span).await;
+                        }
+                        .instrument(span)
+                        .await;
                     }
                 }
             }
         });
 
-        handle_rest_with_parameter(context.clone(), &single_utxo_topic, move |param| {
+        handle_rest_with_path_parameter(context.clone(), &single_utxo_topic, move |param| {
             handle_single_utxo(state.clone(), param[0].to_string())
         });
 
