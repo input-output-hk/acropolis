@@ -1,14 +1,14 @@
 use acropolis_common::DRepCredential;
-use std::collections::BTreeMap;
+use imbl::OrdMap;
 use tracing::info;
 
 pub struct State {
-    historical_distributions: BTreeMap<u64, DRepDistribution>,
+    historical_distributions: OrdMap<u64, DRepDistribution>,
 }
 
 #[derive(Clone)]
 pub struct DRepDistribution {
-    pub dreps: BTreeMap<DRepCredential, u64>,
+    pub dreps: OrdMap<DRepCredential, u64>,
     pub abstain: u64,
     pub no_confidence: u64,
 }
@@ -16,7 +16,7 @@ pub struct DRepDistribution {
 impl State {
     pub fn new() -> Self {
         Self {
-            historical_distributions: BTreeMap::new(),
+            historical_distributions: OrdMap::new(),
         }
     }
 
@@ -24,12 +24,11 @@ impl State {
         self.historical_distributions.insert(epoch, drdd);
     }
 
-    pub fn get_latest(&self) -> Option<DRepDistribution> {
-        self.historical_distributions.last_key_value().map(|(_, map)| map.clone())
+    pub fn get_latest(&self) -> Option<&DRepDistribution> {
+        self.historical_distributions.iter().next_back().map(|(_, map)| map)
     }
-
-    pub fn get_epoch(&self, epoch: u64) -> Option<DRepDistribution> {
-        self.historical_distributions.get(&epoch).cloned()
+    pub fn get_epoch(&self, epoch: u64) -> Option<&DRepDistribution> {
+        self.historical_distributions.get(&epoch)
     }
 
     pub async fn tick(&self) -> anyhow::Result<()> {

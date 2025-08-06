@@ -2,7 +2,7 @@
 //! Stores historical DRep delegation distributions
 use acropolis_common::{
     messages::{CardanoMessage, Message},
-    rest_helper::handle_rest_with_query_parameter,
+    rest_helper::handle_rest_with_query_parameters,
 };
 use anyhow::Result;
 use caryatid_sdk::{module, Context, Module};
@@ -57,7 +57,7 @@ impl DRDDState {
                     };
                     match message.as_ref() {
                         Message::Cardano((_, CardanoMessage::DRepStakeDistribution(msg))) => {
-                            let span = info_span!("spdd_state.handle", epoch = msg.epoch);
+                            let span = info_span!("drdd_state.handle", epoch = msg.epoch);
                             async {
                                 let mut state = state_handler.lock().await;
 
@@ -110,7 +110,7 @@ impl DRDDState {
         };
 
         // Register /drdd REST endpoint
-        handle_rest_with_query_parameter(context.clone(), &handle_drdd_topic, move |params| {
+        handle_rest_with_query_parameters(context.clone(), &handle_drdd_topic, move |params| {
             let state_rest = state_opt.clone();
             handle_drdd(state_rest.clone(), params)
         });
