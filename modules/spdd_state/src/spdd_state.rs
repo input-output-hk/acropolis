@@ -2,13 +2,14 @@
 //! Stores historical stake pool delegation distributions
 use acropolis_common::{
     messages::{CardanoMessage, Message},
-    rest_helper::handle_rest_with_query_parameter,
+    rest_helper::handle_rest_with_query_parameters,
     DelegatedStake, KeyHash,
 };
 use anyhow::Result;
 use caryatid_sdk::{module, Context, Module};
 use config::Config;
-use std::{collections::BTreeMap, sync::Arc};
+use imbl::OrdMap;
+use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, info_span, Instrument};
 mod state;
@@ -60,7 +61,7 @@ impl SPDDState {
                             async {
                                 let mut state = state_handler.lock().await;
 
-                                let spdd: BTreeMap<KeyHash, DelegatedStake> =
+                                let spdd: OrdMap<KeyHash, DelegatedStake> =
                                     msg.spos.iter().map(|(k, v)| (k.clone(), *v)).collect();
 
                                 state.insert_spdd(msg.epoch, spdd);
@@ -106,7 +107,7 @@ impl SPDDState {
         };
 
         // Register /spdd REST endpoint
-        handle_rest_with_query_parameter(context.clone(), &handle_spdd_topic, move |params| {
+        handle_rest_with_query_parameters(context.clone(), &handle_spdd_topic, move |params| {
             let state_rest = state_opt.clone();
             handle_spdd(state_rest.clone(), params)
         });

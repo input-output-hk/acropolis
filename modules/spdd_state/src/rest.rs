@@ -1,6 +1,6 @@
 use crate::state::State;
-use acropolis_common::messages::RESTResponse;
 use acropolis_common::serialization::Bech32WithHrp;
+use acropolis_common::{extract_strict_query_params, messages::RESTResponse};
 use anyhow::Result;
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::Mutex;
@@ -20,38 +20,21 @@ pub async fn handle_spdd(
         }
     };
 
-    let spdd_opt = if let Some(epoch_str) = params.get("epoch") {
-        if params.len() > 1 {
-            return Ok(RESTResponse::with_text(
-                400,
-                "Only 'epoch' is a valid query parameter",
-            ));
-        }
+    extract_strict_query_params!(params, {
+        "epoch" => epoch: Option<u64>,
+    });
 
-        match epoch_str.parse::<u64>() {
-            Ok(epoch) => match locked.get_epoch(epoch) {
-                Some(spdd) => Some(spdd),
-                None => {
-                    return Ok(RESTResponse::with_text(
-                        404,
-                        &format!("SPDD not found for epoch {}", epoch),
-                    ));
-                }
-            },
-            Err(_) => {
+    let spdd_opt = match epoch {
+        Some(epoch) => match locked.get_epoch(epoch) {
+            Some(spdd) => Some(spdd),
+            None => {
                 return Ok(RESTResponse::with_text(
-                    400,
-                    "Invalid epoch query parameter: must be a number",
+                    404,
+                    &format!("SPDD not found for epoch {}", epoch),
                 ));
             }
-        }
-    } else if params.is_empty() {
-        locked.get_latest()
-    } else {
-        return Ok(RESTResponse::with_text(
-            400,
-            "Unexpected query parameter: only 'epoch' is allowed",
-        ));
+        },
+        None => locked.get_latest(),
     };
 
     if let Some(spdd) = spdd_opt {

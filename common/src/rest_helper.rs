@@ -84,7 +84,7 @@ where
 }
 
 // Handle a REST request with query parameters
-pub fn handle_rest_with_query_parameter<F, Fut>(
+pub fn handle_rest_with_query_parameters<F, Fut>(
     context: Arc<Context<Message>>,
     topic: &str,
     handler: F,
@@ -141,4 +141,38 @@ impl<T: ToPrimitive> ToCheckedF64 for T {
     fn to_checked_f64(&self, name: &str) -> Result<f64> {
         self.to_f64().ok_or_else(|| anyhow!("Failed to convert {name} to f64"))
     }
+}
+
+// Macros for extracting and validating REST query parameters
+#[macro_export]
+macro_rules! extract_strict_query_params {
+    ($params:expr, { $($key:literal => $var:ident : Option<$type:ty>,)* }) => {
+        $(
+            let mut $var: Option<$type> = None;
+        )*
+
+        for (k, v) in &$params {
+            match k.as_str() {
+                $(
+                    $key => {
+                        $var = match v.parse::<$type>() {
+                            Ok(val) => Some(val),
+                            Err(_) => {
+                                return Ok($crate::messages::RESTResponse::with_text(
+                                    400,
+                                    concat!("Invalid ", $key, " query parameter: must be a valid type"),
+                                ));
+                            }
+                        };
+                    }
+                )*
+                _ => {
+                    return Ok($crate::messages::RESTResponse::with_text(
+                        400,
+                        concat!("Unexpected query parameter: only allowed keys are: ", $( $key, " ", )*)
+                    ));
+                }
+            }
+        }
+    };
 }
