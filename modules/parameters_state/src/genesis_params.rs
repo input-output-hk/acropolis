@@ -195,15 +195,15 @@ mod test {
     use anyhow::Result;
     use std::collections::HashSet;
     use crate::genesis_params;
-    use acropolis_common::protocol_params::ShelleyParams;
+    use acropolis_common::{protocol_params::ShelleyParams, rational_number::RationalNumber};
+
+    fn get_networks() -> HashSet<&'static str> {
+        HashSet::<&str>::from_iter(genesis_params::PREDEFINED_GENESIS.iter().map(|p| p.0))
+    }
 
     #[test]
     fn test_read_genesis() -> Result<()> {
-        let networks = HashSet::<&str>::from_iter(
-            genesis_params::PREDEFINED_GENESIS.iter().map(|p| p.0)
-        );
-
-        for net in networks.iter() {
+        for net in get_networks().iter() {
             println!("{:?}", genesis_params::read_byron_genesis(net)?);
             println!("{:?}", genesis_params::read_shelley_genesis(net)?);
             println!("{:?}", genesis_params::read_alonzo_genesis(net)?);
@@ -214,16 +214,23 @@ mod test {
 
     #[test]
     fn test_read_write_shelley() -> Result<()> {
-        let networks = HashSet::<&str>::from_iter(
-            genesis_params::PREDEFINED_GENESIS.iter().map(|p| p.0)
-        );
-
-        for net in networks.iter() {
+        for net in get_networks().iter() {
             let shelley = genesis_params::read_shelley_genesis(net)?;
             let shelley_str = serde_json::to_string(&shelley).unwrap();
             let shelley_back = serde_json::from_str::<ShelleyParams>(&shelley_str).unwrap();
             println!("Encoded: {shelley:?}\n\nStr: {shelley_str}\n\nBack: {shelley_back:?}\n");
             assert_eq!(shelley, shelley_back);
+        }
+        Ok(())
+    }
+
+    /// Checking that value for monetary expansion is correctly parsed.
+    /// Pallas loses precision here, and does not parse this value properly.
+    #[test]
+    fn test_shelley_monetary_expansion_value() -> Result<()> {
+        for net in get_networks().iter() {
+            let shelley_params = genesis_params::read_shelley_genesis(net)?.protocol_params;
+            assert_eq!(shelley_params.monetary_expansion, RationalNumber::new(3,1000));
         }
         Ok(())
     }
