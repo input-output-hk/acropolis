@@ -1,3 +1,5 @@
+use crate::KeyHash;
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum EpochsStateQuery {
     GetLatestEpoch,
@@ -10,6 +12,9 @@ pub enum EpochsStateQuery {
     GetEpochBlockDistribution { epoch_number: u64 },
     GetEpochBlockDistributionByPool { epoch_number: u64 },
     GetEpochParameters { epoch_number: u64 },
+
+    // Pools related queries
+    GetBlocksMintedByPools { vrf_key_hashes: Vec<KeyHash> },
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -24,6 +29,10 @@ pub enum EpochsStateQueryResponse {
     EpochBlockDistribution(EpochBlockDistribution),
     EpochBlockDistributionByPool(EpochBlockDistributionByPool),
     EpochParameters(EpochParameters),
+
+    // Pools related responses
+    BlocksMintedByPools(BlocksMintedByPools),
+
     NotFound,
     Error(String),
 }
@@ -57,3 +66,9 @@ pub struct EpochBlockDistributionByPool {}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EpochParameters {}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BlocksMintedByPools {
+    // this is in same order of vrf_key_hashes from EpochsStateQuery::GetBlocksMintedByPools
+    pub blocks_minted: Vec<usize>,
+}

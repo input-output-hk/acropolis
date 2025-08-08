@@ -105,6 +105,13 @@ impl State {
             .ok_or_else(|| anyhow::anyhow!("Historical epoch storage is disabled"))?;
         Ok(history.get(&epoch))
     }
+
+    pub fn get_blocks_minted_by_pools(&self, vrf_key_hashes: &Vec<KeyHash>) -> Vec<usize> {
+        vrf_key_hashes
+            .iter()
+            .map(|vrf_key_hash| *self.vrf_vkey_hashes.get(vrf_key_hash).unwrap_or(&0))
+            .collect()
+    }
 }
 
 #[cfg(test)]

@@ -3,6 +3,7 @@ use acropolis_common::{
     messages::{Message, RESTResponse, StateQuery, StateQueryResponse},
     queries::{
         accounts::{AccountsStateQuery, AccountsStateQueryResponse},
+        epochs::{EpochsStateQuery, EpochsStateQueryResponse},
         pools::{PoolsStateQuery, PoolsStateQueryResponse},
         utils::query_state,
     },
@@ -16,6 +17,7 @@ use crate::types::{PoolExtendedRest, PoolMetadataRest};
 
 const ACCOUNTS_STATE_TOPIC: &str = "accounts-state";
 const POOLS_STATE_TOPIC: &str = "pools-state";
+const EPOCH_STATE_TOPIC: &str = "epoch-state";
 
 /// Handle `/pools` Blockfrost-compatible endpoint
 pub async fn handle_pools_list_blockfrost(
@@ -122,6 +124,10 @@ async fn handle_pools_extended_blockfrost(context: Arc<Context<Message>>) -> Res
     .await?;
     let pools_operators =
         pools_list_with_info.iter().map(|(pool_operator, _)| pool_operator).collect::<Vec<_>>();
+    let pools_vrf_key_hashes = pools_list_with_info
+        .iter()
+        .map(|(_, pool_registration)| pool_registration.vrf_key_hash.clone())
+        .collect::<Vec<_>>();
 
     // Get active stake for each pool from spo-state
     let pools_active_stakes_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
@@ -177,35 +183,61 @@ async fn handle_pools_extended_blockfrost(context: Arc<Context<Message>>) -> Res
     )
     .await?;
 
+    // Get blocks minted for each pool from epoch-activity-counter
+    let pools_blocks_minted_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
+        EpochsStateQuery::GetBlocksMintedByPools {
+            vrf_key_hashes: pools_vrf_key_hashes,
+        },
+    )));
+    let pools_blocks_minted = query_state(
+        &context,
+        EPOCH_STATE_TOPIC,
+        pools_blocks_minted_msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Epochs(
+                EpochsStateQueryResponse::BlocksMintedByPools(res),
+            )) => Ok(res.blocks_minted),
+
+            Message::StateQueryResponse(StateQueryResponse::Epochs(
+                EpochsStateQueryResponse::Error(e),
+            )) => {
+                return Err(anyhow::anyhow!(
+                    "Internal server error while retrieving pools blocks minted: {e}"
+                ));
+            }
+
+            _ => return Err(anyhow::anyhow!("Unexpected message type")),
+        },
+    )
+    .await?;
+
     let pools_extened_rest_results: Result<Vec<PoolExtendedRest>, anyhow::Error> =
         pools_list_with_info
             .iter()
-            .zip(pools_active_stakes.iter().zip(pools_live_stakes.iter()))
-            .map(
-                |((pool_operator, pool_registration), (&active_stake, &live_stake))| {
-                    Ok(PoolExtendedRest {
-                        pool_id: pool_operator.to_bech32_with_hrp("pool")?,
-                        hex: hex::encode(pool_operator),
-                        active_stake: active_stake.to_string(),
-                        live_stake: live_stake.to_string(),
-                        blocks_minted: 0,
-                        live_saturation: 0.0,
-                        declared_pledge: pool_registration.pledge.to_string(),
-                        margin_cost: pool_registration.margin.to_f32(),
-                        fixed_cost: pool_registration.cost.to_string(),
-                        metadata: pool_registration.pool_metadata.as_ref().map(|metadata| {
-                            PoolMetadataRest {
-                                url: metadata.url.clone(),
-                                hash: hex::encode(metadata.hash.clone()),
-                                ticker: "ticker".to_string(),
-                                name: "name".to_string(),
-                                description: "description".to_string(),
-                                homepage: "homepage".to_string(),
-                            }
-                        }),
-                    })
-                },
-            )
+            .enumerate()
+            .map(|(i, (pool_operator, pool_registration))| {
+                Ok(PoolExtendedRest {
+                    pool_id: pool_operator.to_bech32_with_hrp("pool")?,
+                    hex: hex::encode(pool_operator),
+                    active_stake: pools_active_stakes[i].to_string(),
+                    live_stake: pools_live_stakes[i].to_string(),
+                    blocks_minted: pools_blocks_minted[i],
+                    live_saturation: 0.0,
+                    declared_pledge: pool_registration.pledge.to_string(),
+                    margin_cost: pool_registration.margin.to_f32(),
+                    fixed_cost: pool_registration.cost.to_string(),
+                    metadata: pool_registration.pool_metadata.as_ref().map(|metadata| {
+                        PoolMetadataRest {
+                            url: metadata.url.clone(),
+                            hash: hex::encode(metadata.hash.clone()),
+                            ticker: "ticker".to_string(),
+                            name: "name".to_string(),
+                            description: "description".to_string(),
+                            homepage: "homepage".to_string(),
+                        }
+                    }),
+                })
+            })
             .collect();
 
     match pools_extened_rest_results {
