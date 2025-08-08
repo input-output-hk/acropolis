@@ -69,8 +69,10 @@ pub fn calculate_monetary_change(params: &ShelleyParams,
 
 // Calculate 'eta' - ratio of blocks produced during the epoch vs expected
 fn calculate_eta(params: &ShelleyParams, total_non_obft_blocks: usize) -> Result<BigDecimal> {
-    let decentralisation = &params.protocol_params.decentralisation_param.get_rational()?;
-    let active_slots_coeff = &params.active_slots_coeff.get_big_decimal()?;
+    let decentralisation = &params.protocol_params.decentralisation_param;
+    let active_slots_coeff =
+        BigDecimal::from(params.active_slots_coeff.numer()) /
+        BigDecimal::from(params.active_slots_coeff.denom());
     let epoch_length = BigDecimal::from(params.epoch_length);
 
     let eta = if decentralisation >= &RationalNumber::new(8,10) {
@@ -90,8 +92,7 @@ fn calculate_eta(params: &ShelleyParams, total_non_obft_blocks: usize) -> Result
 // Calculate monetary expansion based on current reserves
 fn calculate_monetary_expansion(params: &ShelleyParams, reserves: Lovelace, eta: &BigDecimal)
                                 -> BigDecimal {
-    let monetary_expansion_factor = RationalNumber::new(3, 1000);
-    // TODO odd values coming in! &params.protocol_params.monetary_expansion; // Rho
+    let monetary_expansion_factor = params.protocol_params.monetary_expansion;
     let monetary_expansion = (BigDecimal::from(reserves)
                               * eta
                               * BigDecimal::from(monetary_expansion_factor.numer())
@@ -108,10 +109,10 @@ fn calculate_monetary_expansion(params: &ShelleyParams, reserves: Lovelace, eta:
 mod tests {
     use super::*;
     use acropolis_common::protocol_params::{ 
-        ChameleonFraction, 
         NetworkId, Nonce, NonceVariant, ProtocolVersion, ShelleyProtocolParams
     };
     use chrono::{DateTime, Utc};
+    use acropolis_common::rational_number::rational_number_from_f32;
 
     // Known values at start of Shelley - from Java reference and DBSync
     const EPOCH_208_RESERVES: Lovelace = 13_888_022_852_926_644;
@@ -131,7 +132,7 @@ mod tests {
 
     fn shelley_params() -> ShelleyParams {
         ShelleyParams {
-            active_slots_coeff: ChameleonFraction::Float(0.05),
+            active_slots_coeff: rational_number_from_f32(0.05).unwrap(),
             epoch_length: 432000,
             max_kes_evolutions: 62,
             max_lovelace_supply: 45_000_000_000_000_000,
@@ -157,10 +158,10 @@ mod tests {
                     tag: NonceVariant::NeutralNonce,
                     hash: None
                 },
-                decentralisation_param: ChameleonFraction::new_rational(1, 1),
-                monetary_expansion: ChameleonFraction::new_rational(3, 1000),
-                treasury_cut: ChameleonFraction::new_rational(2, 10),
-                pool_pledge_influence: ChameleonFraction::new_rational(3, 10)
+                decentralisation_param: RationalNumber::new(1, 1),
+                monetary_expansion: RationalNumber::new(3, 1000),
+                treasury_cut: RationalNumber::new(2, 10),
+                pool_pledge_influence: RationalNumber::new(3, 10)
             },
             security_param: 2160,
             slot_length: 1,

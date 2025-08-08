@@ -67,14 +67,14 @@ impl RewardsState {
         let relative_pool_saturation_size = k.inverse();
 
         // Pledge influence factor (a0)
-        let a0 = &params.protocol_params.pool_pledge_influence.get_rational()?;
+        let a0 = &params.protocol_params.pool_pledge_influence;
         let pledge_influence_factor = BigDecimal::from(a0.numer()) / BigDecimal::from(a0.denom());
 
         // Map of SPO operator ID to rewards to split to delegators
         let mut spo_rewards: HashMap<KeyHash, Lovelace> = HashMap::new();
 
         // get_rational() may be costly to call each spos iteration.
-        let decentralisation = &params.protocol_params.decentralisation_param.get_rational()?;
+        let decentralisation = &params.protocol_params.decentralisation_param;
 
         // Calculate for every registered SPO (even those who didn't participate in this epoch)
         // from epoch (i-2) "Go"

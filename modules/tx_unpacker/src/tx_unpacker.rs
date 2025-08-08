@@ -9,13 +9,13 @@ use acropolis_common::{
     *,
 };
 use caryatid_sdk::{module, Context, Module};
-use std::sync::Arc;
+use std::{fmt::Debug, clone::Clone, sync::Arc};
 
 use anyhow::Result;
 use config::Config;
 use futures::future::join_all;
-use pallas::ledger::{traverse::MultiEraTx, traverse};
-use hex::ToHex;
+use pallas::ledger::{traverse::MultiEraTx, primitives, traverse};
+use pallas::ledger::primitives::KeyValuePairs;
 use tracing::{debug, error, info, info_span, Instrument};
 
 mod map_parameters;
@@ -32,6 +32,29 @@ const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.txs";
 pub struct TxUnpacker;
 
 impl TxUnpacker {
+    fn decode_updates<EraSpecificUpdateProposals: Clone + Debug>(
+        dest: &mut Vec<AlonzoBabbageUpdateProposal>,
+        proposals: &KeyValuePairs<primitives::Bytes, EraSpecificUpdateProposals>,
+        epoch: u64,
+        map: impl Fn(&EraSpecificUpdateProposals) -> Result<Box<ProtocolParamUpdate>>,
+    ) {
+        let mut update = AlonzoBabbageUpdateProposal {
+            proposals: Vec::new(),
+            enactment_epoch: epoch
+        };
+
+        for (hash, vote) in proposals.iter() {
+            match map(vote) {
+                Ok(upd) =>
+                    update.proposals.push((hash.to_vec(), upd)),
+                Err(e) =>
+                    error!("Cannot convert alonzo protocol param update {vote:?}: {e}")
+            }
+        }
+
+        dest.push(update);
+    }
+
     /// Main init function
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // Subscribe for tx messages
@@ -73,6 +96,7 @@ impl TxUnpacker {
                 match message.as_ref() {
                     Message::Cardano((block, CardanoMessage::ReceivedTxs(txs_msg))) => {
                         let span = info_span!("utxo_state.handle", block = block.number);
+
                         async {
                             if tracing::enabled!(tracing::Level::DEBUG) {
                                 debug!("Received {} txs for slot {}",
@@ -84,24 +108,37 @@ impl TxUnpacker {
                             let mut certificates = Vec::new();
                             let mut voting_procedures = Vec::new();
                             let mut proposal_procedures = Vec::new();
-                            let mut alonzo_updates = Vec::new();
+                            let mut alonzo_babbage_update_proposals = Vec::new();
                             let mut total_fees: u64 = 0;
 
                             for (tx_index, raw_tx) in txs_msg.txs.iter().enumerate() {
                                 if publish_governance_procedures_topic.is_some() {
-                                    if let Ok(alonzo) = MultiEraTx::decode_for_era(traverse::Era::Alonzo, &raw_tx) {
-                                        if let Some(update) = alonzo.update() {
-                                            if let Some(alonzo_update) = update.as_alonzo() {
-                                                for (hash,vote) in alonzo_update.proposed_protocol_parameter_updates.iter() {
-                                                    match map_parameters::map_alonzo_protocol_param_update(vote) {
-                                                        Ok(upd) =>
-                                                            alonzo_updates.push((hash.to_vec(), upd)),
-                                                        Err(e) => error!("Cannot convert alonzo protocol param update {vote:?}: {e}")
-                                                    }
+                                    //Self::decode_legacy_updates(&mut legacy_update_proposals, &block, &raw_tx);
+                                    if block.era >= Era::Shelley && block.era <= Era::Alonzo {
+                                        if let Ok(alonzo) = MultiEraTx::decode_for_era(traverse::Era::Alonzo, &raw_tx) {
+                                            if let Some(update) = alonzo.update() {
+                                                if let Some(alonzo_update) = update.as_alonzo() {
+                                                    Self::decode_updates(
+                                                        &mut alonzo_babbage_update_proposals,
+                                                        &alonzo_update.proposed_protocol_parameter_updates,
+                                                        alonzo_update.epoch,
+                                                        map_parameters::map_alonzo_protocol_param_update
+                                                    );
                                                 }
-                                                info!("Alonzo updates: {:?} txs, hash {}", 
-                                                    alonzo_updates, alonzo.hash().encode_hex::<String>()
-                                                );
+                                            }
+                                        }
+                                    }
+                                    else if block.era == Era::Babbage {
+                                        if let Ok(babbage) = MultiEraTx::decode_for_era(traverse::Era::Babbage, &raw_tx) {
+                                            if let Some(update) = babbage.update() {
+                                                if let Some(babbage_update) = update.as_babbage() {
+                                                    Self::decode_updates(
+                                                        &mut alonzo_babbage_update_proposals,
+                                                        &babbage_update.proposed_protocol_parameter_updates,
+                                                        babbage_update.epoch,
+                                                        map_parameters::map_babbage_protocol_param_update
+                                                    );
+                                                }
                                             }
                                         }
                                     }
@@ -281,7 +318,7 @@ impl TxUnpacker {
                                         GovernanceProceduresMessage {
                                             voting_procedures,
                                             proposal_procedures,
-                                            alonzo_updates
+                                            alonzo_babbage_updates: alonzo_babbage_update_proposals
                                         })
                                 )));
 

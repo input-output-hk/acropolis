@@ -3,11 +3,11 @@ use acropolis_common::{
     messages::GovernanceOutcomesMessage, 
     AlonzoParams, Committee, CommitteeChange, ConwayParams, EnactStateElem, Era, 
     GovernanceOutcomeVariant, ProtocolParamUpdate, ProtocolParams, 
-    rational_number::RationalNumber, AlonzoVotingOutcome
+    AlonzoBabbageVotingOutcome
 };
 use anyhow::{anyhow, bail, Result};
 use tracing::error;
-use acropolis_common::protocol_params::{ChameleonFraction, ShelleyProtocolParams};
+use acropolis_common::protocol_params::ShelleyProtocolParams;
 
 pub struct ParametersUpdater {
     params: ProtocolParams,
@@ -72,14 +72,6 @@ impl ParametersUpdater {
         Ok(())
     }
 
-    fn sh_chameleon(
-        &mut self,
-        f: impl Fn(&mut ShelleyProtocolParams) -> &mut ChameleonFraction,
-        u: &Option<RationalNumber>
-    ) -> Result<()> {
-        self.sh_upd(f, &u.map(|u| ChameleonFraction::from_rational(u.clone())))
-    }
-
     fn sh_u32(
         &mut self, f: impl Fn(&mut ShelleyProtocolParams) -> &mut u32, u: &Option<u64>
     ) -> Result<()> {
@@ -87,20 +79,20 @@ impl ParametersUpdater {
     }
 
     fn update_shelley_params(&mut self, p: &ProtocolParamUpdate) -> Result<()> {
-        self.sh_chameleon(|sp| &mut sp.pool_pledge_influence, &p.pool_pledge_influence)?;
-        self.sh_chameleon(|sp| &mut sp.monetary_expansion, &p.expansion_rate)?;
+        self.sh_upd(|sp| &mut sp.pool_pledge_influence, &p.pool_pledge_influence)?;
+        self.sh_upd(|sp| &mut sp.monetary_expansion, &p.expansion_rate)?;
         self.sh_upd(|sp| &mut sp.min_pool_cost, &p.min_pool_cost)?;
         self.sh_upd(|sp| &mut sp.pool_retire_max_epoch, &p.maximum_epoch)?;
         self.sh_upd(|sp| &mut sp.key_deposit, &p.key_deposit)?;
         self.sh_upd(|sp| &mut sp.pool_deposit, &p.pool_deposit)?;
-        self.sh_chameleon(|sp| &mut sp.treasury_cut, &p.treasury_growth_rate)?;
+        self.sh_upd(|sp| &mut sp.treasury_cut, &p.treasury_growth_rate)?;
         self.sh_u32(|sp| &mut sp.max_block_body_size, &p.max_block_body_size)?;
         self.sh_u32(|sp| &mut sp.max_tx_size, &p.max_transaction_size)?;
         self.sh_u32(|sp| &mut sp.max_block_header_size, &p.max_block_header_size)?;
         self.sh_u32(|sp| &mut sp.minfee_a, &p.minfee_a)?;
         self.sh_u32(|sp| &mut sp.minfee_b, &p.minfee_b)?;
         self.sh_u32(|sp| &mut sp.stake_pool_target_num, &p.desired_number_of_stake_pools)?;
-        self.sh_chameleon(|sp| &mut sp.decentralisation_param, &p.decentralisation_constant)?;
+        self.sh_upd(|sp| &mut sp.decentralisation_param, &p.decentralisation_constant)?;
         self.sh_upd(|sp| &mut sp.protocol_version, &p.protocol_version)?;
         self.sh_upd(|sp| &mut sp.extra_entropy, &p.extra_enthropy)?;
         Ok(())
@@ -183,7 +175,9 @@ impl ParametersUpdater {
         c.threshold = cu.terms.clone();
     }
 
-    fn apply_alonzo_outcome_elem(&mut self, u: &AlonzoVotingOutcome) -> Result<()> {
+    fn apply_alonzo_babbage_outcome_elem(&mut self, u: &AlonzoBabbageVotingOutcome)
+        -> Result<()>
+    {
         if u.accepted {
             self.update_params(&u.parameter_update)?;
         }
@@ -205,9 +199,9 @@ impl ParametersUpdater {
     }
 
     pub fn apply_enact_state(&mut self, u: &GovernanceOutcomesMessage) -> Result<()> {
-        for outcome in u.alonzo_outcomes.iter() {
-            tracing::info!("Updating alonzo outcome {:?}", outcome);
-            self.apply_alonzo_outcome_elem(outcome)?;
+        for outcome in u.alonzo_babbage_outcomes.iter() {
+            tracing::info!("Updating alonzo/babbage outcome {:?}", outcome);
+            self.apply_alonzo_babbage_outcome_elem(outcome)?;
         }
 
         for outcome in u.conway_outcomes.iter() {
