@@ -1,4 +1,4 @@
-use crate::KeyHash;
+use crate::{KeyHash, ProtocolParams};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum EpochsStateQuery {
@@ -41,7 +41,9 @@ pub enum EpochsStateQueryResponse {
 pub struct LatestEpoch {}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct LatestEpochParameters {}
+pub struct LatestEpochParameters {
+    pub parameters: ProtocolParams,
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EpochInfo {}

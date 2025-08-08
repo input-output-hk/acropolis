@@ -11,6 +11,7 @@ use acropolis_common::{
 };
 use anyhow::Result;
 use caryatid_sdk::Context;
+use rust_decimal::Decimal;
 use std::sync::Arc;
 
 use crate::types::{PoolExtendedRest, PoolMetadataRest};
@@ -18,6 +19,7 @@ use crate::types::{PoolExtendedRest, PoolMetadataRest};
 const ACCOUNTS_STATE_TOPIC: &str = "accounts-state";
 const POOLS_STATE_TOPIC: &str = "pools-state";
 const EPOCH_STATE_TOPIC: &str = "epoch-state";
+const PARAMETERS_STATE_TOPIC: &str = "parameters-state";
 
 /// Handle `/pools` Blockfrost-compatible endpoint
 pub async fn handle_pools_list_blockfrost(
@@ -211,6 +213,36 @@ async fn handle_pools_extended_blockfrost(context: Arc<Context<Message>>) -> Res
     )
     .await?;
 
+    // Get latest parameters from parameters-state
+    let latest_parameters_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
+        EpochsStateQuery::GetLatestEpochParameters,
+    )));
+    let latest_parameters = query_state(
+        &context,
+        PARAMETERS_STATE_TOPIC,
+        latest_parameters_msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Epochs(
+                EpochsStateQueryResponse::LatestEpochParameters(res),
+            )) => Ok(res.parameters),
+            Message::StateQueryResponse(StateQueryResponse::Epochs(
+                EpochsStateQueryResponse::Error(e),
+            )) => Err(anyhow::anyhow!(
+                "Internal server error while retrieving latest parameters: {e}"
+            )),
+            _ => Err(anyhow::anyhow!("Unexpected message type")),
+        },
+    )
+    .await?;
+    let Some(stake_pool_target_num) =
+        latest_parameters.shelley.map(|shelly| shelly.protocol_params.stake_pool_target_num)
+    else {
+        return Ok(RESTResponse::with_text(
+            500,
+            "Internal server error while retrieving latest parameters: stake_pool_target_num not found",
+        ));
+    };
+
     let pools_extened_rest_results: Result<Vec<PoolExtendedRest>, anyhow::Error> =
         pools_list_with_info
             .iter()
@@ -222,7 +254,13 @@ async fn handle_pools_extended_blockfrost(context: Arc<Context<Message>>) -> Res
                     active_stake: pools_active_stakes[i].to_string(),
                     live_stake: pools_live_stakes[i].to_string(),
                     blocks_minted: pools_blocks_minted[i],
-                    live_saturation: 0.0,
+                    live_saturation: if total_active_stake > 0 {
+                        Decimal::from(pools_live_stakes[i])
+                            * Decimal::from(stake_pool_target_num)
+                            / Decimal::from(total_active_stake)
+                    } else {
+                        Decimal::from(0)
+                    },
                     declared_pledge: pool_registration.pledge.to_string(),
                     margin_cost: pool_registration.margin.to_f32(),
                     fixed_cost: pool_registration.cost.to_string(),

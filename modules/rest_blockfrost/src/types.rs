@@ -1,4 +1,5 @@
 use acropolis_common::VotingProcedure;
+use rust_decimal::Decimal;
 use serde::Serialize;
 
 /// REST response structure for proposal votes
@@ -12,10 +13,10 @@ pub struct VoteRest {
 pub struct PoolExtendedRest {
     pub pool_id: String,
     pub hex: String,
-    pub active_stake: String,  // u64 in string
-    pub live_stake: String, // u64 in string
+    pub active_stake: String, // u64 in string
+    pub live_stake: String,   // u64 in string
     pub blocks_minted: usize,
-    pub live_saturation: f32,
+    pub live_saturation: Decimal,
     pub declared_pledge: String, // u64 in string
     pub margin_cost: f32,
     pub fixed_cost: String, // u64 in string

@@ -120,7 +120,7 @@ impl State {
 
         let stake_addresses = self.stake_addresses.lock().unwrap();
 
-        // Collect the SPO keys and UTXO, reward values
+        // Collect the SPO keys and UTXO
         let sas_data: Vec<(KeyHash, u64)> = stake_addresses
             .values()
             .filter_map(|sas| sas.delegated_spo.as_ref().map(|spo| (spo.clone(), sas.utxo_value)))
