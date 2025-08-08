@@ -110,7 +110,7 @@ impl SPOState {
             )) = spdd_message.as_ref()
             {
                 let mut state = state.lock().await;
-                state.handle_spdd(block_info.epoch, spos)
+                state.handle_spdd(block_info, spos)
             }
         }
     }
@@ -169,12 +169,19 @@ impl SPOState {
                     }
 
                     PoolsStateQuery::GetPoolsActiveStakes { pools_operators } => {
-                        let (active_stakes, total_active_stake) =
-                            guard.get_pools_active_stakes(pools_operators);
-                        PoolsStateQueryResponse::PoolsActiveStakes(PoolsActiveStakes {
-                            active_stakes,
-                            total_active_stake,
-                        })
+                        if let Some((active_stakes, total_active_stake)) =
+                            guard.get_pools_active_stakes(pools_operators)
+                        {
+                            PoolsStateQueryResponse::PoolsActiveStakes(PoolsActiveStakes {
+                                active_stakes,
+                                total_active_stake,
+                            })
+                        } else {
+                            PoolsStateQueryResponse::PoolsActiveStakes(PoolsActiveStakes {
+                                active_stakes: vec![0; pools_operators.len()],
+                                total_active_stake: 0,
+                            })
+                        }
                     }
 
                     _ => PoolsStateQueryResponse::Error(format!(
@@ -237,8 +244,7 @@ impl SPOState {
         // Subscriptions
         let certs_subscription = context.subscribe(&subscribe_topic).await?;
         let clock_tick_subscription = context.subscribe(&clock_tick_topic).await?;
-        let spdd_subscription: Box<dyn Subscription<Message>> =
-            context.subscribe(&spdd_topic).await?;
+        let spdd_subscription = context.subscribe(&spdd_topic).await?;
 
         // Start run task
         let run_certs_state = state.clone();

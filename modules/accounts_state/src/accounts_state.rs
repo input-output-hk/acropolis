@@ -392,14 +392,14 @@ impl AccountsState {
 
         // Create history
         let history = Arc::new(Mutex::new(StateHistory::<State>::new("AccountsState")));
-        let history_account_single = history.clone();
+        let history_account_state = history.clone();
         let history_spdd = history.clone();
         let history_pots = history.clone();
         let history_drdd = history.clone();
         let history_tick = history.clone();
 
         context.handle(ACCOUNTS_STATE_TOPIC, move |message| {
-            let history = history_account_single.clone();
+            let history = history_account_state.clone();
             async move {
                 let Message::StateQuery(StateQuery::Accounts(query)) = message.as_ref() else {
                     return Arc::new(Message::StateQueryResponse(StateQueryResponse::Accounts(
