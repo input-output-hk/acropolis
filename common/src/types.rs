@@ -892,108 +892,180 @@ pub enum ProtocolParamType {
 pub struct ProtocolParamUpdate {
     /// The following are the fields from Conway ProtocolParamUpdate structure
     /// AKA txFeePerByte, tx_fee_per_byte (Shelley)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub minfee_a: Option<u64>,
 
     /// AKA txFeeFixed, tx_fee_fixed (Shelley)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub minfee_b: Option<u64>,
 
     /// (Shelley)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub max_block_body_size: Option<u64>,
 
     /// AKA max_tx_size (Shelley)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub max_transaction_size: Option<u64>,
 
     /// (Shelley)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub max_block_header_size: Option<u64>,
 
     /// (Shelley)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub key_deposit: Option<Lovelace>,
 
     /// (Shelley)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub pool_deposit: Option<Lovelace>,
 
     /// AKA poolRetireMaxEpoch, eMax (Shelley)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub maximum_epoch: Option<u64>,
 
     /// AKA stakePoolTargetNum, nOpt (Shelley)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub desired_number_of_stake_pools: Option<u64>,
 
     /// AKA a0 (Shelley)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub pool_pledge_influence: Option<RationalNumber>,
 
     /// AKA rho, monetary_expansion (Shelley)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub expansion_rate: Option<RationalNumber>,
 
     /// AKA tau, treasury_cut (Shelley)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub treasury_growth_rate: Option<RationalNumber>,
 
     /// (Shelley)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub min_pool_cost: Option<Lovelace>,
 
     /// AKA lovelacePerUTxOWord, utxoCostPerWord (Alonzo)
     /// TODO: was there any moment, when this value had different
     /// meaning? (words were recounted to bytes)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub ada_per_utxo_byte: Option<Lovelace>,
 
     /// AKA plutus_v1_cost_model, plutus_v2_cost_model (Shelley)
     /// plutus_v3_cost_model (Conway)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub cost_models_for_script_languages: Option<CostModels>,
 
     /// AKA execution_prices (Alonzo)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub execution_costs: Option<ExUnitPrices>,
 
     /// (Alonzo)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub max_tx_ex_units: Option<ExUnits>,
 
     /// (Alonzo)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub max_block_ex_units: Option<ExUnits>,
 
     /// (Alonzo)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub max_value_size: Option<u64>,
 
     /// (Alonzo)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub collateral_percentage: Option<u64>,
 
     /// (Alonzo)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub max_collateral_inputs: Option<u64>,
 
     /// (Conway)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub pool_voting_thresholds: Option<PoolVotingThresholds>,
 
     /// (Conway)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub drep_voting_thresholds: Option<DRepVotingThresholds>,
 
     /// (Conway)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub min_committee_size: Option<u64>,
 
     /// AKA committee_max_term_limit (Conway)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub committee_term_limit: Option<u64>,
 
     /// AKA gov_action_lifetime (Cownay)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub governance_action_validity_period: Option<u64>,
 
     /// AKA gov_action_deposit (Conway)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub governance_action_deposit: Option<Lovelace>,
 
     /// AKA d_rep_deposit (Conway)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub drep_deposit: Option<Lovelace>,
 
     /// AKA drep_inactivity (Conway)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub drep_inactivity_period: Option<u64>,
 
     /// AKA min_fee_ref_script_cost_per_byte (Conway)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub minfee_refscript_cost_per_byte: Option<RationalNumber>,
 
     /// The following are the fields from Alonzo-compatible ProtocolParamUpdate
     /// structure, not present in Conway.
     /// (Shelley)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub decentralisation_constant: Option<RationalNumber>,
 
     /// (Shelley)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub extra_enthropy: Option<protocol_params::Nonce>,
 
     /// (Shelley)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub protocol_version: Option<protocol_params::ProtocolVersion>
+}
+
+#[derive(Serialize, PartialEq, Deserialize, Debug, Clone)]
+pub struct AlonzoBabbageUpdateProposal {
+    pub proposals: Vec<(GenesisKeyhash, Box<ProtocolParamUpdate>)>,
+    pub enactment_epoch: u64
 }
 
 #[derive(Serialize, PartialEq, Deserialize, Debug, Clone)]
@@ -1197,7 +1269,7 @@ pub enum GovernanceOutcomeVariant {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct AlonzoVotingOutcome {
+pub struct AlonzoBabbageVotingOutcome {
     pub voting: Vec<GenesisKeyhash>,
     pub votes_threshold: u64,
     pub accepted: bool,

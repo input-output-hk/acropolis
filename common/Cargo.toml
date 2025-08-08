@@ -27,7 +27,7 @@ lf-queue = "0.1.0"
 num-rational = { version = "0.4.2", features = ["serde"] }
 serde = { version = "1.0.214", features = ["derive"] }
 serde_json = "1.0"
-serde_with = { version = "3.12.0", features = ["hex"] }
+serde_with = { version = "3.12.0", features = ["hex", "base64"] }
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1.40"
 futures = "0.3.31"

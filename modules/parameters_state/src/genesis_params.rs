@@ -195,6 +195,7 @@ mod test {
     use anyhow::Result;
     use std::collections::HashSet;
     use crate::genesis_params;
+    use acropolis_common::protocol_params::ShelleyParams;
 
     #[test]
     fn test_read_genesis() -> Result<()> {
@@ -207,6 +208,22 @@ mod test {
             println!("{:?}", genesis_params::read_shelley_genesis(net)?);
             println!("{:?}", genesis_params::read_alonzo_genesis(net)?);
             println!("{:?}", genesis_params::read_conway_genesis(net)?);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_read_write_shelley() -> Result<()> {
+        let networks = HashSet::<&str>::from_iter(
+            genesis_params::PREDEFINED_GENESIS.iter().map(|p| p.0)
+        );
+
+        for net in networks.iter() {
+            let shelley = genesis_params::read_shelley_genesis(net)?;
+            let shelley_str = serde_json::to_string(&shelley).unwrap();
+            let shelley_back = serde_json::from_str::<ShelleyParams>(&shelley_str).unwrap();
+            println!("Encoded: {shelley:?}\n\nStr: {shelley_str}\n\nBack: {shelley_back:?}\n");
+            assert_eq!(shelley, shelley_back);
         }
         Ok(())
     }

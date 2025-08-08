@@ -21,6 +21,7 @@ use tracing::{error, info, info_span, Instrument};
 
 mod state;
 mod voting_state;
+mod alonzo_babbage_voting;
 use state::State;
 use voting_state::VotingRegistrationState;
 

@@ -3,9 +3,8 @@
 //! is incompatible with SanchoNet genesis)
 
 use acropolis_common::{
-    rational_number::RationalNumber,
+    rational_number::{ChameleonFraction, RationalNumber},
     AlonzoParams, CostModel, ExUnits, ExUnitPrices,
-    protocol_params::ChameleonFraction
 };
 use anyhow::{bail, Result};
 use serde::Deserialize;

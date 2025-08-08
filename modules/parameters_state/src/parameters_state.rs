@@ -89,8 +89,6 @@ impl ParametersState {
     ) -> Result<()> {
         let config = config.clone();
 
-        info!("New parameters: {message:?}");
-
         let packed_message = Arc::new(Message::Cardano((
             block.clone(),
             CardanoMessage::ProtocolParams(message),

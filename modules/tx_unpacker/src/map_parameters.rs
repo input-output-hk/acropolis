@@ -4,7 +4,9 @@
 use anyhow::{anyhow, bail, Result};
 use pallas::ledger::{
     primitives::{
-        alonzo, conway, Nullable, Relay as PallasRelay, ScriptHash,
+        ExUnitPrices as PallasExUnitPrices,
+        ProtocolVersion as PallasProtocolVersion,
+        alonzo, babbage, conway, Nullable, Relay as PallasRelay, ScriptHash,
         StakeCredential as PallasStakeCredential,
     },
     traverse::MultiEraCert, *
@@ -465,6 +467,13 @@ fn map_ex_units(pallas_units: &conway::ExUnits) -> ExUnits {
     }
 }
 
+fn map_execution_costs(pallas_ex_costs: &PallasExUnitPrices) -> ExUnitPrices {
+    ExUnitPrices {
+        mem_price: map_unit_interval(&pallas_ex_costs.mem_price),
+        step_price: map_unit_interval(&pallas_ex_costs.step_price),
+    }
+}
+
 fn map_conway_execution_costs(pallas_ex_costs: &conway::ExUnitPrices) -> ExUnitPrices {
     ExUnitPrices {
         mem_price: map_unit_interval(&pallas_ex_costs.mem_price),
@@ -472,12 +481,6 @@ fn map_conway_execution_costs(pallas_ex_costs: &conway::ExUnitPrices) -> ExUnitP
     }
 }
 
-fn map_alonzo_execution_costs(pallas_ex_costs: &alonzo::ExUnitPrices) -> ExUnitPrices {
-    ExUnitPrices {
-        mem_price: map_unit_interval(&pallas_ex_costs.mem_price),
-        step_price: map_unit_interval(&pallas_ex_costs.step_price),
-    }
-}
 fn map_conway_cost_models(pallas_cost_models: &conway::CostModels) -> CostModels {
     CostModels {
         plutus_v1: pallas_cost_models.plutus_v1.as_ref().map(|x| CostModel::new(x.clone())),
@@ -513,7 +516,7 @@ fn map_alonzo_cost_models(pallas_cost_models: &alonzo::CostModels) -> Result<Cos
     Ok(res)
 }
 
-fn map_alonzo_protocol_version((minor, major): &alonzo::ProtocolVersion) -> ProtocolVersion {
+fn map_protocol_version((major, minor): &PallasProtocolVersion) -> ProtocolVersion {
     ProtocolVersion {
         minor: *minor,
         major: *major
@@ -667,12 +670,12 @@ pub fn map_alonzo_protocol_param_update(p: &alonzo::ProtocolParamUpdate)
         desired_number_of_stake_pools: map_u32_to_u64(p.desired_number_of_stake_pools),
         pool_pledge_influence: p.pool_pledge_influence.as_ref().map(&map_unit_interval),
         expansion_rate: p.expansion_rate.as_ref().map(&map_unit_interval),
-        treasury_growth_rate: p.expansion_rate.as_ref().map(&map_unit_interval),
+        treasury_growth_rate: p.treasury_growth_rate.as_ref().map(&map_unit_interval),
         min_pool_cost: p.min_pool_cost.clone(),
-        ada_per_utxo_byte: p.min_pool_cost.clone(),
+        ada_per_utxo_byte: p.ada_per_utxo_byte.clone(),
         cost_models_for_script_languages:
             p.cost_models_for_script_languages.as_ref().map(&map_alonzo_cost_models).transpose()?,
-        execution_costs: p.execution_costs.as_ref().map(&map_alonzo_execution_costs),
+        execution_costs: p.execution_costs.as_ref().map(&map_execution_costs),
         max_tx_ex_units: p.max_tx_ex_units.as_ref().map(&map_ex_units),
         max_block_ex_units: p.max_block_ex_units.as_ref().map(&map_ex_units),
         max_value_size: map_u32_to_u64(p.max_value_size),
@@ -693,7 +696,62 @@ pub fn map_alonzo_protocol_param_update(p: &alonzo::ProtocolParamUpdate)
         // Fields, specific for Alonzo-compatible (Alonzo, Babbage, Shelley)
         decentralisation_constant: p.decentralization_constant.as_ref().map(&map_unit_interval),
         extra_enthropy: p.extra_entropy.as_ref().map(&map_alonzo_nonce),
-        protocol_version: p.protocol_version.as_ref().map(map_alonzo_protocol_version),
+        protocol_version: p.protocol_version.as_ref().map(map_protocol_version),
+    }))
+}
+
+fn map_babbage_cost_models(cost_models: &babbage::CostModels) -> CostModels {
+    CostModels {
+        plutus_v1: cost_models.plutus_v1.as_ref().map(|p| CostModel::new(p.clone())),
+        plutus_v2: cost_models.plutus_v2.as_ref().map(|p| CostModel::new(p.clone())),
+        plutus_v3: None
+    }
+}
+
+pub fn map_babbage_protocol_param_update(p: &babbage::ProtocolParamUpdate)
+    -> Result<Box<ProtocolParamUpdate>>
+{
+    Ok(Box::new(ProtocolParamUpdate {
+        // Fields, common for Conway and Alonzo-compatible
+        minfee_a: map_u32_to_u64(p.minfee_a),
+        minfee_b: map_u32_to_u64(p.minfee_b),
+        max_block_body_size: map_u32_to_u64(p.max_block_body_size),
+        max_transaction_size: map_u32_to_u64(p.max_transaction_size),
+        max_block_header_size: map_u32_to_u64(p.max_block_header_size),
+        key_deposit: p.key_deposit.clone(),
+        pool_deposit: p.pool_deposit.clone(),
+        maximum_epoch: p.maximum_epoch.clone(),
+        desired_number_of_stake_pools: map_u32_to_u64(p.desired_number_of_stake_pools),
+        pool_pledge_influence: p.pool_pledge_influence.as_ref().map(&map_unit_interval),
+        expansion_rate: p.expansion_rate.as_ref().map(&map_unit_interval),
+        treasury_growth_rate: p.treasury_growth_rate.as_ref().map(&map_unit_interval),
+        min_pool_cost: p.min_pool_cost.clone(),
+        ada_per_utxo_byte: p.ada_per_utxo_byte.clone(),
+        cost_models_for_script_languages:
+            p.cost_models_for_script_languages.as_ref().map(&map_babbage_cost_models),
+        execution_costs: p.execution_costs.as_ref().map(&map_execution_costs),
+        max_tx_ex_units: p.max_tx_ex_units.as_ref().map(&map_ex_units),
+        max_block_ex_units: p.max_block_ex_units.as_ref().map(&map_ex_units),
+        max_value_size: map_u32_to_u64(p.max_value_size),
+        collateral_percentage: map_u32_to_u64(p.collateral_percentage),
+        max_collateral_inputs: map_u32_to_u64(p.max_collateral_inputs),
+
+        // Fields, specific for Conway
+        pool_voting_thresholds: None,
+        drep_voting_thresholds: None,
+        min_committee_size: None,
+        committee_term_limit: None,
+        governance_action_validity_period: None,
+        governance_action_deposit: None,
+        drep_deposit: None,
+        drep_inactivity_period: None,
+        minfee_refscript_cost_per_byte: None,
+
+        // Fields not found in Babbage
+        decentralisation_constant: None,
+        extra_enthropy: None,
+        // Fields, specific for Alonzo-compatible (Alonzo, Babbage, Shelley)
+        protocol_version: p.protocol_version.as_ref().map(map_protocol_version),
     }))
 }
 
