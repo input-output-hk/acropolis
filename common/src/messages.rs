@@ -130,6 +130,9 @@ pub struct GovernanceProceduresMessage {
 
     /// Voting
     pub voting_procedures: Vec<(DataHash, VotingProcedures)>,
+
+    /// Alonzo-compatible (from Shelley) and Babbage updates
+    pub alonzo_babbage_updates: Vec<AlonzoBabbageUpdateProposal>
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -178,7 +181,8 @@ pub struct ProtocolParamsMessage {
 /// specified in `enact_state`/`withdrawals` field and not repeated in `refunds`.
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GovernanceOutcomesMessage {
-    pub outcomes: Vec<GovernanceOutcome>,
+    pub alonzo_babbage_outcomes: Vec<AlonzoBabbageVotingOutcome>,
+    pub conway_outcomes: Vec<GovernanceOutcome>,
 }
 
 /// SPO state message

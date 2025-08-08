@@ -6,7 +6,8 @@ use caryatid_process::Process;
 use caryatid_sdk::ModuleRegistry;
 use std::{env, sync::Arc};
 use tracing::info;
-use tracing_subscriber;
+use tracing_subscriber::prelude::*;
+use tracing_subscriber::{filter, fmt, EnvFilter, Registry};
 use config::{Config, Environment, File};
 
 // External modules
@@ -30,12 +31,15 @@ use caryatid_module_spy::Spy;
 
 mod playback;
 mod recorder;
+mod recorder_alonzo_governance;
 mod replayer_config;
 
 use playback::Playback;
 use recorder::Recorder;
+use recorder_alonzo_governance::RecorderAlonzoGovernance;
 
 fn setup_governance_collect(process: &mut dyn ModuleRegistry<Message>) {
+    tracing::info!("Collecting");
     GenesisBootstrapper::register(process);
     MithrilSnapshotFetcher::register(process);
     UpstreamChainFetcher::register(process);
@@ -57,6 +61,30 @@ fn setup_governance_collect(process: &mut dyn ModuleRegistry<Message>) {
     Spy::<Message>::register(process);
 }
 
+fn setup_alonzo_governance_collect(process: &mut dyn ModuleRegistry<Message>) {
+    tracing::info!("Collecting");
+    GenesisBootstrapper::register(process);
+    MithrilSnapshotFetcher::register(process);
+    UpstreamChainFetcher::register(process);
+    BlockUnpacker::register(process);
+    TxUnpacker::register(process);
+/*
+    UTXOState::register(process);
+    SPOState::register(process);
+    DRepState::register(process);
+    GovernanceState::register(process);
+    ParametersState::register(process);
+    StakeDeltaFilter::register(process);
+    EpochActivityCounter::register(process);
+    AccountsState::register(process);
+*/
+    RecorderAlonzoGovernance::register(process);
+
+    Clock::<Message>::register(process);
+    RESTServer::<Message>::register(process);
+    Spy::<Message>::register(process);
+}
+
 fn setup_governance_replay(process: &mut dyn ModuleRegistry<Message>) {
     //TxUnpacker::register(process);
     GovernanceState::register(process);
@@ -72,7 +100,11 @@ fn setup_governance_replay(process: &mut dyn ModuleRegistry<Message>) {
 #[tokio::main]
 pub async fn main() -> Result<()> {
     // Initialise tracing
-    tracing_subscriber::fmt::init();
+    let fmt_layer = fmt::layer()
+        .with_filter(EnvFilter::from_default_env().add_directive(filter::LevelFilter::INFO.into()))
+        .with_filter(filter::filter_fn(|meta| meta.is_event()));
+    //tracing_subscriber::fmt::init();
+    Registry::default().with(fmt_layer).init();
 
     info!("Acropolis omnibus process");
 
@@ -95,8 +127,10 @@ pub async fn main() -> Result<()> {
         match key.as_str() {
             "--governance-collect" => setup_governance_collect(&mut process),
             "--governance-replay" => setup_governance_replay(&mut process),
+            "--alonzo-governance-collect" => setup_alonzo_governance_collect(&mut process),
             a => {
-                tracing::error!("Unknown command line argument: {a}");
+                tracing::error!("Unknown command line argument: {a}, \
+                    expected --governance-collect or --governance-replay");
                 return Ok(());
             }
         }
@@ -106,6 +140,7 @@ pub async fn main() -> Result<()> {
     }
 
     // Run it
+    tracing::info!("Running");
     process.run().await?;
 
     // Bye!

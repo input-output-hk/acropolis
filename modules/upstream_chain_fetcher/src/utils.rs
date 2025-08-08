@@ -49,7 +49,9 @@ impl FetcherConfig {
         actual
     }
 
-    fn conf_enum<'a, T: Deserialize<'a> + std::fmt::Debug>(config: &Arc<Config>, keydef: (&str, T)) -> Result<T> {
+    fn conf_enum<'a, T: Deserialize<'a> + std::fmt::Debug>(
+        config: &Arc<Config>, keydef: (&str, T)
+    ) -> Result<T> {
         let actual = if config.get_string(keydef.0).is_ok() {
             config
                 .get::<T>(keydef.0)
