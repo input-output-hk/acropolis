@@ -73,9 +73,6 @@ impl RewardsState {
         // Map of SPO operator ID to rewards to split to delegators
         let mut spo_rewards: HashMap<KeyHash, Lovelace> = HashMap::new();
 
-        // get_rational() may be costly to call each spos iteration.
-        let decentralisation = &params.protocol_params.decentralisation_param;
-
         // Calculate for every registered SPO (even those who didn't participate in this epoch)
         // from epoch (i-2) "Go"
         let mut total_paid_to_pools: Lovelace = 0;
@@ -134,6 +131,7 @@ impl RewardsState {
 
             // If decentralisation_param >= 0.8 => performance = 1
             // Shelley Delegation Spec 3.8.3
+            let decentralisation = &params.protocol_params.decentralisation_param;
             let pool_performance = if decentralisation >= &RationalNumber::new(8,10) {
                 BigDecimal::one()
             } else {
