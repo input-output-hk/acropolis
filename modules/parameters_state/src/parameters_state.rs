@@ -2,7 +2,8 @@
 //! Accepts certificate events and derives the Governance State in memory
 
 use acropolis_common::{
-    messages::{CardanoMessage, Message, ProtocolParamsMessage},
+    messages::{CardanoMessage, Message, ProtocolParamsMessage, StateQuery, StateQueryResponse},
+    queries::epochs::{EpochsStateQuery, EpochsStateQueryResponse, LatestEpochParameters},
     rest_helper::{handle_rest, handle_rest_with_parameter},
     BlockInfo,
 };
@@ -13,11 +14,11 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, info_span, Instrument};
 
+mod alonzo_genesis;
 mod genesis_params;
 mod parameters_updater;
 mod rest;
 mod state;
-mod alonzo_genesis;
 
 use parameters_updater::ParametersUpdater;
 use rest::handle_current;
@@ -36,6 +37,8 @@ const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: (&str, &str) =
     ("publish-parameters-topic", "cardano.protocol.parameters");
 const DEFAULT_NETWORK_NAME: (&str, &str) = ("network-name", "mainnet");
 const DEFAULT_STORE_HISTORY: (&str, bool) = ("store-history", false);
+
+const PARAMETERS_STATE_TOPIC: &str = "parameters-state";
 
 /// Parameters State module
 #[module(
@@ -118,7 +121,9 @@ impl ParametersState {
                         let new_params = locked.handle_enact_state(&block, &gov).await?;
                         Self::publish_update(&config, &block, new_params)?;
                         Ok::<(), anyhow::Error>(())
-                    }.instrument(span).await?;
+                    }
+                    .instrument(span)
+                    .await?;
                 }
                 msg => error!("Unexpected message {msg:?} for enact state topic"),
             }
@@ -144,6 +149,36 @@ impl ParametersState {
             &cfg.handle_historical_topic,
             move |param| handle_historical(state_handle_historical.clone(), param[0].to_string()),
         );
+
+        // Handle parameters state
+        let state_rest_blockfrost = state.clone();
+        context.handle(PARAMETERS_STATE_TOPIC, move |message| {
+            let state = state_rest_blockfrost.clone();
+            async move {
+                let Message::StateQuery(StateQuery::Epochs(query)) = message.as_ref() else {
+                    return Arc::new(Message::StateQueryResponse(StateQueryResponse::Epochs(
+                        EpochsStateQueryResponse::Error("Invalid message for epoch-state".into()),
+                    )));
+                };
+
+                let state = state.lock().await;
+                let response = match query {
+                    EpochsStateQuery::GetLatestEpochParameters => {
+                        EpochsStateQueryResponse::LatestEpochParameters(LatestEpochParameters {
+                            parameters: state.current_params.get_params(),
+                        })
+                    }
+
+                    _ => EpochsStateQueryResponse::Error(format!(
+                        "Unimplemented query variant: {:?}",
+                        query
+                    )),
+                };
+                Arc::new(Message::StateQueryResponse(StateQueryResponse::Epochs(
+                    response,
+                )))
+            }
+        });
 
         // Start run task
         tokio::spawn(async move {

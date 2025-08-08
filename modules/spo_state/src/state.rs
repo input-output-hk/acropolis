@@ -5,14 +5,17 @@ use acropolis_common::{
     messages::{CardanoMessage, Message, SPOStateMessage, TxCertificatesMessage},
     params::{SECURITY_PARAMETER_K, TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH},
     serialization::SerializeMapAs,
-    BlockInfo, KeyHash, PoolRegistration, PoolRetirement, TxCertificate,
+    BlockInfo, DelegatedStake, KeyHash, PoolRegistration, PoolRetirement, TxCertificate,
 };
 use anyhow::Result;
 use imbl::HashMap;
 use serde_with::{hex::Hex, serde_as};
-use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
-use tracing::{debug, info, error};
+use std::{
+    collections::{BTreeMap, VecDeque},
+    sync::Mutex,
+};
+use tracing::{debug, error, info};
 
 #[serde_as]
 #[derive(Debug, Clone, serde::Serialize)]
@@ -84,10 +87,33 @@ impl From<&BlockState> for SPOState {
     }
 }
 
+#[serde_as]
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct EpochState {
+    /// block number where SPOs Snapshot is taken
+    block: u64,
+    /// epoch number where active stake is valid from
+    epoch: u64,
+    /// active stakes for each pool operator for each epoch
+    active_stakes: Arc<Mutex<HashMap<u64, HashMap<KeyHash, u64>>>>,
+}
+
+impl EpochState {
+    pub fn new() -> Self {
+        Self {
+            block: 0,
+            epoch: 0,
+            active_stakes: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+}
+
 /// Overall module state
 pub struct State {
     /// Volatile states, one per volatile block
     history: VecDeque<BlockState>,
+
+    epochs_history: VecDeque<EpochState>,
 }
 
 impl State {
@@ -95,6 +121,7 @@ impl State {
     pub fn new() -> Self {
         Self {
             history: VecDeque::<BlockState>::new(),
+            epochs_history: VecDeque::<EpochState>::new(),
         }
     }
 
@@ -102,7 +129,11 @@ impl State {
         self.history.back()
     }
 
-    pub fn get(&self, operator: &Vec<u8>) -> Option<&PoolRegistration> {
+    pub fn current_epoch_state(&self) -> Option<&EpochState> {
+        self.epochs_history.back()
+    }
+
+    pub fn get(&self, operator: &KeyHash) -> Option<&PoolRegistration> {
         if let Some(current) = self.current() {
             current.spos.get(operator)
         } else {
@@ -110,8 +141,50 @@ impl State {
         }
     }
 
-    pub fn list_pools_with_info(&self) -> Option<Vec<(&Vec<u8>, &PoolRegistration)>> {
-        self.current().map(|state| state.spos.iter().collect())
+    pub fn list_pool_operators(&self) -> Vec<KeyHash> {
+        self.current().map(|state| state.spos.keys().cloned().collect()).unwrap_or_default()
+    }
+
+    pub fn list_pools_with_info(&self) -> Vec<(KeyHash, PoolRegistration)> {
+        self.current()
+            .map(|state| state.spos.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+            .unwrap_or_default()
+    }
+
+    /// Get Pools Active stake from history
+    /// Returns Vec of active stake for each pool_operator
+    /// for certain epoch
+    pub fn get_pools_active_stakes(
+        &self,
+        pools_operators: &Vec<KeyHash>,
+    ) -> Option<(Vec<u64>, u64)> {
+        let current_epoch = self.current().map(|state| state.epoch)?;
+        let epoch_state = self.current_epoch_state()?;
+
+        let active_stakes = epoch_state.active_stakes.lock().unwrap();
+
+        active_stakes.get(&current_epoch).map(|stakes| {
+            let total_active_stake = stakes.values().sum();
+            let pools_active_stakes =
+                pools_operators.iter().map(|spo| stakes.get(spo).cloned().unwrap_or(0)).collect();
+            (pools_active_stakes, total_active_stake)
+        })
+    }
+
+    /// Handle SPO Stake Distribution
+    /// Live stake snapshots taken before the first block of Epoch N
+    /// Is the active stake of Epoch N+2
+    ///
+    pub fn handle_spdd(&mut self, block: &BlockInfo, spos: &Vec<(KeyHash, DelegatedStake)>) {
+        let mut current = self.get_previous_epoch_state(block.number);
+        let mut active_stakes = current.active_stakes.lock().unwrap();
+        active_stakes.insert(
+            block.epoch,
+            HashMap::from_iter(spos.iter().map(|(key, value)| (key.clone(), value.live))),
+        );
+        current.block = block.number;
+        current.epoch = block.epoch;
+        self.epochs_history.push_back(current.clone());
     }
 
     /// Get pools that will be retired in the upcoming epochs
@@ -170,6 +243,27 @@ impl State {
         }
     }
 
+    fn get_previous_epoch_state(&mut self, block_number: u64) -> EpochState {
+        loop {
+            match self.epochs_history.back() {
+                Some(state) => {
+                    if state.block >= block_number {
+                        info!("Rolling back epoch state for block {}", state.block);
+                        self.epochs_history.pop_back();
+                    } else {
+                        break;
+                    }
+                }
+                _ => break,
+            }
+        }
+        if let Some(current) = self.epochs_history.back() {
+            current.clone()
+        } else {
+            EpochState::new()
+        }
+    }
+
     /// Returns a reference to the block state at a specified height, if applicable
     pub fn inspect_previous_state(&self, block_height: u64) -> Option<&BlockState> {
         for state in self.history.iter().rev() {
@@ -185,8 +279,8 @@ impl State {
     pub fn handle_tx_certs(
         &mut self,
         block: &BlockInfo,
-        tx_certs_msg: &TxCertificatesMessage) -> Result<Option<Arc<Message>>> {
-
+        tx_certs_msg: &TxCertificatesMessage,
+    ) -> Result<Option<Arc<Message>>> {
         let mut message: Option<Arc<Message>> = None;
         let mut current = self.get_previous_state(block.number);
         current.block = block.number;
@@ -213,7 +307,7 @@ impl State {
                                 "Retirement requested for unregistered SPO {}",
                                 hex::encode(&dr)
                             ),
-                            _ => retired_spos.push(dr.clone())
+                            _ => retired_spos.push(dr.clone()),
                         };
                     }
                 }
@@ -234,24 +328,34 @@ impl State {
         for tx_cert in tx_certs_msg.certificates.iter() {
             match tx_cert {
                 TxCertificate::PoolRegistration(reg) => {
-                    debug!(block=block.number, "Registering SPO {}", hex::encode(&reg.operator));
+                    debug!(
+                        block = block.number,
+                        "Registering SPO {}",
+                        hex::encode(&reg.operator)
+                    );
                     current.spos.insert(reg.operator.clone(), reg.clone());
 
                     // Remove any existing queued deregistrations
-                    for (epoch, deregistrations) in
-                        &mut current.pending_deregistrations.iter_mut()
+                    for (epoch, deregistrations) in &mut current.pending_deregistrations.iter_mut()
                     {
                         let old_len = deregistrations.len();
                         deregistrations.retain(|d| *d != reg.operator);
                         if deregistrations.len() != old_len {
-                            debug!("Removed pending deregistration of SPO {} from epoch {}",
-                                  hex::encode(&reg.operator), epoch);
+                            debug!(
+                                "Removed pending deregistration of SPO {} from epoch {}",
+                                hex::encode(&reg.operator),
+                                epoch
+                            );
                         }
                     }
                 }
                 TxCertificate::PoolRetirement(ret) => {
-                    debug!("SPO {} wants to retire at the end of epoch {} (cert in block number {})",
-                          hex::encode(&ret.operator), ret.epoch, block.number);
+                    debug!(
+                        "SPO {} wants to retire at the end of epoch {} (cert in block number {})",
+                        hex::encode(&ret.operator),
+                        ret.epoch,
+                        block.number
+                    );
                     if ret.epoch <= current.epoch {
                         error!(
                             "SPO retirement received for current or past epoch {} for SPO {}",
@@ -269,8 +373,11 @@ impl State {
                             let old_len = deregistrations.len();
                             deregistrations.retain(|d| *d != ret.operator);
                             if deregistrations.len() != old_len {
-                                debug!("Replaced pending deregistration of SPO {} from epoch {}",
-                                      hex::encode(&ret.operator), epoch);
+                                debug!(
+                                    "Replaced pending deregistration of SPO {} from epoch {}",
+                                    hex::encode(&ret.operator),
+                                    epoch
+                                );
                             }
                         }
                         current
@@ -500,7 +607,7 @@ pub mod tests {
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
         let msg = new_msg();
         block.number = 2;
-        block.epoch = 1;  // SPO get retired at the start of the epoch it requests
+        block.epoch = 1; // SPO get retired at the start of the epoch it requests
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
         let current = state.current();
         assert!(!current.is_none());

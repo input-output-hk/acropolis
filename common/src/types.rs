@@ -202,6 +202,26 @@ pub struct Ratio {
     pub denominator: u64,
 }
 
+impl Ratio {
+    /// Returns the ratio as f64 (safe for large values)
+    pub fn to_f64(&self) -> f64 {
+        if self.denominator == 0 {
+            0.0
+        } else {
+            (self.numerator as f64) / (self.denominator as f64)
+        }
+    }
+
+    /// Returns the ratio as f32 (less precision)
+    pub fn to_f32(&self) -> f32 {
+        if self.denominator == 0 {
+            0.0
+        } else {
+            (self.numerator as f32) / (self.denominator as f32)
+        }
+    }
+}
+
 /// Withdrawal
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Withdrawal {
