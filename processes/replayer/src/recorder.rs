@@ -1,13 +1,14 @@
 //! Governance recorder module
 
+use acropolis_common::{
+    messages::{
+        CardanoMessage, DRepStakeDistributionMessage, GovernanceProceduresMessage, Message,
+        SPOStakeDistributionMessage,
+    },
+    BlockInfo,
+};
 use anyhow::{anyhow, Result};
 use caryatid_sdk::{module, Context, Module, Subscription};
-use acropolis_common::{BlockInfo, 
-    messages::{
-        Message, CardanoMessage, GovernanceProceduresMessage,
-        DRepStakeDistributionMessage, SPOStakeDistributionMessage
-    }
-};
 use config::Config;
 use std::{fs::File, io::Write, sync::Arc};
 use tracing::{error, info};
@@ -15,18 +16,26 @@ use tracing::{error, info};
 use crate::replayer_config::ReplayerConfig;
 
 /// Recorder module
-#[module(message_type(Message), name = "gov-recorder", description = "Governance messages recorder")]
+#[module(
+    message_type(Message),
+    name = "gov-recorder",
+    description = "Governance messages recorder"
+)]
 pub struct Recorder;
 
 struct BlockRecorder {
     cfg: Arc<ReplayerConfig>,
     prefix: String,
-    num: usize
+    num: usize,
 }
 
 impl BlockRecorder {
     pub fn new(cfg: Arc<ReplayerConfig>, prefix: &str) -> Self {
-        Self { cfg, prefix: prefix.to_string(), num: 0 }
+        Self {
+            cfg,
+            prefix: prefix.to_string(),
+            num: 0,
+        }
     }
 
     pub fn write(&mut self, block: &BlockInfo, info: CardanoMessage) {
@@ -79,7 +88,6 @@ impl Recorder {
         }
     }
 
-
     async fn run(
         cfg: Arc<ReplayerConfig>,
         mut governance_s: Box<dyn Subscription<Message>>,
@@ -93,10 +101,9 @@ impl Recorder {
         loop {
             let (blk_g, gov_procs) = Self::read_governance(&mut governance_s).await?;
 
-            let gov_procs_empty =
-                gov_procs.proposal_procedures.is_empty() &&
-                gov_procs.voting_procedures.is_empty() &&
-                !blk_g.new_epoch;
+            let gov_procs_empty = gov_procs.proposal_procedures.is_empty()
+                && gov_procs.voting_procedures.is_empty()
+                && !blk_g.new_epoch;
 
             if !gov_procs_empty {
                 gov_recorder.write(&blk_g, CardanoMessage::GovernanceProcedures(gov_procs));
@@ -113,7 +120,9 @@ impl Recorder {
                     info!("Waiting spo...");
                     let (blk_spo, d_spo) = Self::read_spo(&mut spo_s).await?;
                     if blk_g != blk_spo {
-                        error!("Governance {blk_g:?} and SPO distribution {blk_spo:?} are out of sync");
+                        error!(
+                            "Governance {blk_g:?} and SPO distribution {blk_spo:?} are out of sync"
+                        );
                     }
 
                     drep_recorder.write(&blk_g, CardanoMessage::DRepStakeDistribution(d_drep));

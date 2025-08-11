@@ -9,8 +9,8 @@ pub fn rational_number_from_f32(f: f32) -> Result<RationalNumber> {
 
 #[cfg(test)]
 mod tests {
-    use crate::rational_number::RationalNumber;
     use crate::rational_number::rational_number_from_f32;
+    use crate::rational_number::RationalNumber;
 
     #[test]
     fn test_fractions() -> Result<(), anyhow::Error> {

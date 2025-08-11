@@ -1,27 +1,58 @@
+use crate::alonzo_genesis;
 use acropolis_common::{
-    rational_number::{RationalNumber, rational_number_from_f32},
-    AlonzoParams, Anchor, BlockVersionData, ByronParams,
-    Committee, Constitution, ConwayParams, Credential, DRepVotingThresholds, Era,
-    NetworkId, Nonce, NonceVariant, PoolVotingThresholds, ProtocolConsts, ProtocolVersion,
-    ShelleyParams, ShelleyProtocolParams, SoftForkRule, TxFeePolicy,
+    rational_number::{rational_number_from_f32, RationalNumber},
+    AlonzoParams, Anchor, BlockVersionData, ByronParams, Committee, Constitution, ConwayParams,
+    Credential, DRepVotingThresholds, Era, NetworkId, Nonce, NonceVariant, PoolVotingThresholds,
+    ProtocolConsts, ProtocolVersion, ShelleyParams, ShelleyProtocolParams, SoftForkRule,
+    TxFeePolicy,
 };
 use anyhow::{anyhow, bail, Result};
 use hex::decode;
 use pallas::ledger::{configs::*, primitives};
 use serde::Deserialize;
-use crate::alonzo_genesis;
 use std::collections::HashMap;
 
 const PREDEFINED_GENESIS: [(&str, Era, &[u8]); 8] = [
-    ("sanchonet", Era::Byron, include_bytes!("../downloads/sanchonet-byron-genesis.json")),
-    ("sanchonet", Era::Shelley, include_bytes!("../downloads/sanchonet-shelley-genesis.json")),
-    ("sanchonet", Era::Alonzo, include_bytes!("../downloads/sanchonet-alonzo-genesis.json")),
-    ("sanchonet", Era::Conway, include_bytes!("../downloads/sanchonet-conway-genesis.json")),
-
-    ("mainnet", Era::Byron, include_bytes!("../downloads/mainnet-byron-genesis.json")),
-    ("mainnet", Era::Shelley, include_bytes!("../downloads/mainnet-shelley-genesis.json")),
-    ("mainnet", Era::Alonzo, include_bytes!("../downloads/mainnet-alonzo-genesis.json")),
-    ("mainnet", Era::Conway, include_bytes!("../downloads/mainnet-conway-genesis.json"))
+    (
+        "sanchonet",
+        Era::Byron,
+        include_bytes!("../downloads/sanchonet-byron-genesis.json"),
+    ),
+    (
+        "sanchonet",
+        Era::Shelley,
+        include_bytes!("../downloads/sanchonet-shelley-genesis.json"),
+    ),
+    (
+        "sanchonet",
+        Era::Alonzo,
+        include_bytes!("../downloads/sanchonet-alonzo-genesis.json"),
+    ),
+    (
+        "sanchonet",
+        Era::Conway,
+        include_bytes!("../downloads/sanchonet-conway-genesis.json"),
+    ),
+    (
+        "mainnet",
+        Era::Byron,
+        include_bytes!("../downloads/mainnet-byron-genesis.json"),
+    ),
+    (
+        "mainnet",
+        Era::Shelley,
+        include_bytes!("../downloads/mainnet-shelley-genesis.json"),
+    ),
+    (
+        "mainnet",
+        Era::Alonzo,
+        include_bytes!("../downloads/mainnet-alonzo-genesis.json"),
+    ),
+    (
+        "mainnet",
+        Era::Conway,
+        include_bytes!("../downloads/mainnet-conway-genesis.json"),
+    ),
 ];
 
 fn decode_hex_string(s: &str, len: usize) -> Result<Vec<u8>> {
@@ -160,9 +191,7 @@ fn map_shelley_protocol_params(p: &shelley::ProtocolParams) -> Result<ShelleyPro
 }
 
 fn unw<T: Clone>(p: &Option<T>, n: &str) -> Result<T> {
-    p.as_ref().ok_or_else(
-        || anyhow!("Empty parameter {n}, invalidating shelley genesis")
-    ).cloned()
+    p.as_ref().ok_or_else(|| anyhow!("Empty parameter {n}, invalidating shelley genesis")).cloned()
 }
 
 fn map_shelley(genesis: &shelley::GenesisFile) -> Result<ShelleyParams> {
@@ -172,7 +201,8 @@ fn map_shelley(genesis: &shelley::GenesisFile) -> Result<ShelleyParams> {
         max_kes_evolutions: unw(&genesis.max_kes_evolutions, "max_kes_evolutions")?,
         max_lovelace_supply: unw(&genesis.max_lovelace_supply, "max_lovelace_supply")?,
         network_id: unw(
-            &genesis.network_id.as_deref().map(map_network_id).transpose()?, "network_id"
+            &genesis.network_id.as_deref().map(map_network_id).transpose()?,
+            "network_id",
         )?,
         network_magic: unw(&genesis.network_magic, "network_magic")?,
         protocol_params: map_shelley_protocol_params(&genesis.protocol_params)?,
@@ -180,7 +210,8 @@ fn map_shelley(genesis: &shelley::GenesisFile) -> Result<ShelleyParams> {
         slot_length: unw(&genesis.slot_length, "slot_length")?,
         slots_per_kes_period: unw(&genesis.slots_per_kes_period, "slots_per_kes_period")?,
         system_start: unw(
-            &genesis.system_start.as_ref().map(|s| s.parse()).transpose()?, "system_start"
+            &genesis.system_start.as_ref().map(|s| s.parse()).transpose()?,
+            "system_start",
         )?,
         update_quorum: unw(&genesis.update_quorum, "update_quorum")?,
     })
@@ -231,35 +262,38 @@ fn map_byron(genesis: &byron::GenesisFile) -> Result<ByronParams> {
 }
 
 fn read_pdef_genesis<'a, PallasStruct: Deserialize<'a>, OurStruct>(
-    network: &str, era: Era, map: impl Fn(&PallasStruct) -> Result<OurStruct>
+    network: &str,
+    era: Era,
+    map: impl Fn(&PallasStruct) -> Result<OurStruct>,
 ) -> Result<OurStruct> {
-    let (_net,_era,genesis) = match PREDEFINED_GENESIS.iter().find(
-        |(n,e,_g)| *n == network && *e == era
-    ) {
-        Some(eg) => eg,
-        None => bail!("Genesis for {era} not defined"),
-    };
+    let (_net, _era, genesis) =
+        match PREDEFINED_GENESIS.iter().find(|(n, e, _g)| *n == network && *e == era) {
+            Some(eg) => eg,
+            None => bail!("Genesis for {era} not defined"),
+        };
 
     match &serde_json::from_slice(genesis) {
         Ok(decoded) => map(decoded),
-        Err(e) => bail!("Cannot read JSON for {network} {era} genesis: {e}")
+        Err(e) => bail!("Cannot read JSON for {network} {era} genesis: {e}"),
     }
 }
 
 pub fn read_byron_genesis(network: &str) -> Result<ByronParams> {
-    read_pdef_genesis::<byron::GenesisFile, ByronParams> (network, Era::Byron, map_byron)
+    read_pdef_genesis::<byron::GenesisFile, ByronParams>(network, Era::Byron, map_byron)
 }
 
 pub fn read_shelley_genesis(network: &str) -> Result<ShelleyParams> {
-    read_pdef_genesis::<shelley::GenesisFile, ShelleyParams> (network, Era::Shelley, map_shelley)
+    read_pdef_genesis::<shelley::GenesisFile, ShelleyParams>(network, Era::Shelley, map_shelley)
 }
 
 pub fn read_alonzo_genesis(network: &str) -> Result<AlonzoParams> {
-    read_pdef_genesis::<alonzo_genesis::Genesis, AlonzoParams> (
-        network, Era::Alonzo, alonzo_genesis::map_alonzo
+    read_pdef_genesis::<alonzo_genesis::Genesis, AlonzoParams>(
+        network,
+        Era::Alonzo,
+        alonzo_genesis::map_alonzo,
     )
 }
 
 pub fn read_conway_genesis(network: &str) -> Result<ConwayParams> {
-    read_pdef_genesis::<conway::GenesisFile, ConwayParams> (network, Era::Conway, map_conway)
+    read_pdef_genesis::<conway::GenesisFile, ConwayParams>(network, Era::Conway, map_conway)
 }

@@ -1,19 +1,15 @@
 //! Acropolis AccountsState: monetary (reserves, treasury) calculations
 
-use acropolis_common::{
-    Lovelace, ShelleyParams,
-    rational_number::RationalNumber,
-};
 use crate::state::Pots;
-use anyhow::{Result, anyhow};
-use tracing::info;
-use bigdecimal::{BigDecimal, ToPrimitive, One};
+use acropolis_common::{rational_number::RationalNumber, Lovelace, ShelleyParams};
+use anyhow::{anyhow, Result};
+use bigdecimal::{BigDecimal, One, ToPrimitive};
 use std::str::FromStr;
+use tracing::info;
 
 /// Result of monetary calculation
 #[derive(Debug, Default, Clone)]
 pub struct MonetaryResult {
-
     /// Updated pots
     pub pots: Pots,
 
@@ -23,10 +19,12 @@ pub struct MonetaryResult {
 
 /// Calculate monetary change at the start of an epoch, returning updated pots and total
 /// available for stake rewards
-pub fn calculate_monetary_change(params: &ShelleyParams,
-                                 old_pots: &Pots,
-                                 total_fees_last_epoch: Lovelace,
-                                 total_non_obft_blocks: usize) -> Result<MonetaryResult> {
+pub fn calculate_monetary_change(
+    params: &ShelleyParams,
+    old_pots: &Pots,
+    total_fees_last_epoch: Lovelace,
+    total_non_obft_blocks: usize,
+) -> Result<MonetaryResult> {
     let mut new_pots = old_pots.clone();
 
     // Add fees to reserves to start with - they will get allocated to treasury and stake
@@ -44,14 +42,12 @@ pub fn calculate_monetary_change(params: &ShelleyParams,
     // Top-slice some for treasury
     let treasury_cut = RationalNumber::new(2, 10);
     // TODO odd values again! &params.protocol_params.treasury_cut;  // Tau
-    let treasury_increase = (&total_reward_pot
-                             * BigDecimal::from(treasury_cut.numer())
-                             / BigDecimal::from(treasury_cut.denom()))
-        .with_scale(0);
+    let treasury_increase = (&total_reward_pot * BigDecimal::from(treasury_cut.numer())
+        / BigDecimal::from(treasury_cut.denom()))
+    .with_scale(0);
 
-    let treasury_increase_u64 = treasury_increase
-        .to_u64()
-        .ok_or(anyhow!("Can't calculate integral treasury cut"))?;
+    let treasury_increase_u64 =
+        treasury_increase.to_u64().ok_or(anyhow!("Can't calculate integral treasury cut"))?;
 
     new_pots.treasury += treasury_increase_u64;
     new_pots.reserves -= treasury_increase_u64;
@@ -74,29 +70,32 @@ fn calculate_eta(params: &ShelleyParams, total_non_obft_blocks: usize) -> Result
     let active_slots_coeff = BigDecimal::from_str(&params.active_slots_coeff.to_string())?;
     let epoch_length = BigDecimal::from(params.epoch_length);
 
-    let eta = if decentralisation >= &RationalNumber::new(8,10) {
+    let eta = if decentralisation >= &RationalNumber::new(8, 10) {
         BigDecimal::one()
     } else {
-        let expected_blocks = epoch_length * active_slots_coeff *
-            (BigDecimal::one() - BigDecimal::from(decentralisation.numer())
-             / BigDecimal::from(decentralisation.denom()));
+        let expected_blocks = epoch_length
+            * active_slots_coeff
+            * (BigDecimal::one()
+                - BigDecimal::from(decentralisation.numer())
+                    / BigDecimal::from(decentralisation.denom()));
 
-        (BigDecimal::from(total_non_obft_blocks as u64) / expected_blocks)
-            .min(BigDecimal::one())
+        (BigDecimal::from(total_non_obft_blocks as u64) / expected_blocks).min(BigDecimal::one())
     };
 
     Ok(eta)
 }
 
 // Calculate monetary expansion based on current reserves
-fn calculate_monetary_expansion(params: &ShelleyParams, reserves: Lovelace, eta: &BigDecimal)
-                                -> BigDecimal {
+fn calculate_monetary_expansion(
+    params: &ShelleyParams,
+    reserves: Lovelace,
+    eta: &BigDecimal,
+) -> BigDecimal {
     let monetary_expansion_factor = RationalNumber::new(3, 1000);
     // TODO odd values coming in! &params.protocol_params.monetary_expansion; // Rho
-    let monetary_expansion = (BigDecimal::from(reserves)
-                              * eta
-                              * BigDecimal::from(monetary_expansion_factor.numer())
-                              / BigDecimal::from(monetary_expansion_factor.denom()))
+    let monetary_expansion =
+        (BigDecimal::from(reserves) * eta * BigDecimal::from(monetary_expansion_factor.numer())
+            / BigDecimal::from(monetary_expansion_factor.denom()))
         .with_scale(0);
 
     info!(eta=%eta, rho=%monetary_expansion_factor, %monetary_expansion, "Monetary:");
@@ -108,7 +107,9 @@ fn calculate_monetary_expansion(params: &ShelleyParams, reserves: Lovelace, eta:
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acropolis_common::{ NetworkId, Nonce, NonceVariant, ProtocolVersion, ShelleyProtocolParams };
+    use acropolis_common::{
+        NetworkId, Nonce, NonceVariant, ProtocolVersion, ShelleyProtocolParams,
+    };
     use chrono::{DateTime, Utc};
 
     // Known values at start of Shelley - from Java reference and DBSync
@@ -122,7 +123,7 @@ mod tests {
 
     const EPOCH_210_RESERVES: Lovelace = 13_278_197_552_770_393;
     const EPOCH_210_TREASURY: Lovelace = 16_306_644_182_013;
-    const EPOCH_210_REFUNDS_TO_TREASURY: Lovelace = 500_000_000;  // 1 SPO with unknown reward
+    const EPOCH_210_REFUNDS_TO_TREASURY: Lovelace = 500_000_000; // 1 SPO with unknown reward
 
     const EPOCH_211_RESERVES: Lovelace = 13_270_236_767_315_870;
     const EPOCH_211_TREASURY: Lovelace = 24_275_595_982_960;
@@ -136,10 +137,7 @@ mod tests {
             network_id: NetworkId::Mainnet,
             network_magic: 76482407,
             protocol_params: ShelleyProtocolParams {
-                protocol_version: ProtocolVersion {
-                    major: 2,
-                    minor: 0,
-                },
+                protocol_version: ProtocolVersion { major: 2, minor: 0 },
                 max_tx_size: 16384,
                 max_block_body_size: 65536,
                 max_block_header_size: 1100,
@@ -153,12 +151,12 @@ mod tests {
                 pool_retire_max_epoch: 18,
                 extra_entropy: Nonce {
                     tag: NonceVariant::NeutralNonce,
-                    hash: None
+                    hash: None,
                 },
                 decentralisation_param: RationalNumber::new(1, 1),
                 monetary_expansion: RationalNumber::new(3, 1000),
                 treasury_cut: RationalNumber::new(2, 10),
-                pool_pledge_influence: RationalNumber::new(3, 10)
+                pool_pledge_influence: RationalNumber::new(3, 10),
             },
             security_param: 2160,
             slot_length: 1,
@@ -170,7 +168,6 @@ mod tests {
 
     #[test]
     fn epoch_208_monetary_change() {
-
         let params = shelley_params();
         let pots = Pots {
             reserves: EPOCH_208_RESERVES,
@@ -182,14 +179,16 @@ mod tests {
         let result = calculate_monetary_change(&params, &pots, 0, 0).unwrap();
 
         // Epoch 209 reserves - all goes to treasury
-        assert_eq!(result.pots.reserves, EPOCH_208_RESERVES - EPOCH_209_TREASURY);
+        assert_eq!(
+            result.pots.reserves,
+            EPOCH_208_RESERVES - EPOCH_209_TREASURY
+        );
         assert_eq!(result.pots.reserves - EPOCH_208_MIRS, EPOCH_209_RESERVES);
         assert_eq!(result.pots.treasury, EPOCH_209_TREASURY);
     }
 
     #[test]
     fn epoch_209_monetary_change() {
-
         let params = shelley_params();
         let pots = Pots {
             reserves: EPOCH_209_RESERVES,
@@ -207,7 +206,6 @@ mod tests {
 
     #[test]
     fn epoch_210_monetary_change() {
-
         let params = shelley_params();
         let pots = Pots {
             reserves: EPOCH_210_RESERVES,
@@ -220,7 +218,9 @@ mod tests {
 
         // Epoch 211 reserves
         assert_eq!(result.pots.reserves, EPOCH_211_RESERVES);
-        assert_eq!(result.pots.treasury + EPOCH_210_REFUNDS_TO_TREASURY, EPOCH_211_TREASURY);
+        assert_eq!(
+            result.pots.treasury + EPOCH_210_REFUNDS_TO_TREASURY,
+            EPOCH_211_TREASURY
+        );
     }
-
 }
