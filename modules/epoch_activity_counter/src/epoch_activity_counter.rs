@@ -57,7 +57,10 @@ impl EpochActivityCounter {
             let (_, message) = headers_message_f.await?;
             match message.as_ref() {
                 Message::Cardano((block, CardanoMessage::BlockHeader(header_msg))) => {
-                    let span = info_span!("epoch_activity_counter.handle_block_header", block = block.number);
+                    let span = info_span!(
+                        "epoch_activity_counter.handle_block_header",
+                        block = block.number
+                    );
                     async {
                         // End of epoch?
                         if block.new_epoch && block.epoch > 0 {
@@ -93,7 +96,9 @@ impl EpochActivityCounter {
 
                             Err(e) => error!("Can't decode header {}: {e}", block.slot),
                         }
-                    }.instrument(span).await;
+                    }
+                    .instrument(span)
+                    .await;
                 }
 
                 _ => error!("Unexpected message type: {message:?}"),
@@ -103,11 +108,16 @@ impl EpochActivityCounter {
             let (_, message) = fees_message_f.await?;
             match message.as_ref() {
                 Message::Cardano((block, CardanoMessage::BlockFees(fees_msg))) => {
-                    let span = info_span!("epoch_activity_counter.handle_block_fees", block = block.number);
+                    let span = info_span!(
+                        "epoch_activity_counter.handle_block_fees",
+                        block = block.number
+                    );
                     async {
                         let mut state = state.lock().await;
                         state.handle_fees(&block, fees_msg.total_fees);
-                    }.instrument(span).await;
+                    }
+                    .instrument(span)
+                    .await;
                 }
 
                 _ => error!("Unexpected message type: {message:?}"),

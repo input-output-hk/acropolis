@@ -52,7 +52,9 @@ impl SnapshotBootstrapper {
                     .publish(&snapshot_topic, Arc::new(spo_state_message))
                     .await
                     .unwrap_or_else(|e| error!("failed to publish: {e}"));
-            }.instrument(span).await;
+            }
+            .instrument(span)
+            .await;
         });
 
         Ok(())

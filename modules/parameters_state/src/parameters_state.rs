@@ -13,11 +13,11 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, info_span, Instrument};
 
+mod alonzo_genesis;
 mod genesis_params;
 mod parameters_updater;
 mod rest;
 mod state;
-mod alonzo_genesis;
 
 use parameters_updater::ParametersUpdater;
 use rest::handle_current;
@@ -118,7 +118,9 @@ impl ParametersState {
                         let new_params = locked.handle_enact_state(&block, &gov).await?;
                         Self::publish_update(&config, &block, new_params)?;
                         Ok::<(), anyhow::Error>(())
-                    }.instrument(span).await?;
+                    }
+                    .instrument(span)
+                    .await?;
                 }
                 msg => error!("Unexpected message {msg:?} for enact state topic"),
             }

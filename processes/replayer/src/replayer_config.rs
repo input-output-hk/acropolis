@@ -33,11 +33,26 @@ impl ReplayerConfig {
     }
 
     /// Returns of subscription topics: topic, prefix, is-epoch-wise, do-skip-epoch-0
-    pub fn get_topics_vec(&self) -> Arc<Vec<(String,String,bool,bool)>> {
+    pub fn get_topics_vec(&self) -> Arc<Vec<(String, String, bool, bool)>> {
         Arc::new(vec![
-            (self.subscribe_topic.to_string(), "gov".to_string(), false, false),
-            (self.drep_distribution_topic.to_string(), "drep".to_string(), true, true),
-            (self.spo_distribution_topic.to_string(), "spo".to_string(), true, true)
+            (
+                self.subscribe_topic.to_string(),
+                "gov".to_string(),
+                false,
+                false,
+            ),
+            (
+                self.drep_distribution_topic.to_string(),
+                "drep".to_string(),
+                true,
+                true,
+            ),
+            (
+                self.spo_distribution_topic.to_string(),
+                "spo".to_string(),
+                true,
+                true,
+            ),
         ])
     }
 }

@@ -4,10 +4,10 @@ use acropolis_common::messages::Message;
 use anyhow::Result;
 use caryatid_process::Process;
 use caryatid_sdk::ModuleRegistry;
+use config::{Config, Environment, File};
 use std::{env, sync::Arc};
 use tracing::info;
 use tracing_subscriber;
-use config::{Config, Environment, File};
 
 // External modules
 use acropolis_module_accounts_state::AccountsState;

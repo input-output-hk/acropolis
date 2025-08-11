@@ -170,14 +170,19 @@ impl StakeDeltaFilter {
                 };
                 match message.as_ref() {
                     Message::Cardano((block_info, CardanoMessage::AddressDeltas(delta))) => {
-                        let span = info_span!("stake_delta_filter_stateless.handle_deltas", block = block_info.number);
+                        let span = info_span!(
+                            "stake_delta_filter_stateless.handle_deltas",
+                            block = block_info.number
+                        );
                         async {
                             let msg = process_message(&cache, &delta, &block_info, None);
                             publisher
                                 .publish(&block_info, msg)
                                 .await
                                 .unwrap_or_else(|e| error!("Publish error: {e}"))
-                        }.instrument(span).await;
+                        }
+                        .instrument(span)
+                        .await;
                     }
 
                     msg => error!(
@@ -208,7 +213,10 @@ impl StakeDeltaFilter {
                 };
                 match message.as_ref() {
                     Message::Cardano((block_info, CardanoMessage::TxCertificates(tx_cert_msg))) => {
-                        let span = info_span!("stake_delta_filter.handle_certs", block = block_info.number);
+                        let span = info_span!(
+                            "stake_delta_filter.handle_certs",
+                            block = block_info.number
+                        );
                         async {
                             let mut state = state_certs.lock().await;
                             state
@@ -216,7 +224,9 @@ impl StakeDeltaFilter {
                                 .await
                                 .inspect_err(|e| error!("Messaging handling error: {e}"))
                                 .ok();
-                        }.instrument(span).await;
+                        }
+                        .instrument(span)
+                        .await;
                     }
 
                     _ => error!("Unexpected message type: {message:?}"),
@@ -235,7 +245,10 @@ impl StakeDeltaFilter {
                 };
                 match message.as_ref() {
                     Message::Cardano((block_info, CardanoMessage::AddressDeltas(deltas))) => {
-                        let span = info_span!("stake_delta_filter.handle_deltas", block = block_info.number);
+                        let span = info_span!(
+                            "stake_delta_filter.handle_deltas",
+                            block = block_info.number
+                        );
                         async {
                             let mut state = state_deltas.lock().await;
                             state
@@ -243,7 +256,9 @@ impl StakeDeltaFilter {
                                 .await
                                 .inspect_err(|e| error!("Messaging handling error: {e}"))
                                 .ok();
-                        }.instrument(span).await;
+                        }
+                        .instrument(span)
+                        .await;
                     }
 
                     _ => error!("Unexpected message type for {}: {message:?}", &topic),
@@ -270,7 +285,9 @@ impl StakeDeltaFilter {
                                 .await
                                 .inspect_err(|e| error!("Tick error: {e}"))
                                 .ok();
-                        }.instrument(span).await;
+                        }
+                        .instrument(span)
+                        .await;
                     }
                 }
             }

@@ -100,7 +100,9 @@ impl UTXOState {
                                 .await
                                 .inspect_err(|e| error!("Messaging handling error: {e}"))
                                 .ok();
-                        }.instrument(span).await;
+                        }
+                        .instrument(span)
+                        .await;
                     }
 
                     _ => error!("Unexpected message type: {message:?}"),
@@ -127,7 +129,9 @@ impl UTXOState {
                                 .await
                                 .inspect_err(|e| error!("Tick error: {e}"))
                                 .ok();
-                        }.instrument(span).await;
+                        }
+                        .instrument(span)
+                        .await;
                     }
                 }
             }

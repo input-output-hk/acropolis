@@ -7,14 +7,14 @@ use acropolis_common::{
     BlockInfo, BlockStatus, Era,
 };
 use anyhow::{bail, Result};
+use crossbeam::channel::{Receiver, TryRecvError};
 use pallas::{
     ledger::traverse::MultiEraHeader,
     network::{
         facades::PeerClient,
-        miniprotocols::{chainsync::HeaderContent, Point}
+        miniprotocols::{chainsync::HeaderContent, Point},
     },
 };
-use crossbeam::channel::{Receiver, TryRecvError};
 use std::{sync::Arc, time::Duration};
 use tokio::time::sleep;
 use tracing::{debug, info};
@@ -31,20 +31,24 @@ pub struct BodyFetcher {
 }
 
 impl BodyFetcher {
-    async fn new(cfg: Arc<FetcherConfig>, cache: Option<UpstreamCache>, last_epoch: Option<u64>) 
-        -> Result<Self>
-    {
+    async fn new(
+        cfg: Arc<FetcherConfig>,
+        cache: Option<UpstreamCache>,
+        last_epoch: Option<u64>,
+    ) -> Result<Self> {
         Ok(BodyFetcher {
             cfg: cfg.clone(),
             peer: utils::peer_connect(cfg.clone(), "body fetcher").await?,
             cache,
-            last_epoch
+            last_epoch,
         })
     }
 
-    async fn fetch_block(&mut self, point: Point, block_info: &BlockInfo) 
-        -> Result<Arc<BlockBodyMessage>> 
-    {
+    async fn fetch_block(
+        &mut self,
+        point: Point,
+        block_info: &BlockInfo,
+    ) -> Result<Arc<BlockBodyMessage>> {
         // Fetch the block body
         debug!("Requesting single block {point:?}");
         let body = self.peer.blockfetch().fetch_single(point.clone()).await;
@@ -128,7 +132,7 @@ impl BodyFetcher {
         let record = UpstreamCacheRecord {
             id: block_info.clone(),
             hdr: msg_hdr.clone(),
-            body: msg_body.clone()
+            body: msg_body.clone(),
         };
 
         self.cache.as_mut().map(|c| c.write_record(&record)).transpose()?;
@@ -145,15 +149,15 @@ impl BodyFetcher {
         cfg: Arc<FetcherConfig>,
         cache: Option<UpstreamCache>,
         last_epoch: Option<u64>,
-        receiver: Receiver<(bool, HeaderContent)>
+        receiver: Receiver<(bool, HeaderContent)>,
     ) -> Result<()> {
         let mut fetcher = Self::new(cfg, cache, last_epoch).await?;
         loop {
-           match receiver.try_recv() {
-               Ok((rolled_back, header)) => fetcher.process_message(rolled_back, header).await?,
-               Err(TryRecvError::Disconnected) => return Ok(()),
-               Err(TryRecvError::Empty) => sleep(Duration::from_millis(1)).await
-           }
+            match receiver.try_recv() {
+                Ok((rolled_back, header)) => fetcher.process_message(rolled_back, header).await?,
+                Err(TryRecvError::Disconnected) => return Ok(()),
+                Err(TryRecvError::Empty) => sleep(Duration::from_millis(1)).await,
+            }
         }
     }
 }

@@ -152,7 +152,9 @@ impl GovernanceState {
                                 .await
                                 .inspect_err(|e| error!("Tick error: {e}"))
                                 .ok();
-                        }.instrument(span).await;
+                        }
+                        .instrument(span)
+                        .await;
                     }
                 }
             }

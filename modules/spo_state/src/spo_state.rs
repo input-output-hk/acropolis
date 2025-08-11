@@ -135,7 +135,9 @@ impl SPOState {
                                     .await
                                     .unwrap_or_else(|e| error!("Failed to publish: {e}"));
                             }
-                        }.instrument(span).await;
+                        }
+                        .instrument(span)
+                        .await;
                     }
                     _ => error!("Unexpected message type: {message:?}"),
                 }
@@ -173,7 +175,9 @@ impl SPOState {
                                 .await
                                 .inspect_err(|e| error!("Tick error: {e}"))
                                 .ok();
-                        }.instrument(span).await;
+                        }
+                        .instrument(span)
+                        .await;
                     }
                 }
             }

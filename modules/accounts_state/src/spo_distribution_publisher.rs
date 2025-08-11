@@ -1,5 +1,5 @@
-use acropolis_common::messages::{CardanoMessage, SPOStakeDistributionMessage, Message};
-use acropolis_common::{KeyHash, BlockInfo, DelegatedStake};
+use acropolis_common::messages::{CardanoMessage, Message, SPOStakeDistributionMessage};
+use acropolis_common::{BlockInfo, DelegatedStake, KeyHash};
 use caryatid_sdk::Context;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -32,7 +32,7 @@ impl SPODistributionPublisher {
                 Arc::new(Message::Cardano((
                     block.clone(),
                     CardanoMessage::SPOStakeDistribution(SPOStakeDistributionMessage {
-                        epoch: block.epoch-1,  // End of previous epoch
+                        epoch: block.epoch - 1, // End of previous epoch
                         spos: spos.into_iter().collect(),
                     }),
                 ))),

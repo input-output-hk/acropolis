@@ -14,13 +14,17 @@ env:
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      - name: Build
+
+      - name: Run Format
+        run: cargo fmt --all -- --check
+
+      - name: Run Build
         run: cargo build --verbose
-      - name: Run tests
+
+      - name: Run Tests
         run: cargo test --verbose

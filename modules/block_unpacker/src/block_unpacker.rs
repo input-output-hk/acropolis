@@ -7,7 +7,7 @@ use caryatid_sdk::{module, Context, Module};
 use config::Config;
 use pallas::ledger::traverse::MultiEraBlock;
 use std::sync::Arc;
-use tracing::{debug, error, info, Instrument, info_span};
+use tracing::{debug, error, info, info_span, Instrument};
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.block.body";
 const DEFAULT_PUBLISH_TOPIC: &str = "cardano.txs";
@@ -72,7 +72,9 @@ impl BlockUnpacker {
                                         .publish(&publish_topic, Arc::new(message_enum))
                                         .await
                                         .unwrap_or_else(|e| error!("Failed to publish: {e}"));
-                                }.instrument(span).await;
+                                }
+                                .instrument(span)
+                                .await;
                             }
 
                             Err(e) => error!("Can't decode block {}: {e}", block_info.number),

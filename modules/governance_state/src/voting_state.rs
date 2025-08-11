@@ -1,19 +1,18 @@
 use acropolis_common::{
-    GovernanceAction, ConwayParams, VotesCount,
-    ProtocolParamType, ProposalProcedure, ProtocolParamUpdate,
-    rational_number::RationalNumber
+    rational_number::RationalNumber, ConwayParams, GovernanceAction, ProposalProcedure,
+    ProtocolParamType, ProtocolParamUpdate, VotesCount,
 };
-use std::{cmp::max, fmt};
 use anyhow::Result;
+use std::{cmp::max, fmt};
 
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct VotingRegistrationState {
     /// Total stake in all SPOs. This parameter is used for Hard Fork initiation voting,
     /// see CIP-1694:
-    /// ... The SPO vote threshold which must be met as a certain threshold of the total 
-    /// active voting stake, excepting Hard Fork Governance Actions. Due to the need for 
-    /// robust consensus around Hard Fork initiations, these votes must be met as a percentage 
-    /// of the stake held by all stake pools. 
+    /// ... The SPO vote threshold which must be met as a certain threshold of the total
+    /// active voting stake, excepting Hard Fork Governance Actions. Due to the need for
+    /// robust consensus around Hard Fork initiations, these votes must be met as a percentage
+    /// of the stake held by all stake pools.
     total_spos: u64,
 
     /// Total stake in active voting SPOs stake
@@ -29,7 +28,9 @@ pub struct VotingRegistrationState {
 
 impl fmt::Display for VotingRegistrationState {
     fn fmt(&self, res: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        write!(res, "spos total {}/reg. {}, dreps {},  committee {}",
+        write!(
+            res,
+            "spos total {}/reg. {}, dreps {},  committee {}",
             self.total_spos, self.registered_spos, self.registered_dreps, self.committee_size
         )
     }
@@ -48,9 +49,17 @@ impl VotingRegistrationState {
     }
 
     pub fn new(
-        total_spos: u64, registered_spos: u64, registered_dreps: u64, committee_size: u64
+        total_spos: u64,
+        registered_spos: u64,
+        registered_dreps: u64,
+        committee_size: u64,
     ) -> Self {
-        Self { total_spos, registered_spos, registered_dreps, committee_size }
+        Self {
+            total_spos,
+            registered_spos,
+            registered_dreps,
+            committee_size,
+        }
     }
 
     fn proportional_count_drep_comm(
