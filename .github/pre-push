@@ -1,6 +1,0 @@
-#!/bin/sh
-echo "Running cargo fmt check..."
-if ! cargo fmt --all -- --check; then
-  echo "❌ Code is not formatted. Run 'cargo fmt --all' to fix."
-  exit 1
-fi
