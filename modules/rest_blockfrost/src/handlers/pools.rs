@@ -230,20 +230,20 @@ async fn handle_pools_extended_blockfrost(context: Arc<Context<Message>>) -> Res
     )
     .await?;
 
-    // Get blocks minted for each pool from epoch-activity-counter
+    // Get total blocks minted for each pool from epoch-activity-counter
     let pools_blocks_minted_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
-        EpochsStateQuery::GetBlocksMintedByPools {
+        EpochsStateQuery::GetTotalBlocksMintedByPools {
             vrf_key_hashes: pools_vrf_key_hashes,
         },
     )));
-    let pools_blocks_minted = query_state(
+    let total_blocks_minted = query_state(
         &context,
         EPOCH_STATE_TOPIC,
         pools_blocks_minted_msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Epochs(
-                EpochsStateQueryResponse::BlocksMintedByPools(res),
-            )) => Ok(res.blocks_minted),
+                EpochsStateQueryResponse::TotalBlocksMintedByPools(res),
+            )) => Ok(res.total_blocks_minted),
 
             Message::StateQueryResponse(StateQueryResponse::Epochs(
                 EpochsStateQueryResponse::Error(e),
@@ -296,7 +296,7 @@ async fn handle_pools_extended_blockfrost(context: Arc<Context<Message>>) -> Res
                     hex: hex::encode(pool_operator),
                     active_stake: pools_active_stakes[i].to_string(),
                     live_stake: pools_live_stakes[i].to_string(),
-                    blocks_minted: pools_blocks_minted[i],
+                    blocks_minted: total_blocks_minted[i],
                     live_saturation: if total_active_stake > 0 {
                         Decimal::from(pools_live_stakes[i]) * Decimal::from(stake_pool_target_num)
                             / Decimal::from(total_active_stake)
