@@ -114,30 +114,23 @@ impl State {
 
     /// Get Pools Live stake
     pub fn get_pools_live_stakes(&self, pools_operators: &Vec<KeyHash>) -> Vec<u64> {
-        let live_stakes_map = Arc::new(DashMap::<KeyHash, u64>::from_iter(
-            pools_operators.iter().map(|op| (op.clone(), 0)),
-        ));
-
         let stake_addresses = self.stake_addresses.lock().unwrap();
+        let live_stakes_map = DashMap::<&KeyHash, u64>::new();
 
         // Collect the SPO keys and UTXO
-        let sas_data: Vec<(KeyHash, u64)> = stake_addresses
+        let sas_data: Vec<(&KeyHash, u64)> = stake_addresses
             .values()
-            .filter_map(|sas| sas.delegated_spo.as_ref().map(|spo| (spo.clone(), sas.utxo_value)))
+            .filter_map(|sas| sas.delegated_spo.as_ref().map(|spo| (spo, sas.utxo_value)))
             .collect();
 
-        sas_data
-            .par_iter() // Rayon multi-threaded iterator
-            .for_each_init(
-                || Arc::clone(&live_stakes_map),
-                |map, (spo, utxo_value)| {
-                    // Check if this stake address is delegated to a pool operator
-                    map.entry(spo.clone()).and_modify(|v| *v += utxo_value);
-                },
-            );
+        sas_data.par_iter().for_each(|(spo, utxo_value)| {
+            *live_stakes_map.entry(spo).or_insert(0) += utxo_value;
+        });
 
-        // Convert DashMap back to ordered Vec
-        live_stakes_map.iter().map(|entry| *entry.value()).collect()
+        pools_operators
+            .iter()
+            .map(|pool_operator| live_stakes_map.get(pool_operator).map(|v| *v).unwrap_or(0))
+            .collect()
     }
 
     /// Log statistics
