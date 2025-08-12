@@ -89,7 +89,7 @@ fn calculate_eta(params: &ShelleyParams, total_non_obft_blocks: usize) -> Result
 }
 
 // Calculate monetary expansion based on current reserves
-fn calculate_monetary_expansion(params: &ShelleyParams, reserves: Lovelace, eta: &BigDecimal)
+fn calculate_monetary_expansion(_params: &ShelleyParams, reserves: Lovelace, eta: &BigDecimal)
                                 -> BigDecimal {
     let monetary_expansion_factor = RationalNumber::new(3, 1000);
     // TODO odd values coming in! &params.protocol_params.monetary_expansion; // Rho

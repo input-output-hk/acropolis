@@ -168,9 +168,12 @@ impl SPOState {
                         PoolsStateQueryResponse::PoolsListWithInfo(pools_list_with_info)
                     }
 
-                    PoolsStateQuery::GetPoolsActiveStakes { pools_operators } => {
+                    PoolsStateQuery::GetPoolsActiveStakes {
+                        pools_operators,
+                        epoch,
+                    } => {
                         if let Some((active_stakes, total_active_stake)) =
-                            guard.get_pools_active_stakes(pools_operators)
+                            guard.get_pools_active_stakes(pools_operators, *epoch)
                         {
                             PoolsStateQueryResponse::PoolsActiveStakes(PoolsActiveStakes {
                                 active_stakes,

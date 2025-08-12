@@ -96,6 +96,8 @@ pub struct EpochState {
     epoch: u64,
     /// active stakes for each pool operator for each epoch
     active_stakes: Arc<Mutex<HashMap<u64, HashMap<KeyHash, u64>>>>,
+    /// block minted count for each pool operator for each epoch
+    blocks_minted: Arc<Mutex<HashMap<u64, HashMap<KeyHash, u64>>>>,
 }
 
 impl EpochState {
@@ -104,6 +106,7 @@ impl EpochState {
             block: 0,
             epoch: 0,
             active_stakes: Arc::new(Mutex::new(HashMap::new())),
+            blocks_minted: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
@@ -141,29 +144,32 @@ impl State {
         }
     }
 
+    /// Get all Stake Pool operators' operator hashes
     pub fn list_pool_operators(&self) -> Vec<KeyHash> {
         self.current().map(|state| state.spos.keys().cloned().collect()).unwrap_or_default()
     }
 
+    /// Get all Stake Pool Operators' operator hashes and their registration information
     pub fn list_pools_with_info(&self) -> Vec<(KeyHash, PoolRegistration)> {
         self.current()
             .map(|state| state.spos.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
             .unwrap_or_default()
     }
 
-    /// Get Pools Active stake from history
-    /// Returns Vec of active stake for each pool_operator
-    /// for certain epoch
+    /// Get Pools Active Stakes by epoch and total active stake
+    /// ## Arguments
+    /// * `pools_operators` - A vector of pool operator hashes
+    /// * `epoch` - The epoch to get the active stakes for
+    /// ## Returns
+    /// `Option<(Vec<u64>, u64)>` - a vector of active stakes for each pool operator and the total active stake.
     pub fn get_pools_active_stakes(
         &self,
         pools_operators: &Vec<KeyHash>,
+        epoch: u64,
     ) -> Option<(Vec<u64>, u64)> {
-        let current_epoch = self.current().map(|state| state.epoch)?;
-        let epoch_state = self.current_epoch_state()?;
-
+        let epoch_state: &EpochState = self.current_epoch_state()?;
         let active_stakes = epoch_state.active_stakes.lock().unwrap();
-
-        active_stakes.get(&current_epoch).map(|stakes| {
+        active_stakes.get(&epoch).map(|stakes| {
             let total_active_stake = stakes.values().sum();
             let pools_active_stakes =
                 pools_operators.iter().map(|spo| stakes.get(spo).cloned().unwrap_or(0)).collect();

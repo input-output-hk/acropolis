@@ -6,7 +6,7 @@ pub enum PoolsStateQuery {
     GetPoolsListWithInfo,
     GetPoolsRetiredList,
     GetPoolsRetiringList,
-    GetPoolsActiveStakes { pools_operators: Vec<Vec<u8>> },
+    GetPoolsActiveStakes { pools_operators: Vec<Vec<u8>>, epoch: u64 },
     GetPoolInfo { pool_id: Vec<u8> },
     GetPoolHistory { pool_id: Vec<u8> },
     GetPoolMetadata { pool_id: Vec<u8> },

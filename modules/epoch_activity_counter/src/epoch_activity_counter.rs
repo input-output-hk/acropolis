@@ -3,7 +3,9 @@
 
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
-    queries::epochs::{BlocksMintedByPools, EpochsStateQuery, EpochsStateQueryResponse},
+    queries::epochs::{
+        BlocksMintedByPools, EpochsStateQuery, EpochsStateQueryResponse, LatestEpoch,
+    },
     rest_helper::{handle_rest, handle_rest_with_parameter},
     Era,
 };
@@ -176,10 +178,15 @@ impl EpochActivityCounter {
 
                 let state = state.lock().await;
                 let response = match query {
+                    EpochsStateQuery::GetLatestEpoch => {
+                        EpochsStateQueryResponse::LatestEpoch(LatestEpoch {
+                            epoch: state.get_current_epoch(),
+                        })
+                    }
+
                     EpochsStateQuery::GetBlocksMintedByPools { vrf_key_hashes } => {
                         EpochsStateQueryResponse::BlocksMintedByPools(BlocksMintedByPools {
-                            blocks_minted: state
-                                .get_blocks_minted_by_pools(vrf_key_hashes),
+                            blocks_minted: state.get_blocks_minted_by_pools(vrf_key_hashes),
                         })
                     }
 
