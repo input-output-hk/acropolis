@@ -15,8 +15,6 @@ use state::State;
 mod rest;
 use rest::handle_drdd;
 
-use crate::state::DRepDistribution;
-
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.drep.distribution";
 const DEFAULT_HANDLE_DRDD_TOPIC: (&str, &str) = ("handle-topic-drdd", "rest.get.drdd");
 const DEFAULT_STORE_DRDD: (&str, bool) = ("store-drdd", false);
@@ -59,15 +57,14 @@ impl DRDDState {
                         Message::Cardano((_, CardanoMessage::DRepStakeDistribution(msg))) => {
                             let span = info_span!("drdd_state.handle", epoch = msg.epoch);
                             async {
-                                let mut state = state_handler.lock().await;
+                                let mut guard = state_handler.lock().await;
 
-                                let drdd = DRepDistribution {
-                                    dreps: msg.dreps.iter().map(|(k, v)| (k.clone(), *v)).collect(),
-                                    abstain: msg.abstain,
-                                    no_confidence: msg.no_confidence,
-                                };
-
-                                state.insert_drdd(msg.epoch, drdd);
+                                guard.apply_drdd_snapshot(
+                                    msg.epoch,
+                                    msg.dreps.iter().map(|(k, v)| (k.clone(), *v)),
+                                    msg.abstain,
+                                    msg.no_confidence,
+                                );
                             }
                             .instrument(span)
                             .await;
