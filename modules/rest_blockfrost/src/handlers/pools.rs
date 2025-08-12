@@ -131,6 +131,11 @@ async fn handle_pools_extended_blockfrost(context: Arc<Context<Message>>) -> Res
         .map(|(_, pool_registration)| pool_registration.vrf_key_hash.clone())
         .collect::<Vec<_>>();
 
+    // if pools_operators is empty, return empty list
+    if pools_operators.is_empty() {
+        return Ok(RESTResponse::with_json(200, "[]"));
+    }
+
     // Get active stake for each pool from spo-state
     let pools_active_stakes_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
         PoolsStateQuery::GetPoolsActiveStakes {
@@ -237,10 +242,8 @@ async fn handle_pools_extended_blockfrost(context: Arc<Context<Message>>) -> Res
     let Some(stake_pool_target_num) =
         latest_parameters.shelley.map(|shelly| shelly.protocol_params.stake_pool_target_num)
     else {
-        return Ok(RESTResponse::with_text(
-            500,
-            "Internal server error while retrieving latest parameters: stake_pool_target_num not found",
-        ));
+        // when shelly era is not started, return empty list
+        return Ok(RESTResponse::with_json(500, "[]"));
     };
 
     let pools_extened_rest_results: Result<Vec<PoolExtendedRest>, anyhow::Error> =
@@ -255,8 +258,7 @@ async fn handle_pools_extended_blockfrost(context: Arc<Context<Message>>) -> Res
                     live_stake: pools_live_stakes[i].to_string(),
                     blocks_minted: pools_blocks_minted[i],
                     live_saturation: if total_active_stake > 0 {
-                        Decimal::from(pools_live_stakes[i])
-                            * Decimal::from(stake_pool_target_num)
+                        Decimal::from(pools_live_stakes[i]) * Decimal::from(stake_pool_target_num)
                             / Decimal::from(total_active_stake)
                     } else {
                         Decimal::from(0)
@@ -293,17 +295,17 @@ async fn handle_pools_extended_blockfrost(context: Arc<Context<Message>>) -> Res
     }
 }
 
-async fn handle_pools_retired_blockfrost(context: Arc<Context<Message>>) -> Result<RESTResponse> {
+async fn handle_pools_retired_blockfrost(_context: Arc<Context<Message>>) -> Result<RESTResponse> {
     Ok(RESTResponse::with_text(501, "Not implemented"))
 }
 
-async fn handle_pools_retiring_blockfrost(context: Arc<Context<Message>>) -> Result<RESTResponse> {
+async fn handle_pools_retiring_blockfrost(_context: Arc<Context<Message>>) -> Result<RESTResponse> {
     Ok(RESTResponse::with_text(501, "Not implemented"))
 }
 
 async fn handle_pools_spo_blockfrost(
-    context: Arc<Context<Message>>,
-    pool_operator: Vec<u8>,
+    _context: Arc<Context<Message>>,
+    _pool_operator: Vec<u8>,
 ) -> Result<RESTResponse> {
     Ok(RESTResponse::with_text(501, "Not implemented"))
 }
