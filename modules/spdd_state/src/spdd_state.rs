@@ -3,12 +3,10 @@
 use acropolis_common::{
     messages::{CardanoMessage, Message},
     rest_helper::handle_rest_with_query_parameters,
-    DelegatedStake, KeyHash,
 };
 use anyhow::Result;
 use caryatid_sdk::{module, Context, Module};
 use config::Config;
-use imbl::OrdMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, info_span, Instrument};
@@ -59,12 +57,12 @@ impl SPDDState {
                         Message::Cardano((_, CardanoMessage::SPOStakeDistribution(msg))) => {
                             let span = info_span!("spdd_state.handle", epoch = msg.epoch);
                             async {
-                                let mut state = state_handler.lock().await;
+                                let mut guard = state_handler.lock().await;
 
-                                let spdd: OrdMap<KeyHash, DelegatedStake> =
-                                    msg.spos.iter().map(|(k, v)| (k.clone(), *v)).collect();
-
-                                state.insert_spdd(msg.epoch, spdd);
+                                guard.apply_spdd_snapshot(
+                                    msg.epoch,
+                                    msg.spos.iter().map(|(k, v)| (k.clone(), *v)),
+                                );
                             }
                             .instrument(span)
                             .await;
