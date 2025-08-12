@@ -38,7 +38,7 @@ const POOLS_STATE_TOPIC: &str = "pools-state";
 pub struct SPOState;
 
 impl SPOState {
-    /// Async run loop
+    /// Async run loop for certificate messages
     async fn run_certs_subscription(
         state: Arc<Mutex<State>>,
         mut spo_state_publisher: SPOStatePublisher,
@@ -71,7 +71,7 @@ impl SPOState {
         }
     }
 
-    /// Async run loop
+    /// Async run loop for clock tick messages
     async fn run_clock_tick_subscription(
         state: Arc<Mutex<State>>,
         mut clock_tick_subscription: Box<dyn Subscription<Message>>,
@@ -93,7 +93,7 @@ impl SPOState {
         }
     }
 
-    /// Async run loop
+    /// Async run loop for SPDD messages
     async fn run_spdd_subscription(
         state: Arc<Mutex<State>>,
         mut spdd_subscription: Box<dyn Subscription<Message>>,

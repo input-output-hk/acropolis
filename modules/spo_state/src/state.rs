@@ -89,24 +89,21 @@ impl From<&BlockState> for SPOState {
 
 #[serde_as]
 #[derive(Debug, Clone, serde::Serialize)]
-pub struct EpochState {
+pub struct ActiveStakesState {
     /// block number where SPOs Snapshot is taken
     block: u64,
     /// epoch number where active stake is valid from
     epoch: u64,
     /// active stakes for each pool operator for each epoch
     active_stakes: Arc<Mutex<HashMap<u64, HashMap<KeyHash, u64>>>>,
-    /// block minted count for each pool operator for each epoch
-    blocks_minted: Arc<Mutex<HashMap<u64, HashMap<KeyHash, u64>>>>,
 }
 
-impl EpochState {
+impl ActiveStakesState {
     pub fn new() -> Self {
         Self {
             block: 0,
             epoch: 0,
             active_stakes: Arc::new(Mutex::new(HashMap::new())),
-            blocks_minted: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
@@ -116,7 +113,7 @@ pub struct State {
     /// Volatile states, one per volatile block
     history: VecDeque<BlockState>,
 
-    epochs_history: VecDeque<EpochState>,
+    epochs_history: VecDeque<ActiveStakesState>,
 }
 
 impl State {
@@ -124,7 +121,7 @@ impl State {
     pub fn new() -> Self {
         Self {
             history: VecDeque::<BlockState>::new(),
-            epochs_history: VecDeque::<EpochState>::new(),
+            epochs_history: VecDeque::<ActiveStakesState>::new(),
         }
     }
 
@@ -132,7 +129,7 @@ impl State {
         self.history.back()
     }
 
-    pub fn current_epoch_state(&self) -> Option<&EpochState> {
+    pub fn current_active_stakes_state(&self) -> Option<&ActiveStakesState> {
         self.epochs_history.back()
     }
 
@@ -167,30 +164,14 @@ impl State {
         pools_operators: &Vec<KeyHash>,
         epoch: u64,
     ) -> Option<(Vec<u64>, u64)> {
-        let epoch_state: &EpochState = self.current_epoch_state()?;
-        let active_stakes = epoch_state.active_stakes.lock().unwrap();
+        let active_stakes_state = self.current_active_stakes_state()?;
+        let active_stakes = active_stakes_state.active_stakes.lock().unwrap();
         active_stakes.get(&epoch).map(|stakes| {
             let total_active_stake = stakes.values().sum();
             let pools_active_stakes =
                 pools_operators.iter().map(|spo| stakes.get(spo).cloned().unwrap_or(0)).collect();
             (pools_active_stakes, total_active_stake)
         })
-    }
-
-    /// Handle SPO Stake Distribution
-    /// Live stake snapshots taken before the first block of Epoch N
-    /// Is the active stake of Epoch N+2
-    ///
-    pub fn handle_spdd(&mut self, block: &BlockInfo, spos: &Vec<(KeyHash, DelegatedStake)>) {
-        let mut current = self.get_previous_epoch_state(block.number);
-        let mut active_stakes = current.active_stakes.lock().unwrap();
-        active_stakes.insert(
-            block.epoch,
-            HashMap::from_iter(spos.iter().map(|(key, value)| (key.clone(), value.live))),
-        );
-        current.block = block.number;
-        current.epoch = block.epoch;
-        self.epochs_history.push_back(current.clone());
     }
 
     /// Get pools that will be retired in the upcoming epochs
@@ -249,7 +230,7 @@ impl State {
         }
     }
 
-    fn get_previous_epoch_state(&mut self, block_number: u64) -> EpochState {
+    fn get_previous_active_stakes_state(&mut self, block_number: u64) -> ActiveStakesState {
         loop {
             match self.epochs_history.back() {
                 Some(state) => {
@@ -266,7 +247,7 @@ impl State {
         if let Some(current) = self.epochs_history.back() {
             current.clone()
         } else {
-            EpochState::new()
+            ActiveStakesState::new()
         }
     }
 
@@ -404,6 +385,29 @@ impl State {
         self.history.push_back(current);
 
         Ok(message)
+    }
+
+    /// Handle SPO Stake Distribution
+    /// Live stake snapshots taken before the first block of Epoch N
+    /// Is the active stake of Epoch N+2
+    ///
+    pub fn handle_spdd(&mut self, block: &BlockInfo, spos: &Vec<(KeyHash, DelegatedStake)>) {
+        let mut current = self.get_previous_active_stakes_state(block.number);
+        let mut active_stakes = current.active_stakes.lock().unwrap();
+        active_stakes.insert(
+            block.epoch,
+            HashMap::from_iter(spos.iter().map(|(key, value)| (key.clone(), value.live))),
+        );
+        current.block = block.number;
+        current.epoch = block.epoch;
+
+        // Prune old history which can not be rolled back to
+        if let Some(front) = self.epochs_history.front() {
+            if current.block > front.block + SECURITY_PARAMETER_K as u64 {
+                self.epochs_history.pop_front();
+            }
+        }
+        self.epochs_history.push_back(current.clone());
     }
 
     pub fn bootstrap(&mut self, state: SPOState) {
