@@ -1,0 +1,24 @@
+# Acropolis DRDD state module
+
+[package]
+name = "acropolis_module_drdd_state"
+version = "0.1.0"
+edition = "2021"
+authors = ["William Hankins <william@sundae.fi>"]
+description = "DRep Pool Delegation Distribution State Tracker"
+license = "Apache-2.0"
+
+[dependencies]
+caryatid_sdk = "0.12"
+config = "0.15.11"
+anyhow = "1.0"
+acropolis_common = { path = "../../common" }
+tracing = "0.1.40"
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1.0.214", features = ["derive"] }
+serde_json = "1.0.132"
+hex = "0.4.3"
+imbl = { version = "5.0.0", features = ["serde"] }
+
+[lib]
+path = "src/drdd_state.rs"

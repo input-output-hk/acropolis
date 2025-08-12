@@ -5,7 +5,7 @@ use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
 use futures::future::Future;
 use num_traits::ToPrimitive;
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 use tokio::task::JoinHandle;
 use tracing::{error, info};
 
@@ -44,7 +44,7 @@ where
 }
 
 /// Handle a REST request with path parameters
-pub fn handle_rest_with_parameter<F, Fut>(
+pub fn handle_rest_with_path_parameter<F, Fut>(
     context: Arc<Context<Message>>,
     topic: &str,
     handler: F,
@@ -83,6 +83,35 @@ where
     })
 }
 
+// Handle a REST request with query parameters
+pub fn handle_rest_with_query_parameters<F, Fut>(
+    context: Arc<Context<Message>>,
+    topic: &str,
+    handler: F,
+) -> JoinHandle<()>
+where
+    F: Fn(HashMap<String, String>) -> Fut + Send + Sync + Clone + 'static,
+    Fut: Future<Output = Result<RESTResponse>> + Send + 'static,
+{
+    context.handle(topic, move |message: Arc<Message>| {
+        let handler = handler.clone();
+        async move {
+            let response = match message.as_ref() {
+                Message::RESTRequest(request) => {
+                    let params = request.query_parameters.clone();
+                    match handler(params).await {
+                        Ok(response) => response,
+                        Err(error) => RESTResponse::with_text(500, &format!("{error:?}")),
+                    }
+                }
+                _ => RESTResponse::with_text(500, "Unexpected message in REST request"),
+            };
+
+            Arc::new(Message::RESTResponse(response))
+        }
+    })
+}
+
 /// Extract parameters from the request path based on the topic pattern.
 /// Skips the first 3 parts of the topic as these are never parameters
 fn extract_params_from_topic_and_path(topic: &str, path_elements: &[String]) -> Vec<String> {
@@ -112,4 +141,38 @@ impl<T: ToPrimitive> ToCheckedF64 for T {
     fn to_checked_f64(&self, name: &str) -> Result<f64> {
         self.to_f64().ok_or_else(|| anyhow!("Failed to convert {name} to f64"))
     }
+}
+
+// Macros for extracting and validating REST query parameters
+#[macro_export]
+macro_rules! extract_strict_query_params {
+    ($params:expr, { $($key:literal => $var:ident : Option<$type:ty>,)* }) => {
+        $(
+            let mut $var: Option<$type> = None;
+        )*
+
+        for (k, v) in &$params {
+            match k.as_str() {
+                $(
+                    $key => {
+                        $var = match v.parse::<$type>() {
+                            Ok(val) => Some(val),
+                            Err(_) => {
+                                return Ok($crate::messages::RESTResponse::with_text(
+                                    400,
+                                    concat!("Invalid ", $key, " query parameter: must be a valid type"),
+                                ));
+                            }
+                        };
+                    }
+                )*
+                _ => {
+                    return Ok($crate::messages::RESTResponse::with_text(
+                        400,
+                        concat!("Unexpected query parameter: only allowed keys are: ", $( $key, " ", )*)
+                    ));
+                }
+            }
+        }
+    };
 }
