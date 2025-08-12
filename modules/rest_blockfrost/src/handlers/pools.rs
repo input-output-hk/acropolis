@@ -120,10 +120,21 @@ async fn handle_pools_extended_blockfrost(context: Arc<Context<Message>>) -> Res
                     "Internal server error while retrieving pools list: {e}"
                 ));
             }
-            _ => return Err(anyhow::anyhow!("Unexpected message type")),
+            _ => {
+                return Err(anyhow::anyhow!(
+                    "Unexpected message type while retrieving pools list with info"
+                ))
+            }
         },
     )
     .await?;
+
+    // if pools are empty, return empty list
+    if pools_list_with_info.is_empty() {
+        return Ok(RESTResponse::with_json(200, "[]"));
+    }
+
+    // Populate pools_operators and pools_vrf_key_hashes
     let pools_operators =
         pools_list_with_info.iter().map(|(pool_operator, _)| pool_operator).collect::<Vec<_>>();
     let pools_vrf_key_hashes = pools_list_with_info
@@ -131,15 +142,40 @@ async fn handle_pools_extended_blockfrost(context: Arc<Context<Message>>) -> Res
         .map(|(_, pool_registration)| pool_registration.vrf_key_hash.clone())
         .collect::<Vec<_>>();
 
-    // if pools_operators is empty, return empty list
-    if pools_operators.is_empty() {
-        return Ok(RESTResponse::with_json(200, "[]"));
-    }
+    // Get Latest Epoch from epoch-state
+    let latest_epoch_info_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
+        EpochsStateQuery::GetLatestEpoch,
+    )));
+    let latest_epoch_info = query_state(
+        &context,
+        EPOCH_STATE_TOPIC,
+        latest_epoch_info_msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Epochs(
+                EpochsStateQueryResponse::LatestEpoch(res),
+            )) => Ok(res.epoch),
+            Message::StateQueryResponse(StateQueryResponse::Epochs(
+                EpochsStateQueryResponse::Error(e),
+            )) => {
+                return Err(anyhow::anyhow!(
+                    "Internal server error while retrieving latest epoch: {e}"
+                ));
+            }
+            _ => {
+                return Err(anyhow::anyhow!(
+                    "Unexpected message type while retrieving latest epoch"
+                ))
+            }
+        },
+    )
+    .await?;
+    let latest_epoch = latest_epoch_info.epoch;
 
     // Get active stake for each pool from spo-state
     let pools_active_stakes_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
         PoolsStateQuery::GetPoolsActiveStakes {
             pools_operators: pools_operators.iter().map(|&op| op.clone()).collect(),
+            epoch: latest_epoch,
         },
     )));
     let (pools_active_stakes, total_active_stake) = query_state(
@@ -157,7 +193,11 @@ async fn handle_pools_extended_blockfrost(context: Arc<Context<Message>>) -> Res
                     "Internal server error while retrieving pools active stakes: {e}"
                 ));
             }
-            _ => return Err(anyhow::anyhow!("Unexpected message type")),
+            _ => {
+                return Err(anyhow::anyhow!(
+                    "Unexpected message type while retrieving pools active stakes"
+                ))
+            }
         },
     )
     .await?;
