@@ -94,7 +94,8 @@ pub struct ActiveStakesState {
     block: u64,
     /// epoch number when Active Stakes is taken (Epoch N + 1)
     epoch: u64,
-    /// active stakes for each pool operator for each epoch (Until Epoch N)
+    /// active stakes for each pool operator for each epoch
+    /// Epoch in key is (Epoch Number when Active Stakes is taken + 2)
     #[serde_as(as = "SerializeMapAs<_, SerializeMapAs<Hex, _>>")]
     active_stakes: HashMap<u64, HashMap<KeyHash, u64>>,
 }
@@ -474,11 +475,11 @@ impl State {
             "Processing SPO Stake Distribution for epoch {} at block {}, epoch {}",
             spdd_message.epoch, block.number, block.epoch
         );
-        let SPOStakeDistributionMessage { epoch, spos, .. } = spdd_message;
+        let SPOStakeDistributionMessage { spos, .. } = spdd_message;
         let current = self.get_previous_active_stakes_state(block.number);
         let mut active_stakes = current.active_stakes.clone();
         active_stakes.insert(
-            *epoch,
+            block.epoch + 2,
             HashMap::from_iter(spos.iter().map(|(key, value)| (key.clone(), value.active))),
         );
 
