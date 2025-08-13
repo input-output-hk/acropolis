@@ -2,7 +2,6 @@
 //! Multi-connection, block body fetching part of the client (in separate thread).
 
 use acropolis_common::{
-    calculations::slot_to_epoch,
     messages::{BlockBodyMessage, BlockHeaderMessage},
     BlockInfo, BlockStatus, Era,
 };
@@ -80,7 +79,7 @@ impl BodyFetcher {
         let number = header.number();
         let hash = header.hash().to_vec();
 
-        let epoch = slot_to_epoch(slot);
+        let epoch = self.cfg.slot_to_epoch(slot);
         let new_epoch = match self.last_epoch {
             Some(last_epoch) => epoch != last_epoch,
             None => true,
