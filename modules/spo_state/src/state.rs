@@ -396,7 +396,7 @@ impl State {
         let mut active_stakes = current.active_stakes.lock().unwrap();
         active_stakes.insert(
             block.epoch,
-            HashMap::from_iter(spos.iter().map(|(key, value)| (key.clone(), value.live))),
+            HashMap::from_iter(spos.iter().map(|(key, value)| (key.clone(), value.active))),
         );
         current.block = block.number;
         current.epoch = block.epoch;
