@@ -230,26 +230,26 @@ async fn handle_pools_extended_blockfrost(context: Arc<Context<Message>>) -> Res
     )
     .await?;
 
-    // Get total blocks minted for each pool from epoch-activity-counter
-    let pools_blocks_minted_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
-        EpochsStateQuery::GetTotalBlocksMintedByPools {
-            vrf_key_hashes: pools_vrf_key_hashes,
+    // Get total blocks minted for each pool from SPO state
+    let total_blocks_minted_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
+        PoolsStateQuery::GetPoolsTotalBlocksMinted {
+            vrf_key_hashes: pools_vrf_key_hashes.clone(),
         },
     )));
     let total_blocks_minted = query_state(
         &context,
-        EPOCH_STATE_TOPIC,
-        pools_blocks_minted_msg,
+        POOLS_STATE_TOPIC,
+        total_blocks_minted_msg,
         |message| match message {
-            Message::StateQueryResponse(StateQueryResponse::Epochs(
-                EpochsStateQueryResponse::TotalBlocksMintedByPools(res),
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::PoolsTotalBlocksMinted(res),
             )) => Ok(res.total_blocks_minted),
 
-            Message::StateQueryResponse(StateQueryResponse::Epochs(
-                EpochsStateQueryResponse::Error(e),
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::Error(e),
             )) => {
                 return Err(anyhow::anyhow!(
-                    "Internal server error while retrieving pools blocks minted: {e}"
+                    "Internal server error while retrieving pools total blocks minted: {e}"
                 ));
             }
 
@@ -257,6 +257,40 @@ async fn handle_pools_extended_blockfrost(context: Arc<Context<Message>>) -> Res
         },
     )
     .await?;
+
+    // Get current epoch's blocks minted for each pool from epoch-activity-counter
+    let current_blocks_minted_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
+        EpochsStateQuery::GetBlocksMintedByPools {
+            vrf_key_hashes: pools_vrf_key_hashes,
+        },
+    )));
+    let current_blocks_minted = query_state(
+        &context,
+        EPOCH_STATE_TOPIC,
+        current_blocks_minted_msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Epochs(
+                EpochsStateQueryResponse::BlocksMintedByPools(res),
+            )) => Ok(res.blocks_minted),
+
+            Message::StateQueryResponse(StateQueryResponse::Epochs(
+                EpochsStateQueryResponse::Error(e),
+            )) => {
+                return Err(anyhow::anyhow!(
+                    "Internal server error while retrieving pools current blocks minted: {e}"
+                ));
+            }
+
+            _ => return Err(anyhow::anyhow!("Unexpected message type")),
+        },
+    )
+    .await?;
+
+    let aggreated_blocks_minted = total_blocks_minted
+        .iter()
+        .zip(current_blocks_minted.iter())
+        .map(|(total, current)| total + current)
+        .collect::<Vec<_>>();
 
     // Get latest parameters from parameters-state
     let latest_parameters_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
@@ -296,7 +330,7 @@ async fn handle_pools_extended_blockfrost(context: Arc<Context<Message>>) -> Res
                     hex: hex::encode(pool_operator),
                     active_stake: pools_active_stakes[i].to_string(),
                     live_stake: pools_live_stakes[i].to_string(),
-                    blocks_minted: total_blocks_minted[i],
+                    blocks_minted: aggreated_blocks_minted[i],
                     live_saturation: if total_active_stake > 0 {
                         Decimal::from(pools_live_stakes[i]) * Decimal::from(stake_pool_target_num)
                             / Decimal::from(total_active_stake)

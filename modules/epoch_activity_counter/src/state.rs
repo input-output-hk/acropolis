@@ -5,8 +5,6 @@ use acropolis_common::{
     messages::{CardanoMessage, EpochActivityMessage, Message},
     BlockInfo, KeyHash,
 };
-use dashmap::DashMap;
-use rayon::prelude::*;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use tracing::info;
@@ -108,32 +106,13 @@ impl State {
         Ok(history.get(&epoch))
     }
 
-    /// Get Total blocks minted so far for each pool
+    /// Get current epoch's blocks minted for each vrf key hash
     /// ### NOTE:
     /// This function only works when `store_history` is enabled.
-    pub fn get_total_blocks_minted_by_pools(&self, vrf_key_hashes: &Vec<KeyHash>) -> Vec<usize> {
-        // check epoch_history
-        let Some(epoch_history) = self.epoch_history.as_ref() else {
-            return vec![0; vrf_key_hashes.len()];
-        };
-
-        let hash_to_total = DashMap::<&KeyHash, usize>::new();
-
-        // collect from history
-        for epoch_message in epoch_history.values() {
-            epoch_message.vrf_vkey_hashes.par_iter().for_each(|(key_hash, block_count)| {
-                *hash_to_total.entry(key_hash).or_insert(0) += block_count;
-            });
-        }
-
-        // collect from current epoch
-        self.vrf_vkey_hashes.par_iter().for_each(|(key_hash, block_count)| {
-            *hash_to_total.entry(key_hash).or_insert(0) += block_count;
-        });
-
+    pub fn get_blocks_minted_by_pools(&self, vrf_key_hashes: &Vec<KeyHash>) -> Vec<u64> {
         vrf_key_hashes
             .iter()
-            .map(|key_hash| hash_to_total.get(key_hash).map(|v| *v).unwrap_or(0))
+            .map(|key_hash| self.vrf_vkey_hashes.get(key_hash).map(|v| *v as u64).unwrap_or(0))
             .collect()
     }
 }
