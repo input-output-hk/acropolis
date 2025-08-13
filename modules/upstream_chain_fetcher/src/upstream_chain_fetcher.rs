@@ -2,7 +2,6 @@
 //! Multi-connection, multi-protocol client interface to the Cardano node
 
 use acropolis_common::{
-    calculations::slot_to_epoch,
     messages::{CardanoMessage, Message},
     BlockInfo, 
 };
@@ -64,7 +63,7 @@ impl UpstreamChainFetcher {
 
         let last_epoch: Option<u64> = match slot {
             0 => None,                      // If we're starting from origin
-            _ => Some(slot_to_epoch(slot)), // From slot of last block
+            _ => Some(cfg.slot_to_epoch(slot)), // From slot of last block
         };
 
         let (sender, receiver) = bounded(MAX_BODY_FETCHER_CHANNEL_LENGTH);
