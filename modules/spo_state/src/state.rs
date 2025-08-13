@@ -113,7 +113,7 @@ pub struct State {
     /// Volatile states, one per volatile block
     history: VecDeque<BlockState>,
 
-    epochs_history: VecDeque<ActiveStakesState>,
+    active_stakes_history: VecDeque<ActiveStakesState>,
 }
 
 impl State {
@@ -121,7 +121,7 @@ impl State {
     pub fn new() -> Self {
         Self {
             history: VecDeque::<BlockState>::new(),
-            epochs_history: VecDeque::<ActiveStakesState>::new(),
+            active_stakes_history: VecDeque::<ActiveStakesState>::new(),
         }
     }
 
@@ -130,9 +130,10 @@ impl State {
     }
 
     pub fn current_active_stakes_state(&self) -> Option<&ActiveStakesState> {
-        self.epochs_history.back()
+        self.active_stakes_history.back()
     }
 
+    #[allow(dead_code)]
     pub fn get(&self, operator: &KeyHash) -> Option<&PoolRegistration> {
         if let Some(current) = self.current() {
             current.spos.get(operator)
@@ -175,6 +176,7 @@ impl State {
     }
 
     /// Get pools that will be retired in the upcoming epochs
+    #[allow(dead_code)]
     pub fn get_retiring_pools(&self) -> Vec<PoolRetirement> {
         self.current().map_or(Vec::new(), |state: &BlockState| {
             let current_epoch = state.epoch;
@@ -232,11 +234,11 @@ impl State {
 
     fn get_previous_active_stakes_state(&mut self, block_number: u64) -> ActiveStakesState {
         loop {
-            match self.epochs_history.back() {
+            match self.active_stakes_history.back() {
                 Some(state) => {
                     if state.block >= block_number {
                         info!("Rolling back epoch state for block {}", state.block);
-                        self.epochs_history.pop_back();
+                        self.active_stakes_history.pop_back();
                     } else {
                         break;
                     }
@@ -244,7 +246,7 @@ impl State {
                 _ => break,
             }
         }
-        if let Some(current) = self.epochs_history.back() {
+        if let Some(current) = self.active_stakes_history.back() {
             current.clone()
         } else {
             ActiveStakesState::new()
@@ -402,12 +404,12 @@ impl State {
         current.epoch = block.epoch;
 
         // Prune old history which can not be rolled back to
-        if let Some(front) = self.epochs_history.front() {
+        if let Some(front) = self.active_stakes_history.front() {
             if current.block > front.block + SECURITY_PARAMETER_K as u64 {
-                self.epochs_history.pop_front();
+                self.active_stakes_history.pop_front();
             }
         }
-        self.epochs_history.push_back(current.clone());
+        self.active_stakes_history.push_back(current.clone());
     }
 
     pub fn bootstrap(&mut self, state: SPOState) {

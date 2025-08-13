@@ -36,13 +36,8 @@ pub struct PoolRetirementRest {
 }
 
 /// Handles /pools/{pool_id}
-/// Handles /pools/retiring
+#[allow(dead_code)]
 pub async fn handle_spo(state: Arc<Mutex<State>>, param: String) -> Result<RESTResponse> {
-    // check if param is "retiring"
-    if param == "retiring" {
-        return handle_retiring_pools(state).await;
-    }
-
     let pool_id = match Vec::<u8>::from_bech32_with_hrp(&param, "pool") {
         Ok(id) => id,
         Err(e) => {
@@ -107,34 +102,5 @@ pub async fn handle_spo(state: Arc<Mutex<State>>, param: String) -> Result<RESTR
             }
         }
         None => Ok(RESTResponse::with_text(404, "Stake pool not found")),
-    }
-}
-
-/// Handles /pools/retiring
-async fn handle_retiring_pools(state: Arc<Mutex<State>>) -> Result<RESTResponse> {
-    let locked = state.lock().await;
-    let mut response: Vec<PoolRetirementRest> = Vec::new();
-    for retiring_pool in locked.get_retiring_pools() {
-        let pool_id = match retiring_pool.operator.to_bech32_with_hrp("pool") {
-            Ok(val) => val,
-            Err(e) => {
-                return Ok(RESTResponse::with_text(
-                    500,
-                    &format!("Internal server error retrieving retiring pools: {e}"),
-                ));
-            }
-        };
-        response.push(PoolRetirementRest {
-            pool_id,
-            epoch: retiring_pool.epoch,
-        });
-    }
-
-    match serde_json::to_string(&response) {
-        Ok(body) => Ok(RESTResponse::with_json(200, &body)),
-        Err(e) => Ok(RESTResponse::with_text(
-            500,
-            &format!("Internal server error retrieving retiring pools: {e}"),
-        )),
     }
 }
