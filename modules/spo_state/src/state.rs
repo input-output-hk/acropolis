@@ -655,6 +655,73 @@ pub mod tests {
     }
 
     #[tokio::test]
+    async fn get_pools_active_stakes_returns_none_when_state_is_new() {
+        let state = State::new();
+        assert!(state.get_pools_active_stakes(&vec![vec![1], vec![2]], 0).is_none());
+    }
+
+    #[tokio::test]
+    async fn get_pools_active_stakes_returns_none_when_epoch_is_not_found() {
+        let mut state = State::new();
+        let mut msg = new_spdd_message();
+        msg.epoch = 1;
+        let mut block = new_block();
+        block.epoch = 1;
+        state.handle_spdd(&block, &msg);
+        assert!(state.get_pools_active_stakes(&vec![vec![1], vec![2]], 2).is_none());
+    }
+
+    #[tokio::test]
+    async fn get_pools_active_stakes_returns_zero_when_active_stakes_not_found() {
+        let mut state = State::new();
+        let mut msg = new_spdd_message();
+        msg.epoch = 1;
+        let mut block = new_block();
+        block.epoch = 1;
+        state.handle_spdd(&block, &msg);
+        let (active_stakes, total) =
+            state.get_pools_active_stakes(&vec![vec![1], vec![2]], 1).unwrap();
+        assert_eq!(2, active_stakes.len());
+        assert_eq!(0, active_stakes[0]);
+        assert_eq!(0, active_stakes[1]);
+        assert_eq!(0, total);
+    }
+
+    #[tokio::test]
+    async fn get_pools_active_stakes_returns_data() {
+        let mut state = State::new();
+        let mut msg = new_spdd_message();
+        msg.spos = vec![
+            (
+                vec![1],
+                DelegatedStake {
+                    active: 10,
+                    live: 10,
+                },
+            ),
+            (
+                vec![2],
+                DelegatedStake {
+                    active: 20,
+                    live: 20,
+                },
+            ),
+        ];
+        msg.epoch = 1;
+        let mut block = new_block();
+        block.number = 1;
+        block.epoch = 1;
+        state.handle_spdd(&block, &msg);
+
+        let (active_stakes, total) =
+            state.get_pools_active_stakes(&vec![vec![1], vec![2]], 1).unwrap();
+        assert_eq!(2, active_stakes.len());
+        assert_eq!(10, active_stakes[0]);
+        assert_eq!(20, active_stakes[1]);
+        assert_eq!(30, total);
+    }
+
+    #[tokio::test]
     async fn spo_gets_restored_on_rollback() {
         let mut state = State::new();
         let mut msg = new_msg();
