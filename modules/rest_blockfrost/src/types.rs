@@ -15,7 +15,7 @@ pub struct PoolExtendedRest {
     pub hex: String,
     pub active_stake: String, // u64 in string
     pub live_stake: String,   // u64 in string
-    pub blocks_minted: usize,
+    pub blocks_minted: u64,
     pub live_saturation: Decimal,
     pub declared_pledge: String, // u64 in string
     pub margin_cost: f32,

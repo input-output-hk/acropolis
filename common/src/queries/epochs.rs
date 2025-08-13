@@ -14,7 +14,7 @@ pub enum EpochsStateQuery {
     GetEpochParameters { epoch_number: u64 },
 
     // Pools related queries
-    GetTotalBlocksMintedByPools { vrf_key_hashes: Vec<KeyHash> },
+    GetBlocksMintedByPools { vrf_key_hashes: Vec<KeyHash> },
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -31,7 +31,7 @@ pub enum EpochsStateQueryResponse {
     EpochParameters(EpochParameters),
 
     // Pools related responses
-    TotalBlocksMintedByPools(TotalBlocksMintedByPools),
+    BlocksMintedByPools(BlocksMintedByPools),
 
     NotFound,
     Error(String),
@@ -72,7 +72,7 @@ pub struct EpochBlockDistributionByPool {}
 pub struct EpochParameters {}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct TotalBlocksMintedByPools {
-    // this is in same order of vrf_key_hashes from EpochsStateQuery::GetTotalBlocksMintedByPools
-    pub total_blocks_minted: Vec<usize>,
+pub struct BlocksMintedByPools {
+    // this is in same order of vrf_key_hashes from EpochsStateQuery::BlocksMintedByPools
+    pub blocks_minted: Vec<u64>,
 }

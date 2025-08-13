@@ -3,8 +3,8 @@
 use acropolis_common::{
     ledger_state::SPOState,
     messages::{
-        CardanoMessage, Message, SPOStakeDistributionMessage, SPOStateMessage,
-        TxCertificatesMessage,
+        CardanoMessage, EpochActivityMessage, Message, SPOStakeDistributionMessage,
+        SPOStateMessage, TxCertificatesMessage,
     },
     params::{SECURITY_PARAMETER_K, TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH},
     serialization::SerializeMapAs,
@@ -90,11 +90,11 @@ impl From<&BlockState> for SPOState {
 #[serde_as]
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ActiveStakesState {
-    /// block number where SPOs Snapshot is taken
+    /// block number when Active Stakes is taken
     block: u64,
-    /// epoch number where active stake is valid from
+    /// epoch number when Active Stakes is taken (Epoch N + 1)
     epoch: u64,
-    /// active stakes for each pool operator for each epoch
+    /// active stakes for each pool operator for each epoch (Until Epoch N)
     #[serde_as(as = "SerializeMapAs<_, SerializeMapAs<Hex, _>>")]
     active_stakes: HashMap<u64, HashMap<KeyHash, u64>>,
 }
@@ -109,13 +109,39 @@ impl ActiveStakesState {
     }
 }
 
+#[serde_as]
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct TotalBlocksMintedState {
+    /// block number when Total Blocks Minted is taken
+    block: u64,
+    /// epoch number when Total Blocks Minted is taken (Epoch N + 1)
+    epoch: u64,
+    /// total blocks minted for each pool operator (Until Epoch N)
+    /// KeyHash is VRF Vkey hash
+    #[serde_as(as = "SerializeMapAs<Hex, _>")]
+    total_blocks_minted: HashMap<KeyHash, u64>,
+}
+
+impl TotalBlocksMintedState {
+    pub fn new() -> Self {
+        Self {
+            block: 0,
+            epoch: 0,
+            total_blocks_minted: HashMap::new(),
+        }
+    }
+}
+
 /// Overall module state
 pub struct State {
     /// Volatile states, one per volatile block
     history: VecDeque<BlockState>,
 
-    // Volatile active stakes state, one per epoch (in case new epoch block is rolled back)
+    /// Volatile active stakes state, one per epoch (in case new epoch block is rolled back)
     active_stakes_history: VecDeque<ActiveStakesState>,
+
+    /// Volatile total blocks minted state, one per epoch (in case new epoch block is rolled back)
+    total_blocks_minted_history: VecDeque<TotalBlocksMintedState>,
 }
 
 impl State {
@@ -124,6 +150,7 @@ impl State {
         Self {
             history: VecDeque::<BlockState>::new(),
             active_stakes_history: VecDeque::<ActiveStakesState>::new(),
+            total_blocks_minted_history: VecDeque::<TotalBlocksMintedState>::new(),
         }
     }
 
@@ -133,6 +160,10 @@ impl State {
 
     pub fn current_active_stakes_state(&self) -> Option<&ActiveStakesState> {
         self.active_stakes_history.back()
+    }
+
+    pub fn current_total_blocks_minted_state(&self) -> Option<&TotalBlocksMintedState> {
+        self.total_blocks_minted_history.back()
     }
 
     #[allow(dead_code)]
@@ -174,6 +205,20 @@ impl State {
                 pools_operators.iter().map(|spo| stakes.get(spo).cloned().unwrap_or(0)).collect();
             (pools_active_stakes, total_active_stake)
         })
+    }
+
+    /// Get total blocks minted for each pool operator
+    /// ## Arguments
+    /// * `pools_operator` - A vector of pool operator hashes
+    /// ## Returns
+    /// `Option<Vec<u64>>` - a vector of total blocks minted for each pool operator.
+    pub fn get_total_blocks_minted(&self, pools_operator: &Vec<KeyHash>) -> Option<Vec<u64>> {
+        let current = self.current_total_blocks_minted_state()?;
+        let total_blocks_minted = pools_operator
+            .iter()
+            .map(|spo| current.total_blocks_minted.get(spo).cloned().unwrap_or(0))
+            .collect();
+        Some(total_blocks_minted)
     }
 
     /// Get pools that will be retired in the upcoming epochs
@@ -238,7 +283,10 @@ impl State {
             match self.active_stakes_history.back() {
                 Some(state) => {
                     if state.block >= block_number {
-                        info!("Rolling back epoch state for block {}", state.block);
+                        info!(
+                            "Rolling back SPO active stakes state for block {}",
+                            state.block
+                        );
                         self.active_stakes_history.pop_back();
                     } else {
                         break;
@@ -251,6 +299,33 @@ impl State {
             current.clone()
         } else {
             ActiveStakesState::new()
+        }
+    }
+
+    fn get_previous_total_blocks_minted_state(
+        &mut self,
+        block_number: u64,
+    ) -> TotalBlocksMintedState {
+        loop {
+            match self.total_blocks_minted_history.back() {
+                Some(state) => {
+                    if state.block >= block_number {
+                        info!(
+                            "Rolling back SPO total blocks minted state for block {}",
+                            state.block
+                        );
+                        self.total_blocks_minted_history.pop_back();
+                    } else {
+                        break;
+                    }
+                }
+                _ => break,
+            }
+        }
+        if let Some(current) = self.total_blocks_minted_history.back() {
+            current.clone()
+        } else {
+            TotalBlocksMintedState::new()
         }
     }
 
@@ -392,14 +467,18 @@ impl State {
 
     /// Handle SPO Stake Distribution
     /// Live stake snapshots taken before the first block of Epoch N
-    /// Is the active stake of Epoch N+2
+    /// Active stake is valid from Epoch N + 2
     ///
     pub fn handle_spdd(&mut self, block: &BlockInfo, spdd_message: &SPOStakeDistributionMessage) {
-        let SPOStakeDistributionMessage { spos, .. } = spdd_message;
+        info!(
+            "Processing SPO Stake Distribution for epoch {} at block {}, epoch {}",
+            spdd_message.epoch, block.number, block.epoch
+        );
+        let SPOStakeDistributionMessage { epoch, spos, .. } = spdd_message;
         let current = self.get_previous_active_stakes_state(block.number);
         let mut active_stakes = current.active_stakes.clone();
         active_stakes.insert(
-            block.epoch,
+            *epoch,
             HashMap::from_iter(spos.iter().map(|(key, value)| (key.clone(), value.active))),
         );
 
@@ -416,6 +495,45 @@ impl State {
             }
         }
         self.active_stakes_history.push_back(new_state);
+    }
+
+    /// Handle Epoch Activity
+    pub fn handle_epoch_activity(
+        &mut self,
+        block: &BlockInfo,
+        epoch_activity_message: &EpochActivityMessage,
+    ) {
+        info!(
+            "Processing Epoch Activity for epoch {} at block {}, epoch {}",
+            epoch_activity_message.epoch, block.number, block.epoch
+        );
+        let EpochActivityMessage {
+            vrf_vkey_hashes, ..
+        } = epoch_activity_message;
+        let current = self.get_previous_total_blocks_minted_state(block.number);
+        let mut total_blocks_minted = current.total_blocks_minted.clone();
+
+        vrf_vkey_hashes.iter().for_each(|(vrf_vkey_hash, amount)| {
+            let Some(v) = total_blocks_minted.get_mut(vrf_vkey_hash) else {
+                total_blocks_minted.insert(vrf_vkey_hash.clone(), *amount as u64);
+                return;
+            };
+            *v += *amount as u64;
+        });
+
+        let new_state = TotalBlocksMintedState {
+            block: block.number,
+            epoch: block.epoch,
+            total_blocks_minted,
+        };
+
+        // Prune old history which can not be rolled back to
+        if let Some(front) = self.total_blocks_minted_history.front() {
+            if current.block > front.block + SECURITY_PARAMETER_K as u64 {
+                self.total_blocks_minted_history.pop_front();
+            }
+        }
+        self.total_blocks_minted_history.push_back(new_state);
     }
 
     pub fn bootstrap(&mut self, state: SPOState) {

@@ -8,6 +8,7 @@ use acropolis_common::{
     },
     queries::pools::{
         PoolsActiveStakes, PoolsList, PoolsListWithInfo, PoolsStateQuery, PoolsStateQueryResponse,
+        PoolsTotalBlocksMinted,
     },
 };
 use anyhow::Result;
@@ -27,6 +28,7 @@ const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.certificates";
 const DEFAULT_CLOCK_TICK_TOPIC: &str = "clock.tick";
 const DEFAULT_SPO_STATE_TOPIC: &str = "cardano.spo.state";
 const DEFAULT_SPDD_SUBSCRIBE_TOPIC: &str = "cardano.spo.distribution";
+const DEFAULT_EPOCH_ACTIVITY_TOPIC: &str = "cardano.epoch.activity";
 
 const POOLS_STATE_TOPIC: &str = "pools-state";
 /// SPO State module
@@ -112,6 +114,25 @@ impl SPOState {
         }
     }
 
+    /// Async run loop for epoch activity messages
+    async fn run_epoch_activity_subscription(
+        state: Arc<Mutex<State>>,
+        mut epoch_activity_subscription: Box<dyn Subscription<Message>>,
+    ) -> Result<()> {
+        loop {
+            // Subscribe to accounts-state's SPDD messsages
+            let (_, spdd_message) = epoch_activity_subscription.read().await?;
+            if let Message::Cardano((
+                block_info,
+                CardanoMessage::EpochActivity(epoch_activity_message),
+            )) = spdd_message.as_ref()
+            {
+                let mut state = state.lock().await;
+                state.handle_epoch_activity(block_info, epoch_activity_message)
+            }
+        }
+    }
+
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // Get configuration
         let subscribe_topic =
@@ -125,6 +146,11 @@ impl SPOState {
         let spdd_topic =
             config.get_string("spdd-topic").unwrap_or(DEFAULT_SPDD_SUBSCRIBE_TOPIC.to_string());
         info!("Creating subscriber on '{spdd_topic}'");
+
+        let epoch_activity_topic = config
+            .get_string("epoch-activity-topic")
+            .unwrap_or(DEFAULT_EPOCH_ACTIVITY_TOPIC.to_string());
+        info!("Creating subscriber on '{epoch_activity_topic}'");
 
         let maybe_snapshot_topic = config
             .get_string("snapshot-topic")
@@ -181,6 +207,24 @@ impl SPOState {
                                 active_stakes: vec![0; pools_operators.len()],
                                 total_active_stake: 0,
                             })
+                        }
+                    }
+
+                    PoolsStateQuery::GetPoolsTotalBlocksMinted { vrf_key_hashes } => {
+                        if let Some(total_blocks_minted) =
+                            guard.get_total_blocks_minted(vrf_key_hashes)
+                        {
+                            PoolsStateQueryResponse::PoolsTotalBlocksMinted(
+                                PoolsTotalBlocksMinted {
+                                    total_blocks_minted,
+                                },
+                            )
+                        } else {
+                            PoolsStateQueryResponse::PoolsTotalBlocksMinted(
+                                PoolsTotalBlocksMinted {
+                                    total_blocks_minted: vec![0; vrf_key_hashes.len()],
+                                },
+                            )
                         }
                     }
 
@@ -245,11 +289,13 @@ impl SPOState {
         let certs_subscription = context.subscribe(&subscribe_topic).await?;
         let clock_tick_subscription = context.subscribe(&clock_tick_topic).await?;
         let spdd_subscription = context.subscribe(&spdd_topic).await?;
+        let epoch_activity_subscription = context.subscribe(&epoch_activity_topic).await?;
 
         // Start run task
         let run_certs_state = state.clone();
         let run_clock_tick_state = state.clone();
         let run_spdd_state = state.clone();
+        let run_epoch_activity_state = state.clone();
 
         context.run(async move {
             Self::run_certs_subscription(run_certs_state, spo_state_publisher, certs_subscription)
@@ -267,6 +313,15 @@ impl SPOState {
             Self::run_spdd_subscription(run_spdd_state, spdd_subscription)
                 .await
                 .unwrap_or_else(|e| error!("Failed to run SPO SPDD Subscription: {e}"));
+        });
+
+        context.run(async move {
+            Self::run_epoch_activity_subscription(
+                run_epoch_activity_state,
+                epoch_activity_subscription,
+            )
+            .await
+            .unwrap_or_else(|e| error!("Failed to run SPO Epoch Activity Subscription: {e}"));
         });
 
         Ok(())

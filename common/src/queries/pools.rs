@@ -7,6 +7,8 @@ pub enum PoolsStateQuery {
     GetPoolsRetiredList,
     GetPoolsRetiringList,
     GetPoolsActiveStakes { pools_operators: Vec<Vec<u8>>, epoch: u64 },
+    // Get total blocks minted for each vrf vkey hashes (not included current epoch's blocks minted)
+    GetPoolsTotalBlocksMinted { vrf_key_hashes: Vec<Vec<u8>>},
     GetPoolInfo { pool_id: Vec<u8> },
     GetPoolHistory { pool_id: Vec<u8> },
     GetPoolMetadata { pool_id: Vec<u8> },
@@ -24,6 +26,7 @@ pub enum PoolsStateQueryResponse {
     PoolsRetiredList(PoolsRetiredList),
     PoolsRetiringList(PoolsRetiringList),
     PoolsActiveStakes(PoolsActiveStakes),
+    PoolsTotalBlocksMinted(PoolsTotalBlocksMinted),
     PoolInfo(PoolInfo),
     PoolHistory(PoolHistory),
     PoolMetadata(PoolMetadata),
@@ -58,6 +61,12 @@ pub struct PoolsActiveStakes {
     pub active_stakes: Vec<u64>,
     // this is total active stake for current epoch
     pub total_active_stake: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PoolsTotalBlocksMinted {
+    // this is in same order of vrf_key_hashes from PoolsStateQuery::GetPoolsTotalBlocksMinted
+    pub total_blocks_minted: Vec<u64>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
