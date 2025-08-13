@@ -3,8 +3,8 @@
 
 use acropolis_common::{
     messages::{
-        CardanoMessage, Message, SPOStakeDistributionMessage, SnapshotDumpMessage, SnapshotMessage,
-        SnapshotStateMessage, StateQuery, StateQueryResponse,
+        CardanoMessage, Message, SnapshotDumpMessage, SnapshotMessage, SnapshotStateMessage,
+        StateQuery, StateQueryResponse,
     },
     queries::pools::{
         PoolsActiveStakes, PoolsList, PoolsListWithInfo, PoolsStateQuery, PoolsStateQueryResponse,
@@ -103,14 +103,11 @@ impl SPOState {
             let (_, spdd_message) = spdd_subscription.read().await?;
             if let Message::Cardano((
                 block_info,
-                CardanoMessage::SPOStakeDistribution(SPOStakeDistributionMessage {
-                    spos,
-                    epoch: _epoch,
-                }),
+                CardanoMessage::SPOStakeDistribution(spdd_message),
             )) = spdd_message.as_ref()
             {
                 let mut state = state.lock().await;
-                state.handle_spdd(block_info, spos)
+                state.handle_spdd(block_info, spdd_message)
             }
         }
     }
