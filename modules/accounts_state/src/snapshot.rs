@@ -1,6 +1,6 @@
 //! Acropolis AccountsState: snapshot for rewards calculations
 
-use crate::state::{Pots, StakeAddressState};
+use crate::state::{Account, Pots, StakeKey};
 use acropolis_common::{KeyHash, Lovelace, PoolRegistration, Ratio, RewardAccount};
 use dashmap::DashMap;
 use imbl::OrdMap;
@@ -55,7 +55,7 @@ impl Snapshot {
     /// Get a stake snapshot based the current stake addresses
     pub fn new(
         epoch: u64,
-        stake_addresses: &DashMap<KeyHash, StakeAddressState>,
+        stake_addresses: &DashMap<StakeKey, Account>,
         spos: &OrdMap<KeyHash, PoolRegistration>,
         spo_block_counts: &HashMap<KeyHash, usize>,
         pots: &Pots,
@@ -72,14 +72,14 @@ impl Snapshot {
         // Note this is _active_ stake, for reward calculations, and hence doesn't include rewards
         let mut total_stake: Lovelace = 0;
         for entry in stake_addresses.iter() {
-            let hash = entry.key();
-            let sas = entry.value();
-            if sas.utxo_value > 0 {
-                if let Some(spo_id) = &sas.delegated_spo {
+            let stake_key = entry.key();
+            let data = entry.value().as_ref();
+            if data.utxo_value > 0 {
+                if let Some(spo_id) = &data.delegated_spo {
                     // Only clone if insertion is needed
                     if let Some(snap_spo) = snapshot.spos.get_mut(spo_id) {
-                        snap_spo.delegators.push((hash.clone(), sas.utxo_value));
-                        snap_spo.total_stake += sas.utxo_value;
+                        snap_spo.delegators.push((stake_key.clone(), data.utxo_value));
+                        snap_spo.total_stake += data.utxo_value;
                     } else {
                         // Find in the SPO list
                         let Some(spo) = spos.get(spo_id) else {
@@ -92,8 +92,8 @@ impl Snapshot {
                         snapshot.spos.insert(
                             spo_id.clone(),
                             SnapshotSPO {
-                                delegators: vec![(hash.clone(), sas.utxo_value)],
-                                total_stake: sas.utxo_value,
+                                delegators: vec![(stake_key.clone(), data.utxo_value)],
+                                total_stake: data.utxo_value,
                                 pledge: spo.pledge,
                                 fixed_cost: spo.cost,
                                 margin: spo.margin.clone(),
@@ -104,7 +104,7 @@ impl Snapshot {
                         );
                     }
                 }
-                total_stake += sas.utxo_value;
+                total_stake += data.utxo_value;
             }
         }
 
@@ -154,6 +154,10 @@ impl Snapshot {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use crate::state::StakeAddressState;
+
     use super::*;
 
     #[test]
@@ -166,38 +170,38 @@ mod tests {
         let addr3: KeyHash = vec![0x13];
         let addr4: KeyHash = vec![0x14];
 
-        let stake_addresses: DashMap<KeyHash, StakeAddressState> = DashMap::new();
+        let stake_addresses: DashMap<StakeKey, Account> = DashMap::new();
         stake_addresses.insert(
-            addr1.clone(),
-            StakeAddressState {
+            addr1.clone().into(),
+            Arc::new(StakeAddressState {
                 utxo_value: 42,
                 delegated_spo: Some(spo1.clone()),
                 ..StakeAddressState::default()
-            },
+            }),
         );
         stake_addresses.insert(
-            addr2.clone(),
-            StakeAddressState {
+            addr2.clone().into(),
+            Arc::new(StakeAddressState {
                 utxo_value: 99,
                 delegated_spo: Some(spo2.clone()),
                 ..StakeAddressState::default()
-            },
+            }),
         );
         stake_addresses.insert(
-            addr3.clone(),
-            StakeAddressState {
+            addr3.clone().into(),
+            Arc::new(StakeAddressState {
                 utxo_value: 0,
                 delegated_spo: Some(spo1.clone()),
                 ..StakeAddressState::default()
-            },
+            }),
         );
         stake_addresses.insert(
-            addr4.clone(),
-            StakeAddressState {
+            addr4.clone().into(),
+            Arc::new(StakeAddressState {
                 utxo_value: 1000000,
                 delegated_spo: None,
                 ..StakeAddressState::default()
-            },
+            }),
         );
 
         let mut spos: OrdMap<KeyHash, PoolRegistration> = OrdMap::new();
