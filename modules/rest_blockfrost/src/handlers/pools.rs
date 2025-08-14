@@ -286,7 +286,7 @@ async fn handle_pools_extended_blockfrost(context: Arc<Context<Message>>) -> Res
     )
     .await?;
 
-    let aggreated_blocks_minted = total_blocks_minted
+    let aggregated_blocks_minted = total_blocks_minted
         .iter()
         .zip(current_blocks_minted.iter())
         .map(|(total, current)| total + current)
@@ -330,7 +330,7 @@ async fn handle_pools_extended_blockfrost(context: Arc<Context<Message>>) -> Res
                     hex: hex::encode(pool_operator),
                     active_stake: pools_active_stakes[i].to_string(),
                     live_stake: pools_live_stakes[i].to_string(),
-                    blocks_minted: aggreated_blocks_minted[i],
+                    blocks_minted: aggregated_blocks_minted[i],
                     live_saturation: if total_active_stake > 0 {
                         Decimal::from(pools_live_stakes[i]) * Decimal::from(stake_pool_target_num)
                             / Decimal::from(total_active_stake)
