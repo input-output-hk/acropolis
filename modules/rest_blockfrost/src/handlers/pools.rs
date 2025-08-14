@@ -13,6 +13,7 @@ use anyhow::Result;
 use caryatid_sdk::Context;
 use rust_decimal::Decimal;
 use std::sync::Arc;
+use crate::utils::fetch_pools_metadata;
 
 use crate::types::{PoolExtendedRest, PoolMetadataRest};
 
@@ -140,6 +141,10 @@ async fn handle_pools_extended_blockfrost(context: Arc<Context<Message>>) -> Res
     let pools_vrf_key_hashes = pools_list_with_info
         .iter()
         .map(|(_, pool_registration)| pool_registration.vrf_key_hash.clone())
+        .collect::<Vec<_>>();
+    let pools_metadata_urls = pools_list_with_info
+        .iter()
+        .map(|(_, pool_registration)| pool_registration.pool_metadata.as_ref().map(|metadata| metadata.url.clone()))
         .collect::<Vec<_>>();
 
     // Get Latest Epoch from epoch-state
@@ -320,6 +325,9 @@ async fn handle_pools_extended_blockfrost(context: Arc<Context<Message>>) -> Res
         return Ok(RESTResponse::with_json(500, "[]"));
     };
 
+    // Fetch pools metadata
+    let pools_metadata = fetch_pools_metadata(pools_metadata_urls).await;
+
     let pools_extened_rest_results: Result<Vec<PoolExtendedRest>, anyhow::Error> =
         pools_list_with_info
             .iter()
@@ -344,10 +352,10 @@ async fn handle_pools_extended_blockfrost(context: Arc<Context<Message>>) -> Res
                         PoolMetadataRest {
                             url: metadata.url.clone(),
                             hash: hex::encode(metadata.hash.clone()),
-                            ticker: "ticker".to_string(),
-                            name: "name".to_string(),
-                            description: "description".to_string(),
-                            homepage: "homepage".to_string(),
+                            ticker: pools_metadata[i].as_ref().map(|metadata| metadata.ticker.clone()),
+                            name: pools_metadata[i].as_ref().map(|metadata| metadata.name.clone()),
+                            description: pools_metadata[i].as_ref().map(|metadata| metadata.description.clone()),
+                            homepage: pools_metadata[i].as_ref().map(|metadata| metadata.homepage.clone()),
                         }
                     }),
                 })

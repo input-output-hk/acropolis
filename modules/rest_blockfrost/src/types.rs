@@ -1,6 +1,6 @@
 use acropolis_common::VotingProcedure;
 use rust_decimal::Decimal;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// REST response structure for proposal votes
 #[derive(Serialize)]
@@ -27,8 +27,16 @@ pub struct PoolExtendedRest {
 pub struct PoolMetadataRest {
     pub url: String,
     pub hash: String,
-    pub ticker: String,
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub ticker: Option<String>,
+    pub homepage: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PoolMetadataResponse {
     pub name: String,
     pub description: String,
+    pub ticker: String,
     pub homepage: String,
 }
