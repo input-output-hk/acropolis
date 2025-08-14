@@ -788,7 +788,7 @@ pub mod tests {
         let mut block = new_block();
         block.epoch = 1;
         state.handle_spdd(&block, &msg);
-        assert!(state.get_pools_active_stakes(&vec![vec![1], vec![2]], 2).is_none());
+        assert!(state.get_pools_active_stakes(&vec![vec![1], vec![2]], block.epoch).is_none());
     }
 
     #[tokio::test]
@@ -800,7 +800,7 @@ pub mod tests {
         block.epoch = 1;
         state.handle_spdd(&block, &msg);
         let (active_stakes, total) =
-            state.get_pools_active_stakes(&vec![vec![1], vec![2]], 1).unwrap();
+            state.get_pools_active_stakes(&vec![vec![1], vec![2]], block.epoch + 1).unwrap();
         assert_eq!(2, active_stakes.len());
         assert_eq!(0, active_stakes[0]);
         assert_eq!(0, active_stakes[1]);
@@ -829,12 +829,12 @@ pub mod tests {
         ];
         msg.epoch = 1;
         let mut block = new_block();
-        block.number = 1;
-        block.epoch = 1;
+        block.number = 11;
+        block.epoch = 2;
         state.handle_spdd(&block, &msg);
 
         let (active_stakes, total) =
-            state.get_pools_active_stakes(&vec![vec![1], vec![2]], 1).unwrap();
+            state.get_pools_active_stakes(&vec![vec![1], vec![2]], block.epoch + 1).unwrap();
         assert_eq!(2, active_stakes.len());
         assert_eq!(10, active_stakes[0]);
         assert_eq!(20, active_stakes[1]);
@@ -930,8 +930,8 @@ pub mod tests {
         ];
         msg.epoch = 1;
         let mut block = new_block();
-        block.number = 1;
-        block.epoch = 1;
+        block.number = 11;
+        block.epoch = 2;
         state.handle_spdd(&block, &msg);
         println!(
             "{}",
@@ -944,15 +944,15 @@ pub mod tests {
             assert_eq!(1, current.active_stakes.len());
             assert_eq!(
                 10,
-                *current.active_stakes.get(&1).unwrap().get(&vec![1]).unwrap()
+                *current.active_stakes.get(&(block.epoch + 1)).unwrap().get(&vec![1]).unwrap()
             );
             assert_eq!(
                 20,
-                *current.active_stakes.get(&1).unwrap().get(&vec![2]).unwrap()
+                *current.active_stakes.get(&(block.epoch + 1)).unwrap().get(&vec![2]).unwrap()
             );
             assert_eq!(
                 30,
-                *current.active_stakes.get(&1).unwrap().get(&vec![3]).unwrap()
+                *current.active_stakes.get(&(block.epoch + 1)).unwrap().get(&vec![3]).unwrap()
             );
         };
 
@@ -973,8 +973,8 @@ pub mod tests {
             ),
         ];
         msg.epoch = 2;
-        block.number = 11;
-        block.epoch = 2;
+        block.number = 21;
+        block.epoch = 3;
         state.handle_spdd(&block, &msg);
         println!(
             "{}",
@@ -987,17 +987,17 @@ pub mod tests {
             assert_eq!(2, current.active_stakes.len());
             assert_eq!(
                 30,
-                *current.active_stakes.get(&2).unwrap().get(&vec![1]).unwrap()
+                *current.active_stakes.get(&(block.epoch + 1)).unwrap().get(&vec![1]).unwrap()
             );
             assert_eq!(
                 40,
-                *current.active_stakes.get(&2).unwrap().get(&vec![2]).unwrap()
+                *current.active_stakes.get(&(block.epoch + 1)).unwrap().get(&vec![2]).unwrap()
             );
         };
 
         let mut msg = new_spdd_message();
-        msg.epoch = 3;
-        block.number = 11;
+        msg.epoch = 2;
+        block.number = 21;
         block.epoch = 3;
         state.handle_spdd(&block, &msg);
         println!(
@@ -1011,18 +1011,18 @@ pub mod tests {
             assert_eq!(2, current.active_stakes.len());
             assert_eq!(
                 10,
-                *current.active_stakes.get(&1).unwrap().get(&vec![1]).unwrap()
+                *current.active_stakes.get(&block.epoch).unwrap().get(&vec![1]).unwrap()
             );
             assert_eq!(
                 20,
-                *current.active_stakes.get(&1).unwrap().get(&vec![2]).unwrap()
+                *current.active_stakes.get(&block.epoch).unwrap().get(&vec![2]).unwrap()
             );
             assert_eq!(
                 30,
-                *current.active_stakes.get(&1).unwrap().get(&vec![3]).unwrap()
+                *current.active_stakes.get(&block.epoch).unwrap().get(&vec![3]).unwrap()
             );
 
-            assert!(current.active_stakes.get(&3).unwrap().is_empty());
+            assert!(current.active_stakes.get(&(block.epoch + 1)).unwrap().is_empty());
         };
     }
 
