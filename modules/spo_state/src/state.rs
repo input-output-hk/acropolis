@@ -90,12 +90,13 @@ impl From<&BlockState> for SPOState {
 #[serde_as]
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ActiveStakesState {
-    /// block number when Active Stakes is taken
+    /// Snapshot is taken at Epoch N - 1 to N boundary
+    /// the first block of Epoch N
     block: u64,
-    /// epoch number when Active Stakes is taken (Epoch N + 1)
+    /// Epoch N (snapshot is Mark)
     epoch: u64,
     /// active stakes for each pool operator for each epoch
-    /// Epoch in key is (Epoch Number when Active Stakes is taken + 2)
+    /// Epoch in key is (Epoch N + 1 when snapshot becomes Set)
     #[serde_as(as = "SerializeMapAs<_, SerializeMapAs<Hex, _>>")]
     active_stakes: HashMap<u64, HashMap<KeyHash, u64>>,
 }
@@ -467,8 +468,8 @@ impl State {
     }
 
     /// Handle SPO Stake Distribution
-    /// Live stake snapshots taken before the first block of Epoch N
-    /// Active stake is valid from Epoch N + 2
+    /// Live stake snapshots taken at Epoch N - 1 to N boundary (Mark at Epoch N)
+    /// Active stake is valid from Epoch N + 1 (Set at Epoch N + 1)
     ///
     pub fn handle_spdd(&mut self, block: &BlockInfo, spdd_message: &SPOStakeDistributionMessage) {
         info!(
@@ -479,7 +480,7 @@ impl State {
         let current = self.get_previous_active_stakes_state(block.number);
         let mut active_stakes = current.active_stakes.clone();
         active_stakes.insert(
-            block.epoch + 2,
+            block.epoch + 1,
             HashMap::from_iter(spos.iter().map(|(key, value)| (key.clone(), value.active))),
         );
 
