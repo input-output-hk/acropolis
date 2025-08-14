@@ -12,7 +12,6 @@ use config::Config;
 use tracing::info;
 mod handlers;
 mod types;
-mod utils;
 use handlers::{
     accounts::handle_single_account_blockfrost,
     governance::{
