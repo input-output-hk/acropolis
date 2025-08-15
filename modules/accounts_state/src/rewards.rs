@@ -1,7 +1,7 @@
 //! Acropolis AccountsState: rewards calculations
 
 use acropolis_common::{
-    KeyHash, Lovelace, ShelleyParams, RewardAccount,
+    KeyHash, Lovelace, protocol_params::ShelleyParams, RewardAccount,
     rational_number::RationalNumber,
 };
 use crate::snapshot::Snapshot;

@@ -1,13 +1,13 @@
 use acropolis_common::{
     rational_number::{RationalNumber, rational_number_from_f32},
-    AlonzoParams, Anchor, BlockVersionData, ByronParams,
+    AlonzoParams, Anchor, BlockVersionData, ByronParams, CostModel,
     Committee, Constitution, ConwayParams, Credential, DRepVotingThresholds, Era,
-    NetworkId, Nonce, NonceVariant, PoolVotingThresholds, ProtocolConsts, ProtocolVersion,
-    ShelleyParams, ShelleyProtocolParams, SoftForkRule, TxFeePolicy,
+    PoolVotingThresholds, ProtocolConsts, SoftForkRule, TxFeePolicy,
+    protocol_params::ShelleyParams
 };
 use anyhow::{anyhow, bail, Result};
 use hex::decode;
-use pallas::ledger::{configs::*, primitives};
+use pallas::ledger::configs::*;
 use serde::Deserialize;
 use crate::alonzo_genesis;
 use std::collections::HashMap;
@@ -106,83 +106,9 @@ fn map_conway(genesis: &conway::GenesisFile) -> Result<ConwayParams> {
         min_fee_ref_script_cost_per_byte: RationalNumber::from(
             genesis.min_fee_ref_script_cost_per_byte,
         ),
-        plutus_v3_cost_model: genesis.plutus_v3_cost_model.clone(),
+        plutus_v3_cost_model: CostModel::new(genesis.plutus_v3_cost_model.clone()),
         constitution: map_constitution(&genesis.constitution)?,
         committee: map_committee(&genesis.committee)?,
-    })
-}
-
-pub fn map_pallas_rational(r: &primitives::RationalNumber) -> RationalNumber {
-    RationalNumber::new(r.numerator, r.denominator)
-}
-
-fn map_network_id(id: &str) -> Result<NetworkId> {
-    match id {
-        "Testnet" => Ok(NetworkId::Testnet),
-        "Mainnet" => Ok(NetworkId::Mainnet),
-        n => Err(anyhow!("Network id {n} is unknown")),
-    }
-}
-
-fn map_shelley_nonce(e: &shelley::ExtraEntropy) -> Result<Nonce> {
-    Ok(Nonce {
-        tag: match &e.tag {
-            shelley::NonceVariant::NeutralNonce => NonceVariant::NeutralNonce,
-            shelley::NonceVariant::Nonce => NonceVariant::Nonce,
-        },
-        hash: e.hash.as_ref().map(|h| decode_hex_string(h, 32)).transpose()?,
-    })
-}
-
-fn map_shelley_protocol_params(p: &shelley::ProtocolParams) -> Result<ShelleyProtocolParams> {
-    Ok(ShelleyProtocolParams {
-        protocol_version: ProtocolVersion {
-            minor: p.protocol_version.minor,
-            major: p.protocol_version.major,
-        },
-        max_tx_size: p.max_tx_size,
-        max_block_body_size: p.max_block_body_size,
-        max_block_header_size: p.max_block_header_size,
-        key_deposit: p.key_deposit,
-        min_utxo_value: p.min_utxo_value,
-        minfee_a: p.min_fee_a,
-        minfee_b: p.min_fee_b,
-        pool_deposit: p.pool_deposit,
-        stake_pool_target_num: p.n_opt,
-        min_pool_cost: p.min_pool_cost,
-        pool_retire_max_epoch: p.e_max,
-        extra_entropy: map_shelley_nonce(&p.extra_entropy)?,
-        decentralisation_param: map_pallas_rational(&p.decentralisation_param),
-        monetary_expansion: map_pallas_rational(&p.rho),
-        treasury_cut: map_pallas_rational(&p.tau),
-        pool_pledge_influence: map_pallas_rational(&p.a0),
-    })
-}
-
-fn unw<T: Clone>(p: &Option<T>, n: &str) -> Result<T> {
-    p.as_ref().ok_or_else(
-        || anyhow!("Empty parameter {n}, invalidating shelley genesis")
-    ).cloned()
-}
-
-fn map_shelley(genesis: &shelley::GenesisFile) -> Result<ShelleyParams> {
-    Ok(ShelleyParams {
-        active_slots_coeff: unw(&genesis.active_slots_coeff, "active_slots_coeff")?,
-        epoch_length: unw(&genesis.epoch_length, "epoch_length")?,
-        max_kes_evolutions: unw(&genesis.max_kes_evolutions, "max_kes_evolutions")?,
-        max_lovelace_supply: unw(&genesis.max_lovelace_supply, "max_lovelace_supply")?,
-        network_id: unw(
-            &genesis.network_id.as_deref().map(map_network_id).transpose()?, "network_id"
-        )?,
-        network_magic: unw(&genesis.network_magic, "network_magic")?,
-        protocol_params: map_shelley_protocol_params(&genesis.protocol_params)?,
-        security_param: unw(&genesis.security_param, "security_param")?,
-        slot_length: unw(&genesis.slot_length, "slot_length")?,
-        slots_per_kes_period: unw(&genesis.slots_per_kes_period, "slots_per_kes_period")?,
-        system_start: unw(
-            &genesis.system_start.as_ref().map(|s| s.parse()).transpose()?, "system_start"
-        )?,
-        update_quorum: unw(&genesis.update_quorum, "update_quorum")?,
     })
 }
 
@@ -251,7 +177,7 @@ pub fn read_byron_genesis(network: &str) -> Result<ByronParams> {
 }
 
 pub fn read_shelley_genesis(network: &str) -> Result<ShelleyParams> {
-    read_pdef_genesis::<shelley::GenesisFile, ShelleyParams> (network, Era::Shelley, map_shelley)
+    read_pdef_genesis::<ShelleyParams, ShelleyParams> (network, Era::Shelley, |x| Ok(x.clone()))
 }
 
 pub fn read_alonzo_genesis(network: &str) -> Result<AlonzoParams> {
@@ -262,4 +188,50 @@ pub fn read_alonzo_genesis(network: &str) -> Result<AlonzoParams> {
 
 pub fn read_conway_genesis(network: &str) -> Result<ConwayParams> {
     read_pdef_genesis::<conway::GenesisFile, ConwayParams> (network, Era::Conway, map_conway)
+}
+
+#[cfg(test)]
+mod test {
+    use anyhow::Result;
+    use std::collections::HashSet;
+    use crate::genesis_params;
+    use acropolis_common::{protocol_params::ShelleyParams, rational_number::RationalNumber};
+
+    fn get_networks() -> HashSet<&'static str> {
+        HashSet::<&str>::from_iter(genesis_params::PREDEFINED_GENESIS.iter().map(|p| p.0))
+    }
+
+    #[test]
+    fn test_read_genesis() -> Result<()> {
+        for net in get_networks().iter() {
+            println!("{:?}", genesis_params::read_byron_genesis(net)?);
+            println!("{:?}", genesis_params::read_shelley_genesis(net)?);
+            println!("{:?}", genesis_params::read_alonzo_genesis(net)?);
+            println!("{:?}", genesis_params::read_conway_genesis(net)?);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_read_write_shelley() -> Result<()> {
+        for net in get_networks().iter() {
+            let shelley = genesis_params::read_shelley_genesis(net)?;
+            let shelley_str = serde_json::to_string(&shelley).unwrap();
+            let shelley_back = serde_json::from_str::<ShelleyParams>(&shelley_str).unwrap();
+            println!("Encoded: {shelley:?}\n\nStr: {shelley_str}\n\nBack: {shelley_back:?}\n");
+            assert_eq!(shelley, shelley_back);
+        }
+        Ok(())
+    }
+
+    /// Checking that value for monetary expansion is correctly parsed.
+    /// Pallas loses precision here, and does not parse this value properly.
+    #[test]
+    fn test_shelley_monetary_expansion_value() -> Result<()> {
+        for net in get_networks().iter() {
+            let shelley_params = genesis_params::read_shelley_genesis(net)?.protocol_params;
+            assert_eq!(shelley_params.monetary_expansion, RationalNumber::new(3,1000));
+        }
+        Ok(())
+    }
 }

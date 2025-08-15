@@ -21,6 +21,7 @@ use tracing::{error, info, info_span, Instrument};
 
 mod state;
 mod voting_state;
+mod alonzo_babbage_voting;
 use state::State;
 use voting_state::VotingRegistrationState;
 
@@ -220,6 +221,7 @@ impl GovernanceState {
                     state.send(&blk_g, governance_outcomes).await?;
                 }
 
+                // Governance may present in any block -- not only in 'new epoch' blocks.
                 {
                     state.lock().await.handle_governance(&blk_g, &gov_procs).await?;
                 }
@@ -261,7 +263,7 @@ impl GovernanceState {
                     }
 
                     {
-                        state.lock().await.advance_era(&blk_g.era);
+                        state.lock().await.advance_epoch(&blk_g)?;
                     }
                 }
                 Ok::<(), anyhow::Error>(())

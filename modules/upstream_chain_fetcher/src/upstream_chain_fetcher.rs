@@ -2,7 +2,6 @@
 //! Multi-connection, multi-protocol client interface to the Cardano node
 
 use acropolis_common::{
-    calculations::slot_to_epoch,
     messages::{CardanoMessage, Message},
     BlockInfo, 
 };
@@ -64,7 +63,7 @@ impl UpstreamChainFetcher {
 
         let last_epoch: Option<u64> = match slot {
             0 => None,                      // If we're starting from origin
-            _ => Some(slot_to_epoch(slot)), // From slot of last block
+            _ => Some(cfg.slot_to_epoch(slot)), // From slot of last block
         };
 
         let (sender, receiver) = bounded(MAX_BODY_FETCHER_CHANNEL_LENGTH);
@@ -185,7 +184,7 @@ impl UpstreamChainFetcher {
             SyncPoint::Snapshot => {
                 info!("Waiting for snapshot completion on {}", cfg.snapshot_completion_topic);
                 let mut completion_subscription = snapshot_complete.as_mut()
-                    .ok_or_else(|| anyhow!("Snapshot topic missing"))?;
+                    .ok_or_else(|| anyhow!("Snapshot topic subscription missing"))?;
 
                 match Self::wait_snapshot_completion(&mut completion_subscription).await? {
                     Some(block) => {

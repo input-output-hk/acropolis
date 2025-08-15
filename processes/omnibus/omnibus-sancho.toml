@@ -9,10 +9,14 @@ network-name = "sanchonet" # "sanchonet", "mainnet"
 #genesis-key = "5b3139312c36362c3134302c3138352c3133382c31312c3233372c3230372c3235302c3134342c32372c322c3138382c33302c31322c38312c3135352c3230342c31302c3137392c37352c32332c3133382c3139362c3231372c352c31342c32302c35372c37392c33392c3137365d"
 #download = false
 
+[module.rest-blockfrost]
+
 [module.upstream-chain-fetcher]
 sync-point = "cache" #"cache" # "origin", "tip", "snapshot"
 node-address = "sancho-testnet.able-pool.io:6002"
 magic-number = 4
+shelley-epoch = 0
+shelley-epoch-len = 86400
 
 [module.block-unpacker]
 
@@ -34,6 +38,7 @@ address-delta-topic = "cardano.address.delta"
 [module.governance-state]
 
 [module.parameters-state]
+store-history = false
 network-name = "sanchonet" # "sanchonet", "mainnet"
 
 [module.stake-delta-filter]
@@ -41,6 +46,7 @@ cache-mode = "write" # "predefined", "read", "write", "write-if-absent"
 write-full-cache = "false"
 
 [module.epoch-activity-counter]
+store-history = false
 
 [module.accounts-state]
 

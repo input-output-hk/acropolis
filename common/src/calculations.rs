@@ -1,16 +1,23 @@
 //! Common calculations for Cardano
 
 const BYRON_SLOTS_PER_EPOCH: u64 = 21_600;
-const SHELLEY_SLOTS_PER_EPOCH: u64 = 432_000;
+pub const SHELLEY_SLOTS_PER_EPOCH: u64 = 432_000;
 const SHELLEY_START_SLOT: u64 = 4_492_800;
 const SHELLEY_START_EPOCH: u64 = 208;
 
 /// Derive an epoch number from a slot, handling Byron/Shelley era changes
 pub fn slot_to_epoch(slot: u64) -> u64 {
-    if slot < SHELLEY_START_SLOT {
+    slot_to_epoch_with_shelley_params(slot, SHELLEY_START_EPOCH, SHELLEY_SLOTS_PER_EPOCH)
+}
+
+pub fn slot_to_epoch_with_shelley_params(
+    slot: u64, shelley_epoch: u64, shelley_epoch_len: u64
+) -> u64 {
+    let shelley_start_slot = shelley_epoch * BYRON_SLOTS_PER_EPOCH;
+    if slot < shelley_start_slot {
         slot / BYRON_SLOTS_PER_EPOCH
     } else {
-        SHELLEY_START_EPOCH + (slot - SHELLEY_START_SLOT) / SHELLEY_SLOTS_PER_EPOCH
+        shelley_epoch + (slot - shelley_start_slot) / shelley_epoch_len
     }
 }
 
