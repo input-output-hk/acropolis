@@ -17,7 +17,7 @@ pub fn slot_to_epoch_with_shelley_params(
     if slot < shelley_start_slot {
         slot / BYRON_SLOTS_PER_EPOCH
     } else {
-        shelley_start_slot + (slot - shelley_start_slot) / shelley_epoch_len
+        shelley_epoch + (slot - shelley_start_slot) / shelley_epoch_len
     }
 }
 

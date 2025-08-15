@@ -46,7 +46,8 @@ pub struct ShelleyProtocolParams {
     pub minfee_b: u32,
     pub pool_deposit: u64,
 
-    /// AKA desired_number_of_stake_pools, n_opt, k parameter
+    /// AKA desired_number_of_stake_pools, n_opt, technical parameter k
+    /// Important: *not to be mixed* with security parameter k, which is not here
     #[serde(rename="nOpt")]
     pub stake_pool_target_num: u32,
     pub min_pool_cost: u64,
@@ -92,7 +93,14 @@ pub struct ShelleyParams {
     pub network_id: NetworkId,
     pub network_magic: u32,
     pub protocol_params: ShelleyProtocolParams,
+
+    /// Ouroboros security parameter k: the Shardagnostic security paramaters,
+    /// aka @k@. This is the maximum number of blocks the node would ever be
+    /// prepared to roll back by. Clients of the node following the chain should
+    /// be prepared to handle the node switching forks up to this long.
+    /// (source: GenesisParameters.hs)
     pub security_param: u32,
+
     pub slot_length: u32,
     pub slots_per_kes_period: u32,
     pub system_start: DateTime<Utc>,
