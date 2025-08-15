@@ -1,3 +1,5 @@
+use crate::{messages::EpochActivityMessage, KeyHash, ProtocolParams};
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum EpochsStateQuery {
     GetLatestEpoch,
@@ -10,6 +12,9 @@ pub enum EpochsStateQuery {
     GetEpochBlockDistribution { epoch_number: u64 },
     GetEpochBlockDistributionByPool { epoch_number: u64 },
     GetEpochParameters { epoch_number: u64 },
+
+    // Pools related queries
+    GetBlocksMintedByPools { vrf_key_hashes: Vec<KeyHash> },
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -24,15 +29,23 @@ pub enum EpochsStateQueryResponse {
     EpochBlockDistribution(EpochBlockDistribution),
     EpochBlockDistributionByPool(EpochBlockDistributionByPool),
     EpochParameters(EpochParameters),
+
+    // Pools related responses
+    BlocksMintedByPools(BlocksMintedByPools),
+
     NotFound,
     Error(String),
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct LatestEpoch {}
+pub struct LatestEpoch {
+    pub epoch: EpochActivityMessage,
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct LatestEpochParameters {}
+pub struct LatestEpochParameters {
+    pub parameters: ProtocolParams,
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EpochInfo {}
@@ -57,3 +70,9 @@ pub struct EpochBlockDistributionByPool {}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EpochParameters {}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BlocksMintedByPools {
+    // this is in same order of vrf_key_hashes from EpochsStateQuery::BlocksMintedByPools
+    pub blocks_minted: Vec<u64>,
+}
