@@ -1,9 +1,10 @@
-use crate::PoolRegistration;
+use crate::{PoolMetadataExtended, PoolRegistration};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum PoolsStateQuery {
     GetPoolsList,
     GetPoolsListWithInfo,
+    GetPoolsMetadataExtended { pools_operators: Vec<Vec<u8>> },
     GetPoolsRetiredList,
     GetPoolsRetiringList,
     GetPoolsActiveStakes { pools_operators: Vec<Vec<u8>>, epoch: u64 },
@@ -23,6 +24,7 @@ pub enum PoolsStateQuery {
 pub enum PoolsStateQueryResponse {
     PoolsList(PoolsList),
     PoolsListWithInfo(PoolsListWithInfo),
+    PoolsMetadataExtended(PoolsMetadataExtended),
     PoolsRetiredList(PoolsRetiredList),
     PoolsRetiringList(PoolsRetiringList),
     PoolsActiveStakes(PoolsActiveStakes),
@@ -47,6 +49,11 @@ pub struct PoolsList {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PoolsListWithInfo {
     pub pools: Vec<(Vec<u8>, PoolRegistration)>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PoolsMetadataExtended {
+    pub pools_metadata_extended: Vec<Option<PoolMetadataExtended>>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
