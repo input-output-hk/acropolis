@@ -1,4 +1,4 @@
-use acropolis_common::{PoolMetadataExtended, VotingProcedure};
+use acropolis_common::VotingProcedure;
 use rust_decimal::Decimal;
 use serde::Serialize;
 
@@ -20,5 +20,4 @@ pub struct PoolExtendedRest {
     pub declared_pledge: String, // u64 in string
     pub margin_cost: f32,
     pub fixed_cost: String, // u64 in string
-    pub metadata: Option<PoolMetadataExtended>,
 }

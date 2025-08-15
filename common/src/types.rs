@@ -402,45 +402,6 @@ pub struct PoolMetadata {
     pub hash: DataHash,
 }
 
-/// Pool metadata
-#[serde_as]
-#[derive(
-    Debug,
-    Clone,
-    serde::Serialize,
-    serde::Deserialize,
-    minicbor::Encode,
-    minicbor::Decode,
-    Eq,
-    PartialEq,
-)]
-pub struct PoolMetadataExtended {
-    /// Metadata URL
-    #[n(0)]
-    pub url: String,
-
-    /// Metadata hash
-    #[serde_as(as = "Hex")]
-    #[n(1)]
-    pub hash: DataHash,
-
-    /// Name
-    #[n(2)]
-    pub name: Option<String>,
-
-    /// Description
-    #[n(3)]
-    pub description: Option<String>,
-
-    /// Ticker
-    #[n(4)]
-    pub ticker: Option<String>,
-
-    /// Homepage
-    #[n(5)]
-    pub homepage: Option<String>,
-}
-
 pub type RewardAccount = Vec<u8>;
 
 /// Pool registration data
