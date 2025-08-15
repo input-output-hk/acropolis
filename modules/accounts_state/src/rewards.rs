@@ -78,8 +78,17 @@ impl RewardsState {
         let mut total_paid_to_pools: Lovelace = 0;
         for (operator_id, spo) in self.go.spos.iter() {
 
+            // Actual blocks produced for epoch (i)
+            let blocks_produced = {
+                if let Some(s) = self.mark.spos.get(operator_id) {
+                    s.blocks_produced
+                } else {
+                    0
+                }
+            };
+
             // Actual blocks produced as proportion of epoch (Beta)
-            let relative_blocks = BigDecimal::from(spo.blocks_produced as u64)
+            let relative_blocks = BigDecimal::from(blocks_produced as u64)
                 / BigDecimal::from(total_blocks as u64);
 
             // Active stake (sigma)
@@ -141,7 +150,7 @@ impl RewardsState {
             // Get actual pool rewards
             let pool_rewards = (&optimum_rewards * &pool_performance).with_scale(0);
 
-            info!(blocks=spo.blocks_produced, %pool_stake, %relative_pool_stake, %relative_blocks,
+            info!(blocks=blocks_produced, %pool_stake, %relative_pool_stake, %relative_blocks,
                   %pool_performance, %optimum_rewards, %pool_rewards,
                    "Pool {}", hex::encode(operator_id.clone()));
 
