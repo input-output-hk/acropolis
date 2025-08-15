@@ -7,8 +7,8 @@ use acropolis_common::{
         StateQuery, StateQueryResponse,
     },
     queries::pools::{
-        PoolsActiveStakes, PoolsList, PoolsListWithInfo, PoolsMetadataExtended, PoolsStateQuery,
-        PoolsStateQueryResponse, PoolsTotalBlocksMinted,
+        PoolsActiveStakes, PoolsList, PoolsListWithInfo, PoolsStateQuery, PoolsStateQueryResponse,
+        PoolsTotalBlocksMinted,
     },
 };
 use anyhow::Result;
@@ -20,7 +20,6 @@ use tracing::{error, info, info_span, Instrument};
 
 mod state;
 use state::State;
-mod metadata;
 mod rest;
 mod spo_state_publisher;
 use crate::spo_state_publisher::SPOStatePublisher;
@@ -57,16 +56,13 @@ impl SPOState {
                         let mut state = state.lock().await;
                         let maybe_message = state
                             .handle_tx_certs(block, tx_certs_msg)
-                            .inspect_err(|e| error!("Messaging handling error: {e}"));
+                            .inspect_err(|e| error!("Messaging handling error: {e}"))
+                            .ok();
 
-                        if let Ok((maybe_message, pools_metadata)) = maybe_message {
-                            if let Some(message) = maybe_message {
-                                if let Err(e) = spo_state_publisher.publish(message).await {
-                                    error!("Error publishing SPO State: {e:#}")
-                                }
+                        if let Some(Some(message)) = maybe_message {
+                            if let Err(e) = spo_state_publisher.publish(message).await {
+                                error!("Error publishing SPO State: {e:#}")
                             }
-
-                            state.handle_pools_metadata(pools_metadata).await;
                         }
                     }
                     .instrument(span)
@@ -194,13 +190,7 @@ impl SPOState {
                         };
                         PoolsStateQueryResponse::PoolsListWithInfo(pools_list_with_info)
                     }
-                    PoolsStateQuery::GetPoolsMetadataExtended { pools_operators } => {
-                        let pools_metadata_extended = PoolsMetadataExtended {
-                            pools_metadata_extended: guard
-                                .list_pools_metadata_extended(pools_operators),
-                        };
-                        PoolsStateQueryResponse::PoolsMetadataExtended(pools_metadata_extended)
-                    }
+
                     PoolsStateQuery::GetPoolsActiveStakes {
                         pools_operators,
                         epoch,
