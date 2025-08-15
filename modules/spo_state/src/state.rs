@@ -8,14 +8,17 @@ use acropolis_common::{
     },
     params::{SECURITY_PARAMETER_K, TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH},
     serialization::SerializeMapAs,
-    BlockInfo, KeyHash, PoolRegistration, PoolRetirement, TxCertificate,
+    BlockInfo, KeyHash, PoolMetadata, PoolMetadataExtended, PoolRegistration, PoolRetirement,
+    TxCertificate,
 };
 use anyhow::Result;
 use imbl::HashMap;
 use serde_with::{hex::Hex, serde_as};
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, HashMap as StdHashMap, VecDeque};
 use std::sync::Arc;
 use tracing::{debug, error, info};
+
+use crate::metadata::fetch_pools_metadata;
 
 #[serde_as]
 #[derive(Debug, Clone, serde::Serialize)]
@@ -144,6 +147,9 @@ pub struct State {
 
     /// Volatile total blocks minted state, one per epoch (in case new epoch block is rolled back)
     total_blocks_minted_history: VecDeque<TotalBlocksMintedState>,
+
+    /// Pools metadata extended
+    pools_metadata_extended: StdHashMap<KeyHash, PoolMetadataExtended>,
 }
 
 impl State {
@@ -153,6 +159,7 @@ impl State {
             history: VecDeque::<BlockState>::new(),
             active_stakes_history: VecDeque::<ActiveStakesState>::new(),
             total_blocks_minted_history: VecDeque::<TotalBlocksMintedState>::new(),
+            pools_metadata_extended: StdHashMap::new(),
         }
     }
 
@@ -187,6 +194,13 @@ impl State {
         self.current()
             .map(|state| state.spos.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
             .unwrap_or_default()
+    }
+
+    pub fn list_pools_metadata_extended(
+        &self,
+        pools_operators: &Vec<KeyHash>,
+    ) -> Vec<Option<PoolMetadataExtended>> {
+        pools_operators.iter().map(|spo| self.pools_metadata_extended.get(spo).cloned()).collect()
     }
 
     /// Get Pools Active Stakes by epoch and total active stake
@@ -347,10 +361,11 @@ impl State {
         &mut self,
         block: &BlockInfo,
         tx_certs_msg: &TxCertificatesMessage,
-    ) -> Result<Option<Arc<Message>>> {
+    ) -> Result<(Option<Arc<Message>>, StdHashMap<KeyHash, PoolMetadata>)> {
         let mut message: Option<Arc<Message>> = None;
         let mut current = self.get_previous_state(block.number);
         current.block = block.number;
+        let mut pools_metadata: StdHashMap<KeyHash, PoolMetadata> = StdHashMap::new();
 
         // Handle end of epoch
         if block.epoch > current.epoch {
@@ -376,6 +391,8 @@ impl State {
                             ),
                             _ => retired_spos.push(dr.clone()),
                         };
+                        // remove pools metadata json
+                        self.pools_metadata_extended.remove(&dr);
                     }
                 }
                 None => (),
@@ -401,6 +418,10 @@ impl State {
                         hex::encode(&reg.operator)
                     );
                     current.spos.insert(reg.operator.clone(), reg.clone());
+
+                    if let Some(pool_metadata) = reg.pool_metadata.as_ref() {
+                        pools_metadata.insert(reg.operator.clone(), pool_metadata.clone());
+                    }
 
                     // Remove any existing queued deregistrations
                     for (epoch, deregistrations) in &mut current.pending_deregistrations.iter_mut()
@@ -464,7 +485,7 @@ impl State {
         }
         self.history.push_back(current);
 
-        Ok(message)
+        Ok((message, pools_metadata))
     }
 
     /// Handle SPO Stake Distribution
@@ -536,6 +557,17 @@ impl State {
             }
         }
         self.total_blocks_minted_history.push_back(new_state);
+    }
+
+    pub async fn handle_pools_metadata(
+        &mut self,
+        pools_metadata: StdHashMap<KeyHash, PoolMetadata>,
+    ) {
+        if let Err(e) =
+            fetch_pools_metadata(&mut self.pools_metadata_extended, pools_metadata).await
+        {
+            error!("Error fetching pools metadata: {e}");
+        }
     }
 
     pub fn bootstrap(&mut self, state: SPOState) {

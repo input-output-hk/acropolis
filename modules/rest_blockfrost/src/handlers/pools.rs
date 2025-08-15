@@ -142,6 +142,36 @@ async fn handle_pools_extended_blockfrost(context: Arc<Context<Message>>) -> Res
         .map(|(_, pool_registration)| pool_registration.vrf_key_hash.clone())
         .collect::<Vec<_>>();
 
+    // Get Pools Metadata Extended from spo-state
+    let pools_metadata_extended_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
+        PoolsStateQuery::GetPoolsMetadataExtended {
+            pools_operators: pools_operators.iter().map(|&op| op.clone()).collect(),
+        },
+    )));
+    let pools_metadata_extended = query_state(
+        &context,
+        POOLS_STATE_TOPIC,
+        pools_metadata_extended_msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::PoolsMetadataExtended(res),
+            )) => Ok(res.pools_metadata_extended),
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::Error(e),
+            )) => {
+                return Err(anyhow::anyhow!(
+                    "Internal server error while retrieving pools metadata extended: {e}"
+                ));
+            }
+            _ => {
+                return Err(anyhow::anyhow!(
+                    "Unexpected message type while retrieving pools metadata extended"
+                ))
+            }
+        },
+    )
+    .await?;
+
     // Get Latest Epoch from epoch-state
     let latest_epoch_info_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
         EpochsStateQuery::GetLatestEpoch,
@@ -340,6 +370,7 @@ async fn handle_pools_extended_blockfrost(context: Arc<Context<Message>>) -> Res
                     declared_pledge: pool_registration.pledge.to_string(),
                     margin_cost: pool_registration.margin.to_f32(),
                     fixed_cost: pool_registration.cost.to_string(),
+                    metadata: pools_metadata_extended[i].clone(),
                 })
             })
             .collect();
