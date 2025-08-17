@@ -2,7 +2,10 @@
 //! Unpacks block bodies to get transaction fees
 
 use acropolis_common::{
-    messages::{CardanoMessage, Message},
+    messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
+    queries::epochs::{
+        BlocksMintedByPools, EpochsStateQuery, EpochsStateQueryResponse, LatestEpoch,
+    },
     rest_helper::{handle_rest, handle_rest_with_parameter},
     Era,
 };
@@ -26,6 +29,8 @@ const DEFAULT_HANDLE_CURRENT_TOPIC: (&str, &str) = ("handle-topic-current-epoch"
 const DEFAULT_HANDLE_HISTORICAL_TOPIC: (&str, &str) =
     ("handle-topic-historical-epoch", "rest.get.epochs.*");
 const DEFAULT_STORE_HISTORY: (&str, bool) = ("store-history", false);
+
+const EPOCH_STATE_TOPIC: &str = "epoch-state";
 
 /// Epoch activity counter module
 #[module(
@@ -159,6 +164,42 @@ impl EpochActivityCounter {
         // Create state
         // TODO!  Handling rollbacks with StateHistory
         let state = Arc::new(Mutex::new(State::new(store_history)));
+
+        // handle epoch-state
+        let state_rest_blockfrost = state.clone();
+        context.handle(EPOCH_STATE_TOPIC, move |message| {
+            let state = state_rest_blockfrost.clone();
+            async move {
+                let Message::StateQuery(StateQuery::Epochs(query)) = message.as_ref() else {
+                    return Arc::new(Message::StateQueryResponse(StateQueryResponse::Epochs(
+                        EpochsStateQueryResponse::Error("Invalid message for epoch-state".into()),
+                    )));
+                };
+
+                let state = state.lock().await;
+                let response = match query {
+                    EpochsStateQuery::GetLatestEpoch => {
+                        EpochsStateQueryResponse::LatestEpoch(LatestEpoch {
+                            epoch: state.get_current_epoch(),
+                        })
+                    }
+
+                    EpochsStateQuery::GetBlocksMintedByPools { vrf_key_hashes } => {
+                        EpochsStateQueryResponse::BlocksMintedByPools(BlocksMintedByPools {
+                            blocks_minted: state.get_blocks_minted_by_pools(vrf_key_hashes),
+                        })
+                    }
+
+                    _ => EpochsStateQueryResponse::Error(format!(
+                        "Unimplemented query variant: {:?}",
+                        query
+                    )),
+                };
+                Arc::new(Message::StateQueryResponse(StateQueryResponse::Epochs(
+                    response,
+                )))
+            }
+        });
 
         handle_rest(context.clone(), &handle_current_topic, {
             let state = state.clone();

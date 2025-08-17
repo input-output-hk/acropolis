@@ -2,7 +2,10 @@
 
 use acropolis_common::{
     ledger_state::SPOState,
-    messages::{CardanoMessage, Message, SPOStateMessage, TxCertificatesMessage},
+    messages::{
+        CardanoMessage, EpochActivityMessage, Message, SPOStakeDistributionMessage,
+        SPOStateMessage, TxCertificatesMessage,
+    },
     params::{SECURITY_PARAMETER_K, TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH},
     serialization::SerializeMapAs,
     BlockInfo, KeyHash, PoolRegistration, PoolRetirement, TxCertificate,
@@ -84,10 +87,63 @@ impl From<&BlockState> for SPOState {
     }
 }
 
+#[serde_as]
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ActiveStakesState {
+    /// Snapshot is taken at Epoch N - 1 to N boundary
+    /// the first block of Epoch N
+    block: u64,
+    /// Epoch N (snapshot is Mark)
+    epoch: u64,
+    /// active stakes for each pool operator for each epoch
+    /// Epoch in key is (Epoch N + 1 when snapshot becomes Set)
+    #[serde_as(as = "SerializeMapAs<_, SerializeMapAs<Hex, _>>")]
+    active_stakes: HashMap<u64, HashMap<KeyHash, u64>>,
+}
+
+impl ActiveStakesState {
+    pub fn new() -> Self {
+        Self {
+            block: 0,
+            epoch: 0,
+            active_stakes: HashMap::new(),
+        }
+    }
+}
+
+#[serde_as]
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct TotalBlocksMintedState {
+    /// block number when Total Blocks Minted is taken
+    block: u64,
+    /// epoch number when Total Blocks Minted is taken (Epoch N + 1)
+    epoch: u64,
+    /// total blocks minted for each pool operator (Until Epoch N)
+    /// KeyHash is VRF Vkey hash
+    #[serde_as(as = "SerializeMapAs<Hex, _>")]
+    total_blocks_minted: HashMap<KeyHash, u64>,
+}
+
+impl TotalBlocksMintedState {
+    pub fn new() -> Self {
+        Self {
+            block: 0,
+            epoch: 0,
+            total_blocks_minted: HashMap::new(),
+        }
+    }
+}
+
 /// Overall module state
 pub struct State {
     /// Volatile states, one per volatile block
     history: VecDeque<BlockState>,
+
+    /// Volatile active stakes state, one per epoch (in case new epoch block is rolled back)
+    active_stakes_history: VecDeque<ActiveStakesState>,
+
+    /// Volatile total blocks minted state, one per epoch (in case new epoch block is rolled back)
+    total_blocks_minted_history: VecDeque<TotalBlocksMintedState>,
 }
 
 impl State {
@@ -95,6 +151,8 @@ impl State {
     pub fn new() -> Self {
         Self {
             history: VecDeque::<BlockState>::new(),
+            active_stakes_history: VecDeque::<ActiveStakesState>::new(),
+            total_blocks_minted_history: VecDeque::<TotalBlocksMintedState>::new(),
         }
     }
 
@@ -102,7 +160,16 @@ impl State {
         self.history.back()
     }
 
-    pub fn get(&self, operator: &Vec<u8>) -> Option<&PoolRegistration> {
+    pub fn current_active_stakes_state(&self) -> Option<&ActiveStakesState> {
+        self.active_stakes_history.back()
+    }
+
+    pub fn current_total_blocks_minted_state(&self) -> Option<&TotalBlocksMintedState> {
+        self.total_blocks_minted_history.back()
+    }
+
+    #[allow(dead_code)]
+    pub fn get(&self, operator: &KeyHash) -> Option<&PoolRegistration> {
         if let Some(current) = self.current() {
             current.spos.get(operator)
         } else {
@@ -110,11 +177,54 @@ impl State {
         }
     }
 
-    pub fn list_pools_with_info(&self) -> Option<Vec<(&Vec<u8>, &PoolRegistration)>> {
-        self.current().map(|state| state.spos.iter().collect())
+    /// Get all Stake Pool operators' operator hashes
+    pub fn list_pool_operators(&self) -> Vec<KeyHash> {
+        self.current().map(|state| state.spos.keys().cloned().collect()).unwrap_or_default()
+    }
+
+    /// Get all Stake Pool Operators' operator hashes and their registration information
+    pub fn list_pools_with_info(&self) -> Vec<(KeyHash, PoolRegistration)> {
+        self.current()
+            .map(|state| state.spos.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+            .unwrap_or_default()
+    }
+
+    /// Get Pools Active Stakes by epoch and total active stake
+    /// ## Arguments
+    /// * `pools_operators` - A vector of pool operator hashes
+    /// * `epoch` - The epoch to get the active stakes for
+    /// ## Returns
+    /// `Option<(Vec<u64>, u64)>` - a vector of active stakes for each pool operator and the total active stake.
+    pub fn get_pools_active_stakes(
+        &self,
+        pools_operators: &Vec<KeyHash>,
+        epoch: u64,
+    ) -> Option<(Vec<u64>, u64)> {
+        let current = self.current_active_stakes_state()?;
+        current.active_stakes.get(&epoch).map(|stakes| {
+            let total_active_stake = stakes.values().sum();
+            let pools_active_stakes =
+                pools_operators.iter().map(|spo| stakes.get(spo).cloned().unwrap_or(0)).collect();
+            (pools_active_stakes, total_active_stake)
+        })
+    }
+
+    /// Get total blocks minted for each pool operator
+    /// ## Arguments
+    /// * `pools_operator` - A vector of pool operator hashes
+    /// ## Returns
+    /// `Option<Vec<u64>>` - a vector of total blocks minted for each pool operator.
+    pub fn get_total_blocks_minted(&self, pools_operator: &Vec<KeyHash>) -> Option<Vec<u64>> {
+        let current = self.current_total_blocks_minted_state()?;
+        let total_blocks_minted = pools_operator
+            .iter()
+            .map(|spo| current.total_blocks_minted.get(spo).cloned().unwrap_or(0))
+            .collect();
+        Some(total_blocks_minted)
     }
 
     /// Get pools that will be retired in the upcoming epochs
+    #[allow(dead_code)]
     pub fn get_retiring_pools(&self) -> Vec<PoolRetirement> {
         self.current().map_or(Vec::new(), |state: &BlockState| {
             let current_epoch = state.epoch;
@@ -167,6 +277,57 @@ impl State {
             current.clone()
         } else {
             BlockState::new(0, 0, HashMap::new(), HashMap::new())
+        }
+    }
+
+    fn get_previous_active_stakes_state(&mut self, block_number: u64) -> ActiveStakesState {
+        loop {
+            match self.active_stakes_history.back() {
+                Some(state) => {
+                    if state.block >= block_number {
+                        info!(
+                            "Rolling back SPO active stakes state for block {}",
+                            state.block
+                        );
+                        self.active_stakes_history.pop_back();
+                    } else {
+                        break;
+                    }
+                }
+                _ => break,
+            }
+        }
+        if let Some(current) = self.active_stakes_history.back() {
+            current.clone()
+        } else {
+            ActiveStakesState::new()
+        }
+    }
+
+    fn get_previous_total_blocks_minted_state(
+        &mut self,
+        block_number: u64,
+    ) -> TotalBlocksMintedState {
+        loop {
+            match self.total_blocks_minted_history.back() {
+                Some(state) => {
+                    if state.block >= block_number {
+                        info!(
+                            "Rolling back SPO total blocks minted state for block {}",
+                            state.block
+                        );
+                        self.total_blocks_minted_history.pop_back();
+                    } else {
+                        break;
+                    }
+                }
+                _ => break,
+            }
+        }
+        if let Some(current) = self.total_blocks_minted_history.back() {
+            current.clone()
+        } else {
+            TotalBlocksMintedState::new()
         }
     }
 
@@ -306,6 +467,77 @@ impl State {
         Ok(message)
     }
 
+    /// Handle SPO Stake Distribution
+    /// Live stake snapshots taken at Epoch N - 1 to N boundary (Mark at Epoch N)
+    /// Active stake is valid from Epoch N + 1 (Set at Epoch N + 1)
+    ///
+    pub fn handle_spdd(&mut self, block: &BlockInfo, spdd_message: &SPOStakeDistributionMessage) {
+        info!(
+            "Processing SPO Stake Distribution for epoch {} at block {}, epoch {}",
+            spdd_message.epoch, block.number, block.epoch
+        );
+        let SPOStakeDistributionMessage { spos, .. } = spdd_message;
+        let current = self.get_previous_active_stakes_state(block.number);
+        let mut active_stakes = current.active_stakes.clone();
+        active_stakes.insert(
+            block.epoch + 1,
+            HashMap::from_iter(spos.iter().map(|(key, value)| (key.clone(), value.active))),
+        );
+
+        let new_state = ActiveStakesState {
+            block: block.number,
+            epoch: block.epoch,
+            active_stakes,
+        };
+
+        // Prune old history which can not be rolled back to
+        if let Some(front) = self.active_stakes_history.front() {
+            if current.block > front.block + SECURITY_PARAMETER_K as u64 {
+                self.active_stakes_history.pop_front();
+            }
+        }
+        self.active_stakes_history.push_back(new_state);
+    }
+
+    /// Handle Epoch Activity
+    pub fn handle_epoch_activity(
+        &mut self,
+        block: &BlockInfo,
+        epoch_activity_message: &EpochActivityMessage,
+    ) {
+        info!(
+            "Processing Epoch Activity for epoch {} at block {}, epoch {}",
+            epoch_activity_message.epoch, block.number, block.epoch
+        );
+        let EpochActivityMessage {
+            vrf_vkey_hashes, ..
+        } = epoch_activity_message;
+        let current = self.get_previous_total_blocks_minted_state(block.number);
+        let mut total_blocks_minted = current.total_blocks_minted.clone();
+
+        vrf_vkey_hashes.iter().for_each(|(vrf_vkey_hash, amount)| {
+            let Some(v) = total_blocks_minted.get_mut(vrf_vkey_hash) else {
+                total_blocks_minted.insert(vrf_vkey_hash.clone(), *amount as u64);
+                return;
+            };
+            *v += *amount as u64;
+        });
+
+        let new_state = TotalBlocksMintedState {
+            block: block.number,
+            epoch: block.epoch,
+            total_blocks_minted,
+        };
+
+        // Prune old history which can not be rolled back to
+        if let Some(front) = self.total_blocks_minted_history.front() {
+            if current.block > front.block + SECURITY_PARAMETER_K as u64 {
+                self.total_blocks_minted_history.pop_front();
+            }
+        }
+        self.total_blocks_minted_history.push_back(new_state);
+    }
+
     pub fn bootstrap(&mut self, state: SPOState) {
         self.history.clear();
         self.history.push_back(state.into());
@@ -320,18 +552,22 @@ impl State {
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use acropolis_common::{BlockInfo, BlockStatus, Era, PoolRetirement, Ratio, TxCertificate};
+    use acropolis_common::{
+        BlockInfo, BlockStatus, DelegatedStake, Era, PoolRetirement, Ratio, TxCertificate,
+    };
 
     #[tokio::test]
     async fn new_state_is_empty() {
         let state = State::new();
         assert_eq!(0, state.history.len());
+        assert_eq!(0, state.active_stakes_history.len());
     }
 
     #[tokio::test]
     async fn current_on_new_state_returns_none() {
         let state = State::new();
         assert!(state.current().is_none());
+        assert!(state.current_active_stakes_state().is_none());
     }
 
     fn new_msg() -> TxCertificatesMessage {
@@ -340,7 +576,14 @@ pub mod tests {
         }
     }
 
-    pub fn new_block() -> BlockInfo {
+    fn new_spdd_message() -> SPOStakeDistributionMessage {
+        SPOStakeDistributionMessage {
+            spos: Vec::new(),
+            epoch: 0,
+        }
+    }
+
+    fn new_block() -> BlockInfo {
         BlockInfo {
             status: BlockStatus::Immutable,
             slot: 0,
@@ -353,12 +596,21 @@ pub mod tests {
     }
 
     #[tokio::test]
-    async fn state_is_not_empty_after_handle() {
+    async fn state_is_not_empty_after_handle_tx_certs() {
         let mut state = State::new();
         let msg = new_msg();
         let block = new_block();
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
         assert_eq!(1, state.history.len());
+    }
+
+    #[tokio::test]
+    async fn active_stakes_state_is_not_empty_after_handle_spdd() {
+        let mut state = State::new();
+        let msg = new_spdd_message();
+        let block = new_block();
+        state.handle_spdd(&block, &msg);
+        assert_eq!(1, state.active_stakes_history.len());
     }
 
     #[tokio::test]
@@ -523,6 +775,73 @@ pub mod tests {
     }
 
     #[tokio::test]
+    async fn get_pools_active_stakes_returns_none_when_state_is_new() {
+        let state = State::new();
+        assert!(state.get_pools_active_stakes(&vec![vec![1], vec![2]], 0).is_none());
+    }
+
+    #[tokio::test]
+    async fn get_pools_active_stakes_returns_none_when_epoch_is_not_found() {
+        let mut state = State::new();
+        let mut msg = new_spdd_message();
+        msg.epoch = 1;
+        let mut block = new_block();
+        block.epoch = 1;
+        state.handle_spdd(&block, &msg);
+        assert!(state.get_pools_active_stakes(&vec![vec![1], vec![2]], block.epoch).is_none());
+    }
+
+    #[tokio::test]
+    async fn get_pools_active_stakes_returns_zero_when_active_stakes_not_found() {
+        let mut state = State::new();
+        let mut msg = new_spdd_message();
+        msg.epoch = 1;
+        let mut block = new_block();
+        block.epoch = 1;
+        state.handle_spdd(&block, &msg);
+        let (active_stakes, total) =
+            state.get_pools_active_stakes(&vec![vec![1], vec![2]], block.epoch + 1).unwrap();
+        assert_eq!(2, active_stakes.len());
+        assert_eq!(0, active_stakes[0]);
+        assert_eq!(0, active_stakes[1]);
+        assert_eq!(0, total);
+    }
+
+    #[tokio::test]
+    async fn get_pools_active_stakes_returns_data() {
+        let mut state = State::new();
+        let mut msg = new_spdd_message();
+        msg.spos = vec![
+            (
+                vec![1],
+                DelegatedStake {
+                    active: 10,
+                    live: 10,
+                },
+            ),
+            (
+                vec![2],
+                DelegatedStake {
+                    active: 20,
+                    live: 20,
+                },
+            ),
+        ];
+        msg.epoch = 1;
+        let mut block = new_block();
+        block.number = 11;
+        block.epoch = 2;
+        state.handle_spdd(&block, &msg);
+
+        let (active_stakes, total) =
+            state.get_pools_active_stakes(&vec![vec![1], vec![2]], block.epoch + 1).unwrap();
+        assert_eq!(2, active_stakes.len());
+        assert_eq!(10, active_stakes[0]);
+        assert_eq!(20, active_stakes[1]);
+        assert_eq!(30, total);
+    }
+
+    #[tokio::test]
     async fn spo_gets_restored_on_rollback() {
         let mut state = State::new();
         let mut msg = new_msg();
@@ -579,6 +898,131 @@ pub mod tests {
             assert_eq!(1, current.spos.len());
             let spo = current.spos.get(&vec![0u8]);
             assert!(!spo.is_none());
+        };
+    }
+
+    #[tokio::test]
+    async fn active_stakes_get_restored_on_rollback() {
+        let mut state = State::new();
+        let mut msg = new_spdd_message();
+        msg.spos = vec![
+            (
+                vec![1],
+                DelegatedStake {
+                    active: 10,
+                    live: 10,
+                },
+            ),
+            (
+                vec![2],
+                DelegatedStake {
+                    active: 20,
+                    live: 20,
+                },
+            ),
+            (
+                vec![3],
+                DelegatedStake {
+                    active: 30,
+                    live: 30,
+                },
+            ),
+        ];
+        msg.epoch = 1;
+        let mut block = new_block();
+        block.number = 11;
+        block.epoch = 2;
+        state.handle_spdd(&block, &msg);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&state.active_stakes_history).unwrap()
+        );
+
+        let current = state.current_active_stakes_state();
+        assert!(!current.is_none());
+        if let Some(current) = current {
+            assert_eq!(1, current.active_stakes.len());
+            assert_eq!(
+                10,
+                *current.active_stakes.get(&(block.epoch + 1)).unwrap().get(&vec![1]).unwrap()
+            );
+            assert_eq!(
+                20,
+                *current.active_stakes.get(&(block.epoch + 1)).unwrap().get(&vec![2]).unwrap()
+            );
+            assert_eq!(
+                30,
+                *current.active_stakes.get(&(block.epoch + 1)).unwrap().get(&vec![3]).unwrap()
+            );
+        };
+
+        msg.spos = vec![
+            (
+                vec![1],
+                DelegatedStake {
+                    active: 30,
+                    live: 30,
+                },
+            ),
+            (
+                vec![2],
+                DelegatedStake {
+                    active: 40,
+                    live: 40,
+                },
+            ),
+        ];
+        msg.epoch = 2;
+        block.number = 21;
+        block.epoch = 3;
+        state.handle_spdd(&block, &msg);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&state.active_stakes_history).unwrap()
+        );
+
+        let current = state.current_active_stakes_state();
+        assert!(!current.is_none());
+        if let Some(current) = current {
+            assert_eq!(2, current.active_stakes.len());
+            assert_eq!(
+                30,
+                *current.active_stakes.get(&(block.epoch + 1)).unwrap().get(&vec![1]).unwrap()
+            );
+            assert_eq!(
+                40,
+                *current.active_stakes.get(&(block.epoch + 1)).unwrap().get(&vec![2]).unwrap()
+            );
+        };
+
+        let mut msg = new_spdd_message();
+        msg.epoch = 2;
+        block.number = 21;
+        block.epoch = 3;
+        state.handle_spdd(&block, &msg);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&state.active_stakes_history).unwrap()
+        );
+
+        let current = state.current_active_stakes_state();
+        assert!(!current.is_none());
+        if let Some(current) = current {
+            assert_eq!(2, current.active_stakes.len());
+            assert_eq!(
+                10,
+                *current.active_stakes.get(&block.epoch).unwrap().get(&vec![1]).unwrap()
+            );
+            assert_eq!(
+                20,
+                *current.active_stakes.get(&block.epoch).unwrap().get(&vec![2]).unwrap()
+            );
+            assert_eq!(
+                30,
+                *current.active_stakes.get(&block.epoch).unwrap().get(&vec![3]).unwrap()
+            );
+
+            assert!(current.active_stakes.get(&(block.epoch + 1)).unwrap().is_empty());
         };
     }
 

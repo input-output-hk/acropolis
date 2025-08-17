@@ -112,6 +112,27 @@ impl State {
         self.pots.clone()
     }
 
+    /// Get Pools Live stake
+    pub fn get_pools_live_stakes(&self, pools_operators: &Vec<KeyHash>) -> Vec<u64> {
+        let stake_addresses = self.stake_addresses.lock().unwrap();
+        let live_stakes_map = DashMap::<&KeyHash, u64>::new();
+
+        // Collect the SPO keys and UTXO
+        let sas_data: Vec<(&KeyHash, u64)> = stake_addresses
+            .values()
+            .filter_map(|sas| sas.delegated_spo.as_ref().map(|spo| (spo, sas.utxo_value)))
+            .collect();
+
+        sas_data.par_iter().for_each(|(spo, utxo_value)| {
+            *live_stakes_map.entry(spo).or_insert(0) += utxo_value;
+        });
+
+        pools_operators
+            .iter()
+            .map(|pool_operator| live_stakes_map.get(pool_operator).map(|v| *v).unwrap_or(0))
+            .collect()
+    }
+
     /// Log statistics
     fn log_stats(&self) {
         info!(num_stake_addresses = self.stake_addresses.lock().unwrap().keys().len(),);

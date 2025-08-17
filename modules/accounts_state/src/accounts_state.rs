@@ -3,6 +3,7 @@
 
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
+    queries::accounts::PoolsLiveStakes,
     rest_helper::handle_rest,
     state_history::StateHistory,
     BlockInfo, BlockStatus,
@@ -43,6 +44,8 @@ const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: &str = "cardano.protocol.parameters";
 const DEFAULT_HANDLE_SPDD_TOPIC: (&str, &str) = ("handle-topic-spdd", "rest.get.spdd");
 const DEFAULT_HANDLE_POTS_TOPIC: (&str, &str) = ("handle-topic-pots", "rest.get.pots");
 const DEFAULT_HANDLE_DRDD_TOPIC: (&str, &str) = ("handle-topic-drdd", "rest.get.drdd");
+
+const ACCOUNTS_STATE_TOPIC: &str = "accounts-state";
 
 /// Accounts State module
 #[module(
@@ -389,14 +392,14 @@ impl AccountsState {
 
         // Create history
         let history = Arc::new(Mutex::new(StateHistory::<State>::new("AccountsState")));
-        let history_account_single = history.clone();
+        let history_account_state = history.clone();
         let history_spdd = history.clone();
         let history_pots = history.clone();
         let history_drdd = history.clone();
         let history_tick = history.clone();
 
-        context.handle("accounts-state", move |message| {
-            let history = history_account_single.clone();
+        context.handle(ACCOUNTS_STATE_TOPIC, move |message| {
+            let history = history_account_state.clone();
             async move {
                 let Message::StateQuery(StateQuery::Accounts(query)) = message.as_ref() else {
                     return Arc::new(Message::StateQueryResponse(StateQueryResponse::Accounts(
@@ -428,6 +431,12 @@ impl AccountsState {
                         } else {
                             AccountsStateQueryResponse::NotFound
                         }
+                    }
+
+                    AccountsStateQuery::GetPoolsLiveStakes { pools_operators } => {
+                        AccountsStateQueryResponse::PoolsLiveStakes(PoolsLiveStakes {
+                            live_stakes: state.get_pools_live_stakes(pools_operators),
+                        })
                     }
 
                     _ => AccountsStateQueryResponse::Error(format!(
