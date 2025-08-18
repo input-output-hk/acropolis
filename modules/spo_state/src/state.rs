@@ -87,6 +87,26 @@ impl From<&BlockState> for SPOState {
     }
 }
 
+/// Epoch State
+/// Store active_stakes, blocks_minted, delegators_count, rewards, fees
+///
+#[serde_as]
+#[derive(Default, Debug, Clone, serde::Serialize)]
+pub struct EpochState {
+    /// epoch number N
+    epoch: u64,
+    /// blocks minted during the epoch
+    blocks_minted: u64,
+    /// active stakes of the epoch (taken boundary from epoch N-2 to N-1)
+    active_stakes: u64,
+    /// delegators count by the end of the epoch
+    delegators_count: u64,
+    /// rewards of the epoch
+    rewards: u64,
+    /// fees of the epoch
+    fees: u64,
+}
+
 #[serde_as]
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ActiveStakesState {
@@ -516,11 +536,7 @@ impl State {
         let mut total_blocks_minted = current.total_blocks_minted.clone();
 
         vrf_vkey_hashes.iter().for_each(|(vrf_vkey_hash, amount)| {
-            let Some(v) = total_blocks_minted.get_mut(vrf_vkey_hash) else {
-                total_blocks_minted.insert(vrf_vkey_hash.clone(), *amount as u64);
-                return;
-            };
-            *v += *amount as u64;
+            *(total_blocks_minted.entry(vrf_vkey_hash.clone()).or_insert(0)) += *amount as u64;
         });
 
         let new_state = TotalBlocksMintedState {

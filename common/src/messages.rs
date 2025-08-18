@@ -118,6 +118,9 @@ pub struct EpochActivityMessage {
     /// Total fees in this epoch
     pub total_fees: u64,
 
+    /// Fees by VRF vkey hash
+    pub fees: Vec<(KeyHash, u64)>,
+
     /// List of all VRF vkey hashes used on blocks (SPO indicator) and
     /// number of blocks produced
     pub vrf_vkey_hashes: Vec<(KeyHash, usize)>,
