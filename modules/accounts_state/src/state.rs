@@ -798,15 +798,11 @@ impl State {
                 // Zero withdrawals are expected, as a way to validate stake addresses (per Pi)
                 if withdrawal.value != 0 {
                     let mut sas = sas.clone();
-                    if let Err(e) =
-                        Self::update_value_with_delta(&mut sas.rewards, -(withdrawal.value as i64))
-                    {
-                        error!(
-                            "Withdrawing from stake address {} hash {}: {e}",
-                            withdrawal.address.to_string().unwrap_or("???".to_string()),
-                            hex::encode(hash)
-                        );
-                        continue;
+                    if let Err(e) = Self::update_value_with_delta(&mut sas.rewards,
+                                                                  -(withdrawal.value as i64)) {
+                        error!("Withdrawing from stake address {} hash {}: {e}",
+                                withdrawal.address.to_string().unwrap_or("???".to_string()),
+                                hex::encode(hash));
                     } else {
                         // Update the stake address
                         stake_addresses.insert(hash.to_vec(), sas);
@@ -873,9 +869,9 @@ mod tests {
     use super::*;
     use acropolis_common::{
         rational_number::RationalNumber, AddressNetwork, Anchor, Committee, Constitution,
-        ConwayParams, Credential, DRepVotingThresholds, PoolVotingThresholds, Pot, PotDelta,
-        ProtocolParams, Ratio, Registration, StakeAddress, StakeAddressDelta, StakeAddressPayload,
-        StakeAndVoteDelegation, StakeRegistrationAndStakeAndVoteDelegation,
+        CostModel, ConwayParams, Credential, DRepVotingThresholds, PoolVotingThresholds, 
+        Pot, PotDelta, ProtocolParams, Ratio, Registration, StakeAddress, StakeAddressDelta, 
+        StakeAddressPayload, StakeAndVoteDelegation, StakeRegistrationAndStakeAndVoteDelegation,
         StakeRegistrationAndVoteDelegation, VoteDelegation, Withdrawal,
     };
 
@@ -1350,7 +1346,7 @@ mod tests {
                 d_rep_deposit: 100_000_000,
                 d_rep_activity: 27,
                 min_fee_ref_script_cost_per_byte: RationalNumber::new(1, 42),
-                plutus_v3_cost_model: Vec::new(),
+                plutus_v3_cost_model: CostModel::new(Vec::new()),
                 constitution: Constitution {
                     anchor: Anchor {
                         url: "constitution.cardano.org".to_string(),

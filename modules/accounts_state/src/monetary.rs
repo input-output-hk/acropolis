@@ -1,14 +1,13 @@
 //! Acropolis AccountsState: monetary (reserves, treasury) calculations
 
 use acropolis_common::{
-    Lovelace, ShelleyParams,
+    Lovelace, protocol_params::ShelleyParams,
     rational_number::RationalNumber,
 };
 use crate::state::Pots;
 use anyhow::{Result, anyhow};
 use tracing::info;
 use bigdecimal::{BigDecimal, ToPrimitive, One};
-use std::str::FromStr;
 
 /// Result of monetary calculation
 #[derive(Debug, Default, Clone)]
@@ -71,7 +70,9 @@ pub fn calculate_monetary_change(params: &ShelleyParams,
 // Calculate 'eta' - ratio of blocks produced during the epoch vs expected
 fn calculate_eta(params: &ShelleyParams, total_non_obft_blocks: usize) -> Result<BigDecimal> {
     let decentralisation = &params.protocol_params.decentralisation_param;
-    let active_slots_coeff = BigDecimal::from_str(&params.active_slots_coeff.to_string())?;
+    let active_slots_coeff =
+        BigDecimal::from(params.active_slots_coeff.numer()) /
+        BigDecimal::from(params.active_slots_coeff.denom());
     let epoch_length = BigDecimal::from(params.epoch_length);
 
     let eta = if decentralisation >= &RationalNumber::new(8,10) {
@@ -89,10 +90,9 @@ fn calculate_eta(params: &ShelleyParams, total_non_obft_blocks: usize) -> Result
 }
 
 // Calculate monetary expansion based on current reserves
-fn calculate_monetary_expansion(_params: &ShelleyParams, reserves: Lovelace, eta: &BigDecimal)
+fn calculate_monetary_expansion(params: &ShelleyParams, reserves: Lovelace, eta: &BigDecimal)
                                 -> BigDecimal {
-    let monetary_expansion_factor = RationalNumber::new(3, 1000);
-    // TODO odd values coming in! &params.protocol_params.monetary_expansion; // Rho
+    let monetary_expansion_factor = params.protocol_params.monetary_expansion;
     let monetary_expansion = (BigDecimal::from(reserves)
                               * eta
                               * BigDecimal::from(monetary_expansion_factor.numer())
@@ -108,8 +108,11 @@ fn calculate_monetary_expansion(_params: &ShelleyParams, reserves: Lovelace, eta
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acropolis_common::{ NetworkId, Nonce, NonceVariant, ProtocolVersion, ShelleyProtocolParams };
+    use acropolis_common::protocol_params::{ 
+        NetworkId, Nonce, NonceVariant, ProtocolVersion, ShelleyProtocolParams
+    };
     use chrono::{DateTime, Utc};
+    use acropolis_common::rational_number::rational_number_from_f32;
 
     // Known values at start of Shelley - from Java reference and DBSync
     const EPOCH_208_RESERVES: Lovelace = 13_888_022_852_926_644;
@@ -129,7 +132,7 @@ mod tests {
 
     fn shelley_params() -> ShelleyParams {
         ShelleyParams {
-            active_slots_coeff: 0.05,
+            active_slots_coeff: rational_number_from_f32(0.05).unwrap(),
             epoch_length: 432000,
             max_kes_evolutions: 62,
             max_lovelace_supply: 45_000_000_000_000_000,

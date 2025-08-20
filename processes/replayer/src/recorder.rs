@@ -96,6 +96,7 @@ impl Recorder {
             let gov_procs_empty =
                 gov_procs.proposal_procedures.is_empty() &&
                 gov_procs.voting_procedures.is_empty() &&
+                gov_procs.alonzo_babbage_updates.is_empty() &&
                 !blk_g.new_epoch;
 
             if !gov_procs_empty {

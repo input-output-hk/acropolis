@@ -3,8 +3,10 @@ use crate::state::State;
 use acropolis_common::{
     messages::RESTResponse, rest_helper::ToCheckedF64, AlonzoParams, Anchor, BlockVersionData,
     ByronParams, Committee, Constitution, ConwayParams, DRepVotingThresholds, ExUnitPrices,
-    ExUnits, NetworkId, Nonce, NonceVariant, PoolVotingThresholds, ProtocolConsts, ProtocolParams,
-    ProtocolVersion, ShelleyParams, ShelleyProtocolParams,
+    ExUnits, PoolVotingThresholds, ProtocolConsts, ProtocolParams,
+    protocol_params::{
+        NetworkId, Nonce, NonceVariant, ProtocolVersion, ShelleyParams, ShelleyProtocolParams,
+    }
 };
 use anyhow::Result;
 use pallas::ledger::primitives::CostModel;
@@ -41,7 +43,7 @@ pub struct ByronParamsRest {
 
 #[derive(Serialize)]
 pub struct ShelleyParamsRest {
-    pub active_slots_coeff: f32,
+    pub active_slots_coeff: f64,
     pub epoch_length: u32,
     pub max_kes_evolutions: u32,
     pub max_lovelace_supply: u64,
@@ -300,7 +302,7 @@ impl TryFrom<&ShelleyParams> for ShelleyParamsRest {
 
     fn try_from(params: &ShelleyParams) -> Result<Self> {
         Ok(Self {
-            active_slots_coeff: params.active_slots_coeff,
+            active_slots_coeff: params.active_slots_coeff.to_checked_f64("active_slots_coeff")?,
             epoch_length: params.epoch_length,
             max_kes_evolutions: params.max_kes_evolutions,
             max_lovelace_supply: params.max_lovelace_supply,
@@ -367,8 +369,8 @@ impl TryFrom<&AlonzoParams> for AlonzoParamsRest {
             max_value_size: src.max_value_size,
             collateral_percentage: src.collateral_percentage,
             max_collateral_inputs: src.max_collateral_inputs,
-            plutus_v1_cost_model: src.plutus_v1_cost_model.clone(),
-            plutus_v2_cost_model: src.plutus_v2_cost_model.clone(),
+            plutus_v1_cost_model: src.plutus_v1_cost_model.as_ref().map(|x| x.as_vec().clone()),
+            plutus_v2_cost_model: src.plutus_v2_cost_model.as_ref().map(|x| x.as_vec().clone()),
         })
     }
 }
@@ -400,7 +402,7 @@ impl TryFrom<&ConwayParams> for ConwayParamsRest {
             min_fee_ref_script_cost_per_byte: src
                 .min_fee_ref_script_cost_per_byte
                 .to_checked_f64("min_fee_ref_script_cost_per_byte")?,
-            plutus_v3_cost_model: src.plutus_v3_cost_model.clone(),
+            plutus_v3_cost_model: src.plutus_v3_cost_model.as_vec().clone(),
             constitution: (&src.constitution).try_into()?,
             committee: (&src.committee).try_into()?,
         })
