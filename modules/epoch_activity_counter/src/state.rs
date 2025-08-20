@@ -70,13 +70,13 @@ impl State {
 
         // find the block in the queue
         loop {
-            let Some((block_number, vrf_key_hash)) = self.blocks.pop_front() else {
+            let Some((front_number, vrf_key_hash)) = self.blocks.pop_front() else {
                 break;
             };
-            if block.number > block_number {
+            if block.number > front_number {
                 // if CardanoMessage::BlockFees is received before CardanoMessage::BlockHeader.
                 error!("CardanoMessage::BlockFees is received before CardanoMessage::BlockHeader.");
-            } else if block_number == block.number {
+            } else if front_number == block.number {
                 // add this fee to fees for this vrf key hash
                 *(self.fees.entry(vrf_key_hash).or_insert(0)) += block_fee;
                 break;

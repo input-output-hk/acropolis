@@ -30,6 +30,8 @@ const DEFAULT_SPO_STATE_TOPIC: &str = "cardano.spo.state";
 const DEFAULT_SPDD_SUBSCRIBE_TOPIC: &str = "cardano.spo.distribution";
 const DEFAULT_EPOCH_ACTIVITY_TOPIC: &str = "cardano.epoch.activity";
 
+const DEFAULT_STORE_HISTORY: (&str, bool) = ("store-history", false);
+
 const POOLS_STATE_TOPIC: &str = "pools-state";
 /// SPO State module
 #[module(
@@ -152,6 +154,9 @@ impl SPOState {
             .unwrap_or(DEFAULT_EPOCH_ACTIVITY_TOPIC.to_string());
         info!("Creating subscriber on '{epoch_activity_topic}'");
 
+        let store_history =
+            config.get_bool(DEFAULT_STORE_HISTORY.0).unwrap_or(DEFAULT_STORE_HISTORY.1);
+
         let maybe_snapshot_topic = config
             .get_string("snapshot-topic")
             .ok()
@@ -162,7 +167,7 @@ impl SPOState {
             .unwrap_or(DEFAULT_SPO_STATE_TOPIC.to_string());
         info!("Creating SPO state publisher on '{spo_state_topic}'");
 
-        let state = Arc::new(Mutex::new(State::new()));
+        let state = Arc::new(Mutex::new(State::new(store_history)));
 
         // handle pools-state
         let state_rest_blockfrost = state.clone();
@@ -195,19 +200,12 @@ impl SPOState {
                         pools_operators,
                         epoch,
                     } => {
-                        if let Some((active_stakes, total_active_stake)) =
-                            guard.get_pools_active_stakes(pools_operators, *epoch)
-                        {
-                            PoolsStateQueryResponse::PoolsActiveStakes(PoolsActiveStakes {
-                                active_stakes,
-                                total_active_stake,
-                            })
-                        } else {
-                            PoolsStateQueryResponse::PoolsActiveStakes(PoolsActiveStakes {
-                                active_stakes: vec![0; pools_operators.len()],
-                                total_active_stake: 0,
-                            })
-                        }
+                        let (active_stakes, total_active_stake) =
+                            guard.get_pools_active_stakes(pools_operators, *epoch);
+                        PoolsStateQueryResponse::PoolsActiveStakes(PoolsActiveStakes {
+                            active_stakes,
+                            total_active_stake,
+                        })
                     }
 
                     PoolsStateQuery::GetPoolsTotalBlocksMinted { vrf_key_hashes } => {
