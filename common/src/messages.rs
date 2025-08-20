@@ -132,7 +132,7 @@ pub struct GovernanceProceduresMessage {
     pub voting_procedures: Vec<(DataHash, VotingProcedures)>,
 
     /// Alonzo-compatible (from Shelley) and Babbage updates
-    pub alonzo_babbage_updates: Vec<AlonzoBabbageUpdateProposal>
+    pub alonzo_babbage_updates: Vec<AlonzoBabbageUpdateProposal>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

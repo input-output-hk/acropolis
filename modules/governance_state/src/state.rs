@@ -1,19 +1,17 @@
 //! Acropolis Governance State: State storage
 
-use acropolis_common::{
-    messages::{
-        CardanoMessage, DRepStakeDistributionMessage, SPOStakeDistributionMessage,
-        GovernanceOutcomesMessage,
-        GovernanceProceduresMessage, Message, ProtocolParamsMessage,
-    },
-    BlockInfo, ConwayParams, DelegatedStake, DRepCredential, DataHash, 
-    EnactStateElem, Era, GovActionId, 
-    GovernanceAction, GovernanceOutcome, GovernanceOutcomeVariant,
-    KeyHash, Lovelace, ProposalProcedure, SingleVoterVotes,
-    TreasuryWithdrawalsAction, Voter, VotesCount, VotingOutcome, VotingProcedure
-};
 use crate::alonzo_babbage_voting::AlonzoBabbageVoting;
 use crate::VotingRegistrationState;
+use acropolis_common::{
+    messages::{
+        CardanoMessage, DRepStakeDistributionMessage, GovernanceOutcomesMessage,
+        GovernanceProceduresMessage, Message, ProtocolParamsMessage, SPOStakeDistributionMessage,
+    },
+    BlockInfo, ConwayParams, DRepCredential, DataHash, DelegatedStake, EnactStateElem, Era,
+    GovActionId, GovernanceAction, GovernanceOutcome, GovernanceOutcomeVariant, KeyHash, Lovelace,
+    ProposalProcedure, SingleVoterVotes, TreasuryWithdrawalsAction, Voter, VotesCount,
+    VotingOutcome, VotingProcedure,
+};
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::Context;
 use hex::ToHex;
@@ -88,7 +86,7 @@ impl State {
     pub async fn handle_drep_stake(
         &mut self,
         drep_message: &DRepStakeDistributionMessage,
-        spo_message: &SPOStakeDistributionMessage
+        spo_message: &SPOStakeDistributionMessage,
     ) -> Result<()> {
         self.drep_stake_messages_count += 1;
         self.drep_stake = HashMap::from_iter(drep_message.dreps.iter().cloned());
@@ -104,17 +102,17 @@ impl State {
         governance_message: &GovernanceProceduresMessage,
     ) -> Result<()> {
         if block.era < Era::Conway {
-            if !(governance_message.proposal_procedures.is_empty() &&
-                governance_message.voting_procedures.is_empty())
+            if !(governance_message.proposal_procedures.is_empty()
+                && governance_message.voting_procedures.is_empty())
             {
                 bail!("Non-empty governance message for pre-conway block {block:?}");
             }
-        }
-        else {
+        } else {
             if !governance_message.alonzo_babbage_updates.is_empty() {
-                if let Err(e) = self.alonzo_babbage_voting.process_update_proposals(
-                    block, &governance_message.alonzo_babbage_updates
-                ) {
+                if let Err(e) = self
+                    .alonzo_babbage_voting
+                    .process_update_proposals(block, &governance_message.alonzo_babbage_updates)
+                {
                     error!("Error handling governance_message: '{e}'");
                 }
             }
@@ -193,7 +191,11 @@ impl State {
     }
 
     /// Checks whether action_id can be considered finally accepted
-    fn is_finally_accepted(&self, voting_state: &VotingRegistrationState, action_id: &GovActionId) -> Result<VotingOutcome> {
+    fn is_finally_accepted(
+        &self,
+        voting_state: &VotingRegistrationState,
+        action_id: &GovActionId,
+    ) -> Result<VotingOutcome> {
         let (_epoch, proposal) = self
             .proposals
             .get(action_id)
@@ -312,7 +314,9 @@ impl State {
     }
 
     fn finalize_conway_voting(
-        &mut self, new_block: &BlockInfo, voting_state: &VotingRegistrationState
+        &mut self,
+        new_block: &BlockInfo,
+        voting_state: &VotingRegistrationState,
     ) -> Result<Vec<GovernanceOutcome>> {
         let mut outcome = Vec::<GovernanceOutcome>::new();
         let actions = self.proposals.keys().map(|a| a.clone()).collect::<Vec<_>>();
@@ -336,12 +340,10 @@ impl State {
                         action_to_perform,
                     })
                 }
-                Ok(Some(out)) => {
-                    outcome.push(GovernanceOutcome {
-                        voting: out,
-                        action_to_perform: GovernanceOutcomeVariant::NoAction,
-                    })
-                }
+                Ok(Some(out)) => outcome.push(GovernanceOutcome {
+                    voting: out,
+                    action_to_perform: GovernanceOutcomeVariant::NoAction,
+                }),
             }
         }
 
@@ -349,24 +351,29 @@ impl State {
     }
 
     fn recalculate_voting_state(&self) -> Result<VotingRegistrationState> {
-        let drep_stake = self.drep_stake.iter().map(|(_dr,lov)| lov).sum();
+        let drep_stake = self.drep_stake.iter().map(|(_dr, lov)| lov).sum();
 
         let committee_usize = self.get_conway_params()?.committee.members.len();
-        let committee = committee_usize.try_into().or_else(
-            |e| Err(anyhow!("Commitee size: conversion usize -> u64 failed, {e}"))
-        )?;
+        let committee = committee_usize.try_into().or_else(|e| {
+            Err(anyhow!(
+                "Commitee size: conversion usize -> u64 failed, {e}"
+            ))
+        })?;
 
-        let spo_stake = self.spo_stake.iter().map(|(_sp,ds)| ds.live).sum();
+        let spo_stake = self.spo_stake.iter().map(|(_sp, ds)| ds.live).sum();
 
-        Ok(VotingRegistrationState::new(spo_stake, spo_stake, drep_stake, committee))
+        Ok(VotingRegistrationState::new(
+            spo_stake, spo_stake, drep_stake, committee,
+        ))
     }
 
     /// Loops through all actions and checks their status for the new_epoch
     /// All incoming data (parameters for the epoch, drep distribution, etc)
     /// should already be actual at this moment.
-    pub fn process_new_epoch(&mut self, new_block: &BlockInfo) 
-        -> Result<GovernanceOutcomesMessage> 
-    {
+    pub fn process_new_epoch(
+        &mut self,
+        new_block: &BlockInfo,
+    ) -> Result<GovernanceOutcomesMessage> {
         let mut output = GovernanceOutcomesMessage::default();
         output.alonzo_babbage_outcomes = self.alonzo_babbage_voting.finalize_voting(new_block)?;
 
@@ -377,7 +384,9 @@ impl State {
 
             info!(
                 "Conway voting, epoch {} ({}): {voting_state}, total {} actions, {acc} accepted",
-                new_block.epoch, new_block.era, outcome.len()
+                new_block.epoch,
+                new_block.era,
+                outcome.len()
             );
             output.conway_outcomes = outcome;
         }

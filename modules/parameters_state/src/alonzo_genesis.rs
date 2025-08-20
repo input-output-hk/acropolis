@@ -4,7 +4,7 @@
 
 use acropolis_common::{
     rational_number::{ChameleonFraction, RationalNumber},
-    AlonzoParams, CostModel, ExUnits, ExUnitPrices,
+    AlonzoParams, CostModel, ExUnitPrices, ExUnits,
 };
 use anyhow::{bail, Result};
 use serde::Deserialize;
@@ -14,18 +14,19 @@ use std::collections::HashMap;
 #[serde(untagged)]
 pub enum AlonzoCostModel {
     Map(HashMap<String, i64>),
-    Vector(Vec<i64>)
+    Vector(Vec<i64>),
 }
 
 impl AlonzoCostModel {
     pub fn to_vec(&self) -> Vec<i64> {
         match self {
             AlonzoCostModel::Map(hm) => {
-                let mut keys = hm.iter().map(|(k,v)| (k.as_str(),*v)).collect::<Vec<(&str,i64)>>();
+                let mut keys =
+                    hm.iter().map(|(k, v)| (k.as_str(), *v)).collect::<Vec<(&str, i64)>>();
                 keys.sort();
-                keys.into_iter().map(|(_,n)| n).collect::<Vec<i64>>()
+                keys.into_iter().map(|(_, n)| n).collect::<Vec<i64>>()
             }
-            AlonzoCostModel::Vector(v) => v.clone()
+            AlonzoCostModel::Vector(v) => v.clone(),
         }
     }
 }

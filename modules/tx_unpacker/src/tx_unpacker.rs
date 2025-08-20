@@ -9,13 +9,13 @@ use acropolis_common::{
     *,
 };
 use caryatid_sdk::{module, Context, Module};
-use std::{fmt::Debug, clone::Clone, sync::Arc};
+use std::{clone::Clone, fmt::Debug, sync::Arc};
 
 use anyhow::Result;
 use config::Config;
 use futures::future::join_all;
-use pallas::ledger::{traverse::MultiEraTx, primitives, traverse};
 use pallas::ledger::primitives::KeyValuePairs;
+use pallas::ledger::{primitives, traverse, traverse::MultiEraTx};
 use tracing::{debug, error, info, info_span, Instrument};
 
 mod map_parameters;
@@ -40,15 +40,13 @@ impl TxUnpacker {
     ) {
         let mut update = AlonzoBabbageUpdateProposal {
             proposals: Vec::new(),
-            enactment_epoch: epoch
+            enactment_epoch: epoch,
         };
 
         for (hash, vote) in proposals.iter() {
             match map(vote) {
-                Ok(upd) =>
-                    update.proposals.push((hash.to_vec(), upd)),
-                Err(e) =>
-                    error!("Cannot convert alonzo protocol param update {vote:?}: {e}")
+                Ok(upd) => update.proposals.push((hash.to_vec(), upd)),
+                Err(e) => error!("Cannot convert alonzo protocol param update {vote:?}: {e}"),
             }
         }
 
