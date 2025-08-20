@@ -1,6 +1,6 @@
+use crate::rational_number::{ChameleonFraction, RationalNumber};
 use chrono::{DateTime, Utc};
 use serde_with::serde_as;
-use crate::rational_number::{RationalNumber, ChameleonFraction};
 
 //
 // Shelley protocol parameters
@@ -36,41 +36,41 @@ pub struct ShelleyProtocolParams {
     pub max_block_body_size: u32,
     pub max_block_header_size: u32,
     pub key_deposit: u64,
-    #[serde(rename="minUTxOValue")]
+    #[serde(rename = "minUTxOValue")]
     pub min_utxo_value: u64,
 
-    #[serde(rename="minFeeA")]
+    #[serde(rename = "minFeeA")]
     pub minfee_a: u32,
 
-    #[serde(rename="minFeeB")]
+    #[serde(rename = "minFeeB")]
     pub minfee_b: u32,
     pub pool_deposit: u64,
 
     /// AKA desired_number_of_stake_pools, n_opt, technical parameter k
     /// Important: *not to be mixed* with security parameter k, which is not here
-    #[serde(rename="nOpt")]
+    #[serde(rename = "nOpt")]
     pub stake_pool_target_num: u32,
     pub min_pool_cost: u64,
 
     /// AKA eMax, e_max
-    #[serde(rename="eMax")]
+    #[serde(rename = "eMax")]
     pub pool_retire_max_epoch: u64,
     pub extra_entropy: Nonce,
     #[serde_as(as = "ChameleonFraction")]
     pub decentralisation_param: RationalNumber,
 
     /// AKA Rho, expansion_rate
-    #[serde(rename="rho")]
+    #[serde(rename = "rho")]
     #[serde_as(as = "ChameleonFraction")]
     pub monetary_expansion: RationalNumber,
 
     /// AKA Tau, treasury_growth_rate
-    #[serde(rename="tau")]
+    #[serde(rename = "tau")]
     #[serde_as(as = "ChameleonFraction")]
     pub treasury_cut: RationalNumber,
 
     /// AKA a0
-    #[serde(rename="a0")]
+    #[serde(rename = "a0")]
     #[serde_as(as = "ChameleonFraction")]
     pub pool_pledge_influence: RationalNumber,
 }

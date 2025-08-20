@@ -4,8 +4,8 @@
 
 use crate::{
     address::{Address, StakeAddress},
+    protocol_params,
     rational_number::RationalNumber,
-    protocol_params
 };
 use anyhow::{anyhow, bail, Error, Result};
 use bech32::{Bech32, Hrp};
@@ -774,12 +774,16 @@ impl Display for GovActionId {
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
-pub struct CostModel (Vec<i64>);
+pub struct CostModel(Vec<i64>);
 
 impl CostModel {
-    pub fn new(m: Vec<i64>) -> Self { CostModel(m) }
+    pub fn new(m: Vec<i64>) -> Self {
+        CostModel(m)
+    }
 
-    pub fn as_vec(&self) -> &Vec<i64> { &self.0 }
+    pub fn as_vec(&self) -> &Vec<i64> {
+        &self.0
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
@@ -1079,13 +1083,13 @@ pub struct ProtocolParamUpdate {
     /// (Shelley)
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
-    pub protocol_version: Option<protocol_params::ProtocolVersion>
+    pub protocol_version: Option<protocol_params::ProtocolVersion>,
 }
 
 #[derive(Serialize, PartialEq, Deserialize, Debug, Clone)]
 pub struct AlonzoBabbageUpdateProposal {
     pub proposals: Vec<(GenesisKeyhash, Box<ProtocolParamUpdate>)>,
-    pub enactment_epoch: u64
+    pub enactment_epoch: u64,
 }
 
 #[derive(Serialize, PartialEq, Deserialize, Debug, Clone)]
@@ -1293,7 +1297,7 @@ pub struct AlonzoBabbageVotingOutcome {
     pub voting: Vec<GenesisKeyhash>,
     pub votes_threshold: u64,
     pub accepted: bool,
-    pub parameter_update: Box<ProtocolParamUpdate>
+    pub parameter_update: Box<ProtocolParamUpdate>,
 }
 
 /// The structure has info about outcome of a single governance action.

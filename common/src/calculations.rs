@@ -11,7 +11,9 @@ pub fn slot_to_epoch(slot: u64) -> u64 {
 }
 
 pub fn slot_to_epoch_with_shelley_params(
-    slot: u64, shelley_epoch: u64, shelley_epoch_len: u64
+    slot: u64,
+    shelley_epoch: u64,
+    shelley_epoch_len: u64,
 ) -> u64 {
     let shelley_start_slot = shelley_epoch * BYRON_SLOTS_PER_EPOCH;
     if slot < shelley_start_slot {
