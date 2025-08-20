@@ -121,6 +121,9 @@ pub struct EpochActivityMessage {
     /// List of all VRF vkey hashes used on blocks (SPO indicator) and
     /// number of blocks produced
     pub vrf_vkey_hashes: Vec<(KeyHash, usize)>,
+
+    /// List of all VRF vkey hashes and fees they received from blocks
+    pub fees: Vec<(KeyHash, u64)>,
 }
 
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
@@ -132,7 +135,7 @@ pub struct GovernanceProceduresMessage {
     pub voting_procedures: Vec<(DataHash, VotingProcedures)>,
 
     /// Alonzo-compatible (from Shelley) and Babbage updates
-    pub alonzo_babbage_updates: Vec<AlonzoBabbageUpdateProposal>
+    pub alonzo_babbage_updates: Vec<AlonzoBabbageUpdateProposal>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
