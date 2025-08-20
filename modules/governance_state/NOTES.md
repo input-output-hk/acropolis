@@ -3,7 +3,7 @@
 Allows track governance actions (and keep the state of current governance 
 activity in memory).
 
-## Governance actions implementation details (in random order)
+## Conway: Governance actions implementation details (in random order)
 
 ### Message bus reorders messages (???)
 Serializer for GovernanceProceduresMessage is necessary (and was used).
@@ -73,3 +73,28 @@ epoch. Special message?
 total. Need info about voting registration.
 * DRep::epoch -- it's written that it's epoch, which has ended. But I receive
 messages with this epoch in its beginning. Need to sort out.
+
+## Alonzo-compatible vote
+
+Speicified in separate field of Alonzo-compatible transactions.
+Votes are not divided into propositions and voting.
+Votes are cast by genesis key holders.
+The proposal needs 5 votes: that is, 5 genesis key holders must
+cast identical proposals.
+
+### Votes counting and expiration
+
+https://github.com/IntersectMBO/cardano-ledger/blob/640fb66d27ac202764de0dda76621c6d57852ba9/eras/shelley/formal-spec/update.tex
+
+* New votes for a key replace old votes (one genesis key = one proposal).
+That is, previous votes for the key expire immediately.
+
+* Votes expire at the end of next epoch: simplified understanding.
+
+* Votes activation is delayed for 6/10 of epoch length. That is, if a vote is
+cast at slot with number greater than 4/10 of the epoch length, it'll be counted 
+to the next epoch.
+
+### Testing
+
+https://cexplorer.io/params
