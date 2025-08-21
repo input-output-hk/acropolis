@@ -321,23 +321,25 @@ impl State {
                 }
 
                 // Update history if enabled
-                if let Err(err) = self.update_historical(&reg.reg.credential, false, |entry| {
-                    if let Some(info) = entry.info.as_mut() {
-                        info.deposit = 0;
-                        info.expired = false;
-                        info.retired = true;
-                        info.active_epoch = None;
-                        info.last_active_epoch = epoch;
+                if self.historical_dreps.is_some() {
+                    if let Err(err) = self.update_historical(&reg.reg.credential, false, |entry| {
+                        if let Some(info) = entry.info.as_mut() {
+                            info.deposit = 0;
+                            info.expired = false;
+                            info.retired = true;
+                            info.active_epoch = None;
+                            info.last_active_epoch = epoch;
+                        }
+                        if let Some(updates) = entry.updates.as_mut() {
+                            updates.push(DRepUpdateEvent {
+                                tx_hash: reg.tx_hash,
+                                cert_index: reg.cert_index,
+                                action: DRepActionUpdate::Deregistered,
+                            });
+                        }
+                    }) {
+                        return Err(anyhow!("Failed to update DRep on deregistration: {err}"));
                     }
-                    if let Some(updates) = entry.updates.as_mut() {
-                        updates.push(DRepUpdateEvent {
-                            tx_hash: reg.tx_hash,
-                            cert_index: reg.cert_index,
-                            action: DRepActionUpdate::Deregistered,
-                        });
-                    }
-                }) {
-                    return Err(anyhow!("Failed to update DRep on deregistration: {err}"));
                 }
 
                 Ok(true)
