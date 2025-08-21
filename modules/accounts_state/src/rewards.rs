@@ -237,6 +237,7 @@ impl RewardsState {
             }
 
             info!(%fixed_cost, %margin, to_delegators, "Reward split:");
+
             costs.to_u64().unwrap_or(0)
         };
         result.rewards.push((spo.reward_account.clone(), spo_benefit));
