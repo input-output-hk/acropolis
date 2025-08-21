@@ -385,7 +385,7 @@ impl State {
     /// Key of returned map is the SPO 'operator' ID
     pub fn generate_spdd(&self) -> BTreeMap<KeyHash, DelegatedStake> {
         // Shareable Dashmap with referenced keys
-        let spo_stakes = Arc::new(DashMap::<KeyHash, DelegatedStake>::new());
+        let spo_stakes = DashMap::<KeyHash, DelegatedStake>::new();
 
         // Total stake across all addresses in parallel, first collecting into a vector
         // because imbl::OrdMap doesn't work in Rayon
@@ -402,20 +402,17 @@ impl State {
         // Parallel sum all the stakes into the spo_stake map
         sas_data
             .par_iter() // Rayon multi-threaded iterator
-            .for_each_init(
-                || Arc::clone(&spo_stakes),
-                |map, (spo, (utxo_value, rewards))| {
-                    map.entry(spo.clone())
-                        .and_modify(|v| {
-                            v.active += *utxo_value;
-                            v.live += *utxo_value + *rewards;
-                        })
-                        .or_insert(DelegatedStake {
-                            active: *utxo_value,
-                            live: *utxo_value + *rewards,
-                        });
-                },
-            );
+            .for_each(|(spo, (utxo_value, rewards))| {
+                spo_stakes.entry(spo.clone())
+                    .and_modify(|v| {
+                        v.active += *utxo_value;
+                        v.live += *utxo_value + *rewards;
+                    })
+                    .or_insert(DelegatedStake {
+                        active: *utxo_value,
+                        live: *utxo_value + *rewards,
+                    });
+            });
 
         // Collect into a plain BTreeMap, so that it is ordered on output
         spo_stakes.iter().map(|entry| (entry.key().clone(), entry.value().clone())).collect()
