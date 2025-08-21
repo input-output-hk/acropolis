@@ -2,8 +2,8 @@
 
 use crate::snapshot::{Snapshot, SnapshotSPO};
 use acropolis_common::{
-    KeyHash, Lovelace, protocol_params::ShelleyParams, RewardAccount,
-    rational_number::RationalNumber,
+    protocol_params::ShelleyParams, rational_number::RationalNumber, KeyHash, Lovelace,
+    RewardAccount,
 };
 use anyhow::{bail, Result};
 use bigdecimal::{BigDecimal, One, ToPrimitive, Zero};

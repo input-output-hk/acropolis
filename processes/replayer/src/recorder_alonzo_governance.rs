@@ -1,66 +1,79 @@
 //! Alonzo governance recorder module
 
+use acropolis_common::{
+    messages::{CardanoMessage, GovernanceProceduresMessage, Message},
+    AlonzoBabbageUpdateProposal, BlockInfo, GenesisKeyhash, ProtocolParamUpdate,
+};
 use anyhow::{anyhow, Result};
 use caryatid_sdk::{module, Context, Module, Subscription};
-use acropolis_common::{
-    BlockInfo, GenesisKeyhash, ProtocolParamUpdate, AlonzoBabbageUpdateProposal,
-    messages::{Message, CardanoMessage, GovernanceProceduresMessage}
-};
 use config::Config;
+use serde_with::{base64::Base64, serde_as};
 use std::{fs::File, io::Write, sync::Arc};
-use serde_with::{serde_as, base64::Base64};
 use tracing::error;
 
 use crate::replayer_config::ReplayerConfig;
 
 /// Recorder module
-#[module(message_type(Message),
-  name = "gov-alonzo-recorder",
-  description = "Alonzo governance messages recorder")]
+#[module(
+    message_type(Message),
+    name = "gov-alonzo-recorder",
+    description = "Alonzo governance messages recorder"
+)]
 pub struct RecorderAlonzoGovernance;
 
 #[serde_as]
 #[derive(serde::Serialize, serde::Deserialize)]
-struct ReplayerGenesisKeyhash(
-    #[serde_as(as = "Base64")]
-    GenesisKeyhash
-);
+struct ReplayerGenesisKeyhash(#[serde_as(as = "Base64")] GenesisKeyhash);
 
 struct BlockRecorder {
     cfg: Arc<ReplayerConfig>,
     prefix: String,
     // slot, epoch, era (num), new_epoch, [enactment epoch, voting: [key, vote]]
-    list: Vec<(u64,u64,u8,u8,Vec<(u64,Vec<(ReplayerGenesisKeyhash, Box<ProtocolParamUpdate>)>)>)>,
+    list: Vec<(
+        u64,
+        u64,
+        u8,
+        u8,
+        Vec<(u64, Vec<(ReplayerGenesisKeyhash, Box<ProtocolParamUpdate>)>)>,
+    )>,
 }
 
 impl BlockRecorder {
     pub fn new(cfg: Arc<ReplayerConfig>, prefix: &str) -> Self {
-        Self { cfg, prefix: prefix.to_string(), list: Vec::new() }
+        Self {
+            cfg,
+            prefix: prefix.to_string(),
+            list: Vec::new(),
+        }
     }
 
-    pub fn write(&mut self, 
-        block: &BlockInfo, votes: &Vec<AlonzoBabbageUpdateProposal>
-    ) {
+    pub fn write(&mut self, block: &BlockInfo, votes: &Vec<AlonzoBabbageUpdateProposal>) {
         let file = format!("{}/{}.json", self.cfg.path, self.prefix);
 
         let mut proposals = Vec::new();
         for vote in votes.iter() {
             let mut votes_indexed = Vec::new();
-            for (h,u) in &vote.proposals {
-                votes_indexed.push((ReplayerGenesisKeyhash(h.clone()),u.clone()));
+            for (h, u) in &vote.proposals {
+                votes_indexed.push((ReplayerGenesisKeyhash(h.clone()), u.clone()));
             }
             proposals.push((vote.enactment_epoch, votes_indexed));
         }
 
-        self.list.push(
-            (block.slot, block.epoch, block.era.clone() as u8, block.new_epoch as u8, proposals)
-        );
+        self.list.push((
+            block.slot,
+            block.epoch,
+            block.era.clone() as u8,
+            block.new_epoch as u8,
+            proposals,
+        ));
 
         let mut file = File::create(file).unwrap();
         let mut continuation = "[";
         for list_elem in &self.list {
-            let serialized = format!("{}{}", 
-                continuation, serde_json::to_string(list_elem).unwrap()
+            let serialized = format!(
+                "{}{}",
+                continuation,
+                serde_json::to_string(list_elem).unwrap()
             );
             file.write_all(serialized.as_bytes()).unwrap();
             continuation = ",\n";
