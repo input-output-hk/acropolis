@@ -798,11 +798,14 @@ impl State {
                 // Zero withdrawals are expected, as a way to validate stake addresses (per Pi)
                 if withdrawal.value != 0 {
                     let mut sas = sas.clone();
-                    if let Err(e) = Self::update_value_with_delta(&mut sas.rewards,
-                                                                  -(withdrawal.value as i64)) {
-                        error!("Withdrawing from stake address {} hash {}: {e}",
-                                withdrawal.address.to_string().unwrap_or("???".to_string()),
-                                hex::encode(hash));
+                    if let Err(e) =
+                        Self::update_value_with_delta(&mut sas.rewards, -(withdrawal.value as i64))
+                    {
+                        error!(
+                            "Withdrawing from stake address {} hash {}: {e}",
+                            withdrawal.address.to_string().unwrap_or("???".to_string()),
+                            hex::encode(hash)
+                        );
                     } else {
                         // Update the stake address
                         stake_addresses.insert(hash.to_vec(), sas);
@@ -869,8 +872,8 @@ mod tests {
     use super::*;
     use acropolis_common::{
         rational_number::RationalNumber, AddressNetwork, Anchor, Committee, Constitution,
-        CostModel, ConwayParams, Credential, DRepVotingThresholds, PoolVotingThresholds, 
-        Pot, PotDelta, ProtocolParams, Ratio, Registration, StakeAddress, StakeAddressDelta, 
+        ConwayParams, CostModel, Credential, DRepVotingThresholds, PoolVotingThresholds, Pot,
+        PotDelta, ProtocolParams, Ratio, Registration, StakeAddress, StakeAddressDelta,
         StakeAddressPayload, StakeAndVoteDelegation, StakeRegistrationAndStakeAndVoteDelegation,
         StakeRegistrationAndVoteDelegation, VoteDelegation, Withdrawal,
     };

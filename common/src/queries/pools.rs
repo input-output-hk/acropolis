@@ -6,17 +6,38 @@ pub enum PoolsStateQuery {
     GetPoolsListWithInfo,
     GetPoolsRetiredList,
     GetPoolsRetiringList,
-    GetPoolsActiveStakes { pools_operators: Vec<Vec<u8>>, epoch: u64 },
+    GetPoolsActiveStakes {
+        pools_operators: Vec<Vec<u8>>,
+        epoch: u64,
+    },
     // Get total blocks minted for each vrf vkey hashes (not included current epoch's blocks minted)
-    GetPoolsTotalBlocksMinted { vrf_key_hashes: Vec<Vec<u8>>},
-    GetPoolInfo { pool_id: Vec<u8> },
-    GetPoolHistory { pool_id: Vec<u8> },
-    GetPoolMetadata { pool_id: Vec<u8> },
-    GetPoolRelays { pool_id: Vec<u8> },
-    GetPoolDelegators { pool_id: Vec<u8> },
-    GetPoolBlocks { pool_id: Vec<u8> },
-    GetPoolUpdates { pool_id: Vec<u8> },
-    GetPoolVotes { pool_id: Vec<u8> },
+    GetPoolsTotalBlocksMinted {
+        vrf_key_hashes: Vec<Vec<u8>>,
+    },
+    GetPoolInfo {
+        pool_id: Vec<u8>,
+    },
+    GetPoolHistory {
+        pool_id: Vec<u8>,
+    },
+    GetPoolMetadata {
+        pool_id: Vec<u8>,
+    },
+    GetPoolRelays {
+        pool_id: Vec<u8>,
+    },
+    GetPoolDelegators {
+        pool_id: Vec<u8>,
+    },
+    GetPoolBlocks {
+        pool_id: Vec<u8>,
+    },
+    GetPoolUpdates {
+        pool_id: Vec<u8>,
+    },
+    GetPoolVotes {
+        pool_id: Vec<u8>,
+    },
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
