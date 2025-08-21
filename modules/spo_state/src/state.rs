@@ -176,6 +176,7 @@ pub struct State {
     pub active_stakes: DashMap<KeyHash, VecDeque<(u64, u64)>>,
 
     /// Volatile total blocks minted state, one per epoch
+    /// Pop on first element when block number is smaller than `current block - SECURITY_PARAMETER_K`
     pub total_blocks_minted_history: VecDeque<TotalBlocksMintedState>,
 }
 
