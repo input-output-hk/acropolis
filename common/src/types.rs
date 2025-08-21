@@ -4,8 +4,8 @@
 
 use crate::{
     address::{Address, StakeAddress},
+    protocol_params,
     rational_number::RationalNumber,
-    protocol_params
 };
 use anyhow::{anyhow, bail, Error, Result};
 use bech32::{Bech32, Hrp};
@@ -658,6 +658,13 @@ pub struct DRepRegistration {
     pub anchor: Option<Anchor>,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DRepRegistrationWithPos {
+    pub reg: DRepRegistration,
+    pub tx_hash: [u8; 32],
+    pub cert_index: u64,
+}
+
 /// DRep Deregistration = unreg_drep_cert
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DRepDeregistration {
@@ -668,6 +675,13 @@ pub struct DRepDeregistration {
     pub refund: Lovelace,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DRepDeregistrationWithPos {
+    pub reg: DRepDeregistration,
+    pub tx_hash: [u8; 32],
+    pub cert_index: u64,
+}
+
 /// DRep Update = update_drep_cert
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DRepUpdate {
@@ -676,6 +690,13 @@ pub struct DRepUpdate {
 
     /// Optional anchor
     pub anchor: Option<Anchor>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DRepUpdateWithPos {
+    pub reg: DRepUpdate,
+    pub tx_hash: [u8; 32],
+    pub cert_index: u64,
 }
 
 pub type CommitteeCredential = Credential;
@@ -774,12 +795,16 @@ impl Display for GovActionId {
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
-pub struct CostModel (Vec<i64>);
+pub struct CostModel(Vec<i64>);
 
 impl CostModel {
-    pub fn new(m: Vec<i64>) -> Self { CostModel(m) }
+    pub fn new(m: Vec<i64>) -> Self {
+        CostModel(m)
+    }
 
-    pub fn as_vec(&self) -> &Vec<i64> { &self.0 }
+    pub fn as_vec(&self) -> &Vec<i64> {
+        &self.0
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
@@ -1079,13 +1104,13 @@ pub struct ProtocolParamUpdate {
     /// (Shelley)
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
-    pub protocol_version: Option<protocol_params::ProtocolVersion>
+    pub protocol_version: Option<protocol_params::ProtocolVersion>,
 }
 
 #[derive(Serialize, PartialEq, Deserialize, Debug, Clone)]
 pub struct AlonzoBabbageUpdateProposal {
     pub proposals: Vec<(GenesisKeyhash, Box<ProtocolParamUpdate>)>,
-    pub enactment_epoch: u64
+    pub enactment_epoch: u64,
 }
 
 #[derive(Serialize, PartialEq, Deserialize, Debug, Clone)]
@@ -1205,6 +1230,7 @@ pub enum Vote {
 pub struct VotingProcedure {
     pub vote: Vote,
     pub anchor: Option<Anchor>,
+    pub vote_index: u32,
 }
 
 #[serde_as]
@@ -1293,7 +1319,7 @@ pub struct AlonzoBabbageVotingOutcome {
     pub voting: Vec<GenesisKeyhash>,
     pub votes_threshold: u64,
     pub accepted: bool,
-    pub parameter_update: Box<ProtocolParamUpdate>
+    pub parameter_update: Box<ProtocolParamUpdate>,
 }
 
 /// The structure has info about outcome of a single governance action.
@@ -1371,13 +1397,13 @@ pub enum TxCertificate {
     ResignCommitteeCold(ResignCommitteeCold),
 
     /// DRep registration
-    DRepRegistration(DRepRegistration),
+    DRepRegistration(DRepRegistrationWithPos),
 
     /// DRep deregistration
-    DRepDeregistration(DRepDeregistration),
+    DRepDeregistration(DRepDeregistrationWithPos),
 
     /// DRep update
-    DRepUpdate(DRepUpdate),
+    DRepUpdate(DRepUpdateWithPos),
 }
 
 #[cfg(test)]
@@ -1436,6 +1462,7 @@ mod tests {
             VotingProcedure {
                 anchor: None,
                 vote: Vote::Abstain,
+                vote_index: 0,
             },
         );
         voting.votes.insert(

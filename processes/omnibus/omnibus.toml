@@ -33,6 +33,16 @@ address-delta-topic = "cardano.address.delta"
 [module.spo-state]
 
 [module.drep-state]
+# Enables /governance/dreps/{drep_id} endpoint (Requires store-delegators to be enabled)
+store-info = true
+# Enables /governance/dreps/{drep_id}/delegators endpoint
+store-delegators = true
+# Enables /governance/dreps/{drep_id}/metadata endpoint
+store-metadata = true
+# Enables /governance/dreps/{drep_id}/updates endpoint
+store-updates = true
+# Enables /governance/dreps/{drep_id}/votes endpoint
+store-votes = true
 
 [module.governance-state]
 
