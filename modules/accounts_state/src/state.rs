@@ -133,6 +133,24 @@ impl State {
             .collect()
     }
 
+    /// Map stake_keys to their delegated DRep
+    pub fn get_drep_delegations_map(
+        &self,
+        stake_keys: &[Vec<u8>],
+    ) -> Option<HashMap<Vec<u8>, Option<DRepChoice>>> {
+        let accounts = self.stake_addresses.lock().ok()?; // If lock fails, return None
+
+        let mut map = HashMap::new();
+
+        for stake_key in stake_keys {
+            let account = accounts.get(stake_key)?;
+            let maybe_drep = account.delegated_drep.clone();
+            map.insert(stake_key.clone(), maybe_drep);
+        }
+
+        Some(map)
+    }
+
     /// Log statistics
     fn log_stats(&self) {
         info!(num_stake_addresses = self.stake_addresses.lock().unwrap().keys().len(),);
@@ -798,11 +816,14 @@ impl State {
                 // Zero withdrawals are expected, as a way to validate stake addresses (per Pi)
                 if withdrawal.value != 0 {
                     let mut sas = sas.clone();
-                    if let Err(e) = Self::update_value_with_delta(&mut sas.rewards,
-                                                                  -(withdrawal.value as i64)) {
-                        error!("Withdrawing from stake address {} hash {}: {e}",
-                                withdrawal.address.to_string().unwrap_or("???".to_string()),
-                                hex::encode(hash));
+                    if let Err(e) =
+                        Self::update_value_with_delta(&mut sas.rewards, -(withdrawal.value as i64))
+                    {
+                        error!(
+                            "Withdrawing from stake address {} hash {}: {e}",
+                            withdrawal.address.to_string().unwrap_or("???".to_string()),
+                            hex::encode(hash)
+                        );
                     } else {
                         // Update the stake address
                         stake_addresses.insert(hash.to_vec(), sas);
@@ -869,8 +890,8 @@ mod tests {
     use super::*;
     use acropolis_common::{
         rational_number::RationalNumber, AddressNetwork, Anchor, Committee, Constitution,
-        CostModel, ConwayParams, Credential, DRepVotingThresholds, PoolVotingThresholds, 
-        Pot, PotDelta, ProtocolParams, Ratio, Registration, StakeAddress, StakeAddressDelta, 
+        ConwayParams, CostModel, Credential, DRepVotingThresholds, PoolVotingThresholds, Pot,
+        PotDelta, ProtocolParams, Ratio, Registration, StakeAddress, StakeAddressDelta,
         StakeAddressPayload, StakeAndVoteDelegation, StakeRegistrationAndStakeAndVoteDelegation,
         StakeRegistrationAndVoteDelegation, VoteDelegation, Withdrawal,
     };

@@ -4,17 +4,17 @@
 use anyhow::{anyhow, bail, Result};
 use pallas::ledger::{
     primitives::{
-        ExUnitPrices as PallasExUnitPrices,
-        ProtocolVersion as PallasProtocolVersion,
-        alonzo, babbage, conway, Nullable, Relay as PallasRelay, ScriptHash,
+        alonzo, babbage, conway, ExUnitPrices as PallasExUnitPrices, Nullable,
+        ProtocolVersion as PallasProtocolVersion, Relay as PallasRelay, ScriptHash,
         StakeCredential as PallasStakeCredential,
     },
-    traverse::MultiEraCert, *
+    traverse::MultiEraCert,
+    *,
 };
 
 use acropolis_common::{
-    rational_number::RationalNumber,
     protocol_params::{Nonce, NonceVariant, ProtocolVersion},
+    rational_number::RationalNumber,
     *,
 };
 use std::collections::{HashMap, HashSet};
@@ -166,22 +166,20 @@ fn map_constitution(constitution: &conway::Constitution) -> Constitution {
 /// Map a Pallas Relay to ours
 fn map_relay(relay: &PallasRelay) -> Relay {
     match relay {
-        PallasRelay::SingleHostAddr(port, ipv4, ipv6) => {
-            Relay::SingleHostAddr(SingleHostAddr {
-                port: match port {
-                    Nullable::Some(port) => Some(*port as u16),
-                    _ => None,
-                },
-                ipv4: match ipv4 {
-                    Nullable::Some(ipv4) => ipv4.try_into().ok(),
-                    _ => None,
-                },
-                ipv6: match ipv6 {
-                    Nullable::Some(ipv6) => ipv6.try_into().ok(),
-                    _ => None,
-                },
-            })
-        }
+        PallasRelay::SingleHostAddr(port, ipv4, ipv6) => Relay::SingleHostAddr(SingleHostAddr {
+            port: match port {
+                Nullable::Some(port) => Some(*port as u16),
+                _ => None,
+            },
+            ipv4: match ipv4 {
+                Nullable::Some(ipv4) => ipv4.try_into().ok(),
+                _ => None,
+            },
+            ipv6: match ipv6 {
+                Nullable::Some(ipv6) => ipv6.try_into().ok(),
+                _ => None,
+            },
+        }),
         PallasRelay::SingleHostName(port, dns_name) => Relay::SingleHostName(SingleHostName {
             port: match port {
                 Nullable::Some(port) => Some(*port as u16),
@@ -195,13 +193,14 @@ fn map_relay(relay: &PallasRelay) -> Relay {
     }
 }
 
-// 
+//
 // Certificates
 //
 
 /// Derive our TxCertificate from a Pallas Certificate
 pub fn map_certificate(
     cert: &MultiEraCert,
+    tx_hash: [u8; 32],
     tx_index: usize,
     cert_index: usize,
 ) -> Result<TxCertificate> {
@@ -383,15 +382,13 @@ pub fn map_certificate(
                     }),
                 ),
 
-                conway::Certificate::StakeRegDeleg(cred, pool_key_hash, coin) => {
-                    Ok(TxCertificate::StakeRegistrationAndDelegation(
-                        StakeRegistrationAndDelegation {
-                            credential: map_stake_credential(cred),
-                            operator: pool_key_hash.to_vec(),
-                            deposit: *coin,
-                        },
-                    ))
-                }
+                conway::Certificate::StakeRegDeleg(cred, pool_key_hash, coin) => Ok(
+                    TxCertificate::StakeRegistrationAndDelegation(StakeRegistrationAndDelegation {
+                        credential: map_stake_credential(cred),
+                        operator: pool_key_hash.to_vec(),
+                        deposit: *coin,
+                    }),
+                ),
 
                 conway::Certificate::VoteRegDeleg(cred, drep, coin) => {
                     Ok(TxCertificate::StakeRegistrationAndVoteDelegation(
@@ -429,24 +426,36 @@ pub fn map_certificate(
                 }
 
                 conway::Certificate::RegDRepCert(cred, coin, anchor) => {
-                    Ok(TxCertificate::DRepRegistration(DRepRegistration {
-                        credential: map_stake_credential(cred),
-                        deposit: *coin,
-                        anchor: map_nullable_anchor(&anchor),
+                    Ok(TxCertificate::DRepRegistration(DRepRegistrationWithPos {
+                        reg: DRepRegistration {
+                            credential: map_stake_credential(cred),
+                            deposit: *coin,
+                            anchor: map_nullable_anchor(&anchor),
+                        },
+                        tx_hash: tx_hash,
+                        cert_index: cert_index as u64,
                     }))
                 }
 
-                conway::Certificate::UnRegDRepCert(cred, coin) => {
-                    Ok(TxCertificate::DRepDeregistration(DRepDeregistration {
-                        credential: map_stake_credential(cred),
-                        refund: *coin,
-                    }))
-                }
+                conway::Certificate::UnRegDRepCert(cred, coin) => Ok(
+                    TxCertificate::DRepDeregistration(DRepDeregistrationWithPos {
+                        reg: DRepDeregistration {
+                            credential: map_stake_credential(cred),
+                            refund: *coin,
+                        },
+                        tx_hash: tx_hash,
+                        cert_index: cert_index as u64,
+                    }),
+                ),
 
                 conway::Certificate::UpdateDRepCert(cred, anchor) => {
-                    Ok(TxCertificate::DRepUpdate(DRepUpdate {
-                        credential: map_stake_credential(cred),
-                        anchor: map_nullable_anchor(&anchor),
+                    Ok(TxCertificate::DRepUpdate(DRepUpdateWithPos {
+                        reg: DRepUpdate {
+                            credential: map_stake_credential(cred),
+                            anchor: map_nullable_anchor(&anchor),
+                        },
+                        tx_hash: tx_hash,
+                        cert_index: cert_index as u64,
                     }))
                 }
             }
@@ -495,17 +504,20 @@ fn map_alonzo_nonce(e: &alonzo::Nonce) -> Nonce {
             alonzo::NonceVariant::NeutralNonce => NonceVariant::NeutralNonce,
             alonzo::NonceVariant::Nonce => NonceVariant::Nonce,
         },
-        hash: e.hash.map(|v| v.to_vec())
+        hash: e.hash.map(|v| v.to_vec()),
     }
 }
-
 
 fn map_alonzo_single_model(model: &alonzo::CostModel) -> Option<CostModel> {
     Some(CostModel::new(model.clone()))
 }
 
 fn map_alonzo_cost_models(pallas_cost_models: &alonzo::CostModels) -> Result<CostModels> {
-    let mut res = CostModels { plutus_v1: None, plutus_v2: None, plutus_v3: None };
+    let mut res = CostModels {
+        plutus_v1: None,
+        plutus_v2: None,
+        plutus_v3: None,
+    };
     for (lang, mdl) in pallas_cost_models.iter() {
         if *lang == alonzo::Language::PlutusV1 {
             res.plutus_v1 = map_alonzo_single_model(mdl);
@@ -519,7 +531,7 @@ fn map_alonzo_cost_models(pallas_cost_models: &alonzo::CostModels) -> Result<Cos
 fn map_protocol_version((major, minor): &PallasProtocolVersion) -> ProtocolVersion {
     ProtocolVersion {
         minor: *minor,
-        major: *major
+        major: *major,
     }
 }
 
@@ -566,7 +578,8 @@ fn map_conway_protocol_param_update(p: &conway::ProtocolParamUpdate) -> Box<Prot
         min_pool_cost: p.min_pool_cost.clone(),
         ada_per_utxo_byte: p.ada_per_utxo_byte.clone(),
         cost_models_for_script_languages: p
-            .cost_models_for_script_languages.as_ref()
+            .cost_models_for_script_languages
+            .as_ref()
             .map(&map_conway_cost_models),
         execution_costs: p.execution_costs.as_ref().map(&map_conway_execution_costs),
         max_tx_ex_units: p.max_tx_ex_units.as_ref().map(&map_ex_units),
@@ -584,7 +597,9 @@ fn map_conway_protocol_param_update(p: &conway::ProtocolParamUpdate) -> Box<Prot
         governance_action_deposit: p.governance_action_deposit.clone(),
         drep_deposit: p.drep_deposit.clone(),
         drep_inactivity_period: p.drep_inactivity_period.clone(),
-        minfee_refscript_cost_per_byte: p.minfee_refscript_cost_per_byte.as_ref()
+        minfee_refscript_cost_per_byte: p
+            .minfee_refscript_cost_per_byte
+            .as_ref()
             .map(&map_unit_interval),
 
         // Fields, missing from Conway
@@ -654,9 +669,9 @@ fn map_u32_to_u64(n: Option<u32>) -> Option<u64> {
     n.as_ref().map(|x| *x as u64)
 }
 
-pub fn map_alonzo_protocol_param_update(p: &alonzo::ProtocolParamUpdate)
-    -> Result<Box<ProtocolParamUpdate>> 
-{
+pub fn map_alonzo_protocol_param_update(
+    p: &alonzo::ProtocolParamUpdate,
+) -> Result<Box<ProtocolParamUpdate>> {
     Ok(Box::new(ProtocolParamUpdate {
         // Fields, common for Conway and Alonzo-compatible
         minfee_a: map_u32_to_u64(p.minfee_a),
@@ -673,8 +688,11 @@ pub fn map_alonzo_protocol_param_update(p: &alonzo::ProtocolParamUpdate)
         treasury_growth_rate: p.treasury_growth_rate.as_ref().map(&map_unit_interval),
         min_pool_cost: p.min_pool_cost.clone(),
         ada_per_utxo_byte: p.ada_per_utxo_byte.clone(),
-        cost_models_for_script_languages:
-            p.cost_models_for_script_languages.as_ref().map(&map_alonzo_cost_models).transpose()?,
+        cost_models_for_script_languages: p
+            .cost_models_for_script_languages
+            .as_ref()
+            .map(&map_alonzo_cost_models)
+            .transpose()?,
         execution_costs: p.execution_costs.as_ref().map(&map_execution_costs),
         max_tx_ex_units: p.max_tx_ex_units.as_ref().map(&map_ex_units),
         max_block_ex_units: p.max_block_ex_units.as_ref().map(&map_ex_units),
@@ -704,13 +722,13 @@ fn map_babbage_cost_models(cost_models: &babbage::CostModels) -> CostModels {
     CostModels {
         plutus_v1: cost_models.plutus_v1.as_ref().map(|p| CostModel::new(p.clone())),
         plutus_v2: cost_models.plutus_v2.as_ref().map(|p| CostModel::new(p.clone())),
-        plutus_v3: None
+        plutus_v3: None,
     }
 }
 
-pub fn map_babbage_protocol_param_update(p: &babbage::ProtocolParamUpdate)
-    -> Result<Box<ProtocolParamUpdate>>
-{
+pub fn map_babbage_protocol_param_update(
+    p: &babbage::ProtocolParamUpdate,
+) -> Result<Box<ProtocolParamUpdate>> {
     Ok(Box::new(ProtocolParamUpdate {
         // Fields, common for Conway and Alonzo-compatible
         minfee_a: map_u32_to_u64(p.minfee_a),
@@ -727,8 +745,10 @@ pub fn map_babbage_protocol_param_update(p: &babbage::ProtocolParamUpdate)
         treasury_growth_rate: p.treasury_growth_rate.as_ref().map(&map_unit_interval),
         min_pool_cost: p.min_pool_cost.clone(),
         ada_per_utxo_byte: p.ada_per_utxo_byte.clone(),
-        cost_models_for_script_languages:
-            p.cost_models_for_script_languages.as_ref().map(&map_babbage_cost_models),
+        cost_models_for_script_languages: p
+            .cost_models_for_script_languages
+            .as_ref()
+            .map(&map_babbage_cost_models),
         execution_costs: p.execution_costs.as_ref().map(&map_execution_costs),
         max_tx_ex_units: p.max_tx_ex_units.as_ref().map(&map_ex_units),
         max_block_ex_units: p.max_block_ex_units.as_ref().map(&map_ex_units),
@@ -790,10 +810,14 @@ fn map_vote(vote: &conway::Vote) -> Vote {
     }
 }
 
-fn map_single_governance_voting_procedure(proc: &conway::VotingProcedure) -> VotingProcedure {
+fn map_single_governance_voting_procedure(
+    vote_index: u32,
+    proc: &conway::VotingProcedure,
+) -> VotingProcedure {
     VotingProcedure {
         vote: map_vote(&proc.vote),
         anchor: map_nullable_anchor(&proc.anchor),
+        vote_index,
     }
 }
 
@@ -808,9 +832,7 @@ pub fn map_all_governance_voting_procedures(
         let voter = map_voter(pallas_voter);
 
         if let Some(existing) = procs.votes.insert(voter.clone(), SingleVoterVotes::default()) {
-            bail!(
-                "Duplicate voter {voter:?}: procedure {vote_procs:?}, existing {existing:?}"
-            );
+            bail!("Duplicate voter {voter:?}: procedure {vote_procs:?}, existing {existing:?}");
         }
 
         let single_voter = procs
@@ -818,13 +840,15 @@ pub fn map_all_governance_voting_procedures(
             .get_mut(&voter)
             .ok_or_else(|| anyhow!("Cannot find voter {:?}, which must present", voter))?;
 
-        for (pallas_action_id, pallas_voting_procedure) in pallas_pair.iter() {
+        for (vote_index, (pallas_action_id, pallas_voting_procedure)) in
+            pallas_pair.iter().enumerate()
+        {
             let action_id = map_gov_action_id(pallas_action_id)?;
-            let vp = map_single_governance_voting_procedure(&pallas_voting_procedure);
+            let vp =
+                map_single_governance_voting_procedure(vote_index as u32, &pallas_voting_procedure);
             single_voter.voting_procedures.insert(action_id, vp);
         }
     }
 
     Ok(procs)
 }
-

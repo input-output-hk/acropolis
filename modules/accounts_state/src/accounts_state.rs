@@ -439,6 +439,15 @@ impl AccountsState {
                         })
                     }
 
+                    AccountsStateQuery::GetAccountsDrepDelegationsMap { stake_keys } => match state
+                        .get_drep_delegations_map(stake_keys)
+                    {
+                        Some(map) => AccountsStateQueryResponse::AccountsDrepDelegationsMap(map),
+                        None => AccountsStateQueryResponse::Error(
+                            "Error retrieving DRep delegations map".to_string(),
+                        ),
+                    },
+
                     _ => AccountsStateQueryResponse::Error(format!(
                         "Unimplemented query variant: {:?}",
                         query
