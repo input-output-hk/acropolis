@@ -403,7 +403,8 @@ impl State {
         sas_data
             .par_iter() // Rayon multi-threaded iterator
             .for_each(|(spo, (utxo_value, rewards))| {
-                spo_stakes.entry(spo.clone())
+                spo_stakes
+                    .entry(spo.clone())
                     .and_modify(|v| {
                         v.active += *utxo_value;
                         v.live += *utxo_value + *rewards;
