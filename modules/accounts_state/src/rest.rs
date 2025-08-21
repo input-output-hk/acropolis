@@ -8,9 +8,7 @@ use tokio::sync::Mutex;
 
 use crate::state::State;
 use acropolis_common::state_history::StateHistory;
-use acropolis_common::{
-    messages::RESTResponse, DelegatedStake, Lovelace,
-};
+use acropolis_common::{messages::RESTResponse, DelegatedStake, Lovelace};
 
 /// REST response structure for /accounts/{stake_address}
 #[derive(serde::Serialize)]

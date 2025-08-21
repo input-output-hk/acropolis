@@ -3,16 +3,16 @@
 
 use acropolis_common::{
     messages::{CardanoMessage, Message},
-    BlockInfo, 
+    BlockInfo,
 };
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{module, Context, Module, Subscription};
-use crossbeam::channel::{TrySendError, bounded};
 use config::Config;
+use crossbeam::channel::{bounded, TrySendError};
 use pallas::{
     ledger::traverse::MultiEraHeader,
     network::{
-        facades::PeerClient, 
+        facades::PeerClient,
         miniprotocols::{
             chainsync::{NextResponse, Tip},
             Point,
@@ -23,12 +23,12 @@ use std::{sync::Arc, time::Duration};
 use tokio::{sync::Mutex, time::sleep};
 use tracing::{debug, error, info};
 
-mod upstream_cache;
 mod body_fetcher;
+mod upstream_cache;
 mod utils;
 
-use upstream_cache::{UpstreamCache, UpstreamCacheRecord};
 use body_fetcher::BodyFetcher;
+use upstream_cache::{UpstreamCache, UpstreamCacheRecord};
 use utils::{FetcherConfig, SyncPoint};
 
 const MAX_BODY_FETCHER_CHANNEL_LENGTH: usize = 100;
@@ -48,7 +48,7 @@ impl UpstreamChainFetcher {
         cfg: Arc<FetcherConfig>,
         peer: Arc<Mutex<PeerClient>>,
         cache: Option<UpstreamCache>,
-        start: Point
+        start: Point,
     ) -> Result<()> {
         // Find intersect to given point
         let slot = start.slot_or_default();
@@ -62,7 +62,7 @@ impl UpstreamChainFetcher {
         let mut response_count = 0;
 
         let last_epoch: Option<u64> = match slot {
-            0 => None,                      // If we're starting from origin
+            0 => None,                          // If we're starting from origin
             _ => Some(cfg.slot_to_epoch(slot)), // From slot of last block
         };
 
@@ -101,13 +101,13 @@ impl UpstreamChainFetcher {
                         for_send = match sender.try_send(for_send) {
                             Ok(()) => break 'sender,
                             Err(TrySendError::Full(fs)) => fs,
-                            Err(e) => bail!("Cannot send message to BodyFetcher: {e}")
+                            Err(e) => bail!("Cannot send message to BodyFetcher: {e}"),
                         };
                         sleep(Duration::from_millis(100)).await;
                     }
 
                     rolled_back = false;
-                },
+                }
 
                 // TODO The first message after sync start always comes with 'RollBackward'.
                 // Here we suppress this status (since it says nothing about actual rollbacks,
@@ -125,9 +125,10 @@ impl UpstreamChainFetcher {
         }
     }
 
-    async fn read_cache(cfg: Arc<FetcherConfig>, cache: &mut UpstreamCache)
-        -> Result<Option<BlockInfo>>
-    {
+    async fn read_cache(
+        cfg: Arc<FetcherConfig>,
+        cache: &mut UpstreamCache,
+    ) -> Result<Option<BlockInfo>> {
         let mut last_block = None;
         cache.start_reading()?;
 
@@ -140,33 +141,33 @@ impl UpstreamChainFetcher {
         Ok(last_block)
     }
 
-    async fn wait_snapshot_completion(subscription: &mut Box<dyn Subscription<Message>>) 
-        -> Result<Option<BlockInfo>>
-    {
+    async fn wait_snapshot_completion(
+        subscription: &mut Box<dyn Subscription<Message>>,
+    ) -> Result<Option<BlockInfo>> {
         let Ok((_, message)) = subscription.read().await else {
             return Ok(None);
         };
 
         match message.as_ref() {
             Message::Cardano((blk, CardanoMessage::SnapshotComplete)) => Ok(Some(blk.clone())),
-            msg => bail!("Unexpected message in completion topic: {msg:?}")
+            msg => bail!("Unexpected message in completion topic: {msg:?}"),
         }
     }
 
     async fn run_chain_sync(
         cfg: Arc<FetcherConfig>,
-        snapshot_complete: &mut Option<Box<dyn Subscription<Message>>>
+        snapshot_complete: &mut Option<Box<dyn Subscription<Message>>>,
     ) -> Result<()> {
-        let peer = Arc::new(Mutex::new(utils::peer_connect(cfg.clone(), "header fetcher").await?));
+        let peer = Arc::new(Mutex::new(
+            utils::peer_connect(cfg.clone(), "header fetcher").await?,
+        ));
 
         match cfg.sync_point {
             SyncPoint::Tip => {
                 // Ask for origin but get the tip as well
                 let mut my_peer = peer.lock().await;
-                let (_, Tip(point, _)) = my_peer
-                    .chainsync()
-                    .find_intersect(vec![Point::Origin])
-                    .await?;
+                let (_, Tip(point, _)) =
+                    my_peer.chainsync().find_intersect(vec![Point::Origin]).await?;
                 Self::sync_to_point(cfg, peer.clone(), None, point).await?;
             }
             SyncPoint::Origin => {
@@ -182,8 +183,12 @@ impl UpstreamChainFetcher {
                 Self::sync_to_point(cfg, peer.clone(), Some(upstream_cache), point).await?;
             }
             SyncPoint::Snapshot => {
-                info!("Waiting for snapshot completion on {}", cfg.snapshot_completion_topic);
-                let mut completion_subscription = snapshot_complete.as_mut()
+                info!(
+                    "Waiting for snapshot completion on {}",
+                    cfg.snapshot_completion_topic
+                );
+                let mut completion_subscription = snapshot_complete
+                    .as_mut()
                     .ok_or_else(|| anyhow!("Snapshot topic subscription missing"))?;
 
                 match Self::wait_snapshot_completion(&mut completion_subscription).await? {
@@ -195,7 +200,7 @@ impl UpstreamChainFetcher {
                         let point = Point::Specific(block.slot, block.hash.clone());
                         Self::sync_to_point(cfg, peer, None, point).await?;
                     }
-                    None => info!("Completion not received. Exiting ...")
+                    None => info!("Completion not received. Exiting ..."),
                 }
             }
         }
@@ -206,13 +211,15 @@ impl UpstreamChainFetcher {
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         let cfg = FetcherConfig::new(context.clone(), config)?;
         let mut subscription = match cfg.sync_point {
-            SyncPoint::Snapshot => 
-                Some(cfg.context.subscribe(&cfg.snapshot_completion_topic).await?),
-            _ => None
+            SyncPoint::Snapshot => {
+                Some(cfg.context.subscribe(&cfg.snapshot_completion_topic).await?)
+            }
+            _ => None,
         };
 
         context.clone().run(async move {
-            Self::run_chain_sync(cfg, &mut subscription).await
+            Self::run_chain_sync(cfg, &mut subscription)
+                .await
                 .unwrap_or_else(|e| error!("Chain sync failed: {e}"));
         });
 
