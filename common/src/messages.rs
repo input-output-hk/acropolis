@@ -171,6 +171,15 @@ pub struct SPOStakeDistributionMessage {
     pub spos: Vec<(KeyHash, DelegatedStake)>,
 }
 
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SPORewardStateMessage {
+    /// Epoch which has ended
+    pub epoch: u64,
+
+    /// SPO reward state by operator ID
+    pub spos: Vec<(KeyHash, SPORewardState)>,
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtocolParamsMessage {
     pub params: ProtocolParams,
@@ -227,6 +236,7 @@ pub enum CardanoMessage {
     // Stake distribution info
     DRepStakeDistribution(DRepStakeDistributionMessage), // Info about drep stake
     SPOStakeDistribution(SPOStakeDistributionMessage),   // SPO delegation distribution (SPDD)
+    SPORewardState(SPORewardStateMessage),               // SPO reward state
     StakeAddressDeltas(StakeAddressDeltasMessage),       // Stake part of address deltas
 }
 

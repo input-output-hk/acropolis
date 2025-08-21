@@ -2,6 +2,7 @@
 use crate::monetary::calculate_monetary_change;
 use crate::rewards::{RewardsResult, RewardsState};
 use crate::snapshot::Snapshot;
+use acropolis_common::SPORewardState;
 use acropolis_common::{
     messages::{
         DRepStateMessage, EpochActivityMessage, PotDeltasMessage, ProtocolParamsMessage,
@@ -382,10 +383,17 @@ impl State {
 
     /// Derive the Stake Pool Delegation Distribution (SPDD) - a map of total stake values
     /// (both with and without rewards) for each active SPO
+    /// And Stake Pool Reward State (rewards and delegators_count for each pool)
     /// Key of returned map is the SPO 'operator' ID
-    pub fn generate_spdd(&self) -> BTreeMap<KeyHash, DelegatedStake> {
+    pub fn generate_spdd(
+        &self,
+    ) -> (
+        BTreeMap<KeyHash, DelegatedStake>,
+        BTreeMap<KeyHash, SPORewardState>,
+    ) {
         // Shareable Dashmap with referenced keys
         let spo_stakes = DashMap::<KeyHash, DelegatedStake>::new();
+        let spo_rewards = DashMap::<KeyHash, SPORewardState>::new();
 
         // Total stake across all addresses in parallel, first collecting into a vector
         // because imbl::OrdMap doesn't work in Rayon
@@ -413,10 +421,23 @@ impl State {
                         active: *utxo_value,
                         live: *utxo_value + *rewards,
                     });
+                spo_rewards
+                    .entry(spo.clone())
+                    .and_modify(|v| {
+                        v.rewards += *rewards;
+                        v.delegators_count += 1;
+                    })
+                    .or_insert(SPORewardState {
+                        rewards: *rewards,
+                        delegators_count: 1,
+                    });
             });
 
         // Collect into a plain BTreeMap, so that it is ordered on output
-        spo_stakes.iter().map(|entry| (entry.key().clone(), entry.value().clone())).collect()
+        (
+            spo_stakes.iter().map(|entry| (entry.key().clone(), entry.value().clone())).collect(),
+            spo_rewards.iter().map(|entry| (entry.key().clone(), entry.value().clone())).collect(),
+        )
     }
 
     /// Derive the DRep Delegation Distribution (SPDD) - the total amount
@@ -931,7 +952,8 @@ mod tests {
     fn spdd_is_empty_at_start() {
         let state = State::default();
         let spdd = state.generate_spdd();
-        assert!(spdd.is_empty());
+        assert!(spdd.0.is_empty());
+        assert!(spdd.1.is_empty());
     }
 
     // TODO! Misnomer - pledge is not specifically included in spdd because it is handled
@@ -1014,12 +1036,20 @@ mod tests {
 
         // Get the SPDD
         let spdd = state.generate_spdd();
-        assert_eq!(spdd.len(), 2);
+        assert_eq!(spdd.0.len(), 2);
+        assert_eq!(spdd.1.len(), 2);
 
-        let stake1 = spdd.get(&spo1).unwrap();
+        let stake1 = spdd.0.get(&spo1).unwrap();
         assert_eq!(stake1.active, 42);
-        let stake2 = spdd.get(&spo2).unwrap();
+        let stake2 = spdd.0.get(&spo2).unwrap();
         assert_eq!(stake2.active, 21);
+
+        let rewards1 = spdd.1.get(&spo1).unwrap();
+        assert_eq!(rewards1.rewards, 0);
+        assert_eq!(rewards1.delegators_count, 1);
+        let rewards2 = spdd.1.get(&spo2).unwrap();
+        assert_eq!(rewards2.rewards, 0);
+        assert_eq!(rewards2.delegators_count, 1);
     }
 
     #[test]
