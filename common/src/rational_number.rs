@@ -1,10 +1,10 @@
 use anyhow::{anyhow, Result};
-use num_traits::ToPrimitive;
 use bigdecimal::BigDecimal;
-use std::str::FromStr;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use num_traits::ToPrimitive;
 use serde::de::Error;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_with::{DeserializeAs, SerializeAs};
+use std::str::FromStr;
 
 pub type RationalNumber = num_rational::Ratio<u64>;
 
@@ -17,7 +17,7 @@ pub fn rational_number_from_f32(f: f32) -> Result<RationalNumber> {
 #[serde(untagged)]
 pub enum ChameleonFraction {
     Float(f32),
-    Fraction {numerator: u64, denominator: u64}
+    Fraction { numerator: u64, denominator: u64 },
 }
 
 impl ChameleonFraction {
@@ -29,32 +29,37 @@ impl ChameleonFraction {
 
     pub fn get_rational(&self) -> anyhow::Result<RationalNumber> {
         match self {
-            ChameleonFraction::Fraction { numerator: n, denominator: d } =>
-                Ok(RationalNumber::new(*n, *d)),
-            ChameleonFraction::Float(v) => rational_number_from_f32(*v)
+            ChameleonFraction::Fraction {
+                numerator: n,
+                denominator: d,
+            } => Ok(RationalNumber::new(*n, *d)),
+            ChameleonFraction::Float(v) => rational_number_from_f32(*v),
         }
     }
 
     pub fn get_big_decimal(&self) -> anyhow::Result<BigDecimal> {
         match self {
-            ChameleonFraction::Fraction { denominator: d, .. } if !Self::div_dec_00(*d) =>
-                anyhow::bail!("Denominator {d} must divide {}", Self::MAX_ROUND_DECIMAL),
-            _ => self.get_approx_big_decimal()
+            ChameleonFraction::Fraction { denominator: d, .. } if !Self::div_dec_00(*d) => {
+                anyhow::bail!("Denominator {d} must divide {}", Self::MAX_ROUND_DECIMAL)
+            }
+            _ => self.get_approx_big_decimal(),
         }
     }
 
     pub fn get_approx_big_decimal(&self) -> anyhow::Result<BigDecimal> {
         match self {
-            ChameleonFraction::Fraction { numerator: n, denominator: d } =>
-                Ok(BigDecimal::from(n) / BigDecimal::from(d)),
-            ChameleonFraction::Float(v) => Ok(BigDecimal::from_str(&v.to_string())?)
+            ChameleonFraction::Fraction {
+                numerator: n,
+                denominator: d,
+            } => Ok(BigDecimal::from(n) / BigDecimal::from(d)),
+            ChameleonFraction::Float(v) => Ok(BigDecimal::from_str(&v.to_string())?),
         }
     }
 
     pub fn from_rational(rational: RationalNumber) -> ChameleonFraction {
-        ChameleonFraction::Fraction{
+        ChameleonFraction::Fraction {
             numerator: *rational.numer(),
-            denominator: *rational.denom()
+            denominator: *rational.denom(),
         }
     }
 
@@ -74,24 +79,30 @@ impl ToPrimitive for ChameleonFraction {
     fn to_i64(&self) -> Option<i64> {
         match self {
             ChameleonFraction::Float(f) => f.to_i64(),
-            ChameleonFraction::Fraction { numerator: n, denominator: d } =>
-                (*d > 0 && n % d == 0).then(|| (n / d).try_into().ok()).flatten()
+            ChameleonFraction::Fraction {
+                numerator: n,
+                denominator: d,
+            } => (*d > 0 && n % d == 0).then(|| (n / d).try_into().ok()).flatten(),
         }
     }
 
     fn to_u64(&self) -> Option<u64> {
         match self {
             ChameleonFraction::Float(f) => f.to_u64(),
-            ChameleonFraction::Fraction { numerator: n, denominator: d } =>
-                (*d > 0 && n % d == 0).then_some(n / d)
+            ChameleonFraction::Fraction {
+                numerator: n,
+                denominator: d,
+            } => (*d > 0 && n % d == 0).then_some(n / d),
         }
     }
 
     fn to_f64(&self) -> Option<f64> {
         match self {
             ChameleonFraction::Float(v) => Some(*v as f64),
-            ChameleonFraction::Fraction{numerator: n, denominator: d} =>
-                RationalNumber::new(*n, *d).to_f64()
+            ChameleonFraction::Fraction {
+                numerator: n,
+                denominator: d,
+            } => RationalNumber::new(*n, *d).to_f64(),
         }
     }
 }
@@ -99,7 +110,7 @@ impl ToPrimitive for ChameleonFraction {
 impl SerializeAs<RationalNumber> for ChameleonFraction {
     fn serialize_as<S>(src: &RationalNumber, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
-        S: Serializer
+        S: Serializer,
     {
         let ch = ChameleonFraction::from_rational(*src);
         ch.serialize(serializer)
@@ -109,22 +120,22 @@ impl SerializeAs<RationalNumber> for ChameleonFraction {
 impl<'de> DeserializeAs<'de, RationalNumber> for ChameleonFraction {
     fn deserialize_as<D>(deserializer: D) -> std::result::Result<RationalNumber, D::Error>
     where
-        D: Deserializer<'de>
+        D: Deserializer<'de>,
     {
         match ChameleonFraction::deserialize(deserializer) {
             Ok(v) => match v.get_rational() {
                 Ok(r) => Ok(r),
-                Err(ce) => Err(D::Error::custom(ce))
-            }
-            Err(e) => Err(e)
+                Err(ce) => Err(D::Error::custom(ce)),
+            },
+            Err(e) => Err(e),
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use anyhow::Result;
     use super::*;
+    use anyhow::Result;
     //use crate::rational_number::RationalNumber;
     //use crate::rational_number::rational_number_from_f32;
 
@@ -149,7 +160,10 @@ mod tests {
         for n in 0..=1000 {
             let ch = [
                 &ChameleonFraction::Float(f32::from_str(&format!("0.{:03}", n))?),
-                &ChameleonFraction::Fraction{numerator: n, denominator: 1000}
+                &ChameleonFraction::Fraction {
+                    numerator: n,
+                    denominator: 1000,
+                },
             ];
 
             for elem in ch {
@@ -166,8 +180,12 @@ mod tests {
     fn test_big_decimal() -> Result<(), anyhow::Error> {
         for n in 0..=1000 {
             assert_eq!(
-                ChameleonFraction::Fraction{numerator: n, denominator: 1000}
-                    .get_big_decimal()?*1000,
+                ChameleonFraction::Fraction {
+                    numerator: n,
+                    denominator: 1000
+                }
+                .get_big_decimal()?
+                    * 1000,
                 BigDecimal::from(n)
             );
         }
@@ -177,8 +195,12 @@ mod tests {
             let mut fives = 1;
             for _f in 0..=19 {
                 assert_eq!(
-                    ChameleonFraction::Fraction{numerator: 777, denominator: twos*fives}
-                        .get_big_decimal()?*BigDecimal::from(twos*fives),
+                    ChameleonFraction::Fraction {
+                        numerator: 777,
+                        denominator: twos * fives
+                    }
+                    .get_big_decimal()?
+                        * BigDecimal::from(twos * fives),
                     BigDecimal::from(777)
                 );
                 fives *= 5;
@@ -192,7 +214,10 @@ mod tests {
     // ChameleonFraction does not work for non 10^n denomniators
     #[test]
     fn test_non_round_denominator() -> Result<(), anyhow::Error> {
-        let fraction777 = ChameleonFraction::Fraction{numerator: 3, denominator: 777};
+        let fraction777 = ChameleonFraction::Fraction {
+            numerator: 3,
+            denominator: 777,
+        };
         if let Ok(v) = fraction777.get_big_decimal() {
             anyhow::bail!(
                 "{fraction777:?} cannot be represented in big decimal, although we have {v:?}"
@@ -200,8 +225,12 @@ mod tests {
         }
 
         assert_ne!(
-            ChameleonFraction::Fraction{numerator: 3, denominator: 777}
-                .get_approx_big_decimal()?*777,
+            ChameleonFraction::Fraction {
+                numerator: 3,
+                denominator: 777
+            }
+            .get_approx_big_decimal()?
+                * 777,
             BigDecimal::from(3)
         );
 

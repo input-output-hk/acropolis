@@ -1,30 +1,37 @@
 use crate::genesis_params;
+use acropolis_common::protocol_params::ShelleyProtocolParams;
 use acropolis_common::{
-    messages::GovernanceOutcomesMessage, 
-    AlonzoParams, Committee, CommitteeChange, ConwayParams, EnactStateElem, Era, 
-    GovernanceOutcomeVariant, ProtocolParamUpdate, ProtocolParams, 
-    AlonzoBabbageVotingOutcome
+    messages::GovernanceOutcomesMessage, AlonzoBabbageVotingOutcome, AlonzoParams, Committee,
+    CommitteeChange, ConwayParams, EnactStateElem, Era, GovernanceOutcomeVariant,
+    ProtocolParamUpdate, ProtocolParams,
 };
 use anyhow::{anyhow, bail, Result};
 use tracing::error;
-use acropolis_common::protocol_params::ShelleyProtocolParams;
 
 pub struct ParametersUpdater {
     params: ProtocolParams,
 }
 
 impl ParametersUpdater {
-    pub fn new() -> Self { Self { params: ProtocolParams::default() } }
+    pub fn new() -> Self {
+        Self {
+            params: ProtocolParams::default(),
+        }
+    }
 
     //
     // Conway parameters update
     //
 
-    fn cw_upd<T: Clone>(&mut self, f: impl Fn(&mut ConwayParams) -> &mut T, u: &Option<T>) -> Result<()> {
+    fn cw_upd<T: Clone>(
+        &mut self,
+        f: impl Fn(&mut ConwayParams) -> &mut T,
+        u: &Option<T>,
+    ) -> Result<()> {
         if let Some(u) = u {
             match &mut self.params.conway {
                 Some(dst) => *f(dst) = (*u).clone(),
-                None => bail!("Conway parameter file must be set in genesis before updating")
+                None => bail!("Conway parameter file must be set in genesis before updating"),
             }
         }
         Ok(())
@@ -36,19 +43,25 @@ impl ParametersUpdater {
 
     fn update_conway_params(&mut self, p: &ProtocolParamUpdate) -> Result<()> {
         self.cw_upd(|c| &mut c.pool_voting_thresholds, &p.pool_voting_thresholds)?;
-        self.cw_upd(|c| &mut c.d_rep_voting_thresholds, &p.drep_voting_thresholds)?;
+        self.cw_upd(
+            |c| &mut c.d_rep_voting_thresholds,
+            &p.drep_voting_thresholds,
+        )?;
         self.cw_upd(|c| &mut c.committee_min_size, &p.min_committee_size)?;
-        self.cw_u32(|c| &mut c.committee_max_term_length, &p.committee_term_limit)?;
+        self.cw_u32(
+            |c| &mut c.committee_max_term_length,
+            &p.committee_term_limit,
+        )?;
         self.cw_u32(|c| &mut c.d_rep_activity, &p.drep_inactivity_period)?;
         self.cw_upd(|c| &mut c.d_rep_deposit, &p.drep_deposit)?;
         self.cw_upd(|c| &mut c.gov_action_deposit, &p.governance_action_deposit)?;
         self.cw_u32(
             |c| &mut c.gov_action_lifetime,
-            &p.governance_action_validity_period
+            &p.governance_action_validity_period,
         )?;
         self.cw_upd(
             |c| &mut c.min_fee_ref_script_cost_per_byte,
-            &p.minfee_refscript_cost_per_byte
+            &p.minfee_refscript_cost_per_byte,
         )?;
         self.cw_upd(
             |c| &mut c.plutus_v3_cost_model,
@@ -61,19 +74,23 @@ impl ParametersUpdater {
     //
 
     fn sh_upd<T: Clone>(
-        &mut self, f: impl Fn(&mut ShelleyProtocolParams) -> &mut T, u: &Option<T>
+        &mut self,
+        f: impl Fn(&mut ShelleyProtocolParams) -> &mut T,
+        u: &Option<T>,
     ) -> Result<()> {
         if let Some(u) = u {
             match &mut self.params.shelley {
                 Some(dst) => *f(&mut dst.protocol_params) = (*u).clone(),
-                None => bail!("Shelley parameter file must be set in genesis before updating")
+                None => bail!("Shelley parameter file must be set in genesis before updating"),
             }
         }
         Ok(())
     }
 
     fn sh_u32(
-        &mut self, f: impl Fn(&mut ShelleyProtocolParams) -> &mut u32, u: &Option<u64>
+        &mut self,
+        f: impl Fn(&mut ShelleyProtocolParams) -> &mut u32,
+        u: &Option<u64>,
     ) -> Result<()> {
         self.sh_upd(f, &u.map(|x| u32::try_from(x)).transpose()?)
     }
@@ -91,8 +108,14 @@ impl ParametersUpdater {
         self.sh_u32(|sp| &mut sp.max_block_header_size, &p.max_block_header_size)?;
         self.sh_u32(|sp| &mut sp.minfee_a, &p.minfee_a)?;
         self.sh_u32(|sp| &mut sp.minfee_b, &p.minfee_b)?;
-        self.sh_u32(|sp| &mut sp.stake_pool_target_num, &p.desired_number_of_stake_pools)?;
-        self.sh_upd(|sp| &mut sp.decentralisation_param, &p.decentralisation_constant)?;
+        self.sh_u32(
+            |sp| &mut sp.stake_pool_target_num,
+            &p.desired_number_of_stake_pools,
+        )?;
+        self.sh_upd(
+            |sp| &mut sp.decentralisation_param,
+            &p.decentralisation_constant,
+        )?;
         self.sh_upd(|sp| &mut sp.protocol_version, &p.protocol_version)?;
         self.sh_upd(|sp| &mut sp.extra_entropy, &p.extra_enthropy)?;
         Ok(())
@@ -103,26 +126,28 @@ impl ParametersUpdater {
     //
 
     fn a_upd<T: Clone>(
-        &mut self, f: impl Fn(&mut AlonzoParams) -> &mut T, u: &Option<T>
+        &mut self,
+        f: impl Fn(&mut AlonzoParams) -> &mut T,
+        u: &Option<T>,
     ) -> Result<()> {
         if let Some(u) = u {
             match &mut self.params.alonzo {
                 Some(dst) => *f(dst) = (*u).clone(),
-                None => bail!("Alonzo parameter file must be set in genesis before updating")
+                None => bail!("Alonzo parameter file must be set in genesis before updating"),
             }
         }
         Ok(())
     }
 
     fn a_opt<T: Clone>(
-        &mut self, f: impl Fn(&mut AlonzoParams) -> &mut Option<T>, u: &Option<T>
+        &mut self,
+        f: impl Fn(&mut AlonzoParams) -> &mut Option<T>,
+        u: &Option<T>,
     ) -> Result<()> {
         self.a_upd(f, &u.as_ref().map(|x| Some(x.clone())))
     }
 
-    fn a_u32(
-        &mut self, f: impl Fn(&mut AlonzoParams) -> &mut u32, u: &Option<u64>
-    ) -> Result<()> {
+    fn a_u32(&mut self, f: impl Fn(&mut AlonzoParams) -> &mut u32, u: &Option<u64>) -> Result<()> {
         self.a_upd(f, &u.map(|x| u32::try_from(x)).transpose()?)
     }
 
@@ -175,9 +200,7 @@ impl ParametersUpdater {
         c.threshold = cu.terms.clone();
     }
 
-    fn apply_alonzo_babbage_outcome_elem(&mut self, u: &AlonzoBabbageVotingOutcome)
-        -> Result<()>
-    {
+    fn apply_alonzo_babbage_outcome_elem(&mut self, u: &AlonzoBabbageVotingOutcome) -> Result<()> {
         if u.accepted {
             self.update_params(&u.parameter_update)?;
         }
@@ -185,7 +208,10 @@ impl ParametersUpdater {
     }
 
     fn apply_enact_state_elem(&mut self, u: &EnactStateElem) -> Result<()> {
-        let ref mut c = self.params.conway.as_mut()
+        let ref mut c = self
+            .params
+            .conway
+            .as_mut()
             .ok_or_else(|| anyhow!("Shelley must present for enact state"))?;
 
         match &u {
