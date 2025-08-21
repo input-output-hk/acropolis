@@ -4,11 +4,11 @@ use acropolis_common::messages::Message;
 use anyhow::Result;
 use caryatid_process::Process;
 use caryatid_sdk::ModuleRegistry;
+use config::{Config, Environment, File};
 use std::{env, sync::Arc};
 use tracing::info;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{filter, fmt, EnvFilter, Registry};
-use config::{Config, Environment, File};
 
 // External modules
 use acropolis_module_accounts_state::AccountsState;
@@ -68,16 +68,16 @@ fn setup_alonzo_governance_collect(process: &mut dyn ModuleRegistry<Message>) {
     UpstreamChainFetcher::register(process);
     BlockUnpacker::register(process);
     TxUnpacker::register(process);
-/*
-    UTXOState::register(process);
-    SPOState::register(process);
-    DRepState::register(process);
-    GovernanceState::register(process);
-    ParametersState::register(process);
-    StakeDeltaFilter::register(process);
-    EpochActivityCounter::register(process);
-    AccountsState::register(process);
-*/
+    /*
+        UTXOState::register(process);
+        SPOState::register(process);
+        DRepState::register(process);
+        GovernanceState::register(process);
+        ParametersState::register(process);
+        StakeDeltaFilter::register(process);
+        EpochActivityCounter::register(process);
+        AccountsState::register(process);
+    */
     RecorderAlonzoGovernance::register(process);
 
     Clock::<Message>::register(process);
@@ -129,8 +129,10 @@ pub async fn main() -> Result<()> {
             "--governance-replay" => setup_governance_replay(&mut process),
             "--alonzo-governance-collect" => setup_alonzo_governance_collect(&mut process),
             a => {
-                tracing::error!("Unknown command line argument: {a}, \
-                    expected --governance-collect or --governance-replay");
+                tracing::error!(
+                    "Unknown command line argument: {a}, \
+                    expected --governance-collect or --governance-replay"
+                );
                 return Ok(());
             }
         }

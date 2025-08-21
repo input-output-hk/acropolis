@@ -1,6 +1,6 @@
-use std::sync::Arc;
 use anyhow::Result;
 use caryatid_sdk::Context;
+use std::sync::Arc;
 
 use crate::messages::Message;
 
