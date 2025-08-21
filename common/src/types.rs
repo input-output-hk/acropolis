@@ -491,6 +491,16 @@ pub struct DelegatedStake {
     pub live: Lovelace,
 }
 
+/// SPO reward state data
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SPORewardState {
+    /// Rewards - for certain epoch
+    pub rewards: Lovelace,
+
+    /// Number of delegators for certain epoch
+    pub delegators_count: u64,
+}
+
 /// Genesis key delegation
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenesisKeyDelegation {

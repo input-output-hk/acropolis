@@ -12,10 +12,11 @@ use anyhow::Result;
 use caryatid_sdk::{message_bus::Subscription, module, Context, Module};
 use config::Config;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::{join, sync::Mutex};
 use tracing::{error, info, info_span, Instrument};
 
 mod drep_distribution_publisher;
+mod spo_reward_state_publisher;
 use drep_distribution_publisher::DRepDistributionPublisher;
 mod spo_distribution_publisher;
 use spo_distribution_publisher::SPODistributionPublisher;
@@ -30,6 +31,8 @@ use acropolis_common::queries::accounts::{
 };
 use rest::{handle_drdd, handle_pots, handle_spdd};
 
+use crate::spo_reward_state_publisher::SPORewardStatePublisher;
+
 const DEFAULT_SPO_STATE_TOPIC: &str = "cardano.spo.state";
 const DEFAULT_EPOCH_ACTIVITY_TOPIC: &str = "cardano.epoch.activity";
 const DEFAULT_TX_CERTIFICATES_TOPIC: &str = "cardano.certificates";
@@ -39,6 +42,7 @@ const DEFAULT_STAKE_DELTAS_TOPIC: &str = "cardano.stake.deltas";
 const DEFAULT_DREP_STATE_TOPIC: &str = "cardano.drep.state";
 const DEFAULT_DREP_DISTRIBUTION_TOPIC: &str = "cardano.drep.distribution";
 const DEFAULT_SPO_DISTRIBUTION_TOPIC: &str = "cardano.spo.distribution";
+const DEFAULT_SPO_REWARD_STATE_TOPIC: &str = "cardano.spo.reward.state";
 const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: &str = "cardano.protocol.parameters";
 
 const DEFAULT_HANDLE_SPDD_TOPIC: (&str, &str) = ("handle-topic-spdd", "rest.get.spdd");
@@ -61,6 +65,7 @@ impl AccountsState {
         history: Arc<Mutex<StateHistory<State>>>,
         mut drep_publisher: DRepDistributionPublisher,
         mut spo_publisher: SPODistributionPublisher,
+        mut spo_reward_state_publisher: SPORewardStatePublisher,
         mut spos_subscription: Box<dyn Subscription<Message>>,
         mut ea_subscription: Box<dyn Subscription<Message>>,
         mut certs_subscription: Box<dyn Subscription<Message>>,
@@ -174,10 +179,20 @@ impl AccountsState {
                                 .inspect_err(|e| error!("SPOState handling error: {e:#}"))
                                 .ok();
 
-                            let spdd = state.generate_spdd();
-                            if let Err(e) = spo_publisher.publish_spdd(block_info, spdd).await {
+                            let (spdd, spo_rewards) = state.generate_spdd();
+
+                            let spdd_publish_future = spo_publisher.publish_spdd(block_info, spdd);
+                            let spo_reward_state_publish_future = spo_reward_state_publisher
+                                .publish_spo_reward_state(block_info, spo_rewards);
+
+                            let (spdd_result, spo_reward_state_result) =
+                                join!(spdd_publish_future, spo_reward_state_publish_future);
+                            spdd_result.unwrap_or_else(|e| {
                                 error!("Error publishing SPO stake distribution: {e:#}")
-                            }
+                            });
+                            spo_reward_state_result.unwrap_or_else(|e| {
+                                error!("Error publishing SPO reward state: {e:#}")
+                            });
                         }
                         .instrument(span)
                         .await;
@@ -374,6 +389,10 @@ impl AccountsState {
             .get_string("publish-spo-distribution-topic")
             .unwrap_or(DEFAULT_SPO_DISTRIBUTION_TOPIC.to_string());
 
+        let spo_reward_state_topic = config
+            .get_string("publish-spo-reward-state-topic")
+            .unwrap_or(DEFAULT_SPO_REWARD_STATE_TOPIC.to_string());
+
         // REST handler topics
         let handle_spdd_topic = config
             .get_string(DEFAULT_HANDLE_SPDD_TOPIC.0)
@@ -489,6 +508,8 @@ impl AccountsState {
         let drep_publisher =
             DRepDistributionPublisher::new(context.clone(), drep_distribution_topic);
         let spo_publisher = SPODistributionPublisher::new(context.clone(), spo_distribution_topic);
+        let spo_reward_state_publisher =
+            SPORewardStatePublisher::new(context.clone(), spo_reward_state_topic);
 
         // Subscribe
         let spos_subscription = context.subscribe(&spo_state_topic).await?;
@@ -506,6 +527,7 @@ impl AccountsState {
                 history,
                 drep_publisher,
                 spo_publisher,
+                spo_reward_state_publisher,
                 spos_subscription,
                 ea_subscription,
                 certs_subscription,
