@@ -90,47 +90,62 @@ impl From<&BlockState> for SPOState {
 }
 
 /// Epoch State for certain pool
-/// Store active_stakes, blocks_minted, delegators_count, rewards, fees
+/// Store active_stakes, delegators_count, rewards
 ///
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct EpochState {
     /// epoch number N
     epoch: u64,
-    /// blocks minted during the epoch
-    blocks_minted: Option<u64>,
     /// active stakes of the epoch N (taken boundary from epoch N-2 to N-1)
     active_stakes: Option<u64>,
     /// delegators count by the end of the epoch
     delegators_count: Option<u64>,
     /// rewards of the epoch
     rewards: Option<u64>,
-    /// fees of the epoch
-    fees: Option<u64>,
 }
 
 impl EpochState {
     pub fn new(epoch: u64) -> Self {
         Self {
             epoch,
-            blocks_minted: None,
             active_stakes: None,
             delegators_count: None,
             rewards: None,
+        }
+    }
+}
+
+/// Epoch State for certain vrf vkey hash
+/// Store blocks_minted, fees
+///
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct VrfVkeyHashEpochState {
+    /// epoch number N
+    epoch: u64,
+    /// total blocks minted during the epoch
+    blocks_minted: Option<u64>,
+    /// fees of the epoch
+    fees: Option<u64>,
+}
+
+impl VrfVkeyHashEpochState {
+    pub fn new(epoch: u64) -> Self {
+        Self {
+            epoch,
+            blocks_minted: None,
             fees: None,
         }
     }
 }
 
-#[serde_as]
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct TotalBlocksMintedState {
-    /// block number when Total Blocks Minted is taken
+    /// block number of Epoch N
     block: u64,
-    /// epoch number when Total Blocks Minted is taken (Epoch N + 1)
+    /// epoch number N
     epoch: u64,
-    /// total blocks minted for each pool operator (Until Epoch N)
-    /// KeyHash is VRF Vkey hash
-    #[serde_as(as = "SerializeMapAs<Hex, _>")]
+    /// total blocks minted for each pool operator keyed by vrf_key_hash
+    /// until the end of Epoch N-1
     total_blocks_minted: HashMap<KeyHash, u64>,
 }
 
@@ -152,13 +167,16 @@ pub struct State {
     /// Epoch History for each pool operator
     epochs_history: Option<Arc<DashMap<KeyHash, BTreeMap<u64, EpochState>>>>,
 
+    /// Epoch History for each vrf vkey hashes
+    vrf_vkey_hashes_history: Option<Arc<DashMap<KeyHash, BTreeMap<u64, VrfVkeyHashEpochState>>>>,
+
     /// Active stakes for each pool operator
     /// (epoch number, active stake)
     /// Pop on first element when epoch number is greater than the epoch number
     pub active_stakes: DashMap<KeyHash, VecDeque<(u64, u64)>>,
 
-    /// Volatile total blocks minted state, one per epoch (in case new epoch block is rolled back)
-    total_blocks_minted_history: VecDeque<TotalBlocksMintedState>,
+    /// Volatile total blocks minted state, one per epoch
+    pub total_blocks_minted_history: VecDeque<TotalBlocksMintedState>,
 }
 
 impl State {
@@ -171,8 +189,13 @@ impl State {
             } else {
                 None
             },
+            vrf_vkey_hashes_history: if store_history {
+                Some(Arc::new(DashMap::new()))
+            } else {
+                None
+            },
             active_stakes: DashMap::new(),
-            total_blocks_minted_history: VecDeque::<TotalBlocksMintedState>::new(),
+            total_blocks_minted_history: VecDeque::new(),
         }
     }
 
@@ -191,6 +214,28 @@ impl State {
         } else {
             None
         }
+    }
+
+    /// Get Epoch State for certain pool operator at certain epoch
+    #[allow(dead_code)]
+    pub fn get_epoch_state(&self, operator: &KeyHash, epoch: u64) -> Option<EpochState> {
+        self.epochs_history.as_ref().and_then(|epochs_history| {
+            epochs_history.get(operator).and_then(|epochs| epochs.get(&epoch).cloned())
+        })
+    }
+
+    /// Get Epoch State for certain vrf vkey hash at certain epoch
+    #[allow(dead_code)]
+    pub fn get_vrf_vkey_hash_epoch_state(
+        &self,
+        vrf_vkey_hash: &KeyHash,
+        epoch: u64,
+    ) -> Option<VrfVkeyHashEpochState> {
+        self.vrf_vkey_hashes_history.as_ref().and_then(|vrf_vkey_hashes_history| {
+            vrf_vkey_hashes_history
+                .get(vrf_vkey_hash)
+                .and_then(|epochs| epochs.get(&epoch).cloned())
+        })
     }
 
     /// Get all Stake Pool operators' operator hashes
@@ -218,16 +263,7 @@ impl State {
     ) -> (Vec<u64>, u64) {
         let active_stakes = pools_operators
             .par_iter()
-            .map(|spo| {
-                self.get_active_stake(spo, epoch).unwrap_or_else(|| {
-                    error!(
-                        "Active stakes for pool {} at epoch {} not found",
-                        hex::encode(spo),
-                        epoch
-                    );
-                    0
-                })
-            })
+            .map(|spo| self.get_active_stake(spo, epoch).unwrap_or(0))
             .collect::<Vec<u64>>();
         let total_active_stake = active_stakes.iter().sum();
         (active_stakes, total_active_stake)
@@ -240,18 +276,22 @@ impl State {
             .flatten()
     }
 
-    /// Get total blocks minted for each pool operator
+    /// Get total blocks minted for each vrf vkey hash
     /// ## Arguments
-    /// * `pools_operator` - A vector of pool operator hashes
+    /// * `vrf_vkey_hashes` - A vector of vrf vkey hashes
     /// ## Returns
-    /// `Option<Vec<u64>>` - a vector of total blocks minted for each pool operator.
-    pub fn get_total_blocks_minted(&self, pools_operator: &Vec<KeyHash>) -> Option<Vec<u64>> {
-        let current = self.current_total_blocks_minted_state()?;
-        let total_blocks_minted = pools_operator
+    /// `Vec<u64>` - a vector of total blocks minted for each vrf vkey hash.
+    pub fn get_total_blocks_minted(&self, vrf_vkey_hashes: &Vec<KeyHash>) -> Vec<u64> {
+        let Some(current) = self.current_total_blocks_minted_state() else {
+            return vec![0; vrf_vkey_hashes.len()];
+        };
+        let total_blocks_minted = vrf_vkey_hashes
             .iter()
-            .map(|spo| current.total_blocks_minted.get(spo).cloned().unwrap_or(0))
+            .map(|vrf_vkey_hash| {
+                current.total_blocks_minted.get(vrf_vkey_hash).cloned().unwrap_or(0)
+            })
             .collect();
-        Some(total_blocks_minted)
+        total_blocks_minted
     }
 
     /// Get pools that will be retired in the upcoming epochs
@@ -313,12 +353,12 @@ impl State {
 
     fn get_previous_total_blocks_minted_state(
         &mut self,
-        block_number: u64,
+        block: &BlockInfo,
     ) -> TotalBlocksMintedState {
         loop {
             match self.total_blocks_minted_history.back() {
                 Some(state) => {
-                    if state.block >= block_number {
+                    if state.block >= block.number || state.epoch >= block.epoch {
                         info!(
                             "Rolling back SPO total blocks minted state for block {}",
                             state.block
@@ -479,40 +519,43 @@ impl State {
     /// Active stake is valid from Epoch N + 1 (Set at Epoch N + 1)
     ///
     pub fn handle_spdd(&mut self, block: &BlockInfo, spdd_message: &SPOStakeDistributionMessage) {
+        let SPOStakeDistributionMessage { epoch, spos } = spdd_message;
         info!(
             "Processing SPO Stake Distribution for epoch {} at block {}, epoch {}",
-            spdd_message.epoch, block.number, block.epoch
+            epoch, block.number, block.epoch
         );
-        let SPOStakeDistributionMessage { spos, .. } = spdd_message;
+        if *epoch != block.epoch - 1 {
+            error!(
+                "SPO Stake Distribution Message's epoch {} is wrong against current block's epoch {}",
+                *epoch, block.epoch
+            )
+        }
 
         spos.par_iter().for_each(|(spo, value)| {
-            {
-                // update active stakes
-                let mut active_stakes =
-                    self.active_stakes.entry(spo.clone()).or_insert(VecDeque::new());
+            // update active stakes
+            let mut active_stakes =
+                self.active_stakes.entry(spo.clone()).or_insert(VecDeque::new());
 
-                // pop active stake of epoch which is less than current epoch
-                loop {
-                    let Some((front_epoch, _)) = active_stakes.front() else {
-                        break;
-                    };
-                    if *front_epoch < block.epoch {
-                        active_stakes.pop_front();
-                    } else {
-                        break;
-                    }
+            // pop active stake of epoch which is less than current epoch
+            loop {
+                let Some((front_epoch, _)) = active_stakes.front() else {
+                    break;
+                };
+                if *front_epoch < block.epoch {
+                    active_stakes.pop_front();
+                } else {
+                    break;
                 }
-                active_stakes.push_back((block.epoch + 1, value.active));
             }
-            {
-                // update epochs history if enabled
-                if let Some(epochs_history) = &self.epochs_history {
-                    let mut current = epochs_history.entry(spo.clone()).or_insert(BTreeMap::new());
-                    current
-                        .entry(block.epoch + 1)
-                        .or_insert(EpochState::new(block.epoch + 1))
-                        .active_stakes = Some(value.active);
-                }
+            active_stakes.push_back((*epoch + 2, value.active));
+
+            // update epochs history if enabled
+            if let Some(epochs_history) = &self.epochs_history {
+                let mut epoch_state = epochs_history.entry(spo.clone()).or_insert(BTreeMap::new());
+                epoch_state
+                    .entry(*epoch + 2)
+                    .or_insert(EpochState::new(*epoch + 2))
+                    .active_stakes = Some(value.active);
             }
         });
     }
@@ -523,22 +566,49 @@ impl State {
         block: &BlockInfo,
         epoch_activity_message: &EpochActivityMessage,
     ) {
+        let EpochActivityMessage {
+            epoch,
+            vrf_vkey_hashes,
+            fees,
+            ..
+        } = epoch_activity_message;
         info!(
             "Processing Epoch Activity for epoch {} at block {}, epoch {}",
-            epoch_activity_message.epoch, block.number, block.epoch
+            epoch, block.number, block.epoch
         );
-        let EpochActivityMessage {
-            vrf_vkey_hashes, ..
-        } = epoch_activity_message;
-        let current = self.get_previous_total_blocks_minted_state(block.number);
+        if *epoch != block.epoch - 1 {
+            error!(
+                "Epoch Activity Message's epoch {} is wrong against current block's epoch {}",
+                *epoch, block.epoch
+            )
+        }
+
+        let current = self.get_previous_total_blocks_minted_state(block);
         let mut total_blocks_minted = current.total_blocks_minted.clone();
 
+        // handle blocks_minted state
         vrf_vkey_hashes.iter().for_each(|(vrf_vkey_hash, amount)| {
-            let Some(v) = total_blocks_minted.get_mut(vrf_vkey_hash) else {
-                total_blocks_minted.insert(vrf_vkey_hash.clone(), *amount as u64);
-                return;
-            };
-            *v += *amount as u64;
+            *(total_blocks_minted.entry(vrf_vkey_hash.clone()).or_insert(0)) += *amount as u64;
+
+            // update vrf vkey hashes epochs history if enabled
+            if let Some(vrf_vkey_hashes_history) = &self.vrf_vkey_hashes_history {
+                let mut epoch_state =
+                    vrf_vkey_hashes_history.entry(vrf_vkey_hash.clone()).or_insert(BTreeMap::new());
+                epoch_state
+                    .entry(*epoch)
+                    .or_insert(VrfVkeyHashEpochState::new(*epoch))
+                    .blocks_minted = Some(*amount as u64);
+            }
+        });
+
+        fees.par_iter().for_each(|(vrf_vkey_hash, fee)| {
+            // update vrf vkey hashes epochs history if enabled
+            if let Some(vrf_vkey_hashes_history) = &self.vrf_vkey_hashes_history {
+                let mut epoch_state =
+                    vrf_vkey_hashes_history.entry(vrf_vkey_hash.clone()).or_insert(BTreeMap::new());
+                epoch_state.entry(*epoch).or_insert(VrfVkeyHashEpochState::new(*epoch)).fees =
+                    Some(*fee);
+            }
         });
 
         let new_state = TotalBlocksMintedState {
@@ -585,6 +655,7 @@ pub mod tests {
         assert_eq!(0, state_with_history.history.len());
         assert_eq!(0, state_with_history.active_stakes.len());
         assert_eq!(0, state_with_history.epochs_history.unwrap().len());
+        assert_eq!(0, state_with_history.vrf_vkey_hashes_history.unwrap().len());
     }
 
     #[tokio::test]
@@ -599,20 +670,30 @@ pub mod tests {
         }
     }
 
-    fn new_spdd_message() -> SPOStakeDistributionMessage {
+    fn new_spdd_message(epoch: u64) -> SPOStakeDistributionMessage {
         SPOStakeDistributionMessage {
             spos: Vec::new(),
-            epoch: 0,
+            epoch,
         }
     }
 
-    fn new_block() -> BlockInfo {
+    fn new_epoch_activity_message(epoch: u64) -> EpochActivityMessage {
+        EpochActivityMessage {
+            epoch,
+            fees: Vec::new(),
+            total_blocks: 0,
+            total_fees: 0,
+            vrf_vkey_hashes: Vec::new(),
+        }
+    }
+
+    fn new_block(epoch: u64) -> BlockInfo {
         BlockInfo {
             status: BlockStatus::Immutable,
             slot: 0,
-            number: 0,
+            number: 10 * epoch,
             hash: Vec::<u8>::new(),
-            epoch: 0,
+            epoch,
             new_epoch: true,
             era: Era::Byron,
         }
@@ -622,21 +703,145 @@ pub mod tests {
     async fn state_is_not_empty_after_handle_tx_certs() {
         let mut state = State::new(false);
         let msg = new_msg();
-        let block = new_block();
+        let block = new_block(1);
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
         assert_eq!(1, state.history.len());
     }
 
     #[tokio::test]
     async fn active_stakes_is_not_empty_after_handle_spdd() {
-        let mut state = State::new(false);
-        let mut msg = new_spdd_message();
-        msg.epoch = 1;
-        msg.spos.push((vec![0u8], DelegatedStake { active: 1, live: 1 }));
-        let mut block = new_block();
-        block.epoch = 2;
+        let mut state = State::new(true);
+        let mut block = new_block(2);
+        let mut msg = new_spdd_message(1);
+        msg.spos = vec![(vec![1], DelegatedStake { active: 1, live: 1 })];
         state.handle_spdd(&block, &msg);
         assert_eq!(1, state.active_stakes.len());
+        assert_eq!(
+            VecDeque::from(vec![(3, 1)]),
+            state.active_stakes.get(&vec![1]).unwrap().clone()
+        );
+
+        block = new_block(3);
+        msg = new_spdd_message(2);
+        msg.spos = vec![(vec![1], DelegatedStake { active: 2, live: 1 })];
+        state.handle_spdd(&block, &msg);
+
+        assert_eq!(1, state.active_stakes.len());
+        assert_eq!(
+            VecDeque::from(vec![(3, 1), (4, 2)]),
+            state.active_stakes.get(&vec![1]).unwrap().clone()
+        );
+
+        block = new_block(4);
+        msg = new_spdd_message(3);
+        msg.spos = vec![(vec![1], DelegatedStake { active: 3, live: 1 })];
+        state.handle_spdd(&block, &msg);
+
+        assert_eq!(1, state.active_stakes.len());
+        assert_eq!(
+            VecDeque::from(vec![(4, 2), (5, 3)]),
+            state.active_stakes.get(&vec![1]).unwrap().clone()
+        );
+    }
+
+    #[tokio::test]
+    async fn blocks_minted_fees_are_not_empty_after_handle_epoch_activity() {
+        let mut state = State::new(true);
+        let mut block = new_block(2);
+        let mut epoch_activity_message = new_epoch_activity_message(1);
+        epoch_activity_message.vrf_vkey_hashes = vec![(vec![2], 1)];
+        epoch_activity_message.total_blocks = 1;
+        epoch_activity_message.fees = vec![(vec![2], 10)];
+        epoch_activity_message.total_fees = 10;
+        state.handle_epoch_activity(&block, &epoch_activity_message);
+
+        block = new_block(3);
+        epoch_activity_message = new_epoch_activity_message(2);
+        epoch_activity_message.vrf_vkey_hashes = vec![(vec![2], 2), (vec![3], 3)];
+        epoch_activity_message.total_blocks = 5;
+        epoch_activity_message.fees = vec![(vec![2], 20), (vec![3], 30)];
+        epoch_activity_message.total_fees = 50;
+        state.handle_epoch_activity(&block, &epoch_activity_message);
+
+        assert_eq!(
+            Some(1),
+            state.get_vrf_vkey_hash_epoch_state(&vec![2], 1).unwrap().blocks_minted
+        );
+        assert_eq!(
+            Some(30),
+            state.get_vrf_vkey_hash_epoch_state(&vec![3], 2).unwrap().fees
+        );
+        assert_eq!(
+            Some(3),
+            state.get_vrf_vkey_hash_epoch_state(&vec![3], 2).unwrap().blocks_minted
+        );
+    }
+
+    #[tokio::test]
+    async fn get_total_blocks_minted_returns_zero_when_state_is_new() {
+        let state = State::new(false);
+        let total_blocks_minted = state.get_total_blocks_minted(&vec![vec![1], vec![2]]);
+        assert_eq!(2, total_blocks_minted.len());
+        assert_eq!(0, total_blocks_minted[0]);
+        assert_eq!(0, total_blocks_minted[1]);
+    }
+
+    #[tokio::test]
+    async fn get_total_blocks_minted_returns_data_after_handle_epoch_activity() {
+        let mut state = State::new(false);
+        let block = new_block(2);
+        let mut epoch_activity_message = new_epoch_activity_message(1);
+        epoch_activity_message.vrf_vkey_hashes = vec![(vec![2], 1)];
+        epoch_activity_message.total_blocks = 1;
+        epoch_activity_message.fees = vec![(vec![2], 10)];
+        epoch_activity_message.total_fees = 10;
+        state.handle_epoch_activity(&block, &epoch_activity_message);
+
+        assert_eq!(1, state.total_blocks_minted_history.len());
+        assert_eq!(
+            vec![1, 0],
+            state.get_total_blocks_minted(&vec![vec![2], vec![3]])
+        );
+    }
+
+    #[tokio::test]
+    async fn total_blocks_minted_history_is_pruned_after_rollback() {
+        let mut state = State::new(false);
+        let mut block = new_block(2);
+        let mut epoch_activity_message = new_epoch_activity_message(1);
+        epoch_activity_message.vrf_vkey_hashes = vec![(vec![2], 1)];
+        epoch_activity_message.total_blocks = 1;
+        epoch_activity_message.fees = vec![(vec![2], 10)];
+        epoch_activity_message.total_fees = 10;
+        state.handle_epoch_activity(&block, &epoch_activity_message);
+
+        block = new_block(3);
+        epoch_activity_message = new_epoch_activity_message(2);
+        epoch_activity_message.vrf_vkey_hashes = vec![(vec![2], 2), (vec![3], 3)];
+        epoch_activity_message.total_blocks = 5;
+        epoch_activity_message.fees = vec![(vec![2], 20), (vec![3], 30)];
+        epoch_activity_message.total_fees = 50;
+        state.handle_epoch_activity(&block, &epoch_activity_message);
+
+        assert_eq!(2, state.total_blocks_minted_history.len());
+        assert_eq!(
+            vec![3, 3],
+            state.get_total_blocks_minted(&vec![vec![2], vec![3]])
+        );
+
+        // roll back here
+        epoch_activity_message = new_epoch_activity_message(2);
+        epoch_activity_message.vrf_vkey_hashes = vec![(vec![2], 2)];
+        epoch_activity_message.total_blocks = 2;
+        epoch_activity_message.fees = vec![(vec![2], 20)];
+        epoch_activity_message.total_fees = 20;
+        state.handle_epoch_activity(&block, &epoch_activity_message);
+
+        assert_eq!(2, state.total_blocks_minted_history.len());
+        assert_eq!(
+            vec![3, 0],
+            state.get_total_blocks_minted(&vec![vec![2], vec![3]])
+        );
     }
 
     #[tokio::test]
@@ -657,7 +862,7 @@ pub mod tests {
             relays: vec![],
             pool_metadata: None,
         }));
-        let block = new_block();
+        let block = new_block(1);
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
         let current = state.current();
         assert!(!current.is_none());
@@ -676,7 +881,7 @@ pub mod tests {
             operator: vec![0],
             epoch: 1,
         }));
-        let block = new_block();
+        let block = new_block(0);
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
         let current = state.current();
         assert!(!current.is_none());
@@ -699,7 +904,7 @@ pub mod tests {
             operator: vec![0],
             epoch: 2,
         }));
-        let mut block = new_block();
+        let mut block = new_block(0);
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
         let mut msg = new_msg();
         block.number = 1;
@@ -730,7 +935,7 @@ pub mod tests {
             operator: vec![0],
             epoch: 2,
         }));
-        let mut block = new_block();
+        let mut block = new_block(0);
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
         let mut msg = new_msg();
         block.number = 1;
@@ -773,7 +978,7 @@ pub mod tests {
             relays: vec![],
             pool_metadata: None,
         }));
-        let mut block = new_block();
+        let mut block = new_block(0);
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
         let current = state.current();
         assert!(!current.is_none());
@@ -813,10 +1018,8 @@ pub mod tests {
     #[tokio::test]
     async fn get_pools_active_stakes_returns_zero_when_epoch_is_not_found() {
         let mut state = State::new(false);
-        let mut msg = new_spdd_message();
-        msg.epoch = 1;
-        let mut block = new_block();
-        block.epoch = 2;
+        let block = new_block(2);
+        let msg = new_spdd_message(1);
         state.handle_spdd(&block, &msg);
         let (active_stakes, total) =
             state.get_pools_active_stakes(&vec![vec![1], vec![2]], block.epoch);
@@ -829,10 +1032,8 @@ pub mod tests {
     #[tokio::test]
     async fn get_pools_active_stakes_returns_zero_when_active_stakes_not_found() {
         let mut state = State::new(false);
-        let mut msg = new_spdd_message();
-        msg.epoch = 1;
-        let mut block = new_block();
-        block.epoch = 2;
+        let block = new_block(2);
+        let msg = new_spdd_message(1);
         state.handle_spdd(&block, &msg);
         let (active_stakes, total) =
             state.get_pools_active_stakes(&vec![vec![1], vec![2]], block.epoch + 1);
@@ -845,7 +1046,8 @@ pub mod tests {
     #[tokio::test]
     async fn get_pools_active_stakes_returns_data() {
         let mut state = State::new(false);
-        let mut msg = new_spdd_message();
+        let block = new_block(2);
+        let mut msg = new_spdd_message(1);
         msg.spos = vec![
             (
                 vec![1],
@@ -862,10 +1064,6 @@ pub mod tests {
                 },
             ),
         ];
-        msg.epoch = 1;
-        let mut block = new_block();
-        block.number = 11;
-        block.epoch = 2;
         state.handle_spdd(&block, &msg);
 
         let (active_stakes, total) =
@@ -894,7 +1092,7 @@ pub mod tests {
             relays: vec![],
             pool_metadata: None,
         }));
-        let mut block = new_block();
+        let mut block = new_block(0);
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
         println!("{}", serde_json::to_string_pretty(&state.history).unwrap());
         let current = state.current();
@@ -950,7 +1148,7 @@ pub mod tests {
             operator: vec![0],
             epoch: 2,
         }));
-        let mut block = new_block();
+        let mut block = new_block(0);
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
         let mut msg = new_msg();
         block.number = 1;
