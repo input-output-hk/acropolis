@@ -156,6 +156,7 @@ impl SPOState {
 
         let store_history =
             config.get_bool(DEFAULT_STORE_HISTORY.0).unwrap_or(DEFAULT_STORE_HISTORY.1);
+        info!("Storing SPO's history: {store_history}");
 
         let maybe_snapshot_topic = config
             .get_string("snapshot-topic")
@@ -209,21 +210,10 @@ impl SPOState {
                     }
 
                     PoolsStateQuery::GetPoolsTotalBlocksMinted { vrf_key_hashes } => {
-                        if let Some(total_blocks_minted) =
-                            guard.get_total_blocks_minted(vrf_key_hashes)
-                        {
-                            PoolsStateQueryResponse::PoolsTotalBlocksMinted(
-                                PoolsTotalBlocksMinted {
-                                    total_blocks_minted,
-                                },
-                            )
-                        } else {
-                            PoolsStateQueryResponse::PoolsTotalBlocksMinted(
-                                PoolsTotalBlocksMinted {
-                                    total_blocks_minted: vec![0; vrf_key_hashes.len()],
-                                },
-                            )
-                        }
+                        let total_blocks_minted = guard.get_total_blocks_minted(vrf_key_hashes);
+                        PoolsStateQueryResponse::PoolsTotalBlocksMinted(PoolsTotalBlocksMinted {
+                            total_blocks_minted,
+                        })
                     }
 
                     _ => PoolsStateQueryResponse::Error(format!(
