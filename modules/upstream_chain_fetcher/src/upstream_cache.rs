@@ -1,15 +1,20 @@
-use anyhow::{anyhow, bail, Result};
-use std::{path::Path, fs::File, io::{BufReader, Write}, sync::Arc};
 use acropolis_common::{
-    messages::{BlockHeaderMessage, BlockBodyMessage},
-    BlockInfo
+    messages::{BlockBodyMessage, BlockHeaderMessage},
+    BlockInfo,
+};
+use anyhow::{anyhow, bail, Result};
+use std::{
+    fs::File,
+    io::{BufReader, Write},
+    path::Path,
+    sync::Arc,
 };
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct UpstreamCacheRecord {
     pub id: BlockInfo,
     pub hdr: Arc<BlockHeaderMessage>,
-    pub body: Arc<BlockBodyMessage>
+    pub body: Arc<BlockBodyMessage>,
 }
 
 pub trait Storage {
@@ -23,7 +28,9 @@ pub struct FileStorage {
 
 impl FileStorage {
     pub fn new(path: &str) -> Self {
-        Self { path: path.to_string() }
+        Self {
+            path: path.to_string(),
+        }
     }
 
     fn get_file_name(&self, chunk_no: usize) -> String {
@@ -49,18 +56,23 @@ pub struct UpstreamCacheImpl<S: Storage> {
 
     // If current_record < density and current_record points outside of chunk_cached,
     // then we're at the first empty record after cached records.
-
     current_chunk: usize,
     current_record: usize,
     chunk_cached: Vec<UpstreamCacheRecord>,
 
     // Reader/writer functions --- to abstract actual struct encoder/storage from chunk logic
-    storage: S
+    storage: S,
 }
 
 impl<S: Storage> UpstreamCacheImpl<S> {
     pub fn new_impl(storage: S) -> Self {
-        Self { storage, density: 1000, current_chunk: 0, current_record: 0, chunk_cached: vec![] }
+        Self {
+            storage,
+            density: 1000,
+            current_chunk: 0,
+            current_record: 0,
+            chunk_cached: vec![],
+        }
     }
 
     pub fn start_reading(&mut self) -> Result<()> {
@@ -84,8 +96,10 @@ impl<S: Storage> UpstreamCacheImpl<S> {
 
             if self.current_record >= self.density {
                 if self.chunk_cached.len() > self.density {
-                    bail!("Full chunk actual length {}, expected {}",
-                        self.chunk_cached.len(), self.density
+                    bail!(
+                        "Full chunk actual length {}, expected {}",
+                        self.chunk_cached.len(),
+                        self.density
                     );
                 }
 
@@ -100,10 +114,11 @@ impl<S: Storage> UpstreamCacheImpl<S> {
 
     pub fn read_record(&mut self) -> Result<Option<UpstreamCacheRecord>> {
         if self.has_record() {
-            let record = self.chunk_cached.get(self.current_record)
-                .ok_or(anyhow!("Error reading {}:{}",
-                    self.current_chunk, self.current_record
-                ))?;
+            let record = self.chunk_cached.get(self.current_record).ok_or(anyhow!(
+                "Error reading {}:{}",
+                self.current_chunk,
+                self.current_record
+            ))?;
 
             return Ok(Some(record.clone()));
         };
@@ -154,35 +169,41 @@ impl Storage for FileStorage {
 
 #[cfg(test)]
 mod test {
+    use crate::upstream_cache::{Storage, UpstreamCacheImpl, UpstreamCacheRecord};
+    use acropolis_common::{
+        messages::{BlockBodyMessage, BlockHeaderMessage},
+        BlockInfo, BlockStatus, Era,
+    };
     use anyhow::Result;
     use std::{collections::HashMap, sync::Arc};
-    use acropolis_common::{
-        messages::{BlockHeaderMessage, BlockBodyMessage},
-        BlockInfo, BlockStatus, Era
-    };
-    use crate::upstream_cache::{Storage, UpstreamCacheImpl, UpstreamCacheRecord};
 
-    fn blk(n: u64) -> BlockInfo { BlockInfo {
-        status: BlockStatus::Volatile,
-        slot: n,
-        number: n,
-        hash: vec![],
-        epoch: 0,
-        new_epoch: false,
-        era: Era::default(),
-    }}
+    fn blk(n: u64) -> BlockInfo {
+        BlockInfo {
+            status: BlockStatus::Volatile,
+            slot: n,
+            number: n,
+            hash: vec![],
+            epoch: 0,
+            new_epoch: false,
+            era: Era::default(),
+        }
+    }
 
     fn ucr(n: u64, hdr: usize, body: usize) -> UpstreamCacheRecord {
         UpstreamCacheRecord {
             id: blk(n),
-            hdr: Arc::new(BlockHeaderMessage { raw: vec![hdr as u8] }), 
-            body: Arc::new(BlockBodyMessage { raw: vec![body as u8] })
+            hdr: Arc::new(BlockHeaderMessage {
+                raw: vec![hdr as u8],
+            }),
+            body: Arc::new(BlockBodyMessage {
+                raw: vec![body as u8],
+            }),
         }
     }
 
     #[derive(Default)]
     struct TestStorage {
-        rec: HashMap<usize, Vec<UpstreamCacheRecord>>
+        rec: HashMap<usize, Vec<UpstreamCacheRecord>>,
     }
 
     impl Storage for TestStorage {
@@ -208,22 +229,28 @@ mod test {
     fn test_write_read() -> Result<()> {
         let mut cache = UpstreamCacheImpl::<TestStorage>::new_impl(TestStorage::default());
         cache.density = 3;
-        let perm: [u64; 11] = [3,1,4,1,5,9,2,6,5,3,5];
+        let perm: [u64; 11] = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5];
 
         for n in 0..11 {
-            cache.write_record(&ucr(perm[n], n, n+100))?;
+            cache.write_record(&ucr(perm[n], n, n + 100))?;
         }
 
         assert_eq!(cache.storage.rec.len(), 4);
         for ch in 0..3 {
             let chunk = cache.storage.rec.get(&ch).unwrap();
-            assert_eq!(chunk.get(0).unwrap().id.number, perm[ch*3]);
-            assert_eq!(chunk.get(1).unwrap().id.number, perm[ch*3+1]);
-            assert_eq!(chunk.get(2).unwrap().id.number, perm[ch*3+2]);
+            assert_eq!(chunk.get(0).unwrap().id.number, perm[ch * 3]);
+            assert_eq!(chunk.get(1).unwrap().id.number, perm[ch * 3 + 1]);
+            assert_eq!(chunk.get(2).unwrap().id.number, perm[ch * 3 + 2]);
             assert_eq!(chunk.len(), 3);
         }
-        assert_eq!(cache.storage.rec.get(&3).unwrap().get(0).unwrap().id.number, perm[9]);
-        assert_eq!(cache.storage.rec.get(&3).unwrap().get(1).unwrap().id.number, perm[10]);
+        assert_eq!(
+            cache.storage.rec.get(&3).unwrap().get(0).unwrap().id.number,
+            perm[9]
+        );
+        assert_eq!(
+            cache.storage.rec.get(&3).unwrap().get(1).unwrap().id.number,
+            perm[10]
+        );
         assert_eq!(cache.storage.rec.get(&3).unwrap().len(), 2);
 
         cache.start_reading()?;
@@ -231,7 +258,7 @@ mod test {
             let record = cache.read_record()?.unwrap();
             assert_eq!(record.id.number, perm[n]);
             assert_eq!(record.hdr.raw, vec![n as u8]);
-            assert_eq!(record.body.raw, vec![(n+100) as u8]);
+            assert_eq!(record.body.raw, vec![(n + 100) as u8]);
 
             cache.next_record()?;
         }
