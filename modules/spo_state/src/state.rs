@@ -521,10 +521,6 @@ impl State {
     ///
     pub fn handle_spdd(&mut self, block: &BlockInfo, spdd_message: &SPOStakeDistributionMessage) {
         let SPOStakeDistributionMessage { epoch, spos } = spdd_message;
-        info!(
-            "Processing SPO Stake Distribution for epoch {} at block {}, epoch {}",
-            epoch, block.number, block.epoch
-        );
         if *epoch != block.epoch - 1 {
             error!(
                 "SPO Stake Distribution Message's epoch {} is wrong against current block's epoch {}",
@@ -573,10 +569,6 @@ impl State {
             fees,
             ..
         } = epoch_activity_message;
-        info!(
-            "Processing Epoch Activity for epoch {} at block {}, epoch {}",
-            epoch, block.number, block.epoch
-        );
         if *epoch != block.epoch - 1 {
             error!(
                 "Epoch Activity Message's epoch {} is wrong against current block's epoch {}",
