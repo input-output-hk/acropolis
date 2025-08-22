@@ -3,12 +3,12 @@
 use acropolis_common::{
     ledger_state::SPOState,
     messages::{
-        CardanoMessage, EpochActivityMessage, Message, SPOStakeDistributionMessage,
-        SPOStateMessage, TxCertificatesMessage,
+        CardanoMessage, EpochActivityMessage, Message, SPORewardStateMessage,
+        SPOStakeDistributionMessage, SPOStateMessage, TxCertificatesMessage,
     },
     params::{SECURITY_PARAMETER_K, TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH},
     serialization::SerializeMapAs,
-    BlockInfo, KeyHash, PoolRegistration, PoolRetirement, TxCertificate,
+    BlockInfo, KeyHash, PoolEpochHistory, PoolRegistration, PoolRetirement, TxCertificate,
 };
 use anyhow::Result;
 use dashmap::DashMap;
@@ -90,14 +90,14 @@ impl From<&BlockState> for SPOState {
 }
 
 /// Epoch State for certain pool
-/// Store active_stakes, delegators_count, rewards
+/// Store active_stake, delegators_count, rewards
 ///
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct EpochState {
     /// epoch number N
     epoch: u64,
-    /// active stakes of the epoch N (taken boundary from epoch N-2 to N-1)
-    active_stakes: Option<u64>,
+    /// active stake of the epoch N (taken boundary from epoch N-2 to N-1)
+    active_stake: Option<u64>,
     /// delegators count by the end of the epoch
     delegators_count: Option<u64>,
     /// rewards of the epoch
@@ -108,7 +108,7 @@ impl EpochState {
     pub fn new(epoch: u64) -> Self {
         Self {
             epoch,
-            active_stakes: None,
+            active_stake: None,
             delegators_count: None,
             rewards: None,
         }
@@ -312,6 +312,41 @@ impl State {
                 })
                 .collect()
         })
+    }
+
+    /// Get Pool History by SPO
+    pub fn get_pool_history(&self, spo: &KeyHash) -> Option<Vec<PoolEpochHistory>> {
+        let epoch_history =
+            self.epochs_history.as_ref().and_then(|epochs_history| epochs_history.get(spo))?;
+
+        let vrf_vkey_hash_history = self
+            .vrf_vkey_hashes_history
+            .as_ref()
+            .and_then(|vrf_vkey_hashes_history| vrf_vkey_hashes_history.get(spo))?;
+
+        info!(
+            "Epoch History: {:?} Vrf Vkey Hash History: {:?}",
+            epoch_history.values(),
+            vrf_vkey_hash_history.values()
+        );
+
+        let mut pool_history = Vec::<PoolEpochHistory>::new();
+        for (epoch, epoch_state) in epoch_history.iter() {
+            let Some(vrf_vkey_hash_epoch_state) = vrf_vkey_hash_history.get(epoch) else {
+                continue;
+            };
+
+            let Some(epoch_history) = Self::make_pool_epoch_history_state(
+                *epoch,
+                epoch_state.clone(),
+                vrf_vkey_hash_epoch_state.clone(),
+            ) else {
+                continue;
+            };
+            pool_history.push(epoch_history);
+        }
+
+        Some(pool_history)
     }
 
     async fn log_stats(&self) {
@@ -549,10 +584,33 @@ impl State {
             // update epochs history if enabled
             if let Some(epochs_history) = &self.epochs_history {
                 let mut epoch_state = epochs_history.entry(spo.clone()).or_insert(BTreeMap::new());
-                epoch_state
-                    .entry(*epoch + 2)
-                    .or_insert(EpochState::new(*epoch + 2))
-                    .active_stakes = Some(value.active);
+                epoch_state.entry(*epoch + 2).or_insert(EpochState::new(*epoch + 2)).active_stake =
+                    Some(value.active);
+            }
+        });
+    }
+
+    /// Handle SPO Reward State
+    pub fn handle_spo_reward_state(
+        &mut self,
+        block: &BlockInfo,
+        spo_reward_state_message: &SPORewardStateMessage,
+    ) {
+        let SPORewardStateMessage { epoch, spos } = spo_reward_state_message;
+        if *epoch != block.epoch - 1 {
+            error!(
+                "SPO Reward State Message's epoch {} is wrong against current block's epoch {}",
+                *epoch, block.epoch
+            )
+        }
+
+        spos.par_iter().for_each(|(spo, value)| {
+            // update epochs history if enabled
+            if let Some(epochs_history) = &self.epochs_history {
+                let mut epoch_state = epochs_history.entry(spo.clone()).or_insert(BTreeMap::new());
+                let state = epoch_state.entry(*epoch).or_insert(EpochState::new(*epoch));
+                state.rewards = Some(value.rewards);
+                state.delegators_count = Some(value.delegators_count);
             }
         });
     }
@@ -584,7 +642,7 @@ impl State {
             *(total_blocks_minted.entry(vrf_vkey_hash.clone()).or_insert(0)) += *amount as u64;
 
             // update vrf vkey hashes epochs history if enabled
-            if let Some(vrf_vkey_hashes_history) = &self.vrf_vkey_hashes_history {
+            if let Some(vrf_vkey_hashes_history) = self.vrf_vkey_hashes_history.as_mut() {
                 let mut epoch_state =
                     vrf_vkey_hashes_history.entry(vrf_vkey_hash.clone()).or_insert(BTreeMap::new());
                 epoch_state
@@ -627,6 +685,21 @@ impl State {
     pub fn dump(&self, block_height: u64) -> Option<SPOState> {
         self.inspect_previous_state(block_height).map(SPOState::from)
     }
+
+    pub fn make_pool_epoch_history_state(
+        epoch: u64,
+        epoch_state: EpochState,
+        vrf_vkey_hash_epoch_state: VrfVkeyHashEpochState,
+    ) -> Option<PoolEpochHistory> {
+        Some(PoolEpochHistory {
+            epoch,
+            blocks_minted: vrf_vkey_hash_epoch_state.blocks_minted.unwrap_or(0),
+            active_stake: epoch_state.active_stake.unwrap_or(0),
+            delegators_count: epoch_state.delegators_count.unwrap_or(0),
+            rewards: epoch_state.rewards.unwrap_or(0),
+            fees: vrf_vkey_hash_epoch_state.fees.unwrap_or(0),
+        })
+    }
 }
 
 // -- Tests --
@@ -634,7 +707,8 @@ impl State {
 pub mod tests {
     use super::*;
     use acropolis_common::{
-        BlockInfo, BlockStatus, DelegatedStake, Era, PoolRetirement, Ratio, TxCertificate,
+        BlockInfo, BlockStatus, DelegatedStake, Era, PoolRetirement, Ratio, SPORewardState,
+        TxCertificate,
     };
 
     #[tokio::test]
@@ -665,6 +739,13 @@ pub mod tests {
 
     fn new_spdd_message(epoch: u64) -> SPOStakeDistributionMessage {
         SPOStakeDistributionMessage {
+            spos: Vec::new(),
+            epoch,
+        }
+    }
+
+    fn new_spo_reward_state_message(epoch: u64) -> SPORewardStateMessage {
+        SPORewardStateMessage {
             spos: Vec::new(),
             epoch,
         }
@@ -835,6 +916,70 @@ pub mod tests {
             vec![3, 0],
             state.get_total_blocks_minted(&vec![vec![2], vec![3]])
         );
+    }
+
+    #[tokio::test]
+    async fn get_pool_history_returns_none_when_store_history_disabled() {
+        let state = State::new(false);
+        let pool_history = state.get_pool_history(&vec![1]);
+        assert!(pool_history.is_none());
+    }
+
+    #[tokio::test]
+    async fn get_pool_history_returns_none_when_spo_is_not_found() {
+        let state = State::new(true);
+        let pool_history = state.get_pool_history(&vec![1]);
+        assert!(pool_history.is_none());
+    }
+
+    #[tokio::test]
+    async fn get_pool_history_returns_data() {
+        let mut state = State::new(true);
+        let mut block = new_block(2);
+        let mut spdd_msg = new_spdd_message(1);
+        spdd_msg.spos = vec![
+            (vec![1], DelegatedStake { active: 1, live: 1 }),
+            (vec![2], DelegatedStake { active: 2, live: 2 }),
+        ];
+        state.handle_spdd(&block, &spdd_msg);
+
+        block = new_block(4);
+        let mut spo_reward_state_message = new_spo_reward_state_message(3);
+        spo_reward_state_message.spos = vec![
+            (
+                vec![1],
+                SPORewardState {
+                    rewards: 10,
+                    delegators_count: 1,
+                },
+            ),
+            (
+                vec![2],
+                SPORewardState {
+                    rewards: 20,
+                    delegators_count: 2,
+                },
+            ),
+        ];
+        state.handle_spo_reward_state(&block, &spo_reward_state_message);
+
+        block = new_block(4);
+        let mut epoch_activity_message = new_epoch_activity_message(3);
+        epoch_activity_message.vrf_vkey_hashes = vec![(vec![1], 1), (vec![2], 2)];
+        epoch_activity_message.total_blocks = 3;
+        epoch_activity_message.fees = vec![(vec![1], 10), (vec![2], 20)];
+        epoch_activity_message.total_fees = 30;
+        state.handle_epoch_activity(&block, &epoch_activity_message);
+
+        let pool_history = state.get_pool_history(&vec![1]).unwrap();
+        assert_eq!(1, pool_history.len());
+        let epoch_history = pool_history[0].clone();
+        assert_eq!(3, epoch_history.epoch);
+        assert_eq!(1, epoch_history.active_stake);
+        assert_eq!(1, epoch_history.delegators_count);
+        assert_eq!(10, epoch_history.rewards);
+        assert_eq!(1, epoch_history.blocks_minted);
+        assert_eq!(10, epoch_history.fees);
     }
 
     #[tokio::test]

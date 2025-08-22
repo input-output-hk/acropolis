@@ -471,6 +471,17 @@ pub struct PoolRetirement {
     pub epoch: u64,
 }
 
+/// Pool Epoch History Data
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PoolEpochHistory {
+    pub epoch: u64,
+    pub blocks_minted: u64,
+    pub active_stake: u64,
+    pub delegators_count: u64,
+    pub rewards: u64,
+    pub fees: u64,
+}
+
 /// Stake delegation data
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StakeDelegation {
