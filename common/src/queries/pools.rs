@@ -1,4 +1,4 @@
-use crate::{rational_number::RationalNumber, PoolEpochHistory, PoolRegistration};
+use crate::{PoolEpochState, PoolRegistration};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum PoolsStateQuery {
@@ -95,7 +95,7 @@ pub struct PoolInfo {}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PoolHistory {
-    pub epochs: Vec<PoolEpochHistory>,
+    pub history: Vec<PoolEpochState>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

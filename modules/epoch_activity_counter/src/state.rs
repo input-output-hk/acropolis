@@ -5,9 +5,9 @@ use acropolis_common::{
     messages::{CardanoMessage, EpochActivityMessage, Message},
     BlockInfo, KeyHash,
 };
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
-use tracing::{error, info};
+use tracing::info;
 
 pub struct State {
     // Current epoch number
@@ -19,16 +19,8 @@ pub struct State {
     // Total blocks seen this epoch
     total_blocks: usize,
 
-    // Maps of fees by vrf key hashes
-    fees: HashMap<KeyHash, u64>,
-
     // Total fees seen this epoch
     total_fees: u64,
-
-    // Blocks seen this epoch
-    // removed when we calculate the fee of the block
-    // and cleared when we end the epoch
-    blocks: VecDeque<(u64, KeyHash)>,
 
     // History of epochs (disabled by default)
     epoch_history: Option<BTreeMap<u64, EpochActivityMessage>>,
@@ -42,8 +34,6 @@ impl State {
             blocks_minted: HashMap::new(),
             total_blocks: 0,
             total_fees: 0,
-            fees: HashMap::new(),
-            blocks: VecDeque::new(),
             epoch_history: if store_history {
                 Some(BTreeMap::new())
             } else {
@@ -53,36 +43,18 @@ impl State {
     }
 
     // Handle a block minting, taking the SPO's VRF vkey
-    pub fn handle_mint(&mut self, block: &BlockInfo, vrf_vkey: Option<&[u8]>) {
+    pub fn handle_mint(&mut self, _block: &BlockInfo, vrf_vkey: Option<&[u8]>) {
         self.total_blocks += 1;
 
         if let Some(vrf_vkey) = vrf_vkey {
             // Count one on this hash
             *(self.blocks_minted.entry(keyhash(vrf_vkey)).or_insert(0)) += 1;
-
-            // Add the block to the queue
-            self.blocks.push_back((block.number, keyhash(vrf_vkey)));
         }
     }
 
     // Handle block fees
-    pub fn handle_fees(&mut self, block: &BlockInfo, block_fee: u64) {
+    pub fn handle_fees(&mut self, _block: &BlockInfo, block_fee: u64) {
         self.total_fees += block_fee;
-
-        // find the block in the queue
-        loop {
-            let Some((front_number, vrf_key_hash)) = self.blocks.pop_front() else {
-                break;
-            };
-            if block.number > front_number {
-                // if CardanoMessage::BlockFees is received before CardanoMessage::BlockHeader.
-                error!("CardanoMessage::BlockFees is received before CardanoMessage::BlockHeader.");
-            } else if front_number == block.number {
-                // add this fee to fees for this vrf key hash
-                *(self.fees.entry(vrf_key_hash).or_insert(0)) += block_fee;
-                break;
-            }
-        }
     }
 
     // Handle end of epoch, returns message to be published
@@ -110,8 +82,6 @@ impl State {
         self.total_blocks = 0;
         self.blocks_minted.clear();
         self.total_fees = 0;
-        self.fees.clear();
-        self.blocks.clear();
 
         message
     }
@@ -122,7 +92,6 @@ impl State {
             total_blocks: self.total_blocks,
             total_fees: self.total_fees,
             vrf_vkey_hashes: self.blocks_minted.iter().map(|(k, v)| (k.clone(), *v)).collect(),
-            fees: self.fees.iter().map(|(k, v)| (k.clone(), *v)).collect(),
         }
     }
 
@@ -192,8 +161,6 @@ mod tests {
         assert_eq!(state.total_blocks, 2);
         assert_eq!(state.blocks_minted.len(), 1);
         assert_eq!(state.blocks_minted.get(&keyhash(vrf)), Some(&2));
-        assert_eq!(state.fees.get(&keyhash(vrf)), Some(&300));
-        assert!(state.blocks.is_empty());
     }
 
     #[test]
@@ -216,34 +183,12 @@ mod tests {
             state.blocks_minted.iter().find(|(k, _)| *k == &keyhash(b"vrf_2")).map(|(_, v)| *v),
             Some(2)
         );
-
-        block = make_block(100);
-        state.handle_fees(&block, 100);
-        block.number += 1;
-        state.handle_fees(&block, 200);
-        block.number += 1;
-        state.handle_fees(&block, 300);
-
-        assert_eq!(state.blocks.len(), 0);
-        assert_eq!(state.fees.len(), 2);
-        assert_eq!(
-            state.fees.iter().find(|(k, _)| *k == &keyhash(b"vrf_1")).map(|(_, v)| *v),
-            Some(100)
-        );
-        assert_eq!(
-            state.fees.iter().find(|(k, _)| *k == &keyhash(b"vrf_2")).map(|(_, v)| *v),
-            Some(500)
-        );
     }
 
     #[test]
     fn handle_fees_counts_fees() {
         let mut state = State::new(false);
         let mut block = make_block(100);
-        state.blocks = VecDeque::from([
-            (block.number, keyhash(b"vrf_1")),
-            (block.number + 1, keyhash(b"vrf_2")),
-        ]);
 
         state.handle_fees(&block, 100);
         block.number += 1;
@@ -268,17 +213,12 @@ mod tests {
                 assert_eq!(ea.total_blocks, 1);
                 assert_eq!(ea.total_fees, 123);
                 assert_eq!(ea.vrf_vkey_hashes.len(), 1);
-                assert_eq!(ea.fees.len(), 1);
                 assert_eq!(
                     ea.vrf_vkey_hashes
                         .iter()
                         .find(|(k, _)| k == &keyhash(b"vrf_1"))
                         .map(|(_, v)| *v),
                     Some(1)
-                );
-                assert_eq!(
-                    ea.fees.iter().find(|(k, _)| k == &keyhash(b"vrf_1")).map(|(_, v)| *v),
-                    Some(123)
                 );
             }
             _ => panic!("Expected EpochActivity message"),
@@ -300,8 +240,6 @@ mod tests {
 
         state.end_epoch(&block, 199);
         assert!(state.blocks_minted.is_empty());
-        assert!(state.fees.is_empty());
-        assert!(state.blocks.is_empty());
 
         // Use the public API method
         let history = state
@@ -311,10 +249,5 @@ mod tests {
 
         assert_eq!(history.total_blocks, 1);
         assert_eq!(history.total_fees, 50);
-        assert_eq!(history.fees.len(), 1);
-        assert_eq!(
-            history.fees.iter().find(|(k, _)| k == &keyhash(b"vrf_1")).map(|(_, v)| *v),
-            Some(50)
-        );
     }
 }

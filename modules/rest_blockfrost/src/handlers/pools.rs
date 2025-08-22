@@ -400,7 +400,7 @@ pub async fn handle_pool_history_blockfrost(
             |message| match message {
                 Message::StateQueryResponse(StateQueryResponse::Pools(
                     PoolsStateQueryResponse::PoolHistory(pool_history),
-                )) => Ok(pool_history.epochs),
+                )) => Ok(pool_history.history),
                 Message::StateQueryResponse(StateQueryResponse::Pools(
                     PoolsStateQueryResponse::Error(e),
                 )) => Err(anyhow::anyhow!(

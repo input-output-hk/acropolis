@@ -40,7 +40,7 @@ pub async fn handle_spdd(history: Arc<Mutex<StateHistory<State>>>) -> Result<RES
         None => return Ok(RESTResponse::with_json(200, "{}")),
     };
 
-    let (spdd, _) = state.generate_spdd();
+    let spdd = state.generate_spdd();
     let spdd: HashMap<String, DelegatedStake> = spdd
         .iter()
         .map(|(k, ds)| {
