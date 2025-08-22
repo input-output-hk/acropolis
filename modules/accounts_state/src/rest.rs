@@ -40,8 +40,8 @@ pub async fn handle_spdd(history: Arc<Mutex<StateHistory<State>>>) -> Result<RES
         None => return Ok(RESTResponse::with_json(200, "{}")),
     };
 
-    let spdd = state.generate_spdd();
-    let spdd: HashMap<String, DelegatedStake> = spdd
+    let spdd: HashMap<String, DelegatedStake> = state
+        .generate_spdd()
         .iter()
         .map(|(k, ds)| {
             let bech32 = k.to_bech32_with_hrp("pool").unwrap_or_else(|_| hex::encode(k));
