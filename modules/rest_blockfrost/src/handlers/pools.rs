@@ -375,10 +375,49 @@ async fn handle_pools_spo_blockfrost(
 }
 
 pub async fn handle_pool_history_blockfrost(
-    _context: Arc<Context<Message>>,
-    _params: Vec<String>,
+    context: Arc<Context<Message>>,
+    params: Vec<String>,
 ) -> Result<RESTResponse> {
-    Ok(RESTResponse::with_text(501, "Not implemented"))
+    let Some(pool_id) = params.get(0) else {
+        return Ok(RESTResponse::with_text(400, "Missing pool ID parameter"));
+    };
+
+    let Ok(spo) = Vec::<u8>::from_bech32_with_hrp(pool_id, "pool") else {
+        return Ok(RESTResponse::with_text(
+            400,
+            &format!("Invalid Bech32 stake pool ID: {pool_id}"),
+        ));
+    };
+
+    let pool_history_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
+        PoolsStateQuery::GetPoolHistory { pool_id: spo },
+    )));
+    let pool_history =
+        query_state(
+            &context,
+            POOLS_STATE_TOPIC,
+            pool_history_msg,
+            |message| match message {
+                Message::StateQueryResponse(StateQueryResponse::Pools(
+                    PoolsStateQueryResponse::PoolHistory(pool_history),
+                )) => Ok(pool_history.epochs),
+                Message::StateQueryResponse(StateQueryResponse::Pools(
+                    PoolsStateQueryResponse::Error(e),
+                )) => Err(anyhow::anyhow!(
+                    "Internal server error while retrieving pool history: {e}"
+                )),
+                _ => Err(anyhow::anyhow!("Unexpected message type")),
+            },
+        )
+        .await?;
+
+    match serde_json::to_string(&pool_history) {
+        Ok(json) => Ok(RESTResponse::with_json(200, &json)),
+        Err(e) => Ok(RESTResponse::with_text(
+            500,
+            &format!("Internal server error while retrieving pool history: {e}"),
+        )),
+    }
 }
 
 pub async fn handle_pool_metadata_blockfrost(

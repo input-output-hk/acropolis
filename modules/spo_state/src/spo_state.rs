@@ -7,8 +7,8 @@ use acropolis_common::{
         StateQuery, StateQueryResponse,
     },
     queries::pools::{
-        PoolsActiveStakes, PoolsList, PoolsListWithInfo, PoolsStateQuery, PoolsStateQueryResponse,
-        PoolsTotalBlocksMinted,
+        PoolHistory, PoolsActiveStakes, PoolsList, PoolsListWithInfo, PoolsStateQuery,
+        PoolsStateQueryResponse, PoolsTotalBlocksMinted,
     },
 };
 use anyhow::Result;
@@ -28,11 +28,12 @@ const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.certificates";
 const DEFAULT_CLOCK_TICK_TOPIC: &str = "clock.tick";
 const DEFAULT_SPO_STATE_TOPIC: &str = "cardano.spo.state";
 const DEFAULT_SPDD_SUBSCRIBE_TOPIC: &str = "cardano.spo.distribution";
+const DEFAULT_SPO_REWARD_STATE_SUBSCRIBE_TOPIC: &str = "cardano.spo.reward.state";
 const DEFAULT_EPOCH_ACTIVITY_TOPIC: &str = "cardano.epoch.activity";
 
 const DEFAULT_STORE_HISTORY: (&str, bool) = ("store-history", false);
-
 const POOLS_STATE_TOPIC: &str = "pools-state";
+
 /// SPO State module
 #[module(
     message_type(Message),
@@ -116,6 +117,25 @@ impl SPOState {
         }
     }
 
+    /// Async run loop for SPO Reward State messages
+    async fn run_spo_reward_state_subscription(
+        state: Arc<Mutex<State>>,
+        mut spo_reward_state_subscription: Box<dyn Subscription<Message>>,
+    ) -> Result<()> {
+        loop {
+            // Subscribe to accounts-state's SPO Reward State messsages
+            let (_, spo_reward_state_message) = spo_reward_state_subscription.read().await?;
+            if let Message::Cardano((
+                block_info,
+                CardanoMessage::SPORewardState(spo_reward_state_message),
+            )) = spo_reward_state_message.as_ref()
+            {
+                let mut state = state.lock().await;
+                state.handle_spo_reward_state(block_info, spo_reward_state_message)
+            }
+        }
+    }
+
     /// Async run loop for epoch activity messages
     async fn run_epoch_activity_subscription(
         state: Arc<Mutex<State>>,
@@ -148,6 +168,11 @@ impl SPOState {
         let spdd_topic =
             config.get_string("spdd-topic").unwrap_or(DEFAULT_SPDD_SUBSCRIBE_TOPIC.to_string());
         info!("Creating subscriber on '{spdd_topic}'");
+
+        let spo_reward_state_topic = config
+            .get_string("spo-reward-state-topic")
+            .unwrap_or(DEFAULT_SPO_REWARD_STATE_SUBSCRIBE_TOPIC.to_string());
+        info!("Creating subscriber on '{spo_reward_state_topic}'");
 
         let epoch_activity_topic = config
             .get_string("epoch-activity-topic")
@@ -216,6 +241,13 @@ impl SPOState {
                         })
                     }
 
+                    PoolsStateQuery::GetPoolHistory { pool_id } => {
+                        let pool_history = guard.get_pool_history(pool_id).unwrap_or(Vec::new());
+                        PoolsStateQueryResponse::PoolHistory(PoolHistory {
+                            epochs: pool_history,
+                        })
+                    }
+
                     _ => PoolsStateQueryResponse::Error(format!(
                         "Unimplemented query variant: {:?}",
                         query
@@ -277,12 +309,14 @@ impl SPOState {
         let certs_subscription = context.subscribe(&subscribe_topic).await?;
         let clock_tick_subscription = context.subscribe(&clock_tick_topic).await?;
         let spdd_subscription = context.subscribe(&spdd_topic).await?;
+        let spo_reward_state_subscription = context.subscribe(&spo_reward_state_topic).await?;
         let epoch_activity_subscription = context.subscribe(&epoch_activity_topic).await?;
 
         // Start run task
         let run_certs_state = state.clone();
         let run_clock_tick_state = state.clone();
         let run_spdd_state = state.clone();
+        let run_spo_reward_state_state = state.clone();
         let run_epoch_activity_state = state.clone();
 
         context.run(async move {
@@ -301,6 +335,15 @@ impl SPOState {
             Self::run_spdd_subscription(run_spdd_state, spdd_subscription)
                 .await
                 .unwrap_or_else(|e| error!("Failed to run SPO SPDD Subscription: {e}"));
+        });
+
+        context.run(async move {
+            Self::run_spo_reward_state_subscription(
+                run_spo_reward_state_state,
+                spo_reward_state_subscription,
+            )
+            .await
+            .unwrap_or_else(|e| error!("Failed to run SPO SPO Reward State Subscription: {e}"));
         });
 
         context.run(async move {
