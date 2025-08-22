@@ -59,7 +59,6 @@ impl RewardsState {
         // equivalently (max-supply-reserves) - this is the denominator
         // for sigma, z0, s
         let total_supply = BigDecimal::from(params.max_lovelace_supply - self.mark.pots.reserves);
-        info!(epoch, %total_supply, %stake_rewards, "Calculating rewards:");
 
         // Relative pool saturation size (z0)
         let k = BigDecimal::from(&params.protocol_params.stake_pool_target_num);
@@ -71,6 +70,26 @@ impl RewardsState {
         // Pledge influence factor (a0)
         let a0 = &params.protocol_params.pool_pledge_influence;
         let pledge_influence_factor = BigDecimal::from(a0.numer()) / BigDecimal::from(a0.denom());
+
+        let mut active_stake = BigDecimal::from(0);
+        for (_, spo) in self.go.spos.iter() {
+            for (_, value) in spo.delegators.iter() {
+                active_stake += value;
+            }
+        }
+
+        let decentralisation = params.protocol_params.decentralisation_param;
+
+        info!(
+            epoch,
+            %total_supply,
+            %active_stake,
+            %stake_rewards,
+            %pledge_influence_factor,
+            %relative_pool_saturation_size,
+            %decentralisation,
+            "Calculating rewards:",
+        );
 
         // Calculate for every registered SPO (even those who didn't participate in this epoch)
         // from epoch (i-2) "Go"
@@ -94,9 +113,10 @@ impl RewardsState {
                 total_blocks as u64,
                 &stake_rewards,
                 &total_supply,
+                &active_stake,
                 &relative_pool_saturation_size,
                 &pledge_influence_factor,
-                params,
+                &decentralisation,
                 self.go.clone(),
                 &mut result,
                 &mut total_paid_to_pools,
@@ -123,9 +143,10 @@ impl RewardsState {
         total_blocks: u64,
         stake_rewards: &BigDecimal,
         total_supply: &BigDecimal,
+        active_stake: &BigDecimal,
         relative_pool_saturation_size: &BigDecimal,
         pledge_influence_factor: &BigDecimal,
-        params: &ShelleyParams,
+        decentralisation_param: &RationalNumber,
         snapshot: Arc<Snapshot>,
         result: &mut RewardsResult,
         total_paid_to_pools: &mut Lovelace,
@@ -182,8 +203,7 @@ impl RewardsState {
 
         // If decentralisation_param >= 0.8 => performance = 1
         // Shelley Delegation Spec 3.8.3
-        let decentralisation = &params.protocol_params.decentralisation_param;
-        let pool_performance = if decentralisation >= &RationalNumber::new(8, 10) {
+        let pool_performance = if decentralisation_param >= &RationalNumber::new(8, 10) {
             BigDecimal::one()
         } else {
             relative_blocks.clone() / relative_pool_stake.clone()
@@ -193,8 +213,8 @@ impl RewardsState {
         let pool_rewards = (&optimum_rewards * &pool_performance).with_scale(0);
 
         info!(blocks=blocks_produced, %pool_stake, %relative_pool_stake, %relative_blocks,
-              %pool_performance, %optimum_rewards, %pool_rewards,
-               "Pool {}", hex::encode(operator_id.clone()));
+                  %pool_performance, %optimum_rewards, %pool_rewards,
+                   "Pool {}", hex::encode(operator_id.clone()));
 
         // Subtract fixed costs
         let fixed_cost = BigDecimal::from(spo.fixed_cost);
@@ -225,7 +245,7 @@ impl RewardsState {
                     let to_pay = reward.with_scale(0).to_u64().unwrap_or(0);
 
                     debug!("Reward stake {stake} -> proportion {proportion} of SPO rewards {to_delegators} -> {to_pay} to hash {}",
-                           hex::encode(&hash));
+                               hex::encode(&hash));
 
                     // Transfer from reserves to this account
                     result.rewards.push((hash.clone(), to_pay));
@@ -243,5 +263,40 @@ impl RewardsState {
         result.rewards.push((spo.reward_account.clone(), spo_benefit));
         result.total_paid += spo_benefit;
         *total_paid_to_pools += spo_benefit;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn calculate_rewards_for_individual_spo() {
+        let spo: SnapshotSPO = SnapshotSPO::default();
+        let snapshot = Arc::new(Snapshot::default());
+        let mut result = RewardsResult::default();
+        let mut total_paid_to_pools = 0;
+        let mut total_paid_to_delegators = 0;
+        let mut num_delegators_paid = 0;
+
+        RewardsState::calculate_spo_rewards(
+            &KeyHash::from("30c6319d1f680470c8d2d48f8d44fd2848fa9b8cd6ac944d4dfc0c54"),
+            &spo,
+            1,
+            1991,
+            &BigDecimal::from(31834688329017u64),
+            &BigDecimal::from(31737719158318701u64),
+            &BigDecimal::from(10177811974822904u64),
+            &BigDecimal::from(150).inverse(),
+            &(BigDecimal::from(3) / 10),
+            &RationalNumber::new(1, 1),
+            snapshot,
+            &mut result,
+            &mut total_paid_to_pools,
+            &mut total_paid_to_delegators,
+            &mut num_delegators_paid,
+        );
+
+        assert_eq!(total_paid_to_pools, 34091555121);
     }
 }
