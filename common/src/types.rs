@@ -473,13 +473,14 @@ pub struct PoolRetirement {
 
 /// Pool Epoch History Data
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PoolEpochHistory {
+pub struct PoolEpochState {
     pub epoch: u64,
     pub blocks_minted: u64,
     pub active_stake: u64,
+    pub active_size: RationalNumber,
     pub delegators_count: u64,
-    pub rewards: u64,
-    pub fees: u64,
+    pub pool_reward: u64,
+    pub spo_reward: u64,
 }
 
 /// Stake delegation data
@@ -500,16 +501,6 @@ pub struct DelegatedStake {
 
     /// Total 'live' stake - UTXO values and rewards (used for VRF)
     pub live: Lovelace,
-}
-
-/// SPO reward state data
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct SPORewardState {
-    /// Rewards - for certain epoch
-    pub rewards: Lovelace,
-
-    /// Number of delegators for certain epoch
-    pub delegators_count: u64,
 }
 
 /// Genesis key delegation

@@ -121,9 +121,6 @@ pub struct EpochActivityMessage {
     /// List of all VRF vkey hashes used on blocks (SPO indicator) and
     /// number of blocks produced
     pub vrf_vkey_hashes: Vec<(KeyHash, usize)>,
-
-    /// List of all VRF vkey hashes and fees they received from blocks
-    pub fees: Vec<(KeyHash, u64)>,
 }
 
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
@@ -169,15 +166,6 @@ pub struct SPOStakeDistributionMessage {
 
     /// SPO stake distribution by operator ID
     pub spos: Vec<(KeyHash, DelegatedStake)>,
-}
-
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
-pub struct SPORewardStateMessage {
-    /// Epoch which has ended
-    pub epoch: u64,
-
-    /// SPO reward state by operator ID
-    pub spos: Vec<(KeyHash, SPORewardState)>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -236,7 +224,6 @@ pub enum CardanoMessage {
     // Stake distribution info
     DRepStakeDistribution(DRepStakeDistributionMessage), // Info about drep stake
     SPOStakeDistribution(SPOStakeDistributionMessage),   // SPO delegation distribution (SPDD)
-    SPORewardState(SPORewardStateMessage),               // SPO reward state
     StakeAddressDeltas(StakeAddressDeltasMessage),       // Stake part of address deltas
 }
 
