@@ -5,8 +5,9 @@ use acropolis_common::{
     queries::{
         accounts::{AccountsStateQuery, AccountsStateQueryResponse, DEFAULT_ACCOUNTS_QUERY_TOPIC},
         get_query_topic,
+        governance::{DRepActionUpdate, DRepUpdateEvent, VoteRecord},
     },
-    Anchor, Credential, DRepChoice, DRepCredential, Lovelace, StakeCredential, TxCertificate, Vote,
+    Anchor, Credential, DRepChoice, DRepCredential, Lovelace, StakeCredential, TxCertificate,
     Voter, VotingProcedures,
 };
 use anyhow::{anyhow, Result};
@@ -64,27 +65,6 @@ pub struct DRepRecordExtended {
     pub last_active_epoch: u64,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
-pub struct DRepUpdateEvent {
-    pub tx_hash: [u8; 32],
-    pub cert_index: u64,
-    pub action: DRepActionUpdate,
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
-pub enum DRepActionUpdate {
-    Registered,
-    Updated,
-    Deregistered,
-}
-
-#[derive(Clone, serde::Serialize, serde::Deserialize, Debug)]
-pub struct VoteRecord {
-    pub tx_hash: [u8; 32],
-    pub vote_index: u32,
-    pub vote: Vote,
-}
-
 impl DRepRecord {
     pub fn new(deposit: Lovelace, anchor: Option<Anchor>) -> Self {
         Self { deposit, anchor }
@@ -135,6 +115,7 @@ impl State {
         self.dreps.len()
     }
 
+    #[allow(dead_code)]
     pub fn get_drep(&self, credential: &DRepCredential) -> Option<&DRepRecord> {
         self.dreps.get(credential)
     }
@@ -150,6 +131,88 @@ impl State {
     pub async fn tick(&self) -> Result<()> {
         self.log_stats().await;
         Ok(())
+    }
+
+    pub fn get_drep_info(
+        &self,
+        credential: &DRepCredential,
+    ) -> Result<Option<&DRepRecordExtended>, &'static str> {
+        let hist = self
+            .historical_dreps
+            .as_ref()
+            .ok_or("Historical DRep storage is disabled by configuration.")?;
+        match hist.get(credential) {
+            Some(e) => {
+                e.info.as_ref().ok_or("DRep info storage is disabled by configuration.").map(Some)
+            }
+            None => Ok(None),
+        }
+    }
+
+    pub fn get_drep_delegators(
+        &self,
+        credential: &DRepCredential,
+    ) -> Result<Option<&Vec<Credential>>, &'static str> {
+        let hist = self
+            .historical_dreps
+            .as_ref()
+            .ok_or("Historical DRep storage is disabled by configuration.")?;
+        match hist.get(credential) {
+            Some(e) => e
+                .delegators
+                .as_ref()
+                .ok_or("DRep delegator storage is disabled by configuration.")
+                .map(Some),
+            None => Ok(None),
+        }
+    }
+
+    pub fn get_drep_anchor(
+        &self,
+        credential: &DRepCredential,
+    ) -> Result<Option<&Anchor>, &'static str> {
+        let hist = self
+            .historical_dreps
+            .as_ref()
+            .ok_or("Historical DRep storage is disabled by configuration.")?;
+        match hist.get(credential) {
+            Some(e) => e.metadata.as_ref().ok_or("DRep metadata not found").map(|m| m.as_ref()),
+            None => Ok(None),
+        }
+    }
+
+    pub fn get_drep_updates(
+        &self,
+        credential: &DRepCredential,
+    ) -> Result<Option<&Vec<DRepUpdateEvent>>, &'static str> {
+        let hist = self
+            .historical_dreps
+            .as_ref()
+            .ok_or("Historical DRep storage is disabled by configuration.")?;
+        match hist.get(credential) {
+            Some(e) => e
+                .updates
+                .as_ref()
+                .ok_or("DRep updates storage is disabled by configuration.")
+                .map(Some),
+            None => Ok(None),
+        }
+    }
+
+    pub fn get_drep_votes(
+        &self,
+        credential: &DRepCredential,
+    ) -> Result<Option<&Vec<VoteRecord>>, &'static str> {
+        let hist = self
+            .historical_dreps
+            .as_ref()
+            .ok_or("Historical DRep storage is disabled by configuration.")?;
+        match hist.get(credential) {
+            Some(e) => {
+                e.votes.as_ref().ok_or("DRep votes storage is disabled by configuration.").map(Some)
+            }
+            None => Ok(None),
+        }
     }
 }
 
