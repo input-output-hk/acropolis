@@ -533,6 +533,8 @@ impl State {
             )
         }
 
+        let total_active_stake: u64 = spos.par_iter().map(|(_, value)| value.active).sum();
+
         // update active stakes
         spos.par_iter().for_each(|(spo, value)| {
             let mut active_stakes =
@@ -558,6 +560,10 @@ impl State {
                 Self::update_epochs_history_with(epochs_history, spo, *epoch + 2, |epoch_state| {
                     epoch_state.active_stake = Some(value.active);
                     epoch_state.delegators_count = Some(value.active_delegators_count);
+                    if total_active_stake > 0 {
+                        epoch_state.active_size =
+                            Some(RationalNumber::new(value.active, total_active_stake));
+                    }
                 });
             });
         }
@@ -894,6 +900,7 @@ pub mod tests {
         assert_eq!(1, first_epoch.blocks_minted);
         assert_eq!(3, third_epoch.epoch);
         assert_eq!(1, third_epoch.active_stake);
+        assert_eq!(RationalNumber::new(1, 1), third_epoch.active_size);
         assert_eq!(1, third_epoch.delegators_count);
     }
 
