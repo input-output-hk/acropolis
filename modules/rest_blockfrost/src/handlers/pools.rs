@@ -14,7 +14,7 @@ use caryatid_sdk::Context;
 use rust_decimal::Decimal;
 use std::sync::Arc;
 
-use crate::types::PoolExtendedRest;
+use crate::types::{PoolEpochStateRest, PoolExtendedRest};
 
 const ACCOUNTS_STATE_TOPIC: &str = "accounts-state";
 const POOLS_STATE_TOPIC: &str = "pools-state";
@@ -392,24 +392,23 @@ pub async fn handle_pool_history_blockfrost(
     let pool_history_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
         PoolsStateQuery::GetPoolHistory { pool_id: spo },
     )));
-    let pool_history =
-        query_state(
-            &context,
-            POOLS_STATE_TOPIC,
-            pool_history_msg,
-            |message| match message {
-                Message::StateQueryResponse(StateQueryResponse::Pools(
-                    PoolsStateQueryResponse::PoolHistory(pool_history),
-                )) => Ok(pool_history.history),
-                Message::StateQueryResponse(StateQueryResponse::Pools(
-                    PoolsStateQueryResponse::Error(e),
-                )) => Err(anyhow::anyhow!(
-                    "Internal server error while retrieving pool history: {e}"
-                )),
-                _ => Err(anyhow::anyhow!("Unexpected message type")),
-            },
-        )
-        .await?;
+    let pool_history: Vec<PoolEpochStateRest> = query_state(
+        &context,
+        POOLS_STATE_TOPIC,
+        pool_history_msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::PoolHistory(pool_history),
+            )) => Ok(pool_history.history.into_iter().map(|state| state.into()).collect()),
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::Error(e),
+            )) => Err(anyhow::anyhow!(
+                "Internal server error while retrieving pool history: {e}"
+            )),
+            _ => Err(anyhow::anyhow!("Unexpected message type")),
+        },
+    )
+    .await?;
 
     match serde_json::to_string(&pool_history) {
         Ok(json) => Ok(RESTResponse::with_json(200, &json)),
