@@ -408,10 +408,12 @@ impl State {
                     .entry(spo.clone())
                     .and_modify(|v| {
                         v.active += *utxo_value;
+                        v.active_delegators_count += 1;
                         v.live += *utxo_value + *rewards;
                     })
                     .or_insert(DelegatedStake {
                         active: *utxo_value,
+                        active_delegators_count: 1,
                         live: *utxo_value + *rewards,
                     });
             });
