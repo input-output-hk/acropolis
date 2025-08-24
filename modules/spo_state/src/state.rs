@@ -32,6 +32,10 @@ pub struct BlockState {
 
     #[serde_as(as = "SerializeMapAs<_, Vec<Hex>>")]
     pending_deregistrations: HashMap<u64, Vec<Vec<u8>>>,
+
+    /// vrf_key_hash -> operator_hash mapping
+    #[serde_as(as = "SerializeMapAs<Hex, Hex>")]
+    vrf_key_hashes: HashMap<Vec<u8>, Vec<u8>>,
 }
 
 impl BlockState {
@@ -40,22 +44,27 @@ impl BlockState {
         epoch: u64,
         spos: HashMap<Vec<u8>, PoolRegistration>,
         pending_deregistrations: HashMap<u64, Vec<Vec<u8>>>,
+        vrf_key_hashes: HashMap<Vec<u8>, Vec<u8>>,
     ) -> Self {
         Self {
             block,
             epoch,
             spos,
             pending_deregistrations,
+            vrf_key_hashes,
         }
     }
 }
 
 impl From<SPOState> for BlockState {
     fn from(value: SPOState) -> Self {
+        let spos: HashMap<KeyHash, PoolRegistration> = value.pools.into();
+        let vrf_key_hashes =
+            spos.iter().map(|(k, v)| (v.vrf_key_hash.clone(), k.clone())).collect();
         Self {
             block: 0,
             epoch: 0,
-            spos: value.pools.into(),
+            spos,
             pending_deregistrations: value.retiring.into_iter().fold(
                 HashMap::new(),
                 |mut acc, (key_hash, epoch)| {
@@ -63,6 +72,7 @@ impl From<SPOState> for BlockState {
                     acc
                 },
             ),
+            vrf_key_hashes,
         }
     }
 }
@@ -174,9 +184,6 @@ pub struct State {
     /// Volatile total blocks minted state, one per epoch
     /// Pop on first element when block number is smaller than `current block - SECURITY_PARAMETER_K`
     pub total_blocks_minted_history: VecDeque<TotalBlocksMintedState>,
-
-    /// vrf_key_hash -> operator_hash mapping
-    pub vrf_key_hashes: DashMap<Vec<u8>, Vec<u8>>,
 }
 
 impl State {
@@ -191,7 +198,6 @@ impl State {
             },
             active_stakes: DashMap::new(),
             total_blocks_minted_history: VecDeque::new(),
-            vrf_key_hashes: DashMap::new(),
         }
     }
 
@@ -214,7 +220,7 @@ impl State {
 
     /// Get SPO from vrf_key_hash
     pub fn get_spo_from_vrf_key_hash(&self, vrf_key_hash: &KeyHash) -> Option<KeyHash> {
-        self.vrf_key_hashes.get(vrf_key_hash).map(|v| v.value().clone())
+        self.current().and_then(|state| state.vrf_key_hashes.get(vrf_key_hash).cloned())
     }
 
     /// Get Epoch State for certain pool operator at certain epoch
@@ -343,7 +349,7 @@ impl State {
         if let Some(current) = self.history.back() {
             current.clone()
         } else {
-            BlockState::new(0, 0, HashMap::new(), HashMap::new())
+            BlockState::new(0, 0, HashMap::new(), HashMap::new(), HashMap::new())
         }
     }
 
@@ -418,13 +424,8 @@ impl State {
                                 hex::encode(&dr),
                             ),
                             Some(de_reg) => {
-                                info!(
-                                    "Deregistered SPO {} with vrf key hash {} at epoch {}",
-                                    hex::encode(&dr),
-                                    hex::encode(&de_reg.vrf_key_hash),
-                                    current.epoch
-                                );
                                 retired_spos.push(dr.clone());
+                                current.vrf_key_hashes.remove(&de_reg.vrf_key_hash);
                             }
                         };
                     }
@@ -452,7 +453,7 @@ impl State {
                         hex::encode(&reg.operator)
                     );
                     current.spos.insert(reg.operator.clone(), reg.clone());
-                    self.vrf_key_hashes.insert(reg.vrf_key_hash.clone(), reg.operator.clone());
+                    current.vrf_key_hashes.insert(reg.vrf_key_hash.clone(), reg.operator.clone());
 
                     // Remove any existing queued deregistrations
                     for (epoch, deregistrations) in &mut current.pending_deregistrations.iter_mut()
