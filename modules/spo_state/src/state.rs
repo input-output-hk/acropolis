@@ -603,11 +603,6 @@ impl State {
                     Self::update_epochs_history_with(epochs_history, &spo, *epoch, |epoch_state| {
                         epoch_state.blocks_minted = Some(*amount as u64);
                     });
-                } else {
-                    error!(
-                        "Vrf vkey hash {} not found in current state",
-                        hex::encode(vrf_vkey_hash)
-                    );
                 }
             })
         }
