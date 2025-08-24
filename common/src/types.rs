@@ -499,6 +499,9 @@ pub struct DelegatedStake {
     /// Active stake - UTXO values only (used for reward calcs)
     pub active: Lovelace,
 
+    /// Active delegators count - delegators making active stakes (used for pool history)
+    pub active_delegators_count: u64,
+
     /// Total 'live' stake - UTXO values and rewards (used for VRF)
     pub live: Lovelace,
 }
