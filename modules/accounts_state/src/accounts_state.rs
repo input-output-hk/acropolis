@@ -3,7 +3,7 @@
 
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
-    queries::accounts::PoolsLiveStakes,
+    queries::accounts::{PoolsLiveStakes, DEFAULT_ACCOUNTS_QUERY_TOPIC},
     rest_helper::handle_rest,
     state_history::StateHistory,
     BlockInfo, BlockStatus,
@@ -44,8 +44,6 @@ const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: &str = "cardano.protocol.parameters";
 const DEFAULT_HANDLE_SPDD_TOPIC: (&str, &str) = ("handle-topic-spdd", "rest.get.spdd");
 const DEFAULT_HANDLE_POTS_TOPIC: (&str, &str) = ("handle-topic-pots", "rest.get.pots");
 const DEFAULT_HANDLE_DRDD_TOPIC: (&str, &str) = ("handle-topic-drdd", "rest.get.drdd");
-
-const ACCOUNTS_STATE_TOPIC: &str = "accounts-state";
 
 /// Accounts State module
 #[module(
@@ -390,6 +388,12 @@ impl AccountsState {
             .unwrap_or(DEFAULT_HANDLE_DRDD_TOPIC.1.to_string());
         info!("Creating request handler on '{}'", handle_drdd_topic);
 
+        // Query topics
+        let accounts_query_topic = config
+            .get_string(DEFAULT_ACCOUNTS_QUERY_TOPIC.0)
+            .unwrap_or(DEFAULT_ACCOUNTS_QUERY_TOPIC.1.to_string());
+        info!("Creating query handler on '{}'", accounts_query_topic);
+
         // Create history
         let history = Arc::new(Mutex::new(StateHistory::<State>::new("AccountsState")));
         let history_account_state = history.clone();
@@ -398,7 +402,7 @@ impl AccountsState {
         let history_drdd = history.clone();
         let history_tick = history.clone();
 
-        context.handle(ACCOUNTS_STATE_TOPIC, move |message| {
+        context.handle(&accounts_query_topic, move |message| {
             let history = history_account_state.clone();
             async move {
                 let Message::StateQuery(StateQuery::Accounts(query)) = message.as_ref() else {

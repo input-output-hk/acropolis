@@ -1,13 +1,19 @@
 use std::collections::HashMap;
 
 use crate::{
-    Anchor, DRepCredential, GovActionId, Lovelace, ProposalProcedure, Voter, VotingProcedure,
+    Anchor, Credential, DRepCredential, GovActionId, Lovelace, ProposalProcedure, Vote, Voter,
+    VotingProcedure,
 };
+
+pub const DEFAULT_DREPS_QUERY_TOPIC: (&str, &str) =
+    ("drep-state-query-topic", "cardano.query.dreps");
+pub const DEFAULT_GOVERNANCE_QUERY_TOPIC: (&str, &str) =
+    ("governance-state-query-topic", "cardano.query.governance");
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum GovernanceStateQuery {
     GetDRepsList,
-    GetDRepInfo { drep_credential: DRepCredential },
+    GetDRepInfoWithDelegators { drep_credential: DRepCredential },
     GetDRepDelegators { drep_credential: DRepCredential },
     GetDRepMetadata { drep_credential: DRepCredential },
     GetDRepUpdates { drep_credential: DRepCredential },
@@ -23,9 +29,9 @@ pub enum GovernanceStateQuery {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum GovernanceStateQueryResponse {
     DRepsList(DRepsList),
-    DRepInfo(DRepInfo),
+    DRepInfoWithDelegators(DRepInfoWithDelegators),
     DRepDelegators(DRepDelegatorAddresses),
-    DRepMetadata(DRepMetadata),
+    DRepMetadata(Option<Option<Anchor>>),
     DRepUpdates(DRepUpdates),
     DRepVotes(DRepVotes),
     ProposalsList(ProposalsList),
@@ -46,20 +52,53 @@ pub struct DRepsList {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DRepInfo {
     pub deposit: Lovelace,
-    pub anchor: Option<Anchor>,
+    pub retired: bool,
+    pub expired: bool,
+    pub active_epoch: Option<u64>,
+    pub last_active_epoch: u64,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct DRepDelegatorAddresses {}
+pub struct DRepInfoWithDelegators {
+    pub info: DRepInfo,
+    pub delegators: Vec<Credential>,
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct DRepMetadata {}
+pub struct DRepDelegatorAddresses {
+    pub addresses: Vec<Credential>,
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct DRepUpdates {}
+pub struct DRepUpdates {
+    pub updates: Vec<DRepUpdateEvent>,
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct DRepVotes {}
+pub struct DRepUpdateEvent {
+    pub tx_hash: [u8; 32],
+    pub cert_index: u64,
+    pub action: DRepActionUpdate,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub enum DRepActionUpdate {
+    Registered,
+    Updated,
+    Deregistered,
+}
+
+#[derive(Clone, serde::Serialize, serde::Deserialize, Debug)]
+pub struct DRepVotes {
+    pub votes: Vec<VoteRecord>,
+}
+
+#[derive(Clone, serde::Serialize, serde::Deserialize, Debug)]
+pub struct VoteRecord {
+    pub tx_hash: [u8; 32],
+    pub vote_index: u32,
+    pub vote: Vote,
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProposalsList {
@@ -84,3 +123,14 @@ pub struct ProposalVotes {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProposalMetadata {}
+
+pub fn handle_governance_query_result<T>(
+    result: anyhow::Result<Option<T>>,
+    mapper: impl FnOnce(T) -> GovernanceStateQueryResponse,
+) -> GovernanceStateQueryResponse {
+    match result {
+        Ok(Some(val)) => mapper(val),
+        Ok(None) => GovernanceStateQueryResponse::NotFound,
+        Err(e) => GovernanceStateQueryResponse::Error(e.to_string()),
+    }
+}

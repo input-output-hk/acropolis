@@ -339,6 +339,27 @@ impl Credential {
         bech32::encode::<Bech32>(hrp, data.as_slice())
             .map_err(|e| anyhow!("Bech32 encoding error: {e}"))
     }
+
+    pub fn to_stake_bech32(&self) -> Result<String, anyhow::Error> {
+        let hash = self.get_hash();
+
+        if hash.len() != 28 {
+            return Err(anyhow!("Credential hash must be 28 bytes"));
+        }
+
+        let header = match self {
+            Credential::AddrKeyHash(_) => 0b1110_0001,
+            Credential::ScriptHash(_) => 0b1111_0001,
+        };
+
+        let mut address_bytes = [0u8; 29];
+        address_bytes[0] = header;
+        address_bytes[1..].copy_from_slice(&hash);
+
+        let hrp = Hrp::parse("stake").map_err(|e| anyhow!("HRP parse error: {e}"))?;
+        bech32::encode::<Bech32>(hrp, &address_bytes)
+            .map_err(|e| anyhow!("Bech32 encoding error: {e}"))
+    }
 }
 
 pub type StakeCredential = Credential;
