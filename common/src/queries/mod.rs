@@ -1,3 +1,7 @@
+use crate::messages::Message;
+use caryatid_sdk::Context;
+use std::sync::Arc;
+
 pub mod accounts;
 pub mod addresses;
 pub mod assets;
@@ -12,3 +16,7 @@ pub mod pools;
 pub mod scripts;
 pub mod transactions;
 pub mod utils;
+
+pub fn get_query_topic(context: Arc<Context<Message>>, topic: (&str, &str)) -> String {
+    context.config.get_string(topic.0).unwrap_or_else(|_| topic.1.to_string())
+}
