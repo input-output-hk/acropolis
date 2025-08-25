@@ -212,10 +212,11 @@ impl TxUnpacker {
                                         }
 
                                         if publish_certificates_topic.is_some() {
+                                            let tx_hash = tx.hash();
                                             for ( cert_index, cert) in certs.iter().enumerate() {
-                                                match map_parameters::map_certificate(&cert, tx_index, cert_index) {
+                                                match map_parameters::map_certificate(&cert, *tx_hash, tx_index, cert_index) {
                                                     Ok(tx_cert) => {
-                                                        certificates.push(tx_cert);
+                                                        certificates.push( tx_cert);
                                                     },
                                                     Err(_e) => {
                                                         // TODO error unexpected
@@ -257,7 +258,7 @@ impl TxUnpacker {
                                             if let Some(pallas_vp) = votes {
                                                 // Nonempty set -- governance_message.voting_procedures will not be empty
                                                 match map_parameters::map_all_governance_voting_procedures(pallas_vp) {
-                                                    Ok(vp) => voting_procedures.push((tx.hash().to_vec(), vp)),
+                                                    Ok(vp) => voting_procedures.push((*tx.hash(), vp)),
                                                     Err(e) => error!("Cannot decode governance voting procedures in slot {}: {e}", block.slot)
                                                 }
                                             }

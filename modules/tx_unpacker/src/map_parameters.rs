@@ -200,6 +200,7 @@ fn map_relay(relay: &PallasRelay) -> Relay {
 /// Derive our TxCertificate from a Pallas Certificate
 pub fn map_certificate(
     cert: &MultiEraCert,
+    tx_hash: [u8; 32],
     tx_index: usize,
     cert_index: usize,
 ) -> Result<TxCertificate> {
@@ -425,24 +426,36 @@ pub fn map_certificate(
                 }
 
                 conway::Certificate::RegDRepCert(cred, coin, anchor) => {
-                    Ok(TxCertificate::DRepRegistration(DRepRegistration {
-                        credential: map_stake_credential(cred),
-                        deposit: *coin,
-                        anchor: map_nullable_anchor(&anchor),
+                    Ok(TxCertificate::DRepRegistration(DRepRegistrationWithPos {
+                        reg: DRepRegistration {
+                            credential: map_stake_credential(cred),
+                            deposit: *coin,
+                            anchor: map_nullable_anchor(&anchor),
+                        },
+                        tx_hash: tx_hash,
+                        cert_index: cert_index as u64,
                     }))
                 }
 
-                conway::Certificate::UnRegDRepCert(cred, coin) => {
-                    Ok(TxCertificate::DRepDeregistration(DRepDeregistration {
-                        credential: map_stake_credential(cred),
-                        refund: *coin,
-                    }))
-                }
+                conway::Certificate::UnRegDRepCert(cred, coin) => Ok(
+                    TxCertificate::DRepDeregistration(DRepDeregistrationWithPos {
+                        reg: DRepDeregistration {
+                            credential: map_stake_credential(cred),
+                            refund: *coin,
+                        },
+                        tx_hash: tx_hash,
+                        cert_index: cert_index as u64,
+                    }),
+                ),
 
                 conway::Certificate::UpdateDRepCert(cred, anchor) => {
-                    Ok(TxCertificate::DRepUpdate(DRepUpdate {
-                        credential: map_stake_credential(cred),
-                        anchor: map_nullable_anchor(&anchor),
+                    Ok(TxCertificate::DRepUpdate(DRepUpdateWithPos {
+                        reg: DRepUpdate {
+                            credential: map_stake_credential(cred),
+                            anchor: map_nullable_anchor(&anchor),
+                        },
+                        tx_hash: tx_hash,
+                        cert_index: cert_index as u64,
                     }))
                 }
             }
@@ -797,10 +810,14 @@ fn map_vote(vote: &conway::Vote) -> Vote {
     }
 }
 
-fn map_single_governance_voting_procedure(proc: &conway::VotingProcedure) -> VotingProcedure {
+fn map_single_governance_voting_procedure(
+    vote_index: u32,
+    proc: &conway::VotingProcedure,
+) -> VotingProcedure {
     VotingProcedure {
         vote: map_vote(&proc.vote),
         anchor: map_nullable_anchor(&proc.anchor),
+        vote_index,
     }
 }
 
@@ -823,9 +840,12 @@ pub fn map_all_governance_voting_procedures(
             .get_mut(&voter)
             .ok_or_else(|| anyhow!("Cannot find voter {:?}, which must present", voter))?;
 
-        for (pallas_action_id, pallas_voting_procedure) in pallas_pair.iter() {
+        for (vote_index, (pallas_action_id, pallas_voting_procedure)) in
+            pallas_pair.iter().enumerate()
+        {
             let action_id = map_gov_action_id(pallas_action_id)?;
-            let vp = map_single_governance_voting_procedure(&pallas_voting_procedure);
+            let vp =
+                map_single_governance_voting_procedure(vote_index as u32, &pallas_voting_procedure);
             single_voter.voting_procedures.insert(action_id, vp);
         }
     }

@@ -658,6 +658,13 @@ pub struct DRepRegistration {
     pub anchor: Option<Anchor>,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DRepRegistrationWithPos {
+    pub reg: DRepRegistration,
+    pub tx_hash: [u8; 32],
+    pub cert_index: u64,
+}
+
 /// DRep Deregistration = unreg_drep_cert
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DRepDeregistration {
@@ -668,6 +675,13 @@ pub struct DRepDeregistration {
     pub refund: Lovelace,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DRepDeregistrationWithPos {
+    pub reg: DRepDeregistration,
+    pub tx_hash: [u8; 32],
+    pub cert_index: u64,
+}
+
 /// DRep Update = update_drep_cert
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DRepUpdate {
@@ -676,6 +690,13 @@ pub struct DRepUpdate {
 
     /// Optional anchor
     pub anchor: Option<Anchor>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DRepUpdateWithPos {
+    pub reg: DRepUpdate,
+    pub tx_hash: [u8; 32],
+    pub cert_index: u64,
 }
 
 pub type CommitteeCredential = Credential;
@@ -1209,6 +1230,7 @@ pub enum Vote {
 pub struct VotingProcedure {
     pub vote: Vote,
     pub anchor: Option<Anchor>,
+    pub vote_index: u32,
 }
 
 #[serde_as]
@@ -1375,13 +1397,13 @@ pub enum TxCertificate {
     ResignCommitteeCold(ResignCommitteeCold),
 
     /// DRep registration
-    DRepRegistration(DRepRegistration),
+    DRepRegistration(DRepRegistrationWithPos),
 
     /// DRep deregistration
-    DRepDeregistration(DRepDeregistration),
+    DRepDeregistration(DRepDeregistrationWithPos),
 
     /// DRep update
-    DRepUpdate(DRepUpdate),
+    DRepUpdate(DRepUpdateWithPos),
 }
 
 #[cfg(test)]
@@ -1440,6 +1462,7 @@ mod tests {
             VotingProcedure {
                 anchor: None,
                 vote: Vote::Abstain,
+                vote_index: 0,
             },
         );
         voting.votes.insert(
