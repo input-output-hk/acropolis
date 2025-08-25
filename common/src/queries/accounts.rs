@@ -1,5 +1,8 @@
 use crate::{DRepChoice, KeyHash};
 
+pub const DEFAULT_ACCOUNTS_QUERY_TOPIC: (&str, &str) =
+    ("accounts-state-query-topic", "cardano.query.accounts");
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum AccountsStateQuery {
     GetAccountInfo { stake_key: Vec<u8> },
@@ -13,6 +16,9 @@ pub enum AccountsStateQuery {
     GetAccountAssets { stake_key: Vec<u8> },
     GetAccountAssetsTotals { stake_key: Vec<u8> },
     GetAccountUTxOs { stake_key: Vec<u8> },
+
+    // Pools related queries
+    GetPoolsLiveStakes { pools_operators: Vec<Vec<u8>> },
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -28,6 +34,10 @@ pub enum AccountsStateQueryResponse {
     AccountAssets(AccountAssets),
     AccountAssetsTotals(AccountAssetsTotals),
     AccountUTxOs(AccountUTxOs),
+
+    // Pools related responses
+    PoolsLiveStakes(PoolsLiveStakes),
+
     NotFound,
     Error(String),
 }
@@ -69,3 +79,9 @@ pub struct AccountAssetsTotals {}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AccountUTxOs {}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PoolsLiveStakes {
+    // this is in same order of pools_operator from AccountsStateQuery::GetPoolsLiveStakes
+    pub live_stakes: Vec<u64>,
+}

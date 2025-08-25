@@ -3,8 +3,8 @@
 //! is incompatible with SanchoNet genesis)
 
 use acropolis_common::{
-    rational_number::{RationalNumber, rational_number_from_f32},
-    AlonzoParams, ExUnits, ExUnitPrices
+    rational_number::{ChameleonFraction, RationalNumber},
+    AlonzoParams, CostModel, ExUnitPrices, ExUnits,
 };
 use anyhow::{bail, Result};
 use serde::Deserialize;
@@ -12,20 +12,21 @@ use std::collections::HashMap;
 
 #[derive(Deserialize, Clone)]
 #[serde(untagged)]
-pub enum CostModel {
+pub enum AlonzoCostModel {
     Map(HashMap<String, i64>),
-    Vector(Vec<i64>)
+    Vector(Vec<i64>),
 }
 
-impl CostModel {
+impl AlonzoCostModel {
     pub fn to_vec(&self) -> Vec<i64> {
         match self {
-            CostModel::Map(hm) => {
-                let mut keys = hm.iter().map(|(k,v)| (k.as_str(),*v)).collect::<Vec<(&str,i64)>>();
+            AlonzoCostModel::Map(hm) => {
+                let mut keys =
+                    hm.iter().map(|(k, v)| (k.as_str(), *v)).collect::<Vec<(&str, i64)>>();
                 keys.sort();
-                keys.into_iter().map(|(_,n)| n).collect::<Vec<i64>>()
+                keys.into_iter().map(|(_, n)| n).collect::<Vec<i64>>()
             }
-            CostModel::Vector(v) => v.clone()
+            AlonzoCostModel::Vector(v) => v.clone(),
         }
     }
 }
@@ -37,43 +38,26 @@ pub enum Language {
 }
 
 #[derive(Deserialize, Clone)]
-pub struct CostModelPerLanguage(HashMap<Language, CostModel>);
+pub struct CostModelPerLanguage(HashMap<Language, AlonzoCostModel>);
 
 impl CostModelPerLanguage {
-    fn get_plutus_v1(&self) -> Result<Option<Vec<i64>>> {
+    fn get_plutus_v1(&self) -> Result<Option<CostModel>> {
         let mut res = None;
-        for (k,v) in self.0.iter() {
+        for (k, v) in self.0.iter() {
             if *k != Language::PlutusV1 {
                 bail!("Only PlutusV1 language cost model is allowed in Alonzo Genesis!")
             }
-            res = Some(v.to_vec());
+            res = Some(CostModel::new(v.to_vec()));
         }
         Ok(res)
     }
 }
 
 #[derive(Deserialize, Clone)]
-#[serde(untagged)]
-pub enum AlonzoFraction {
-    Float(f32),
-    Fraction {numerator: u64, denominator: u64}
-}
-
-impl AlonzoFraction {
-    fn get_rational(&self) -> Result<RationalNumber> {
-        match self {
-            AlonzoFraction::Fraction { numerator: n, denominator: d } => 
-                Ok(RationalNumber::new(*n, *d)),
-            AlonzoFraction::Float(v) => rational_number_from_f32(*v)
-        }
-    }
-}
-
-#[derive(Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct AlonzoExecutionPrices {
-    pub pr_steps: AlonzoFraction,
-    pub pr_mem: AlonzoFraction,
+    pub pr_steps: ChameleonFraction,
+    pub pr_mem: ChameleonFraction,
 }
 
 #[derive(Deserialize, Clone)]
@@ -104,7 +88,7 @@ fn map_ex_units(e: &AlonzoExUnits) -> Result<ExUnits> {
     })
 }
 
-fn map_alonzo_fraction(fr: &AlonzoFraction) -> Result<RationalNumber> {
+fn map_alonzo_fraction(fr: &ChameleonFraction) -> Result<RationalNumber> {
     fr.get_rational()
 }
 

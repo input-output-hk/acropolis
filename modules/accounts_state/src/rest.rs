@@ -1,7 +1,6 @@
 //! REST handlers for Acropolis Accounts State module
-use std::sync::Arc;
-
 use anyhow::Result;
+use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::state::State;

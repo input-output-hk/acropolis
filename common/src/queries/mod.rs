@@ -11,3 +11,4 @@ pub mod network;
 pub mod pools;
 pub mod scripts;
 pub mod transactions;
+pub mod utils;

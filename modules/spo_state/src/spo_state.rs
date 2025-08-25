@@ -4,11 +4,15 @@
 use acropolis_common::{
     messages::{
         CardanoMessage, Message, SnapshotDumpMessage, SnapshotMessage, SnapshotStateMessage,
+        StateQuery, StateQueryResponse,
     },
-    rest_helper::{handle_rest, handle_rest_with_path_parameter},
+    queries::pools::{
+        PoolsActiveStakes, PoolsList, PoolsListWithInfo, PoolsStateQuery, PoolsStateQueryResponse,
+        PoolsTotalBlocksMinted,
+    },
 };
 use anyhow::Result;
-use caryatid_sdk::{module, Context, Module};
+use caryatid_sdk::{module, Context, Module, Subscription};
 use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -17,15 +21,16 @@ use tracing::{error, info, info_span, Instrument};
 mod state;
 use state::State;
 mod rest;
-use rest::{handle_list, handle_spo};
+mod spo_state_publisher;
+use crate::spo_state_publisher::SPOStatePublisher;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.certificates";
-const DEFAULT_LIST_TOPIC: (&str, &str) = ("handle-topic-pool-list", "rest.get.pools");
-const DEFAULT_SINGLE_TOPIC: (&str, &str) = ("handle-topic-pool-info", "rest.get.pools.*");
-const DEFAULT_RETIRING_POOLS_TOPIC: (&str, &str) =
-    ("handle-topic-retiring-pools", "rest.get.pools_retiring");
+const DEFAULT_CLOCK_TICK_TOPIC: &str = "clock.tick";
 const DEFAULT_SPO_STATE_TOPIC: &str = "cardano.spo.state";
+const DEFAULT_SPDD_SUBSCRIBE_TOPIC: &str = "cardano.spo.distribution";
+const DEFAULT_EPOCH_ACTIVITY_TOPIC: &str = "cardano.epoch.activity";
 
+const POOLS_STATE_TOPIC: &str = "pools-state";
 /// SPO State module
 #[module(
     message_type(Message),
@@ -35,29 +40,122 @@ const DEFAULT_SPO_STATE_TOPIC: &str = "cardano.spo.state";
 pub struct SPOState;
 
 impl SPOState {
+    /// Async run loop for certificate messages
+    async fn run_certs_subscription(
+        state: Arc<Mutex<State>>,
+        mut spo_state_publisher: SPOStatePublisher,
+        mut certs_subscription: Box<dyn Subscription<Message>>,
+    ) -> Result<()> {
+        loop {
+            // Subscribe to certificate messages
+            let (_, certs_message) = certs_subscription.read().await?;
+            match certs_message.as_ref() {
+                Message::Cardano((block, CardanoMessage::TxCertificates(tx_certs_msg))) => {
+                    let span = info_span!("spo_state.handle_tx_certs", block = block.number);
+                    async {
+                        let mut state = state.lock().await;
+                        let maybe_message = state
+                            .handle_tx_certs(block, tx_certs_msg)
+                            .inspect_err(|e| error!("Messaging handling error: {e}"))
+                            .ok();
+
+                        if let Some(Some(message)) = maybe_message {
+                            if let Err(e) = spo_state_publisher.publish(message).await {
+                                error!("Error publishing SPO State: {e:#}")
+                            }
+                        }
+                    }
+                    .instrument(span)
+                    .await;
+                }
+                _ => error!("Unexpected message type: {certs_message:?}"),
+            }
+        }
+    }
+
+    /// Async run loop for clock tick messages
+    async fn run_clock_tick_subscription(
+        state: Arc<Mutex<State>>,
+        mut clock_tick_subscription: Box<dyn Subscription<Message>>,
+    ) -> Result<()> {
+        loop {
+            // Subscribe to clock tick messages
+            let (_, tick_message) = clock_tick_subscription.read().await?;
+            if let Message::Clock(tick_message) = tick_message.as_ref() {
+                if (tick_message.number % 60) == 0 {
+                    let span = info_span!("spo_state.tick", number = tick_message.number);
+                    async {
+                        let state = state.lock().await;
+                        state.tick().await.inspect_err(|e| error!("Tick error: {e}")).ok();
+                    }
+                    .instrument(span)
+                    .await;
+                }
+            }
+        }
+    }
+
+    /// Async run loop for SPDD messages
+    async fn run_spdd_subscription(
+        state: Arc<Mutex<State>>,
+        mut spdd_subscription: Box<dyn Subscription<Message>>,
+    ) -> Result<()> {
+        loop {
+            // Subscribe to accounts-state's SPDD messsages
+            let (_, spdd_message) = spdd_subscription.read().await?;
+            if let Message::Cardano((
+                block_info,
+                CardanoMessage::SPOStakeDistribution(spdd_message),
+            )) = spdd_message.as_ref()
+            {
+                let mut state = state.lock().await;
+                state.handle_spdd(block_info, spdd_message)
+            }
+        }
+    }
+
+    /// Async run loop for epoch activity messages
+    async fn run_epoch_activity_subscription(
+        state: Arc<Mutex<State>>,
+        mut epoch_activity_subscription: Box<dyn Subscription<Message>>,
+    ) -> Result<()> {
+        loop {
+            // Subscribe to accounts-state's SPDD messsages
+            let (_, spdd_message) = epoch_activity_subscription.read().await?;
+            if let Message::Cardano((
+                block_info,
+                CardanoMessage::EpochActivity(epoch_activity_message),
+            )) = spdd_message.as_ref()
+            {
+                let mut state = state.lock().await;
+                state.handle_epoch_activity(block_info, epoch_activity_message)
+            }
+        }
+    }
+
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // Get configuration
         let subscribe_topic =
             config.get_string("subscribe-topic").unwrap_or(DEFAULT_SUBSCRIBE_TOPIC.to_string());
         info!("Creating subscriber on '{subscribe_topic}'");
 
+        let clock_tick_topic =
+            config.get_string("clock-tick-topic").unwrap_or(DEFAULT_CLOCK_TICK_TOPIC.to_string());
+        info!("Creating subscriber on '{clock_tick_topic}'");
+
+        let spdd_topic =
+            config.get_string("spdd-topic").unwrap_or(DEFAULT_SPDD_SUBSCRIBE_TOPIC.to_string());
+        info!("Creating subscriber on '{spdd_topic}'");
+
+        let epoch_activity_topic = config
+            .get_string("epoch-activity-topic")
+            .unwrap_or(DEFAULT_EPOCH_ACTIVITY_TOPIC.to_string());
+        info!("Creating subscriber on '{epoch_activity_topic}'");
+
         let maybe_snapshot_topic = config
             .get_string("snapshot-topic")
             .ok()
             .inspect(|snapshot_topic| info!("Creating subscriber on '{snapshot_topic}'"));
-
-        let handle_list_topic =
-            config.get_string(DEFAULT_LIST_TOPIC.0).unwrap_or(DEFAULT_LIST_TOPIC.1.to_string());
-        info!("Creating request handler on '{handle_list_topic}'");
-
-        let handle_single_topic =
-            config.get_string(DEFAULT_SINGLE_TOPIC.0).unwrap_or(DEFAULT_SINGLE_TOPIC.1.to_string());
-        info!("Creating request handler on '{handle_single_topic}'");
-
-        let handle_retiring_pools_topic = config
-            .get_string(DEFAULT_RETIRING_POOLS_TOPIC.0)
-            .unwrap_or(DEFAULT_RETIRING_POOLS_TOPIC.1.to_string());
-        info!("Creating request handler on '{handle_retiring_pools_topic}'");
 
         let spo_state_topic = config
             .get_string("publish-spo-state-topic")
@@ -65,6 +163,82 @@ impl SPOState {
         info!("Creating SPO state publisher on '{spo_state_topic}'");
 
         let state = Arc::new(Mutex::new(State::new()));
+
+        // handle pools-state
+        let state_rest_blockfrost = state.clone();
+        context.handle(POOLS_STATE_TOPIC, move |message| {
+            let state = state_rest_blockfrost.clone();
+            async move {
+                let Message::StateQuery(StateQuery::Pools(query)) = message.as_ref() else {
+                    return Arc::new(Message::StateQueryResponse(StateQueryResponse::Pools(
+                        PoolsStateQueryResponse::Error("Invalid message for pools-state".into()),
+                    )));
+                };
+
+                let guard = state.lock().await;
+
+                let response = match query {
+                    PoolsStateQuery::GetPoolsList => {
+                        let pools_list = PoolsList {
+                            pool_operators: guard.list_pool_operators(),
+                        };
+                        PoolsStateQueryResponse::PoolsList(pools_list)
+                    }
+                    PoolsStateQuery::GetPoolsListWithInfo => {
+                        let pools_list_with_info = PoolsListWithInfo {
+                            pools: guard.list_pools_with_info(),
+                        };
+                        PoolsStateQueryResponse::PoolsListWithInfo(pools_list_with_info)
+                    }
+
+                    PoolsStateQuery::GetPoolsActiveStakes {
+                        pools_operators,
+                        epoch,
+                    } => {
+                        if let Some((active_stakes, total_active_stake)) =
+                            guard.get_pools_active_stakes(pools_operators, *epoch)
+                        {
+                            PoolsStateQueryResponse::PoolsActiveStakes(PoolsActiveStakes {
+                                active_stakes,
+                                total_active_stake,
+                            })
+                        } else {
+                            PoolsStateQueryResponse::PoolsActiveStakes(PoolsActiveStakes {
+                                active_stakes: vec![0; pools_operators.len()],
+                                total_active_stake: 0,
+                            })
+                        }
+                    }
+
+                    PoolsStateQuery::GetPoolsTotalBlocksMinted { vrf_key_hashes } => {
+                        if let Some(total_blocks_minted) =
+                            guard.get_total_blocks_minted(vrf_key_hashes)
+                        {
+                            PoolsStateQueryResponse::PoolsTotalBlocksMinted(
+                                PoolsTotalBlocksMinted {
+                                    total_blocks_minted,
+                                },
+                            )
+                        } else {
+                            PoolsStateQueryResponse::PoolsTotalBlocksMinted(
+                                PoolsTotalBlocksMinted {
+                                    total_blocks_minted: vec![0; vrf_key_hashes.len()],
+                                },
+                            )
+                        }
+                    }
+
+                    _ => PoolsStateQueryResponse::Error(format!(
+                        "Unimplemented query variant: {:?}",
+                        query
+                    )),
+                };
+
+                Arc::new(Message::StateQueryResponse(StateQueryResponse::Pools(
+                    response,
+                )))
+            }
+        });
 
         // Subscribe for snapshot messages, if allowed
         if let Some(snapshot_topic) = maybe_snapshot_topic {
@@ -108,79 +282,46 @@ impl SPOState {
             });
         }
 
-        // Subscribe for certificate messages
-        let mut subscription = context.subscribe(&subscribe_topic).await?;
-        let context_subscribe = context.clone();
-        let state_subscribe = state.clone();
+        // Publishers
+        let spo_state_publisher = SPOStatePublisher::new(context.clone(), spo_state_topic);
+
+        // Subscriptions
+        let certs_subscription = context.subscribe(&subscribe_topic).await?;
+        let clock_tick_subscription = context.subscribe(&clock_tick_topic).await?;
+        let spdd_subscription = context.subscribe(&spdd_topic).await?;
+        let epoch_activity_subscription = context.subscribe(&epoch_activity_topic).await?;
+
+        // Start run task
+        let run_certs_state = state.clone();
+        let run_clock_tick_state = state.clone();
+        let run_spdd_state = state.clone();
+        let run_epoch_activity_state = state.clone();
+
         context.run(async move {
-            loop {
-                let Ok((_, message)) = subscription.read().await else {
-                    return;
-                };
-
-                match message.as_ref() {
-                    Message::Cardano((block, CardanoMessage::TxCertificates(tx_certs_msg))) => {
-                        let span = info_span!("spo_state.handle_tx_certs", block = block.number);
-                        async {
-                            let mut state = state_subscribe.lock().await;
-                            let maybe_message = state
-                                .handle_tx_certs(block, tx_certs_msg)
-                                .inspect_err(|e| error!("Messaging handling error: {e}"))
-                                .ok();
-
-                            if let Some(Some(message)) = maybe_message {
-                                context_subscribe
-                                    .message_bus
-                                    .publish(&spo_state_topic, message)
-                                    .await
-                                    .unwrap_or_else(|e| error!("Failed to publish: {e}"));
-                            }
-                        }
-                        .instrument(span)
-                        .await;
-                    }
-                    _ => error!("Unexpected message type: {message:?}"),
-                }
-            }
+            Self::run_certs_subscription(run_certs_state, spo_state_publisher, certs_subscription)
+                .await
+                .unwrap_or_else(|e| error!("Failed to run SPO Certs Subscription: {e}"));
         });
 
-        // Handle REST requests for full SPO state
-        let state_list: Arc<Mutex<State>> = state.clone();
-        handle_rest(context.clone(), &handle_list_topic, move || {
-            handle_list(state_list.clone())
-        });
-
-        // Handle REST requests for single SPO state and retiring pools
-        let state_single = state.clone();
-        handle_rest_with_path_parameter(context.clone(), &handle_single_topic, move |param| {
-            handle_spo(state_single.clone(), param[0].to_string())
-        });
-
-        // Ticker to log stats
-        let state_tick = state.clone();
-        let mut subscription = context.subscribe("clock.tick").await?;
         context.run(async move {
-            loop {
-                let Ok((_, message)) = subscription.read().await else {
-                    return;
-                };
-                if let Message::Clock(message) = message.as_ref() {
-                    if (message.number % 60) == 0 {
-                        let span = info_span!("spo_state.tick", number = message.number);
-                        async {
-                            state_tick
-                                .lock()
-                                .await
-                                .tick()
-                                .await
-                                .inspect_err(|e| error!("Tick error: {e}"))
-                                .ok();
-                        }
-                        .instrument(span)
-                        .await;
-                    }
-                }
-            }
+            Self::run_clock_tick_subscription(run_clock_tick_state, clock_tick_subscription)
+                .await
+                .unwrap_or_else(|e| error!("Failed to run SPO Clock Tick Subscription: {e}"));
+        });
+
+        context.run(async move {
+            Self::run_spdd_subscription(run_spdd_state, spdd_subscription)
+                .await
+                .unwrap_or_else(|e| error!("Failed to run SPO SPDD Subscription: {e}"));
+        });
+
+        context.run(async move {
+            Self::run_epoch_activity_subscription(
+                run_epoch_activity_state,
+                epoch_activity_subscription,
+            )
+            .await
+            .unwrap_or_else(|e| error!("Failed to run SPO Epoch Activity Subscription: {e}"));
         });
 
         Ok(())

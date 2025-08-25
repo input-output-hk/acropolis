@@ -7,6 +7,7 @@ pub mod crypto;
 pub mod ledger_state;
 pub mod messages;
 pub mod params;
+pub mod protocol_params;
 pub mod queries;
 pub mod rational_number;
 pub mod rest_helper;
