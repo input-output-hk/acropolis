@@ -170,14 +170,15 @@ impl State {
     fn insert_voting_procedure(
         &mut self,
         voter: &Voter,
-        transaction: &DataHash,
+        transaction: &[u8; 32],
         voter_votes: &SingleVoterVotes,
     ) -> Result<()> {
         for (action_id, procedure) in voter_votes.voting_procedures.iter() {
             let votes = self.votes.entry(action_id.clone()).or_insert_with(|| HashMap::new());
-            if let Some((prev_trans, prev_vote)) =
-                votes.insert(voter.clone(), (transaction.clone(), procedure.clone()))
-            {
+            if let Some((prev_trans, prev_vote)) = votes.insert(
+                voter.clone(),
+                (transaction.clone().to_vec(), procedure.clone()),
+            ) {
                 // Re-voting is allowed; new vote must be treated as the proper one,
                 // older is to be discarded.
                 if tracing::enabled!(tracing::Level::DEBUG) {
