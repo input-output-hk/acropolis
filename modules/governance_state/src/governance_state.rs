@@ -19,6 +19,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, info_span, Instrument};
 
+mod alonzo_babbage_voting;
 mod state;
 mod voting_state;
 use state::State;
@@ -152,7 +153,9 @@ impl GovernanceState {
                                 .await
                                 .inspect_err(|e| error!("Tick error: {e}"))
                                 .ok();
-                        }.instrument(span).await;
+                        }
+                        .instrument(span)
+                        .await;
                     }
                 }
             }
@@ -220,6 +223,7 @@ impl GovernanceState {
                     state.send(&blk_g, governance_outcomes).await?;
                 }
 
+                // Governance may present in any block -- not only in 'new epoch' blocks.
                 {
                     state.lock().await.handle_governance(&blk_g, &gov_procs).await?;
                 }
@@ -261,7 +265,7 @@ impl GovernanceState {
                     }
 
                     {
-                        state.lock().await.advance_era(&blk_g.era);
+                        state.lock().await.advance_epoch(&blk_g)?;
                     }
                 }
                 Ok::<(), anyhow::Error>(())

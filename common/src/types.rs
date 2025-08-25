@@ -4,12 +4,12 @@
 
 use crate::{
     address::{Address, StakeAddress},
+    protocol_params,
     rational_number::RationalNumber,
 };
 use anyhow::{anyhow, bail, Error, Result};
 use bech32::{Bech32, Hrp};
 use bitmask_enum::bitmask;
-use chrono::{DateTime, Utc};
 use hex::decode;
 use serde::{Deserialize, Serialize};
 use serde_with::{hex::Hex, serde_as};
@@ -188,6 +188,8 @@ pub type ScriptHash = KeyHash;
 /// Address key hash
 pub type AddrKeyhash = KeyHash;
 
+pub type GenesisKeyhash = Vec<u8>;
+
 /// Data hash used for metadata, anchors (SHA256)
 pub type DataHash = Vec<u8>;
 
@@ -200,6 +202,26 @@ pub type LovelaceDelta = i64;
 pub struct Ratio {
     pub numerator: u64,
     pub denominator: u64,
+}
+
+impl Ratio {
+    /// Returns the ratio as f64 (safe for large values)
+    pub fn to_f64(&self) -> f64 {
+        if self.denominator == 0 {
+            0.0
+        } else {
+            (self.numerator as f64) / (self.denominator as f64)
+        }
+    }
+
+    /// Returns the ratio as f32 (less precision)
+    pub fn to_f32(&self) -> f32 {
+        if self.denominator == 0 {
+            0.0
+        } else {
+            (self.numerator as f32) / (self.denominator as f32)
+        }
+    }
 }
 
 /// Withdrawal
@@ -751,7 +773,18 @@ impl Display for GovActionId {
     }
 }
 
-type CostModel = Vec<i64>;
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
+pub struct CostModel(Vec<i64>);
+
+impl CostModel {
+    pub fn new(m: Vec<i64>) -> Self {
+        CostModel(m)
+    }
+
+    pub fn as_vec(&self) -> &Vec<i64> {
+        &self.0
+    }
+}
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct CostModels {
@@ -825,56 +858,6 @@ pub struct ProtocolConsts {
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct ProtocolVersion {
-    pub minor: u64,
-    pub major: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub enum NonceVariant {
-    NeutralNonce,
-    Nonce,
-}
-
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct Nonce {
-    pub tag: NonceVariant,
-    pub hash: Option<Vec<u8>>,
-}
-
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct ShelleyProtocolParams {
-    pub protocol_version: ProtocolVersion,
-    pub max_tx_size: u32,
-    pub max_block_body_size: u32,
-    pub max_block_header_size: u32,
-    pub key_deposit: u64,
-    pub min_utxo_value: u64,
-
-    pub minfee_a: u32,
-    pub minfee_b: u32,
-    pub pool_deposit: u64,
-
-    /// AKA desired_number_of_stake_pools, n_opt, k parameter
-    pub stake_pool_target_num: u32,
-    pub min_pool_cost: u64,
-
-    /// AKA eMax, e_max
-    pub pool_retire_max_epoch: u64,
-    pub extra_entropy: Nonce,
-    pub decentralisation_param: RationalNumber,
-
-    /// AKA Rho, expansion_rate
-    pub monetary_expansion: RationalNumber,
-
-    /// AKA Tau, treasury_growth_rate
-    pub treasury_cut: RationalNumber,
-
-    /// AKA a0
-    pub pool_pledge_influence: RationalNumber,
-}
-
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct AlonzoParams {
     pub lovelace_per_utxo_word: u64,
     pub execution_prices: ExUnitPrices,
@@ -896,29 +879,6 @@ pub struct ByronParams {
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum NetworkId {
-    Testnet,
-    Mainnet,
-}
-
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct ShelleyParams {
-    pub active_slots_coeff: f32,
-    pub epoch_length: u32,
-    pub max_kes_evolutions: u32,
-    pub max_lovelace_supply: u64,
-    pub network_id: NetworkId,
-    pub network_magic: u32,
-    pub protocol_params: ShelleyProtocolParams,
-    pub security_param: u32,
-    pub slot_length: u32,
-    pub slots_per_kes_period: u32,
-    pub system_start: DateTime<Utc>,
-    pub update_quorum: u32,
-}
-
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ConwayParams {
     pub pool_voting_thresholds: PoolVotingThresholds,
     pub d_rep_voting_thresholds: DRepVotingThresholds,
@@ -934,11 +894,11 @@ pub struct ConwayParams {
     pub committee: Committee,
 }
 
-#[derive(Debug, Default, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Default, PartialEq, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtocolParams {
     pub alonzo: Option<AlonzoParams>,
     pub byron: Option<ByronParams>,
-    pub shelley: Option<ShelleyParams>,
+    pub shelley: Option<protocol_params::ShelleyParams>,
     pub conway: Option<ConwayParams>,
 }
 
@@ -952,100 +912,184 @@ pub enum ProtocolParamType {
     SecurityProperty,
 }
 
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ProtocolParamUpdate {
+    /// The following are the fields from Conway ProtocolParamUpdate structure
     /// AKA txFeePerByte, tx_fee_per_byte (Shelley)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub minfee_a: Option<u64>,
 
     /// AKA txFeeFixed, tx_fee_fixed (Shelley)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub minfee_b: Option<u64>,
 
     /// (Shelley)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub max_block_body_size: Option<u64>,
 
     /// AKA max_tx_size (Shelley)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub max_transaction_size: Option<u64>,
 
     /// (Shelley)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub max_block_header_size: Option<u64>,
 
     /// (Shelley)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub key_deposit: Option<Lovelace>,
 
     /// (Shelley)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub pool_deposit: Option<Lovelace>,
 
     /// AKA poolRetireMaxEpoch, eMax (Shelley)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub maximum_epoch: Option<u64>,
 
     /// AKA stakePoolTargetNum, nOpt (Shelley)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub desired_number_of_stake_pools: Option<u64>,
 
     /// AKA a0 (Shelley)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub pool_pledge_influence: Option<RationalNumber>,
 
     /// AKA rho, monetary_expansion (Shelley)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub expansion_rate: Option<RationalNumber>,
 
     /// AKA tau, treasury_cut (Shelley)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub treasury_growth_rate: Option<RationalNumber>,
 
     /// (Shelley)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub min_pool_cost: Option<Lovelace>,
 
     /// AKA lovelacePerUTxOWord, utxoCostPerWord (Alonzo)
     /// TODO: was there any moment, when this value had different
     /// meaning? (words were recounted to bytes)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub ada_per_utxo_byte: Option<Lovelace>,
 
     /// AKA plutus_v1_cost_model, plutus_v2_cost_model (Shelley)
     /// plutus_v3_cost_model (Conway)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub cost_models_for_script_languages: Option<CostModels>,
 
     /// AKA execution_prices (Alonzo)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub execution_costs: Option<ExUnitPrices>,
 
     /// (Alonzo)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub max_tx_ex_units: Option<ExUnits>,
 
     /// (Alonzo)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub max_block_ex_units: Option<ExUnits>,
 
     /// (Alonzo)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub max_value_size: Option<u64>,
 
     /// (Alonzo)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub collateral_percentage: Option<u64>,
 
     /// (Alonzo)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub max_collateral_inputs: Option<u64>,
 
     /// (Conway)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub pool_voting_thresholds: Option<PoolVotingThresholds>,
 
     /// (Conway)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub drep_voting_thresholds: Option<DRepVotingThresholds>,
 
     /// (Conway)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub min_committee_size: Option<u64>,
 
     /// AKA committee_max_term_limit (Conway)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub committee_term_limit: Option<u64>,
 
     /// AKA gov_action_lifetime (Cownay)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub governance_action_validity_period: Option<u64>,
 
     /// AKA gov_action_deposit (Conway)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub governance_action_deposit: Option<Lovelace>,
 
     /// AKA d_rep_deposit (Conway)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub drep_deposit: Option<Lovelace>,
 
     /// AKA drep_inactivity (Conway)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub drep_inactivity_period: Option<u64>,
 
     /// AKA min_fee_ref_script_cost_per_byte (Conway)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub minfee_refscript_cost_per_byte: Option<RationalNumber>,
+
+    /// The following are the fields from Alonzo-compatible ProtocolParamUpdate
+    /// structure, not present in Conway.
+    /// (Shelley)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub decentralisation_constant: Option<RationalNumber>,
+
+    /// (Shelley)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub extra_enthropy: Option<protocol_params::Nonce>,
+
+    /// (Shelley)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub protocol_version: Option<protocol_params::ProtocolVersion>,
+}
+
+#[derive(Serialize, PartialEq, Deserialize, Debug, Clone)]
+pub struct AlonzoBabbageUpdateProposal {
+    pub proposals: Vec<(GenesisKeyhash, Box<ProtocolParamUpdate>)>,
+    pub enactment_epoch: u64,
 }
 
 #[derive(Serialize, PartialEq, Deserialize, Debug, Clone)]
@@ -1246,6 +1290,14 @@ pub enum GovernanceOutcomeVariant {
     EnactStateElem(EnactStateElem),
     TreasuryWithdrawal(TreasuryWithdrawalsAction),
     NoAction,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AlonzoBabbageVotingOutcome {
+    pub voting: Vec<GenesisKeyhash>,
+    pub votes_threshold: u64,
+    pub accepted: bool,
+    pub parameter_update: Box<ProtocolParamUpdate>,
 }
 
 /// The structure has info about outcome of a single governance action.

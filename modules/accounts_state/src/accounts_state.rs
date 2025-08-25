@@ -3,8 +3,9 @@
 
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
+    queries::accounts::{PoolsLiveStakes, DEFAULT_ACCOUNTS_QUERY_TOPIC},
     rest_helper::handle_rest,
-    state_history::StateHistory,
+    state_history::{HistoryKind, StateHistory},
     BlockInfo, BlockStatus,
 };
 use anyhow::Result;
@@ -94,7 +95,7 @@ impl AccountsState {
             }
 
             if let Some(block_info) = current_block {
-                history.lock().await.commit(&block_info, state);
+                history.lock().await.commit(block_info.number, state);
             }
         }
 
@@ -116,7 +117,7 @@ impl AccountsState {
                 Message::Cardano((block_info, _)) => {
                     // Handle rollbacks on this topic only
                     if block_info.status == BlockStatus::RolledBack {
-                        state = history.lock().await.get_rolled_back_state(&block_info);
+                        state = history.lock().await.get_rolled_back_state(block_info.number);
                     }
 
                     current_block = Some(block_info.clone());
@@ -302,7 +303,7 @@ impl AccountsState {
 
             // Commit the new state
             if let Some(block_info) = current_block {
-                history.lock().await.commit(&block_info, state);
+                history.lock().await.commit(block_info.number, state);
             }
         }
     }
@@ -375,14 +376,23 @@ impl AccountsState {
             .unwrap_or(DEFAULT_HANDLE_POTS_TOPIC.1.to_string());
         info!("Creating request handler on '{}'", handle_pots_topic);
 
+        // Query topic
+        let accounts_query_topic = config
+            .get_string(DEFAULT_ACCOUNTS_QUERY_TOPIC.0)
+            .unwrap_or(DEFAULT_ACCOUNTS_QUERY_TOPIC.1.to_string());
+        info!("Creating query handler on '{}'", accounts_query_topic);
+
         // Create history
-        let history = Arc::new(Mutex::new(StateHistory::<State>::new("AccountsState")));
-        let history_account_single = history.clone();
+        let history = Arc::new(Mutex::new(StateHistory::<State>::new(
+            "AccountsState",
+            HistoryKind::BlockState,
+        )));
+        let history_account_state = history.clone();
         let history_pots = history.clone();
         let history_tick = history.clone();
 
-        context.handle("accounts-state", move |message| {
-            let history = history_account_single.clone();
+        context.handle(&accounts_query_topic, move |message| {
+            let history = history_account_state.clone();
             async move {
                 let Message::StateQuery(StateQuery::Accounts(query)) = message.as_ref() else {
                     return Arc::new(Message::StateQueryResponse(StateQueryResponse::Accounts(
@@ -414,6 +424,12 @@ impl AccountsState {
                         } else {
                             AccountsStateQueryResponse::NotFound
                         }
+                    }
+
+                    AccountsStateQuery::GetPoolsLiveStakes { pools_operators } => {
+                        AccountsStateQueryResponse::PoolsLiveStakes(PoolsLiveStakes {
+                            live_stakes: state.get_pools_live_stakes(pools_operators),
+                        })
                     }
 
                     _ => AccountsStateQueryResponse::Error(format!(
