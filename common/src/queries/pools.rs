@@ -1,4 +1,4 @@
-use crate::PoolRegistration;
+use crate::{PoolEpochState, PoolRegistration};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum PoolsStateQuery {
@@ -94,7 +94,9 @@ pub struct PoolsTotalBlocksMinted {
 pub struct PoolInfo {}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PoolHistory {}
+pub struct PoolHistory {
+    pub history: Vec<PoolEpochState>,
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PoolMetadata {}

@@ -471,6 +471,18 @@ pub struct PoolRetirement {
     pub epoch: u64,
 }
 
+/// Pool Epoch History Data
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PoolEpochState {
+    pub epoch: u64,
+    pub blocks_minted: u64,
+    pub active_stake: u64,
+    pub active_size: RationalNumber,
+    pub delegators_count: u64,
+    pub pool_reward: u64,
+    pub spo_reward: u64,
+}
+
 /// Stake delegation data
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StakeDelegation {
@@ -486,6 +498,9 @@ pub struct StakeDelegation {
 pub struct DelegatedStake {
     /// Active stake - UTXO values only (used for reward calcs)
     pub active: Lovelace,
+
+    /// Active delegators count - delegators making active stakes (used for pool history)
+    pub active_delegators_count: u64,
 
     /// Total 'live' stake - UTXO values and rewards (used for VRF)
     pub live: Lovelace,

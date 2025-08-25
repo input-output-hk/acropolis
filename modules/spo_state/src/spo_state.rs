@@ -7,8 +7,8 @@ use acropolis_common::{
         StateQuery, StateQueryResponse,
     },
     queries::pools::{
-        PoolsActiveStakes, PoolsList, PoolsListWithInfo, PoolsStateQuery, PoolsStateQueryResponse,
-        PoolsTotalBlocksMinted,
+        PoolHistory, PoolsActiveStakes, PoolsList, PoolsListWithInfo, PoolsStateQuery,
+        PoolsStateQueryResponse, PoolsTotalBlocksMinted,
     },
 };
 use anyhow::Result;
@@ -30,7 +30,9 @@ const DEFAULT_SPO_STATE_TOPIC: &str = "cardano.spo.state";
 const DEFAULT_SPDD_SUBSCRIBE_TOPIC: &str = "cardano.spo.distribution";
 const DEFAULT_EPOCH_ACTIVITY_TOPIC: &str = "cardano.epoch.activity";
 
+const DEFAULT_STORE_HISTORY: (&str, bool) = ("store-history", false);
 const POOLS_STATE_TOPIC: &str = "pools-state";
+
 /// SPO State module
 #[module(
     message_type(Message),
@@ -152,6 +154,10 @@ impl SPOState {
             .unwrap_or(DEFAULT_EPOCH_ACTIVITY_TOPIC.to_string());
         info!("Creating subscriber on '{epoch_activity_topic}'");
 
+        let store_history =
+            config.get_bool(DEFAULT_STORE_HISTORY.0).unwrap_or(DEFAULT_STORE_HISTORY.1);
+        info!("Storing SPO's history: {store_history}");
+
         let maybe_snapshot_topic = config
             .get_string("snapshot-topic")
             .ok()
@@ -162,7 +168,7 @@ impl SPOState {
             .unwrap_or(DEFAULT_SPO_STATE_TOPIC.to_string());
         info!("Creating SPO state publisher on '{spo_state_topic}'");
 
-        let state = Arc::new(Mutex::new(State::new()));
+        let state = Arc::new(Mutex::new(State::new(store_history)));
 
         // handle pools-state
         let state_rest_blockfrost = state.clone();
@@ -195,37 +201,24 @@ impl SPOState {
                         pools_operators,
                         epoch,
                     } => {
-                        if let Some((active_stakes, total_active_stake)) =
-                            guard.get_pools_active_stakes(pools_operators, *epoch)
-                        {
-                            PoolsStateQueryResponse::PoolsActiveStakes(PoolsActiveStakes {
-                                active_stakes,
-                                total_active_stake,
-                            })
-                        } else {
-                            PoolsStateQueryResponse::PoolsActiveStakes(PoolsActiveStakes {
-                                active_stakes: vec![0; pools_operators.len()],
-                                total_active_stake: 0,
-                            })
-                        }
+                        let (active_stakes, total_active_stake) =
+                            guard.get_pools_active_stakes(pools_operators, *epoch);
+                        PoolsStateQueryResponse::PoolsActiveStakes(PoolsActiveStakes {
+                            active_stakes,
+                            total_active_stake,
+                        })
                     }
 
                     PoolsStateQuery::GetPoolsTotalBlocksMinted { vrf_key_hashes } => {
-                        if let Some(total_blocks_minted) =
-                            guard.get_total_blocks_minted(vrf_key_hashes)
-                        {
-                            PoolsStateQueryResponse::PoolsTotalBlocksMinted(
-                                PoolsTotalBlocksMinted {
-                                    total_blocks_minted,
-                                },
-                            )
-                        } else {
-                            PoolsStateQueryResponse::PoolsTotalBlocksMinted(
-                                PoolsTotalBlocksMinted {
-                                    total_blocks_minted: vec![0; vrf_key_hashes.len()],
-                                },
-                            )
-                        }
+                        let total_blocks_minted = guard.get_total_blocks_minted(vrf_key_hashes);
+                        PoolsStateQueryResponse::PoolsTotalBlocksMinted(PoolsTotalBlocksMinted {
+                            total_blocks_minted,
+                        })
+                    }
+
+                    PoolsStateQuery::GetPoolHistory { pool_id } => {
+                        let history = guard.get_pool_history(pool_id).unwrap_or(Vec::new());
+                        PoolsStateQueryResponse::PoolHistory(PoolHistory { history })
                     }
 
                     _ => PoolsStateQueryResponse::Error(format!(
