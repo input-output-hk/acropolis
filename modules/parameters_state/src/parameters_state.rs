@@ -4,7 +4,7 @@
 use acropolis_common::{
     messages::{CardanoMessage, Message, ProtocolParamsMessage, StateQuery, StateQueryResponse},
     queries::epochs::{EpochsStateQuery, EpochsStateQueryResponse, LatestEpochParameters},
-    rest_helper::{handle_rest, handle_rest_with_parameter},
+    rest_helper::{handle_rest, handle_rest_with_path_parameter},
     BlockInfo,
 };
 use anyhow::Result;
@@ -145,7 +145,7 @@ impl ParametersState {
         });
 
         let state_handle_historical = state.clone();
-        handle_rest_with_parameter(
+        handle_rest_with_path_parameter(
             cfg.context.clone(),
             &cfg.handle_historical_topic,
             move |param| handle_historical(state_handle_historical.clone(), param[0].to_string()),

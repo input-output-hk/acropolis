@@ -6,7 +6,7 @@ use acropolis_common::{
     queries::governance::{
         DRepInfo, DRepsList, GovernanceStateQuery, GovernanceStateQueryResponse,
     },
-    state_history::StateHistory,
+    state_history::{HistoryKind, StateHistory},
     BlockInfo, BlockStatus,
 };
 use anyhow::Result;
@@ -86,7 +86,7 @@ impl DRepState {
                 Message::Cardano((ref block_info, _)) => {
                     // rollback only on certs
                     if block_info.status == BlockStatus::RolledBack {
-                        state = history.lock().await.get_rolled_back_state(&block_info);
+                        state = history.lock().await.get_rolled_back_state(block_info.number);
                     }
                     current_block = Some(block_info.clone());
                     block_info.new_epoch && block_info.epoch > 0
@@ -178,7 +178,7 @@ impl DRepState {
 
             // Commit the new state
             if let Some(block_info) = current_block {
-                history.lock().await.commit(&block_info, state);
+                history.lock().await.commit(block_info.number, state);
             }
         }
     }
@@ -249,7 +249,10 @@ impl DRepState {
         info!("Creating DRep query handler on '{drep_query_topic}'");
 
         // Initalize state history
-        let history = Arc::new(Mutex::new(StateHistory::<State>::new("DRepState")));
+        let history = Arc::new(Mutex::new(StateHistory::<State>::new(
+            "DRepState",
+            HistoryKind::BlockState,
+        )));
         let history_run = history.clone();
         let query_history = history.clone();
         let ticker_history = history.clone();

@@ -6,7 +6,7 @@ use acropolis_common::{
     queries::epochs::{
         BlocksMintedByPools, EpochsStateQuery, EpochsStateQueryResponse, LatestEpoch,
     },
-    rest_helper::{handle_rest, handle_rest_with_parameter},
+    rest_helper::{handle_rest, handle_rest_with_path_parameter},
     Era,
 };
 use anyhow::Result;
@@ -209,7 +209,7 @@ impl EpochActivityCounter {
             }
         });
 
-        handle_rest_with_parameter(context.clone(), &handle_historical_topic, {
+        handle_rest_with_path_parameter(context.clone(), &handle_historical_topic, {
             let state = state.clone();
             move |param| handle_historical_epoch(state.clone(), param[0].to_string())
         });

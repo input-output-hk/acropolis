@@ -67,6 +67,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "acropolis_module_drdd_state"
+version = "0.1.0"
+dependencies = [
+ "acropolis_common",
+ "anyhow",
+ "caryatid_sdk",
+ "config",
+ "hex",
+ "imbl",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "acropolis_module_drep_state"
 version = "0.1.0"
 dependencies = [
@@ -206,6 +222,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "acropolis_module_spdd_state"
+version = "0.1.0"
+dependencies = [
+ "acropolis_common",
+ "anyhow",
+ "caryatid_sdk",
+ "config",
+ "hex",
+ "imbl",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "acropolis_module_spo_state"
 version = "0.1.0"
 dependencies = [
@@ -304,6 +335,7 @@ dependencies = [
  "acropolis_common",
  "acropolis_module_accounts_state",
  "acropolis_module_block_unpacker",
+ "acropolis_module_drdd_state",
  "acropolis_module_drep_state",
  "acropolis_module_epoch_activity_counter",
  "acropolis_module_genesis_bootstrapper",
@@ -311,6 +343,7 @@ dependencies = [
  "acropolis_module_mithril_snapshot_fetcher",
  "acropolis_module_parameters_state",
  "acropolis_module_rest_blockfrost",
+ "acropolis_module_spdd_state",
  "acropolis_module_spo_state",
  "acropolis_module_stake_delta_filter",
  "acropolis_module_tx_unpacker",
@@ -1176,9 +1209,9 @@ dependencies = [
 
 [[package]]
 name = "caryatid_module_rest_server"
-version = "0.13.0"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32a545635a30944ab96b41397be9ae36cf15d48d398db2aaff268067a08c31d8"
+checksum = "04b3369fd37cc7c395feea110e0fc60075cb9fbc3c3470a4d3b0988da1606b72"
 dependencies = [
  "anyhow",
  "axum",
