@@ -133,6 +133,24 @@ impl State {
             .collect()
     }
 
+    /// Map stake_keys to their delegated DRep
+    pub fn get_drep_delegations_map(
+        &self,
+        stake_keys: &[Vec<u8>],
+    ) -> Option<HashMap<Vec<u8>, Option<DRepChoice>>> {
+        let accounts = self.stake_addresses.lock().ok()?; // If lock fails, return None
+
+        let mut map = HashMap::new();
+
+        for stake_key in stake_keys {
+            let account = accounts.get(stake_key)?;
+            let maybe_drep = account.delegated_drep.clone();
+            map.insert(stake_key.clone(), maybe_drep);
+        }
+
+        Some(map)
+    }
+
     /// Log statistics
     fn log_stats(&self) {
         info!(num_stake_addresses = self.stake_addresses.lock().unwrap().keys().len(),);

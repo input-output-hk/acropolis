@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::{DRepChoice, KeyHash};
 
 pub const DEFAULT_ACCOUNTS_QUERY_TOPIC: (&str, &str) =
@@ -19,6 +21,9 @@ pub enum AccountsStateQuery {
 
     // Pools related queries
     GetPoolsLiveStakes { pools_operators: Vec<Vec<u8>> },
+
+    // Dreps related queries
+    GetAccountsDrepDelegationsMap { stake_keys: Vec<Vec<u8>> },
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -37,6 +42,9 @@ pub enum AccountsStateQueryResponse {
 
     // Pools related responses
     PoolsLiveStakes(PoolsLiveStakes),
+
+    // DReps related responses
+    AccountsDrepDelegationsMap(HashMap<Vec<u8>, Option<DRepChoice>>),
 
     NotFound,
     Error(String),
