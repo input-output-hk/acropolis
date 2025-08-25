@@ -116,6 +116,7 @@ impl RewardsState {
         Ok(result)
     }
 
+    /// Calculate rewards for an individual SPO
     fn calculate_spo_rewards(
         operator_id: &KeyHash,
         spo: &SnapshotSPO,
