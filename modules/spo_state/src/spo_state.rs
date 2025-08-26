@@ -7,8 +7,8 @@ use acropolis_common::{
         StateQuery, StateQueryResponse,
     },
     queries::pools::{
-        PoolHistory, PoolsActiveStakes, PoolsList, PoolsListWithInfo, PoolsStateQuery,
-        PoolsStateQueryResponse, PoolsTotalBlocksMinted,
+        PoolHistory, PoolsActiveStakes, PoolsList, PoolsListWithInfo, PoolsRetiringList,
+        PoolsStateQuery, PoolsStateQueryResponse, PoolsTotalBlocksMinted,
     },
 };
 use anyhow::Result;
@@ -241,6 +241,13 @@ impl SPOState {
                     PoolsStateQuery::GetPoolHistory { pool_id } => {
                         let history = guard.get_pool_history(pool_id).unwrap_or(Vec::new());
                         PoolsStateQueryResponse::PoolHistory(PoolHistory { history })
+                    }
+
+                    PoolsStateQuery::GetPoolsRetiringList => {
+                        let retiring_pools = guard.get_retiring_pools();
+                        PoolsStateQueryResponse::PoolsRetiringList(PoolsRetiringList {
+                            retiring_pools,
+                        })
                     }
 
                     _ => PoolsStateQueryResponse::Error(format!(

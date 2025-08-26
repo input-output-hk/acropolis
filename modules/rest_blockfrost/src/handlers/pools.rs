@@ -8,13 +8,14 @@ use acropolis_common::{
         utils::query_state,
     },
     serialization::Bech32WithHrp,
+    PoolRetirement,
 };
 use anyhow::Result;
 use caryatid_sdk::Context;
 use rust_decimal::Decimal;
 use std::sync::Arc;
 
-use crate::types::{PoolEpochStateRest, PoolExtendedRest};
+use crate::types::{PoolEpochStateRest, PoolExtendedRest, PoolRetiringRest};
 
 const ACCOUNTS_STATE_TOPIC: &str = "accounts-state";
 const POOLS_STATE_TOPIC: &str = "pools-state";
@@ -363,8 +364,48 @@ async fn handle_pools_retired_blockfrost(_context: Arc<Context<Message>>) -> Res
     Ok(RESTResponse::with_text(501, "Not implemented"))
 }
 
-async fn handle_pools_retiring_blockfrost(_context: Arc<Context<Message>>) -> Result<RESTResponse> {
-    Ok(RESTResponse::with_text(501, "Not implemented"))
+async fn handle_pools_retiring_blockfrost(context: Arc<Context<Message>>) -> Result<RESTResponse> {
+    // Get retiring pools from spo-state
+    let retiring_pools_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
+        PoolsStateQuery::GetPoolsRetiringList,
+    )));
+    let retiring_pools =
+        query_state(
+            &context,
+            POOLS_STATE_TOPIC,
+            retiring_pools_msg,
+            |message| match message {
+                Message::StateQueryResponse(StateQueryResponse::Pools(
+                    PoolsStateQueryResponse::PoolsRetiringList(retiring_pools),
+                )) => Ok(retiring_pools.retiring_pools),
+                Message::StateQueryResponse(StateQueryResponse::Pools(
+                    PoolsStateQueryResponse::Error(e),
+                )) => Err(anyhow::anyhow!(
+                    "Internal server error while retrieving retiring pools: {e}"
+                )),
+                _ => Err(anyhow::anyhow!("Unexpected message type")),
+            },
+        )
+        .await?;
+
+    let retiring_pools_rest = retiring_pools
+        .iter()
+        .filter_map(|PoolRetirement { operator, epoch }| {
+            let pool_id = operator.to_bech32_with_hrp("pool").ok()?;
+            Some(PoolRetiringRest {
+                pool_id,
+                epoch: *epoch,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    match serde_json::to_string(&retiring_pools_rest) {
+        Ok(json) => Ok(RESTResponse::with_json(200, &json)),
+        Err(e) => Ok(RESTResponse::with_text(
+            500,
+            &format!("Internal server error while retrieving retiring pools: {e}"),
+        )),
+    }
 }
 
 async fn handle_pools_spo_blockfrost(

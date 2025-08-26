@@ -288,7 +288,6 @@ impl State {
     }
 
     /// Get pools that will be retired in the upcoming epochs
-    #[allow(dead_code)]
     pub fn get_retiring_pools(&self) -> Vec<PoolRetirement> {
         self.current().map_or(Vec::new(), |state: &BlockState| {
             let current_epoch = state.epoch;
