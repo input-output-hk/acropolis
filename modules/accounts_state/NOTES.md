@@ -94,6 +94,8 @@ AND encode(ph.hash_raw, 'hex') LIKE '30c6319d1f680%'
 GROUP BY ph.hash_raw;
 ```
 
+Note: pool_id for this SPO is 93
+
 |                       pool_id_hex                        | member_rewards | leader_rewards |
 |----------------------------------------------------------|----------------|----------------|
 | 30c6319d1f680470c8d2d48f8d44fd2848fa9b8cd6ac944d4dfc0c54 |   32024424770 |      2067130351 |
