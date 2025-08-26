@@ -7,8 +7,7 @@ use acropolis_common::{
         StateQuery, StateQueryResponse,
     },
     queries::pools::{
-        PoolHistory, PoolsActiveStakes, PoolsList, PoolsListWithInfo, PoolsRetiringList,
-        PoolsStateQuery, PoolsStateQueryResponse, PoolsTotalBlocksMinted,
+        PoolHistory, PoolsActiveStakes, PoolsList, PoolsListWithInfo, PoolsRetiredList, PoolsRetiringList, PoolsStateQuery, PoolsStateQueryResponse, PoolsTotalBlocksMinted
     },
 };
 use anyhow::Result;
@@ -23,6 +22,8 @@ use state::State;
 mod rest;
 mod spo_state_publisher;
 use crate::spo_state_publisher::SPOStatePublisher;
+mod state_config;
+use state_config::StateConfig;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.certificates";
 const DEFAULT_CLOCK_TICK_TOPIC: &str = "clock.tick";
@@ -31,7 +32,6 @@ const DEFAULT_SPDD_SUBSCRIBE_TOPIC: &str = "cardano.spo.distribution";
 const DEFAULT_EPOCH_ACTIVITY_TOPIC: &str = "cardano.epoch.activity";
 const DEFAULT_SPO_REWARDS_TOPIC: &str = "cardano.spo.rewards";
 
-const DEFAULT_STORE_HISTORY: (&str, bool) = ("store-history", false);
 const POOLS_STATE_TOPIC: &str = "pools-state";
 
 /// SPO State module
@@ -176,10 +176,6 @@ impl SPOState {
             config.get_string("spo-rewards-topic").unwrap_or(DEFAULT_SPO_REWARDS_TOPIC.to_string());
         info!("Creating SPO rewards publisher on '{spo_rewards_topic}'");
 
-        let store_history =
-            config.get_bool(DEFAULT_STORE_HISTORY.0).unwrap_or(DEFAULT_STORE_HISTORY.1);
-        info!("Storing SPO's history: {store_history}");
-
         let maybe_snapshot_topic = config
             .get_string("snapshot-topic")
             .ok()
@@ -190,7 +186,7 @@ impl SPOState {
             .unwrap_or(DEFAULT_SPO_STATE_TOPIC.to_string());
         info!("Creating SPO state publisher on '{spo_state_topic}'");
 
-        let state = Arc::new(Mutex::new(State::new(store_history)));
+        let state = Arc::new(Mutex::new(State::new(StateConfig::from(config))));
 
         // handle pools-state
         let state_rest_blockfrost = state.clone();
@@ -247,6 +243,13 @@ impl SPOState {
                         let retiring_pools = guard.get_retiring_pools();
                         PoolsStateQueryResponse::PoolsRetiringList(PoolsRetiringList {
                             retiring_pools,
+                        })
+                    }
+
+                    PoolsStateQuery::GetPoolsRetiredList => {
+                        let retired_pools = guard.get_retired_pools();
+                        PoolsStateQueryResponse::PoolsRetiredList(PoolsRetiredList {
+                            retired_pools,
                         })
                     }
 
