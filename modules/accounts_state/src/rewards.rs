@@ -227,18 +227,23 @@ impl RewardsState {
                                ))
                 .with_scale(0);
             let costs = &fixed_cost + &margin_cost;
-            let remainder = &pool_rewards - &costs;
 
             // Pay the delegators - split remainder in proportional to delegated stake,
             // * as it was 2 epochs ago *
-            let to_delegators = remainder.to_u64().unwrap_or(0);
-            if to_delegators > 0 {
+
+            // You'd think this was just pool_rewards-costs here, but the Haskell code recalculates
+            // the margin without the relative_owner_stake term !?
+            let to_delegators = ((&pool_rewards - &fixed_cost) * (BigDecimal::one() - &margin))
+                .with_scale(0);
+            let mut total_paid: u64 = 0;
+            let mut delegators_paid: usize = 0;
+            if !to_delegators.is_zero() {
                 let total_stake = BigDecimal::from(spo.total_stake);
                 for (hash, stake) in &spo.delegators {
                     let proportion = BigDecimal::from(stake) / &total_stake;
 
                     // and hence how much of the total reward they get
-                    let reward = BigDecimal::from(to_delegators) * &proportion;
+                    let reward = &to_delegators * &proportion;
                     let to_pay = reward.with_scale(0).to_u64().unwrap_or(0);
 
                     debug!("Reward stake {stake} -> proportion {proportion} of SPO rewards {to_delegators} -> {to_pay} to hash {}",
@@ -248,13 +253,16 @@ impl RewardsState {
                     result.rewards.push((hash.clone(), to_pay));
                     result.total_paid += to_pay;
 
-                    *num_delegators_paid += 1;
-                    *total_paid_to_delegators += to_pay;
+                    total_paid += to_pay;
+                    delegators_paid += 1;
                 }
             }
 
-            info!(%fixed_cost, %margin_cost, leader_reward=%costs, to_delegators, "Reward split:");
+            info!(%fixed_cost, %margin_cost, leader_reward=%costs, %to_delegators, total_paid,
+                  delegators_paid, "Reward split:");
 
+            *num_delegators_paid += delegators_paid;
+            *total_paid_to_delegators += total_paid;
             costs.to_u64().unwrap_or(0)
         };
         result.rewards.push((spo.reward_account.clone(), spo_benefit));
