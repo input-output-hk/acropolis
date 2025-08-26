@@ -79,8 +79,16 @@ impl<S: Clone + Default> StateHistory<S> {
     /// Commit the new state
     pub fn commit(&mut self, block: &BlockInfo, state: S) {
         // Prune beyond 'k'
-        while self.history.len() >= SECURITY_PARAMETER_K as usize {
-            self.history.pop_front();
+        loop {
+            if let Some(entry) = self.history.front() {
+                if entry.block < block.number - SECURITY_PARAMETER_K as u64 {
+                    self.history.pop_front();
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
         }
 
         self.history.push_back(HistoryEntry {
