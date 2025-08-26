@@ -3,8 +3,8 @@
 use acropolis_common::{
     ledger_state::SPOState,
     messages::{
-        CardanoMessage, EpochActivityMessage, Message, SPOStakeDistributionMessage,
-        SPOStateMessage, TxCertificatesMessage,
+        CardanoMessage, EpochActivityMessage, Message, SPORewardsMessage,
+        SPOStakeDistributionMessage, SPOStateMessage, TxCertificatesMessage,
     },
     params::{SECURITY_PARAMETER_K, TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH},
     rational_number::RationalNumber,
@@ -622,6 +622,30 @@ impl State {
         self.total_blocks_minted_history.push_back(new_state);
     }
 
+    pub fn handle_spo_rewards(
+        &mut self,
+        block: &BlockInfo,
+        spo_rewards_message: &SPORewardsMessage,
+    ) {
+        let SPORewardsMessage { epoch, spos } = spo_rewards_message;
+        if *epoch != block.epoch - 1 {
+            error!(
+                "SPO Rewards Message's epoch {} is wrong against current block's epoch {}",
+                *epoch, block.epoch
+            )
+        }
+
+        // update epochs history if set
+        if let Some(epochs_history) = self.epochs_history.as_ref() {
+            spos.par_iter().for_each(|(spo, value)| {
+                Self::update_epochs_history_with(epochs_history, spo, *epoch, |epoch_state| {
+                    epoch_state.pool_reward = Some(value.total_rewards);
+                    epoch_state.spo_reward = Some(value.operator_rewards);
+                });
+            });
+        }
+    }
+
     pub fn bootstrap(&mut self, state: SPOState) {
         self.history.clear();
         self.history.push_back(state.into());
@@ -648,7 +672,8 @@ impl State {
 pub mod tests {
     use super::*;
     use acropolis_common::{
-        BlockInfo, BlockStatus, DelegatedStake, Era, PoolRetirement, Ratio, TxCertificate,
+        BlockInfo, BlockStatus, DelegatedStake, Era, PoolRetirement, Ratio, SPORewards,
+        TxCertificate,
     };
 
     #[tokio::test]
@@ -689,6 +714,13 @@ pub mod tests {
             total_blocks: 0,
             total_fees: 0,
             vrf_vkey_hashes: Vec::new(),
+        }
+    }
+
+    fn new_spo_rewards_message(epoch: u64) -> SPORewardsMessage {
+        SPORewardsMessage {
+            spos: Vec::new(),
+            epoch,
         }
     }
 
@@ -887,6 +919,16 @@ pub mod tests {
         epoch_activity_msg.total_fees = 10;
         state.handle_epoch_activity(&block, &epoch_activity_msg);
 
+        let mut spo_rewards_msg = new_spo_rewards_message(1);
+        spo_rewards_msg.spos = vec![(
+            vec![1],
+            SPORewards {
+                total_rewards: 100,
+                operator_rewards: 10,
+            },
+        )];
+        state.handle_spo_rewards(&block, &spo_rewards_msg);
+
         let pool_history = state.get_pool_history(&vec![1]).unwrap();
         assert_eq!(2, pool_history.len());
         let first_epoch = pool_history.get(0).unwrap();
@@ -897,6 +939,8 @@ pub mod tests {
         assert_eq!(1, third_epoch.active_stake);
         assert_eq!(RationalNumber::new(1, 1), third_epoch.active_size);
         assert_eq!(1, third_epoch.delegators_count);
+        assert_eq!(100, first_epoch.pool_reward);
+        assert_eq!(10, first_epoch.spo_reward);
     }
 
     #[tokio::test]

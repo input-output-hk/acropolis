@@ -29,6 +29,7 @@ const DEFAULT_CLOCK_TICK_TOPIC: &str = "clock.tick";
 const DEFAULT_SPO_STATE_TOPIC: &str = "cardano.spo.state";
 const DEFAULT_SPDD_SUBSCRIBE_TOPIC: &str = "cardano.spo.distribution";
 const DEFAULT_EPOCH_ACTIVITY_TOPIC: &str = "cardano.epoch.activity";
+const DEFAULT_SPO_REWARDS_TOPIC: &str = "cardano.spo.rewards";
 
 const DEFAULT_STORE_HISTORY: (&str, bool) = ("store-history", false);
 const POOLS_STATE_TOPIC: &str = "pools-state";
@@ -135,6 +136,23 @@ impl SPOState {
         }
     }
 
+    /// Async run loop for SPO rewards messages
+    async fn run_spo_rewards_subscription(
+        state: Arc<Mutex<State>>,
+        mut spo_rewards_subscription: Box<dyn Subscription<Message>>,
+    ) -> Result<()> {
+        loop {
+            // Subscribe to accounts-state's SPO rewards messsages
+            let (_, spo_rewards_message) = spo_rewards_subscription.read().await?;
+            if let Message::Cardano((block_info, CardanoMessage::SPORewards(spo_rewards_message))) =
+                spo_rewards_message.as_ref()
+            {
+                let mut state = state.lock().await;
+                state.handle_spo_rewards(block_info, spo_rewards_message)
+            }
+        }
+    }
+
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // Get configuration
         let subscribe_topic =
@@ -153,6 +171,10 @@ impl SPOState {
             .get_string("epoch-activity-topic")
             .unwrap_or(DEFAULT_EPOCH_ACTIVITY_TOPIC.to_string());
         info!("Creating subscriber on '{epoch_activity_topic}'");
+
+        let spo_rewards_topic =
+            config.get_string("spo-rewards-topic").unwrap_or(DEFAULT_SPO_REWARDS_TOPIC.to_string());
+        info!("Creating SPO rewards publisher on '{spo_rewards_topic}'");
 
         let store_history =
             config.get_bool(DEFAULT_STORE_HISTORY.0).unwrap_or(DEFAULT_STORE_HISTORY.1);
@@ -283,12 +305,14 @@ impl SPOState {
         let clock_tick_subscription = context.subscribe(&clock_tick_topic).await?;
         let spdd_subscription = context.subscribe(&spdd_topic).await?;
         let epoch_activity_subscription = context.subscribe(&epoch_activity_topic).await?;
+        let spo_rewards_subscription = context.subscribe(&spo_rewards_topic).await?;
 
         // Start run task
         let run_certs_state = state.clone();
         let run_clock_tick_state = state.clone();
         let run_spdd_state = state.clone();
         let run_epoch_activity_state = state.clone();
+        let run_spo_rewards_state = state.clone();
 
         context.run(async move {
             Self::run_certs_subscription(run_certs_state, spo_state_publisher, certs_subscription)
@@ -315,6 +339,12 @@ impl SPOState {
             )
             .await
             .unwrap_or_else(|e| error!("Failed to run SPO Epoch Activity Subscription: {e}"));
+        });
+
+        context.run(async move {
+            Self::run_spo_rewards_subscription(run_spo_rewards_state, spo_rewards_subscription)
+                .await
+                .unwrap_or_else(|e| error!("Failed to run SPO Rewards Subscription: {e}"));
         });
 
         Ok(())
