@@ -452,6 +452,24 @@ impl AccountsState {
                         ),
                     },
 
+                    AccountsStateQuery::GetAccountsBalancesMap { stake_keys } => {
+                        match state.get_accounts_balances_map(stake_keys) {
+                            Some(map) => AccountsStateQueryResponse::AccountsBalancesMap(map),
+                            None => AccountsStateQueryResponse::Error(
+                                "One or more accounts not found".to_string(),
+                            ),
+                        }
+                    }
+
+                    AccountsStateQuery::GetAccountsBalancesSum { stake_keys } => {
+                        match state.get_account_balances_sum(stake_keys) {
+                            Some(sum) => AccountsStateQueryResponse::AccountsBalancesSum(sum),
+                            None => AccountsStateQueryResponse::Error(
+                                "One or more accounts not found".to_string(),
+                            ),
+                        }
+                    }
+
                     _ => AccountsStateQueryResponse::Error(format!(
                         "Unimplemented query variant: {:?}",
                         query
