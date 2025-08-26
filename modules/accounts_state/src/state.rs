@@ -226,11 +226,10 @@ impl State {
         info!(total_blocks, total_non_obft_blocks, "Block counts:");
 
         // Update the reserves and treasury (monetary.rs)
-        // TODO note using last-but-one epoch's fees for reward pot - why?
         let monetary_change = calculate_monetary_change(
             &shelley_params,
             &self.pots,
-            self.rewards_state.mark.fees,
+            self.rewards_state.latest.fees,  // Last epoch's fees - note snapshot not pushed yet
             total_non_obft_blocks,
         )?;
         self.pots = monetary_change.pots;
@@ -249,13 +248,9 @@ impl State {
             &spo_block_counts,
             &self.pots,
             total_fees,
+            total_blocks,
         );
         self.rewards_state.push(snapshot);
-
-        // Stop here if no blocks to pay out on
-        if total_blocks == 0 {
-            return Ok(vec![]);
-        }
 
         let rs = self.rewards_state.clone();
         self.epoch_rewards_task = Arc::new(Mutex::new(Some(spawn_blocking(move || {
@@ -263,7 +258,6 @@ impl State {
             rs.calculate_rewards(
                 epoch,
                 &shelley_params,
-                total_blocks,
                 monetary_change.stake_rewards,
             )
         }))));

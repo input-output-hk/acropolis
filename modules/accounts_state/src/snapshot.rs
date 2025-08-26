@@ -50,6 +50,9 @@ pub struct Snapshot {
 
     /// Fees
     pub fees: Lovelace,
+
+    /// Total blocks
+    pub blocks: usize,
 }
 
 impl Snapshot {
@@ -61,11 +64,13 @@ impl Snapshot {
         spo_block_counts: &HashMap<KeyHash, usize>,
         pots: &Pots,
         fees: Lovelace,
+        blocks: usize,
     ) -> Self {
         let mut snapshot = Self {
             _epoch: epoch,
             pots: pots.clone(),
             fees,
+            blocks,
             ..Self::default()
         };
 
@@ -120,6 +125,7 @@ impl Snapshot {
             total_stake,
             spos = snapshot.spos.len(),
             fees,
+            blocks,
             "Snapshot"
         );
 
@@ -211,6 +217,7 @@ mod tests {
             &spos,
             &spo_block_counts,
             &Pots::default(),
+            0,
             0,
         );
 
