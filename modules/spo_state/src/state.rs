@@ -622,6 +622,9 @@ impl State {
         self.total_blocks_minted_history.push_back(new_state);
     }
 
+    /// Handle SPO rewards data calculated from accounts-state
+    /// NOTE:
+    /// The calculated result is one epoch off against blockfrost's response.
     pub fn handle_spo_rewards(
         &mut self,
         block: &BlockInfo,
