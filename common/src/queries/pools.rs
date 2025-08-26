@@ -1,4 +1,4 @@
-use crate::{PoolEpochState, PoolRegistration};
+use crate::{KeyHash, PoolEpochState, PoolRegistration, PoolRetirement};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum PoolsStateQuery {
@@ -62,19 +62,22 @@ pub enum PoolsStateQueryResponse {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PoolsList {
-    pub pool_operators: Vec<Vec<u8>>,
+    pub pool_operators: Vec<KeyHash>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PoolsListWithInfo {
-    pub pools: Vec<(Vec<u8>, PoolRegistration)>,
+    pub pools: Vec<(KeyHash, PoolRegistration)>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PoolsRetiredList {}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PoolsRetiringList {}
+pub struct PoolsRetiringList {
+    // pool id, retiring epoch
+    pub retiring_pools: Vec<PoolRetirement>,
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PoolsActiveStakes {
