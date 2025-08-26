@@ -71,7 +71,9 @@ pub struct PoolsListWithInfo {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PoolsRetiredList {}
+pub struct PoolsRetiredList {
+    pub retired_pools: Vec<PoolRetirement>,
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PoolsRetiringList {

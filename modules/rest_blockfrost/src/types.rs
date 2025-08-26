@@ -23,7 +23,7 @@ pub struct PoolExtendedRest {
 }
 
 #[derive(Serialize)]
-pub struct PoolRetiringRest {
+pub struct PoolRetirementRest {
     pub pool_id: String,
     pub epoch: u64,
 }

@@ -20,6 +20,8 @@ use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 use tracing::{debug, error, info};
 
+use crate::state_config::StateConfig;
+
 #[serde_as]
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct BlockState {
@@ -188,10 +190,10 @@ pub struct State {
 
 impl State {
     // Construct with optional publisher
-    pub fn new(store_history: bool) -> Self {
+    pub fn new(state_config: StateConfig) -> Self {
         Self {
             history: VecDeque::<BlockState>::new(),
-            epochs_history: if store_history {
+            epochs_history: if state_config.store_history {
                 Some(Arc::new(DashMap::new()))
             } else {
                 None
@@ -303,6 +305,11 @@ impl State {
                 })
                 .collect()
         })
+    }
+
+    /// Get pools that have been retired so far
+    pub fn get_retired_pools(&self) -> Vec<PoolRetirement> {
+        vec![]
     }
 
     /// Get Pool History by SPO
@@ -672,20 +679,43 @@ impl State {
 // -- Tests --
 #[cfg(test)]
 pub mod tests {
+    use crate::state_config::StateConfig;
+
     use super::*;
     use acropolis_common::{
         BlockInfo, BlockStatus, DelegatedStake, Era, PoolRetirement, Ratio, SPORewards,
         TxCertificate,
     };
 
+    fn default_state_config() -> StateConfig {
+        StateConfig {
+            store_history: false,
+            store_retired_pools: false,
+        }
+    }
+
+    fn save_history_state_config() -> StateConfig {
+        StateConfig {
+            store_history: true,
+            store_retired_pools: false,
+        }
+    }
+
+    fn save_all_state_config() -> StateConfig {
+        StateConfig {
+            store_history: true,
+            store_retired_pools: true,
+        }
+    }
+
     #[tokio::test]
     async fn new_state_is_empty() {
-        let state = State::new(false);
+        let state = State::new(default_state_config());
         assert_eq!(0, state.history.len());
         assert_eq!(0, state.active_stakes.len());
         assert!(state.epochs_history.is_none());
 
-        let state_with_history = State::new(true);
+        let state_with_history = State::new(StateConfig::new(true, true));
         assert_eq!(0, state_with_history.history.len());
         assert_eq!(0, state_with_history.active_stakes.len());
         assert_eq!(0, state_with_history.epochs_history.unwrap().len());
@@ -693,7 +723,7 @@ pub mod tests {
 
     #[tokio::test]
     async fn current_on_new_state_returns_none() {
-        let state = State::new(false);
+        let state = State::new(StateConfig::new(false, false));
         assert!(state.current().is_none());
     }
 
@@ -740,7 +770,7 @@ pub mod tests {
 
     #[tokio::test]
     async fn state_is_not_empty_after_handle_tx_certs() {
-        let mut state = State::new(false);
+        let mut state = State::new(default_state_config());
         let msg = new_msg();
         let block = new_block(1);
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
@@ -749,7 +779,7 @@ pub mod tests {
 
     #[tokio::test]
     async fn active_stakes_is_not_empty_after_handle_spdd() {
-        let mut state = State::new(true);
+        let mut state = State::new(save_all_state_config());
         let mut block = new_block(2);
         let mut msg = new_spdd_message(1);
         msg.spos = vec![(
@@ -806,7 +836,7 @@ pub mod tests {
 
     #[tokio::test]
     async fn get_total_blocks_minted_returns_zero_when_state_is_new() {
-        let state = State::new(false);
+        let state = State::new(default_state_config());
         let total_blocks_minted = state.get_total_blocks_minted(&vec![vec![1], vec![2]]);
         assert_eq!(2, total_blocks_minted.len());
         assert_eq!(0, total_blocks_minted[0]);
@@ -815,7 +845,7 @@ pub mod tests {
 
     #[tokio::test]
     async fn get_total_blocks_minted_returns_data_after_handle_epoch_activity() {
-        let mut state = State::new(false);
+        let mut state = State::new(default_state_config());
         let block = new_block(2);
         let mut epoch_activity_message = new_epoch_activity_message(1);
         epoch_activity_message.vrf_vkey_hashes = vec![(vec![2], 1)];
@@ -832,7 +862,7 @@ pub mod tests {
 
     #[tokio::test]
     async fn total_blocks_minted_history_is_pruned_after_rollback() {
-        let mut state = State::new(false);
+        let mut state = State::new(default_state_config());
         let mut block = new_block(2);
         let mut epoch_activity_message = new_epoch_activity_message(1);
         epoch_activity_message.vrf_vkey_hashes = vec![(vec![2], 1)];
@@ -869,21 +899,21 @@ pub mod tests {
 
     #[tokio::test]
     async fn get_pool_history_returns_none_when_store_history_disabled() {
-        let state = State::new(false);
+        let state = State::new(default_state_config());
         let pool_history = state.get_pool_history(&vec![1]);
         assert!(pool_history.is_none());
     }
 
     #[tokio::test]
     async fn get_pool_history_returns_none_when_spo_is_not_found() {
-        let state = State::new(true);
+        let state = State::new(save_history_state_config());
         let pool_history = state.get_pool_history(&vec![1]);
         assert!(pool_history.is_none());
     }
 
     #[tokio::test]
     async fn get_pool_history_returns_data() {
-        let mut state = State::new(true);
+        let mut state = State::new(save_history_state_config());
 
         let mut block = new_block(1);
         let mut cert_msg = new_msg();
@@ -947,7 +977,7 @@ pub mod tests {
 
     #[tokio::test]
     async fn spo_gets_registered() {
-        let mut state = State::new(false);
+        let mut state = State::new(default_state_config());
         let mut msg = new_msg();
         msg.certificates.push(TxCertificate::PoolRegistration(PoolRegistration {
             operator: vec![0],
@@ -976,7 +1006,7 @@ pub mod tests {
 
     #[tokio::test]
     async fn pending_deregistration_gets_queued() {
-        let mut state = State::new(false);
+        let mut state = State::new(default_state_config());
         let mut msg = new_msg();
         msg.certificates.push(TxCertificate::PoolRetirement(PoolRetirement {
             operator: vec![0],
@@ -999,7 +1029,7 @@ pub mod tests {
 
     #[tokio::test]
     async fn second_pending_deregistration_gets_queued() {
-        let mut state = State::new(false);
+        let mut state = State::new(default_state_config());
         let mut msg = new_msg();
         msg.certificates.push(TxCertificate::PoolRetirement(PoolRetirement {
             operator: vec![0],
@@ -1030,7 +1060,7 @@ pub mod tests {
 
     #[tokio::test]
     async fn rollback_removes_second_pending_deregistration() {
-        let mut state = State::new(false);
+        let mut state = State::new(default_state_config());
         let mut msg = new_msg();
         msg.certificates.push(TxCertificate::PoolRetirement(PoolRetirement {
             operator: vec![0],
@@ -1063,7 +1093,7 @@ pub mod tests {
 
     #[tokio::test]
     async fn spo_gets_deregistered() {
-        let mut state = State::new(false);
+        let mut state = State::new(default_state_config());
         let mut msg = new_msg();
         msg.certificates.push(TxCertificate::PoolRegistration(PoolRegistration {
             operator: vec![0],
@@ -1108,7 +1138,7 @@ pub mod tests {
 
     #[tokio::test]
     async fn get_pools_active_stakes_returns_zero_when_state_is_new() {
-        let state = State::new(false);
+        let state = State::new(default_state_config());
         let (active_stakes, total) = state.get_pools_active_stakes(&vec![vec![1], vec![2]], 0);
         assert_eq!(2, active_stakes.len());
         assert_eq!(0, active_stakes[0]);
@@ -1118,7 +1148,7 @@ pub mod tests {
 
     #[tokio::test]
     async fn get_pools_active_stakes_returns_zero_when_epoch_is_not_found() {
-        let mut state = State::new(false);
+        let mut state = State::new(default_state_config());
         let block = new_block(2);
         let msg = new_spdd_message(1);
         state.handle_spdd(&block, &msg);
@@ -1132,7 +1162,7 @@ pub mod tests {
 
     #[tokio::test]
     async fn get_pools_active_stakes_returns_zero_when_active_stakes_not_found() {
-        let mut state = State::new(false);
+        let mut state = State::new(default_state_config());
         let block = new_block(2);
         let msg = new_spdd_message(1);
         state.handle_spdd(&block, &msg);
@@ -1146,7 +1176,7 @@ pub mod tests {
 
     #[tokio::test]
     async fn get_pools_active_stakes_returns_data() {
-        let mut state = State::new(false);
+        let mut state = State::new(default_state_config());
         let block = new_block(2);
         let mut msg = new_spdd_message(1);
         msg.spos = vec![
@@ -1179,7 +1209,7 @@ pub mod tests {
 
     #[tokio::test]
     async fn spo_gets_restored_on_rollback() {
-        let mut state = State::new(false);
+        let mut state = State::new(default_state_config());
         let mut msg = new_msg();
         msg.certificates.push(TxCertificate::PoolRegistration(PoolRegistration {
             operator: vec![0],
@@ -1239,13 +1269,13 @@ pub mod tests {
 
     #[tokio::test]
     async fn get_retiring_pools_returns_empty_when_state_is_new() {
-        let state = State::new(false);
+        let state = State::new(default_state_config());
         assert!(state.get_retiring_pools().is_empty());
     }
 
     #[tokio::test]
     async fn get_retiring_pools_returns_pools() {
-        let mut state = State::new(false);
+        let mut state = State::new(default_state_config());
         let mut msg = new_msg();
         msg.certificates.push(TxCertificate::PoolRetirement(PoolRetirement {
             operator: vec![0],
