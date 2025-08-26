@@ -18,7 +18,7 @@ impl SPORewardsPublisher {
         Self { context, topic }
     }
 
-    /// Publish the SPDD
+    /// Publish the SPO rewards
     pub async fn publish_spo_rewards(
         &mut self,
         block: &BlockInfo,
