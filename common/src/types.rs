@@ -506,6 +506,16 @@ pub struct DelegatedStake {
     pub live: Lovelace,
 }
 
+/// SPO rewards data (for SPORewardsMessage)
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SPORewards {
+    /// Total rewards before distribution
+    pub total_rewards: Lovelace,
+
+    /// Pool operator's rewards
+    pub operator_rewards: Lovelace,
+}
+
 /// Genesis key delegation
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenesisKeyDelegation {

@@ -2,6 +2,7 @@
 use crate::monetary::calculate_monetary_change;
 use crate::rewards::{RewardsResult, RewardsState};
 use crate::snapshot::Snapshot;
+use acropolis_common::SPORewards;
 use acropolis_common::{
     messages::{
         DRepStateMessage, EpochActivityMessage, PotDeltasMessage, ProtocolParamsMessage,
@@ -492,7 +493,12 @@ impl State {
 
     /// Handle an EpochActivityMessage giving total fees and block counts by VRF key for
     /// the just-ended epoch
-    pub async fn handle_epoch_activity(&mut self, ea_msg: &EpochActivityMessage) -> Result<()> {
+    /// This also returns SPO rewards for publishing to the SPDD topic (For epoch N)
+    pub async fn handle_epoch_activity(
+        &mut self,
+        ea_msg: &EpochActivityMessage,
+    ) -> Result<Vec<(KeyHash, SPORewards)>> {
+        let mut spors: Vec<(KeyHash, SPORewards)> = Vec::new();
         // Reverse map of VRF key to SPO operator ID
         let vrf_to_operator: HashMap<KeyHash, KeyHash> =
             self.spos.iter().map(|(id, spo)| (spo.vrf_key_hash.clone(), id.clone())).collect();
@@ -525,6 +531,9 @@ impl State {
                         self.add_to_reward(&account, amount);
                     }
 
+                    // save SPO rewards
+                    spors = reward_result.spors.into_iter().collect();
+
                     // Adjust the reserves for next time with amount actually paid
                     self.pots.reserves -= reward_result.total_paid;
                 }
@@ -532,7 +541,9 @@ impl State {
             }
         };
         // Enter epoch - note the message specifies the epoch that has just *ended*
-        self.enter_epoch(ea_msg.epoch + 1, ea_msg.total_fees, spo_block_counts)
+        self.enter_epoch(ea_msg.epoch + 1, ea_msg.total_fees, spo_block_counts)?;
+
+        Ok(spors)
     }
 
     /// Handle an SPOStateMessage with the full set of SPOs valid at the end of the last
