@@ -389,10 +389,33 @@ pub async fn handle_pool_history_blockfrost(
         ));
     };
 
+    // get latest epoch from epoch-state
+    let latest_epoch_info_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
+        EpochsStateQuery::GetLatestEpoch,
+    )));
+    let latest_epoch_info = query_state(
+        &context,
+        EPOCH_STATE_TOPIC,
+        latest_epoch_info_msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Epochs(
+                EpochsStateQueryResponse::LatestEpoch(res),
+            )) => Ok(res.epoch),
+            Message::StateQueryResponse(StateQueryResponse::Epochs(
+                EpochsStateQueryResponse::Error(e),
+            )) => Err(anyhow::anyhow!(
+                "Internal server error while retrieving latest epoch: {e}"
+            )),
+            _ => Err(anyhow::anyhow!("Unexpected message type")),
+        },
+    )
+    .await?;
+    let latest_epoch = latest_epoch_info.epoch;
+
     let pool_history_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
         PoolsStateQuery::GetPoolHistory { pool_id: spo },
     )));
-    let pool_history: Vec<PoolEpochStateRest> = query_state(
+    let mut pool_history: Vec<PoolEpochStateRest> = query_state(
         &context,
         POOLS_STATE_TOPIC,
         pool_history_msg,
@@ -409,6 +432,9 @@ pub async fn handle_pool_history_blockfrost(
         },
     )
     .await?;
+
+    // remove epoch state whose epoch is greater than or equal to latest_epoch
+    pool_history.retain(|state| state.epoch < latest_epoch);
 
     match serde_json::to_string(&pool_history) {
         Ok(json) => Ok(RESTResponse::with_json(200, &json)),
