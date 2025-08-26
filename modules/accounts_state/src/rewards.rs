@@ -24,13 +24,16 @@ pub struct RewardsResult {
 /// State for rewards calculation
 #[derive(Debug, Default, Clone)]
 pub struct RewardsState {
-    /// Latest snapshot (epoch i) (if any)
+    /// Current snapshot (epoch i+1)
+    pub latest: Arc<Snapshot>,
+
+    /// Latest snapshot (epoch i)
     pub mark: Arc<Snapshot>,
 
-    /// Previous snapshot (epoch i-1) (if any)
+    /// Previous snapshot (epoch i-1)
     pub set: Arc<Snapshot>,
 
-    /// One before that (epoch i-2) (if any)
+    /// One before that (epoch i-2)
     pub go: Arc<Snapshot>,
 }
 
@@ -39,7 +42,8 @@ impl RewardsState {
     pub fn push(&mut self, latest: Snapshot) {
         self.go = self.set.clone();
         self.set = self.mark.clone();
-        self.mark = Arc::new(latest);
+        self.mark = self.latest.clone();
+        self.latest = Arc::new(latest);
     }
 
     /// Calculate rewards for a given epoch based on current rewards state and protocol parameters
@@ -50,16 +54,21 @@ impl RewardsState {
         &self,
         epoch: u64,
         params: &ShelleyParams,
-        total_blocks: usize,
         stake_rewards: BigDecimal,
     ) -> Result<RewardsResult> {
         let mut result = RewardsResult::default();
+
+        // If no blocks produced in previous epoch, don't do anything
+        let total_blocks = self.mark.blocks;
+        if total_blocks == 0 {
+            return Ok(result);
+        }
 
         // Calculate total supply (total in circulation + treasury) or
         // equivalently (max-supply-reserves) - this is the denominator
         // for sigma, z0, s
         let total_supply = BigDecimal::from(params.max_lovelace_supply - self.mark.pots.reserves);
-        info!(epoch, %total_supply, %stake_rewards, "Calculating rewards:");
+        info!(epoch, %total_supply, %stake_rewards, total_blocks, "Calculating rewards:");
 
         // Relative pool saturation size (z0)
         let k = BigDecimal::from(&params.protocol_params.stake_pool_target_num);
@@ -78,9 +87,9 @@ impl RewardsState {
         let mut total_paid_to_delegators: Lovelace = 0;
         let mut num_delegators_paid: usize = 0;
         for (operator_id, spo) in self.go.spos.iter() {
-            // Actual blocks produced for epoch (i)
+            // Actual blocks produced for epoch (i-2)
             let blocks_produced = {
-                if let Some(s) = self.mark.spos.get(operator_id) {
+                if let Some(s) = self.go.spos.get(operator_id) {
                     s.blocks_produced
                 } else {
                     0
@@ -91,7 +100,7 @@ impl RewardsState {
                 operator_id,
                 spo,
                 blocks_produced as u64,
-                total_blocks as u64,
+                total_blocks,
                 &stake_rewards,
                 &total_supply,
                 &relative_pool_saturation_size,
@@ -121,7 +130,7 @@ impl RewardsState {
         operator_id: &KeyHash,
         spo: &SnapshotSPO,
         blocks_produced: u64,
-        total_blocks: u64,
+        total_blocks: usize,
         stake_rewards: &BigDecimal,
         total_supply: &BigDecimal,
         relative_pool_saturation_size: &BigDecimal,
@@ -134,7 +143,8 @@ impl RewardsState {
         num_delegators_paid: &mut usize,
     ) {
         // Actual blocks produced as proportion of epoch (Beta)
-        let relative_blocks = BigDecimal::from(blocks_produced) / BigDecimal::from(total_blocks);
+        let relative_blocks = BigDecimal::from(blocks_produced)
+            / BigDecimal::from(total_blocks as u64);
 
         // Active stake (sigma)
         let pool_stake = BigDecimal::from(spo.total_stake);
