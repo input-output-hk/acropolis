@@ -219,11 +219,17 @@ impl RewardsState {
             pool_rewards.to_u64().unwrap_or(0)
         } else {
             // Enough left over for some margin split
-            let margin = ((&pool_rewards - &fixed_cost)
-                          * BigDecimal::from(spo.margin.numerator)  // TODO use RationalNumber
-                          / BigDecimal::from(spo.margin.denominator))
-            .with_scale(0);
-            let costs = &fixed_cost + &margin;
+            let margin = BigDecimal::from(spo.margin.numerator)
+                       / BigDecimal::from(spo.margin.denominator);
+
+            let relative_owner_stake = &pool_owner_stake / total_supply;
+            let margin_cost = ((&pool_rewards - &fixed_cost)
+                               * (&margin
+                                  + (BigDecimal::one() - &margin)
+                                    * (relative_owner_stake / relative_pool_stake)
+                               ))
+                .with_scale(0);
+            let costs = &fixed_cost + &margin_cost;
             let remainder = &pool_rewards - &costs;
 
             // Pay the delegators - split remainder in proportional to delegated stake,
@@ -250,7 +256,7 @@ impl RewardsState {
                 }
             }
 
-            info!(%fixed_cost, %margin, to_delegators, "Reward split:");
+            info!(%fixed_cost, %margin_cost, leader_reward=%costs, to_delegators, "Reward split:");
 
             costs.to_u64().unwrap_or(0)
         };
