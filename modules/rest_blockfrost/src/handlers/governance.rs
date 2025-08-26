@@ -13,7 +13,7 @@ use acropolis_common::{
             DEFAULT_GOVERNANCE_QUERY_TOPIC,
         },
     },
-    Credential, GovActionId, Voter,
+    Credential, GovActionId, TxHash, Voter,
 };
 use anyhow::Result;
 use caryatid_sdk::Context;
@@ -698,8 +698,16 @@ pub fn parse_gov_action_id(params: &[String]) -> Result<Result<GovActionId, REST
     let tx_hash_hex = &params[0];
     let cert_index_str = &params[1];
 
-    let transaction_id = match hex::decode(tx_hash_hex) {
-        Ok(bytes) => bytes,
+    let transaction_id: TxHash = match hex::decode(tx_hash_hex) {
+        Ok(bytes) => match bytes.as_slice().try_into() {
+            Ok(arr) => arr,
+            Err(_) => {
+                return Ok(Err(RESTResponse::with_text(
+                    400,
+                    "Invalid tx_hash length, must be 32 bytes",
+                )));
+            }
+        },
         Err(e) => {
             return Ok(Err(RESTResponse::with_text(
                 400,

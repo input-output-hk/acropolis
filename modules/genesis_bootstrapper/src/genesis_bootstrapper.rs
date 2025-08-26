@@ -102,7 +102,7 @@ impl GenesisBootstrapper {
                 let mut total_allocated: u64 = 0;
                 for (hash, address, amount) in gen_utxos.iter() {
                     let tx_output = TxOutput {
-                        tx_hash: hash.to_vec(),
+                        tx_hash: **hash,
                         index: 0,
                         address: Address::Byron(ByronAddress {
                             payload: address.payload.to_vec(),

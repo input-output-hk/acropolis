@@ -8,7 +8,7 @@ use acropolis_common::{
         governance::{DRepActionUpdate, DRepUpdateEvent, VoteRecord},
     },
     Anchor, Credential, DRepChoice, DRepCredential, Lovelace, StakeCredential, TxCertificate,
-    Voter, VotingProcedures,
+    TxHash, Voter, VotingProcedures,
 };
 use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
@@ -251,7 +251,7 @@ impl State {
 
     pub fn process_votes(
         &mut self,
-        voting_procedures: &[([u8; 32], VotingProcedures)],
+        voting_procedures: &[(TxHash, VotingProcedures)],
     ) -> Result<()> {
         let Some(hist_map) = self.historical_dreps.as_mut() else {
             return Ok(());
@@ -270,10 +270,6 @@ impl State {
                     .entry(drep_cred)
                     .or_insert_with(|| HistoricalDRepState::from_config(&cfg));
 
-                // ensure votes vec exists if we created from a config that didn’t set it before
-                if entry.votes.is_none() {
-                    entry.votes = Some(Vec::new());
-                }
                 let votes = entry.votes.as_mut().unwrap();
 
                 for (_, vp) in &single_votes.voting_procedures {
@@ -569,7 +565,7 @@ mod tests {
     use crate::state::{DRepRecord, DRepStorageConfig, State};
     use acropolis_common::{
         Anchor, Credential, DRepDeregistration, DRepDeregistrationWithPos, DRepRegistration,
-        DRepRegistrationWithPos, DRepUpdate, DRepUpdateWithPos, TxCertificate,
+        DRepRegistrationWithPos, DRepUpdate, DRepUpdateWithPos, TxCertificate, TxHash,
     };
 
     const CRED_1: [u8; 28] = [
@@ -590,7 +586,7 @@ mod tests {
                 deposit: 500000000,
                 anchor: None,
             },
-            tx_hash: [0u8; 32],
+            tx_hash: TxHash::default(),
             cert_index: 1,
         });
         let mut state = State::new(DRepStorageConfig::default());
@@ -615,7 +611,7 @@ mod tests {
                 deposit: 500000000,
                 anchor: None,
             },
-            tx_hash: [0u8; 32],
+            tx_hash: TxHash::default(),
             cert_index: 1,
         });
         let mut state = State::new(DRepStorageConfig::default());
@@ -627,7 +623,7 @@ mod tests {
                 deposit: 600000000,
                 anchor: None,
             },
-            tx_hash: [0u8; 32],
+            tx_hash: TxHash::default(),
             cert_index: 1,
         });
         assert!(state.process_one_cert(&bad_tx_cert, 1).is_err());
@@ -652,7 +648,7 @@ mod tests {
                 deposit: 500000000,
                 anchor: None,
             },
-            tx_hash: [0u8; 32],
+            tx_hash: TxHash::default(),
             cert_index: 1,
         });
         let mut state = State::new(DRepStorageConfig::default());
@@ -667,7 +663,7 @@ mod tests {
                 credential: tx_cred.clone(),
                 anchor: Some(anchor.clone()),
             },
-            tx_hash: [0u8; 32],
+            tx_hash: TxHash::default(),
             cert_index: 1,
         });
 
@@ -696,7 +692,7 @@ mod tests {
                 deposit: 500000000,
                 anchor: None,
             },
-            tx_hash: [0u8; 32],
+            tx_hash: TxHash::default(),
             cert_index: 1,
         });
         let mut state = State::new(DRepStorageConfig::default());
@@ -711,7 +707,7 @@ mod tests {
                 credential: Credential::AddrKeyHash(CRED_2.to_vec()),
                 anchor: Some(anchor.clone()),
             },
-            tx_hash: [0u8; 32],
+            tx_hash: TxHash::default(),
             cert_index: 1,
         });
         assert!(state.process_one_cert(&update_anchor_tx_cert, 1).is_err());
@@ -736,7 +732,7 @@ mod tests {
                 deposit: 500000000,
                 anchor: None,
             },
-            tx_hash: [0u8; 32],
+            tx_hash: TxHash::default(),
             cert_index: 1,
         });
         let mut state = State::new(DRepStorageConfig::default());
@@ -747,7 +743,7 @@ mod tests {
                 credential: tx_cred.clone(),
                 refund: 500000000,
             },
-            tx_hash: [0u8; 32],
+            tx_hash: TxHash::default(),
             cert_index: 1,
         });
         assert_eq!(
@@ -767,7 +763,7 @@ mod tests {
                 deposit: 500000000,
                 anchor: None,
             },
-            tx_hash: [0u8; 32],
+            tx_hash: TxHash::default(),
             cert_index: 1,
         });
         let mut state = State::new(DRepStorageConfig::default());
@@ -778,7 +774,7 @@ mod tests {
                 credential: Credential::AddrKeyHash(CRED_2.to_vec()),
                 refund: 500000000,
             },
-            tx_hash: [0u8; 32],
+            tx_hash: TxHash::default(),
             cert_index: 1,
         });
         assert!(state.process_one_cert(&unregister_tx_cert, 1).is_err());

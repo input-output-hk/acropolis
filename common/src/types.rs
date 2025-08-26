@@ -141,7 +141,7 @@ pub struct StakeAddressDelta {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TxOutput {
     /// Tx hash
-    pub tx_hash: Vec<u8>,
+    pub tx_hash: TxHash,
 
     /// Output index in tx
     pub index: u64,
@@ -159,7 +159,7 @@ pub struct TxOutput {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TxInput {
     /// Tx hash of referenced UTXO
-    pub tx_hash: Vec<u8>,
+    pub tx_hash: TxHash,
 
     /// Index of UTXO in referenced tx
     pub index: u64,
@@ -192,6 +192,9 @@ pub type GenesisKeyhash = Vec<u8>;
 
 /// Data hash used for metadata, anchors (SHA256)
 pub type DataHash = Vec<u8>;
+
+/// Transaction hash
+pub type TxHash = [u8; 32];
 
 /// Amount of Ada, in Lovelace
 pub type Lovelace = u64;
@@ -682,7 +685,7 @@ pub struct DRepRegistration {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DRepRegistrationWithPos {
     pub reg: DRepRegistration,
-    pub tx_hash: [u8; 32],
+    pub tx_hash: TxHash,
     pub cert_index: u64,
 }
 
@@ -699,7 +702,7 @@ pub struct DRepDeregistration {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DRepDeregistrationWithPos {
     pub reg: DRepDeregistration,
-    pub tx_hash: [u8; 32],
+    pub tx_hash: TxHash,
     pub cert_index: u64,
 }
 
@@ -716,7 +719,7 @@ pub struct DRepUpdate {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DRepUpdateWithPos {
     pub reg: DRepUpdate,
-    pub tx_hash: [u8; 32],
+    pub tx_hash: TxHash,
     pub cert_index: u64,
 }
 
@@ -758,13 +761,13 @@ pub struct ExUnitPrices {
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct GovActionId {
-    pub transaction_id: DataHash,
+    pub transaction_id: TxHash,
     pub action_index: u8,
 }
 
 impl GovActionId {
     pub fn to_bech32(&self) -> Result<String, anyhow::Error> {
-        let mut buf = self.transaction_id.clone();
+        let mut buf = self.transaction_id.to_vec();
         buf.push(self.action_index);
 
         let gov_action_hrp = Hrp::parse("gov_action")?;
@@ -784,7 +787,10 @@ impl GovActionId {
             return Err(anyhow!("Invalid Bech32 governance action"));
         }
 
-        let transaction_id: DataHash = data[..32].to_vec();
+        let transaction_id: TxHash = match data[..32].try_into() {
+            Ok(arr) => arr,
+            Err(_) => return Err(anyhow!("Transaction ID must be 32 bytes")),
+        };
         let action_index = data[32];
 
         Ok(GovActionId {
