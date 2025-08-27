@@ -51,7 +51,8 @@ pub fn calculate_monetary_change(
     new_pots.reserves -= treasury_increase_u64;
 
     // Remainder goes to stakeholders
-    let stake_rewards = (&total_reward_pot - &treasury_increase).to_u64()
+    let stake_rewards = (&total_reward_pot - &treasury_increase)
+        .to_u64()
         .ok_or(anyhow!("Can't calculate integral stake rewards"))?;
 
     info!(total_rewards=%total_reward_pot, cut=%treasury_cut, increase=treasury_increase_u64,
