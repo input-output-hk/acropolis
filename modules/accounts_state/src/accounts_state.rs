@@ -1,11 +1,11 @@
 //! Acropolis accounts state module for Caryatid
-//! Manages stake and reward accounts state
+//! Manages stake and reward acc, StateHistoryStoreounts state
 
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::accounts::{PoolsLiveStakes, DEFAULT_ACCOUNTS_QUERY_TOPIC},
     rest_helper::handle_rest,
-    state_history::{HistoryKind, StateHistory},
+    state_history::{StateHistory, StateHistoryStore},
     BlockInfo, BlockStatus,
 };
 use anyhow::Result;
@@ -402,7 +402,7 @@ impl AccountsState {
         // Create history
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "AccountsState",
-            HistoryKind::BlockState,
+            StateHistoryStore::default_block_store(),
         )));
         let history_account_state = history.clone();
         let history_pots = history.clone();

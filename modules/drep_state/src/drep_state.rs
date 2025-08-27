@@ -6,7 +6,7 @@ use acropolis_common::{
     queries::governance::{
         DRepInfo, DRepsList, GovernanceStateQuery, GovernanceStateQueryResponse,
     },
-    state_history::{HistoryKind, StateHistory},
+    state_history::{StateHistory, StateHistoryStore},
     BlockInfo, BlockStatus,
 };
 use anyhow::Result;
@@ -251,7 +251,7 @@ impl DRepState {
         // Initalize state history
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "DRepState",
-            HistoryKind::BlockState,
+            StateHistoryStore::default_block_store(),
         )));
         let history_run = history.clone();
         let query_history = history.clone();
