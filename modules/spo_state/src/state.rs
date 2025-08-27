@@ -9,7 +9,7 @@ use acropolis_common::{
     params::{SECURITY_PARAMETER_K, TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH},
     rational_number::RationalNumber,
     serialization::SerializeMapAs,
-    state_history::StateHistory,
+    state_history::{HistoryKind, StateHistory},
     BlockInfo, KeyHash, PoolEpochState, PoolRegistration, PoolRetirement, TxCertificate,
 };
 use anyhow::Result;
@@ -193,7 +193,7 @@ impl State {
     // Construct with optional publisher
     pub fn new(state_config: StateConfig) -> Self {
         Self {
-            history: StateHistory::new("spo-states/block-state"),
+            history: StateHistory::new("spo-states/block-state", HistoryKind::BlockState),
             epochs_history: if state_config.store_history {
                 Some(Arc::new(DashMap::new()))
             } else {
@@ -374,7 +374,7 @@ impl State {
         tx_certs_msg: &TxCertificatesMessage,
     ) -> Result<Option<Arc<Message>>> {
         let mut message: Option<Arc<Message>> = None;
-        let mut current = self.history.get_rolled_back_state(block);
+        let mut current = self.history.get_rolled_back_state(block.number);
         current.block = block.number;
 
         // Handle end of epoch
@@ -490,7 +490,7 @@ impl State {
         }
 
         // Commit the new state
-        self.history.commit(block, current);
+        self.history.commit(block.number, current);
 
         Ok(message)
     }
