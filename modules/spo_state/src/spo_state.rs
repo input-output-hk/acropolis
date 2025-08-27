@@ -7,7 +7,8 @@ use acropolis_common::{
         StateQuery, StateQueryResponse,
     },
     queries::pools::{
-        PoolHistory, PoolsActiveStakes, PoolsList, PoolsListWithInfo, PoolsRetiredList, PoolsRetiringList, PoolsStateQuery, PoolsStateQueryResponse, PoolsTotalBlocksMinted
+        PoolHistory, PoolsActiveStakes, PoolsList, PoolsListWithInfo, PoolsRetiredList,
+        PoolsRetiringList, PoolsStateQuery, PoolsStateQueryResponse, PoolsTotalBlocksMinted,
     },
 };
 use anyhow::Result;
