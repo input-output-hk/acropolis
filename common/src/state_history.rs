@@ -119,8 +119,12 @@ impl<S: Clone + Default> StateHistory<S> {
     pub fn commit(&mut self, index: u64, state: S) {
         match self.kind {
             HistoryKind::BlockState => {
-                while self.history.len() >= SECURITY_PARAMETER_K as usize {
-                    self.history.pop_front();
+                while let Some(entry) = self.history.front() {
+                    if (index - entry.index) > SECURITY_PARAMETER_K as u64 {
+                        self.history.pop_front();
+                    } else {
+                        break;
+                    }
                 }
                 self.history.push_back(HistoryEntry { index, state });
             }
