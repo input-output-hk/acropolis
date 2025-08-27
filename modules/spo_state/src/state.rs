@@ -163,6 +163,9 @@ pub struct State {
     /// Epoch History for each pool operator
     epochs_history: Option<Arc<DashMap<KeyHash, BTreeMap<u64, EpochState>>>>,
 
+    /// Retired pools history
+    retired_pools_history: Option<Arc<DashMap<u64, Vec<KeyHash>>>>,
+
     /// Active stakes for each pool operator
     /// (epoch number, active stake)
     /// Remove elements when epoch number is less than current epoch number
@@ -182,6 +185,11 @@ impl State {
                 StateHistoryStore::default_block_store(),
             ),
             epochs_history: if state_config.store_history {
+                Some(Arc::new(DashMap::new()))
+            } else {
+                None
+            },
+            retired_pools_history: if state_config.store_retired_pools {
                 Some(Arc::new(DashMap::new()))
             } else {
                 None
@@ -293,7 +301,25 @@ impl State {
 
     /// Get pools that have been retired so far
     pub fn get_retired_pools(&self) -> Vec<PoolRetirement> {
-        vec![]
+        self.retired_pools_history
+            .as_ref()
+            .map(|retired_pools_history| {
+                retired_pools_history
+                    .iter()
+                    .flat_map(|entry| {
+                        let epoch = *entry.key();
+                        entry
+                            .value()
+                            .iter()
+                            .map(move |pool| PoolRetirement {
+                                operator: pool.clone(),
+                                epoch,
+                            })
+                            .collect::<Vec<PoolRetirement>>()
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// Get Pool History by SPO
@@ -348,6 +374,11 @@ impl State {
             let deregistrations = current.pending_deregistrations.remove(&current.epoch);
             match deregistrations {
                 Some(deregistrations) => {
+                    // update retired pools history if enabled
+                    if let Some(retired_pools_history) = self.retired_pools_history.as_ref() {
+                        retired_pools_history.insert(current.epoch, deregistrations.clone());
+                    }
+
                     for dr in deregistrations {
                         debug!("Retiring SPO {}", hex::encode(&dr));
                         match current.spos.remove(&dr) {
@@ -481,14 +512,19 @@ impl State {
         // update epochs history if set
         if let Some(epochs_history) = self.epochs_history.as_ref() {
             spos.par_iter().for_each(|(spo, value)| {
-                Self::update_epochs_history_with(epochs_history, spo, *epoch + 2, |epoch_state| {
-                    epoch_state.active_stake = Some(value.active);
-                    epoch_state.delegators_count = Some(value.active_delegators_count);
-                    if total_active_stake > 0 {
-                        epoch_state.active_size =
-                            Some(RationalNumber::new(value.active, total_active_stake));
-                    }
-                });
+                Self::update_epochs_history_with(
+                    epochs_history,
+                    spo,
+                    epoch_to_update,
+                    |epoch_state| {
+                        epoch_state.active_stake = Some(value.active);
+                        epoch_state.delegators_count = Some(value.active_delegators_count);
+                        if total_active_stake > 0 {
+                            epoch_state.active_size =
+                                Some(RationalNumber::new(value.active, total_active_stake));
+                        }
+                    },
+                );
             });
         }
     }
@@ -586,7 +622,7 @@ impl State {
         epoch: u64,
         update_fn: impl FnOnce(&mut EpochState),
     ) {
-        let mut epochs = epochs_history.entry(spo.clone()).or_insert_with(|| BTreeMap::new());
+        let mut epochs = epochs_history.entry(spo.clone()).or_insert_with(BTreeMap::new);
         let epoch_state = epochs.entry(epoch).or_insert_with(|| EpochState::new(epoch));
         update_fn(epoch_state);
     }
