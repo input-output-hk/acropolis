@@ -39,11 +39,7 @@ impl From<PoolEpochState> for PoolEpochStateRest {
             epoch: state.epoch,
             blocks: state.blocks_minted,
             active_stake: state.active_stake.to_string(),
-            active_size: if *state.active_size.denom() > 0 {
-                state.active_size.to_checked_f64("active_size").unwrap_or(0.0)
-            } else {
-                0.0
-            },
+            active_size: state.active_size.to_checked_f64("active_size").unwrap_or(0.0),
             delegators_count: state.delegators_count,
             rewards: state.pool_reward.to_string(),
             fees: state.spo_reward.to_string(),

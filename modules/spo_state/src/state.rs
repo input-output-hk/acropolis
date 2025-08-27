@@ -33,9 +33,9 @@ pub struct BlockState {
     #[serde_as(as = "SerializeMapAs<_, Vec<Hex>>")]
     pending_deregistrations: HashMap<u64, Vec<Vec<u8>>>,
 
-    /// vrf_key_hash -> operator_hash mapping
+    /// vrf_key_hash -> pool_id mapping
     #[serde_as(as = "SerializeMapAs<Hex, Hex>")]
-    vrf_key_hashes: HashMap<Vec<u8>, Vec<u8>>,
+    vrf_key_to_pool_id_map: HashMap<Vec<u8>, Vec<u8>>,
 }
 
 impl BlockState {
@@ -44,14 +44,14 @@ impl BlockState {
         epoch: u64,
         spos: HashMap<Vec<u8>, PoolRegistration>,
         pending_deregistrations: HashMap<u64, Vec<Vec<u8>>>,
-        vrf_key_hashes: HashMap<Vec<u8>, Vec<u8>>,
+        vrf_key_to_pool_id_map: HashMap<Vec<u8>, Vec<u8>>,
     ) -> Self {
         Self {
             block,
             epoch,
             spos,
             pending_deregistrations,
-            vrf_key_hashes,
+            vrf_key_to_pool_id_map,
         }
     }
 }
@@ -59,7 +59,7 @@ impl BlockState {
 impl From<SPOState> for BlockState {
     fn from(value: SPOState) -> Self {
         let spos: HashMap<KeyHash, PoolRegistration> = value.pools.into();
-        let vrf_key_hashes =
+        let vrf_key_to_pool_id_map =
             spos.iter().map(|(k, v)| (v.vrf_key_hash.clone(), k.clone())).collect();
         Self {
             block: 0,
@@ -72,7 +72,7 @@ impl From<SPOState> for BlockState {
                     acc
                 },
             ),
-            vrf_key_hashes,
+            vrf_key_to_pool_id_map,
         }
     }
 }
@@ -220,7 +220,7 @@ impl State {
 
     /// Get SPO from vrf_key_hash
     pub fn get_spo_from_vrf_key_hash(&self, vrf_key_hash: &KeyHash) -> Option<KeyHash> {
-        self.current().and_then(|state| state.vrf_key_hashes.get(vrf_key_hash).cloned())
+        self.current().and_then(|state| state.vrf_key_to_pool_id_map.get(vrf_key_hash).cloned())
     }
 
     /// Get Epoch State for certain pool operator at certain epoch
@@ -425,7 +425,7 @@ impl State {
                             ),
                             Some(de_reg) => {
                                 retired_spos.push(dr.clone());
-                                current.vrf_key_hashes.remove(&de_reg.vrf_key_hash);
+                                current.vrf_key_to_pool_id_map.remove(&de_reg.vrf_key_hash);
                             }
                         };
                     }
@@ -453,7 +453,9 @@ impl State {
                         hex::encode(&reg.operator)
                     );
                     current.spos.insert(reg.operator.clone(), reg.clone());
-                    current.vrf_key_hashes.insert(reg.vrf_key_hash.clone(), reg.operator.clone());
+                    current
+                        .vrf_key_to_pool_id_map
+                        .insert(reg.vrf_key_hash.clone(), reg.operator.clone());
 
                     // Remove any existing queued deregistrations
                     for (epoch, deregistrations) in &mut current.pending_deregistrations.iter_mut()

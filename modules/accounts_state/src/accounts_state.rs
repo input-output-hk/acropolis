@@ -200,15 +200,15 @@ impl AccountsState {
                         );
                         async {
                             Self::check_sync(&current_block, &block_info);
-                            let spors = state
+                            let spo_rewards = state
                                 .handle_epoch_activity(ea_msg)
                                 .await
                                 .inspect_err(|e| error!("EpochActivity handling error: {e:#}"))
                                 .ok();
-                            // spors is for previous epoch
-                            if let Some(spors) = spors {
+                            // SPO rewards is for previous epoch
+                            if let Some(spo_rewards) = spo_rewards {
                                 if let Err(e) = spo_rewards_publisher
-                                    .publish_spo_rewards(block_info, spors)
+                                    .publish_spo_rewards(block_info, spo_rewards)
                                     .await
                                 {
                                     error!("Error publishing SPO rewards: {e:#}")
