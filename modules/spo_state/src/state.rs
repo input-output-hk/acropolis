@@ -80,25 +80,21 @@ impl From<SPOState> for BlockState {
     }
 }
 
-// TODO: cleanup clones and into_iter, if possible
-// It's not the end of the world here, as this is only used in testing, for now.
 impl From<&BlockState> for SPOState {
     fn from(value: &BlockState) -> Self {
         Self {
-            pools: value.spos.clone().into_iter().fold(BTreeMap::new(), |mut acc, (key, value)| {
-                acc.insert(key, value);
-                acc
-            }),
-            retiring: value.pending_deregistrations.clone().into_iter().fold(
-                BTreeMap::new(),
-                |mut acc, (epoch, key_hashes)| {
-                    key_hashes.into_iter().for_each(|key_hash| {
-                        acc.insert(key_hash, epoch);
-                    });
-
-                    acc
-                },
-            ),
+            pools: value.spos.iter().map(|(key, value)| (key.clone(), value.clone())).collect(),
+            retiring: value
+                .pending_deregistrations
+                .iter()
+                .map(|(epoch, key_hashes)| {
+                    key_hashes
+                        .iter()
+                        .map(|key_hash| (key_hash.clone(), *epoch))
+                        .collect::<Vec<(Vec<u8>, u64)>>()
+                })
+                .flatten()
+                .collect(),
         }
     }
 }
