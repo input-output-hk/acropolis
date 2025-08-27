@@ -129,7 +129,7 @@ pub struct GovernanceProceduresMessage {
     pub proposal_procedures: Vec<ProposalProcedure>,
 
     /// Voting
-    pub voting_procedures: Vec<(DataHash, VotingProcedures)>,
+    pub voting_procedures: Vec<([u8; 32], VotingProcedures)>,
 
     /// Alonzo-compatible (from Shelley) and Babbage updates
     pub alonzo_babbage_updates: Vec<AlonzoBabbageUpdateProposal>,

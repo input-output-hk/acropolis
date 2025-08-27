@@ -3,9 +3,9 @@
 
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
-    queries::accounts::PoolsLiveStakes,
+    queries::accounts::{PoolsLiveStakes, DEFAULT_ACCOUNTS_QUERY_TOPIC},
     rest_helper::handle_rest,
-    state_history::StateHistory,
+    state_history::{HistoryKind, StateHistory},
     BlockInfo, BlockStatus,
 };
 use anyhow::Result;
@@ -30,7 +30,7 @@ mod snapshot;
 use acropolis_common::queries::accounts::{
     AccountInfo, AccountsStateQuery, AccountsStateQueryResponse,
 };
-use rest::{handle_drdd, handle_pots, handle_spdd};
+use rest::handle_pots;
 
 const DEFAULT_SPO_STATE_TOPIC: &str = "cardano.spo.state";
 const DEFAULT_EPOCH_ACTIVITY_TOPIC: &str = "cardano.epoch.activity";
@@ -44,11 +44,7 @@ const DEFAULT_SPO_DISTRIBUTION_TOPIC: &str = "cardano.spo.distribution";
 const DEFAULT_SPO_REWARDS_TOPIC: &str = "cardano.spo.rewards";
 const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: &str = "cardano.protocol.parameters";
 
-const DEFAULT_HANDLE_SPDD_TOPIC: (&str, &str) = ("handle-topic-spdd", "rest.get.spdd");
 const DEFAULT_HANDLE_POTS_TOPIC: (&str, &str) = ("handle-topic-pots", "rest.get.pots");
-const DEFAULT_HANDLE_DRDD_TOPIC: (&str, &str) = ("handle-topic-drdd", "rest.get.drdd");
-
-const ACCOUNTS_STATE_TOPIC: &str = "accounts-state";
 
 /// Accounts State module
 #[module(
@@ -103,7 +99,7 @@ impl AccountsState {
             }
 
             if let Some(block_info) = current_block {
-                history.lock().await.commit(&block_info, state);
+                history.lock().await.commit(block_info.number, state);
             }
         }
 
@@ -125,7 +121,7 @@ impl AccountsState {
                 Message::Cardano((block_info, _)) => {
                     // Handle rollbacks on this topic only
                     if block_info.status == BlockStatus::RolledBack {
-                        state = history.lock().await.get_rolled_back_state(&block_info);
+                        state = history.lock().await.get_rolled_back_state(block_info.number);
                     }
 
                     current_block = Some(block_info.clone());
@@ -320,7 +316,7 @@ impl AccountsState {
 
             // Commit the new state
             if let Some(block_info) = current_block {
-                history.lock().await.commit(&block_info, state);
+                history.lock().await.commit(block_info.number, state);
             }
         }
     }
@@ -392,30 +388,27 @@ impl AccountsState {
             .unwrap_or(DEFAULT_SPO_REWARDS_TOPIC.to_string());
 
         // REST handler topics
-        let handle_spdd_topic = config
-            .get_string(DEFAULT_HANDLE_SPDD_TOPIC.0)
-            .unwrap_or(DEFAULT_HANDLE_SPDD_TOPIC.1.to_string());
-        info!("Creating request handler on '{}'", handle_spdd_topic);
-
         let handle_pots_topic = config
             .get_string(DEFAULT_HANDLE_POTS_TOPIC.0)
             .unwrap_or(DEFAULT_HANDLE_POTS_TOPIC.1.to_string());
         info!("Creating request handler on '{}'", handle_pots_topic);
 
-        let handle_drdd_topic = config
-            .get_string(DEFAULT_HANDLE_DRDD_TOPIC.0)
-            .unwrap_or(DEFAULT_HANDLE_DRDD_TOPIC.1.to_string());
-        info!("Creating request handler on '{}'", handle_drdd_topic);
+        // Query topic
+        let accounts_query_topic = config
+            .get_string(DEFAULT_ACCOUNTS_QUERY_TOPIC.0)
+            .unwrap_or(DEFAULT_ACCOUNTS_QUERY_TOPIC.1.to_string());
+        info!("Creating query handler on '{}'", accounts_query_topic);
 
         // Create history
-        let history = Arc::new(Mutex::new(StateHistory::<State>::new("AccountsState")));
+        let history = Arc::new(Mutex::new(StateHistory::<State>::new(
+            "AccountsState",
+            HistoryKind::BlockState,
+        )));
         let history_account_state = history.clone();
-        let history_spdd = history.clone();
         let history_pots = history.clone();
-        let history_drdd = history.clone();
         let history_tick = history.clone();
 
-        context.handle(ACCOUNTS_STATE_TOPIC, move |message| {
+        context.handle(&accounts_query_topic, move |message| {
             let history = history_account_state.clone();
             async move {
                 let Message::StateQuery(StateQuery::Accounts(query)) = message.as_ref() else {
@@ -456,6 +449,15 @@ impl AccountsState {
                         })
                     }
 
+                    AccountsStateQuery::GetAccountsDrepDelegationsMap { stake_keys } => match state
+                        .get_drep_delegations_map(stake_keys)
+                    {
+                        Some(map) => AccountsStateQueryResponse::AccountsDrepDelegationsMap(map),
+                        None => AccountsStateQueryResponse::Error(
+                            "Error retrieving DRep delegations map".to_string(),
+                        ),
+                    },
+
                     _ => AccountsStateQueryResponse::Error(format!(
                         "Unimplemented query variant: {:?}",
                         query
@@ -468,16 +470,8 @@ impl AccountsState {
             }
         });
 
-        handle_rest(context.clone(), &handle_spdd_topic, move || {
-            handle_spdd(history_spdd.clone())
-        });
-
         handle_rest(context.clone(), &handle_pots_topic, move || {
             handle_pots(history_pots.clone())
-        });
-
-        handle_rest(context.clone(), &handle_drdd_topic, move || {
-            handle_drdd(history_drdd.clone())
         });
 
         // Ticker to log stats

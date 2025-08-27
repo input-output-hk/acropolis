@@ -17,7 +17,7 @@ pub async fn handle_dreps_list_blockfrost(
     let msg = Arc::new(Message::StateQuery(StateQuery::Governance(
         GovernanceStateQuery::GetDRepsList,
     )));
-    let raw = context.message_bus.request("drep-state", msg).await?;
+    let raw = context.message_bus.request("cardano.query.dreps", msg).await?;
     let message = Arc::try_unwrap(raw).unwrap_or_else(|arc| (*arc).clone());
     match message {
         Message::StateQueryResponse(StateQueryResponse::Governance(
@@ -68,7 +68,7 @@ pub async fn handle_single_drep_blockfrost(
         },
     )));
 
-    let raw = context.message_bus.request("drep-state", msg).await?;
+    let raw = context.message_bus.request("cardano.query.dreps", msg).await?;
     let message = Arc::try_unwrap(raw).unwrap_or_else(|arc| (*arc).clone());
 
     match message {
