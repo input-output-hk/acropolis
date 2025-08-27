@@ -22,7 +22,7 @@ impl SPORewardsPublisher {
     pub async fn publish_spo_rewards(
         &mut self,
         block: &BlockInfo,
-        spors: Vec<(KeyHash, SPORewards)>,
+        spo_rewards: Vec<(KeyHash, SPORewards)>,
     ) -> anyhow::Result<()> {
         self.context
             .message_bus
@@ -32,7 +32,7 @@ impl SPORewardsPublisher {
                     block.clone(),
                     CardanoMessage::SPORewards(SPORewardsMessage {
                         epoch: block.epoch - 1, // End of previous epoch
-                        spos: spors.into_iter().collect(),
+                        spos: spo_rewards.into_iter().collect(),
                     }),
                 ))),
             )
