@@ -240,7 +240,6 @@ impl AccountsState {
 
                     _ => error!("Unexpected message type: {message:?}"),
                 }
-
             }
 
             // Now handle the certs_message properly
