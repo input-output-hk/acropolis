@@ -17,7 +17,7 @@ use dashmap::DashMap;
 use imbl::HashMap;
 use rayon::prelude::*;
 use serde_with::{hex::Hex, serde_as};
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use tracing::{debug, error, info};
 
@@ -165,8 +165,8 @@ pub struct State {
 
     /// Active stakes for each pool operator
     /// (epoch number, active stake)
-    /// Pop on first element when epoch number is greater than the epoch number
-    pub active_stakes: DashMap<KeyHash, VecDeque<(u64, u64)>>,
+    /// Remove elements when epoch number is less than current epoch number
+    pub active_stakes: DashMap<KeyHash, BTreeMap<u64, u64>>,
 
     /// Volatile total blocks minted state, one per epoch
     /// Pop on first element when block number is smaller than `current block - SECURITY_PARAMETER_K`
@@ -252,10 +252,7 @@ impl State {
     }
 
     fn get_active_stake(&self, spo: &KeyHash, epoch: u64) -> Option<u64> {
-        self.active_stakes
-            .get(spo)
-            .map(|stakes| stakes.iter().find(|(e, _)| *e == epoch).map(|(_, stake)| *stake))
-            .flatten()
+        self.active_stakes.get(spo).map(|stakes| stakes.get(&epoch).cloned()).flatten()
     }
 
     /// Get total blocks minted for each vrf vkey hash
@@ -468,24 +465,17 @@ impl State {
         }
 
         let total_active_stake: u64 = spos.par_iter().map(|(_, value)| value.active).sum();
+        let epoch_to_update = *epoch + 2;
 
         // update active stakes
         spos.par_iter().for_each(|(spo, value)| {
-            let mut active_stakes =
-                self.active_stakes.entry(spo.clone()).or_insert_with(VecDeque::new);
+            let mut active_stakes = self
+                .active_stakes
+                .entry(spo.clone())
+                .and_modify(|stakes| stakes.retain(|k, _| *k >= block.epoch))
+                .or_insert_with(BTreeMap::new);
 
-            // pop active stake of epoch which is less than current epoch
-            loop {
-                let Some((front_epoch, _)) = active_stakes.front() else {
-                    break;
-                };
-                if *front_epoch < block.epoch {
-                    active_stakes.pop_front();
-                } else {
-                    break;
-                }
-            }
-            active_stakes.push_back((*epoch + 2, value.active));
+            active_stakes.insert(epoch_to_update, value.active);
         });
 
         // update epochs history if set
@@ -719,7 +709,7 @@ pub mod tests {
         state.handle_spdd(&block, &msg);
         assert_eq!(1, state.active_stakes.len());
         assert_eq!(
-            VecDeque::from(vec![(3, 1)]),
+            BTreeMap::from([(3, 1)]),
             state.active_stakes.get(&vec![1]).unwrap().clone()
         );
 
@@ -737,7 +727,7 @@ pub mod tests {
 
         assert_eq!(1, state.active_stakes.len());
         assert_eq!(
-            VecDeque::from(vec![(3, 1), (4, 2)]),
+            BTreeMap::from([(3, 1), (4, 2)]),
             state.active_stakes.get(&vec![1]).unwrap().clone()
         );
 
@@ -755,7 +745,7 @@ pub mod tests {
 
         assert_eq!(1, state.active_stakes.len());
         assert_eq!(
-            VecDeque::from(vec![(4, 2), (5, 3)]),
+            BTreeMap::from([(4, 2), (5, 3)]),
             state.active_stakes.get(&vec![1]).unwrap().clone()
         );
     }
