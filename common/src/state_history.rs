@@ -54,11 +54,6 @@ impl<S: Clone + Default> StateHistory<S> {
         self.history.iter().map(|entry| &entry.state).collect()
     }
 
-    /// Get state history's size
-    pub fn len(&self) -> usize {
-        self.history.len()
-    }
-
     /// Get the previous state for the given block, handling rollbacks if required
     /// State returned is cloned ready for modification - call commit() when done
     pub fn get_rolled_back_state(&mut self, index: u64) -> S {
@@ -99,14 +94,15 @@ impl<S: Clone + Default> StateHistory<S> {
         self.history.iter().find(|entry| entry.index == index).map(|entry| &entry.state)
     }
 
+    /// Get state history's size
     pub fn len(&self) -> usize {
         self.history.len()
     }
 
     /// Return a reference to the state at the given block number, if it exists
-    pub fn inspect_previous_state(&self, block_number: u64) -> Option<&S> {
+    pub fn inspect_previous_state(&self, index: u64) -> Option<&S> {
         for state in self.history.iter().rev() {
-            if state.block == block_number {
+            if state.index == index {
                 return Some(&state.state);
             }
         }
@@ -116,7 +112,7 @@ impl<S: Clone + Default> StateHistory<S> {
     /// Commit new state without checking the block number
     /// TODO: enhance block number logic to commit state without check (for bootstrapping)
     pub fn commit_forced(&mut self, state: S) {
-        self.history.push_back(HistoryEntry { block: 0, state });
+        self.history.push_back(HistoryEntry { index: 0, state });
     }
 
     /// Commit the new state
