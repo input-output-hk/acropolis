@@ -498,7 +498,7 @@ impl State {
         &mut self,
         ea_msg: &EpochActivityMessage,
     ) -> Result<Vec<(KeyHash, SPORewards)>> {
-        let mut spors: Vec<(KeyHash, SPORewards)> = Vec::new();
+        let mut spo_rewards: Vec<(KeyHash, SPORewards)> = Vec::new();
         // Reverse map of VRF key to SPO operator ID
         let vrf_to_operator: HashMap<KeyHash, KeyHash> =
             self.spos.iter().map(|(id, spo)| (spo.vrf_key_hash.clone(), id.clone())).collect();
@@ -532,7 +532,7 @@ impl State {
                     }
 
                     // save SPO rewards
-                    spors = reward_result.spors.into_iter().collect();
+                    spo_rewards = reward_result.spo_rewards.into_iter().collect();
 
                     // Adjust the reserves for next time with amount actually paid
                     self.pots.reserves -= reward_result.total_paid;
@@ -543,7 +543,7 @@ impl State {
         // Enter epoch - note the message specifies the epoch that has just *ended*
         self.enter_epoch(ea_msg.epoch + 1, ea_msg.total_fees, spo_block_counts)?;
 
-        Ok(spors)
+        Ok(spo_rewards)
     }
 
     /// Handle an SPOStateMessage with the full set of SPOs valid at the end of the last

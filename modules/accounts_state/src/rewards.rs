@@ -21,7 +21,7 @@ pub struct RewardsResult {
     pub rewards: Vec<(RewardAccount, Lovelace)>,
 
     /// SPO rewards
-    pub spors: Vec<(KeyHash, SPORewards)>,
+    pub spo_rewards: Vec<(KeyHash, SPORewards)>,
 }
 
 /// State for rewards calculation
@@ -244,7 +244,7 @@ impl RewardsState {
             costs.to_u64().unwrap_or(0)
         };
         result.rewards.push((spo.reward_account.clone(), spo_benefit));
-        result.spors.push((
+        result.spo_rewards.push((
             operator_id.clone(),
             SPORewards {
                 total_rewards: pool_rewards.to_u64().unwrap_or(0),
