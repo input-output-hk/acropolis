@@ -88,6 +88,7 @@ impl RewardsState {
         // from epoch (i-2) "Go"
         let mut total_paid_to_pools: Lovelace = 0;
         let mut total_paid_to_delegators: Lovelace = 0;
+        let mut num_pools_paid: usize = 0;
         let mut num_delegators_paid: usize = 0;
         for (operator_id, spo) in self.go.spos.iter() {
             // Actual blocks produced for epoch (i-2)
@@ -98,6 +99,8 @@ impl RewardsState {
                     0
                 }
             };
+
+            // TODO:  Filter for actually producing any blocks
 
             Self::calculate_spo_rewards(
                 operator_id,
@@ -113,6 +116,7 @@ impl RewardsState {
                 &mut result,
                 &mut total_paid_to_pools,
                 &mut total_paid_to_delegators,
+                &mut num_pools_paid,
                 &mut num_delegators_paid,
             );
         }
@@ -120,6 +124,7 @@ impl RewardsState {
         info!(
             num_delegators_paid,
             total_paid_to_delegators,
+            num_pools_paid,
             total_paid_to_pools,
             total = result.total_paid,
             "Rewards actually paid:"
@@ -143,6 +148,7 @@ impl RewardsState {
         result: &mut RewardsResult,
         total_paid_to_pools: &mut Lovelace,
         total_paid_to_delegators: &mut Lovelace,
+        num_pools_paid: &mut usize,
         num_delegators_paid: &mut usize,
     ) {
         // Actual blocks produced as proportion of epoch (Beta)
@@ -289,5 +295,6 @@ impl RewardsState {
         ));
         result.total_paid += spo_benefit;
         *total_paid_to_pools += spo_benefit;
+        *num_pools_paid += 1;
     }
 }
