@@ -24,9 +24,6 @@ pub struct RewardsResult {
 /// State for rewards calculation
 #[derive(Debug, Default, Clone)]
 pub struct RewardsState {
-    /// Current snapshot (epoch i+1)
-    pub latest: Arc<Snapshot>,
-
     /// Latest snapshot (epoch i)
     pub mark: Arc<Snapshot>,
 
@@ -42,8 +39,7 @@ impl RewardsState {
     pub fn push(&mut self, latest: Snapshot) {
         self.go = self.set.clone();
         self.set = self.mark.clone();
-        self.mark = self.latest.clone();
-        self.latest = Arc::new(latest);
+        self.mark = Arc::new(latest);
     }
 
     /// Calculate rewards for a given epoch based on current rewards state and protocol parameters
@@ -54,7 +50,7 @@ impl RewardsState {
         &self,
         epoch: u64,
         params: &ShelleyParams,
-        stake_rewards: BigDecimal,
+        stake_rewards: Lovelace,
     ) -> Result<RewardsResult> {
         let mut result = RewardsResult::default();
 
@@ -63,6 +59,9 @@ impl RewardsState {
         if total_blocks == 0 {
             return Ok(result);
         }
+
+        // Take stake rewards from epoch we just left
+        let stake_rewards = BigDecimal::from(stake_rewards);
 
         // Calculate total supply (total in circulation + treasury) or
         // equivalently (max-supply-reserves) - this is the denominator
@@ -89,15 +88,16 @@ impl RewardsState {
         let mut num_delegators_paid: usize = 0;
         for (operator_id, spo) in self.go.spos.iter() {
             // Actual blocks produced for epoch (i-2)
-            let blocks_produced = {
-                if let Some(s) = self.go.spos.get(operator_id) {
-                    s.blocks_produced
-                } else {
-                    0
-                }
+            let blocks_produced = if let Some(s) = self.mark.spos.get(operator_id) {
+                s.blocks_produced
+            } else {
+                0
             };
 
-            // TODO:  Filter for actually producing any blocks
+            // Filter for actually producing any blocks
+            if blocks_produced == 0 {
+                continue;
+            }
 
             Self::calculate_spo_rewards(
                 operator_id,

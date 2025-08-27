@@ -192,14 +192,7 @@ impl State {
         let total_non_obft_blocks = total_blocks - obft_block_count;
         info!(total_blocks, total_non_obft_blocks, "Block counts:");
 
-        // Update the reserves and treasury (monetary.rs)
-        let monetary_change = calculate_monetary_change(
-            &shelley_params,
-            &self.pots,
-            self.rewards_state.latest.fees, // Last epoch's fees - note snapshot not pushed yet
-            total_non_obft_blocks,
-        )?;
-        self.pots = monetary_change.pots;
+        info!(epoch, reserves=self.pots.reserves, treasury=self.pots.treasury, "Entering ");
 
         // Pay the refunds and MIRs
         self.pay_pool_refunds();
@@ -213,10 +206,21 @@ impl State {
             &self.spos,
             &spo_block_counts,
             &self.pots,
-            total_fees,
             total_blocks,
         );
         self.rewards_state.push(snapshot);
+
+        // Update the reserves and treasury (monetary.rs)
+        let monetary_change = calculate_monetary_change(
+            &shelley_params,
+            &self.pots,
+            total_fees,
+            total_non_obft_blocks,
+        )?;
+        self.pots = monetary_change.pots;
+
+        info!(epoch, reserves=self.pots.reserves, treasury=self.pots.treasury,
+              "After monetary change");
 
         let rs = self.rewards_state.clone();
         self.epoch_rewards_task = Arc::new(Mutex::new(Some(spawn_blocking(move || {
