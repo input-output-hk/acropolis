@@ -249,7 +249,19 @@ impl RewardsState {
                     let to_pay = reward.with_scale(0).to_u64().unwrap_or(0);
 
                     debug!("Reward stake {stake} -> proportion {proportion} of SPO rewards {to_delegators} -> {to_pay} to hash {}",
-                           hex::encode(&hash));
+                           hex::encode(hash));
+
+                    // Pool owners don't get member rewards (seems unfair!)
+                    if spo.pool_owners.contains(hash) {
+                        info!(
+                            "Skipping pool owner reward account {}, losing {to_pay}",
+                            hex::encode(hash)
+                        );
+                        continue;
+                    }
+
+                    // TODO Shelley-until-Allegra bug if same reward account used for multiple
+                    // SPOs - check pool's reward address but only before Allegra?
 
                     // Transfer from reserves to this account
                     result.rewards.push((hash.clone(), to_pay));
