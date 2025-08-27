@@ -9,7 +9,7 @@ use acropolis_common::{
     params::TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH,
     rational_number::RationalNumber,
     serialization::SerializeMapAs,
-    state_history::{HistoryKind, StateHistory},
+    state_history::{StateHistory, StateHistoryStore},
     BlockInfo, KeyHash, PoolEpochState, PoolRegistration, PoolRetirement, TxCertificate,
 };
 use anyhow::Result;
@@ -177,7 +177,10 @@ impl State {
     // Construct with optional publisher
     pub fn new(state_config: StateConfig) -> Self {
         Self {
-            history: StateHistory::new("spo-states/block-state", HistoryKind::BlockState),
+            history: StateHistory::new(
+                "spo-states/block-state",
+                StateHistoryStore::default_block_store(),
+            ),
             epochs_history: if state_config.store_history {
                 Some(Arc::new(DashMap::new()))
             } else {
@@ -186,7 +189,7 @@ impl State {
             active_stakes: DashMap::new(),
             total_blocks_minted_history: StateHistory::new(
                 "spo-states/total-blocks-minted",
-                HistoryKind::BlockState,
+                StateHistoryStore::default_block_store(),
             ),
         }
     }
@@ -584,7 +587,7 @@ impl State {
     }
 
     pub fn dump(&self, block_height: u64) -> Option<SPOState> {
-        self.history.inspect_previous_state(block_height).map(SPOState::from)
+        self.history.get_by_index_reverse(block_height).map(SPOState::from)
     }
 
     fn update_epochs_history_with(

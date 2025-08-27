@@ -1,5 +1,5 @@
 use acropolis_common::{
-    state_history::{HistoryKind, StateHistory},
+    state_history::{StateHistory, StateHistoryStore},
     DelegatedStake, KeyHash,
 };
 use imbl::{OrdMap, OrdSet};
@@ -12,7 +12,7 @@ pub struct State {
 impl State {
     pub fn new() -> Self {
         Self {
-            spdd_history: StateHistory::new("spdd", HistoryKind::EpochState),
+            spdd_history: StateHistory::new("spdd", StateHistoryStore::Unbounded),
         }
     }
 
