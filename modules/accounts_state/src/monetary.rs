@@ -39,7 +39,7 @@ pub fn calculate_monetary_change(
     let total_reward_pot = &monetary_expansion + BigDecimal::from(total_fees_last_epoch);
 
     // Top-slice some for treasury
-    let treasury_cut = &params.protocol_params.treasury_cut;  // Tau
+    let treasury_cut = &params.protocol_params.treasury_cut; // Tau
     let treasury_increase = (&total_reward_pot * BigDecimal::from(treasury_cut.numer())
         / BigDecimal::from(treasury_cut.denom()))
     .with_scale(0);
@@ -112,27 +112,27 @@ mod tests {
     use chrono::{DateTime, Utc};
 
     // Known values at start of Shelley - from Java reference and DBSync
-    const EPOCH_208_RESERVES: Lovelace =  13_888_022_852_926_644;
-    const EPOCH_208_MIRS: Lovelace =         593_529_326_186_446;
+    const EPOCH_208_RESERVES: Lovelace = 13_888_022_852_926_644;
+    const EPOCH_208_MIRS: Lovelace = 593_529_326_186_446;
 
-    const EPOCH_209_RESERVES: Lovelace =  13_286_160_713_028_443;
-    const EPOCH_209_TREASURY: Lovelace =       8_332_813_711_755;
-    const EPOCH_209_FEES: Lovelace =              10_670_212_208;
+    const EPOCH_209_RESERVES: Lovelace = 13_286_160_713_028_443;
+    const EPOCH_209_TREASURY: Lovelace = 8_332_813_711_755;
+    const EPOCH_209_FEES: Lovelace = 10_670_212_208;
     const EPOCH_209_STAKE_REWARDS: Lovelace = 33_331_254_847_024;
 
-    const EPOCH_210_RESERVES: Lovelace =  13_278_197_552_770_393;
-    const EPOCH_210_TREASURY: Lovelace =      16_306_644_182_013;
-    const EPOCH_210_REFUNDS_TO_TREASURY: Lovelace =  500_000_000; // 1 SPO with unknown reward
-    const EPOCH_210_FEES: Lovelace =               7_666_346_424;
+    const EPOCH_210_RESERVES: Lovelace = 13_278_197_552_770_393;
+    const EPOCH_210_TREASURY: Lovelace = 16_306_644_182_013;
+    const EPOCH_210_REFUNDS_TO_TREASURY: Lovelace = 500_000_000; // 1 SPO with unknown reward
+    const EPOCH_210_FEES: Lovelace = 7_666_346_424;
     const EPOCH_210_STAKE_REWARDS: Lovelace = 31_895_321_881_035;
 
-    const EPOCH_211_RESERVES: Lovelace =  13_270_236_767_315_870;
-    const EPOCH_211_TREASURY: Lovelace =      24_275_595_982_960;
-    const EPOCH_211_FEES: Lovelace =               7_770_532_273;
+    const EPOCH_211_RESERVES: Lovelace = 13_270_236_767_315_870;
+    const EPOCH_211_TREASURY: Lovelace = 24_275_595_982_960;
+    const EPOCH_211_FEES: Lovelace = 7_770_532_273;
     const EPOCH_211_STAKE_REWARDS: Lovelace = 31_873_807_203_788;
 
-    const EPOCH_212_RESERVES: Lovelace =  13_262_280_841_681_299;
-    const EPOCH_212_TREASURY: Lovelace =      32_239_292_149_804;
+    const EPOCH_212_RESERVES: Lovelace = 13_262_280_841_681_299;
+    const EPOCH_212_TREASURY: Lovelace = 32_239_292_149_804;
     const EPOCH_212_STAKE_REWARDS: Lovelace = 31_854_784_667_376;
 
     fn shelley_params() -> ShelleyParams {
