@@ -6,7 +6,7 @@ use acropolis_common::{
         CardanoMessage, EpochActivityMessage, Message, SPORewardsMessage,
         SPOStakeDistributionMessage, SPOStateMessage, TxCertificatesMessage,
     },
-    params::{SECURITY_PARAMETER_K, TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH},
+    params::TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH,
     rational_number::RationalNumber,
     serialization::SerializeMapAs,
     state_history::{HistoryKind, StateHistory},
@@ -146,25 +146,13 @@ impl EpochState {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Default, Debug, Clone, serde::Serialize)]
 pub struct TotalBlocksMintedState {
-    /// block number of Epoch N
+    /// block number of Epoch Boundary from N-1 to N
     block: u64,
-    /// epoch number N
-    epoch: u64,
     /// total blocks minted for each pool operator keyed by vrf_key_hash
     /// until the end of Epoch N-1
     total_blocks_minted: HashMap<KeyHash, u64>,
-}
-
-impl TotalBlocksMintedState {
-    pub fn new() -> Self {
-        Self {
-            block: 0,
-            epoch: 0,
-            total_blocks_minted: HashMap::new(),
-        }
-    }
 }
 
 /// Overall module state
@@ -182,7 +170,7 @@ pub struct State {
 
     /// Volatile total blocks minted state, one per epoch
     /// Pop on first element when block number is smaller than `current block - SECURITY_PARAMETER_K`
-    pub total_blocks_minted_history: VecDeque<TotalBlocksMintedState>,
+    pub total_blocks_minted_history: StateHistory<TotalBlocksMintedState>,
 }
 
 impl State {
@@ -196,16 +184,15 @@ impl State {
                 None
             },
             active_stakes: DashMap::new(),
-            total_blocks_minted_history: VecDeque::new(),
+            total_blocks_minted_history: StateHistory::new(
+                "spo-states/total-blocks-minted",
+                HistoryKind::BlockState,
+            ),
         }
     }
 
     pub fn current(&self) -> Option<&BlockState> {
         self.history.current()
-    }
-
-    pub fn current_total_blocks_minted_state(&self) -> Option<&TotalBlocksMintedState> {
-        self.total_blocks_minted_history.back()
     }
 
     #[allow(dead_code)]
@@ -274,7 +261,7 @@ impl State {
     /// ## Returns
     /// `Vec<u64>` - a vector of total blocks minted for each vrf vkey hash.
     pub fn get_total_blocks_minted(&self, vrf_vkey_hashes: &Vec<KeyHash>) -> Vec<u64> {
-        let Some(current) = self.current_total_blocks_minted_state() else {
+        let Some(current) = self.total_blocks_minted_history.current() else {
             return vec![0; vrf_vkey_hashes.len()];
         };
         let total_blocks_minted = vrf_vkey_hashes
@@ -333,33 +320,6 @@ impl State {
     pub async fn tick(&self) -> Result<()> {
         self.log_stats().await;
         Ok(())
-    }
-
-    fn get_previous_total_blocks_minted_state(
-        &mut self,
-        block: &BlockInfo,
-    ) -> TotalBlocksMintedState {
-        loop {
-            match self.total_blocks_minted_history.back() {
-                Some(state) => {
-                    if state.block >= block.number || state.epoch >= block.epoch {
-                        info!(
-                            "Rolling back SPO total blocks minted state for block {}",
-                            state.block
-                        );
-                        self.total_blocks_minted_history.pop_back();
-                    } else {
-                        break;
-                    }
-                }
-                _ => break,
-            }
-        }
-        if let Some(current) = self.total_blocks_minted_history.back() {
-            current.clone()
-        } else {
-            TotalBlocksMintedState::new()
-        }
     }
 
     /// Handle TxCertificates with SPO registrations / de-registrations
@@ -558,12 +518,17 @@ impl State {
             )
         }
 
-        let current_total_blocks_minted_state = self.get_previous_total_blocks_minted_state(block);
-        let mut total_blocks_minted = current_total_blocks_minted_state.total_blocks_minted.clone();
+        let mut total_blocks_minted = self
+            .total_blocks_minted_history
+            .get_rolled_back_state(block.number)
+            .total_blocks_minted;
 
         // handle blocks_minted state
         vrf_vkey_hashes.iter().for_each(|(vrf_vkey_hash, amount)| {
-            *(total_blocks_minted.entry(vrf_vkey_hash.clone()).or_insert(0)) += *amount as u64;
+            total_blocks_minted
+                .entry(vrf_vkey_hash.clone())
+                .and_modify(|v| *v += *amount as u64)
+                .or_insert(*amount as u64);
         });
 
         // update epochs history if set
@@ -580,17 +545,10 @@ impl State {
 
         let new_state = TotalBlocksMintedState {
             block: block.number,
-            epoch: block.epoch,
             total_blocks_minted,
         };
 
-        // Prune old history which can not be rolled back to
-        if let Some(front) = self.total_blocks_minted_history.front() {
-            if current_total_blocks_minted_state.block > front.block + SECURITY_PARAMETER_K as u64 {
-                self.total_blocks_minted_history.pop_front();
-            }
-        }
-        self.total_blocks_minted_history.push_back(new_state);
+        self.total_blocks_minted_history.commit(block.number, new_state);
     }
 
     /// Handle SPO rewards data calculated from accounts-state
