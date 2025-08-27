@@ -4,7 +4,7 @@ use std::{future::Future, sync::Arc};
 
 use acropolis_common::{
     messages::{Message, RESTResponse},
-    rest_helper::handle_rest_with_parameter,
+    rest_helper::handle_rest_with_path_parameter,
 };
 use anyhow::Result;
 use caryatid_sdk::{module, Context, Module};
@@ -282,7 +282,7 @@ where
 
     tracing::info!("Creating request handler on '{}'", topic_name);
 
-    handle_rest_with_parameter(context.clone(), &topic_name, move |params| {
+    handle_rest_with_path_parameter(context.clone(), &topic_name, move |params| {
         let context = context.clone();
         let handler_fn = handler_fn.clone();
         let params: Vec<String> = params.iter().map(|s| s.to_string()).collect();

@@ -3,7 +3,7 @@
 
 use acropolis_common::{
     messages::{CardanoMessage, Message},
-    rest_helper::handle_rest_with_parameter,
+    rest_helper::handle_rest_with_path_parameter,
 };
 use caryatid_sdk::{module, Context, Module};
 
@@ -137,7 +137,7 @@ impl UTXOState {
             }
         });
 
-        handle_rest_with_parameter(context.clone(), &single_utxo_topic, move |param| {
+        handle_rest_with_path_parameter(context.clone(), &single_utxo_topic, move |param| {
             handle_single_utxo(state.clone(), param[0].to_string())
         });
 
