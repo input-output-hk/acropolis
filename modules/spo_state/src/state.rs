@@ -9,6 +9,7 @@ use acropolis_common::{
     params::{SECURITY_PARAMETER_K, TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH},
     rational_number::RationalNumber,
     serialization::SerializeMapAs,
+    state_history::StateHistory,
     BlockInfo, KeyHash, PoolEpochState, PoolRegistration, PoolRetirement, TxCertificate,
 };
 use anyhow::Result;
@@ -23,7 +24,7 @@ use tracing::{debug, error, info};
 use crate::state_config::StateConfig;
 
 #[serde_as]
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Default, Debug, Clone, serde::Serialize)]
 pub struct BlockState {
     block: u64,
 
@@ -173,7 +174,7 @@ impl TotalBlocksMintedState {
 /// Overall module state
 pub struct State {
     /// Volatile states, one per volatile block
-    history: VecDeque<BlockState>,
+    history: StateHistory<BlockState>,
 
     /// Epoch History for each pool operator
     epochs_history: Option<Arc<DashMap<KeyHash, BTreeMap<u64, EpochState>>>>,
@@ -192,7 +193,7 @@ impl State {
     // Construct with optional publisher
     pub fn new(state_config: StateConfig) -> Self {
         Self {
-            history: VecDeque::<BlockState>::new(),
+            history: StateHistory::new("spo-states/block-state"),
             epochs_history: if state_config.store_history {
                 Some(Arc::new(DashMap::new()))
             } else {
@@ -204,7 +205,7 @@ impl State {
     }
 
     pub fn current(&self) -> Option<&BlockState> {
-        self.history.back()
+        self.history.current()
     }
 
     pub fn current_total_blocks_minted_state(&self) -> Option<&TotalBlocksMintedState> {
@@ -338,27 +339,6 @@ impl State {
         Ok(())
     }
 
-    fn get_previous_state(&mut self, block_number: u64) -> BlockState {
-        loop {
-            match self.history.back() {
-                Some(state) => {
-                    if state.block >= block_number {
-                        info!("Rolling back state for block {}", state.block);
-                        self.history.pop_back();
-                    } else {
-                        break;
-                    }
-                }
-                _ => break,
-            }
-        }
-        if let Some(current) = self.history.back() {
-            current.clone()
-        } else {
-            BlockState::new(0, 0, HashMap::new(), HashMap::new(), HashMap::new())
-        }
-    }
-
     fn get_previous_total_blocks_minted_state(
         &mut self,
         block: &BlockInfo,
@@ -386,16 +366,6 @@ impl State {
         }
     }
 
-    /// Returns a reference to the block state at a specified height, if applicable
-    pub fn inspect_previous_state(&self, block_height: u64) -> Option<&BlockState> {
-        for state in self.history.iter().rev() {
-            if state.block == block_height {
-                return Some(state);
-            }
-        }
-        None
-    }
-
     /// Handle TxCertificates with SPO registrations / de-registrations
     /// Returns an optional state message for end of epoch
     pub fn handle_tx_certs(
@@ -404,7 +374,7 @@ impl State {
         tx_certs_msg: &TxCertificatesMessage,
     ) -> Result<Option<Arc<Message>>> {
         let mut message: Option<Arc<Message>> = None;
-        let mut current = self.get_previous_state(block.number);
+        let mut current = self.history.get_rolled_back_state(block);
         current.block = block.number;
 
         // Handle end of epoch
@@ -517,11 +487,8 @@ impl State {
             }
         }
 
-        // Prune and add to state history
-        if self.history.len() >= SECURITY_PARAMETER_K as usize {
-            self.history.pop_front();
-        }
-        self.history.push_back(current);
+        // Commit the new state
+        self.history.commit(block, current);
 
         Ok(message)
     }
@@ -657,11 +624,11 @@ impl State {
 
     pub fn bootstrap(&mut self, state: SPOState) {
         self.history.clear();
-        self.history.push_back(state.into());
+        self.history.commit_forced(state.into());
     }
 
     pub fn dump(&self, block_height: u64) -> Option<SPOState> {
-        self.inspect_previous_state(block_height).map(SPOState::from)
+        self.history.inspect_previous_state(block_height).map(SPOState::from)
     }
 
     fn update_epochs_history_with(
@@ -1227,7 +1194,10 @@ pub mod tests {
         }));
         let mut block = new_block(0);
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
-        println!("{}", serde_json::to_string_pretty(&state.history).unwrap());
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&state.history.values()).unwrap()
+        );
         let current = state.current();
         assert!(!current.is_none());
         if let Some(current) = current {
@@ -1242,12 +1212,18 @@ pub mod tests {
             epoch: 1,
         }));
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
-        println!("{}", serde_json::to_string_pretty(&state.history).unwrap());
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&state.history.values()).unwrap()
+        );
         let msg = new_msg();
         block.number = 2;
         block.epoch = 1;
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
-        println!("{}", serde_json::to_string_pretty(&state.history).unwrap());
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&state.history.values()).unwrap()
+        );
         let current = state.current();
         assert!(!current.is_none());
         if let Some(current) = current {
@@ -1257,7 +1233,10 @@ pub mod tests {
         block.number = 2;
         block.epoch = 0;
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
-        println!("{}", serde_json::to_string_pretty(&state.history).unwrap());
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&state.history.values()).unwrap()
+        );
         let current = state.current();
         assert!(!current.is_none());
         if let Some(current) = current {

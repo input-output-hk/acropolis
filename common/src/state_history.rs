@@ -5,7 +5,6 @@
 use crate::params::SECURITY_PARAMETER_K;
 use crate::types::BlockInfo;
 use std::collections::VecDeque;
-
 use tracing::info;
 
 /// Entry in the history - S is the state to be stored
@@ -43,6 +42,16 @@ impl<S: Clone + Default> StateHistory<S> {
         }
     }
 
+    /// Get all the states references in the history
+    pub fn values(&self) -> Vec<&S> {
+        self.history.iter().map(|entry| &entry.state).collect()
+    }
+
+    /// Get state history's size
+    pub fn len(&self) -> usize {
+        self.history.len()
+    }
+
     /// Get the previous state for the given block, handling rollbacks if required
     /// State returned is cloned ready for modification - call commit() when done
     pub fn get_rolled_back_state(&mut self, block: &BlockInfo) -> S {
@@ -76,10 +85,29 @@ impl<S: Clone + Default> StateHistory<S> {
         }
     }
 
+    /// Return a reference to the state at the given block number, if it exists
+    pub fn inspect_previous_state(&self, block_number: u64) -> Option<&S> {
+        for state in self.history.iter().rev() {
+            if state.block == block_number {
+                return Some(&state.state);
+            }
+        }
+        None
+    }
+
+    /// Commit new state without checking the block number
+    /// TODO: enhance block number logic to commit state without check (for bootstrapping)
+    pub fn commit_forced(&mut self, state: S) {
+        self.history.push_back(HistoryEntry { block: 0, state });
+    }
+
     /// Commit the new state
     pub fn commit(&mut self, block: &BlockInfo, state: S) {
         // Prune beyond 'k'
         loop {
+            if block.number < SECURITY_PARAMETER_K as u64 {
+                break;
+            }
             if let Some(entry) = self.history.front() {
                 if entry.block < block.number - SECURITY_PARAMETER_K as u64 {
                     self.history.pop_front();
@@ -95,5 +123,10 @@ impl<S: Clone + Default> StateHistory<S> {
             block: block.number,
             state,
         });
+    }
+
+    /// Clear the history
+    pub fn clear(&mut self) {
+        self.history.clear();
     }
 }
