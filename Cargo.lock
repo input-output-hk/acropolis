@@ -181,6 +181,7 @@ dependencies = [
  "caryatid_sdk",
  "config",
  "hex",
+ "num-traits",
  "rust_decimal",
  "serde",
  "serde_json",

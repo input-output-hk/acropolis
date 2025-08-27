@@ -97,6 +97,25 @@ impl State {
     pub async fn tick(&self) -> Result<()> {
         Ok(())
     }
+
+    pub fn get_epoch_params(
+        &self,
+        epoch: u64,
+    ) -> Result<Option<&ProtocolParamsMessage>, &'static str> {
+        let hist = self
+            .parameter_history
+            .as_ref()
+            .ok_or("Historical parameter storage is disabled by configuration.")?;
+
+        if epoch > self.active_epoch {
+            return Ok(None);
+        }
+
+        match hist.range(..=epoch).next_back() {
+            Some((_, params)) => Ok(Some(params)),
+            None => Ok(None),
+        }
+    }
 }
 
 #[cfg(test)]

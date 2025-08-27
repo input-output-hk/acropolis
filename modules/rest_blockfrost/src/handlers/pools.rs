@@ -303,7 +303,7 @@ async fn handle_pools_extended_blockfrost(context: Arc<Context<Message>>) -> Res
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Epochs(
                 EpochsStateQueryResponse::LatestEpochParameters(res),
-            )) => Ok(res.parameters),
+            )) => Ok(res),
             Message::StateQueryResponse(StateQueryResponse::Epochs(
                 EpochsStateQueryResponse::Error(e),
             )) => Err(anyhow::anyhow!(

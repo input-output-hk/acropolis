@@ -1,6 +1,7 @@
 use acropolis_common::{
-    rational_number::RationalNumber, ConwayParams, GovernanceAction, ProposalProcedure,
-    ProtocolParamType, ProtocolParamUpdate, VotesCount,
+    protocol_params::{ConwayParams, ProtocolParamUpdate},
+    rational_number::RationalNumber,
+    GovernanceAction, ProposalProcedure, ProtocolParamType, VotesCount,
 };
 use anyhow::Result;
 use std::{cmp::max, fmt};

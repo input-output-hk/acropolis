@@ -6,6 +6,7 @@ use acropolis_common::{
         BlockFeesMessage, CardanoMessage, GovernanceProceduresMessage, Message,
         TxCertificatesMessage, UTXODeltasMessage, WithdrawalsMessage,
     },
+    protocol_params::{AlonzoBabbageUpdateProposal, ProtocolParamUpdate},
     *,
 };
 use caryatid_sdk::{module, Context, Module};

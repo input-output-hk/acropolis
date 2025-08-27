@@ -5,6 +5,7 @@ use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::epochs::{
         BlocksMintedByPools, EpochsStateQuery, EpochsStateQueryResponse, LatestEpoch,
+        DEFAULT_EPOCH_QUERY_TOPIC,
     },
     rest_helper::{handle_rest, handle_rest_with_parameter},
     Era,
@@ -29,8 +30,6 @@ const DEFAULT_HANDLE_CURRENT_TOPIC: (&str, &str) = ("handle-topic-current-epoch"
 const DEFAULT_HANDLE_HISTORICAL_TOPIC: (&str, &str) =
     ("handle-topic-historical-epoch", "rest.get.epochs.*");
 const DEFAULT_STORE_HISTORY: (&str, bool) = ("store-history", false);
-
-const EPOCH_STATE_TOPIC: &str = "epoch-state";
 
 /// Epoch activity counter module
 #[module(
@@ -157,6 +156,11 @@ impl EpochActivityCounter {
             .unwrap_or(DEFAULT_HANDLE_HISTORICAL_TOPIC.1.to_string());
         info!("Creating request handler on '{}'", handle_historical_topic);
 
+        // Query topic
+        let epoch_query_topic = config
+            .get_string(DEFAULT_EPOCH_QUERY_TOPIC.0)
+            .unwrap_or(DEFAULT_EPOCH_QUERY_TOPIC.1.to_string());
+
         // Subscribe
         let headers_subscription = context.subscribe(&subscribe_headers_topic).await?;
         let fees_subscription = context.subscribe(&subscribe_fees_topic).await?;
@@ -167,7 +171,7 @@ impl EpochActivityCounter {
 
         // handle epoch-state
         let state_rest_blockfrost = state.clone();
-        context.handle(EPOCH_STATE_TOPIC, move |message| {
+        context.handle(&epoch_query_topic, move |message| {
             let state = state_rest_blockfrost.clone();
             async move {
                 let Message::StateQuery(StateQuery::Epochs(query)) = message.as_ref() else {

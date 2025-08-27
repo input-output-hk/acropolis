@@ -3,8 +3,7 @@
 
 use acropolis_common::{
     messages::{CardanoMessage, Message, ProtocolParamsMessage, StateQuery, StateQueryResponse},
-    queries::epochs::{EpochsStateQuery, EpochsStateQueryResponse, LatestEpochParameters},
-    rest_helper::{handle_rest, handle_rest_with_parameter},
+    queries::epochs::{EpochsStateQuery, EpochsStateQueryResponse, DEFAULT_PARAMETERS_QUERY_TOPIC},
     BlockInfo,
 };
 use anyhow::Result;
@@ -17,28 +16,16 @@ use tracing::{error, info, info_span, Instrument};
 mod alonzo_genesis;
 mod genesis_params;
 mod parameters_updater;
-mod rest;
 mod state;
 
 use parameters_updater::ParametersUpdater;
-use rest::handle_current;
 use state::State;
 
-use crate::rest::handle_historical;
-
 const DEFAULT_ENACT_STATE_TOPIC: (&str, &str) = ("enact-state-topic", "cardano.enact.state");
-const DEFAULT_HANDLE_CURRENT_TOPIC: (&str, &str) =
-    ("handle-current-params-topic", "rest.get.epoch.parameters");
-const DEFAULT_HANDLE_HISTORICAL_TOPIC: (&str, &str) = (
-    "handle-historical-params-topic",
-    "rest.get.epochs.*.parameters",
-);
 const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: (&str, &str) =
     ("publish-parameters-topic", "cardano.protocol.parameters");
 const DEFAULT_NETWORK_NAME: (&str, &str) = ("network-name", "mainnet");
 const DEFAULT_STORE_HISTORY: (&str, bool) = ("store-history", false);
-
-const PARAMETERS_STATE_TOPIC: &str = "parameters-state";
 
 /// Parameters State module
 #[module(
@@ -52,8 +39,7 @@ struct ParametersStateConfig {
     pub context: Arc<Context<Message>>,
     pub network_name: String,
     pub enact_state_topic: String,
-    pub handle_current_topic: String,
-    pub handle_historical_topic: String,
+    pub parameters_query_topic: String,
     pub protocol_parameters_topic: String,
     pub store_history: bool,
 }
@@ -76,8 +62,7 @@ impl ParametersStateConfig {
             context,
             network_name: Self::conf(config, DEFAULT_NETWORK_NAME),
             enact_state_topic: Self::conf(config, DEFAULT_ENACT_STATE_TOPIC),
-            handle_current_topic: Self::conf(config, DEFAULT_HANDLE_CURRENT_TOPIC),
-            handle_historical_topic: Self::conf(config, DEFAULT_HANDLE_HISTORICAL_TOPIC),
+            parameters_query_topic: Self::conf(config, DEFAULT_PARAMETERS_QUERY_TOPIC),
             protocol_parameters_topic: Self::conf(config, DEFAULT_PROTOCOL_PARAMETERS_TOPIC),
             store_history: Self::conf_bool(config, DEFAULT_STORE_HISTORY),
         })
@@ -139,21 +124,9 @@ impl ParametersState {
             cfg.store_history,
         )));
 
-        let state_handle_current = state.clone();
-        handle_rest(cfg.context.clone(), &cfg.handle_current_topic, move || {
-            handle_current(state_handle_current.clone())
-        });
-
-        let state_handle_historical = state.clone();
-        handle_rest_with_parameter(
-            cfg.context.clone(),
-            &cfg.handle_historical_topic,
-            move |param| handle_historical(state_handle_historical.clone(), param[0].to_string()),
-        );
-
         // Handle parameters state
         let state_rest_blockfrost = state.clone();
-        context.handle(PARAMETERS_STATE_TOPIC, move |message| {
+        context.handle(&cfg.parameters_query_topic, move |message| {
             let state = state_rest_blockfrost.clone();
             async move {
                 let Message::StateQuery(StateQuery::Epochs(query)) = message.as_ref() else {
@@ -165,9 +138,19 @@ impl ParametersState {
                 let state = state.lock().await;
                 let response = match query {
                     EpochsStateQuery::GetLatestEpochParameters => {
-                        EpochsStateQueryResponse::LatestEpochParameters(LatestEpochParameters {
-                            parameters: state.current_params.get_params(),
-                        })
+                        EpochsStateQueryResponse::LatestEpochParameters(
+                            state.current_params.get_params(),
+                        )
+                    }
+
+                    EpochsStateQuery::GetEpochParameters { epoch_number } => {
+                        match state.get_epoch_params(*epoch_number) {
+                            Ok(Some(params)) => {
+                                EpochsStateQueryResponse::EpochParameters(params.clone().params)
+                            }
+                            Ok(None) => EpochsStateQueryResponse::NotFound,
+                            Err(msg) => EpochsStateQueryResponse::Error(msg.to_string()),
+                        }
                     }
 
                     _ => EpochsStateQueryResponse::Error(format!(

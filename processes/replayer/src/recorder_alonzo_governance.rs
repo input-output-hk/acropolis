@@ -2,7 +2,8 @@
 
 use acropolis_common::{
     messages::{CardanoMessage, GovernanceProceduresMessage, Message},
-    AlonzoBabbageUpdateProposal, BlockInfo, GenesisKeyhash, ProtocolParamUpdate,
+    protocol_params::{AlonzoBabbageUpdateProposal, GenesisKeyhash, ProtocolParamUpdate},
+    BlockInfo,
 };
 use anyhow::{anyhow, Result};
 use caryatid_sdk::{module, Context, Module, Subscription};

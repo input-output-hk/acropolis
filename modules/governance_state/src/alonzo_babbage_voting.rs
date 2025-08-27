@@ -1,6 +1,7 @@
 use acropolis_common::{
-    calculations::SHELLEY_SLOTS_PER_EPOCH, AlonzoBabbageUpdateProposal, AlonzoBabbageVotingOutcome,
-    BlockInfo, Era, GenesisKeyhash, ProtocolParamUpdate,
+    calculations::SHELLEY_SLOTS_PER_EPOCH,
+    protocol_params::{AlonzoBabbageUpdateProposal, GenesisKeyhash, ProtocolParamUpdate},
+    AlonzoBabbageVotingOutcome, BlockInfo, Era,
 };
 use anyhow::{bail, Result};
 use std::collections::{HashMap, HashSet};
@@ -106,8 +107,9 @@ impl AlonzoBabbageVoting {
 mod tests {
     use crate::alonzo_babbage_voting::AlonzoBabbageVoting;
     use acropolis_common::{
-        rational_number::rational_number_from_f32, AlonzoBabbageUpdateProposal,
-        AlonzoBabbageVotingOutcome, BlockInfo, BlockStatus, GenesisKeyhash, ProtocolParamUpdate,
+        protocol_params::{AlonzoBabbageUpdateProposal, GenesisKeyhash, ProtocolParamUpdate},
+        rational_number::rational_number_from_f32,
+        AlonzoBabbageVotingOutcome, BlockInfo, BlockStatus,
     };
     use anyhow::Result;
     use serde_with::{base64::Base64, serde_as};

@@ -1,4 +1,9 @@
-use crate::{messages::EpochActivityMessage, KeyHash, ProtocolParams};
+use crate::{messages::EpochActivityMessage, protocol_params::ProtocolParams, KeyHash};
+
+pub const DEFAULT_PARAMETERS_QUERY_TOPIC: (&str, &str) =
+    ("parameters-state-query-topic", "cardano.query.parameters");
+pub const DEFAULT_EPOCH_QUERY_TOPIC: (&str, &str) =
+    ("epoch-state-query-topic", "cardano.query.epoch");
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum EpochsStateQuery {
@@ -20,7 +25,7 @@ pub enum EpochsStateQuery {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum EpochsStateQueryResponse {
     LatestEpoch(LatestEpoch),
-    LatestEpochParameters(LatestEpochParameters),
+    LatestEpochParameters(ProtocolParams),
     EpochInfo(EpochInfo),
     NextEpochs(NextEpochs),
     PreviousEpochs(PreviousEpochs),
@@ -28,7 +33,7 @@ pub enum EpochsStateQueryResponse {
     EpochStakeDistributionByPool(EpochStakeDistributionByPool),
     EpochBlockDistribution(EpochBlockDistribution),
     EpochBlockDistributionByPool(EpochBlockDistributionByPool),
-    EpochParameters(EpochParameters),
+    EpochParameters(ProtocolParams),
 
     // Pools related responses
     BlocksMintedByPools(BlocksMintedByPools),
@@ -40,11 +45,6 @@ pub enum EpochsStateQueryResponse {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LatestEpoch {
     pub epoch: EpochActivityMessage,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct LatestEpochParameters {
-    pub parameters: ProtocolParams,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -67,9 +67,6 @@ pub struct EpochBlockDistribution {}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EpochBlockDistributionByPool {}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct EpochParameters {}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BlocksMintedByPools {
