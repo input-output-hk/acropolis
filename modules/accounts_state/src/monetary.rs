@@ -13,7 +13,7 @@ pub struct MonetaryResult {
     pub pots: Pots,
 
     /// Total stake reward available
-    pub stake_rewards: BigDecimal,
+    pub stake_rewards: Lovelace,
 }
 
 /// Calculate monetary change at the start of an epoch, returning updated pots and total
@@ -51,10 +51,11 @@ pub fn calculate_monetary_change(
     new_pots.reserves -= treasury_increase_u64;
 
     // Remainder goes to stakeholders
-    let stake_rewards = &total_reward_pot - &treasury_increase;
+    let stake_rewards = (&total_reward_pot - &treasury_increase).to_u64()
+        .ok_or(anyhow!("Can't calculate integral stake rewards"))?;
 
     info!(total_rewards=%total_reward_pot, cut=%treasury_cut, increase=treasury_increase_u64,
-          %stake_rewards, "Treasury:");
+          stake_rewards, "Treasury:");
 
     Ok(MonetaryResult {
         pots: new_pots,
@@ -193,7 +194,7 @@ mod tests {
         );
         assert_eq!(result.pots.reserves - EPOCH_208_MIRS, EPOCH_209_RESERVES);
         assert_eq!(result.pots.treasury, EPOCH_209_TREASURY);
-        assert_eq!(result.stake_rewards, EPOCH_209_STAKE_REWARDS.into());
+        assert_eq!(result.stake_rewards, EPOCH_209_STAKE_REWARDS);
     }
 
     #[test]
@@ -211,7 +212,7 @@ mod tests {
         // Epoch 210 results
         assert_eq!(result.pots.reserves, EPOCH_210_RESERVES);
         assert_eq!(result.pots.treasury, EPOCH_210_TREASURY);
-        assert_eq!(result.stake_rewards, EPOCH_210_STAKE_REWARDS.into());
+        assert_eq!(result.stake_rewards, EPOCH_210_STAKE_REWARDS);
     }
 
     #[test]
@@ -232,7 +233,7 @@ mod tests {
             result.pots.treasury + EPOCH_210_REFUNDS_TO_TREASURY,
             EPOCH_211_TREASURY
         );
-        assert_eq!(result.stake_rewards, EPOCH_211_STAKE_REWARDS.into());
+        assert_eq!(result.stake_rewards, EPOCH_211_STAKE_REWARDS);
     }
 
     #[test]
@@ -250,6 +251,6 @@ mod tests {
         // Epoch 212 results
         assert_eq!(result.pots.reserves, EPOCH_212_RESERVES);
         assert_eq!(result.pots.treasury, EPOCH_212_TREASURY);
-        assert_eq!(result.stake_rewards, EPOCH_212_STAKE_REWARDS.into());
+        assert_eq!(result.stake_rewards, EPOCH_212_STAKE_REWARDS);
     }
 }

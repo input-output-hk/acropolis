@@ -185,6 +185,38 @@ impl AccountsState {
                     _ => error!("Unexpected message type: {message:?}"),
                 }
 
+                // Update parameters, ready for monetary/rewards calc triggered by epoch_activity
+                let (_, message) = params_message_f.await?;
+                match message.as_ref() {
+                    Message::Cardano((block_info, CardanoMessage::ProtocolParams(params_msg))) => {
+                        let span = info_span!(
+                            "account_state.handle_parameters",
+                            block = block_info.number
+                        );
+                        async {
+                            Self::check_sync(&current_block, &block_info);
+                            if let Some(ref block) = current_block {
+                                if block.number != block_info.number {
+                                    error!(
+                                        expected = block.number,
+                                        received = block_info.number,
+                                        "Certificate and parameters messages re-ordered!"
+                                    );
+                                }
+                            }
+
+                            state
+                                .handle_parameters(params_msg)
+                                .inspect_err(|e| error!("Messaging handling error: {e}"))
+                                .ok();
+                        }
+                        .instrument(span)
+                        .await;
+                    }
+
+                    _ => error!("Unexpected message type: {message:?}"),
+                }
+
                 // Handle epoch activity
                 let (_, message) = ea_message_f.await?;
                 match message.as_ref() {
@@ -218,39 +250,6 @@ impl AccountsState {
                                     error!("Error publishing stake reward deltas: {e:#}")
                                 });
                             }
-                        }
-                        .instrument(span)
-                        .await;
-                    }
-
-                    _ => error!("Unexpected message type: {message:?}"),
-                }
-
-                // Update parameters - *after* reward calculation in epoch-activity above
-                // ready for the *next* epoch boundary
-                let (_, message) = params_message_f.await?;
-                match message.as_ref() {
-                    Message::Cardano((block_info, CardanoMessage::ProtocolParams(params_msg))) => {
-                        let span = info_span!(
-                            "account_state.handle_parameters",
-                            block = block_info.number
-                        );
-                        async {
-                            Self::check_sync(&current_block, &block_info);
-                            if let Some(ref block) = current_block {
-                                if block.number != block_info.number {
-                                    error!(
-                                        expected = block.number,
-                                        received = block_info.number,
-                                        "Certificate and parameters messages re-ordered!"
-                                    );
-                                }
-                            }
-
-                            state
-                                .handle_parameters(params_msg)
-                                .inspect_err(|e| error!("Messaging handling error: {e}"))
-                                .ok();
                         }
                         .instrument(span)
                         .await;
