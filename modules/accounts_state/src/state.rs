@@ -229,7 +229,7 @@ impl State {
         let monetary_change = calculate_monetary_change(
             &shelley_params,
             &self.pots,
-            self.rewards_state.latest.fees,  // Last epoch's fees - note snapshot not pushed yet
+            self.rewards_state.latest.fees, // Last epoch's fees - note snapshot not pushed yet
             total_non_obft_blocks,
         )?;
         self.pots = monetary_change.pots;
@@ -255,11 +255,7 @@ impl State {
         let rs = self.rewards_state.clone();
         self.epoch_rewards_task = Arc::new(Mutex::new(Some(spawn_blocking(move || {
             // Calculate reward payouts
-            rs.calculate_rewards(
-                epoch,
-                &shelley_params,
-                monetary_change.stake_rewards,
-            )
+            rs.calculate_rewards(epoch, &shelley_params, monetary_change.stake_rewards)
         }))));
 
         Ok(reward_deltas)

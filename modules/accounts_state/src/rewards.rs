@@ -146,8 +146,8 @@ impl RewardsState {
         num_delegators_paid: &mut usize,
     ) {
         // Actual blocks produced as proportion of epoch (Beta)
-        let relative_blocks = BigDecimal::from(blocks_produced)
-            / BigDecimal::from(total_blocks as u64);
+        let relative_blocks =
+            BigDecimal::from(blocks_produced) / BigDecimal::from(total_blocks as u64);
 
         // Active stake (sigma)
         let pool_stake = BigDecimal::from(spo.total_stake);
@@ -219,15 +219,14 @@ impl RewardsState {
             pool_rewards.to_u64().unwrap_or(0)
         } else {
             // Enough left over for some margin split
-            let margin = BigDecimal::from(spo.margin.numerator)
-                       / BigDecimal::from(spo.margin.denominator);
+            let margin =
+                BigDecimal::from(spo.margin.numerator) / BigDecimal::from(spo.margin.denominator);
 
             let relative_owner_stake = &pool_owner_stake / total_supply;
             let margin_cost = ((&pool_rewards - &fixed_cost)
-                               * (&margin
-                                  + (BigDecimal::one() - &margin)
-                                    * (relative_owner_stake / relative_pool_stake)
-                               ))
+                * (&margin
+                    + (BigDecimal::one() - &margin)
+                        * (relative_owner_stake / relative_pool_stake)))
                 .with_scale(0);
             let costs = &fixed_cost + &margin_cost;
 
@@ -236,8 +235,8 @@ impl RewardsState {
 
             // You'd think this was just pool_rewards-costs here, but the Haskell code recalculates
             // the margin without the relative_owner_stake term !?
-            let to_delegators = ((&pool_rewards - &fixed_cost) * (BigDecimal::one() - &margin))
-                .with_scale(0);
+            let to_delegators =
+                ((&pool_rewards - &fixed_cost) * (BigDecimal::one() - &margin)).with_scale(0);
             let mut total_paid: u64 = 0;
             let mut delegators_paid: usize = 0;
             if !to_delegators.is_zero() {
