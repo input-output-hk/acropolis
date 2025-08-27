@@ -296,7 +296,7 @@ async fn handle_pools_extended_blockfrost(context: Arc<Context<Message>>) -> Res
     let latest_parameters_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
         EpochsStateQuery::GetLatestEpochParameters,
     )));
-    let latest_parameters = query_state(
+    let (_, latest_parameters) = query_state(
         &context,
         PARAMETERS_STATE_TOPIC,
         latest_parameters_msg,

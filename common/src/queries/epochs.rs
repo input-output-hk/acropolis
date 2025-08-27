@@ -25,7 +25,7 @@ pub enum EpochsStateQuery {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum EpochsStateQueryResponse {
     LatestEpoch(LatestEpoch),
-    LatestEpochParameters(ProtocolParams),
+    LatestEpochParameters((u64, ProtocolParams)), // Current epoch and active params
     EpochInfo(EpochInfo),
     NextEpochs(NextEpochs),
     PreviousEpochs(PreviousEpochs),

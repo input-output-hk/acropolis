@@ -32,61 +32,64 @@ pub async fn handle_epoch_params_blockfrost(
     }
     let param = &params[0];
 
-    let query = if param == "latest" {
-        EpochsStateQuery::GetLatestEpochParameters
+    let query;
+    let mut epoch_number: Option<u64> = None;
+
+    if param == "latest" {
+        query = EpochsStateQuery::GetLatestEpochParameters;
     } else {
-        match param.parse::<u64>() {
-            Ok(epoch_number) => EpochsStateQuery::GetEpochParameters { epoch_number },
+        let parsed = match param.parse::<u64>() {
+            Ok(num) => num,
             Err(_) => {
                 return Ok(RESTResponse::with_text(
                     400,
                     "Invalid epoch number parameter",
-                ))
+                ));
             }
-        }
-    };
-    info!("Query: {:?}", query);
+        };
+        query = EpochsStateQuery::GetEpochParameters {
+            epoch_number: parsed,
+        };
+        epoch_number = Some(parsed);
+    }
 
     let msg = Arc::new(Message::StateQuery(StateQuery::Epochs(query)));
     let parameters_query_topic = get_query_topic(context.clone(), DEFAULT_PARAMETERS_QUERY_TOPIC);
     let raw_msg = context.message_bus.request(&parameters_query_topic, msg).await?;
     let message = Arc::try_unwrap(raw_msg).unwrap_or_else(|arc| (*arc).clone());
-    info!("Message: {:?}", message);
     match message {
-        Message::StateQueryResponse(StateQueryResponse::Epochs(resp)) => {
-            info!("EpochsStateQueryResponse received: {:?}", resp);
-            match resp {
-                EpochsStateQueryResponse::LatestEpochParameters(params) => {
-                    let rest = ProtocolParamsRest::from((1, params));
-                    match serde_json::to_string_pretty(&rest) {
-                        Ok(json) => Ok(RESTResponse::with_json(200, &json)),
-                        Err(e) => Ok(RESTResponse::with_text(
-                            500,
-                            &format!("Failed to serialize parameters: {e}"),
-                        )),
-                    }
+        Message::StateQueryResponse(StateQueryResponse::Epochs(resp)) => match resp {
+            EpochsStateQueryResponse::LatestEpochParameters((epoch, params)) => {
+                let rest = ProtocolParamsRest::from((epoch, params));
+                match serde_json::to_string_pretty(&rest) {
+                    Ok(json) => Ok(RESTResponse::with_json(200, &json)),
+                    Err(e) => Ok(RESTResponse::with_text(
+                        500,
+                        &format!("Failed to serialize parameters: {e}"),
+                    )),
                 }
-                EpochsStateQueryResponse::EpochParameters(params) => {
-                    let rest = ProtocolParamsRest::from((1, params));
-                    match serde_json::to_string_pretty(&rest) {
-                        Ok(json) => Ok(RESTResponse::with_json(200, &json)),
-                        Err(e) => Ok(RESTResponse::with_text(
-                            500,
-                            &format!("Failed to serialize parameters: {e}"),
-                        )),
-                    }
-                }
-                EpochsStateQueryResponse::NotFound => Ok(RESTResponse::with_text(
-                    404,
-                    "Protocol parameters not found for requested epoch",
-                )),
-                EpochsStateQueryResponse::Error(msg) => Ok(RESTResponse::with_text(400, &msg)),
-                _ => Ok(RESTResponse::with_text(
-                    500,
-                    "Unexpected EpochsStateQueryResponse message",
-                )),
             }
-        }
+            EpochsStateQueryResponse::EpochParameters(params) => {
+                let epoch = epoch_number.expect("epoch_number must exist for EpochParameters");
+                let rest = ProtocolParamsRest::from((epoch, params));
+                match serde_json::to_string_pretty(&rest) {
+                    Ok(json) => Ok(RESTResponse::with_json(200, &json)),
+                    Err(e) => Ok(RESTResponse::with_text(
+                        500,
+                        &format!("Failed to serialize parameters: {e}"),
+                    )),
+                }
+            }
+            EpochsStateQueryResponse::NotFound => Ok(RESTResponse::with_text(
+                404,
+                "Protocol parameters not found for requested epoch",
+            )),
+            EpochsStateQueryResponse::Error(msg) => Ok(RESTResponse::with_text(400, &msg)),
+            _ => Ok(RESTResponse::with_text(
+                500,
+                "Unexpected EpochsStateQueryResponse message",
+            )),
+        },
         _ => {
             return Ok(RESTResponse::with_text(
                 500,

@@ -138,9 +138,10 @@ impl ParametersState {
                 let state = state.lock().await;
                 let response = match query {
                     EpochsStateQuery::GetLatestEpochParameters => {
-                        EpochsStateQueryResponse::LatestEpochParameters(
+                        EpochsStateQueryResponse::LatestEpochParameters((
+                            state.active_epoch,
                             state.current_params.get_params(),
-                        )
+                        ))
                     }
 
                     EpochsStateQuery::GetEpochParameters { epoch_number } => {
