@@ -9,6 +9,7 @@ use acropolis_common::{
     queries::pools::{
         PoolHistory, PoolsActiveStakes, PoolsList, PoolsListWithInfo, PoolsRetiredList,
         PoolsRetiringList, PoolsStateQuery, PoolsStateQueryResponse, PoolsTotalBlocksMinted,
+        DEFAULT_POOLS_QUERY_TOPIC,
     },
 };
 use anyhow::Result;
@@ -40,8 +41,6 @@ const DEFAULT_SPO_STATE_TOPIC: &str = "cardano.spo.state";
 const DEFAULT_SPDD_SUBSCRIBE_TOPIC: &str = "cardano.spo.distribution";
 const DEFAULT_EPOCH_ACTIVITY_TOPIC: &str = "cardano.epoch.activity";
 const DEFAULT_SPO_REWARDS_TOPIC: &str = "cardano.spo.rewards";
-
-const POOLS_STATE_TOPIC: &str = "pools-state";
 
 /// SPO State module
 #[module(
@@ -213,6 +212,12 @@ impl SPOState {
             .unwrap_or(DEFAULT_SPO_STATE_TOPIC.to_string());
         info!("Creating SPO state publisher on '{spo_state_topic}'");
 
+        // query topic
+        let pools_query_topic = config
+            .get_string(DEFAULT_POOLS_QUERY_TOPIC.0)
+            .unwrap_or(DEFAULT_POOLS_QUERY_TOPIC.1.to_string());
+        info!("Creating query handler on '{}'", pools_query_topic);
+
         let state = Arc::new(Mutex::new(State::new()));
 
         // store config
@@ -228,9 +233,9 @@ impl SPOState {
         let retired_pools_history = RetiredPoolsHistoryState::new(store_config.clone());
         let run_deregistrations_retired_pools_history = retired_pools_history.clone();
 
-        // handle pools-state
+        // handle pools-state query
         let state_rest_blockfrost = state.clone();
-        context.handle(POOLS_STATE_TOPIC, move |message| {
+        context.handle(&pools_query_topic, move |message| {
             let state = state_rest_blockfrost.clone();
             let epochs_history = epochs_history.clone();
             let retired_pools_history = retired_pools_history.clone();

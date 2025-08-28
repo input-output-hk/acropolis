@@ -181,12 +181,16 @@ impl State {
             .par_iter()
             .map(|spo| self.get_active_stake(spo, epoch).unwrap_or(0))
             .collect::<Vec<u64>>();
-        let total_active_stake = active_stakes.iter().sum();
+        let total_active_stake = self.get_total_active_stake(epoch);
         (active_stakes, total_active_stake)
     }
 
     fn get_active_stake(&self, spo: &KeyHash, epoch: u64) -> Option<u64> {
         self.active_stakes.get(spo).map(|stakes| stakes.get(&epoch).cloned()).flatten()
+    }
+
+    fn get_total_active_stake(&self, epoch: u64) -> u64 {
+        self.active_stakes.iter().map(|entry| entry.value().get(&epoch).cloned().unwrap_or(0)).sum()
     }
 
     /// Get total blocks minted for each vrf vkey hash

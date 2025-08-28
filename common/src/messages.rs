@@ -4,6 +4,7 @@
 #![allow(dead_code)]
 
 use crate::ledger_state::SPOState;
+use crate::queries::parameters::{ParametersStateQuery, ParametersStateQueryResponse};
 use crate::queries::{
     accounts::{AccountsStateQuery, AccountsStateQueryResponse},
     addresses::{AddressStateQuery, AddressStateQueryResponse},
@@ -325,6 +326,7 @@ pub enum StateQuery {
     Pools(PoolsStateQuery),
     Scripts(ScriptsStateQuery),
     Transactions(TransactionsStateQuery),
+    Parameters(ParametersStateQuery),
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -342,4 +344,5 @@ pub enum StateQueryResponse {
     Pools(PoolsStateQueryResponse),
     Scripts(ScriptsStateQueryResponse),
     Transactions(TransactionsStateQueryResponse),
+    Parameters(ParametersStateQueryResponse),
 }

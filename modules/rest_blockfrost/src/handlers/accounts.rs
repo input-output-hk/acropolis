@@ -3,10 +3,13 @@ use std::sync::Arc;
 
 use acropolis_common::messages::{Message, RESTResponse, StateQuery, StateQueryResponse};
 use acropolis_common::queries::accounts::{AccountsStateQuery, AccountsStateQueryResponse};
+use acropolis_common::queries::utils::query_state;
 use acropolis_common::serialization::Bech32WithHrp;
 use acropolis_common::{Address, DRepChoice, StakeAddress, StakeAddressPayload};
 use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
+
+use crate::query_topics::QueryTopics;
 
 #[derive(serde::Serialize)]
 pub struct StakeAccountRest {
@@ -26,6 +29,7 @@ pub struct DRepChoiceRest {
 pub async fn handle_single_account_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
+    query_topics: Arc<QueryTopics>,
 ) -> Result<RESTResponse> {
     let Some(stake_address) = params.get(0) else {
         return Ok(RESTResponse::with_text(
@@ -52,35 +56,29 @@ pub async fn handle_single_account_blockfrost(
     let msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
         AccountsStateQuery::GetAccountInfo { stake_key },
     )));
-
-    // Send message via message bus
-    let raw = context.message_bus.request("accounts-state", msg).await?;
-
-    // Unwrap and match
-    let message = Arc::try_unwrap(raw).unwrap_or_else(|arc| (*arc).clone());
-
-    let account = match message {
-        Message::StateQueryResponse(StateQueryResponse::Accounts(
-            AccountsStateQueryResponse::AccountInfo(account),
-        )) => account,
-
-        Message::StateQueryResponse(StateQueryResponse::Accounts(
-            AccountsStateQueryResponse::NotFound,
-        )) => {
-            return Ok(RESTResponse::with_text(404, "Stake address not found"));
-        }
-
-        Message::StateQueryResponse(StateQueryResponse::Accounts(
-            AccountsStateQueryResponse::Error(e),
-        )) => {
-            return Ok(RESTResponse::with_text(
-                500,
-                &format!("Internal server error: {e}"),
-            ));
-        }
-
-        _ => return Ok(RESTResponse::with_text(500, "Unexpected message type")),
-    };
+    let account = query_state(
+        &context,
+        &query_topics.accounts_query_topic,
+        msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Accounts(
+                AccountsStateQueryResponse::AccountInfo(account),
+            )) => Ok(account),
+            Message::StateQueryResponse(StateQueryResponse::Accounts(
+                AccountsStateQueryResponse::Error(e),
+            )) => {
+                return Err(anyhow::anyhow!(
+                    "Internal server error while retrieving account info: {e}"
+                ));
+            }
+            _ => {
+                return Err(anyhow::anyhow!(
+                    "Unexpected message type while retrieving account info"
+                ))
+            }
+        },
+    )
+    .await?;
 
     let delegated_spo = match &account.delegated_spo {
         Some(spo) => match spo.to_bech32_with_hrp("pool") {
