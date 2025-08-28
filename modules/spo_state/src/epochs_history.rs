@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use tracing::error;
 
-use crate::state_config::StateConfig;
+use crate::store_config::StoreConfig;
 
 /// Epoch State for certain pool
 /// Store active_stake, delegators_count, rewards
@@ -66,14 +66,18 @@ pub struct EpochsHistoryState {
 }
 
 impl EpochsHistoryState {
-    pub fn new(state_config: StateConfig) -> Self {
+    pub fn new(store_config: StoreConfig) -> Self {
         Self {
-            epochs_history: if state_config.store_history {
+            epochs_history: if store_config.store_history {
                 Some(Arc::new(DashMap::new()))
             } else {
                 None
             },
         }
+    }
+
+    pub fn is_enabled(&self) -> bool {
+        self.epochs_history.is_some()
     }
 
     /// Get Epoch State for certain pool operator at certain epoch
@@ -180,26 +184,26 @@ mod tests {
 
     #[test]
     fn epochs_history_is_none_when_store_history_is_false() {
-        let epochs_history = EpochsHistoryState::new(default_state_config());
+        let epochs_history = EpochsHistoryState::new(default_store_config());
         assert!(epochs_history.epochs_history.is_none());
     }
 
     #[test]
     fn epochs_history_is_some_when_store_history_is_true() {
-        let epochs_history = EpochsHistoryState::new(save_history_state_config());
+        let epochs_history = EpochsHistoryState::new(save_history_store_config());
         assert!(epochs_history.epochs_history.is_some());
     }
 
     #[test]
     fn get_pool_history_returns_none_when_spo_is_not_found() {
-        let epochs_history = EpochsHistoryState::new(save_history_state_config());
+        let epochs_history = EpochsHistoryState::new(save_history_store_config());
         let pool_history = epochs_history.get_pool_history(&vec![1]);
         assert!(pool_history.is_none());
     }
 
     #[test]
     fn get_pool_history_returns_data() {
-        let epochs_history = EpochsHistoryState::new(save_history_state_config());
+        let epochs_history = EpochsHistoryState::new(save_history_store_config());
 
         let block = new_block(2);
         let mut spdd_msg = new_spdd_message(1);

@@ -5,24 +5,24 @@ use acropolis_common::{
     BlockInfo, BlockStatus, Era, TxCertificate,
 };
 
-use crate::state_config::StateConfig;
+use crate::store_config::StoreConfig;
 
-pub fn default_state_config() -> StateConfig {
-    StateConfig {
+pub fn default_store_config() -> StoreConfig {
+    StoreConfig {
         store_history: false,
         store_retired_pools: false,
     }
 }
 
-pub fn save_history_state_config() -> StateConfig {
-    StateConfig {
+pub fn save_history_store_config() -> StoreConfig {
+    StoreConfig {
         store_history: true,
         store_retired_pools: false,
     }
 }
 
-pub fn save_retired_pools_state_config() -> StateConfig {
-    StateConfig {
+pub fn save_retired_pools_store_config() -> StoreConfig {
+    StoreConfig {
         store_history: false,
         store_retired_pools: true,
     }
