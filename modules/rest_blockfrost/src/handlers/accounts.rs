@@ -65,6 +65,11 @@ pub async fn handle_single_account_blockfrost(
                 AccountsStateQueryResponse::AccountInfo(account),
             )) => Ok(account),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
+                AccountsStateQueryResponse::NotFound,
+            )) => {
+                return Err(anyhow::anyhow!("Account not found"));
+            }
+            Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
             )) => {
                 return Err(anyhow::anyhow!(
