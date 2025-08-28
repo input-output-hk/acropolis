@@ -7,8 +7,9 @@ use acropolis_common::{
         CardanoMessage, DRepStakeDistributionMessage, GovernanceOutcomesMessage,
         GovernanceProceduresMessage, Message, ProtocolParamsMessage, SPOStakeDistributionMessage,
     },
-    BlockInfo, ConwayParams, DRepCredential, DataHash, DelegatedStake, EnactStateElem, Era,
-    GovActionId, GovernanceAction, GovernanceOutcome, GovernanceOutcomeVariant, KeyHash, Lovelace,
+    protocol_params::ConwayParams,
+    BlockInfo, DRepCredential, DataHash, DelegatedStake, EnactStateElem, Era, GovActionId,
+    GovernanceAction, GovernanceOutcome, GovernanceOutcomeVariant, KeyHash, Lovelace,
     ProposalProcedure, SingleVoterVotes, TreasuryWithdrawalsAction, Voter, VotesCount,
     VotingOutcome, VotingProcedure,
 };

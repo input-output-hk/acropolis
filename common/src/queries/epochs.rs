@@ -1,4 +1,7 @@
-use crate::{messages::EpochActivityMessage, KeyHash, ProtocolParams};
+use crate::{messages::EpochActivityMessage, protocol_params::ProtocolParams, KeyHash};
+
+pub const DEFAULT_PARAMETERS_QUERY_TOPIC: (&str, &str) =
+    ("parameters-state-query-topic", "cardano.query.parameters");
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum EpochsStateQuery {

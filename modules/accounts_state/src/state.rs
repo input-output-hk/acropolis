@@ -2,6 +2,7 @@
 use crate::monetary::calculate_monetary_change;
 use crate::rewards::{RewardsResult, RewardsState};
 use crate::snapshot::Snapshot;
+use acropolis_common::protocol_params::ProtocolParams;
 use acropolis_common::{
     messages::{
         DRepStateMessage, EpochActivityMessage, PotDeltasMessage, ProtocolParamsMessage,
@@ -9,7 +10,7 @@ use acropolis_common::{
     },
     DRepChoice, DRepCredential, DelegatedStake, InstantaneousRewardSource,
     InstantaneousRewardTarget, KeyHash, Lovelace, MoveInstantaneousReward, PoolRegistration, Pot,
-    ProtocolParams, StakeAddress, StakeCredential, TxCertificate,
+    StakeAddress, StakeCredential, TxCertificate,
 };
 use anyhow::{bail, Result};
 use dashmap::DashMap;
@@ -889,10 +890,10 @@ impl State {
 mod tests {
     use super::*;
     use acropolis_common::{
-        rational_number::RationalNumber, AddressNetwork, Anchor, Committee, Constitution,
-        ConwayParams, CostModel, Credential, DRepVotingThresholds, PoolVotingThresholds, Pot,
-        PotDelta, ProtocolParams, Ratio, Registration, StakeAddress, StakeAddressDelta,
-        StakeAddressPayload, StakeAndVoteDelegation, StakeRegistrationAndStakeAndVoteDelegation,
+        protocol_params::ConwayParams, rational_number::RationalNumber, AddressNetwork, Anchor,
+        Committee, Constitution, CostModel, Credential, DRepVotingThresholds, PoolVotingThresholds,
+        Pot, PotDelta, Ratio, Registration, StakeAddress, StakeAddressDelta, StakeAddressPayload,
+        StakeAndVoteDelegation, StakeRegistrationAndStakeAndVoteDelegation,
         StakeRegistrationAndVoteDelegation, VoteDelegation, Withdrawal,
     };
 
