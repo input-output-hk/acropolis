@@ -15,7 +15,6 @@ use anyhow::Result;
 use caryatid_sdk::Context;
 use rust_decimal::Decimal;
 use std::sync::Arc;
-use tracing::info;
 
 use crate::query_topics::QueryTopics;
 use crate::types::{PoolEpochStateRest, PoolExtendedRest, PoolRetirementRest};
@@ -138,7 +137,6 @@ async fn handle_pools_extended_blockfrost(
         },
     )
     .await?;
-    info!("pools_list_with_info: {}", pools_list_with_info.len());
 
     // if pools are empty, return empty list
     if pools_list_with_info.is_empty() {
@@ -181,7 +179,6 @@ async fn handle_pools_extended_blockfrost(
     )
     .await?;
     let latest_epoch = latest_epoch_info.epoch;
-    info!("latest_epoch: {}", latest_epoch);
 
     // Get active stake for each pool from spo-state
     let pools_active_stakes_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
@@ -213,7 +210,6 @@ async fn handle_pools_extended_blockfrost(
         },
     )
     .await?;
-    info!("total_active_stake: {:?}", total_active_stake);
 
     // Get live stake for each pool from accounts-state
     let pools_live_stakes_msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
@@ -242,7 +238,6 @@ async fn handle_pools_extended_blockfrost(
         },
     )
     .await?;
-    info!("pools_live_stakes: {:?}", pools_live_stakes.len());
 
     // Get total blocks minted for each pool from SPO state
     let total_blocks_minted_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
@@ -271,7 +266,6 @@ async fn handle_pools_extended_blockfrost(
         },
     )
     .await?;
-    info!("total_blocks_minted: {:?}", total_blocks_minted.len());
 
     // Get current epoch's blocks minted for each pool from epoch-activity-counter
     let current_blocks_minted_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
@@ -300,7 +294,6 @@ async fn handle_pools_extended_blockfrost(
         },
     )
     .await?;
-    info!("current_blocks_minted: {:?}", current_blocks_minted.len());
 
     let aggregated_blocks_minted = total_blocks_minted
         .iter()
@@ -335,7 +328,6 @@ async fn handle_pools_extended_blockfrost(
         // when shelly era is not started, return empty list
         return Ok(RESTResponse::with_json(500, "[]"));
     };
-    info!("stake_pool_target_num: {}", stake_pool_target_num);
 
     let pools_extened_rest_results: Result<Vec<PoolExtendedRest>, anyhow::Error> =
         pools_list_with_info
@@ -360,8 +352,6 @@ async fn handle_pools_extended_blockfrost(
                 })
             })
             .collect();
-
-    info!("pools_extened_rest_results made",);
 
     match pools_extened_rest_results {
         Ok(pools_extened_rest) => match serde_json::to_string(&pools_extened_rest) {

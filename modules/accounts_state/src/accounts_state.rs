@@ -1,5 +1,5 @@
 //! Acropolis accounts state module for Caryatid
-//! Manages stake and reward acc, StateHistoryStoreounts state
+//! Manages stake and reward accounts state
 
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
