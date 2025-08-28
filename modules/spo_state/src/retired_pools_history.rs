@@ -4,7 +4,7 @@ use acropolis_common::PoolRetirement;
 use dashmap::DashMap;
 use std::sync::Arc;
 
-use crate::state_config::StateConfig;
+use crate::store_config::StoreConfig;
 
 #[derive(Debug, Clone)]
 pub struct RetiredPoolsHistoryState {
@@ -12,14 +12,18 @@ pub struct RetiredPoolsHistoryState {
 }
 
 impl RetiredPoolsHistoryState {
-    pub fn new(state_config: StateConfig) -> Self {
+    pub fn new(store_config: StoreConfig) -> Self {
         Self {
-            retired_pools_history: if state_config.store_retired_pools {
+            retired_pools_history: if store_config.store_retired_pools {
                 Some(Arc::new(DashMap::new()))
             } else {
                 None
             },
         }
+    }
+
+    pub fn is_enabled(&self) -> bool {
+        self.retired_pools_history.is_some()
     }
 
     /// Get Pool History by SPO
@@ -65,25 +69,25 @@ mod tests {
 
     #[test]
     fn retired_pools_history_is_none_when_store_retired_pools_is_false() {
-        let state = RetiredPoolsHistoryState::new(default_state_config());
+        let state = RetiredPoolsHistoryState::new(default_store_config());
         assert!(state.retired_pools_history.is_none());
     }
 
     #[test]
     fn retired_pools_history_is_some_when_store_retired_pools_is_true() {
-        let state = RetiredPoolsHistoryState::new(save_retired_pools_state_config());
+        let state = RetiredPoolsHistoryState::new(save_retired_pools_store_config());
         assert!(state.retired_pools_history.is_some());
     }
 
     #[test]
     fn get_retired_pools_return_empty() {
-        let state = RetiredPoolsHistoryState::new(save_retired_pools_state_config());
+        let state = RetiredPoolsHistoryState::new(save_retired_pools_store_config());
         assert_eq!(0, state.get_retired_pools().len());
     }
 
     #[test]
     fn get_retired_pools_return_data() {
-        let state = RetiredPoolsHistoryState::new(save_retired_pools_state_config());
+        let state = RetiredPoolsHistoryState::new(save_retired_pools_store_config());
 
         let block = new_block(2);
         let retired_spos = vec![vec![1], vec![2]];

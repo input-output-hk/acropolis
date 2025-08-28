@@ -6,12 +6,12 @@ const DEFAULT_STORE_HISTORY: (&str, bool) = ("store-history", false);
 const DEFAULT_STORE_RETIRED_POOLS: (&str, bool) = ("store-retired-pools", false);
 
 #[derive(Debug, Clone)]
-pub struct StateConfig {
+pub struct StoreConfig {
     pub store_history: bool,
     pub store_retired_pools: bool,
 }
 
-impl StateConfig {
+impl StoreConfig {
     #[allow(dead_code)]
     pub fn new(store_history: bool, store_retired_pools: bool) -> Self {
         Self {
@@ -21,7 +21,7 @@ impl StateConfig {
     }
 }
 
-impl From<Arc<Config>> for StateConfig {
+impl From<Arc<Config>> for StoreConfig {
     fn from(config: Arc<Config>) -> Self {
         Self {
             store_history: config

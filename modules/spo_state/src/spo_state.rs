@@ -23,7 +23,7 @@ mod rest;
 mod retired_pools_history;
 mod spo_state_publisher;
 mod state;
-mod state_config;
+mod store_config;
 #[cfg(test)]
 mod test_utils;
 
@@ -32,7 +32,7 @@ use crate::{
     spo_state_publisher::SPOStatePublisher,
 };
 use state::State;
-use state_config::StateConfig;
+use store_config::StoreConfig;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.certificates";
 const DEFAULT_CLOCK_TICK_TOPIC: &str = "clock.tick";
@@ -213,17 +213,19 @@ impl SPOState {
             .unwrap_or(DEFAULT_SPO_STATE_TOPIC.to_string());
         info!("Creating SPO state publisher on '{spo_state_topic}'");
 
-        let state_config = StateConfig::from(config);
         let state = Arc::new(Mutex::new(State::new()));
 
+        // store config
+        let store_config = StoreConfig::from(config);
+
         // Create epochs history
-        let epochs_history = EpochsHistoryState::new(state_config.clone());
+        let epochs_history = EpochsHistoryState::new(store_config.clone());
         let run_spdd_epochs_history = epochs_history.clone();
         let run_spo_rewards_epochs_history = epochs_history.clone();
         let run_epoch_activity_epochs_history = epochs_history.clone();
 
         // Create Retired pools history
-        let retired_pools_history = RetiredPoolsHistoryState::new(state_config.clone());
+        let retired_pools_history = RetiredPoolsHistoryState::new(store_config.clone());
         let run_deregistrations_retired_pools_history = retired_pools_history.clone();
 
         // handle pools-state
@@ -275,9 +277,15 @@ impl SPOState {
                     }
 
                     PoolsStateQuery::GetPoolHistory { pool_id } => {
-                        let history =
-                            epochs_history.get_pool_history(pool_id).unwrap_or(Vec::new());
-                        PoolsStateQueryResponse::PoolHistory(PoolHistory { history })
+                        if epochs_history.is_enabled() {
+                            let history =
+                                epochs_history.get_pool_history(pool_id).unwrap_or(Vec::new());
+                            PoolsStateQueryResponse::PoolHistory(PoolHistory { history })
+                        } else {
+                            PoolsStateQueryResponse::Error(
+                                "Pool Epoch history is not enabled".into(),
+                            )
+                        }
                     }
 
                     PoolsStateQuery::GetPoolsRetiringList => {
@@ -288,10 +296,16 @@ impl SPOState {
                     }
 
                     PoolsStateQuery::GetPoolsRetiredList => {
-                        let retired_pools = retired_pools_history.get_retired_pools();
-                        PoolsStateQueryResponse::PoolsRetiredList(PoolsRetiredList {
-                            retired_pools,
-                        })
+                        if retired_pools_history.is_enabled() {
+                            let retired_pools = retired_pools_history.get_retired_pools();
+                            PoolsStateQueryResponse::PoolsRetiredList(PoolsRetiredList {
+                                retired_pools,
+                            })
+                        } else {
+                            PoolsStateQueryResponse::Error(
+                                "Pool retirement history is not enabled".into(),
+                            )
+                        }
                     }
 
                     _ => PoolsStateQueryResponse::Error(format!(
