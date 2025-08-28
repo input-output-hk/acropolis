@@ -70,14 +70,11 @@ pub fn calculate_rewards(
     let mut num_pools_paid: usize = 0;
     let mut num_delegators_paid: usize = 0;
     for (operator_id, spo) in staking.spos.iter() {
-        // Actual blocks produced for epoch (i-2)
-        let blocks_produced = if let Some(s) = performance.spos.get(operator_id) {
-            s.blocks_produced
-        } else {
-            0
-        };
+        // Actual blocks produced for epoch i, no rewards if none
+        let blocks_produced = performance.spos.get(operator_id)
+            .map(|s| s.blocks_produced)
+            .unwrap_or(0);
 
-        // Filter for actually producing any blocks
         if blocks_produced == 0 {
             continue;
         }
