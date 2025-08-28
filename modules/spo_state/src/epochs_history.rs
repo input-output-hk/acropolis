@@ -190,15 +190,15 @@ mod tests {
         assert!(epochs_history.epochs_history.is_some());
     }
 
-    #[tokio::test]
-    async fn get_pool_history_returns_none_when_spo_is_not_found() {
+    #[test]
+    fn get_pool_history_returns_none_when_spo_is_not_found() {
         let epochs_history = EpochsHistoryState::new(save_history_state_config());
         let pool_history = epochs_history.get_pool_history(&vec![1]);
         assert!(pool_history.is_none());
     }
 
-    #[tokio::test]
-    async fn get_pool_history_returns_data() {
+    #[test]
+    fn get_pool_history_returns_data() {
         let epochs_history = EpochsHistoryState::new(save_history_state_config());
 
         let block = new_block(2);

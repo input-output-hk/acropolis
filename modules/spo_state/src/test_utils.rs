@@ -28,13 +28,6 @@ pub fn save_retired_pools_state_config() -> StateConfig {
     }
 }
 
-pub fn save_all_state_config() -> StateConfig {
-    StateConfig {
-        store_history: true,
-        store_retired_pools: true,
-    }
-}
-
 pub fn new_block(epoch: u64) -> BlockInfo {
     BlockInfo {
         status: BlockStatus::Immutable,
