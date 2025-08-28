@@ -12,7 +12,7 @@ pub struct State {
 impl State {
     pub fn new() -> Self {
         Self {
-            spdd_history: StateHistory::new("spdd", HistoryKind::EpochState),
+            spdd_history: StateHistory::new("spdd", HistoryKind::EpochState, true),
         }
     }
 

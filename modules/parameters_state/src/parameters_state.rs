@@ -112,9 +112,9 @@ impl ParametersState {
         loop {
             match enact_s.read().await?.1.as_ref() {
                 Message::Cardano((block, CardanoMessage::GovernanceOutcomes(gov))) => {
-                    let span = info_span!("parameters_state.handle", block = block.number);
+                    let span = info_span!("parameters_state.handle", epoch = block.epoch);
                     async {
-                        // Either get the current state or initialise it
+                        // Get current state and current params
                         let mut state = {
                             let mut h = history.lock().await;
                             h.get_or_init_with(|| State::new(config.network_name.clone()))
@@ -126,14 +126,17 @@ impl ParametersState {
                         }
 
                         if block.new_epoch {
+                            // Get current params
+                            let current_params = state.current_params.get_params();
+
                             // Process GovOutcomes message on epoch transition
                             let new_params = state.handle_enact_state(&block, &gov).await?;
 
                             // Publish protocol params message
-                            Self::publish_update(&config, &block, new_params)?;
+                            Self::publish_update(&config, &block, new_params.clone())?;
 
-                            // Commit state
-                            {
+                            // Commit state on params change
+                            if current_params != new_params.params {
                                 let mut h = history.lock().await;
                                 h.commit(block.epoch, state);
                             }
@@ -157,17 +160,18 @@ impl ParametersState {
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "ParametersState",
             HistoryKind::EpochState,
+            cfg.store_history,
         )));
+        let query_state = history.clone();
 
-        let state_handle_current = history.clone();
+        let state_rest = history.clone();
         handle_rest(cfg.context.clone(), &cfg.handle_current_topic, move || {
-            handle_current(state_handle_current.clone())
+            handle_current(state_rest.clone())
         });
 
         // Handle parameters queries
-        let state_rest_blockfrost = history.clone();
         context.handle(&cfg.parameters_query_topic, move |message| {
-            let history = state_rest_blockfrost.clone();
+            let history = query_state.clone();
             async move {
                 let Message::StateQuery(StateQuery::Epochs(query)) = message.as_ref() else {
                     return Arc::new(Message::StateQueryResponse(StateQueryResponse::Epochs(

@@ -386,6 +386,7 @@ impl AccountsState {
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "AccountsState",
             HistoryKind::BlockState,
+            false,
         )));
         let history_account_state = history.clone();
         let history_pots = history.clone();
