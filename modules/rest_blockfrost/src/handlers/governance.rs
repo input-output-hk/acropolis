@@ -3,6 +3,7 @@ use crate::types::{
     DRepInfoREST, DRepMetadataREST, DRepUpdateREST, DRepVoteREST, DRepsListREST, ProposalVoteREST,
     VoterRoleREST,
 };
+use crate::QueryTopics;
 use acropolis_common::{
     messages::{Message, RESTResponse, StateQuery, StateQueryResponse},
     queries::{
@@ -24,6 +25,7 @@ use std::{collections::HashMap, sync::Arc};
 pub async fn handle_dreps_list_blockfrost(
     context: Arc<Context<Message>>,
     _params: Vec<String>,
+    _query_topics: Arc<QueryTopics>,
 ) -> Result<RESTResponse> {
     let msg = Arc::new(Message::StateQuery(StateQuery::Governance(
         GovernanceStateQuery::GetDRepsList,
@@ -71,6 +73,7 @@ pub async fn handle_dreps_list_blockfrost(
 pub async fn handle_single_drep_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
+    _query_topics: Arc<QueryTopics>,
 ) -> Result<RESTResponse> {
     let Some(drep_id) = params.get(0) else {
         return Ok(RESTResponse::with_text(400, "Missing DRep ID parameter"));
@@ -177,6 +180,7 @@ pub async fn handle_single_drep_blockfrost(
 pub async fn handle_drep_delegators_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
+    _query_topics: Arc<QueryTopics>,
 ) -> Result<RESTResponse> {
     let Some(drep_id) = params.get(0) else {
         return Ok(RESTResponse::with_text(400, "Missing DRep ID parameter"));
@@ -290,6 +294,7 @@ pub async fn handle_drep_delegators_blockfrost(
 pub async fn handle_drep_metadata_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
+    _query_topics: Arc<QueryTopics>,
 ) -> Result<RESTResponse> {
     let Some(drep_id) = params.get(0) else {
         return Ok(RESTResponse::with_text(400, "Missing DRep ID parameter"));
@@ -388,6 +393,7 @@ pub async fn handle_drep_metadata_blockfrost(
 pub async fn handle_drep_updates_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
+    _query_topics: Arc<QueryTopics>,
 ) -> Result<RESTResponse> {
     let Some(drep_id) = params.get(0) else {
         return Ok(RESTResponse::with_text(400, "Missing DRep ID parameter"));
@@ -449,6 +455,7 @@ pub async fn handle_drep_updates_blockfrost(
 pub async fn handle_drep_votes_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
+    _query_topics: Arc<QueryTopics>,
 ) -> Result<RESTResponse> {
     let Some(drep_id) = params.get(0) else {
         return Ok(RESTResponse::with_text(400, "Missing DRep ID parameter"));
@@ -509,6 +516,7 @@ pub async fn handle_drep_votes_blockfrost(
 pub async fn handle_proposals_list_blockfrost(
     context: Arc<Context<Message>>,
     _params: Vec<String>,
+    _query_topics: Arc<QueryTopics>,
 ) -> Result<RESTResponse> {
     let msg = Arc::new(Message::StateQuery(StateQuery::Governance(
         GovernanceStateQuery::GetProposalsList,
@@ -559,6 +567,7 @@ pub async fn handle_proposals_list_blockfrost(
 pub async fn handle_single_proposal_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
+    _query_topics: Arc<QueryTopics>,
 ) -> Result<RESTResponse> {
     let proposal = match parse_gov_action_id(&params)? {
         Ok(id) => id,
@@ -599,6 +608,7 @@ pub async fn handle_single_proposal_blockfrost(
 pub async fn handle_proposal_parameters_blockfrost(
     _context: Arc<Context<Message>>,
     _params: Vec<String>,
+    _query_topics: Arc<QueryTopics>,
 ) -> Result<RESTResponse> {
     Ok(RESTResponse::with_text(501, "Not implemented"))
 }
@@ -606,6 +616,7 @@ pub async fn handle_proposal_parameters_blockfrost(
 pub async fn handle_proposal_withdrawals_blockfrost(
     _context: Arc<Context<Message>>,
     _params: Vec<String>,
+    _query_topics: Arc<QueryTopics>,
 ) -> Result<RESTResponse> {
     Ok(RESTResponse::with_text(501, "Not implemented"))
 }
@@ -613,6 +624,7 @@ pub async fn handle_proposal_withdrawals_blockfrost(
 pub async fn handle_proposal_votes_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
+    _query_topics: Arc<QueryTopics>,
 ) -> Result<RESTResponse> {
     let proposal = match parse_gov_action_id(&params)? {
         Ok(id) => id,
@@ -681,6 +693,7 @@ pub async fn handle_proposal_votes_blockfrost(
 pub async fn handle_proposal_metadata_blockfrost(
     _context: Arc<Context<Message>>,
     _params: Vec<String>,
+    _query_topics: Arc<QueryTopics>,
 ) -> Result<RESTResponse> {
     Ok(RESTResponse::with_text(501, "Not implemented"))
 }
