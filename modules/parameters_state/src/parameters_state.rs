@@ -3,7 +3,10 @@
 
 use acropolis_common::{
     messages::{CardanoMessage, Message, ProtocolParamsMessage, StateQuery, StateQueryResponse},
-    queries::epochs::{EpochsStateQuery, EpochsStateQueryResponse, LatestEpochParameters},
+    queries::parameters::{
+        LatestParameters, ParametersStateQuery, ParametersStateQueryResponse,
+        DEFAULT_PARAMETERS_QUERY_TOPIC,
+    },
     rest_helper::{handle_rest, handle_rest_with_path_parameter},
     BlockInfo,
 };
@@ -37,8 +40,6 @@ const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: (&str, &str) =
     ("publish-parameters-topic", "cardano.protocol.parameters");
 const DEFAULT_NETWORK_NAME: (&str, &str) = ("network-name", "mainnet");
 const DEFAULT_STORE_HISTORY: (&str, bool) = ("store-history", false);
-
-const PARAMETERS_STATE_TOPIC: &str = "parameters-state";
 
 /// Parameters State module
 #[module(
@@ -139,6 +140,11 @@ impl ParametersState {
             cfg.store_history,
         )));
 
+        // query topic
+        let parameters_query_topic = config
+            .get_string(DEFAULT_PARAMETERS_QUERY_TOPIC.0)
+            .unwrap_or(DEFAULT_PARAMETERS_QUERY_TOPIC.1.to_string());
+
         let state_handle_current = state.clone();
         handle_rest(cfg.context.clone(), &cfg.handle_current_topic, move || {
             handle_current(state_handle_current.clone())
@@ -153,29 +159,26 @@ impl ParametersState {
 
         // Handle parameters state
         let state_rest_blockfrost = state.clone();
-        context.handle(PARAMETERS_STATE_TOPIC, move |message| {
+        context.handle(&parameters_query_topic, move |message| {
             let state = state_rest_blockfrost.clone();
             async move {
-                let Message::StateQuery(StateQuery::Epochs(query)) = message.as_ref() else {
-                    return Arc::new(Message::StateQueryResponse(StateQueryResponse::Epochs(
-                        EpochsStateQueryResponse::Error("Invalid message for epoch-state".into()),
+                let Message::StateQuery(StateQuery::Parameters(query)) = message.as_ref() else {
+                    return Arc::new(Message::StateQueryResponse(StateQueryResponse::Parameters(
+                        ParametersStateQueryResponse::Error(
+                            "Invalid message for parameters-state".into(),
+                        ),
                     )));
                 };
 
                 let state = state.lock().await;
                 let response = match query {
-                    EpochsStateQuery::GetLatestEpochParameters => {
-                        EpochsStateQueryResponse::LatestEpochParameters(LatestEpochParameters {
+                    ParametersStateQuery::GetLatestParameters => {
+                        ParametersStateQueryResponse::LatestParameters(LatestParameters {
                             parameters: state.current_params.get_params(),
                         })
                     }
-
-                    _ => EpochsStateQueryResponse::Error(format!(
-                        "Unimplemented query variant: {:?}",
-                        query
-                    )),
                 };
-                Arc::new(Message::StateQueryResponse(StateQueryResponse::Epochs(
+                Arc::new(Message::StateQueryResponse(StateQueryResponse::Parameters(
                     response,
                 )))
             }

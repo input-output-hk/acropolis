@@ -14,7 +14,7 @@ pub struct State {
     current_epoch: u64,
 
     // Map of counts by VRF key hashes
-    vrf_vkey_hashes: HashMap<KeyHash, usize>,
+    blocks_minted: HashMap<KeyHash, usize>,
 
     // Total blocks seen this epoch
     total_blocks: usize,
@@ -31,7 +31,7 @@ impl State {
     pub fn new(store_history: bool) -> Self {
         Self {
             current_epoch: 0,
-            vrf_vkey_hashes: HashMap::new(),
+            blocks_minted: HashMap::new(),
             total_blocks: 0,
             total_fees: 0,
             epoch_history: if store_history {
@@ -48,13 +48,13 @@ impl State {
 
         if let Some(vrf_vkey) = vrf_vkey {
             // Count one on this hash
-            *(self.vrf_vkey_hashes.entry(keyhash(vrf_vkey)).or_insert(0)) += 1;
+            *(self.blocks_minted.entry(keyhash(vrf_vkey)).or_insert(0)) += 1;
         }
     }
 
     // Handle block fees
-    pub fn handle_fees(&mut self, _block: &BlockInfo, total_fees: u64) {
-        self.total_fees += total_fees;
+    pub fn handle_fees(&mut self, _block: &BlockInfo, block_fee: u64) {
+        self.total_fees += block_fee;
     }
 
     // Handle end of epoch, returns message to be published
@@ -62,7 +62,7 @@ impl State {
         info!(
             epoch,
             total_blocks = self.total_blocks,
-            unique_vrf_keys = self.vrf_vkey_hashes.len(),
+            unique_vrf_keys = self.blocks_minted.len(),
             total_fees = self.total_fees,
             "End of epoch"
         );
@@ -80,7 +80,7 @@ impl State {
 
         self.current_epoch = epoch + 1;
         self.total_blocks = 0;
-        self.vrf_vkey_hashes.clear();
+        self.blocks_minted.clear();
         self.total_fees = 0;
 
         message
@@ -91,7 +91,7 @@ impl State {
             epoch: self.current_epoch,
             total_blocks: self.total_blocks,
             total_fees: self.total_fees,
-            vrf_vkey_hashes: self.vrf_vkey_hashes.iter().map(|(k, v)| (k.clone(), *v)).collect(),
+            vrf_vkey_hashes: self.blocks_minted.iter().map(|(k, v)| (k.clone(), *v)).collect(),
         }
     }
 
@@ -112,7 +112,7 @@ impl State {
     pub fn get_blocks_minted_by_pools(&self, vrf_key_hashes: &Vec<KeyHash>) -> Vec<u64> {
         vrf_key_hashes
             .iter()
-            .map(|key_hash| self.vrf_vkey_hashes.get(key_hash).map(|v| *v as u64).unwrap_or(0))
+            .map(|key_hash| self.blocks_minted.get(key_hash).map(|v| *v as u64).unwrap_or(0))
             .collect()
     }
 }
@@ -143,38 +143,44 @@ mod tests {
         let state = State::new(false);
         assert_eq!(state.total_blocks, 0);
         assert_eq!(state.total_fees, 0);
-        assert!(state.vrf_vkey_hashes.is_empty());
+        assert!(state.blocks_minted.is_empty());
     }
 
     #[test]
     fn handle_mint_single_vrf_records_counts() {
         let mut state = State::new(false);
         let vrf = b"vrf_key";
-        let block = make_block(100);
+        let mut block = make_block(100);
         state.handle_mint(&block, Some(vrf));
+        state.handle_fees(&block, 100);
+
+        block.number += 1;
         state.handle_mint(&block, Some(vrf));
+        state.handle_fees(&block, 200);
 
         assert_eq!(state.total_blocks, 2);
-        assert_eq!(state.vrf_vkey_hashes.len(), 1);
-        assert_eq!(state.vrf_vkey_hashes.get(&keyhash(vrf)), Some(&2));
+        assert_eq!(state.blocks_minted.len(), 1);
+        assert_eq!(state.blocks_minted.get(&keyhash(vrf)), Some(&2));
     }
 
     #[test]
     fn handle_mint_multiple_vrf_records_counts() {
         let mut state = State::new(false);
-        let block = make_block(100);
+        let mut block = make_block(100);
         state.handle_mint(&block, Some(b"vrf_1"));
+        block.number += 1;
         state.handle_mint(&block, Some(b"vrf_2"));
+        block.number += 1;
         state.handle_mint(&block, Some(b"vrf_2"));
 
         assert_eq!(state.total_blocks, 3);
-        assert_eq!(state.vrf_vkey_hashes.len(), 2);
+        assert_eq!(state.blocks_minted.len(), 2);
         assert_eq!(
-            state.vrf_vkey_hashes.iter().find(|(k, _)| *k == &keyhash(b"vrf_1")).map(|(_, v)| *v),
+            state.blocks_minted.iter().find(|(k, _)| *k == &keyhash(b"vrf_1")).map(|(_, v)| *v),
             Some(1)
         );
         assert_eq!(
-            state.vrf_vkey_hashes.iter().find(|(k, _)| *k == &keyhash(b"vrf_2")).map(|(_, v)| *v),
+            state.blocks_minted.iter().find(|(k, _)| *k == &keyhash(b"vrf_2")).map(|(_, v)| *v),
             Some(2)
         );
     }
@@ -182,8 +188,10 @@ mod tests {
     #[test]
     fn handle_fees_counts_fees() {
         let mut state = State::new(false);
-        let block = make_block(100);
+        let mut block = make_block(100);
+
         state.handle_fees(&block, 100);
+        block.number += 1;
         state.handle_fees(&block, 250);
 
         assert_eq!(state.total_fees, 350);
@@ -220,7 +228,7 @@ mod tests {
         assert_eq!(state.current_epoch, 1);
         assert_eq!(state.total_blocks, 0);
         assert_eq!(state.total_fees, 0);
-        assert!(state.vrf_vkey_hashes.is_empty());
+        assert!(state.blocks_minted.is_empty());
     }
 
     #[test]
@@ -231,6 +239,7 @@ mod tests {
         state.handle_fees(&block, 50);
 
         state.end_epoch(&block, 199);
+        assert!(state.blocks_minted.is_empty());
 
         // Use the public API method
         let history = state

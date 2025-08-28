@@ -1,4 +1,7 @@
-use crate::PoolRegistration;
+use crate::{KeyHash, PoolEpochState, PoolRegistration, PoolRetirement};
+
+pub const DEFAULT_POOLS_QUERY_TOPIC: (&str, &str) =
+    ("pools-state-query-topic", "cardano.query.pools");
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum PoolsStateQuery {
@@ -62,19 +65,24 @@ pub enum PoolsStateQueryResponse {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PoolsList {
-    pub pool_operators: Vec<Vec<u8>>,
+    pub pool_operators: Vec<KeyHash>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PoolsListWithInfo {
-    pub pools: Vec<(Vec<u8>, PoolRegistration)>,
+    pub pools: Vec<(KeyHash, PoolRegistration)>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PoolsRetiredList {}
+pub struct PoolsRetiredList {
+    pub retired_pools: Vec<PoolRetirement>,
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PoolsRetiringList {}
+pub struct PoolsRetiringList {
+    // pool id, retiring epoch
+    pub retiring_pools: Vec<PoolRetirement>,
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PoolsActiveStakes {
@@ -94,7 +102,9 @@ pub struct PoolsTotalBlocksMinted {
 pub struct PoolInfo {}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PoolHistory {}
+pub struct PoolHistory {
+    pub history: Vec<PoolEpochState>,
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PoolMetadata {}
