@@ -22,9 +22,13 @@ mod state;
 use state::State;
 mod rest;
 mod spo_state_publisher;
-use crate::spo_state_publisher::SPOStatePublisher;
+use crate::{epochs_history_state::EpochsHistoryState, spo_state_publisher::SPOStatePublisher};
 mod state_config;
 use state_config::StateConfig;
+mod epochs_history_state;
+
+#[cfg(test)]
+mod test_utils;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.certificates";
 const DEFAULT_CLOCK_TICK_TOPIC: &str = "clock.tick";
@@ -103,6 +107,7 @@ impl SPOState {
     async fn run_spdd_subscription(
         state: Arc<Mutex<State>>,
         mut spdd_subscription: Box<dyn Subscription<Message>>,
+        epochs_history: EpochsHistoryState,
     ) -> Result<()> {
         loop {
             // Subscribe to accounts-state's SPDD messsages
@@ -113,7 +118,10 @@ impl SPOState {
             )) = spdd_message.as_ref()
             {
                 let mut state = state.lock().await;
-                state.handle_spdd(block_info, spdd_message)
+                state.handle_spdd(block_info, spdd_message);
+
+                // update epochs_history
+                epochs_history.handle_spdd(block_info, spdd_message);
             }
         }
     }
@@ -122,6 +130,7 @@ impl SPOState {
     async fn run_epoch_activity_subscription(
         state: Arc<Mutex<State>>,
         mut epoch_activity_subscription: Box<dyn Subscription<Message>>,
+        epochs_history: EpochsHistoryState,
     ) -> Result<()> {
         loop {
             // Subscribe to accounts-state's SPDD messsages
@@ -132,15 +141,18 @@ impl SPOState {
             )) = spdd_message.as_ref()
             {
                 let mut state = state.lock().await;
-                state.handle_epoch_activity(block_info, epoch_activity_message)
+                let spos = state.handle_epoch_activity(block_info, epoch_activity_message);
+
+                // update epochs_history
+                epochs_history.handle_epoch_activity(block_info, epoch_activity_message, &spos);
             }
         }
     }
 
     /// Async run loop for SPO rewards messages
     async fn run_spo_rewards_subscription(
-        state: Arc<Mutex<State>>,
         mut spo_rewards_subscription: Box<dyn Subscription<Message>>,
+        epochs_history: EpochsHistoryState,
     ) -> Result<()> {
         loop {
             // Subscribe to accounts-state's SPO rewards messsages
@@ -148,8 +160,8 @@ impl SPOState {
             if let Message::Cardano((block_info, CardanoMessage::SPORewards(spo_rewards_message))) =
                 spo_rewards_message.as_ref()
             {
-                let mut state = state.lock().await;
-                state.handle_spo_rewards(block_info, spo_rewards_message)
+                // update epochs_history
+                epochs_history.handle_spo_rewards(block_info, spo_rewards_message);
             }
         }
     }
@@ -187,12 +199,20 @@ impl SPOState {
             .unwrap_or(DEFAULT_SPO_STATE_TOPIC.to_string());
         info!("Creating SPO state publisher on '{spo_state_topic}'");
 
-        let state = Arc::new(Mutex::new(State::new(StateConfig::from(config))));
+        let state_config = StateConfig::from(config);
+        let state = Arc::new(Mutex::new(State::new(state_config.clone())));
+
+        // Create history
+        let epochs_history = EpochsHistoryState::new(state_config.clone());
+        let run_spdd_epochs_history = epochs_history.clone();
+        let run_spo_rewards_epochs_history = epochs_history.clone();
+        let run_epoch_activity_epochs_history = epochs_history.clone();
 
         // handle pools-state
         let state_rest_blockfrost = state.clone();
         context.handle(POOLS_STATE_TOPIC, move |message| {
             let state = state_rest_blockfrost.clone();
+            let epochs_history = epochs_history.clone();
             async move {
                 let Message::StateQuery(StateQuery::Pools(query)) = message.as_ref() else {
                     return Arc::new(Message::StateQueryResponse(StateQueryResponse::Pools(
@@ -236,7 +256,8 @@ impl SPOState {
                     }
 
                     PoolsStateQuery::GetPoolHistory { pool_id } => {
-                        let history = guard.get_pool_history(pool_id).unwrap_or(Vec::new());
+                        let history =
+                            epochs_history.get_pool_history(pool_id).unwrap_or(Vec::new());
                         PoolsStateQueryResponse::PoolHistory(PoolHistory { history })
                     }
 
@@ -323,7 +344,6 @@ impl SPOState {
         let run_clock_tick_state = state.clone();
         let run_spdd_state = state.clone();
         let run_epoch_activity_state = state.clone();
-        let run_spo_rewards_state = state.clone();
 
         context.run(async move {
             Self::run_certs_subscription(run_certs_state, spo_state_publisher, certs_subscription)
@@ -338,7 +358,7 @@ impl SPOState {
         });
 
         context.run(async move {
-            Self::run_spdd_subscription(run_spdd_state, spdd_subscription)
+            Self::run_spdd_subscription(run_spdd_state, spdd_subscription, run_spdd_epochs_history)
                 .await
                 .unwrap_or_else(|e| error!("Failed to run SPO SPDD Subscription: {e}"));
         });
@@ -347,15 +367,19 @@ impl SPOState {
             Self::run_epoch_activity_subscription(
                 run_epoch_activity_state,
                 epoch_activity_subscription,
+                run_epoch_activity_epochs_history,
             )
             .await
             .unwrap_or_else(|e| error!("Failed to run SPO Epoch Activity Subscription: {e}"));
         });
 
         context.run(async move {
-            Self::run_spo_rewards_subscription(run_spo_rewards_state, spo_rewards_subscription)
-                .await
-                .unwrap_or_else(|e| error!("Failed to run SPO Rewards Subscription: {e}"));
+            Self::run_spo_rewards_subscription(
+                spo_rewards_subscription,
+                run_spo_rewards_epochs_history,
+            )
+            .await
+            .unwrap_or_else(|e| error!("Failed to run SPO Rewards Subscription: {e}"));
         });
 
         Ok(())
