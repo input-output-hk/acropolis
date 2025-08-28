@@ -3,8 +3,8 @@
 
 use acropolis_common::{
     messages::{
-        CardanoMessage, Message, SnapshotDumpMessage, SnapshotMessage, SnapshotStateMessage,
-        StateQuery, StateQueryResponse,
+        CardanoMessage, Message, SPOStateMessage, SnapshotDumpMessage, SnapshotMessage,
+        SnapshotStateMessage, StateQuery, StateQueryResponse,
     },
     queries::pools::{
         PoolHistory, PoolsActiveStakes, PoolsList, PoolsListWithInfo, PoolsRetiredList,
@@ -18,17 +18,21 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, info_span, Instrument};
 
-mod state;
-use state::State;
+mod epochs_history;
 mod rest;
+mod retired_pools_history;
 mod spo_state_publisher;
-use crate::{epochs_history_state::EpochsHistoryState, spo_state_publisher::SPOStatePublisher};
+mod state;
 mod state_config;
-use state_config::StateConfig;
-mod epochs_history_state;
-
 #[cfg(test)]
 mod test_utils;
+
+use crate::{
+    epochs_history::EpochsHistoryState, retired_pools_history::RetiredPoolsHistoryState,
+    spo_state_publisher::SPOStatePublisher,
+};
+use state::State;
+use state_config::StateConfig;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.certificates";
 const DEFAULT_CLOCK_TICK_TOPIC: &str = "clock.tick";
@@ -53,6 +57,7 @@ impl SPOState {
         state: Arc<Mutex<State>>,
         mut spo_state_publisher: SPOStatePublisher,
         mut certs_subscription: Box<dyn Subscription<Message>>,
+        retired_pools_history: RetiredPoolsHistoryState,
     ) -> Result<()> {
         loop {
             // Subscribe to certificate messages
@@ -68,6 +73,15 @@ impl SPOState {
                             .ok();
 
                         if let Some(Some(message)) = maybe_message {
+                            if let Message::Cardano((
+                                _,
+                                CardanoMessage::SPOState(SPOStateMessage { retired_spos, .. }),
+                            )) = message.as_ref()
+                            {
+                                retired_pools_history.handle_deregistrations(block, retired_spos);
+                            }
+
+                            // publish spo message
                             if let Err(e) = spo_state_publisher.publish(message).await {
                                 error!("Error publishing SPO State: {e:#}")
                             }
@@ -200,19 +214,24 @@ impl SPOState {
         info!("Creating SPO state publisher on '{spo_state_topic}'");
 
         let state_config = StateConfig::from(config);
-        let state = Arc::new(Mutex::new(State::new(state_config.clone())));
+        let state = Arc::new(Mutex::new(State::new()));
 
-        // Create history
+        // Create epochs history
         let epochs_history = EpochsHistoryState::new(state_config.clone());
         let run_spdd_epochs_history = epochs_history.clone();
         let run_spo_rewards_epochs_history = epochs_history.clone();
         let run_epoch_activity_epochs_history = epochs_history.clone();
+
+        // Create Retired pools history
+        let retired_pools_history = RetiredPoolsHistoryState::new(state_config.clone());
+        let run_deregistrations_retired_pools_history = retired_pools_history.clone();
 
         // handle pools-state
         let state_rest_blockfrost = state.clone();
         context.handle(POOLS_STATE_TOPIC, move |message| {
             let state = state_rest_blockfrost.clone();
             let epochs_history = epochs_history.clone();
+            let retired_pools_history = retired_pools_history.clone();
             async move {
                 let Message::StateQuery(StateQuery::Pools(query)) = message.as_ref() else {
                     return Arc::new(Message::StateQueryResponse(StateQueryResponse::Pools(
@@ -269,7 +288,7 @@ impl SPOState {
                     }
 
                     PoolsStateQuery::GetPoolsRetiredList => {
-                        let retired_pools = guard.get_retired_pools();
+                        let retired_pools = retired_pools_history.get_retired_pools();
                         PoolsStateQueryResponse::PoolsRetiredList(PoolsRetiredList {
                             retired_pools,
                         })
@@ -346,9 +365,14 @@ impl SPOState {
         let run_epoch_activity_state = state.clone();
 
         context.run(async move {
-            Self::run_certs_subscription(run_certs_state, spo_state_publisher, certs_subscription)
-                .await
-                .unwrap_or_else(|e| error!("Failed to run SPO Certs Subscription: {e}"));
+            Self::run_certs_subscription(
+                run_certs_state,
+                spo_state_publisher,
+                certs_subscription,
+                run_deregistrations_retired_pools_history,
+            )
+            .await
+            .unwrap_or_else(|e| error!("Failed to run SPO Certs Subscription: {e}"));
         });
 
         context.run(async move {

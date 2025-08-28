@@ -20,8 +20,6 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use tracing::{debug, error, info};
 
-use crate::state_config::StateConfig;
-
 #[serde_as]
 #[derive(Default, Debug, Clone, serde::Serialize)]
 pub struct BlockState {
@@ -112,9 +110,6 @@ pub struct State {
     /// Volatile states, one per volatile block
     history: StateHistory<BlockState>,
 
-    /// Retired pools history
-    retired_pools_history: Option<Arc<DashMap<u64, Vec<KeyHash>>>>,
-
     /// Active stakes for each pool operator
     /// (epoch number, active stake)
     /// Remove elements when epoch number is less than current epoch number
@@ -127,17 +122,12 @@ pub struct State {
 
 impl State {
     // Construct with optional publisher
-    pub fn new(state_config: StateConfig) -> Self {
+    pub fn new() -> Self {
         Self {
             history: StateHistory::new(
                 "spo-states/block-state",
                 StateHistoryStore::default_block_store(),
             ),
-            retired_pools_history: if state_config.store_retired_pools {
-                Some(Arc::new(DashMap::new()))
-            } else {
-                None
-            },
             active_stakes: DashMap::new(),
             total_blocks_minted_history: StateHistory::new(
                 "spo-states/total-blocks-minted",
@@ -235,29 +225,6 @@ impl State {
         })
     }
 
-    /// Get pools that have been retired so far
-    pub fn get_retired_pools(&self) -> Vec<PoolRetirement> {
-        self.retired_pools_history
-            .as_ref()
-            .map(|retired_pools_history| {
-                retired_pools_history
-                    .iter()
-                    .flat_map(|entry| {
-                        let epoch = *entry.key();
-                        entry
-                            .value()
-                            .iter()
-                            .map(move |pool| PoolRetirement {
-                                operator: pool.clone(),
-                                epoch,
-                            })
-                            .collect::<Vec<PoolRetirement>>()
-                    })
-                    .collect()
-            })
-            .unwrap_or_default()
-    }
-
     async fn log_stats(&self) {
         if let Some(current) = self.current() {
             info!(
@@ -299,29 +266,21 @@ impl State {
             // Deregister any pending
             let mut retired_spos: Vec<KeyHash> = Vec::new();
             let deregistrations = current.pending_deregistrations.remove(&current.epoch);
-            match deregistrations {
-                Some(deregistrations) => {
-                    // update retired pools history if enabled
-                    if let Some(retired_pools_history) = self.retired_pools_history.as_ref() {
-                        retired_pools_history.insert(current.epoch, deregistrations.clone());
-                    }
-
-                    for dr in deregistrations {
-                        debug!("Retiring SPO {}", hex::encode(&dr));
-                        match current.spos.remove(&dr) {
-                            None => error!(
-                                "Retirement requested for unregistered SPO {}",
-                                hex::encode(&dr),
-                            ),
-                            Some(de_reg) => {
-                                retired_spos.push(dr.clone());
-                                current.vrf_key_to_pool_id_map.remove(&de_reg.vrf_key_hash);
-                            }
-                        };
-                    }
+            if let Some(deregistrations) = deregistrations {
+                for dr in deregistrations {
+                    debug!("Retiring SPO {}", hex::encode(&dr));
+                    match current.spos.remove(&dr) {
+                        None => error!(
+                            "Retirement requested for unregistered SPO {}",
+                            hex::encode(&dr),
+                        ),
+                        Some(de_reg) => {
+                            retired_spos.push(dr.clone());
+                            current.vrf_key_to_pool_id_map.remove(&de_reg.vrf_key_hash);
+                        }
+                    };
                 }
-                None => (),
-            };
+            }
 
             message = Some(Arc::new(Message::Cardano((
                 block.clone(),
@@ -503,26 +462,20 @@ mod tests {
 
     #[tokio::test]
     async fn new_state_is_empty() {
-        let state = State::new(default_state_config());
+        let state = State::new();
         assert_eq!(0, state.history.len());
         assert_eq!(0, state.active_stakes.len());
-        assert!(state.retired_pools_history.is_none());
-
-        let state_with_history = State::new(save_all_state_config());
-        assert_eq!(0, state_with_history.history.len());
-        assert_eq!(0, state_with_history.active_stakes.len());
-        assert_eq!(0, state_with_history.retired_pools_history.unwrap().len());
     }
 
     #[tokio::test]
     async fn current_on_new_state_returns_none() {
-        let state = State::new(default_state_config());
+        let state = State::new();
         assert!(state.current().is_none());
     }
 
     #[tokio::test]
     async fn state_is_not_empty_after_handle_tx_certs() {
-        let mut state = State::new(default_state_config());
+        let mut state = State::new();
         let msg = new_certs_msg();
         let block = new_block(1);
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
@@ -531,7 +484,7 @@ mod tests {
 
     #[tokio::test]
     async fn active_stakes_is_not_empty_after_handle_spdd() {
-        let mut state = State::new(default_state_config());
+        let mut state = State::new();
         let mut block = new_block(2);
         let mut msg = new_spdd_message(1);
         msg.spos = vec![(
@@ -588,7 +541,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_total_blocks_minted_returns_zero_when_state_is_new() {
-        let state = State::new(default_state_config());
+        let state = State::new();
         let total_blocks_minted = state.get_total_blocks_minted(&vec![vec![1], vec![2]]);
         assert_eq!(2, total_blocks_minted.len());
         assert_eq!(0, total_blocks_minted[0]);
@@ -597,7 +550,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_total_blocks_minted_returns_data_after_handle_epoch_activity() {
-        let mut state = State::new(default_state_config());
+        let mut state = State::new();
         let block = new_block(2);
         let mut epoch_activity_message = new_epoch_activity_message(1);
         epoch_activity_message.vrf_vkey_hashes = vec![(vec![2], 1)];
@@ -614,7 +567,7 @@ mod tests {
 
     #[tokio::test]
     async fn total_blocks_minted_history_is_pruned_after_rollback() {
-        let mut state = State::new(default_state_config());
+        let mut state = State::new();
         let mut block = new_block(2);
         let mut epoch_activity_message = new_epoch_activity_message(1);
         epoch_activity_message.vrf_vkey_hashes = vec![(vec![2], 1)];
@@ -650,51 +603,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_retired_pools_returns_data() {
-        let mut state = State::new(save_retired_pools_state_config());
-        let mut block = new_block(1);
-        let mut msg = new_certs_msg();
-        msg.certificates = vec![
-            TxCertificate::PoolRetirement(PoolRetirement {
-                operator: vec![1],
-                epoch: 2,
-            }),
-            TxCertificate::PoolRetirement(PoolRetirement {
-                operator: vec![2],
-                epoch: 2,
-            }),
-        ];
-        assert!(state.handle_tx_certs(&block, &msg).is_ok());
-
-        block = new_block(2);
-        msg = new_certs_msg();
-        msg.certificates = vec![TxCertificate::PoolRegistration(PoolRegistration {
-            operator: vec![1],
-            vrf_key_hash: vec![1],
-            pledge: 0,
-            cost: 0,
-            margin: Ratio {
-                numerator: 0,
-                denominator: 0,
-            },
-            reward_account: vec![0],
-            pool_owners: vec![vec![0]],
-            relays: vec![],
-            pool_metadata: None,
-        })];
-        assert!(state.handle_tx_certs(&block, &msg).is_ok());
-
-        let retiring_pools = state.get_retired_pools();
-        assert_eq!(2, retiring_pools.len());
-        assert_eq!(2, retiring_pools[0].epoch);
-        assert_eq!(2, retiring_pools[1].epoch);
-        assert_eq!(vec![1], retiring_pools[0].operator);
-        assert_eq!(vec![2], retiring_pools[1].operator);
-    }
-
-    #[tokio::test]
     async fn spo_gets_registered() {
-        let mut state = State::new(default_state_config());
+        let mut state = State::new();
         let mut msg = new_certs_msg();
         msg.certificates.push(TxCertificate::PoolRegistration(PoolRegistration {
             operator: vec![0],
@@ -723,7 +633,7 @@ mod tests {
 
     #[tokio::test]
     async fn pending_deregistration_gets_queued() {
-        let mut state = State::new(default_state_config());
+        let mut state = State::new();
         let mut msg = new_certs_msg();
         msg.certificates.push(TxCertificate::PoolRetirement(PoolRetirement {
             operator: vec![0],
@@ -746,7 +656,7 @@ mod tests {
 
     #[tokio::test]
     async fn second_pending_deregistration_gets_queued() {
-        let mut state = State::new(default_state_config());
+        let mut state = State::new();
         let mut msg = new_certs_msg();
         msg.certificates.push(TxCertificate::PoolRetirement(PoolRetirement {
             operator: vec![0],
@@ -777,7 +687,7 @@ mod tests {
 
     #[tokio::test]
     async fn rollback_removes_second_pending_deregistration() {
-        let mut state = State::new(default_state_config());
+        let mut state = State::new();
         let mut msg = new_certs_msg();
         msg.certificates.push(TxCertificate::PoolRetirement(PoolRetirement {
             operator: vec![0],
@@ -810,7 +720,7 @@ mod tests {
 
     #[tokio::test]
     async fn spo_gets_deregistered() {
-        let mut state = State::new(default_state_config());
+        let mut state = State::new();
         let mut msg = new_certs_msg();
         msg.certificates.push(TxCertificate::PoolRegistration(PoolRegistration {
             operator: vec![0],
@@ -855,7 +765,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_pools_active_stakes_returns_zero_when_state_is_new() {
-        let state = State::new(default_state_config());
+        let state = State::new();
         let (active_stakes, total) = state.get_pools_active_stakes(&vec![vec![1], vec![2]], 0);
         assert_eq!(2, active_stakes.len());
         assert_eq!(0, active_stakes[0]);
@@ -865,7 +775,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_pools_active_stakes_returns_zero_when_epoch_is_not_found() {
-        let mut state = State::new(default_state_config());
+        let mut state = State::new();
         let block = new_block(2);
         let msg = new_spdd_message(1);
         state.handle_spdd(&block, &msg);
@@ -879,7 +789,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_pools_active_stakes_returns_zero_when_active_stakes_not_found() {
-        let mut state = State::new(default_state_config());
+        let mut state = State::new();
         let block = new_block(2);
         let msg = new_spdd_message(1);
         state.handle_spdd(&block, &msg);
@@ -893,7 +803,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_pools_active_stakes_returns_data() {
-        let mut state = State::new(default_state_config());
+        let mut state = State::new();
         let block = new_block(2);
         let mut msg = new_spdd_message(1);
         msg.spos = vec![
@@ -926,7 +836,7 @@ mod tests {
 
     #[tokio::test]
     async fn spo_gets_restored_on_rollback() {
-        let mut state = State::new(default_state_config());
+        let mut state = State::new();
         let mut msg = new_certs_msg();
         msg.certificates.push(TxCertificate::PoolRegistration(PoolRegistration {
             operator: vec![0],
@@ -998,13 +908,13 @@ mod tests {
 
     #[tokio::test]
     async fn get_retiring_pools_returns_empty_when_state_is_new() {
-        let state = State::new(default_state_config());
+        let state = State::new();
         assert!(state.get_retiring_pools().is_empty());
     }
 
     #[tokio::test]
     async fn get_retiring_pools_returns_pools() {
-        let mut state = State::new(default_state_config());
+        let mut state = State::new();
         let mut msg = new_certs_msg();
         msg.certificates.push(TxCertificate::PoolRetirement(PoolRetirement {
             operator: vec![0],
