@@ -395,10 +395,10 @@ impl State {
         for tx_cert in tx_certs_msg.certificates.iter() {
             match tx_cert {
                 TxCertificate::PoolRegistration(reg) => {
-                    debug!(
+                    info!(
                         block = block.number,
-                        "Registering SPO {}",
-                        hex::encode(&reg.operator)
+                        "Registering SPO {} {:?}",
+                        hex::encode(&reg.operator), reg
                     );
                     current.spos.insert(reg.operator.clone(), reg.clone());
 
@@ -417,7 +417,7 @@ impl State {
                     }
                 }
                 TxCertificate::PoolRetirement(ret) => {
-                    debug!(
+                   info!(
                         "SPO {} wants to retire at the end of epoch {} (cert in block number {})",
                         hex::encode(&ret.operator),
                         ret.epoch,
