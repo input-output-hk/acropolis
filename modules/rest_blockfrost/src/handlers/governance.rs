@@ -119,10 +119,10 @@ pub async fn handle_single_drep_blockfrost(
             let raw_sum = context.message_bus.request(&accounts_query_topic, sum_msg).await?;
             let sum_response = Arc::try_unwrap(raw_sum).unwrap_or_else(|arc| (*arc).clone());
 
-            let sum = match sum_response {
+            let amount = match sum_response {
                 Message::StateQueryResponse(StateQueryResponse::Accounts(
                     AccountsStateQueryResponse::AccountsBalancesSum(sum),
-                )) => sum,
+                )) => sum.to_string(),
 
                 Message::StateQueryResponse(StateQueryResponse::Accounts(
                     AccountsStateQueryResponse::Error(e),
@@ -140,8 +140,6 @@ pub async fn handle_single_drep_blockfrost(
                     ));
                 }
             };
-
-            let amount = (sum + response.info.deposit).to_string();
 
             let response = DRepInfoREST {
                 drep_id: drep_id.to_string(),
