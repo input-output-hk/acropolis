@@ -3,12 +3,13 @@ use crate::state::State;
 use acropolis_common::{
     messages::RESTResponse,
     protocol_params::{
-        NetworkId, Nonce, NonceVariant, ProtocolVersion, ShelleyParams, ShelleyProtocolParams,
+        AlonzoParams, BabbageParams, ByronParams, ConwayParams, NetworkId, Nonce, NonceVariant,
+        ProtocolParams, ProtocolVersion, ShelleyParams, ShelleyProtocolParams,
     },
     rest_helper::ToCheckedF64,
-    AlonzoParams, Anchor, BlockVersionData, ByronParams, Committee, Constitution, ConwayParams,
-    DRepVotingThresholds, ExUnitPrices, ExUnits, PoolVotingThresholds, ProtocolConsts,
-    ProtocolParams,
+    state_history::StateHistory,
+    Anchor, BlockVersionData, Committee, Constitution, DRepVotingThresholds, ExUnitPrices, ExUnits,
+    PoolVotingThresholds, ProtocolConsts,
 };
 use anyhow::Result;
 use pallas::ledger::primitives::CostModel;
@@ -31,6 +32,7 @@ pub struct EraParametersRest {
     pub byron: Option<ByronParamsRest>,
     pub shelley: Option<ShelleyParamsRest>,
     pub alonzo: Option<AlonzoParamsRest>,
+    pub babbage: Option<BabbageParamsRest>,
     pub conway: Option<ConwayParamsRest>,
 }
 
@@ -110,7 +112,6 @@ pub struct AlonzoParamsRest {
     pub collateral_percentage: u32,
     pub max_collateral_inputs: u32,
     pub plutus_v1_cost_model: Option<CostModel>,
-    pub plutus_v2_cost_model: Option<CostModel>,
 }
 
 #[derive(Serialize)]
@@ -119,6 +120,12 @@ pub struct ExUnitPricesRest {
     pub mem_price: f64,
     /// step_price as float
     pub step_price: f64,
+}
+
+#[derive(Serialize)]
+pub struct BabbageParamsRest {
+    pub coins_per_utxo_byte: u64,
+    pub plutus_v2_cost_model: Option<CostModel>,
 }
 
 #[derive(Serialize)]
@@ -183,8 +190,8 @@ pub struct CommitteeRest {
 }
 
 /// REST handler for /epoch/parameters — returns current live protocol parameters
-pub async fn handle_current(state: Arc<Mutex<State>>) -> Result<RESTResponse> {
-    let lock = state.lock().await;
+pub async fn handle_current(history: Arc<Mutex<StateHistory<State>>>) -> Result<RESTResponse> {
+    let lock = history.lock().await.get_current_state();
     let params = lock.current_params.get_params();
     let active_epoch = lock.active_epoch;
 
@@ -215,8 +222,12 @@ pub async fn handle_current(state: Arc<Mutex<State>>) -> Result<RESTResponse> {
     Ok(RESTResponse::with_json(200, &json))
 }
 
+/*
 /// REST handler for /epochs/{epoch_number}/parameters — returns parameters for the closest prior epoch
-pub async fn handle_historical(state: Arc<Mutex<State>>, epoch: String) -> Result<RESTResponse> {
+pub async fn handle_historical(
+    history: Arc<Mutex<StateHistory<State>>>,
+    epoch: String,
+) -> Result<RESTResponse> {
     let parsed_epoch = match epoch.parse::<u64>() {
         Ok(v) => v,
         Err(_) => {
@@ -227,9 +238,9 @@ pub async fn handle_historical(state: Arc<Mutex<State>>, epoch: String) -> Resul
         }
     };
 
-    let lock = state.lock().await;
+    let state = history.lock().await.get_by_index(parsed_epoch);
 
-    match &lock.parameter_history {
+    match &state {
         Some(history) => match history.range(..=parsed_epoch).next_back() {
             Some((epoch_found, msg)) => match ProtocolParametersRest::try_from((epoch_found, &msg.params)) {
                 Ok(response) => match serde_json::to_string(&response) {
@@ -251,7 +262,7 @@ pub async fn handle_historical(state: Arc<Mutex<State>>, epoch: String) -> Resul
             "Historical parameter storage not enabled",
         )),
     }
-}
+}*/
 
 /// ProtocolParametersRest helper functions
 impl TryFrom<(&u64, &ProtocolParams)> for ProtocolParametersRest {
@@ -277,6 +288,10 @@ impl TryFrom<&ProtocolParams> for EraParametersRest {
             },
             alonzo: match &params.alonzo {
                 Some(alonzo) => Some(AlonzoParamsRest::try_from(alonzo)?),
+                None => None,
+            },
+            babbage: match &params.babbage {
+                Some(babbage) => Some(BabbageParamsRest::try_from(babbage)?),
                 None => None,
             },
             conway: match &params.conway {
@@ -372,6 +387,16 @@ impl TryFrom<&AlonzoParams> for AlonzoParamsRest {
             collateral_percentage: src.collateral_percentage,
             max_collateral_inputs: src.max_collateral_inputs,
             plutus_v1_cost_model: src.plutus_v1_cost_model.as_ref().map(|x| x.as_vec().clone()),
+        })
+    }
+}
+
+impl TryFrom<&BabbageParams> for BabbageParamsRest {
+    type Error = anyhow::Error;
+
+    fn try_from(src: &BabbageParams) -> Result<Self> {
+        Ok(Self {
+            coins_per_utxo_byte: src.coins_per_utxo_byte,
             plutus_v2_cost_model: src.plutus_v2_cost_model.as_ref().map(|x| x.as_vec().clone()),
         })
     }

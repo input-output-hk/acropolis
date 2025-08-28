@@ -18,7 +18,9 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 
 /// Protocol era
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub enum Era {
     Byron,
     Shelley,
@@ -878,51 +880,6 @@ pub struct ProtocolConsts {
     pub vss_min_ttl: Option<u32>,
 }
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct AlonzoParams {
-    pub lovelace_per_utxo_word: u64,
-    pub execution_prices: ExUnitPrices,
-    pub max_tx_ex_units: ExUnits,
-    pub max_block_ex_units: ExUnits,
-    pub max_value_size: u32,
-    pub collateral_percentage: u32,
-    pub max_collateral_inputs: u32,
-    pub plutus_v1_cost_model: Option<CostModel>,
-    pub plutus_v2_cost_model: Option<CostModel>,
-}
-
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct ByronParams {
-    pub block_version_data: BlockVersionData,
-    pub fts_seed: Option<Vec<u8>>,
-    pub protocol_consts: ProtocolConsts,
-    pub start_time: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct ConwayParams {
-    pub pool_voting_thresholds: PoolVotingThresholds,
-    pub d_rep_voting_thresholds: DRepVotingThresholds,
-    pub committee_min_size: u64,
-    pub committee_max_term_length: u32,
-    pub gov_action_lifetime: u32,
-    pub gov_action_deposit: u64,
-    pub d_rep_deposit: u64,
-    pub d_rep_activity: u32,
-    pub min_fee_ref_script_cost_per_byte: RationalNumber,
-    pub plutus_v3_cost_model: CostModel,
-    pub constitution: Constitution,
-    pub committee: Committee,
-}
-
-#[derive(Debug, Default, PartialEq, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ProtocolParams {
-    pub alonzo: Option<AlonzoParams>,
-    pub byron: Option<ByronParams>,
-    pub shelley: Option<protocol_params::ShelleyParams>,
-    pub conway: Option<ConwayParams>,
-}
-
 #[bitmask(u8)]
 #[derive(serde::Serialize, serde::Deserialize)]
 pub enum ProtocolParamType {
@@ -1001,14 +958,12 @@ pub struct ProtocolParamUpdate {
     #[serde(default)]
     pub min_pool_cost: Option<Lovelace>,
 
-    /// AKA lovelacePerUTxOWord, utxoCostPerWord (Alonzo)
-    /// TODO: was there any moment, when this value had different
-    /// meaning? (words were recounted to bytes)
+    /// Cost per 8-byte word (Alonzo) - DEPRECATED after Babbage
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
-    pub ada_per_utxo_byte: Option<Lovelace>,
+    pub lovelace_per_utxo_word: Option<Lovelace>,
 
-    /// AKA plutus_v1_cost_model, plutus_v2_cost_model (Shelley)
+    /// AKA plutus_v1_cost_model (Shelley), plutus_v2_cost_model (Babbage)
     /// plutus_v3_cost_model (Conway)
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
@@ -1043,6 +998,11 @@ pub struct ProtocolParamUpdate {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
     pub max_collateral_inputs: Option<u64>,
+
+    // Cost per byte (Babbage)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub coins_per_utxo_byte: Option<Lovelace>,
 
     /// (Conway)
     #[serde(skip_serializing_if = "Option::is_none")]

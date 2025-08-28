@@ -10,6 +10,7 @@ use anyhow::Result;
 use caryatid_sdk::{module, Context, Module};
 use config::Config;
 use tracing::info;
+mod cost_model_names;
 mod handlers;
 mod types;
 use handlers::{
