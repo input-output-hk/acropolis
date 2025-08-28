@@ -1,9 +1,12 @@
-use std::collections::HashMap;
-
-use acropolis_common::{queries::governance::DRepActionUpdate, Vote};
+use acropolis_common::{
+    rest_helper::ToCheckedF64,
+    PoolEpochState,
+    {queries::governance::DRepActionUpdate, Vote},
+};
 use rust_decimal::Decimal;
 use serde::Serialize;
 use serde_json::Value;
+use std::collections::HashMap;
 
 // REST response structure for /governance/dreps
 #[derive(Serialize)]
@@ -210,4 +213,35 @@ pub struct PoolExtendedRest {
     pub declared_pledge: String, // u64 in string
     pub margin_cost: f32,
     pub fixed_cost: String, // u64 in string
+}
+
+#[derive(Serialize)]
+pub struct PoolRetirementRest {
+    pub pool_id: String,
+    pub epoch: u64,
+}
+
+#[derive(Serialize)]
+pub struct PoolEpochStateRest {
+    pub epoch: u64,
+    pub blocks: u64,
+    pub active_stake: String, // u64 in string
+    pub active_size: f64,
+    pub delegators_count: u64,
+    pub rewards: String, // u64 in string
+    pub fees: String,    // u64 in string
+}
+
+impl From<PoolEpochState> for PoolEpochStateRest {
+    fn from(state: PoolEpochState) -> Self {
+        Self {
+            epoch: state.epoch,
+            blocks: state.blocks_minted,
+            active_stake: state.active_stake.to_string(),
+            active_size: state.active_size.to_checked_f64("active_size").unwrap_or(0.0),
+            delegators_count: state.delegators_count,
+            rewards: state.pool_reward.to_string(),
+            fees: state.spo_reward.to_string(),
+        }
+    }
 }

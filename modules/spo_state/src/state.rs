@@ -6,19 +6,22 @@ use acropolis_common::{
         CardanoMessage, EpochActivityMessage, Message, SPOStakeDistributionMessage,
         SPOStateMessage, TxCertificatesMessage,
     },
-    params::{SECURITY_PARAMETER_K, TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH},
+    params::TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH,
     serialization::SerializeMapAs,
+    state_history::{StateHistory, StateHistoryStore},
     BlockInfo, KeyHash, PoolRegistration, PoolRetirement, TxCertificate,
 };
 use anyhow::Result;
+use dashmap::DashMap;
 use imbl::HashMap;
+use rayon::prelude::*;
 use serde_with::{hex::Hex, serde_as};
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use tracing::{debug, error, info};
 
 #[serde_as]
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Default, Debug, Clone, serde::Serialize)]
 pub struct BlockState {
     block: u64,
 
@@ -29,6 +32,10 @@ pub struct BlockState {
 
     #[serde_as(as = "SerializeMapAs<_, Vec<Hex>>")]
     pending_deregistrations: HashMap<u64, Vec<Vec<u8>>>,
+
+    /// vrf_key_hash -> pool_id mapping
+    #[serde_as(as = "SerializeMapAs<Hex, Hex>")]
+    vrf_key_to_pool_id_map: HashMap<Vec<u8>, Vec<u8>>,
 }
 
 impl BlockState {
@@ -37,22 +44,27 @@ impl BlockState {
         epoch: u64,
         spos: HashMap<Vec<u8>, PoolRegistration>,
         pending_deregistrations: HashMap<u64, Vec<Vec<u8>>>,
+        vrf_key_to_pool_id_map: HashMap<Vec<u8>, Vec<u8>>,
     ) -> Self {
         Self {
             block,
             epoch,
             spos,
             pending_deregistrations,
+            vrf_key_to_pool_id_map,
         }
     }
 }
 
 impl From<SPOState> for BlockState {
     fn from(value: SPOState) -> Self {
+        let spos: HashMap<KeyHash, PoolRegistration> = value.pools.into();
+        let vrf_key_to_pool_id_map =
+            spos.iter().map(|(k, v)| (v.vrf_key_hash.clone(), k.clone())).collect();
         Self {
             block: 0,
             epoch: 0,
-            spos: value.pools.into(),
+            spos,
             pending_deregistrations: value.retiring.into_iter().fold(
                 HashMap::new(),
                 |mut acc, (key_hash, epoch)| {
@@ -60,112 +72,72 @@ impl From<SPOState> for BlockState {
                     acc
                 },
             ),
+            vrf_key_to_pool_id_map,
         }
     }
 }
 
-// TODO: cleanup clones and into_iter, if possible
-// It's not the end of the world here, as this is only used in testing, for now.
 impl From<&BlockState> for SPOState {
     fn from(value: &BlockState) -> Self {
         Self {
-            pools: value.spos.clone().into_iter().fold(BTreeMap::new(), |mut acc, (key, value)| {
-                acc.insert(key, value);
-                acc
-            }),
-            retiring: value.pending_deregistrations.clone().into_iter().fold(
-                BTreeMap::new(),
-                |mut acc, (epoch, key_hashes)| {
-                    key_hashes.into_iter().for_each(|key_hash| {
-                        acc.insert(key_hash, epoch);
-                    });
-
-                    acc
-                },
-            ),
+            pools: value.spos.iter().map(|(key, value)| (key.clone(), value.clone())).collect(),
+            retiring: value
+                .pending_deregistrations
+                .iter()
+                .map(|(epoch, key_hashes)| {
+                    key_hashes
+                        .iter()
+                        .map(|key_hash| (key_hash.clone(), *epoch))
+                        .collect::<Vec<(Vec<u8>, u64)>>()
+                })
+                .flatten()
+                .collect(),
         }
     }
 }
 
-#[serde_as]
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct ActiveStakesState {
-    /// Snapshot is taken at Epoch N - 1 to N boundary
-    /// the first block of Epoch N
-    block: u64,
-    /// Epoch N (snapshot is Mark)
-    epoch: u64,
-    /// active stakes for each pool operator for each epoch
-    /// Epoch in key is (Epoch N + 1 when snapshot becomes Set)
-    #[serde_as(as = "SerializeMapAs<_, SerializeMapAs<Hex, _>>")]
-    active_stakes: HashMap<u64, HashMap<KeyHash, u64>>,
-}
-
-impl ActiveStakesState {
-    pub fn new() -> Self {
-        Self {
-            block: 0,
-            epoch: 0,
-            active_stakes: HashMap::new(),
-        }
-    }
-}
-
-#[serde_as]
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Default, Debug, Clone, serde::Serialize)]
 pub struct TotalBlocksMintedState {
-    /// block number when Total Blocks Minted is taken
+    /// block number of Epoch Boundary from N-1 to N
     block: u64,
-    /// epoch number when Total Blocks Minted is taken (Epoch N + 1)
-    epoch: u64,
-    /// total blocks minted for each pool operator (Until Epoch N)
-    /// KeyHash is VRF Vkey hash
-    #[serde_as(as = "SerializeMapAs<Hex, _>")]
+    /// total blocks minted for each pool operator keyed by vrf_key_hash
+    /// until the end of Epoch N-1
     total_blocks_minted: HashMap<KeyHash, u64>,
-}
-
-impl TotalBlocksMintedState {
-    pub fn new() -> Self {
-        Self {
-            block: 0,
-            epoch: 0,
-            total_blocks_minted: HashMap::new(),
-        }
-    }
 }
 
 /// Overall module state
 pub struct State {
     /// Volatile states, one per volatile block
-    history: VecDeque<BlockState>,
+    history: StateHistory<BlockState>,
 
-    /// Volatile active stakes state, one per epoch (in case new epoch block is rolled back)
-    active_stakes_history: VecDeque<ActiveStakesState>,
+    /// Active stakes for each pool operator
+    /// (epoch number, active stake)
+    /// Remove elements when epoch number is less than current epoch number
+    pub active_stakes: DashMap<KeyHash, BTreeMap<u64, u64>>,
 
-    /// Volatile total blocks minted state, one per epoch (in case new epoch block is rolled back)
-    total_blocks_minted_history: VecDeque<TotalBlocksMintedState>,
+    /// Volatile total blocks minted state, one per epoch
+    /// Pop on first element when block number is smaller than `current block - SECURITY_PARAMETER_K`
+    pub total_blocks_minted_history: StateHistory<TotalBlocksMintedState>,
 }
 
 impl State {
     // Construct with optional publisher
     pub fn new() -> Self {
         Self {
-            history: VecDeque::<BlockState>::new(),
-            active_stakes_history: VecDeque::<ActiveStakesState>::new(),
-            total_blocks_minted_history: VecDeque::<TotalBlocksMintedState>::new(),
+            history: StateHistory::new(
+                "spo-states/block-state",
+                StateHistoryStore::default_block_store(),
+            ),
+            active_stakes: DashMap::new(),
+            total_blocks_minted_history: StateHistory::new(
+                "spo-states/total-blocks-minted",
+                StateHistoryStore::default_block_store(),
+            ),
         }
     }
 
     pub fn current(&self) -> Option<&BlockState> {
-        self.history.back()
-    }
-
-    pub fn current_active_stakes_state(&self) -> Option<&ActiveStakesState> {
-        self.active_stakes_history.back()
-    }
-
-    pub fn current_total_blocks_minted_state(&self) -> Option<&TotalBlocksMintedState> {
-        self.total_blocks_minted_history.back()
+        self.history.current()
     }
 
     #[allow(dead_code)]
@@ -175,6 +147,11 @@ impl State {
         } else {
             None
         }
+    }
+
+    /// Get SPO from vrf_key_hash
+    pub fn get_spo_from_vrf_key_hash(&self, vrf_key_hash: &KeyHash) -> Option<KeyHash> {
+        self.current().and_then(|state| state.vrf_key_to_pool_id_map.get(vrf_key_hash).cloned())
     }
 
     /// Get all Stake Pool operators' operator hashes
@@ -194,37 +171,47 @@ impl State {
     /// * `pools_operators` - A vector of pool operator hashes
     /// * `epoch` - The epoch to get the active stakes for
     /// ## Returns
-    /// `Option<(Vec<u64>, u64)>` - a vector of active stakes for each pool operator and the total active stake.
+    /// `(Vec<u64>, u64)` - a vector of active stakes for each pool operator and the total active stake.
     pub fn get_pools_active_stakes(
         &self,
         pools_operators: &Vec<KeyHash>,
         epoch: u64,
-    ) -> Option<(Vec<u64>, u64)> {
-        let current = self.current_active_stakes_state()?;
-        current.active_stakes.get(&epoch).map(|stakes| {
-            let total_active_stake = stakes.values().sum();
-            let pools_active_stakes =
-                pools_operators.iter().map(|spo| stakes.get(spo).cloned().unwrap_or(0)).collect();
-            (pools_active_stakes, total_active_stake)
-        })
+    ) -> (Vec<u64>, u64) {
+        let active_stakes = pools_operators
+            .par_iter()
+            .map(|spo| self.get_active_stake(spo, epoch).unwrap_or(0))
+            .collect::<Vec<u64>>();
+        let total_active_stake = self.get_total_active_stake(epoch);
+        (active_stakes, total_active_stake)
     }
 
-    /// Get total blocks minted for each pool operator
+    fn get_active_stake(&self, spo: &KeyHash, epoch: u64) -> Option<u64> {
+        self.active_stakes.get(spo).map(|stakes| stakes.get(&epoch).cloned()).flatten()
+    }
+
+    fn get_total_active_stake(&self, epoch: u64) -> u64 {
+        self.active_stakes.iter().map(|entry| entry.value().get(&epoch).cloned().unwrap_or(0)).sum()
+    }
+
+    /// Get total blocks minted for each vrf vkey hash
     /// ## Arguments
-    /// * `pools_operator` - A vector of pool operator hashes
+    /// * `vrf_vkey_hashes` - A vector of vrf vkey hashes
     /// ## Returns
-    /// `Option<Vec<u64>>` - a vector of total blocks minted for each pool operator.
-    pub fn get_total_blocks_minted(&self, pools_operator: &Vec<KeyHash>) -> Option<Vec<u64>> {
-        let current = self.current_total_blocks_minted_state()?;
-        let total_blocks_minted = pools_operator
+    /// `Vec<u64>` - a vector of total blocks minted for each vrf vkey hash.
+    pub fn get_total_blocks_minted(&self, vrf_vkey_hashes: &Vec<KeyHash>) -> Vec<u64> {
+        let Some(current) = self.total_blocks_minted_history.current() else {
+            return vec![0; vrf_vkey_hashes.len()];
+        };
+        let total_blocks_minted = vrf_vkey_hashes
             .iter()
-            .map(|spo| current.total_blocks_minted.get(spo).cloned().unwrap_or(0))
+            .map(|vrf_vkey_hash| {
+                current.total_blocks_minted.get(vrf_vkey_hash).cloned().unwrap_or(0)
+            })
             .collect();
-        Some(total_blocks_minted)
+        total_blocks_minted
     }
 
     /// Get pools that will be retired in the upcoming epochs
-    #[allow(dead_code)]
     pub fn get_retiring_pools(&self) -> Vec<PoolRetirement> {
         self.current().map_or(Vec::new(), |state: &BlockState| {
             let current_epoch = state.epoch;
@@ -259,88 +246,6 @@ impl State {
         Ok(())
     }
 
-    fn get_previous_state(&mut self, block_number: u64) -> BlockState {
-        loop {
-            match self.history.back() {
-                Some(state) => {
-                    if state.block >= block_number {
-                        info!("Rolling back state for block {}", state.block);
-                        self.history.pop_back();
-                    } else {
-                        break;
-                    }
-                }
-                _ => break,
-            }
-        }
-        if let Some(current) = self.history.back() {
-            current.clone()
-        } else {
-            BlockState::new(0, 0, HashMap::new(), HashMap::new())
-        }
-    }
-
-    fn get_previous_active_stakes_state(&mut self, block_number: u64) -> ActiveStakesState {
-        loop {
-            match self.active_stakes_history.back() {
-                Some(state) => {
-                    if state.block >= block_number {
-                        info!(
-                            "Rolling back SPO active stakes state for block {}",
-                            state.block
-                        );
-                        self.active_stakes_history.pop_back();
-                    } else {
-                        break;
-                    }
-                }
-                _ => break,
-            }
-        }
-        if let Some(current) = self.active_stakes_history.back() {
-            current.clone()
-        } else {
-            ActiveStakesState::new()
-        }
-    }
-
-    fn get_previous_total_blocks_minted_state(
-        &mut self,
-        block_number: u64,
-    ) -> TotalBlocksMintedState {
-        loop {
-            match self.total_blocks_minted_history.back() {
-                Some(state) => {
-                    if state.block >= block_number {
-                        info!(
-                            "Rolling back SPO total blocks minted state for block {}",
-                            state.block
-                        );
-                        self.total_blocks_minted_history.pop_back();
-                    } else {
-                        break;
-                    }
-                }
-                _ => break,
-            }
-        }
-        if let Some(current) = self.total_blocks_minted_history.back() {
-            current.clone()
-        } else {
-            TotalBlocksMintedState::new()
-        }
-    }
-
-    /// Returns a reference to the block state at a specified height, if applicable
-    pub fn inspect_previous_state(&self, block_height: u64) -> Option<&BlockState> {
-        for state in self.history.iter().rev() {
-            if state.block == block_height {
-                return Some(state);
-            }
-        }
-        None
-    }
-
     /// Handle TxCertificates with SPO registrations / de-registrations
     /// Returns an optional state message for end of epoch
     pub fn handle_tx_certs(
@@ -349,7 +254,7 @@ impl State {
         tx_certs_msg: &TxCertificatesMessage,
     ) -> Result<Option<Arc<Message>>> {
         let mut message: Option<Arc<Message>> = None;
-        let mut current = self.get_previous_state(block.number);
+        let mut current = self.history.get_rolled_back_state(block.number);
         current.block = block.number;
 
         // Handle end of epoch
@@ -365,21 +270,21 @@ impl State {
             // Deregister any pending
             let mut retired_spos: Vec<KeyHash> = Vec::new();
             let deregistrations = current.pending_deregistrations.remove(&current.epoch);
-            match deregistrations {
-                Some(deregistrations) => {
-                    for dr in deregistrations {
-                        debug!("Retiring SPO {}", hex::encode(&dr));
-                        match current.spos.remove(&dr) {
-                            None => error!(
-                                "Retirement requested for unregistered SPO {}",
-                                hex::encode(&dr)
-                            ),
-                            _ => retired_spos.push(dr.clone()),
-                        };
-                    }
+            if let Some(deregistrations) = deregistrations {
+                for dr in deregistrations {
+                    debug!("Retiring SPO {}", hex::encode(&dr));
+                    match current.spos.remove(&dr) {
+                        None => error!(
+                            "Retirement requested for unregistered SPO {}",
+                            hex::encode(&dr),
+                        ),
+                        Some(de_reg) => {
+                            retired_spos.push(dr.clone());
+                            current.vrf_key_to_pool_id_map.remove(&de_reg.vrf_key_hash);
+                        }
+                    };
                 }
-                None => (),
-            };
+            }
 
             message = Some(Arc::new(Message::Cardano((
                 block.clone(),
@@ -401,6 +306,9 @@ impl State {
                         hex::encode(&reg.operator)
                     );
                     current.spos.insert(reg.operator.clone(), reg.clone());
+                    current
+                        .vrf_key_to_pool_id_map
+                        .insert(reg.vrf_key_hash.clone(), reg.operator.clone());
 
                     // Remove any existing queued deregistrations
                     for (epoch, deregistrations) in &mut current.pending_deregistrations.iter_mut()
@@ -458,11 +366,8 @@ impl State {
             }
         }
 
-        // Prune and add to state history
-        if self.history.len() >= SECURITY_PARAMETER_K as usize {
-            self.history.pop_front();
-        }
-        self.history.push_back(current);
+        // Commit the new state
+        self.history.commit(block.number, current);
 
         Ok(message)
     }
@@ -472,151 +377,239 @@ impl State {
     /// Active stake is valid from Epoch N + 1 (Set at Epoch N + 1)
     ///
     pub fn handle_spdd(&mut self, block: &BlockInfo, spdd_message: &SPOStakeDistributionMessage) {
-        info!(
-            "Processing SPO Stake Distribution for epoch {} at block {}, epoch {}",
-            spdd_message.epoch, block.number, block.epoch
-        );
-        let SPOStakeDistributionMessage { spos, .. } = spdd_message;
-        let current = self.get_previous_active_stakes_state(block.number);
-        let mut active_stakes = current.active_stakes.clone();
-        active_stakes.insert(
-            block.epoch + 1,
-            HashMap::from_iter(spos.iter().map(|(key, value)| (key.clone(), value.active))),
-        );
-
-        let new_state = ActiveStakesState {
-            block: block.number,
-            epoch: block.epoch,
-            active_stakes,
-        };
-
-        // Prune old history which can not be rolled back to
-        if let Some(front) = self.active_stakes_history.front() {
-            if current.block > front.block + SECURITY_PARAMETER_K as u64 {
-                self.active_stakes_history.pop_front();
-            }
+        let SPOStakeDistributionMessage { epoch, spos } = spdd_message;
+        if *epoch != block.epoch - 1 {
+            error!(
+                "SPO Stake Distribution Message's epoch {} is wrong against current block's epoch {}",
+                *epoch, block.epoch
+            )
         }
-        self.active_stakes_history.push_back(new_state);
+        let epoch_to_update = *epoch + 2;
+
+        // update active stakes
+        spos.par_iter().for_each(|(spo, value)| {
+            let mut active_stakes = self
+                .active_stakes
+                .entry(spo.clone())
+                .and_modify(|stakes| stakes.retain(|k, _| *k >= block.epoch))
+                .or_insert_with(BTreeMap::new);
+
+            active_stakes.insert(epoch_to_update, value.active);
+        });
     }
 
     /// Handle Epoch Activity
+    /// Returns blocks minted amount keyed by spo
+    ///
     pub fn handle_epoch_activity(
         &mut self,
         block: &BlockInfo,
         epoch_activity_message: &EpochActivityMessage,
-    ) {
-        info!(
-            "Processing Epoch Activity for epoch {} at block {}, epoch {}",
-            epoch_activity_message.epoch, block.number, block.epoch
-        );
+    ) -> Vec<(KeyHash, u64)> {
         let EpochActivityMessage {
-            vrf_vkey_hashes, ..
+            epoch,
+            vrf_vkey_hashes,
+            ..
         } = epoch_activity_message;
-        let current = self.get_previous_total_blocks_minted_state(block.number);
-        let mut total_blocks_minted = current.total_blocks_minted.clone();
+        if *epoch != block.epoch - 1 {
+            error!(
+                "Epoch Activity Message's epoch {} is wrong against current block's epoch {}",
+                *epoch, block.epoch
+            )
+        }
 
+        let mut total_blocks_minted = self
+            .total_blocks_minted_history
+            .get_rolled_back_state(block.number)
+            .total_blocks_minted;
+
+        // handle blocks_minted state
         vrf_vkey_hashes.iter().for_each(|(vrf_vkey_hash, amount)| {
-            let Some(v) = total_blocks_minted.get_mut(vrf_vkey_hash) else {
-                total_blocks_minted.insert(vrf_vkey_hash.clone(), *amount as u64);
-                return;
-            };
-            *v += *amount as u64;
+            total_blocks_minted
+                .entry(vrf_vkey_hash.clone())
+                .and_modify(|v| *v += *amount as u64)
+                .or_insert(*amount as u64);
         });
 
         let new_state = TotalBlocksMintedState {
             block: block.number,
-            epoch: block.epoch,
             total_blocks_minted,
         };
 
-        // Prune old history which can not be rolled back to
-        if let Some(front) = self.total_blocks_minted_history.front() {
-            if current.block > front.block + SECURITY_PARAMETER_K as u64 {
-                self.total_blocks_minted_history.pop_front();
-            }
-        }
-        self.total_blocks_minted_history.push_back(new_state);
+        self.total_blocks_minted_history.commit(block.number, new_state);
+
+        let spos = vrf_vkey_hashes
+            .iter()
+            .filter_map(|(vrf_vkey_hash, amount)| {
+                self.get_spo_from_vrf_key_hash(vrf_vkey_hash).map(|spo| (spo, *amount as u64))
+            })
+            .collect::<Vec<(KeyHash, u64)>>();
+        spos
     }
 
     pub fn bootstrap(&mut self, state: SPOState) {
         self.history.clear();
-        self.history.push_back(state.into());
+        self.history.commit_forced(state.into());
     }
 
     pub fn dump(&self, block_height: u64) -> Option<SPOState> {
-        self.inspect_previous_state(block_height).map(SPOState::from)
+        self.history.get_by_index_reverse(block_height).map(SPOState::from)
     }
 }
 
 // -- Tests --
 #[cfg(test)]
-pub mod tests {
+mod tests {
     use super::*;
-    use acropolis_common::{
-        BlockInfo, BlockStatus, DelegatedStake, Era, PoolRetirement, Ratio, TxCertificate,
-    };
+    use crate::test_utils::*;
+    use acropolis_common::{DelegatedStake, PoolRetirement, Ratio, TxCertificate};
 
     #[tokio::test]
     async fn new_state_is_empty() {
         let state = State::new();
         assert_eq!(0, state.history.len());
-        assert_eq!(0, state.active_stakes_history.len());
+        assert_eq!(0, state.active_stakes.len());
     }
 
     #[tokio::test]
     async fn current_on_new_state_returns_none() {
         let state = State::new();
         assert!(state.current().is_none());
-        assert!(state.current_active_stakes_state().is_none());
-    }
-
-    fn new_msg() -> TxCertificatesMessage {
-        TxCertificatesMessage {
-            certificates: Vec::<TxCertificate>::new(),
-        }
-    }
-
-    fn new_spdd_message() -> SPOStakeDistributionMessage {
-        SPOStakeDistributionMessage {
-            spos: Vec::new(),
-            epoch: 0,
-        }
-    }
-
-    fn new_block() -> BlockInfo {
-        BlockInfo {
-            status: BlockStatus::Immutable,
-            slot: 0,
-            number: 0,
-            hash: Vec::<u8>::new(),
-            epoch: 0,
-            new_epoch: true,
-            era: Era::Byron,
-        }
     }
 
     #[tokio::test]
     async fn state_is_not_empty_after_handle_tx_certs() {
         let mut state = State::new();
-        let msg = new_msg();
-        let block = new_block();
+        let msg = new_certs_msg();
+        let block = new_block(1);
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
         assert_eq!(1, state.history.len());
     }
 
     #[tokio::test]
-    async fn active_stakes_state_is_not_empty_after_handle_spdd() {
+    async fn active_stakes_is_not_empty_after_handle_spdd() {
         let mut state = State::new();
-        let msg = new_spdd_message();
-        let block = new_block();
+        let mut block = new_block(2);
+        let mut msg = new_spdd_message(1);
+        msg.spos = vec![(
+            vec![1],
+            DelegatedStake {
+                active: 1,
+                active_delegators_count: 1,
+                live: 1,
+            },
+        )];
         state.handle_spdd(&block, &msg);
-        assert_eq!(1, state.active_stakes_history.len());
+        assert_eq!(1, state.active_stakes.len());
+        assert_eq!(
+            BTreeMap::from([(3, 1)]),
+            state.active_stakes.get(&vec![1]).unwrap().clone()
+        );
+
+        block = new_block(3);
+        msg = new_spdd_message(2);
+        msg.spos = vec![(
+            vec![1],
+            DelegatedStake {
+                active: 2,
+                active_delegators_count: 1,
+                live: 1,
+            },
+        )];
+        state.handle_spdd(&block, &msg);
+
+        assert_eq!(1, state.active_stakes.len());
+        assert_eq!(
+            BTreeMap::from([(3, 1), (4, 2)]),
+            state.active_stakes.get(&vec![1]).unwrap().clone()
+        );
+
+        block = new_block(4);
+        msg = new_spdd_message(3);
+        msg.spos = vec![(
+            vec![1],
+            DelegatedStake {
+                active: 3,
+                active_delegators_count: 1,
+                live: 1,
+            },
+        )];
+        state.handle_spdd(&block, &msg);
+
+        assert_eq!(1, state.active_stakes.len());
+        assert_eq!(
+            BTreeMap::from([(4, 2), (5, 3)]),
+            state.active_stakes.get(&vec![1]).unwrap().clone()
+        );
+    }
+
+    #[tokio::test]
+    async fn get_total_blocks_minted_returns_zero_when_state_is_new() {
+        let state = State::new();
+        let total_blocks_minted = state.get_total_blocks_minted(&vec![vec![1], vec![2]]);
+        assert_eq!(2, total_blocks_minted.len());
+        assert_eq!(0, total_blocks_minted[0]);
+        assert_eq!(0, total_blocks_minted[1]);
+    }
+
+    #[tokio::test]
+    async fn get_total_blocks_minted_returns_data_after_handle_epoch_activity() {
+        let mut state = State::new();
+        let block = new_block(2);
+        let mut epoch_activity_message = new_epoch_activity_message(1);
+        epoch_activity_message.vrf_vkey_hashes = vec![(vec![2], 1)];
+        epoch_activity_message.total_blocks = 1;
+        epoch_activity_message.total_fees = 10;
+        state.handle_epoch_activity(&block, &epoch_activity_message);
+
+        assert_eq!(1, state.total_blocks_minted_history.len());
+        assert_eq!(
+            vec![1, 0],
+            state.get_total_blocks_minted(&vec![vec![2], vec![3]])
+        );
+    }
+
+    #[tokio::test]
+    async fn total_blocks_minted_history_is_pruned_after_rollback() {
+        let mut state = State::new();
+        let mut block = new_block(2);
+        let mut epoch_activity_message = new_epoch_activity_message(1);
+        epoch_activity_message.vrf_vkey_hashes = vec![(vec![2], 1)];
+        epoch_activity_message.total_blocks = 1;
+        epoch_activity_message.total_fees = 10;
+        state.handle_epoch_activity(&block, &epoch_activity_message);
+
+        block = new_block(3);
+        epoch_activity_message = new_epoch_activity_message(2);
+        epoch_activity_message.vrf_vkey_hashes = vec![(vec![2], 2), (vec![3], 3)];
+        epoch_activity_message.total_blocks = 5;
+        epoch_activity_message.total_fees = 50;
+        state.handle_epoch_activity(&block, &epoch_activity_message);
+
+        assert_eq!(2, state.total_blocks_minted_history.len());
+        assert_eq!(
+            vec![3, 3],
+            state.get_total_blocks_minted(&vec![vec![2], vec![3]])
+        );
+
+        // roll back here
+        epoch_activity_message = new_epoch_activity_message(2);
+        epoch_activity_message.vrf_vkey_hashes = vec![(vec![2], 2)];
+        epoch_activity_message.total_blocks = 2;
+        epoch_activity_message.total_fees = 20;
+        state.handle_epoch_activity(&block, &epoch_activity_message);
+
+        assert_eq!(2, state.total_blocks_minted_history.len());
+        assert_eq!(
+            vec![3, 0],
+            state.get_total_blocks_minted(&vec![vec![2], vec![3]])
+        );
     }
 
     #[tokio::test]
     async fn spo_gets_registered() {
         let mut state = State::new();
-        let mut msg = new_msg();
+        let mut msg = new_certs_msg();
         msg.certificates.push(TxCertificate::PoolRegistration(PoolRegistration {
             operator: vec![0],
             vrf_key_hash: vec![0],
@@ -631,7 +624,7 @@ pub mod tests {
             relays: vec![],
             pool_metadata: None,
         }));
-        let block = new_block();
+        let block = new_block(1);
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
         let current = state.current();
         assert!(!current.is_none());
@@ -645,12 +638,12 @@ pub mod tests {
     #[tokio::test]
     async fn pending_deregistration_gets_queued() {
         let mut state = State::new();
-        let mut msg = new_msg();
+        let mut msg = new_certs_msg();
         msg.certificates.push(TxCertificate::PoolRetirement(PoolRetirement {
             operator: vec![0],
             epoch: 1,
         }));
-        let block = new_block();
+        let block = new_block(0);
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
         let current = state.current();
         assert!(!current.is_none());
@@ -668,14 +661,14 @@ pub mod tests {
     #[tokio::test]
     async fn second_pending_deregistration_gets_queued() {
         let mut state = State::new();
-        let mut msg = new_msg();
+        let mut msg = new_certs_msg();
         msg.certificates.push(TxCertificate::PoolRetirement(PoolRetirement {
             operator: vec![0],
             epoch: 2,
         }));
-        let mut block = new_block();
+        let mut block = new_block(0);
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
-        let mut msg = new_msg();
+        let mut msg = new_certs_msg();
         block.number = 1;
         msg.certificates.push(TxCertificate::PoolRetirement(PoolRetirement {
             operator: vec![1],
@@ -699,21 +692,21 @@ pub mod tests {
     #[tokio::test]
     async fn rollback_removes_second_pending_deregistration() {
         let mut state = State::new();
-        let mut msg = new_msg();
+        let mut msg = new_certs_msg();
         msg.certificates.push(TxCertificate::PoolRetirement(PoolRetirement {
             operator: vec![0],
             epoch: 2,
         }));
-        let mut block = new_block();
+        let mut block = new_block(0);
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
-        let mut msg = new_msg();
+        let mut msg = new_certs_msg();
         block.number = 1;
         msg.certificates.push(TxCertificate::PoolRetirement(PoolRetirement {
             operator: vec![1],
             epoch: 2,
         }));
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
-        let msg = new_msg();
+        let msg = new_certs_msg();
         block.number = 1;
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
         let current = state.current();
@@ -732,7 +725,7 @@ pub mod tests {
     #[tokio::test]
     async fn spo_gets_deregistered() {
         let mut state = State::new();
-        let mut msg = new_msg();
+        let mut msg = new_certs_msg();
         msg.certificates.push(TxCertificate::PoolRegistration(PoolRegistration {
             operator: vec![0],
             vrf_key_hash: vec![0],
@@ -747,7 +740,7 @@ pub mod tests {
             relays: vec![],
             pool_metadata: None,
         }));
-        let mut block = new_block();
+        let mut block = new_block(0);
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
         let current = state.current();
         assert!(!current.is_none());
@@ -756,14 +749,14 @@ pub mod tests {
             let spo = current.spos.get(&vec![0u8]);
             assert!(!spo.is_none());
         };
-        let mut msg = new_msg();
+        let mut msg = new_certs_msg();
         block.number = 1;
         msg.certificates.push(TxCertificate::PoolRetirement(PoolRetirement {
             operator: vec![0],
             epoch: 1,
         }));
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
-        let msg = new_msg();
+        let msg = new_certs_msg();
         block.number = 2;
         block.epoch = 1; // SPO get retired at the start of the epoch it requests
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
@@ -775,32 +768,37 @@ pub mod tests {
     }
 
     #[tokio::test]
-    async fn get_pools_active_stakes_returns_none_when_state_is_new() {
+    async fn get_pools_active_stakes_returns_zero_when_state_is_new() {
         let state = State::new();
-        assert!(state.get_pools_active_stakes(&vec![vec![1], vec![2]], 0).is_none());
+        let (active_stakes, total) = state.get_pools_active_stakes(&vec![vec![1], vec![2]], 0);
+        assert_eq!(2, active_stakes.len());
+        assert_eq!(0, active_stakes[0]);
+        assert_eq!(0, active_stakes[1]);
+        assert_eq!(0, total);
     }
 
     #[tokio::test]
-    async fn get_pools_active_stakes_returns_none_when_epoch_is_not_found() {
+    async fn get_pools_active_stakes_returns_zero_when_epoch_is_not_found() {
         let mut state = State::new();
-        let mut msg = new_spdd_message();
-        msg.epoch = 1;
-        let mut block = new_block();
-        block.epoch = 1;
+        let block = new_block(2);
+        let msg = new_spdd_message(1);
         state.handle_spdd(&block, &msg);
-        assert!(state.get_pools_active_stakes(&vec![vec![1], vec![2]], block.epoch).is_none());
+        let (active_stakes, total) =
+            state.get_pools_active_stakes(&vec![vec![1], vec![2]], block.epoch);
+        assert_eq!(2, active_stakes.len());
+        assert_eq!(0, active_stakes[0]);
+        assert_eq!(0, active_stakes[1]);
+        assert_eq!(0, total);
     }
 
     #[tokio::test]
     async fn get_pools_active_stakes_returns_zero_when_active_stakes_not_found() {
         let mut state = State::new();
-        let mut msg = new_spdd_message();
-        msg.epoch = 1;
-        let mut block = new_block();
-        block.epoch = 1;
+        let block = new_block(2);
+        let msg = new_spdd_message(1);
         state.handle_spdd(&block, &msg);
         let (active_stakes, total) =
-            state.get_pools_active_stakes(&vec![vec![1], vec![2]], block.epoch + 1).unwrap();
+            state.get_pools_active_stakes(&vec![vec![1], vec![2]], block.epoch + 1);
         assert_eq!(2, active_stakes.len());
         assert_eq!(0, active_stakes[0]);
         assert_eq!(0, active_stakes[1]);
@@ -810,12 +808,14 @@ pub mod tests {
     #[tokio::test]
     async fn get_pools_active_stakes_returns_data() {
         let mut state = State::new();
-        let mut msg = new_spdd_message();
+        let block = new_block(2);
+        let mut msg = new_spdd_message(1);
         msg.spos = vec![
             (
                 vec![1],
                 DelegatedStake {
                     active: 10,
+                    active_delegators_count: 1,
                     live: 10,
                 },
             ),
@@ -823,18 +823,15 @@ pub mod tests {
                 vec![2],
                 DelegatedStake {
                     active: 20,
+                    active_delegators_count: 1,
                     live: 20,
                 },
             ),
         ];
-        msg.epoch = 1;
-        let mut block = new_block();
-        block.number = 11;
-        block.epoch = 2;
         state.handle_spdd(&block, &msg);
 
         let (active_stakes, total) =
-            state.get_pools_active_stakes(&vec![vec![1], vec![2]], block.epoch + 1).unwrap();
+            state.get_pools_active_stakes(&vec![vec![1], vec![2]], block.epoch + 1);
         assert_eq!(2, active_stakes.len());
         assert_eq!(10, active_stakes[0]);
         assert_eq!(20, active_stakes[1]);
@@ -844,7 +841,7 @@ pub mod tests {
     #[tokio::test]
     async fn spo_gets_restored_on_rollback() {
         let mut state = State::new();
-        let mut msg = new_msg();
+        let mut msg = new_certs_msg();
         msg.certificates.push(TxCertificate::PoolRegistration(PoolRegistration {
             operator: vec![0],
             vrf_key_hash: vec![0],
@@ -859,9 +856,12 @@ pub mod tests {
             relays: vec![],
             pool_metadata: None,
         }));
-        let mut block = new_block();
+        let mut block = new_block(0);
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
-        println!("{}", serde_json::to_string_pretty(&state.history).unwrap());
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&state.history.values()).unwrap()
+        );
         let current = state.current();
         assert!(!current.is_none());
         if let Some(current) = current {
@@ -869,160 +869,44 @@ pub mod tests {
             let spo = current.spos.get(&vec![0u8]);
             assert!(!spo.is_none());
         };
-        let mut msg = new_msg();
+        let mut msg = new_certs_msg();
         block.number = 1;
         msg.certificates.push(TxCertificate::PoolRetirement(PoolRetirement {
             operator: vec![0],
             epoch: 1,
         }));
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
-        println!("{}", serde_json::to_string_pretty(&state.history).unwrap());
-        let msg = new_msg();
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&state.history.values()).unwrap()
+        );
+        let msg = new_certs_msg();
         block.number = 2;
         block.epoch = 1;
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
-        println!("{}", serde_json::to_string_pretty(&state.history).unwrap());
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&state.history.values()).unwrap()
+        );
         let current = state.current();
         assert!(!current.is_none());
         if let Some(current) = current {
             assert!(current.spos.is_empty());
         };
-        let msg = new_msg();
+        let msg = new_certs_msg();
         block.number = 2;
         block.epoch = 0;
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
-        println!("{}", serde_json::to_string_pretty(&state.history).unwrap());
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&state.history.values()).unwrap()
+        );
         let current = state.current();
         assert!(!current.is_none());
         if let Some(current) = current {
             assert_eq!(1, current.spos.len());
             let spo = current.spos.get(&vec![0u8]);
             assert!(!spo.is_none());
-        };
-    }
-
-    #[tokio::test]
-    async fn active_stakes_get_restored_on_rollback() {
-        let mut state = State::new();
-        let mut msg = new_spdd_message();
-        msg.spos = vec![
-            (
-                vec![1],
-                DelegatedStake {
-                    active: 10,
-                    live: 10,
-                },
-            ),
-            (
-                vec![2],
-                DelegatedStake {
-                    active: 20,
-                    live: 20,
-                },
-            ),
-            (
-                vec![3],
-                DelegatedStake {
-                    active: 30,
-                    live: 30,
-                },
-            ),
-        ];
-        msg.epoch = 1;
-        let mut block = new_block();
-        block.number = 11;
-        block.epoch = 2;
-        state.handle_spdd(&block, &msg);
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&state.active_stakes_history).unwrap()
-        );
-
-        let current = state.current_active_stakes_state();
-        assert!(!current.is_none());
-        if let Some(current) = current {
-            assert_eq!(1, current.active_stakes.len());
-            assert_eq!(
-                10,
-                *current.active_stakes.get(&(block.epoch + 1)).unwrap().get(&vec![1]).unwrap()
-            );
-            assert_eq!(
-                20,
-                *current.active_stakes.get(&(block.epoch + 1)).unwrap().get(&vec![2]).unwrap()
-            );
-            assert_eq!(
-                30,
-                *current.active_stakes.get(&(block.epoch + 1)).unwrap().get(&vec![3]).unwrap()
-            );
-        };
-
-        msg.spos = vec![
-            (
-                vec![1],
-                DelegatedStake {
-                    active: 30,
-                    live: 30,
-                },
-            ),
-            (
-                vec![2],
-                DelegatedStake {
-                    active: 40,
-                    live: 40,
-                },
-            ),
-        ];
-        msg.epoch = 2;
-        block.number = 21;
-        block.epoch = 3;
-        state.handle_spdd(&block, &msg);
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&state.active_stakes_history).unwrap()
-        );
-
-        let current = state.current_active_stakes_state();
-        assert!(!current.is_none());
-        if let Some(current) = current {
-            assert_eq!(2, current.active_stakes.len());
-            assert_eq!(
-                30,
-                *current.active_stakes.get(&(block.epoch + 1)).unwrap().get(&vec![1]).unwrap()
-            );
-            assert_eq!(
-                40,
-                *current.active_stakes.get(&(block.epoch + 1)).unwrap().get(&vec![2]).unwrap()
-            );
-        };
-
-        let mut msg = new_spdd_message();
-        msg.epoch = 2;
-        block.number = 21;
-        block.epoch = 3;
-        state.handle_spdd(&block, &msg);
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&state.active_stakes_history).unwrap()
-        );
-
-        let current = state.current_active_stakes_state();
-        assert!(!current.is_none());
-        if let Some(current) = current {
-            assert_eq!(2, current.active_stakes.len());
-            assert_eq!(
-                10,
-                *current.active_stakes.get(&block.epoch).unwrap().get(&vec![1]).unwrap()
-            );
-            assert_eq!(
-                20,
-                *current.active_stakes.get(&block.epoch).unwrap().get(&vec![2]).unwrap()
-            );
-            assert_eq!(
-                30,
-                *current.active_stakes.get(&block.epoch).unwrap().get(&vec![3]).unwrap()
-            );
-
-            assert!(current.active_stakes.get(&(block.epoch + 1)).unwrap().is_empty());
         };
     }
 
@@ -1035,14 +919,14 @@ pub mod tests {
     #[tokio::test]
     async fn get_retiring_pools_returns_pools() {
         let mut state = State::new();
-        let mut msg = new_msg();
+        let mut msg = new_certs_msg();
         msg.certificates.push(TxCertificate::PoolRetirement(PoolRetirement {
             operator: vec![0],
             epoch: 2,
         }));
-        let mut block = new_block();
+        let mut block = new_block(0);
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
-        let mut msg = new_msg();
+        let mut msg = new_certs_msg();
         block.number = 1;
         msg.certificates.push(TxCertificate::PoolRetirement(PoolRetirement {
             operator: vec![1],
