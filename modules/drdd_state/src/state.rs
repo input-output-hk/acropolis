@@ -19,7 +19,7 @@ pub struct DRepDistribution {
 impl State {
     pub fn new() -> Self {
         Self {
-            drdd_history: StateHistory::new("drdd", HistoryKind::EpochState),
+            drdd_history: StateHistory::new("drdd", HistoryKind::EpochState, true),
         }
     }
 

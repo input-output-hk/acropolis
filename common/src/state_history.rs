@@ -27,15 +27,19 @@ pub struct StateHistory<S> {
 
     // Block or Epoch based history
     kind: HistoryKind,
+
+    // Prune blocks at k and epochs at 2 flag
+    keep_all: bool,
 }
 
 impl<S: Clone + Default> StateHistory<S> {
     /// Construct
-    pub fn new(module: &str, kind: HistoryKind) -> Self {
+    pub fn new(module: &str, kind: HistoryKind, keep_all: bool) -> Self {
         Self {
             history: VecDeque::new(),
             module: module.to_string(),
-            kind: kind,
+            kind,
+            keep_all,
         }
     }
 
@@ -90,6 +94,11 @@ impl<S: Clone + Default> StateHistory<S> {
         self.history.iter().find(|entry| entry.index == index).map(|entry| &entry.state)
     }
 
+    /// Get the most recently stored state at or beore a given index, direct ref
+    pub fn get_at_or_before(&self, index: u64) -> Option<&S> {
+        self.history.iter().rev().find(|entry| entry.index <= index).map(|entry| &entry.state)
+    }
+
     pub fn len(&self) -> usize {
         self.history.len()
     }
@@ -98,12 +107,19 @@ impl<S: Clone + Default> StateHistory<S> {
     pub fn commit(&mut self, index: u64, state: S) {
         match self.kind {
             HistoryKind::BlockState => {
-                while self.history.len() >= SECURITY_PARAMETER_K as usize {
-                    self.history.pop_front();
+                if !self.keep_all {
+                    while self.history.len() >= SECURITY_PARAMETER_K as usize {
+                        self.history.pop_front();
+                    }
                 }
                 self.history.push_back(HistoryEntry { index, state });
             }
             HistoryKind::EpochState => {
+                if !self.keep_all {
+                    while self.history.len() >= 2 {
+                        self.history.pop_front();
+                    }
+                }
                 self.history.push_back(HistoryEntry { index, state });
             }
         }
