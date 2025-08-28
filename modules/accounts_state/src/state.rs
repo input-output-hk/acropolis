@@ -115,18 +115,25 @@ impl State {
 
     /// Get Pools Live stake
     pub fn get_pools_live_stakes(&self, pools_operators: &Vec<KeyHash>) -> Vec<u64> {
+        info!("get_pools_live_stakes start");
         let stake_addresses = self.stake_addresses.lock().unwrap();
-        let live_stakes_map = DashMap::<&KeyHash, u64>::new();
+        let mut live_stakes_map = HashMap::<KeyHash, u64>::new();
+        info!("lock stake_addresses success");
 
         // Collect the SPO keys and UTXO
-        let sas_data: Vec<(&KeyHash, u64)> = stake_addresses
+        let sas_data: Vec<(KeyHash, u64)> = stake_addresses
             .values()
-            .filter_map(|sas| sas.delegated_spo.as_ref().map(|spo| (spo, sas.utxo_value)))
+            .filter_map(|sas| sas.delegated_spo.as_ref().map(|spo| (spo.clone(), sas.utxo_value)))
             .collect();
+        info!("sas_data collected {}", sas_data.len());
 
-        sas_data.par_iter().for_each(|(spo, utxo_value)| {
-            *live_stakes_map.entry(spo).or_insert(0) += utxo_value;
+        sas_data.iter().for_each(|(spo, utxo_value)| {
+            live_stakes_map
+                .entry(spo.clone())
+                .and_modify(|v| *v += utxo_value)
+                .or_insert(*utxo_value);
         });
+        info!("live_stakes_map collected {}", live_stakes_map.len());
 
         pools_operators
             .iter()

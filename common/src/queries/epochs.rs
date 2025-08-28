@@ -1,5 +1,8 @@
 use crate::{messages::EpochActivityMessage, KeyHash, ProtocolParams};
 
+pub const DEFAULT_EPOCHS_QUERY_TOPIC: (&str, &str) =
+    ("epochs-state-query-topic", "cardano.query.epochs");
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum EpochsStateQuery {
     GetLatestEpoch,

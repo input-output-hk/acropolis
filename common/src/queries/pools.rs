@@ -1,5 +1,8 @@
 use crate::{KeyHash, PoolEpochState, PoolRegistration, PoolRetirement};
 
+pub const DEFAULT_POOLS_QUERY_TOPIC: (&str, &str) =
+    ("pools-state-query-topic", "cardano.query.pools");
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum PoolsStateQuery {
     GetPoolsList,
