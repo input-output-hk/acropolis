@@ -182,31 +182,7 @@ impl AccountsState {
                     _ => error!("Unexpected message type: {message:?}"),
                 }
 
-                // Handle epoch activity
-                let (_, message) = ea_message_f.await?;
-                match message.as_ref() {
-                    Message::Cardano((block_info, CardanoMessage::EpochActivity(ea_msg))) => {
-                        let span = info_span!(
-                            "account_state.handle_epoch_activity",
-                            block = block_info.number
-                        );
-                        async {
-                            Self::check_sync(&current_block, &block_info);
-                            state
-                                .handle_epoch_activity(ea_msg)
-                                .await
-                                .inspect_err(|e| error!("EpochActivity handling error: {e:#}"))
-                                .ok();
-                        }
-                        .instrument(span)
-                        .await;
-                    }
-
-                    _ => error!("Unexpected message type: {message:?}"),
-                }
-
-                // Update parameters - *after* reward calculation in epoch-activity above
-                // ready for the *next* epoch boundary
+                // Update parameters, ready for monetary/rewards calc triggered by epoch_activity
                 let (_, message) = params_message_f.await?;
                 match message.as_ref() {
                     Message::Cardano((block_info, CardanoMessage::ProtocolParams(params_msg))) => {
@@ -229,6 +205,29 @@ impl AccountsState {
                             state
                                 .handle_parameters(params_msg)
                                 .inspect_err(|e| error!("Messaging handling error: {e}"))
+                                .ok();
+                        }
+                        .instrument(span)
+                        .await;
+                    }
+
+                    _ => error!("Unexpected message type: {message:?}"),
+                }
+
+                // Handle epoch activity
+                let (_, message) = ea_message_f.await?;
+                match message.as_ref() {
+                    Message::Cardano((block_info, CardanoMessage::EpochActivity(ea_msg))) => {
+                        let span = info_span!(
+                            "account_state.handle_epoch_activity",
+                            block = block_info.number
+                        );
+                        async {
+                            Self::check_sync(&current_block, &block_info);
+                            state
+                                .handle_epoch_activity(ea_msg)
+                                .await
+                                .inspect_err(|e| error!("EpochActivity handling error: {e:#}"))
                                 .ok();
                         }
                         .instrument(span)

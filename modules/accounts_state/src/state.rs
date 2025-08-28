@@ -1,6 +1,6 @@
 //! Acropolis AccountsState: State storage
 use crate::monetary::calculate_monetary_change;
-use crate::rewards::{RewardsResult, RewardsState};
+use crate::rewards::{calculate_rewards, RewardsResult};
 use crate::snapshot::Snapshot;
 use acropolis_common::{
     messages::{
@@ -66,6 +66,28 @@ pub struct Pots {
     pub deposits: Lovelace,
 }
 
+/// State for rewards calculation
+#[derive(Debug, Default, Clone)]
+pub struct EpochSnapshots {
+    /// Latest snapshot (epoch i)
+    pub mark: Arc<Snapshot>,
+
+    /// Previous snapshot (epoch i-1)
+    pub set: Arc<Snapshot>,
+
+    /// One before that (epoch i-2)
+    pub go: Arc<Snapshot>,
+}
+
+impl EpochSnapshots {
+    /// Push a new snapshot
+    pub fn push(&mut self, latest: Snapshot) {
+        self.go = self.set.clone();
+        self.set = self.mark.clone();
+        self.mark = Arc::new(latest);
+    }
+}
+
 /// Overall state - stored per block
 #[derive(Debug, Default, Clone)]
 pub struct State {
@@ -76,8 +98,8 @@ pub struct State {
     /// Wrapped in an Arc so it doesn't get cloned in full by StateHistory
     stake_addresses: Arc<Mutex<HashMap<KeyHash, StakeAddressState>>>,
 
-    /// Reward state - short history of snapshots
-    rewards_state: RewardsState,
+    /// Short history of snapshots
+    epoch_snapshots: EpochSnapshots,
 
     /// Global account pots
     pots: Pots,
@@ -210,15 +232,12 @@ impl State {
         let total_non_obft_blocks = total_blocks - obft_block_count;
         info!(total_blocks, total_non_obft_blocks, "Block counts:");
 
-        // Update the reserves and treasury (monetary.rs)
-        // TODO note using last-but-one epoch's fees for reward pot - why?
-        let monetary_change = calculate_monetary_change(
-            &shelley_params,
-            &self.pots,
-            self.rewards_state.mark.fees,
-            total_non_obft_blocks,
-        )?;
-        self.pots = monetary_change.pots;
+        info!(
+            epoch,
+            reserves = self.pots.reserves,
+            treasury = self.pots.treasury,
+            "Entering "
+        );
 
         // Pay the refunds and MIRs
         self.pay_pool_refunds();
@@ -232,22 +251,35 @@ impl State {
             &self.spos,
             &spo_block_counts,
             &self.pots,
-            total_fees,
+            total_blocks,
         );
-        self.rewards_state.push(snapshot);
+        self.epoch_snapshots.push(snapshot);
 
-        // Stop here if no blocks to pay out on
-        if total_blocks == 0 {
-            return Ok(());
-        }
+        // Update the reserves and treasury (monetary.rs)
+        let monetary_change = calculate_monetary_change(
+            &shelley_params,
+            &self.pots,
+            total_fees,
+            total_non_obft_blocks,
+        )?;
+        self.pots = monetary_change.pots;
 
-        let rs = self.rewards_state.clone();
+        info!(
+            epoch,
+            reserves = self.pots.reserves,
+            treasury = self.pots.treasury,
+            "After monetary change"
+        );
+
+        let performance = self.epoch_snapshots.mark.clone();
+        let staking = self.epoch_snapshots.go.clone();
         self.epoch_rewards_task = Arc::new(Mutex::new(Some(spawn_blocking(move || {
             // Calculate reward payouts
-            rs.calculate_rewards(
+            calculate_rewards(
                 epoch,
+                performance,
+                staking,
                 &shelley_params,
-                total_blocks,
                 monetary_change.stake_rewards,
             )
         }))));
@@ -586,7 +618,7 @@ impl State {
                 match StakeAddress::from_binary(&retired_spo.reward_account) {
                     Ok(stake_address) => {
                         let keyhash = stake_address.get_hash();
-                        debug!(
+                        info!(
                             "SPO {} has retired - refunding their deposit to {}",
                             hex::encode(id),
                             hex::encode(keyhash)

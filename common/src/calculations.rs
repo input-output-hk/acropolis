@@ -2,7 +2,6 @@
 
 const BYRON_SLOTS_PER_EPOCH: u64 = 21_600;
 pub const SHELLEY_SLOTS_PER_EPOCH: u64 = 432_000;
-const SHELLEY_START_SLOT: u64 = 4_492_800;
 const SHELLEY_START_EPOCH: u64 = 208;
 
 /// Derive an epoch number from a slot, handling Byron/Shelley era changes
