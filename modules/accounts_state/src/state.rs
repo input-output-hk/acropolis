@@ -2,6 +2,7 @@
 use crate::monetary::calculate_monetary_change;
 use crate::rewards::{RewardsResult, RewardsState};
 use crate::snapshot::Snapshot;
+use acropolis_common::SPORewards;
 use acropolis_common::{
     messages::{
         DRepStateMessage, EpochActivityMessage, PotDeltasMessage, ProtocolParamsMessage,
@@ -115,16 +116,19 @@ impl State {
     /// Get Pools Live stake
     pub fn get_pools_live_stakes(&self, pools_operators: &Vec<KeyHash>) -> Vec<u64> {
         let stake_addresses = self.stake_addresses.lock().unwrap();
-        let live_stakes_map = DashMap::<&KeyHash, u64>::new();
+        let mut live_stakes_map = HashMap::<KeyHash, u64>::new();
 
         // Collect the SPO keys and UTXO
-        let sas_data: Vec<(&KeyHash, u64)> = stake_addresses
+        let sas_data: Vec<(KeyHash, u64)> = stake_addresses
             .values()
-            .filter_map(|sas| sas.delegated_spo.as_ref().map(|spo| (spo, sas.utxo_value)))
+            .filter_map(|sas| sas.delegated_spo.as_ref().map(|spo| (spo.clone(), sas.utxo_value)))
             .collect();
 
-        sas_data.par_iter().for_each(|(spo, utxo_value)| {
-            *live_stakes_map.entry(spo).or_insert(0) += utxo_value;
+        sas_data.iter().for_each(|(spo, utxo_value)| {
+            live_stakes_map
+                .entry(spo.clone())
+                .and_modify(|v| *v += utxo_value)
+                .or_insert(*utxo_value);
         });
 
         pools_operators
@@ -400,10 +404,11 @@ impl State {
 
     /// Derive the Stake Pool Delegation Distribution (SPDD) - a map of total stake values
     /// (both with and without rewards) for each active SPO
+    /// And Stake Pool Reward State (rewards and delegators_count for each pool)
     /// Key of returned map is the SPO 'operator' ID
     pub fn generate_spdd(&self) -> BTreeMap<KeyHash, DelegatedStake> {
         // Shareable Dashmap with referenced keys
-        let spo_stakes = Arc::new(DashMap::<KeyHash, DelegatedStake>::new());
+        let spo_stakes = DashMap::<KeyHash, DelegatedStake>::new();
 
         // Total stake across all addresses in parallel, first collecting into a vector
         // because imbl::OrdMap doesn't work in Rayon
@@ -420,20 +425,20 @@ impl State {
         // Parallel sum all the stakes into the spo_stake map
         sas_data
             .par_iter() // Rayon multi-threaded iterator
-            .for_each_init(
-                || Arc::clone(&spo_stakes),
-                |map, (spo, (utxo_value, rewards))| {
-                    map.entry(spo.clone())
-                        .and_modify(|v| {
-                            v.active += *utxo_value;
-                            v.live += *utxo_value + *rewards;
-                        })
-                        .or_insert(DelegatedStake {
-                            active: *utxo_value,
-                            live: *utxo_value + *rewards,
-                        });
-                },
-            );
+            .for_each(|(spo, (utxo_value, rewards))| {
+                spo_stakes
+                    .entry(spo.clone())
+                    .and_modify(|v| {
+                        v.active += *utxo_value;
+                        v.active_delegators_count += 1;
+                        v.live += *utxo_value + *rewards;
+                    })
+                    .or_insert(DelegatedStake {
+                        active: *utxo_value,
+                        active_delegators_count: 1,
+                        live: *utxo_value + *rewards,
+                    });
+            });
 
         // Collect into a plain BTreeMap, so that it is ordered on output
         spo_stakes.iter().map(|entry| (entry.key().clone(), entry.value().clone())).collect()
@@ -509,7 +514,12 @@ impl State {
 
     /// Handle an EpochActivityMessage giving total fees and block counts by VRF key for
     /// the just-ended epoch
-    pub async fn handle_epoch_activity(&mut self, ea_msg: &EpochActivityMessage) -> Result<()> {
+    /// This also returns SPO rewards for publishing to the SPDD topic (For epoch N)
+    pub async fn handle_epoch_activity(
+        &mut self,
+        ea_msg: &EpochActivityMessage,
+    ) -> Result<Vec<(KeyHash, SPORewards)>> {
+        let mut spo_rewards: Vec<(KeyHash, SPORewards)> = Vec::new();
         // Reverse map of VRF key to SPO operator ID
         let vrf_to_operator: HashMap<KeyHash, KeyHash> =
             self.spos.iter().map(|(id, spo)| (spo.vrf_key_hash.clone(), id.clone())).collect();
@@ -542,6 +552,9 @@ impl State {
                         self.add_to_reward(&account, amount);
                     }
 
+                    // save SPO rewards
+                    spo_rewards = reward_result.spo_rewards.into_iter().collect();
+
                     // Adjust the reserves for next time with amount actually paid
                     self.pots.reserves -= reward_result.total_paid;
                 }
@@ -549,7 +562,9 @@ impl State {
             }
         };
         // Enter epoch - note the message specifies the epoch that has just *ended*
-        self.enter_epoch(ea_msg.epoch + 1, ea_msg.total_fees, spo_block_counts)
+        self.enter_epoch(ea_msg.epoch + 1, ea_msg.total_fees, spo_block_counts)?;
+
+        Ok(spo_rewards)
     }
 
     /// Handle an SPOStateMessage with the full set of SPOs valid at the end of the last

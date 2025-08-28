@@ -5,7 +5,7 @@ use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::accounts::{PoolsLiveStakes, DEFAULT_ACCOUNTS_QUERY_TOPIC},
     rest_helper::handle_rest,
-    state_history::{HistoryKind, StateHistory},
+    state_history::{StateHistory, StateHistoryStore},
     BlockInfo, BlockStatus,
 };
 use anyhow::Result;
@@ -19,6 +19,8 @@ mod drep_distribution_publisher;
 use drep_distribution_publisher::DRepDistributionPublisher;
 mod spo_distribution_publisher;
 use spo_distribution_publisher::SPODistributionPublisher;
+mod spo_rewards_publisher;
+use spo_rewards_publisher::SPORewardsPublisher;
 mod state;
 use state::State;
 mod monetary;
@@ -39,6 +41,7 @@ const DEFAULT_STAKE_DELTAS_TOPIC: &str = "cardano.stake.deltas";
 const DEFAULT_DREP_STATE_TOPIC: &str = "cardano.drep.state";
 const DEFAULT_DREP_DISTRIBUTION_TOPIC: &str = "cardano.drep.distribution";
 const DEFAULT_SPO_DISTRIBUTION_TOPIC: &str = "cardano.spo.distribution";
+const DEFAULT_SPO_REWARDS_TOPIC: &str = "cardano.spo.rewards";
 const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: &str = "cardano.protocol.parameters";
 
 const DEFAULT_HANDLE_POTS_TOPIC: (&str, &str) = ("handle-topic-pots", "rest.get.pots");
@@ -57,6 +60,7 @@ impl AccountsState {
         history: Arc<Mutex<StateHistory<State>>>,
         mut drep_publisher: DRepDistributionPublisher,
         mut spo_publisher: SPODistributionPublisher,
+        mut spo_rewards_publisher: SPORewardsPublisher,
         mut spos_subscription: Box<dyn Subscription<Message>>,
         mut ea_subscription: Box<dyn Subscription<Message>>,
         mut certs_subscription: Box<dyn Subscription<Message>>,
@@ -192,11 +196,20 @@ impl AccountsState {
                         );
                         async {
                             Self::check_sync(&current_block, &block_info);
-                            state
+                            let spo_rewards = state
                                 .handle_epoch_activity(ea_msg)
                                 .await
                                 .inspect_err(|e| error!("EpochActivity handling error: {e:#}"))
                                 .ok();
+                            // SPO rewards is for previous epoch
+                            if let Some(spo_rewards) = spo_rewards {
+                                if let Err(e) = spo_rewards_publisher
+                                    .publish_spo_rewards(block_info, spo_rewards)
+                                    .await
+                                {
+                                    error!("Error publishing SPO rewards: {e:#}")
+                                }
+                            }
                         }
                         .instrument(span)
                         .await;
@@ -370,6 +383,10 @@ impl AccountsState {
             .get_string("publish-spo-distribution-topic")
             .unwrap_or(DEFAULT_SPO_DISTRIBUTION_TOPIC.to_string());
 
+        let spo_rewards_topic = config
+            .get_string("publish-spo-rewards-topic")
+            .unwrap_or(DEFAULT_SPO_REWARDS_TOPIC.to_string());
+
         // REST handler topics
         let handle_pots_topic = config
             .get_string(DEFAULT_HANDLE_POTS_TOPIC.0)
@@ -385,7 +402,7 @@ impl AccountsState {
         // Create history
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "AccountsState",
-            HistoryKind::BlockState,
+            StateHistoryStore::default_block_store(),
         )));
         let history_account_state = history.clone();
         let history_pots = history.clone();
@@ -483,6 +500,7 @@ impl AccountsState {
         let drep_publisher =
             DRepDistributionPublisher::new(context.clone(), drep_distribution_topic);
         let spo_publisher = SPODistributionPublisher::new(context.clone(), spo_distribution_topic);
+        let spo_rewards_publisher = SPORewardsPublisher::new(context.clone(), spo_rewards_topic);
 
         // Subscribe
         let spos_subscription = context.subscribe(&spo_state_topic).await?;
@@ -500,6 +518,7 @@ impl AccountsState {
                 history,
                 drep_publisher,
                 spo_publisher,
+                spo_rewards_publisher,
                 spos_subscription,
                 ea_subscription,
                 certs_subscription,

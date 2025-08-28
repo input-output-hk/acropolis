@@ -2,14 +2,20 @@
 //! Keeps per-block state for rollbacks or per-epoch state for historical lookups
 //! Use imbl collections in the state to avoid memory explosion!
 
-use crate::params::SECURITY_PARAMETER_K;
 use std::collections::VecDeque;
-
 use tracing::info;
 
-pub enum HistoryKind {
-    BlockState, // Used for rollbacks, bounded at k
-    EpochState, // Used for historical lookups, unbounded
+use crate::params::SECURITY_PARAMETER_K;
+
+pub enum StateHistoryStore {
+    Bounded(u64), // Used for rollbacks, bounded at k
+    Unbounded,    // Used for historical lookups, unbounded
+}
+
+impl StateHistoryStore {
+    pub fn default_block_store() -> Self {
+        Self::Bounded(SECURITY_PARAMETER_K)
+    }
 }
 
 struct HistoryEntry<S> {
@@ -25,17 +31,16 @@ pub struct StateHistory<S> {
     /// Module name
     module: String,
 
-    // Block or Epoch based history
-    kind: HistoryKind,
+    store: StateHistoryStore,
 }
 
 impl<S: Clone + Default> StateHistory<S> {
     /// Construct
-    pub fn new(module: &str, kind: HistoryKind) -> Self {
+    pub fn new(module: &str, store: StateHistoryStore) -> Self {
         Self {
             history: VecDeque::new(),
             module: module.to_string(),
-            kind: kind,
+            store,
         }
     }
 
@@ -50,38 +55,25 @@ impl<S: Clone + Default> StateHistory<S> {
         self.history.back().map(|entry| entry.state.clone()).unwrap_or_default()
     }
 
+    /// Get all the states references in the history
+    pub fn values(&self) -> Vec<&S> {
+        self.history.iter().map(|entry| &entry.state).collect()
+    }
+
     /// Get the previous state for the given block, handling rollbacks if required
     /// State returned is cloned ready for modification - call commit() when done
     pub fn get_rolled_back_state(&mut self, index: u64) -> S {
-        match self.kind {
-            HistoryKind::BlockState => {
-                while let Some(entry) = self.history.back() {
-                    if entry.index >= index {
-                        info!(
-                            "{} rolling back state to {} removing block {}",
-                            self.module, index, entry.index
-                        );
-                        self.history.pop_back();
-                    } else {
-                        break;
-                    }
-                }
-            }
-            HistoryKind::EpochState => {
-                while let Some(entry) = self.history.back() {
-                    if entry.index >= index {
-                        info!(
-                            "{} rolling back epoch state to {} removing epoch {}",
-                            self.module, index, entry.index
-                        );
-                        self.history.pop_back();
-                    } else {
-                        break;
-                    }
-                }
+        while let Some(entry) = self.history.back() {
+            if entry.index >= index {
+                info!(
+                    "{} rolling back state to {} removing block {}",
+                    self.module, index, entry.index
+                );
+                self.history.pop_back();
+            } else {
+                break;
             }
         }
-
         self.get_current_state()
     }
 
@@ -90,20 +82,36 @@ impl<S: Clone + Default> StateHistory<S> {
         self.history.iter().find(|entry| entry.index == index).map(|entry| &entry.state)
     }
 
+    /// Return a reference to the state at the given block number, if it exists
+    pub fn get_by_index_reverse(&self, index: u64) -> Option<&S> {
+        self.history.iter().rev().find(|entry| entry.index == index).map(|entry| &entry.state)
+    }
+
+    /// Get state history's size
     pub fn len(&self) -> usize {
         self.history.len()
     }
 
+    /// Commit new state without checking the block number
+    /// TODO: enhance block number logic to commit state without check (for bootstrapping)
+    pub fn commit_forced(&mut self, state: S) {
+        self.history.push_back(HistoryEntry { index: 0, state });
+    }
+
     /// Commit the new state
     pub fn commit(&mut self, index: u64, state: S) {
-        match self.kind {
-            HistoryKind::BlockState => {
-                while self.history.len() >= SECURITY_PARAMETER_K as usize {
-                    self.history.pop_front();
+        match self.store {
+            StateHistoryStore::Bounded(k) => {
+                while let Some(entry) = self.history.front() {
+                    if (index - entry.index) > k {
+                        self.history.pop_front();
+                    } else {
+                        break;
+                    }
                 }
                 self.history.push_back(HistoryEntry { index, state });
             }
-            HistoryKind::EpochState => {
+            StateHistoryStore::Unbounded => {
                 self.history.push_back(HistoryEntry { index, state });
             }
         }
@@ -121,5 +129,10 @@ impl<S: Clone> StateHistory<S> {
         } else {
             init()
         }
+    }
+
+    /// Clear the history
+    pub fn clear(&mut self) {
+        self.history.clear();
     }
 }
