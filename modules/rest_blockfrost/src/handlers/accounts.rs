@@ -9,7 +9,7 @@ use acropolis_common::{Address, DRepChoice, StakeAddress, StakeAddressPayload};
 use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
 
-use crate::query_topics::QueryTopics;
+use crate::handlers_config::HandlersConfig;
 
 #[derive(serde::Serialize)]
 pub struct StakeAccountRest {
@@ -29,7 +29,7 @@ pub struct DRepChoiceRest {
 pub async fn handle_single_account_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
-    query_topics: Arc<QueryTopics>,
+    handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
     let Some(stake_address) = params.get(0) else {
         return Ok(RESTResponse::with_text(
@@ -58,7 +58,7 @@ pub async fn handle_single_account_blockfrost(
     )));
     let account = query_state(
         &context,
-        &query_topics.accounts_query_topic,
+        &handlers_config.accounts_query_topic,
         msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Accounts(
