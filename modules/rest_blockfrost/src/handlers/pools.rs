@@ -16,8 +16,8 @@ use caryatid_sdk::Context;
 use rust_decimal::Decimal;
 use std::sync::Arc;
 
-use crate::query_topics::QueryTopics;
 use crate::types::{PoolEpochStateRest, PoolExtendedRest, PoolRetirementRest};
+use crate::{query_topics::QueryTopics, types::PoolMetadataRest, utils::fetch_pool_metadata};
 
 /// Handle `/pools` Blockfrost-compatible endpoint
 pub async fn handle_pools_list_blockfrost(
@@ -540,11 +540,66 @@ pub async fn handle_pool_history_blockfrost(
 }
 
 pub async fn handle_pool_metadata_blockfrost(
-    _context: Arc<Context<Message>>,
-    _params: Vec<String>,
-    _query_topics: Arc<QueryTopics>,
+    context: Arc<Context<Message>>,
+    params: Vec<String>,
+    query_topics: Arc<QueryTopics>,
 ) -> Result<RESTResponse> {
-    Ok(RESTResponse::with_text(501, "Not implemented"))
+    let Some(pool_id) = params.get(0) else {
+        return Ok(RESTResponse::with_text(400, "Missing pool ID parameter"));
+    };
+
+    let Ok(spo) = Vec::<u8>::from_bech32_with_hrp(pool_id, "pool") else {
+        return Ok(RESTResponse::with_text(
+            400,
+            &format!("Invalid Bech32 stake pool ID: {pool_id}"),
+        ));
+    };
+
+    let pool_metadata_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
+        PoolsStateQuery::GetPoolMetadata {
+            pool_id: spo.clone(),
+        },
+    )));
+    let pool_metadata = query_state(
+        &context,
+        &query_topics.pools_query_topic,
+        pool_metadata_msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::PoolMetadata(pool_metadata),
+            )) => Ok(pool_metadata),
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::NotFound,
+            )) => Err(anyhow::anyhow!("Not found")),
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::Error(e),
+            )) => Err(anyhow::anyhow!(
+                "Internal server error while retrieving pool metadata: {e}"
+            )),
+            _ => Err(anyhow::anyhow!("Unexpected message type")),
+        },
+    )
+    .await?;
+
+    let pool_metadata_json = fetch_pool_metadata(pool_metadata.url.clone()).await?;
+    let pool_metadata_rest = PoolMetadataRest {
+        pool_id: pool_id.to_string(),
+        hex: hex::encode(spo),
+        url: pool_metadata.url,
+        hash: hex::encode(pool_metadata.hash),
+        ticker: pool_metadata_json.ticker,
+        name: pool_metadata_json.name,
+        description: pool_metadata_json.description,
+        homepage: pool_metadata_json.homepage,
+    };
+
+    match serde_json::to_string(&pool_metadata_rest) {
+        Ok(json) => Ok(RESTResponse::with_json(200, &json)),
+        Err(e) => Ok(RESTResponse::with_text(
+            500,
+            &format!("Internal server error while retrieving pool metadata: {e}"),
+        )),
+    }
 }
 
 pub async fn handle_pool_relays_blockfrost(

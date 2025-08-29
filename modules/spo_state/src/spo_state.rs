@@ -313,6 +313,19 @@ impl SPOState {
                         }
                     }
 
+                    PoolsStateQuery::GetPoolMetadata { pool_id } => {
+                        // NOTE:
+                        // we need to check retired pools metadata
+                        // to do so, we need to save retired pool's registration
+                        //
+                        let pool_metadata = guard.get_pool_metadata(pool_id);
+                        if let Some(pool_metadata) = pool_metadata {
+                            PoolsStateQueryResponse::PoolMetadata(pool_metadata)
+                        } else {
+                            PoolsStateQueryResponse::NotFound
+                        }
+                    }
+
                     _ => PoolsStateQueryResponse::Error(format!(
                         "Unimplemented query variant: {:?}",
                         query

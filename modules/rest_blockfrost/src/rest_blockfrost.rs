@@ -13,6 +13,7 @@ use tracing::info;
 mod handlers;
 mod query_topics;
 mod types;
+mod utils;
 use handlers::{
     accounts::handle_single_account_blockfrost,
     governance::{

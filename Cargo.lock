@@ -197,6 +197,7 @@ dependencies = [
  "caryatid_sdk",
  "config",
  "hex",
+ "reqwest 0.12.23",
  "rust_decimal",
  "serde",
  "serde_json",
