@@ -393,7 +393,7 @@ impl AccountsState {
             .unwrap_or(DEFAULT_HANDLE_POTS_TOPIC.1.to_string());
         info!("Creating request handler on '{}'", handle_pots_topic);
 
-        // Query topic
+        // Query topics
         let accounts_query_topic = config
             .get_string(DEFAULT_ACCOUNTS_QUERY_TOPIC.0)
             .unwrap_or(DEFAULT_ACCOUNTS_QUERY_TOPIC.1.to_string());
@@ -457,6 +457,24 @@ impl AccountsState {
                             "Error retrieving DRep delegations map".to_string(),
                         ),
                     },
+
+                    AccountsStateQuery::GetAccountsBalancesMap { stake_keys } => {
+                        match state.get_accounts_balances_map(stake_keys) {
+                            Some(map) => AccountsStateQueryResponse::AccountsBalancesMap(map),
+                            None => AccountsStateQueryResponse::Error(
+                                "One or more accounts not found".to_string(),
+                            ),
+                        }
+                    }
+
+                    AccountsStateQuery::GetAccountsBalancesSum { stake_keys } => {
+                        match state.get_account_balances_sum(stake_keys) {
+                            Some(sum) => AccountsStateQueryResponse::AccountsBalancesSum(sum),
+                            None => AccountsStateQueryResponse::Error(
+                                "One or more accounts not found".to_string(),
+                            ),
+                        }
+                    }
 
                     _ => AccountsStateQueryResponse::Error(format!(
                         "Unimplemented query variant: {:?}",

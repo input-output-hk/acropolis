@@ -18,6 +18,8 @@ pub enum AccountsStateQuery {
     GetAccountAssets { stake_key: Vec<u8> },
     GetAccountAssetsTotals { stake_key: Vec<u8> },
     GetAccountUTxOs { stake_key: Vec<u8> },
+    GetAccountsBalancesMap { stake_keys: Vec<Vec<u8>> },
+    GetAccountsBalancesSum { stake_keys: Vec<Vec<u8>> },
 
     // Pools related queries
     GetPoolsLiveStakes { pools_operators: Vec<Vec<u8>> },
@@ -39,6 +41,8 @@ pub enum AccountsStateQueryResponse {
     AccountAssets(AccountAssets),
     AccountAssetsTotals(AccountAssetsTotals),
     AccountUTxOs(AccountUTxOs),
+    AccountsBalancesMap(HashMap<Vec<u8>, u64>),
+    AccountsBalancesSum(u64),
 
     // Pools related responses
     PoolsLiveStakes(PoolsLiveStakes),

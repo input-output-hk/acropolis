@@ -8,7 +8,7 @@ use acropolis_common::{
     },
     queries::governance::{
         GovernanceStateQuery, GovernanceStateQueryResponse, ProposalInfo, ProposalVotes,
-        ProposalsList,
+        ProposalsList, DEFAULT_GOVERNANCE_QUERY_TOPIC,
     },
     BlockInfo,
 };
@@ -48,6 +48,7 @@ pub struct GovernanceStateConfig {
     spo_distribution_topic: String,
     protocol_parameters_topic: String,
     enact_state_topic: String,
+    governance_query_topic: String,
 }
 
 impl GovernanceStateConfig {
@@ -64,6 +65,7 @@ impl GovernanceStateConfig {
             spo_distribution_topic: Self::conf(config, DEFAULT_SPO_DISTRIBUTION_TOPIC),
             protocol_parameters_topic: Self::conf(config, DEFAULT_PROTOCOL_PARAMETERS_TOPIC),
             enact_state_topic: Self::conf(config, DEFAULT_ENACT_STATE_TOPIC),
+            governance_query_topic: Self::conf(config, DEFAULT_GOVERNANCE_QUERY_TOPIC),
         })
     }
 }
@@ -162,7 +164,7 @@ impl GovernanceState {
         });
 
         let query_state = state.clone();
-        context.handle("governance-state", move |message| {
+        context.handle(&config.governance_query_topic, move |message| {
             let state_handle = query_state.clone();
             async move {
                 let Message::StateQuery(StateQuery::Governance(query)) = message.as_ref() else {

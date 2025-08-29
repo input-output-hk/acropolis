@@ -137,6 +137,23 @@ impl State {
             .collect()
     }
 
+    /// Map stake_keys to their total balances (utxo + rewards)
+    pub fn get_accounts_balances_map(
+        &self,
+        stake_keys: &[Vec<u8>],
+    ) -> Option<HashMap<Vec<u8>, u64>> {
+        let accounts = self.stake_addresses.lock().unwrap();
+        let mut map = HashMap::new();
+
+        for key in stake_keys {
+            let account = accounts.get(key)?;
+            let balance = account.utxo_value + account.rewards;
+            map.insert(key.clone(), balance);
+        }
+
+        Some(map)
+    }
+
     /// Map stake_keys to their delegated DRep
     pub fn get_drep_delegations_map(
         &self,
@@ -153,6 +170,17 @@ impl State {
         }
 
         Some(map)
+    }
+
+    /// Sum stake_keys balances (utxo + rewards)
+    pub fn get_account_balances_sum(&self, stake_keys: &[Vec<u8>]) -> Option<u64> {
+        let accounts = self.stake_addresses.lock().unwrap();
+        let mut total = 0;
+        for key in stake_keys {
+            let account = accounts.get(key)?;
+            total += account.utxo_value + account.rewards;
+        }
+        Some(total)
     }
 
     /// Log statistics
