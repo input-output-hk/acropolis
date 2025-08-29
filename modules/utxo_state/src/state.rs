@@ -2,7 +2,7 @@
 use crate::volatile_index::VolatileIndex;
 use acropolis_common::{
     messages::UTXODeltasMessage, params::SECURITY_PARAMETER_K, Address, BlockInfo, BlockStatus,
-    TxInput, TxOutput, UTXODelta,
+    TxHash, TxInput, TxOutput, UTXODelta,
 };
 use anyhow::Result;
 use async_trait::async_trait;
@@ -15,8 +15,8 @@ use tracing::{debug, error, info};
 /// Key of ledger state store
 #[derive(Debug, Clone, Eq)]
 pub struct UTXOKey {
-    pub hash: [u8; 32], // Tx hash
-    pub index: u64,     // Output index in the transaction
+    pub hash: TxHash, // Tx hash
+    pub index: u64,   // Output index in the transaction
 }
 
 impl UTXOKey {
@@ -438,7 +438,7 @@ mod tests {
     async fn observe_output_adds_to_immutable_utxos() {
         let mut state = new_state();
         let output = TxOutput {
-            tx_hash: vec![42],
+            tx_hash: TxHash::default(),
             index: 0,
             address: create_address(99),
             value: 42,
@@ -467,7 +467,7 @@ mod tests {
     async fn observe_input_spends_utxo() {
         let mut state = new_state();
         let output = TxOutput {
-            tx_hash: vec![42],
+            tx_hash: TxHash::default(),
             index: 0,
             address: create_address(99),
             value: 42,
@@ -493,7 +493,7 @@ mod tests {
     async fn rollback_removes_future_created_utxos() {
         let mut state = new_state();
         let output = TxOutput {
-            tx_hash: vec![42],
+            tx_hash: TxHash::default(),
             index: 0,
             address: create_address(99),
             value: 42,
@@ -518,7 +518,7 @@ mod tests {
 
         // Create the UTXO in block 10
         let output = TxOutput {
-            tx_hash: vec![42],
+            tx_hash: TxHash::default(),
             index: 0,
             address: create_address(99),
             value: 42,
@@ -555,7 +555,7 @@ mod tests {
     async fn prune_shifts_new_utxos_into_immutable() {
         let mut state = new_state();
         let output = TxOutput {
-            tx_hash: vec![42],
+            tx_hash: TxHash::default(),
             index: 0,
             address: create_address(99),
             value: 42,
@@ -587,7 +587,7 @@ mod tests {
     async fn prune_deletes_old_spent_utxos() {
         let mut state = new_state();
         let output = TxOutput {
-            tx_hash: vec![42],
+            tx_hash: TxHash::default(),
             index: 0,
             address: create_address(99),
             value: 42,
@@ -658,7 +658,7 @@ mod tests {
         state.register_address_delta_observer(observer.clone());
 
         let output = TxOutput {
-            tx_hash: vec![42],
+            tx_hash: TxHash::default(),
             index: 0,
             address: create_address(99),
             value: 42,
@@ -689,7 +689,7 @@ mod tests {
         state.register_address_delta_observer(observer.clone());
 
         let output = TxOutput {
-            tx_hash: vec![42],
+            tx_hash: TxHash::default(),
             index: 0,
             address: create_address(99),
             value: 42,
@@ -718,7 +718,7 @@ mod tests {
 
         // Create the UTXO in block 10
         let output = TxOutput {
-            tx_hash: vec![42],
+            tx_hash: TxHash::default(),
             index: 0,
             address: create_address(99),
             value: 42,
