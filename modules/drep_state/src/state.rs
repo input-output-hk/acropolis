@@ -5,9 +5,10 @@ use acropolis_common::{
     queries::{
         accounts::{AccountsStateQuery, AccountsStateQueryResponse, DEFAULT_ACCOUNTS_QUERY_TOPIC},
         get_query_topic,
+        governance::{DRepActionUpdate, DRepUpdateEvent, VoteRecord},
     },
-    Anchor, Credential, DRepChoice, DRepCredential, Lovelace, StakeCredential, TxCertificate, Vote,
-    Voter, VotingProcedures,
+    Anchor, Credential, DRepChoice, DRepCredential, Lovelace, StakeCredential, TxCertificate,
+    TxHash, Voter, VotingProcedures,
 };
 use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
@@ -64,27 +65,6 @@ pub struct DRepRecordExtended {
     pub last_active_epoch: u64,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
-pub struct DRepUpdateEvent {
-    pub tx_hash: [u8; 32],
-    pub cert_index: u64,
-    pub action: DRepActionUpdate,
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
-pub enum DRepActionUpdate {
-    Registered,
-    Updated,
-    Deregistered,
-}
-
-#[derive(Clone, serde::Serialize, serde::Deserialize, Debug)]
-pub struct VoteRecord {
-    pub tx_hash: [u8; 32],
-    pub vote_index: u32,
-    pub vote: Vote,
-}
-
 impl DRepRecord {
     pub fn new(deposit: Lovelace, anchor: Option<Anchor>) -> Self {
         Self { deposit, anchor }
@@ -135,6 +115,7 @@ impl State {
         self.dreps.len()
     }
 
+    #[allow(dead_code)]
     pub fn get_drep(&self, credential: &DRepCredential) -> Option<&DRepRecord> {
         self.dreps.get(credential)
     }
@@ -150,6 +131,88 @@ impl State {
     pub async fn tick(&self) -> Result<()> {
         self.log_stats().await;
         Ok(())
+    }
+
+    pub fn get_drep_info(
+        &self,
+        credential: &DRepCredential,
+    ) -> Result<Option<&DRepRecordExtended>, &'static str> {
+        let hist = self
+            .historical_dreps
+            .as_ref()
+            .ok_or("Historical DRep storage is disabled by configuration.")?;
+        match hist.get(credential) {
+            Some(e) => {
+                e.info.as_ref().ok_or("DRep info storage is disabled by configuration.").map(Some)
+            }
+            None => Ok(None),
+        }
+    }
+
+    pub fn get_drep_delegators(
+        &self,
+        credential: &DRepCredential,
+    ) -> Result<Option<&Vec<Credential>>, &'static str> {
+        let hist = self
+            .historical_dreps
+            .as_ref()
+            .ok_or("Historical DRep storage is disabled by configuration.")?;
+        match hist.get(credential) {
+            Some(e) => e
+                .delegators
+                .as_ref()
+                .ok_or("DRep delegator storage is disabled by configuration.")
+                .map(Some),
+            None => Ok(None),
+        }
+    }
+
+    pub fn get_drep_anchor(
+        &self,
+        credential: &DRepCredential,
+    ) -> Result<Option<&Anchor>, &'static str> {
+        let hist = self
+            .historical_dreps
+            .as_ref()
+            .ok_or("Historical DRep storage is disabled by configuration.")?;
+        match hist.get(credential) {
+            Some(e) => e.metadata.as_ref().ok_or("DRep metadata not found").map(|m| m.as_ref()),
+            None => Ok(None),
+        }
+    }
+
+    pub fn get_drep_updates(
+        &self,
+        credential: &DRepCredential,
+    ) -> Result<Option<&Vec<DRepUpdateEvent>>, &'static str> {
+        let hist = self
+            .historical_dreps
+            .as_ref()
+            .ok_or("Historical DRep storage is disabled by configuration.")?;
+        match hist.get(credential) {
+            Some(e) => e
+                .updates
+                .as_ref()
+                .ok_or("DRep updates storage is disabled by configuration.")
+                .map(Some),
+            None => Ok(None),
+        }
+    }
+
+    pub fn get_drep_votes(
+        &self,
+        credential: &DRepCredential,
+    ) -> Result<Option<&Vec<VoteRecord>>, &'static str> {
+        let hist = self
+            .historical_dreps
+            .as_ref()
+            .ok_or("Historical DRep storage is disabled by configuration.")?;
+        match hist.get(credential) {
+            Some(e) => {
+                e.votes.as_ref().ok_or("DRep votes storage is disabled by configuration.").map(Some)
+            }
+            None => Ok(None),
+        }
     }
 }
 
@@ -188,7 +251,7 @@ impl State {
 
     pub fn process_votes(
         &mut self,
-        voting_procedures: &[([u8; 32], VotingProcedures)],
+        voting_procedures: &[(TxHash, VotingProcedures)],
     ) -> Result<()> {
         let Some(hist_map) = self.historical_dreps.as_mut() else {
             return Ok(());
@@ -207,10 +270,6 @@ impl State {
                     .entry(drep_cred)
                     .or_insert_with(|| HistoricalDRepState::from_config(&cfg));
 
-                // ensure votes vec exists if we created from a config that didn’t set it before
-                if entry.votes.is_none() {
-                    entry.votes = Some(Vec::new());
-                }
                 let votes = entry.votes.as_mut().unwrap();
 
                 for (_, vp) in &single_votes.voting_procedures {
@@ -506,7 +565,7 @@ mod tests {
     use crate::state::{DRepRecord, DRepStorageConfig, State};
     use acropolis_common::{
         Anchor, Credential, DRepDeregistration, DRepDeregistrationWithPos, DRepRegistration,
-        DRepRegistrationWithPos, DRepUpdate, DRepUpdateWithPos, TxCertificate,
+        DRepRegistrationWithPos, DRepUpdate, DRepUpdateWithPos, TxCertificate, TxHash,
     };
 
     const CRED_1: [u8; 28] = [
@@ -527,7 +586,7 @@ mod tests {
                 deposit: 500000000,
                 anchor: None,
             },
-            tx_hash: [0u8; 32],
+            tx_hash: TxHash::default(),
             cert_index: 1,
         });
         let mut state = State::new(DRepStorageConfig::default());
@@ -552,7 +611,7 @@ mod tests {
                 deposit: 500000000,
                 anchor: None,
             },
-            tx_hash: [0u8; 32],
+            tx_hash: TxHash::default(),
             cert_index: 1,
         });
         let mut state = State::new(DRepStorageConfig::default());
@@ -564,7 +623,7 @@ mod tests {
                 deposit: 600000000,
                 anchor: None,
             },
-            tx_hash: [0u8; 32],
+            tx_hash: TxHash::default(),
             cert_index: 1,
         });
         assert!(state.process_one_cert(&bad_tx_cert, 1).is_err());
@@ -589,7 +648,7 @@ mod tests {
                 deposit: 500000000,
                 anchor: None,
             },
-            tx_hash: [0u8; 32],
+            tx_hash: TxHash::default(),
             cert_index: 1,
         });
         let mut state = State::new(DRepStorageConfig::default());
@@ -604,7 +663,7 @@ mod tests {
                 credential: tx_cred.clone(),
                 anchor: Some(anchor.clone()),
             },
-            tx_hash: [0u8; 32],
+            tx_hash: TxHash::default(),
             cert_index: 1,
         });
 
@@ -633,7 +692,7 @@ mod tests {
                 deposit: 500000000,
                 anchor: None,
             },
-            tx_hash: [0u8; 32],
+            tx_hash: TxHash::default(),
             cert_index: 1,
         });
         let mut state = State::new(DRepStorageConfig::default());
@@ -648,7 +707,7 @@ mod tests {
                 credential: Credential::AddrKeyHash(CRED_2.to_vec()),
                 anchor: Some(anchor.clone()),
             },
-            tx_hash: [0u8; 32],
+            tx_hash: TxHash::default(),
             cert_index: 1,
         });
         assert!(state.process_one_cert(&update_anchor_tx_cert, 1).is_err());
@@ -673,7 +732,7 @@ mod tests {
                 deposit: 500000000,
                 anchor: None,
             },
-            tx_hash: [0u8; 32],
+            tx_hash: TxHash::default(),
             cert_index: 1,
         });
         let mut state = State::new(DRepStorageConfig::default());
@@ -684,7 +743,7 @@ mod tests {
                 credential: tx_cred.clone(),
                 refund: 500000000,
             },
-            tx_hash: [0u8; 32],
+            tx_hash: TxHash::default(),
             cert_index: 1,
         });
         assert_eq!(
@@ -704,7 +763,7 @@ mod tests {
                 deposit: 500000000,
                 anchor: None,
             },
-            tx_hash: [0u8; 32],
+            tx_hash: TxHash::default(),
             cert_index: 1,
         });
         let mut state = State::new(DRepStorageConfig::default());
@@ -715,7 +774,7 @@ mod tests {
                 credential: Credential::AddrKeyHash(CRED_2.to_vec()),
                 refund: 500000000,
             },
-            tx_hash: [0u8; 32],
+            tx_hash: TxHash::default(),
             cert_index: 1,
         });
         assert!(state.process_one_cert(&unregister_tx_cert, 1).is_err());

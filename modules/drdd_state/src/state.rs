@@ -1,5 +1,5 @@
 use acropolis_common::{
-    state_history::{HistoryKind, StateHistory},
+    state_history::{StateHistory, StateHistoryStore},
     DRepCredential,
 };
 use imbl::{OrdMap, OrdSet};
@@ -19,7 +19,7 @@ pub struct DRepDistribution {
 impl State {
     pub fn new() -> Self {
         Self {
-            drdd_history: StateHistory::new("drdd", HistoryKind::EpochState, true),
+            drdd_history: StateHistory::new("drdd", StateHistoryStore::Unbounded),
         }
     }
 

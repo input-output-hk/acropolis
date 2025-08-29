@@ -11,6 +11,7 @@ use caryatid_sdk::{module, Context, Module};
 use config::Config;
 use tracing::info;
 mod handlers;
+mod query_topics;
 mod types;
 use handlers::{
     accounts::handle_single_account_blockfrost,
@@ -30,6 +31,8 @@ use handlers::{
         handle_pools_list_blockfrost,
     },
 };
+
+use crate::query_topics::QueryTopics;
 
 // Accounts topics
 const DEFAULT_HANDLE_SINGLE_ACCOUNT_TOPIC: (&str, &str) =
@@ -113,12 +116,16 @@ const DEFAULT_HANDLE_POOL_VOTES_TOPIC: (&str, &str) =
 pub struct BlockfrostREST;
 
 impl BlockfrostREST {
-    pub async fn init(&self, context: Arc<Context<Message>>, _config: Arc<Config>) -> Result<()> {
+    pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
+        // load query topics from config
+        let query_topics = Arc::new(QueryTopics::from(config));
+
         info!("Blockfrost REST enabled");
         // Handler for /accounts/{stake_address}
         register_handler(
             context.clone(),
             DEFAULT_HANDLE_SINGLE_ACCOUNT_TOPIC,
+            query_topics.clone(),
             handle_single_account_blockfrost,
         );
 
@@ -126,6 +133,7 @@ impl BlockfrostREST {
         register_handler(
             context.clone(),
             DEFAULT_HANDLE_DREPS_LIST_TOPIC,
+            query_topics.clone(),
             handle_dreps_list_blockfrost,
         );
 
@@ -133,6 +141,7 @@ impl BlockfrostREST {
         register_handler(
             context.clone(),
             DEFAULT_HANDLE_SINGLE_DREP_TOPIC,
+            query_topics.clone(),
             handle_single_drep_blockfrost,
         );
 
@@ -140,6 +149,7 @@ impl BlockfrostREST {
         register_handler(
             context.clone(),
             DEFAULT_HANDLE_DREP_DELEGATORS_TOPIC,
+            query_topics.clone(),
             handle_drep_delegators_blockfrost,
         );
 
@@ -147,6 +157,7 @@ impl BlockfrostREST {
         register_handler(
             context.clone(),
             DEFAULT_HANDLE_DREP_METADATA_TOPIC,
+            query_topics.clone(),
             handle_drep_metadata_blockfrost,
         );
 
@@ -154,6 +165,7 @@ impl BlockfrostREST {
         register_handler(
             context.clone(),
             DEFAULT_HANDLE_DREP_UPDATES_TOPIC,
+            query_topics.clone(),
             handle_drep_updates_blockfrost,
         );
 
@@ -161,6 +173,7 @@ impl BlockfrostREST {
         register_handler(
             context.clone(),
             DEFAULT_HANDLE_DREP_VOTES_TOPIC,
+            query_topics.clone(),
             handle_drep_votes_blockfrost,
         );
 
@@ -168,6 +181,7 @@ impl BlockfrostREST {
         register_handler(
             context.clone(),
             DEFAULT_HANDLE_PROPOSALS_LIST_TOPIC,
+            query_topics.clone(),
             handle_proposals_list_blockfrost,
         );
 
@@ -175,6 +189,7 @@ impl BlockfrostREST {
         register_handler(
             context.clone(),
             DEFAULT_HANDLE_SINGLE_PROPOSAL_TOPIC,
+            query_topics.clone(),
             handle_single_proposal_blockfrost,
         );
 
@@ -182,6 +197,7 @@ impl BlockfrostREST {
         register_handler(
             context.clone(),
             DEFAULT_HANDLE_PROPOSAL_PARAMETERS_TOPIC,
+            query_topics.clone(),
             handle_proposal_parameters_blockfrost,
         );
 
@@ -189,6 +205,7 @@ impl BlockfrostREST {
         register_handler(
             context.clone(),
             DEFAULT_HANDLE_PROPOSAL_WITHDRAWALS_TOPIC,
+            query_topics.clone(),
             handle_proposal_withdrawals_blockfrost,
         );
 
@@ -196,6 +213,7 @@ impl BlockfrostREST {
         register_handler(
             context.clone(),
             DEFAULT_HANDLE_PROPOSAL_VOTES_TOPIC,
+            query_topics.clone(),
             handle_proposal_votes_blockfrost,
         );
 
@@ -203,6 +221,7 @@ impl BlockfrostREST {
         register_handler(
             context.clone(),
             DEFAULT_HANDLE_PROPOSAL_METADATA_TOPIC,
+            query_topics.clone(),
             handle_proposal_metadata_blockfrost,
         );
 
@@ -210,6 +229,7 @@ impl BlockfrostREST {
         register_handler(
             context.clone(),
             DEFAULT_HANDLE_POOLS_LIST_TOPIC,
+            query_topics.clone(),
             handle_pools_list_blockfrost,
         );
 
@@ -217,6 +237,7 @@ impl BlockfrostREST {
         register_handler(
             context.clone(),
             DEFAULT_HANDLE_POOLS_EXTENDED_RETIRED_RETIRING_SINGLE_TOPIC,
+            query_topics.clone(),
             handle_pools_extended_retired_retiring_single_blockfrost,
         );
 
@@ -224,6 +245,7 @@ impl BlockfrostREST {
         register_handler(
             context.clone(),
             DEFAULT_HANDLE_POOL_HISTORY_TOPIC,
+            query_topics.clone(),
             handle_pool_history_blockfrost,
         );
 
@@ -231,6 +253,7 @@ impl BlockfrostREST {
         register_handler(
             context.clone(),
             DEFAULT_HANDLE_POOL_METADATA_TOPIC,
+            query_topics.clone(),
             handle_pool_metadata_blockfrost,
         );
 
@@ -238,6 +261,7 @@ impl BlockfrostREST {
         register_handler(
             context.clone(),
             DEFAULT_HANDLE_POOL_RELAYS_TOPIC,
+            query_topics.clone(),
             handle_pool_relays_blockfrost,
         );
 
@@ -245,6 +269,7 @@ impl BlockfrostREST {
         register_handler(
             context.clone(),
             DEFAULT_HANDLE_POOL_DELEGATORS_TOPIC,
+            query_topics.clone(),
             handle_pool_delegators_blockfrost,
         );
 
@@ -252,6 +277,7 @@ impl BlockfrostREST {
         register_handler(
             context.clone(),
             DEFAULT_HANDLE_POOL_BLOCKS_TOPIC,
+            query_topics.clone(),
             handle_pool_blocks_blockfrost,
         );
 
@@ -259,6 +285,7 @@ impl BlockfrostREST {
         register_handler(
             context.clone(),
             DEFAULT_HANDLE_POOL_UPDATES_TOPIC,
+            query_topics.clone(),
             handle_pool_updates_blockfrost,
         );
 
@@ -266,6 +293,7 @@ impl BlockfrostREST {
         register_handler(
             context.clone(),
             DEFAULT_HANDLE_POOL_VOTES_TOPIC,
+            query_topics.clone(),
             handle_pool_votes_blockfrost,
         );
 
@@ -273,9 +301,17 @@ impl BlockfrostREST {
     }
 }
 
-fn register_handler<F, Fut>(context: Arc<Context<Message>>, topic: (&str, &str), handler_fn: F)
-where
-    F: Fn(Arc<Context<Message>>, Vec<String>) -> Fut + Send + Sync + Clone + 'static,
+fn register_handler<F, Fut>(
+    context: Arc<Context<Message>>,
+    topic: (&str, &str),
+    query_topics: Arc<QueryTopics>,
+    handler_fn: F,
+) where
+    F: Fn(Arc<Context<Message>>, Vec<String>, Arc<QueryTopics>) -> Fut
+        + Send
+        + Sync
+        + Clone
+        + 'static,
     Fut: Future<Output = Result<RESTResponse>> + Send + 'static,
 {
     let topic_name = context.config.get_string(topic.0).unwrap_or_else(|_| topic.1.to_string());
@@ -286,7 +322,8 @@ where
         let context = context.clone();
         let handler_fn = handler_fn.clone();
         let params: Vec<String> = params.iter().map(|s| s.to_string()).collect();
+        let query_topics = query_topics.clone();
 
-        async move { handler_fn(context, params).await }
+        async move { handler_fn(context, params, query_topics).await }
     });
 }
