@@ -2,8 +2,15 @@ use std::time::Duration;
 
 use anyhow::Result;
 use reqwest::Client;
+use serde::{Deserialize, Serialize};
 
-use crate::types::PoolMetadataJson;
+#[derive(Serialize, Deserialize)]
+pub struct PoolMetadataJson {
+    pub ticker: String,
+    pub name: String,
+    pub description: String,
+    pub homepage: String,
+}
 
 pub async fn fetch_pool_metadata(url: String) -> Result<PoolMetadataJson> {
     let client = Client::new();

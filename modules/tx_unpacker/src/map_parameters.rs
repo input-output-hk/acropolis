@@ -145,7 +145,7 @@ pub fn map_gov_action_id(pallas_action_id: &conway::GovActionId) -> Result<GovAc
     };
 
     Ok(GovActionId {
-        transaction_id: pallas_action_id.transaction_id.to_vec(),
+        transaction_id: *pallas_action_id.transaction_id,
         action_index: act_idx_u8,
     })
 }
@@ -200,7 +200,7 @@ fn map_relay(relay: &PallasRelay) -> Relay {
 /// Derive our TxCertificate from a Pallas Certificate
 pub fn map_certificate(
     cert: &MultiEraCert,
-    tx_hash: [u8; 32],
+    tx_hash: TxHash,
     tx_index: usize,
     cert_index: usize,
 ) -> Result<TxCertificate> {
@@ -432,7 +432,7 @@ pub fn map_certificate(
                             deposit: *coin,
                             anchor: map_nullable_anchor(&anchor),
                         },
-                        tx_hash: tx_hash,
+                        tx_hash,
                         cert_index: cert_index as u64,
                     }))
                 }
@@ -443,7 +443,7 @@ pub fn map_certificate(
                             credential: map_stake_credential(cred),
                             refund: *coin,
                         },
-                        tx_hash: tx_hash,
+                        tx_hash,
                         cert_index: cert_index as u64,
                     }),
                 ),
@@ -454,7 +454,7 @@ pub fn map_certificate(
                             credential: map_stake_credential(cred),
                             anchor: map_nullable_anchor(&anchor),
                         },
-                        tx_hash: tx_hash,
+                        tx_hash,
                         cert_index: cert_index as u64,
                     }))
                 }
