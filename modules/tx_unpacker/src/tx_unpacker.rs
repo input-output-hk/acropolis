@@ -174,7 +174,7 @@ impl TxUnpacker {
 
                                                 // Construct message
                                                 let tx_input = TxInput {
-                                                    tx_hash: oref.hash().to_vec(),
+                                                    tx_hash: **oref.hash(),
                                                     index: oref.index(),
                                                 };
 
@@ -190,7 +190,7 @@ impl TxUnpacker {
                                                         match map_parameters::map_address(&pallas_address) {
                                                             Ok(address) => {
                                                                 let tx_output = TxOutput {
-                                                                    tx_hash: tx.hash().to_vec(),
+                                                                    tx_hash: *tx.hash(),
                                                                     index: index as u64,
                                                                     address: address,
                                                                     value: output.value().coin(),
@@ -244,7 +244,7 @@ impl TxUnpacker {
                                         if publish_governance_procedures_topic.is_some() {
                                             if let Some(pp) = props {
                                                 // Nonempty set -- governance_message.proposal_procedures will not be empty
-                                                let mut proc_id = GovActionId { transaction_id: tx.hash().to_vec(), action_index: 0 };
+                                                let mut proc_id = GovActionId { transaction_id: *tx.hash(), action_index: 0 };
                                                 for (action_index, pallas_governance_proposals) in pp.iter().enumerate() {
                                                     match proc_id.set_action_index(action_index)
                                                         .and_then (|proc_id| map_parameters::map_governance_proposals_procedures(&proc_id, &pallas_governance_proposals))

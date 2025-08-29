@@ -4,27 +4,26 @@ use acropolis_common::{
     queries::{
         accounts::{AccountsStateQuery, AccountsStateQueryResponse},
         epochs::{EpochsStateQuery, EpochsStateQueryResponse},
+        parameters::{ParametersStateQuery, ParametersStateQueryResponse},
         pools::{PoolsStateQuery, PoolsStateQueryResponse},
         utils::query_state,
     },
     serialization::Bech32WithHrp,
+    PoolRetirement,
 };
 use anyhow::Result;
 use caryatid_sdk::Context;
 use rust_decimal::Decimal;
 use std::sync::Arc;
 
-use crate::types::PoolExtendedRest;
-
-const ACCOUNTS_STATE_TOPIC: &str = "accounts-state";
-const POOLS_STATE_TOPIC: &str = "pools-state";
-const EPOCH_STATE_TOPIC: &str = "epoch-state";
-const PARAMETERS_STATE_TOPIC: &str = "parameters-state";
+use crate::query_topics::QueryTopics;
+use crate::types::{PoolEpochStateRest, PoolExtendedRest, PoolRetirementRest};
 
 /// Handle `/pools` Blockfrost-compatible endpoint
 pub async fn handle_pools_list_blockfrost(
     context: Arc<Context<Message>>,
     _params: Vec<String>,
+    query_topics: Arc<QueryTopics>,
 ) -> Result<RESTResponse> {
     // Prepare the message
     let msg = Arc::new(Message::StateQuery(StateQuery::Pools(
@@ -32,7 +31,7 @@ pub async fn handle_pools_list_blockfrost(
     )));
 
     // Send message via message bus
-    let raw = context.message_bus.request(POOLS_STATE_TOPIC, msg).await?;
+    let raw = context.message_bus.request(&query_topics.pools_query_topic, msg).await?;
 
     // Unwrap and match
     let message = Arc::try_unwrap(raw).unwrap_or_else(|arc| (*arc).clone());
@@ -78,6 +77,7 @@ pub async fn handle_pools_list_blockfrost(
 pub async fn handle_pools_extended_retired_retiring_single_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
+    query_topics: Arc<QueryTopics>,
 ) -> Result<RESTResponse> {
     let param = match params.as_slice() {
         [param] => param,
@@ -85,9 +85,15 @@ pub async fn handle_pools_extended_retired_retiring_single_blockfrost(
     };
 
     match param.as_str() {
-        "extended" => return handle_pools_extended_blockfrost(context.clone()).await,
-        "retired" => return handle_pools_retired_blockfrost(context.clone()).await,
-        "retiring" => return handle_pools_retiring_blockfrost(context.clone()).await,
+        "extended" => {
+            return handle_pools_extended_blockfrost(context.clone(), query_topics.clone()).await
+        }
+        "retired" => {
+            return handle_pools_retired_blockfrost(context.clone(), query_topics.clone()).await
+        }
+        "retiring" => {
+            return handle_pools_retiring_blockfrost(context.clone(), query_topics.clone()).await
+        }
         _ => match Vec::<u8>::from_bech32_with_hrp(param, "pool") {
             Ok(pool_id) => return handle_pools_spo_blockfrost(context.clone(), pool_id).await,
             Err(e) => {
@@ -100,14 +106,17 @@ pub async fn handle_pools_extended_retired_retiring_single_blockfrost(
     }
 }
 
-async fn handle_pools_extended_blockfrost(context: Arc<Context<Message>>) -> Result<RESTResponse> {
+async fn handle_pools_extended_blockfrost(
+    context: Arc<Context<Message>>,
+    query_topics: Arc<QueryTopics>,
+) -> Result<RESTResponse> {
     // Get pools info from spo-state
     let pools_list_with_info_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
         PoolsStateQuery::GetPoolsListWithInfo,
     )));
     let pools_list_with_info = query_state(
         &context,
-        POOLS_STATE_TOPIC,
+        &query_topics.pools_query_topic,
         pools_list_with_info_msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Pools(
@@ -142,13 +151,13 @@ async fn handle_pools_extended_blockfrost(context: Arc<Context<Message>>) -> Res
         .map(|(_, pool_registration)| pool_registration.vrf_key_hash.clone())
         .collect::<Vec<_>>();
 
-    // Get Latest Epoch from epoch-state
+    // Get Latest Epoch from epochs-state
     let latest_epoch_info_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
         EpochsStateQuery::GetLatestEpoch,
     )));
     let latest_epoch_info = query_state(
         &context,
-        EPOCH_STATE_TOPIC,
+        &query_topics.epochs_query_topic,
         latest_epoch_info_msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Epochs(
@@ -180,7 +189,7 @@ async fn handle_pools_extended_blockfrost(context: Arc<Context<Message>>) -> Res
     )));
     let (pools_active_stakes, total_active_stake) = query_state(
         &context,
-        POOLS_STATE_TOPIC,
+        &query_topics.pools_query_topic,
         pools_active_stakes_msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Pools(
@@ -210,7 +219,7 @@ async fn handle_pools_extended_blockfrost(context: Arc<Context<Message>>) -> Res
     )));
     let pools_live_stakes = query_state(
         &context,
-        ACCOUNTS_STATE_TOPIC,
+        &query_topics.accounts_query_topic,
         pools_live_stakes_msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Accounts(
@@ -238,7 +247,7 @@ async fn handle_pools_extended_blockfrost(context: Arc<Context<Message>>) -> Res
     )));
     let total_blocks_minted = query_state(
         &context,
-        POOLS_STATE_TOPIC,
+        &query_topics.pools_query_topic,
         total_blocks_minted_msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Pools(
@@ -266,7 +275,7 @@ async fn handle_pools_extended_blockfrost(context: Arc<Context<Message>>) -> Res
     )));
     let current_blocks_minted = query_state(
         &context,
-        EPOCH_STATE_TOPIC,
+        &query_topics.epochs_query_topic,
         current_blocks_minted_msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Epochs(
@@ -293,19 +302,19 @@ async fn handle_pools_extended_blockfrost(context: Arc<Context<Message>>) -> Res
         .collect::<Vec<_>>();
 
     // Get latest parameters from parameters-state
-    let latest_parameters_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
-        EpochsStateQuery::GetLatestEpochParameters,
+    let latest_parameters_msg = Arc::new(Message::StateQuery(StateQuery::Parameters(
+        ParametersStateQuery::GetLatestParameters,
     )));
     let latest_parameters = query_state(
         &context,
-        PARAMETERS_STATE_TOPIC,
+        &query_topics.parameters_query_topic,
         latest_parameters_msg,
         |message| match message {
-            Message::StateQueryResponse(StateQueryResponse::Epochs(
-                EpochsStateQueryResponse::LatestEpochParameters(res),
+            Message::StateQueryResponse(StateQueryResponse::Parameters(
+                ParametersStateQueryResponse::LatestParameters(res),
             )) => Ok(res.parameters),
-            Message::StateQueryResponse(StateQueryResponse::Epochs(
-                EpochsStateQueryResponse::Error(e),
+            Message::StateQueryResponse(StateQueryResponse::Parameters(
+                ParametersStateQueryResponse::Error(e),
             )) => Err(anyhow::anyhow!(
                 "Internal server error while retrieving latest parameters: {e}"
             )),
@@ -359,12 +368,96 @@ async fn handle_pools_extended_blockfrost(context: Arc<Context<Message>>) -> Res
     }
 }
 
-async fn handle_pools_retired_blockfrost(_context: Arc<Context<Message>>) -> Result<RESTResponse> {
-    Ok(RESTResponse::with_text(501, "Not implemented"))
+async fn handle_pools_retired_blockfrost(
+    context: Arc<Context<Message>>,
+    query_topics: Arc<QueryTopics>,
+) -> Result<RESTResponse> {
+    // Get retired pools from spo-state
+    let retired_pools_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
+        PoolsStateQuery::GetPoolsRetiredList,
+    )));
+    let retired_pools = query_state(
+        &context,
+        &query_topics.pools_query_topic,
+        retired_pools_msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::PoolsRetiredList(retired_pools),
+            )) => Ok(retired_pools.retired_pools),
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::Error(e),
+            )) => Err(anyhow::anyhow!(
+                "Internal server error while retrieving retired pools: {e}"
+            )),
+            _ => Err(anyhow::anyhow!("Unexpected message type")),
+        },
+    )
+    .await?;
+
+    let retired_pools_rest = retired_pools
+        .iter()
+        .filter_map(|PoolRetirement { operator, epoch }| {
+            let pool_id = operator.to_bech32_with_hrp("pool").ok()?;
+            Some(PoolRetirementRest {
+                pool_id,
+                epoch: *epoch,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    match serde_json::to_string(&retired_pools_rest) {
+        Ok(json) => Ok(RESTResponse::with_json(200, &json)),
+        Err(e) => Ok(RESTResponse::with_text(
+            500,
+            &format!("Internal server error while retrieving retired pools: {e}"),
+        )),
+    }
 }
 
-async fn handle_pools_retiring_blockfrost(_context: Arc<Context<Message>>) -> Result<RESTResponse> {
-    Ok(RESTResponse::with_text(501, "Not implemented"))
+async fn handle_pools_retiring_blockfrost(
+    context: Arc<Context<Message>>,
+    query_topics: Arc<QueryTopics>,
+) -> Result<RESTResponse> {
+    // Get retiring pools from spo-state
+    let retiring_pools_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
+        PoolsStateQuery::GetPoolsRetiringList,
+    )));
+    let retiring_pools = query_state(
+        &context,
+        &query_topics.pools_query_topic,
+        retiring_pools_msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::PoolsRetiringList(retiring_pools),
+            )) => Ok(retiring_pools.retiring_pools),
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::Error(e),
+            )) => Err(anyhow::anyhow!(
+                "Internal server error while retrieving retiring pools: {e}"
+            )),
+            _ => Err(anyhow::anyhow!("Unexpected message type")),
+        },
+    )
+    .await?;
+
+    let retiring_pools_rest = retiring_pools
+        .iter()
+        .filter_map(|PoolRetirement { operator, epoch }| {
+            let pool_id = operator.to_bech32_with_hrp("pool").ok()?;
+            Some(PoolRetirementRest {
+                pool_id,
+                epoch: *epoch,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    match serde_json::to_string(&retiring_pools_rest) {
+        Ok(json) => Ok(RESTResponse::with_json(200, &json)),
+        Err(e) => Ok(RESTResponse::with_text(
+            500,
+            &format!("Internal server error while retrieving retiring pools: {e}"),
+        )),
+    }
 }
 
 async fn handle_pools_spo_blockfrost(
@@ -375,15 +468,81 @@ async fn handle_pools_spo_blockfrost(
 }
 
 pub async fn handle_pool_history_blockfrost(
-    _context: Arc<Context<Message>>,
-    _params: Vec<String>,
+    context: Arc<Context<Message>>,
+    params: Vec<String>,
+    query_topics: Arc<QueryTopics>,
 ) -> Result<RESTResponse> {
-    Ok(RESTResponse::with_text(501, "Not implemented"))
+    let Some(pool_id) = params.get(0) else {
+        return Ok(RESTResponse::with_text(400, "Missing pool ID parameter"));
+    };
+
+    let Ok(spo) = Vec::<u8>::from_bech32_with_hrp(pool_id, "pool") else {
+        return Ok(RESTResponse::with_text(
+            400,
+            &format!("Invalid Bech32 stake pool ID: {pool_id}"),
+        ));
+    };
+
+    // get latest epoch from epochs-state
+    let latest_epoch_info_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
+        EpochsStateQuery::GetLatestEpoch,
+    )));
+    let latest_epoch_info = query_state(
+        &context,
+        &query_topics.epochs_query_topic,
+        latest_epoch_info_msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Epochs(
+                EpochsStateQueryResponse::LatestEpoch(res),
+            )) => Ok(res.epoch),
+            Message::StateQueryResponse(StateQueryResponse::Epochs(
+                EpochsStateQueryResponse::Error(e),
+            )) => Err(anyhow::anyhow!(
+                "Internal server error while retrieving latest epoch: {e}"
+            )),
+            _ => Err(anyhow::anyhow!("Unexpected message type")),
+        },
+    )
+    .await?;
+    let latest_epoch = latest_epoch_info.epoch;
+
+    let pool_history_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
+        PoolsStateQuery::GetPoolHistory { pool_id: spo },
+    )));
+    let mut pool_history: Vec<PoolEpochStateRest> = query_state(
+        &context,
+        &query_topics.pools_query_topic,
+        pool_history_msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::PoolHistory(pool_history),
+            )) => Ok(pool_history.history.into_iter().map(|state| state.into()).collect()),
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::Error(e),
+            )) => Err(anyhow::anyhow!(
+                "Internal server error while retrieving pool history: {e}"
+            )),
+            _ => Err(anyhow::anyhow!("Unexpected message type")),
+        },
+    )
+    .await?;
+
+    // remove epoch state whose epoch is greater than or equal to latest_epoch
+    pool_history.retain(|state| state.epoch < latest_epoch);
+
+    match serde_json::to_string(&pool_history) {
+        Ok(json) => Ok(RESTResponse::with_json(200, &json)),
+        Err(e) => Ok(RESTResponse::with_text(
+            500,
+            &format!("Internal server error while retrieving pool history: {e}"),
+        )),
+    }
 }
 
 pub async fn handle_pool_metadata_blockfrost(
     _context: Arc<Context<Message>>,
     _params: Vec<String>,
+    _query_topics: Arc<QueryTopics>,
 ) -> Result<RESTResponse> {
     Ok(RESTResponse::with_text(501, "Not implemented"))
 }
@@ -391,6 +550,7 @@ pub async fn handle_pool_metadata_blockfrost(
 pub async fn handle_pool_relays_blockfrost(
     _context: Arc<Context<Message>>,
     _params: Vec<String>,
+    _query_topics: Arc<QueryTopics>,
 ) -> Result<RESTResponse> {
     Ok(RESTResponse::with_text(501, "Not implemented"))
 }
@@ -398,6 +558,7 @@ pub async fn handle_pool_relays_blockfrost(
 pub async fn handle_pool_delegators_blockfrost(
     _context: Arc<Context<Message>>,
     _params: Vec<String>,
+    _query_topics: Arc<QueryTopics>,
 ) -> Result<RESTResponse> {
     Ok(RESTResponse::with_text(501, "Not implemented"))
 }
@@ -405,6 +566,7 @@ pub async fn handle_pool_delegators_blockfrost(
 pub async fn handle_pool_blocks_blockfrost(
     _context: Arc<Context<Message>>,
     _params: Vec<String>,
+    _query_topics: Arc<QueryTopics>,
 ) -> Result<RESTResponse> {
     Ok(RESTResponse::with_text(501, "Not implemented"))
 }
@@ -412,6 +574,7 @@ pub async fn handle_pool_blocks_blockfrost(
 pub async fn handle_pool_updates_blockfrost(
     _context: Arc<Context<Message>>,
     _params: Vec<String>,
+    _query_topics: Arc<QueryTopics>,
 ) -> Result<RESTResponse> {
     Ok(RESTResponse::with_text(501, "Not implemented"))
 }
@@ -419,6 +582,7 @@ pub async fn handle_pool_updates_blockfrost(
 pub async fn handle_pool_votes_blockfrost(
     _context: Arc<Context<Message>>,
     _params: Vec<String>,
+    _query_topics: Arc<QueryTopics>,
 ) -> Result<RESTResponse> {
     Ok(RESTResponse::with_text(501, "Not implemented"))
 }
