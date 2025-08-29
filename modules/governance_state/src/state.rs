@@ -103,40 +103,42 @@ impl State {
         governance_message: &GovernanceProceduresMessage,
     ) -> Result<()> {
         if block.era < Era::Conway {
+            // Alonzo-Babbage governance
             if !(governance_message.proposal_procedures.is_empty()
                 && governance_message.voting_procedures.is_empty())
             {
-                bail!("Non-empty governance message for pre-conway block {block:?}");
+                bail!("Unexpected Conway governance procedures in pre-Conway block {block:?}");
             }
-        } else {
+
             if !governance_message.alonzo_babbage_updates.is_empty() {
                 if let Err(e) = self
                     .alonzo_babbage_voting
                     .process_update_proposals(block, &governance_message.alonzo_babbage_updates)
                 {
-                    error!("Error handling governance_message: '{e}'");
+                    error!("Error handling Babbage governance_message: '{e}'");
                 }
             }
-        }
-
-        for pproc in &governance_message.proposal_procedures {
-            self.proposal_count += 1;
-            if let Err(e) = self.insert_proposal_procedure(block.epoch, pproc) {
-                error!("Error handling governance_message: '{}'", e);
-            }
-        }
-
-        for (trans, vproc) in &governance_message.voting_procedures {
-            for (voter, voter_votes) in vproc.votes.iter() {
-                if let Err(e) = self.insert_voting_procedure(voter, trans, voter_votes) {
-                    error!(
-                        "Error handling governance voting block {}, trans {}: '{}'",
-                        block.number,
-                        trans.encode_hex::<String>(),
-                        e
-                    );
+        } else {
+            // Conway governance
+            for pproc in &governance_message.proposal_procedures {
+                self.proposal_count += 1;
+                if let Err(e) = self.insert_proposal_procedure(block.epoch, pproc) {
+                    error!("Error handling governance_message: '{}'", e);
                 }
-                self.votes_count += voter_votes.voting_procedures.len();
+            }
+
+            for (trans, vproc) in &governance_message.voting_procedures {
+                for (voter, voter_votes) in vproc.votes.iter() {
+                    if let Err(e) = self.insert_voting_procedure(voter, trans, voter_votes) {
+                        error!(
+                            "Error handling governance voting block {}, trans {}: '{}'",
+                            block.number,
+                            trans.encode_hex::<String>(),
+                            e
+                        );
+                    }
+                    self.votes_count += voter_votes.voting_procedures.len();
+                }
             }
         }
 
