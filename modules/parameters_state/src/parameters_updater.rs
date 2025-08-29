@@ -1,6 +1,6 @@
 use crate::genesis_params;
 use acropolis_common::protocol_params::{
-    AlonzoParams, BabbageParams, ConwayParams, ProtocolParams, ShelleyProtocolParams,
+    AlonzoParams, ConwayParams, ProtocolParams, ShelleyProtocolParams,
 };
 use acropolis_common::{
     messages::GovernanceOutcomesMessage, AlonzoBabbageVotingOutcome, Committee, CommitteeChange,
@@ -75,41 +75,18 @@ impl ParametersUpdater {
     // Babbage parameters update
     //
 
-    fn bab_upd<T: Clone>(
-        &mut self,
-        f: impl Fn(&mut BabbageParams) -> &mut T,
-        u: &Option<T>,
-    ) -> Result<()> {
-        if let Some(u) = u {
-            match &mut self.params.babbage {
-                Some(dst) => *f(dst) = u.clone(),
-                None => {
-                    let mut params = BabbageParams {
-                        coins_per_utxo_byte: 0,
-                        plutus_v2_cost_model: None,
-                    };
-                    *f(&mut params) = u.clone();
-                    self.params.babbage = Some(params);
+    fn update_babbage_params(&mut self, p: &ProtocolParamUpdate) -> Result<()> {
+        if let Some(babbage) = &mut self.params.babbage {
+            if let Some(val) = p.coins_per_utxo_byte {
+                babbage.coins_per_utxo_byte = val;
+            }
+            if let Some(cost_models) = &p.cost_models_for_script_languages {
+                if let Some(plutus_v2) = &cost_models.plutus_v2 {
+                    babbage.plutus_v2_cost_model = Some(plutus_v2.clone());
                 }
             }
         }
         Ok(())
-    }
-
-    fn bab_opt<T: Clone>(
-        &mut self,
-        f: impl Fn(&mut BabbageParams) -> &mut Option<T>,
-        u: &Option<T>,
-    ) -> Result<()> {
-        self.bab_upd(f, &u.as_ref().map(|x| Some(x.clone())))
-    }
-
-    fn update_babbage_params(&mut self, p: &ProtocolParamUpdate) -> Result<()> {
-        self.bab_upd(|b| &mut b.coins_per_utxo_byte, &p.coins_per_utxo_byte)?;
-        self.bab_opt(
-            |b| &mut b.plutus_v2_cost_model,
-            &p.cost_models_for_script_languages.as_ref().and_then(|x| x.plutus_v2.clone()),
-        )
     }
 
     //
@@ -299,6 +276,10 @@ impl ParametersUpdater {
             Era::Alonzo => Self::upgen(
                 &mut self.params.alonzo,
                 &genesis_params::read_alonzo_genesis(network)?,
+            ),
+            Era::Babbage => Self::upgen(
+                &mut self.params.babbage,
+                &genesis_params::apply_babbage_transition(self.params.alonzo.as_ref())?,
             ),
             Era::Conway => Self::upgen(
                 &mut self.params.conway,
