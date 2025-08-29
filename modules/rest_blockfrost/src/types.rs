@@ -1,6 +1,6 @@
 use acropolis_common::{rest_helper::ToCheckedF64, PoolEpochState, VotingProcedure};
 use rust_decimal::Decimal;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// REST response structure for proposal votes
 #[derive(Serialize)]
@@ -51,4 +51,24 @@ impl From<PoolEpochState> for PoolEpochStateRest {
             fees: state.spo_reward.to_string(),
         }
     }
+}
+
+#[derive(Serialize)]
+pub struct PoolMetadataRest {
+    pub pool_id: String,
+    pub hex: String,
+    pub url: String,
+    pub hash: String,
+    pub ticker: String,
+    pub name: String,
+    pub description: String,
+    pub homepage: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct PoolMetadataJson {
+    pub ticker: String,
+    pub name: String,
+    pub description: String,
+    pub homepage: String,
 }
