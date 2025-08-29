@@ -12,9 +12,9 @@ pub struct PoolMetadataJson {
     pub homepage: String,
 }
 
-pub async fn fetch_pool_metadata(url: String) -> Result<PoolMetadataJson> {
+pub async fn fetch_pool_metadata(url: String, timeout: Duration) -> Result<PoolMetadataJson> {
     let client = Client::new();
-    let response = client.get(url).timeout(Duration::from_secs(3)).send().await?;
+    let response = client.get(url).timeout(timeout).send().await?;
     let body = response.json::<PoolMetadataJson>().await?;
     Ok(body)
 }
@@ -26,7 +26,8 @@ mod tests {
     #[tokio::test]
     async fn test_fetch_pool_metadata() {
         let url = "https://raw.githubusercontent.com/Octalus/cardano/master/p.json";
-        let pool_metadata = fetch_pool_metadata(url.to_string()).await.unwrap();
+        let pool_metadata =
+            fetch_pool_metadata(url.to_string(), Duration::from_secs(3)).await.unwrap();
         assert_eq!(pool_metadata.ticker, "OCTAS");
         assert_eq!(pool_metadata.name, "OctasPool");
         assert_eq!(pool_metadata.description, "Octa's Performance Pool");
