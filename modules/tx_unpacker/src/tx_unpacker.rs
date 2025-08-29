@@ -112,7 +112,7 @@ impl TxUnpacker {
                             for (tx_index, raw_tx) in txs_msg.txs.iter().enumerate() {
                                 if publish_governance_procedures_topic.is_some() {
                                     //Self::decode_legacy_updates(&mut legacy_update_proposals, &block, &raw_tx);
-                                    if block.era >= Era::Shelley && block.era <= Era::Alonzo {
+                                    if block.era >= Era::Shelley && block.era < Era::Babbage {
                                         if let Ok(alonzo) = MultiEraTx::decode_for_era(traverse::Era::Alonzo, &raw_tx) {
                                             if let Some(update) = alonzo.update() {
                                                 if let Some(alonzo_update) = update.as_alonzo() {
@@ -126,7 +126,7 @@ impl TxUnpacker {
                                             }
                                         }
                                     }
-                                    else if block.era == Era::Babbage {
+                                    else if block.era >= Era::Babbage && block.era < Era::Conway{
                                         if let Ok(babbage) = MultiEraTx::decode_for_era(traverse::Era::Babbage, &raw_tx) {
                                             if let Some(update) = babbage.update() {
                                                 if let Some(babbage_update) = update.as_babbage() {

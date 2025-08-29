@@ -4,6 +4,7 @@
 #![allow(dead_code)]
 
 use crate::ledger_state::SPOState;
+use crate::protocol_params::ProtocolParams;
 use crate::queries::parameters::{ParametersStateQuery, ParametersStateQueryResponse};
 use crate::queries::{
     accounts::{AccountsStateQuery, AccountsStateQueryResponse},

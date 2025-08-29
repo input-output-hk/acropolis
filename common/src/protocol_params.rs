@@ -1,31 +1,51 @@
-use crate::rational_number::{ChameleonFraction, RationalNumber};
+use crate::{
+    rational_number::{ChameleonFraction, RationalNumber},
+    BlockVersionData, Committee, Constitution, CostModel, DRepVotingThresholds, ExUnitPrices,
+    ExUnits, PoolVotingThresholds, ProtocolConsts,
+};
 use chrono::{DateTime, Utc};
 use serde_with::serde_as;
+
+#[derive(Debug, Default, PartialEq, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ProtocolParams {
+    pub byron: Option<ByronParams>,
+    pub alonzo: Option<AlonzoParams>,
+    pub shelley: Option<ShelleyParams>,
+    pub babbage: Option<BabbageParams>,
+    pub conway: Option<ConwayParams>,
+}
+
+//
+// Byron protocol parameters
+//
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ByronParams {
+    pub block_version_data: BlockVersionData,
+    pub fts_seed: Option<Vec<u8>>,
+    pub protocol_consts: ProtocolConsts,
+    pub start_time: u64,
+}
+
+//
+// Alonzo protocol parameters
+//
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct AlonzoParams {
+    pub lovelace_per_utxo_word: u64, // Deprecated after transition to Babbage
+    pub execution_prices: ExUnitPrices,
+    pub max_tx_ex_units: ExUnits,
+    pub max_block_ex_units: ExUnits,
+    pub max_value_size: u32,
+    pub collateral_percentage: u32,
+    pub max_collateral_inputs: u32,
+    pub plutus_v1_cost_model: Option<CostModel>,
+}
 
 //
 // Shelley protocol parameters
 //
-
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ProtocolVersion {
-    pub minor: u64,
-    pub major: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "PascalCase")]
-pub enum NonceVariant {
-    NeutralNonce,
-    Nonce,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Nonce {
-    pub tag: NonceVariant,
-    pub hash: Option<Vec<u8>>,
-}
 
 #[serde_as]
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -105,4 +125,55 @@ pub struct ShelleyParams {
     pub slots_per_kes_period: u32,
     pub system_start: DateTime<Utc>,
     pub update_quorum: u32,
+}
+
+//
+// Babbage protocol parameters
+//
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct BabbageParams {
+    pub coins_per_utxo_byte: u64,
+    pub plutus_v2_cost_model: Option<CostModel>,
+}
+
+//
+// Conway protocol parameters
+//
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ConwayParams {
+    pub pool_voting_thresholds: PoolVotingThresholds,
+    pub d_rep_voting_thresholds: DRepVotingThresholds,
+    pub committee_min_size: u64,
+    pub committee_max_term_length: u32,
+    pub gov_action_lifetime: u32,
+    pub gov_action_deposit: u64,
+    pub d_rep_deposit: u64,
+    pub d_rep_activity: u32,
+    pub min_fee_ref_script_cost_per_byte: RationalNumber,
+    pub plutus_v3_cost_model: CostModel,
+    pub constitution: Constitution,
+    pub committee: Committee,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProtocolVersion {
+    pub minor: u64,
+    pub major: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub enum NonceVariant {
+    NeutralNonce,
+    Nonce,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Nonce {
+    pub tag: NonceVariant,
+    pub hash: Option<Vec<u8>>,
 }

@@ -7,8 +7,9 @@ use acropolis_common::{
         LatestParameters, ParametersStateQuery, ParametersStateQueryResponse,
         DEFAULT_PARAMETERS_QUERY_TOPIC,
     },
-    rest_helper::{handle_rest, handle_rest_with_path_parameter},
-    BlockInfo,
+    rest_helper::handle_rest,
+    state_history::{StateHistory, StateHistoryStore},
+    BlockInfo, BlockStatus,
 };
 use anyhow::Result;
 use caryatid_sdk::{message_bus::Subscription, module, Context, Module};
@@ -27,15 +28,9 @@ use parameters_updater::ParametersUpdater;
 use rest::handle_current;
 use state::State;
 
-use crate::rest::handle_historical;
-
 const DEFAULT_ENACT_STATE_TOPIC: (&str, &str) = ("enact-state-topic", "cardano.enact.state");
 const DEFAULT_HANDLE_CURRENT_TOPIC: (&str, &str) =
     ("handle-current-params-topic", "rest.get.epoch.parameters");
-const DEFAULT_HANDLE_HISTORICAL_TOPIC: (&str, &str) = (
-    "handle-historical-params-topic",
-    "rest.get.epochs.*.parameters",
-);
 const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: (&str, &str) =
     ("publish-parameters-topic", "cardano.protocol.parameters");
 const DEFAULT_NETWORK_NAME: (&str, &str) = ("network-name", "mainnet");
@@ -54,8 +49,8 @@ struct ParametersStateConfig {
     pub network_name: String,
     pub enact_state_topic: String,
     pub handle_current_topic: String,
-    pub handle_historical_topic: String,
     pub protocol_parameters_topic: String,
+    pub parameters_query_topic: String,
     pub store_history: bool,
 }
 
@@ -78,8 +73,8 @@ impl ParametersStateConfig {
             network_name: Self::conf(config, DEFAULT_NETWORK_NAME),
             enact_state_topic: Self::conf(config, DEFAULT_ENACT_STATE_TOPIC),
             handle_current_topic: Self::conf(config, DEFAULT_HANDLE_CURRENT_TOPIC),
-            handle_historical_topic: Self::conf(config, DEFAULT_HANDLE_HISTORICAL_TOPIC),
             protocol_parameters_topic: Self::conf(config, DEFAULT_PROTOCOL_PARAMETERS_TOPIC),
+            parameters_query_topic: Self::conf(config, DEFAULT_PARAMETERS_QUERY_TOPIC),
             store_history: Self::conf_bool(config, DEFAULT_STORE_HISTORY),
         })
     }
@@ -111,17 +106,42 @@ impl ParametersState {
 
     async fn run(
         config: Arc<ParametersStateConfig>,
-        state: Arc<Mutex<State>>,
+        history: Arc<Mutex<StateHistory<State>>>,
         mut enact_s: Box<dyn Subscription<Message>>,
     ) -> Result<()> {
         loop {
             match enact_s.read().await?.1.as_ref() {
                 Message::Cardano((block, CardanoMessage::GovernanceOutcomes(gov))) => {
-                    let span = info_span!("parameters_state.handle", block = block.number);
+                    let span = info_span!("parameters_state.handle", epoch = block.epoch);
                     async {
-                        let mut locked = state.lock().await;
-                        let new_params = locked.handle_enact_state(&block, &gov).await?;
-                        Self::publish_update(&config, &block, new_params)?;
+                        // Get current state and current params
+                        let mut state = {
+                            let mut h = history.lock().await;
+                            h.get_or_init_with(|| State::new(config.network_name.clone()))
+                        };
+
+                        // Handle rollback if needed
+                        if block.status == BlockStatus::RolledBack {
+                            state = history.lock().await.get_rolled_back_state(block.epoch);
+                        }
+
+                        if block.new_epoch {
+                            // Get current params
+                            let current_params = state.current_params.get_params();
+
+                            // Process GovOutcomes message on epoch transition
+                            let new_params = state.handle_enact_state(&block, &gov).await?;
+
+                            // Publish protocol params message
+                            Self::publish_update(&config, &block, new_params.clone())?;
+
+                            // Commit state on params change
+                            if current_params != new_params.params {
+                                let mut h = history.lock().await;
+                                h.commit(block.epoch, state);
+                            }
+                        }
+
                         Ok::<(), anyhow::Error>(())
                     }
                     .instrument(span)
@@ -135,32 +155,30 @@ impl ParametersState {
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         let cfg = ParametersStateConfig::new(context.clone(), &config);
         let enact = cfg.context.subscribe(&cfg.enact_state_topic).await?;
-        let state = Arc::new(Mutex::new(State::new(
-            cfg.network_name.clone(),
-            cfg.store_history,
-        )));
 
-        // query topic
-        let parameters_query_topic = config
-            .get_string(DEFAULT_PARAMETERS_QUERY_TOPIC.0)
-            .unwrap_or(DEFAULT_PARAMETERS_QUERY_TOPIC.1.to_string());
+        // Initalize state history
+        let history = if cfg.store_history {
+            Arc::new(Mutex::new(StateHistory::<State>::new(
+                "ParameterState",
+                StateHistoryStore::Unbounded,
+            )))
+        } else {
+            Arc::new(Mutex::new(StateHistory::new(
+                "ParameterState",
+                StateHistoryStore::default_epoch_store(),
+            )))
+        };
 
-        let state_handle_current = state.clone();
+        let query_state = history.clone();
+
+        let state_rest = history.clone();
         handle_rest(cfg.context.clone(), &cfg.handle_current_topic, move || {
-            handle_current(state_handle_current.clone())
+            handle_current(state_rest.clone())
         });
 
-        let state_handle_historical = state.clone();
-        handle_rest_with_path_parameter(
-            cfg.context.clone(),
-            &cfg.handle_historical_topic,
-            move |param| handle_historical(state_handle_historical.clone(), param[0].to_string()),
-        );
-
-        // Handle parameters state
-        let state_rest_blockfrost = state.clone();
-        context.handle(&parameters_query_topic, move |message| {
-            let state = state_rest_blockfrost.clone();
+        // Handle parameters queries
+        context.handle(&cfg.parameters_query_topic, move |message| {
+            let history = query_state.clone();
             async move {
                 let Message::StateQuery(StateQuery::Parameters(query)) = message.as_ref() else {
                     return Arc::new(Message::StateQueryResponse(StateQueryResponse::Parameters(
@@ -170,7 +188,7 @@ impl ParametersState {
                     )));
                 };
 
-                let state = state.lock().await;
+                let state = history.lock().await.get_current_state();
                 let response = match query {
                     ParametersStateQuery::GetLatestParameters => {
                         ParametersStateQueryResponse::LatestParameters(LatestParameters {
@@ -186,7 +204,7 @@ impl ParametersState {
 
         // Start run task
         tokio::spawn(async move {
-            Self::run(cfg, state, enact).await.unwrap_or_else(|e| error!("Failed: {e}"));
+            Self::run(cfg, history, enact).await.unwrap_or_else(|e| error!("Failed: {e}"));
         });
 
         Ok(())

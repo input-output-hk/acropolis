@@ -5,30 +5,25 @@ use acropolis_common::{
     messages::{GovernanceOutcomesMessage, ProtocolParamsMessage},
     BlockInfo, Era,
 };
-use anyhow::{bail, Result};
-use std::{collections::BTreeMap, ops::RangeInclusive};
+use anyhow::Result;
+use std::ops::RangeInclusive;
 use tracing::info;
 
+#[derive(Default, Clone)]
 pub struct State {
     pub network_name: String,
     pub active_epoch: u64,
     pub current_params: ParametersUpdater,
     pub current_era: Option<Era>,
-    pub parameter_history: Option<BTreeMap<u64, ProtocolParamsMessage>>,
 }
 
 impl State {
-    pub fn new(network_name: String, store_history: bool) -> Self {
+    pub fn new(network_name: String) -> Self {
         Self {
             network_name,
             active_epoch: 0,
             current_params: ParametersUpdater::new(),
             current_era: None,
-            parameter_history: if store_history {
-                Some(BTreeMap::new())
-            } else {
-                None
-            },
         }
     }
 
@@ -57,7 +52,7 @@ impl State {
             new_block.era,
             self.current_params.get_params()
         );
-        self.current_era = Some(new_block.era.clone());
+        self.current_era = Some(new_block.era);
         Ok(())
     }
 
@@ -66,29 +61,13 @@ impl State {
         block: &BlockInfo,
         msg: &GovernanceOutcomesMessage,
     ) -> Result<ProtocolParamsMessage> {
-        if !block.new_epoch {
-            bail!("Enact state for block {block:?} (not a new epoch)");
+        if self.current_era != Some(block.era) {
+            self.apply_genesis(&block)?;
         }
-
-        self.apply_genesis(&block)?;
         self.current_params.apply_enact_state(msg)?;
         let params_message = ProtocolParamsMessage {
             params: self.current_params.get_params(),
         };
-
-        if let Some(history) = self.parameter_history.as_mut() {
-            let last = history.range(..block.epoch).next_back();
-
-            let should_store = match last {
-                Some((_, last_params)) => last_params.params != params_message.params,
-                None => true,
-            };
-
-            if should_store {
-                history.insert(block.epoch, params_message.clone());
-                self.active_epoch = block.epoch;
-            }
-        }
 
         Ok(params_message)
     }

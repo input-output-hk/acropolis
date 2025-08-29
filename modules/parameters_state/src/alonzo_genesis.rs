@@ -3,8 +3,9 @@
 //! is incompatible with SanchoNet genesis)
 
 use acropolis_common::{
+    protocol_params::AlonzoParams,
     rational_number::{ChameleonFraction, RationalNumber},
-    AlonzoParams, CostModel, ExUnitPrices, ExUnits,
+    CostModel, ExUnitPrices, ExUnits,
 };
 use anyhow::{bail, Result};
 use serde::Deserialize;
@@ -109,6 +110,5 @@ pub fn map_alonzo(genesis: &Genesis) -> Result<AlonzoParams> {
         collateral_percentage: genesis.collateral_percentage,
         max_collateral_inputs: genesis.max_collateral_inputs,
         plutus_v1_cost_model: genesis.cost_models.get_plutus_v1()?,
-        plutus_v2_cost_model: None,
     })
 }

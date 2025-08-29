@@ -16,6 +16,9 @@ impl StateHistoryStore {
     pub fn default_block_store() -> Self {
         Self::Bounded(SECURITY_PARAMETER_K)
     }
+    pub fn default_epoch_store() -> Self {
+        Self::Bounded(2)
+    }
 }
 
 struct HistoryEntry<S> {
@@ -80,6 +83,11 @@ impl<S: Clone + Default> StateHistory<S> {
     /// Get the state for a given index (if any), direct ref
     pub fn get_by_index(&self, index: u64) -> Option<&S> {
         self.history.iter().find(|entry| entry.index == index).map(|entry| &entry.state)
+    }
+
+    /// Get the most recently stored state at or beore a given index, direct ref
+    pub fn get_at_or_before(&self, index: u64) -> Option<&S> {
+        self.history.iter().rev().find(|entry| entry.index <= index).map(|entry| &entry.state)
     }
 
     /// Return a reference to the state at the given block number, if it exists

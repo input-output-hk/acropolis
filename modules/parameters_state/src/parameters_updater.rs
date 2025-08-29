@@ -1,13 +1,15 @@
 use crate::genesis_params;
-use acropolis_common::protocol_params::ShelleyProtocolParams;
+use acropolis_common::protocol_params::{
+    AlonzoParams, ConwayParams, ProtocolParams, ShelleyProtocolParams,
+};
 use acropolis_common::{
-    messages::GovernanceOutcomesMessage, AlonzoBabbageVotingOutcome, AlonzoParams, Committee,
-    CommitteeChange, ConwayParams, EnactStateElem, Era, GovernanceOutcomeVariant,
-    ProtocolParamUpdate, ProtocolParams,
+    messages::GovernanceOutcomesMessage, AlonzoBabbageVotingOutcome, Committee, CommitteeChange,
+    EnactStateElem, Era, GovernanceOutcomeVariant, ProtocolParamUpdate,
 };
 use anyhow::{anyhow, bail, Result};
 use tracing::error;
 
+#[derive(Default, Clone)]
 pub struct ParametersUpdater {
     params: ProtocolParams,
 }
@@ -67,6 +69,24 @@ impl ParametersUpdater {
             |c| &mut c.plutus_v3_cost_model,
             &p.cost_models_for_script_languages.as_ref().and_then(|x| x.plutus_v3.clone()),
         )
+    }
+
+    //
+    // Babbage parameters update
+    //
+
+    fn update_babbage_params(&mut self, p: &ProtocolParamUpdate) -> Result<()> {
+        if let Some(babbage) = &mut self.params.babbage {
+            if let Some(val) = p.coins_per_utxo_byte {
+                babbage.coins_per_utxo_byte = val;
+            }
+            if let Some(cost_models) = &p.cost_models_for_script_languages {
+                if let Some(plutus_v2) = &cost_models.plutus_v2 {
+                    babbage.plutus_v2_cost_model = Some(plutus_v2.clone());
+                }
+            }
+        }
+        Ok(())
     }
 
     //
@@ -158,14 +178,10 @@ impl ParametersUpdater {
         self.a_upd(|a| &mut a.execution_prices, &p.execution_costs)?;
         self.a_upd(|a| &mut a.max_tx_ex_units, &p.max_tx_ex_units)?;
         self.a_upd(|a| &mut a.max_block_ex_units, &p.max_block_ex_units)?;
-        self.a_upd(|a| &mut a.lovelace_per_utxo_word, &p.ada_per_utxo_byte)?;
+        self.a_upd(|a| &mut a.lovelace_per_utxo_word, &p.lovelace_per_utxo_word)?;
         self.a_opt(
             |a| &mut a.plutus_v1_cost_model,
             &p.cost_models_for_script_languages.as_ref().and_then(|x| x.plutus_v1.clone()),
-        )?;
-        self.a_opt(
-            |a| &mut a.plutus_v2_cost_model,
-            &p.cost_models_for_script_languages.as_ref().and_then(|x| x.plutus_v2.clone()),
         )
     }
 
@@ -176,6 +192,7 @@ impl ParametersUpdater {
     fn update_params(&mut self, pu: &ProtocolParamUpdate) -> Result<()> {
         self.update_alonzo_params(pu)?;
         self.update_shelley_params(pu)?;
+        self.update_babbage_params(pu)?;
         self.update_conway_params(pu)
     }
 
@@ -259,6 +276,10 @@ impl ParametersUpdater {
             Era::Alonzo => Self::upgen(
                 &mut self.params.alonzo,
                 &genesis_params::read_alonzo_genesis(network)?,
+            ),
+            Era::Babbage => Self::upgen(
+                &mut self.params.babbage,
+                &genesis_params::apply_babbage_transition(self.params.alonzo.as_ref())?,
             ),
             Era::Conway => Self::upgen(
                 &mut self.params.conway,
