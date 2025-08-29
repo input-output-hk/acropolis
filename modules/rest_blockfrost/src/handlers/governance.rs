@@ -1,18 +1,14 @@
 //! REST handlers for Acropolis Blockfrost /governance endpoints
+use crate::handlers_config::HandlersConfig;
 use crate::types::{
     DRepInfoREST, DRepMetadataREST, DRepUpdateREST, DRepVoteREST, DRepsListREST, ProposalVoteREST,
     VoterRoleREST,
 };
-use crate::QueryTopics;
 use acropolis_common::{
     messages::{Message, RESTResponse, StateQuery, StateQueryResponse},
     queries::{
-        accounts::{AccountsStateQuery, AccountsStateQueryResponse, DEFAULT_ACCOUNTS_QUERY_TOPIC},
-        get_query_topic,
-        governance::{
-            GovernanceStateQuery, GovernanceStateQueryResponse, DEFAULT_DREPS_QUERY_TOPIC,
-            DEFAULT_GOVERNANCE_QUERY_TOPIC,
-        },
+        accounts::{AccountsStateQuery, AccountsStateQueryResponse},
+        governance::{GovernanceStateQuery, GovernanceStateQueryResponse},
     },
     Credential, GovActionId, TxHash, Voter,
 };
@@ -25,14 +21,13 @@ use std::{collections::HashMap, sync::Arc};
 pub async fn handle_dreps_list_blockfrost(
     context: Arc<Context<Message>>,
     _params: Vec<String>,
-    _query_topics: Arc<QueryTopics>,
+    handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
     let msg = Arc::new(Message::StateQuery(StateQuery::Governance(
         GovernanceStateQuery::GetDRepsList,
     )));
 
-    let dreps_query_topic = get_query_topic(context.clone(), DEFAULT_DREPS_QUERY_TOPIC);
-    let raw_msg = context.message_bus.request(&dreps_query_topic, msg).await?;
+    let raw_msg = context.message_bus.request(&handlers_config.dreps_query_topic, msg).await?;
     let message = Arc::try_unwrap(raw_msg).unwrap_or_else(|arc| (*arc).clone());
     match message {
         Message::StateQueryResponse(StateQueryResponse::Governance(
@@ -73,7 +68,7 @@ pub async fn handle_dreps_list_blockfrost(
 pub async fn handle_single_drep_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
-    _query_topics: Arc<QueryTopics>,
+    handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
     let Some(drep_id) = params.get(0) else {
         return Ok(RESTResponse::with_text(400, "Missing DRep ID parameter"));
@@ -95,8 +90,7 @@ pub async fn handle_single_drep_blockfrost(
         },
     )));
 
-    let drep_query_topic = get_query_topic(context.clone(), DEFAULT_DREPS_QUERY_TOPIC);
-    let raw_msg = context.message_bus.request(&drep_query_topic, msg).await?;
+    let raw_msg = context.message_bus.request(&handlers_config.dreps_query_topic, msg).await?;
     let message = Arc::try_unwrap(raw_msg).unwrap_or_else(|arc| (*arc).clone());
 
     match message {
@@ -117,9 +111,8 @@ pub async fn handle_single_drep_blockfrost(
                 },
             )));
 
-            let accounts_query_topic =
-                get_query_topic(context.clone(), DEFAULT_ACCOUNTS_QUERY_TOPIC);
-            let raw_sum = context.message_bus.request(&accounts_query_topic, sum_msg).await?;
+            let raw_sum =
+                context.message_bus.request(&handlers_config.accounts_query_topic, sum_msg).await?;
             let sum_response = Arc::try_unwrap(raw_sum).unwrap_or_else(|arc| (*arc).clone());
 
             let amount = match sum_response {
@@ -180,7 +173,7 @@ pub async fn handle_single_drep_blockfrost(
 pub async fn handle_drep_delegators_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
-    _query_topics: Arc<QueryTopics>,
+    handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
     let Some(drep_id) = params.get(0) else {
         return Ok(RESTResponse::with_text(400, "Missing DRep ID parameter"));
@@ -197,8 +190,7 @@ pub async fn handle_drep_delegators_blockfrost(
         },
     )));
 
-    let drep_query_topic = get_query_topic(context.clone(), DEFAULT_DREPS_QUERY_TOPIC);
-    let raw_msg = context.message_bus.request(&drep_query_topic, msg).await?;
+    let raw_msg = context.message_bus.request(&handlers_config.dreps_query_topic, msg).await?;
     let message = Arc::try_unwrap(raw_msg).unwrap_or_else(|arc| (*arc).clone());
 
     match message {
@@ -228,9 +220,8 @@ pub async fn handle_drep_delegators_blockfrost(
                 AccountsStateQuery::GetAccountsBalancesMap { stake_keys },
             )));
 
-            let accounts_query_topic =
-                get_query_topic(context.clone(), DEFAULT_ACCOUNTS_QUERY_TOPIC);
-            let raw_msg = context.message_bus.request(&accounts_query_topic, msg).await?;
+            let raw_msg =
+                context.message_bus.request(&handlers_config.accounts_query_topic, msg).await?;
             let message = Arc::try_unwrap(raw_msg).unwrap_or_else(|arc| (*arc).clone());
 
             match message {
@@ -294,7 +285,7 @@ pub async fn handle_drep_delegators_blockfrost(
 pub async fn handle_drep_metadata_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
-    _query_topics: Arc<QueryTopics>,
+    handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
     let Some(drep_id) = params.get(0) else {
         return Ok(RESTResponse::with_text(400, "Missing DRep ID parameter"));
@@ -311,8 +302,7 @@ pub async fn handle_drep_metadata_blockfrost(
         },
     )));
 
-    let drep_query_topic = get_query_topic(context.clone(), DEFAULT_DREPS_QUERY_TOPIC);
-    let raw_msg = context.message_bus.request(&drep_query_topic, msg).await?;
+    let raw_msg = context.message_bus.request(&handlers_config.dreps_query_topic, msg).await?;
     let message = Arc::try_unwrap(raw_msg).unwrap_or_else(|arc| (*arc).clone());
 
     match message {
@@ -393,7 +383,7 @@ pub async fn handle_drep_metadata_blockfrost(
 pub async fn handle_drep_updates_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
-    _query_topics: Arc<QueryTopics>,
+    handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
     let Some(drep_id) = params.get(0) else {
         return Ok(RESTResponse::with_text(400, "Missing DRep ID parameter"));
@@ -410,8 +400,7 @@ pub async fn handle_drep_updates_blockfrost(
         },
     )));
 
-    let drep_query_topic = get_query_topic(context.clone(), DEFAULT_DREPS_QUERY_TOPIC);
-    let raw_msg = context.message_bus.request(&drep_query_topic, msg).await?;
+    let raw_msg = context.message_bus.request(&handlers_config.dreps_query_topic, msg).await?;
     let message = Arc::try_unwrap(raw_msg).unwrap_or_else(|arc| (*arc).clone());
 
     match message {
@@ -455,7 +444,7 @@ pub async fn handle_drep_updates_blockfrost(
 pub async fn handle_drep_votes_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
-    _query_topics: Arc<QueryTopics>,
+    handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
     let Some(drep_id) = params.get(0) else {
         return Ok(RESTResponse::with_text(400, "Missing DRep ID parameter"));
@@ -472,8 +461,7 @@ pub async fn handle_drep_votes_blockfrost(
         },
     )));
 
-    let drep_query_topic = get_query_topic(context.clone(), DEFAULT_DREPS_QUERY_TOPIC);
-    let raw_msg = context.message_bus.request(&drep_query_topic, msg).await?;
+    let raw_msg = context.message_bus.request(&handlers_config.dreps_query_topic, msg).await?;
     let message = Arc::try_unwrap(raw_msg).unwrap_or_else(|arc| (*arc).clone());
     match message {
         Message::StateQueryResponse(StateQueryResponse::Governance(
@@ -516,14 +504,13 @@ pub async fn handle_drep_votes_blockfrost(
 pub async fn handle_proposals_list_blockfrost(
     context: Arc<Context<Message>>,
     _params: Vec<String>,
-    _query_topics: Arc<QueryTopics>,
+    handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
     let msg = Arc::new(Message::StateQuery(StateQuery::Governance(
         GovernanceStateQuery::GetProposalsList,
     )));
 
-    let governance_query_topic = get_query_topic(context.clone(), DEFAULT_GOVERNANCE_QUERY_TOPIC);
-    let raw_msg = context.message_bus.request(&governance_query_topic, msg).await?;
+    let raw_msg = context.message_bus.request(&handlers_config.governance_query_topic, msg).await?;
     let message = Arc::try_unwrap(raw_msg).unwrap_or_else(|arc| (*arc).clone());
 
     match message {
@@ -567,7 +554,7 @@ pub async fn handle_proposals_list_blockfrost(
 pub async fn handle_single_proposal_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
-    _query_topics: Arc<QueryTopics>,
+    handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
     let proposal = match parse_gov_action_id(&params)? {
         Ok(id) => id,
@@ -578,8 +565,7 @@ pub async fn handle_single_proposal_blockfrost(
         GovernanceStateQuery::GetProposalInfo { proposal },
     )));
 
-    let governance_query_topic = get_query_topic(context.clone(), DEFAULT_GOVERNANCE_QUERY_TOPIC);
-    let raw_msg = context.message_bus.request(&governance_query_topic, msg).await?;
+    let raw_msg = context.message_bus.request(&handlers_config.governance_query_topic, msg).await?;
     let message = Arc::try_unwrap(raw_msg).unwrap_or_else(|arc| (*arc).clone());
 
     match message {
@@ -608,7 +594,7 @@ pub async fn handle_single_proposal_blockfrost(
 pub async fn handle_proposal_parameters_blockfrost(
     _context: Arc<Context<Message>>,
     _params: Vec<String>,
-    _query_topics: Arc<QueryTopics>,
+    _handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
     Ok(RESTResponse::with_text(501, "Not implemented"))
 }
@@ -616,7 +602,7 @@ pub async fn handle_proposal_parameters_blockfrost(
 pub async fn handle_proposal_withdrawals_blockfrost(
     _context: Arc<Context<Message>>,
     _params: Vec<String>,
-    _query_topics: Arc<QueryTopics>,
+    _handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
     Ok(RESTResponse::with_text(501, "Not implemented"))
 }
@@ -624,7 +610,7 @@ pub async fn handle_proposal_withdrawals_blockfrost(
 pub async fn handle_proposal_votes_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
-    _query_topics: Arc<QueryTopics>,
+    handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
     let proposal = match parse_gov_action_id(&params)? {
         Ok(id) => id,
@@ -638,8 +624,7 @@ pub async fn handle_proposal_votes_blockfrost(
         GovernanceStateQuery::GetProposalVotes { proposal },
     )));
 
-    let governance_query_topic = get_query_topic(context.clone(), DEFAULT_GOVERNANCE_QUERY_TOPIC);
-    let raw_msg = context.message_bus.request(&governance_query_topic, msg).await?;
+    let raw_msg = context.message_bus.request(&handlers_config.governance_query_topic, msg).await?;
     let message = Arc::try_unwrap(raw_msg).unwrap_or_else(|arc| (*arc).clone());
 
     match message {
@@ -693,7 +678,7 @@ pub async fn handle_proposal_votes_blockfrost(
 pub async fn handle_proposal_metadata_blockfrost(
     _context: Arc<Context<Message>>,
     _params: Vec<String>,
-    _query_topics: Arc<QueryTopics>,
+    _handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
     Ok(RESTResponse::with_text(501, "Not implemented"))
 }
