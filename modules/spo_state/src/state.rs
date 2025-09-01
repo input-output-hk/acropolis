@@ -9,7 +9,7 @@ use acropolis_common::{
     params::TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH,
     serialization::SerializeMapAs,
     state_history::{StateHistory, StateHistoryStore},
-    BlockInfo, KeyHash, PoolRegistration, PoolRetirement, TxCertificate,
+    BlockInfo, KeyHash, PoolMetadata, PoolRegistration, PoolRetirement, TxCertificate,
 };
 use anyhow::Result;
 use dashmap::DashMap;
@@ -164,6 +164,13 @@ impl State {
         self.current()
             .map(|state| state.spos.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
             .unwrap_or_default()
+    }
+
+    /// Get pool metadata
+    pub fn get_pool_metadata(&self, pool_id: &KeyHash) -> Option<PoolMetadata> {
+        self.current()
+            .and_then(|state| state.spos.get(pool_id).map(|p| p.pool_metadata.clone()))
+            .flatten()
     }
 
     /// Get Pools Active Stakes by epoch and total active stake
