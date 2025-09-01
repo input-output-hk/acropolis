@@ -31,6 +31,8 @@ store = "memory" # "memory", "dashmap", "fjall", "fjall-async", "sled", "sled-as
 address-delta-topic = "cardano.address.delta"
 
 [module.spo-state]
+store-history = false
+store-retired-pools = false
 
 [module.spdd-state]
 store-spdd = false

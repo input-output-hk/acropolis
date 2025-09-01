@@ -245,3 +245,15 @@ impl From<PoolEpochState> for PoolEpochStateRest {
         }
     }
 }
+
+#[derive(Serialize)]
+pub struct PoolMetadataRest {
+    pub pool_id: String,
+    pub hex: String,
+    pub url: String,
+    pub hash: String,
+    pub ticker: String,
+    pub name: String,
+    pub description: String,
+    pub homepage: String,
+}
