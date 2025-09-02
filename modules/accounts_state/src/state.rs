@@ -584,6 +584,23 @@ impl State {
         // Check for how many new SPOs
         let new_count = new_spos.keys().filter(|id| !self.spos.contains_key(*id)).count();
 
+        // Log new ones and pledge changes
+        for (id, spo) in new_spos.iter() {
+            match self.spos.get(id) {
+                Some(old_spo) => {
+                    if spo.pledge != old_spo.pledge {
+                        info!(epoch=spo_msg.epoch, pledge=spo.pledge,
+                              "Updated pledge for SPO {}", hex::encode(id));
+                    }
+                }
+
+                _ => {
+                    info!(epoch=spo_msg.epoch, pledge=spo.pledge,
+                          "Registered new SPO {}", hex::encode(id));
+                }
+            }
+        }
+
         // They've each paid their deposit, so increment that (the UTXO spend is taken
         // care of in UTXOState)
         let total_deposits = (new_count as u64) * deposit;
