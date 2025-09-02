@@ -23,7 +23,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::mem::take;
 use std::sync::{atomic::AtomicU64, Arc, Mutex};
 use tokio::task::{spawn_blocking, JoinHandle};
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
 const DEFAULT_KEY_DEPOSIT: u64 = 2_000_000;
 const DEFAULT_POOL_DEPOSIT: u64 = 500_000_000;
@@ -658,6 +658,23 @@ impl State {
 
         // Check for how many new SPOs
         let new_count = new_spos.keys().filter(|id| !self.spos.contains_key(*id)).count();
+
+        // Log new ones and pledge changes
+        for (id, spo) in new_spos.iter() {
+            match self.spos.get(id) {
+                Some(old_spo) => {
+                    if spo.pledge != old_spo.pledge {
+                        info!(epoch=spo_msg.epoch, pledge=spo.pledge,
+                              "Updated pledge for SPO {}", hex::encode(id));
+                    }
+                }
+
+                _ => {
+                    info!(epoch=spo_msg.epoch, pledge=spo.pledge,
+                          "Registered new SPO {}", hex::encode(id));
+                }
+            }
+        }
 
         // They've each paid their deposit, so increment that (the UTXO spend is taken
         // care of in UTXOState)

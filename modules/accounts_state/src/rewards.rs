@@ -187,7 +187,7 @@ fn calculate_spo_rewards(
     let pool_rewards = (&optimum_rewards * &pool_performance).with_scale(0);
 
     info!(blocks=blocks_produced, %pool_stake, %relative_pool_stake, %relative_blocks,
-          %pool_performance, %optimum_rewards, %pool_rewards,
+          %pool_performance, %optimum_rewards, %pool_rewards, pool_owner_stake, %pool_pledge,
            "Pool {}", hex::encode(operator_id.clone()));
 
     // Subtract fixed costs
