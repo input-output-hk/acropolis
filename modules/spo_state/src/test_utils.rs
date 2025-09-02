@@ -9,22 +9,34 @@ use crate::store_config::StoreConfig;
 
 pub fn default_store_config() -> StoreConfig {
     StoreConfig {
-        store_history: false,
+        store_epochs_history: false,
         store_retired_pools: false,
+        store_registration: false,
+        store_updates: false,
+        store_delegators: false,
+        store_votes: false,
     }
 }
 
 pub fn save_history_store_config() -> StoreConfig {
     StoreConfig {
-        store_history: true,
+        store_epochs_history: true,
         store_retired_pools: false,
+        store_registration: false,
+        store_updates: false,
+        store_delegators: false,
+        store_votes: false,
     }
 }
 
 pub fn save_retired_pools_store_config() -> StoreConfig {
     StoreConfig {
-        store_history: false,
+        store_epochs_history: false,
         store_retired_pools: true,
+        store_registration: false,
+        store_updates: false,
+        store_delegators: false,
+        store_votes: false,
     }
 }
 

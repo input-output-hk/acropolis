@@ -2,6 +2,7 @@
 //! Accepts certificate events and derives the SPO state in memory
 
 use acropolis_common::{
+    ledger_state::SPOState as LedgerSPOState,
     messages::{
         CardanoMessage, Message, SPOStateMessage, SnapshotDumpMessage, SnapshotMessage,
         SnapshotStateMessage, StateQuery, StateQueryResponse,
@@ -11,6 +12,8 @@ use acropolis_common::{
         PoolsRetiringList, PoolsStateQuery, PoolsStateQueryResponse, PoolsTotalBlocksMinted,
         DEFAULT_POOLS_QUERY_TOPIC,
     },
+    state_history::{StateHistory, StateHistoryStore},
+    BlockInfo, BlockStatus,
 };
 use anyhow::Result;
 use caryatid_sdk::{module, Context, Module, Subscription};
@@ -19,7 +22,9 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, info_span, Instrument};
 
+mod aggregated_state;
 mod epochs_history;
+mod historical_spo_state;
 mod rest;
 mod retired_pools_history;
 mod spo_state_publisher;
@@ -29,8 +34,8 @@ mod store_config;
 mod test_utils;
 
 use crate::{
-    epochs_history::EpochsHistoryState, retired_pools_history::RetiredPoolsHistoryState,
-    spo_state_publisher::SPOStatePublisher,
+    aggregated_state::AggregatedSPOState, epochs_history::EpochsHistoryState,
+    retired_pools_history::RetiredPoolsHistoryState, spo_state_publisher::SPOStatePublisher,
 };
 use state::State;
 use store_config::StoreConfig;
@@ -51,24 +56,44 @@ const DEFAULT_SPO_REWARDS_TOPIC: &str = "cardano.spo.rewards";
 pub struct SPOState;
 
 impl SPOState {
-    /// Async run loop for certificate messages
-    async fn run_certs_subscription(
-        state: Arc<Mutex<State>>,
-        mut spo_state_publisher: SPOStatePublisher,
-        mut certs_subscription: Box<dyn Subscription<Message>>,
+    /// Main async run loop
+    async fn run(
+        history: Arc<Mutex<StateHistory<State>>>,
+        aggregated_state: AggregatedSPOState,
+        epochs_history: EpochsHistoryState,
         retired_pools_history: RetiredPoolsHistoryState,
+        store_config: &StoreConfig,
+        mut certs_subscription: Box<dyn Subscription<Message>>,
+        mut spdd_subscription: Box<dyn Subscription<Message>>,
+        mut spo_rewards_subscription: Box<dyn Subscription<Message>>,
+        mut epoch_activity_subscription: Box<dyn Subscription<Message>>,
+        mut spo_state_publisher: SPOStatePublisher,
     ) -> Result<()> {
+        // Main loop of synchronised messages
         loop {
-            // Subscribe to certificate messages
-            let (_, certs_message) = certs_subscription.read().await?;
-            match certs_message.as_ref() {
-                Message::Cardano((block, CardanoMessage::TxCertificates(tx_certs_msg))) => {
-                    let span = info_span!("spo_state.handle_tx_certs", block = block.number);
+            // Get a mutable state
+            let mut state = history.lock().await.get_or_init_with(|| State::new(store_config));
+            let mut current_block: Option<BlockInfo> = None;
+
+            // read per-block topics in parallel
+            let certs_message_f = certs_subscription.read();
+
+            // Use certs_message as the synchroniser
+            let (_, certs_message) = certs_message_f.await?;
+            let new_epoch = match certs_message.as_ref() {
+                Message::Cardano((block_info, CardanoMessage::TxCertificates(tx_certs_msg))) => {
+                    // Handle rollbacks on this topic only
+                    if block_info.status == BlockStatus::RolledBack {
+                        state = history.lock().await.get_rolled_back_state(block_info.number);
+                    }
+                    current_block = Some(block_info.clone());
+
+                    let span = info_span!("spo_state.handle_certs", block = block_info.number);
                     async {
-                        let mut state = state.lock().await;
+                        Self::check_sync(&current_block, &block_info);
                         let maybe_message = state
-                            .handle_tx_certs(block, tx_certs_msg)
-                            .inspect_err(|e| error!("Messaging handling error: {e}"))
+                            .handle_tx_certs(block_info, tx_certs_msg)
+                            .inspect_err(|e| error!("TxCerts Messages handling error: {e}"))
                             .ok();
 
                         if let Some(Some(message)) = maybe_message {
@@ -77,7 +102,8 @@ impl SPOState {
                                 CardanoMessage::SPOState(SPOStateMessage { retired_spos, .. }),
                             )) = message.as_ref()
                             {
-                                retired_pools_history.handle_deregistrations(block, retired_spos);
+                                retired_pools_history
+                                    .handle_deregistrations(block_info, retired_spos);
                             }
 
                             // publish spo message
@@ -88,15 +114,96 @@ impl SPOState {
                     }
                     .instrument(span)
                     .await;
+
+                    // new_epoch?
+                    block_info.new_epoch && block_info.epoch > 0
                 }
-                _ => error!("Unexpected message type: {certs_message:?}"),
+
+                _ => {
+                    error!("Unexpected message type: {certs_message:?}");
+                    false
+                }
+            };
+
+            // read from epoch-boundary messages only when it's a new epoch
+            if new_epoch {
+                let spdd_message_f = spdd_subscription.read();
+                let spo_rewards_message_f = spo_rewards_subscription.read();
+                let ea_message_f = epoch_activity_subscription.read();
+
+                // Handle SPDD
+                let (_, spdd_message) = spdd_message_f.await?;
+                if let Message::Cardano((
+                    block_info,
+                    CardanoMessage::SPOStakeDistribution(spdd_message),
+                )) = spdd_message.as_ref()
+                {
+                    let span = info_span!("spo_state.handle_spdd", block = block_info.number);
+                    span.in_scope(|| {
+                        Self::check_sync(&current_block, &block_info);
+                        // update aggregated state
+                        aggregated_state.handle_spdd(block_info, spdd_message);
+                        // update epochs_history
+                        epochs_history.handle_spdd(block_info, spdd_message);
+                    });
+                }
+
+                // Handle SPO rewards
+                let (_, spo_rewards_message) = spo_rewards_message_f.await?;
+                if let Message::Cardano((
+                    block_info,
+                    CardanoMessage::SPORewards(spo_rewards_message),
+                )) = spo_rewards_message.as_ref()
+                {
+                    let span =
+                        info_span!("spo_state.handle_spo_rewards", block = block_info.number);
+                    span.in_scope(|| {
+                        Self::check_sync(&current_block, &block_info);
+                        // update epochs_history
+                        epochs_history.handle_spo_rewards(block_info, spo_rewards_message);
+                    });
+                }
+
+                // Handle EochActivityMessage
+                let (_, ea_message) = ea_message_f.await?;
+                if let Message::Cardano((
+                    block_info,
+                    CardanoMessage::EpochActivity(epoch_activity_message),
+                )) = ea_message.as_ref()
+                {
+                    let span =
+                        info_span!("spo_state.handle_epoch_activity", block = block_info.number);
+                    async {
+                        Self::check_sync(&current_block, &block_info);
+                        // update aggregated_state
+                        aggregated_state
+                            .handle_epoch_activity(block_info, epoch_activity_message)
+                            .await;
+                        // update epochs_history
+                        // epochs_history is keyed by spo not vrf_key_hash
+                        let spos = state
+                            .get_blocks_minted_by_spos(&epoch_activity_message.vrf_vkey_hashes);
+                        epochs_history.handle_epoch_activity(
+                            block_info,
+                            epoch_activity_message,
+                            &spos,
+                        );
+                    }
+                    .instrument(span)
+                    .await;
+                }
+            }
+
+            // Commit the new state
+            if let Some(block_info) = current_block {
+                history.lock().await.commit(block_info.number, state);
             }
         }
     }
 
     /// Async run loop for clock tick messages
     async fn run_clock_tick_subscription(
-        state: Arc<Mutex<State>>,
+        history: Arc<Mutex<StateHistory<State>>>,
         mut clock_tick_subscription: Box<dyn Subscription<Message>>,
     ) -> Result<()> {
         loop {
@@ -106,75 +213,12 @@ impl SPOState {
                 if (tick_message.number % 60) == 0 {
                     let span = info_span!("spo_state.tick", number = tick_message.number);
                     async {
-                        let state = state.lock().await;
-                        state.tick().await.inspect_err(|e| error!("Tick error: {e}")).ok();
+                        let state = history.lock().await.get_current_state();
+                        state.tick().inspect_err(|e| error!("Tick error: {e}")).ok();
                     }
                     .instrument(span)
                     .await;
                 }
-            }
-        }
-    }
-
-    /// Async run loop for SPDD messages
-    async fn run_spdd_subscription(
-        state: Arc<Mutex<State>>,
-        mut spdd_subscription: Box<dyn Subscription<Message>>,
-        epochs_history: EpochsHistoryState,
-    ) -> Result<()> {
-        loop {
-            // Subscribe to accounts-state's SPDD messsages
-            let (_, spdd_message) = spdd_subscription.read().await?;
-            if let Message::Cardano((
-                block_info,
-                CardanoMessage::SPOStakeDistribution(spdd_message),
-            )) = spdd_message.as_ref()
-            {
-                let mut state = state.lock().await;
-                state.handle_spdd(block_info, spdd_message);
-
-                // update epochs_history
-                epochs_history.handle_spdd(block_info, spdd_message);
-            }
-        }
-    }
-
-    /// Async run loop for epoch activity messages
-    async fn run_epoch_activity_subscription(
-        state: Arc<Mutex<State>>,
-        mut epoch_activity_subscription: Box<dyn Subscription<Message>>,
-        epochs_history: EpochsHistoryState,
-    ) -> Result<()> {
-        loop {
-            // Subscribe to accounts-state's SPDD messsages
-            let (_, spdd_message) = epoch_activity_subscription.read().await?;
-            if let Message::Cardano((
-                block_info,
-                CardanoMessage::EpochActivity(epoch_activity_message),
-            )) = spdd_message.as_ref()
-            {
-                let mut state = state.lock().await;
-                let spos = state.handle_epoch_activity(block_info, epoch_activity_message);
-
-                // update epochs_history
-                epochs_history.handle_epoch_activity(block_info, epoch_activity_message, &spos);
-            }
-        }
-    }
-
-    /// Async run loop for SPO rewards messages
-    async fn run_spo_rewards_subscription(
-        mut spo_rewards_subscription: Box<dyn Subscription<Message>>,
-        epochs_history: EpochsHistoryState,
-    ) -> Result<()> {
-        loop {
-            // Subscribe to accounts-state's SPO rewards messsages
-            let (_, spo_rewards_message) = spo_rewards_subscription.read().await?;
-            if let Message::Cardano((block_info, CardanoMessage::SPORewards(spo_rewards_message))) =
-                spo_rewards_message.as_ref()
-            {
-                // update epochs_history
-                epochs_history.handle_spo_rewards(block_info, spo_rewards_message);
             }
         }
     }
@@ -218,27 +262,37 @@ impl SPOState {
             .unwrap_or(DEFAULT_POOLS_QUERY_TOPIC.1.to_string());
         info!("Creating query handler on '{}'", pools_query_topic);
 
-        let state = Arc::new(Mutex::new(State::new()));
-
         // store config
         let store_config = StoreConfig::from(config);
 
+        // Create history
+        let history = Arc::new(Mutex::new(StateHistory::<State>::new(
+            "spo_state",
+            StateHistoryStore::default_block_store(),
+        )));
+        let history_spo_state = history.clone();
+        let history_tick = history.clone();
+        let history_snapshot = history.clone();
+
+        // Create Aggregated State
+        let aggregated_state = AggregatedSPOState::new();
+        let aggregated_state_spo_state = aggregated_state.clone();
+
         // Create epochs history
         let epochs_history = EpochsHistoryState::new(store_config.clone());
-        let run_spdd_epochs_history = epochs_history.clone();
-        let run_spo_rewards_epochs_history = epochs_history.clone();
-        let run_epoch_activity_epochs_history = epochs_history.clone();
+        let epochs_history_spo_state = epochs_history.clone();
 
         // Create Retired pools history
         let retired_pools_history = RetiredPoolsHistoryState::new(store_config.clone());
-        let run_deregistrations_retired_pools_history = retired_pools_history.clone();
+        let retired_pools_history_spo_state = retired_pools_history.clone();
 
         // handle pools-state query
-        let state_rest_blockfrost = state.clone();
         context.handle(&pools_query_topic, move |message| {
-            let state = state_rest_blockfrost.clone();
-            let epochs_history = epochs_history.clone();
-            let retired_pools_history = retired_pools_history.clone();
+            let history = history_spo_state.clone();
+            let aggregated_state = aggregated_state_spo_state.clone();
+            let epochs_history = epochs_history_spo_state.clone();
+            let retired_pools_history = retired_pools_history_spo_state.clone();
+
             async move {
                 let Message::StateQuery(StateQuery::Pools(query)) = message.as_ref() else {
                     return Arc::new(Message::StateQueryResponse(StateQueryResponse::Pools(
@@ -246,18 +300,18 @@ impl SPOState {
                     )));
                 };
 
-                let guard = state.lock().await;
+                let state = history.lock().await.get_current_state();
 
                 let response = match query {
                     PoolsStateQuery::GetPoolsList => {
                         let pools_list = PoolsList {
-                            pool_operators: guard.list_pool_operators(),
+                            pool_operators: state.list_pool_operators(),
                         };
                         PoolsStateQueryResponse::PoolsList(pools_list)
                     }
                     PoolsStateQuery::GetPoolsListWithInfo => {
                         let pools_list_with_info = PoolsListWithInfo {
-                            pools: guard.list_pools_with_info(),
+                            pools: state.list_pools_with_info(),
                         };
                         PoolsStateQueryResponse::PoolsListWithInfo(pools_list_with_info)
                     }
@@ -267,7 +321,7 @@ impl SPOState {
                         epoch,
                     } => {
                         let (active_stakes, total_active_stake) =
-                            guard.get_pools_active_stakes(pools_operators, *epoch);
+                            aggregated_state.get_pools_active_stakes(pools_operators, *epoch);
                         PoolsStateQueryResponse::PoolsActiveStakes(PoolsActiveStakes {
                             active_stakes,
                             total_active_stake,
@@ -275,7 +329,8 @@ impl SPOState {
                     }
 
                     PoolsStateQuery::GetPoolsTotalBlocksMinted { vrf_key_hashes } => {
-                        let total_blocks_minted = guard.get_total_blocks_minted(vrf_key_hashes);
+                        let total_blocks_minted =
+                            aggregated_state.get_total_blocks_minted(vrf_key_hashes).await;
                         PoolsStateQueryResponse::PoolsTotalBlocksMinted(PoolsTotalBlocksMinted {
                             total_blocks_minted,
                         })
@@ -294,7 +349,7 @@ impl SPOState {
                     }
 
                     PoolsStateQuery::GetPoolsRetiringList => {
-                        let retiring_pools = guard.get_retiring_pools();
+                        let retiring_pools = state.get_retiring_pools();
                         PoolsStateQueryResponse::PoolsRetiringList(PoolsRetiringList {
                             retiring_pools,
                         })
@@ -318,7 +373,7 @@ impl SPOState {
                         // we need to check retired pools metadata
                         // to do so, we need to save retired pool's registration
                         //
-                        let pool_metadata = guard.get_pool_metadata(pool_id);
+                        let pool_metadata = state.get_pool_metadata(pool_id);
                         if let Some(pool_metadata) = pool_metadata {
                             PoolsStateQueryResponse::PoolMetadata(pool_metadata)
                         } else {
@@ -342,25 +397,27 @@ impl SPOState {
         if let Some(snapshot_topic) = maybe_snapshot_topic {
             let mut subscription = context.subscribe(&snapshot_topic).await?;
             let context_snapshot = context.clone();
-            let state_snapshot = state.clone();
+            let history = history_snapshot.clone();
             context.run(async move {
                 let Ok((_, message)) = subscription.read().await else {
                     return;
                 };
 
+                let mut guard = history.lock().await;
                 match message.as_ref() {
                     Message::Snapshot(SnapshotMessage::Bootstrap(
                         SnapshotStateMessage::SPOState(spo_state),
                     )) => {
-                        let mut state = state_snapshot.lock().await;
-                        state.bootstrap(spo_state.clone());
+                        guard.clear();
+                        guard.commit_forced(spo_state.clone().into());
                     }
                     Message::Snapshot(SnapshotMessage::DumpRequest(SnapshotDumpMessage {
                         block_height,
                     })) => {
                         info!("inspecting state at block height {}", block_height);
-                        let state = state_snapshot.lock().await;
-                        let maybe_spo_state = state.dump(*block_height);
+                        let maybe_spo_state = guard
+                            .get_by_index_reverse(*block_height)
+                            .map(|state| LedgerSPOState::from(state));
 
                         if let Some(spo_state) = maybe_spo_state {
                             context_snapshot
@@ -385,59 +442,47 @@ impl SPOState {
 
         // Subscriptions
         let certs_subscription = context.subscribe(&subscribe_topic).await?;
-        let clock_tick_subscription = context.subscribe(&clock_tick_topic).await?;
         let spdd_subscription = context.subscribe(&spdd_topic).await?;
-        let epoch_activity_subscription = context.subscribe(&epoch_activity_topic).await?;
         let spo_rewards_subscription = context.subscribe(&spo_rewards_topic).await?;
-
-        // Start run task
-        let run_certs_state = state.clone();
-        let run_clock_tick_state = state.clone();
-        let run_spdd_state = state.clone();
-        let run_epoch_activity_state = state.clone();
+        let epoch_activity_subscription = context.subscribe(&epoch_activity_topic).await?;
+        let clock_tick_subscription = context.subscribe(&clock_tick_topic).await?;
 
         context.run(async move {
-            Self::run_certs_subscription(
-                run_certs_state,
-                spo_state_publisher,
+            Self::run(
+                history,
+                aggregated_state,
+                epochs_history,
+                retired_pools_history,
+                &store_config,
                 certs_subscription,
-                run_deregistrations_retired_pools_history,
+                spdd_subscription,
+                spo_rewards_subscription,
+                epoch_activity_subscription,
+                spo_state_publisher,
             )
             .await
-            .unwrap_or_else(|e| error!("Failed to run SPO Certs Subscription: {e}"));
+            .unwrap_or_else(|e| error!("Failed to run SPO State: {e}"));
         });
 
         context.run(async move {
-            Self::run_clock_tick_subscription(run_clock_tick_state, clock_tick_subscription)
+            Self::run_clock_tick_subscription(history_tick, clock_tick_subscription)
                 .await
                 .unwrap_or_else(|e| error!("Failed to run SPO Clock Tick Subscription: {e}"));
         });
 
-        context.run(async move {
-            Self::run_spdd_subscription(run_spdd_state, spdd_subscription, run_spdd_epochs_history)
-                .await
-                .unwrap_or_else(|e| error!("Failed to run SPO SPDD Subscription: {e}"));
-        });
-
-        context.run(async move {
-            Self::run_epoch_activity_subscription(
-                run_epoch_activity_state,
-                epoch_activity_subscription,
-                run_epoch_activity_epochs_history,
-            )
-            .await
-            .unwrap_or_else(|e| error!("Failed to run SPO Epoch Activity Subscription: {e}"));
-        });
-
-        context.run(async move {
-            Self::run_spo_rewards_subscription(
-                spo_rewards_subscription,
-                run_spo_rewards_epochs_history,
-            )
-            .await
-            .unwrap_or_else(|e| error!("Failed to run SPO Rewards Subscription: {e}"));
-        });
-
         Ok(())
+    }
+
+    /// Check for synchronisation
+    fn check_sync(expected: &Option<BlockInfo>, actual: &BlockInfo) {
+        if let Some(ref block) = expected {
+            if block.number != actual.number {
+                error!(
+                    expected = block.number,
+                    actual = actual.number,
+                    "Messages out of sync"
+                );
+            }
+        }
     }
 }
