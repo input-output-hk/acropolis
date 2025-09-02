@@ -2,6 +2,7 @@
 use crate::monetary::calculate_monetary_change;
 use crate::rewards::{calculate_rewards, RewardsResult};
 use crate::snapshot::Snapshot;
+use crate::verify::PotsVerifier;
 use acropolis_common::{
     messages::{
         DRepStateMessage, EpochActivityMessage, PotDeltasMessage, ProtocolParamsMessage,
@@ -54,7 +55,7 @@ pub struct DRepDelegationDistribution {
 }
 
 /// Global 'pot' account state
-#[derive(Debug, Default, Clone, serde::Serialize)]
+#[derive(Debug, Default, PartialEq, Clone, serde::Serialize)]
 pub struct Pots {
     /// Unallocated reserves
     pub reserves: Lovelace,
@@ -170,12 +171,14 @@ impl State {
     ///   epoch: Number of epoch we are entering
     ///   total_fees: Total fees taken in previous epoch
     ///   spo_block_counts: Count of blocks minted by operator ID in previous epoch
+    ///   verifier: optional verifier
     // Follows the general scheme in https://docs.cardano.org/about-cardano/learn/pledging-rewards
     fn enter_epoch(
         &mut self,
         epoch: u64,
         total_fees: u64,
         spo_block_counts: HashMap<KeyHash, usize>,
+        verifier: &Option<PotsVerifier>,
     ) -> Result<()> {
         // TODO HACK! Investigate why this differs to our calculated reserves after AVVM
         // 13,887,515,255 - as we enter 208 (Shelley)
@@ -218,13 +221,18 @@ impl State {
             epoch,
             reserves = self.pots.reserves,
             treasury = self.pots.treasury,
-            "Entering "
+            "Entering"
         );
 
         // Pay the refunds and MIRs
         self.pay_pool_refunds();
         self.pay_stake_refunds();
         self.pay_mirs();
+
+        // Verify pots state
+        if let Some(verifier) = verifier {
+            verifier.verify(epoch, &self.pots);
+        }
 
         // Capture a new snapshot and push it to state
         let snapshot = Snapshot::new(
@@ -523,7 +531,8 @@ impl State {
 
     /// Handle an EpochActivityMessage giving total fees and block counts by VRF key for
     /// the just-ended epoch
-    pub async fn handle_epoch_activity(&mut self, ea_msg: &EpochActivityMessage) -> Result<()> {
+    pub async fn handle_epoch_activity(&mut self, ea_msg: &EpochActivityMessage,
+                                       verifier: &Option<PotsVerifier>) -> Result<()> {
         // Reverse map of VRF key to SPO operator ID
         let vrf_to_operator: HashMap<KeyHash, KeyHash> =
             self.spos.iter().map(|(id, spo)| (spo.vrf_key_hash.clone(), id.clone())).collect();
@@ -563,7 +572,7 @@ impl State {
             }
         };
         // Enter epoch - note the message specifies the epoch that has just *ended*
-        self.enter_epoch(ea_msg.epoch + 1, ea_msg.total_fees, spo_block_counts)
+        self.enter_epoch(ea_msg.epoch + 1, ea_msg.total_fees, spo_block_counts, verifier)
     }
 
     /// Handle an SPOStateMessage with the full set of SPOs valid at the end of the last
