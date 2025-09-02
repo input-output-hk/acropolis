@@ -7,9 +7,9 @@ use acropolis_common::{
         CardanoMessage, DRepStakeDistributionMessage, GovernanceOutcomesMessage,
         GovernanceProceduresMessage, Message, ProtocolParamsMessage, SPOStakeDistributionMessage,
     },
-    BlockInfo, ConwayParams, DRepCredential, DataHash, DelegatedStake, EnactStateElem, Era,
-    GovActionId, GovernanceAction, GovernanceOutcome, GovernanceOutcomeVariant, KeyHash, Lovelace,
-    ProposalProcedure, SingleVoterVotes, TreasuryWithdrawalsAction, Voter, VotesCount,
+    BlockInfo, ConwayParams, DRepCredential, DelegatedStake, EnactStateElem, Era, GovActionId,
+    GovernanceAction, GovernanceOutcome, GovernanceOutcomeVariant, KeyHash, Lovelace,
+    ProposalProcedure, SingleVoterVotes, TreasuryWithdrawalsAction, TxHash, Voter, VotesCount,
     VotingOutcome, VotingProcedure,
 };
 use anyhow::{anyhow, bail, Result};
@@ -35,7 +35,7 @@ pub struct State {
 
     alonzo_babbage_voting: AlonzoBabbageVoting,
     proposals: HashMap<GovActionId, (u64, ProposalProcedure)>,
-    votes: HashMap<GovActionId, HashMap<Voter, (DataHash, VotingProcedure)>>,
+    votes: HashMap<GovActionId, HashMap<Voter, (TxHash, VotingProcedure)>>,
 }
 
 impl State {
@@ -170,7 +170,7 @@ impl State {
     fn insert_voting_procedure(
         &mut self,
         voter: &Voter,
-        transaction: &DataHash,
+        transaction: &TxHash,
         voter_votes: &SingleVoterVotes,
     ) -> Result<()> {
         for (action_id, procedure) in voter_votes.voting_procedures.iter() {
@@ -441,7 +441,7 @@ impl State {
     pub fn get_proposal_votes(
         &self,
         proposal_id: &GovActionId,
-    ) -> Result<HashMap<Voter, (DataHash, VotingProcedure)>> {
+    ) -> Result<HashMap<Voter, (TxHash, VotingProcedure)>> {
         match self.votes.get(proposal_id) {
             Some(all_votes) => Ok(all_votes.clone()),
             None => Err(anyhow::anyhow!(

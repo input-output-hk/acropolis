@@ -4,6 +4,7 @@
 #![allow(dead_code)]
 
 use crate::ledger_state::SPOState;
+use crate::queries::parameters::{ParametersStateQuery, ParametersStateQueryResponse};
 use crate::queries::{
     accounts::{AccountsStateQuery, AccountsStateQueryResponse},
     addresses::{AddressStateQuery, AddressStateQueryResponse},
@@ -129,7 +130,7 @@ pub struct GovernanceProceduresMessage {
     pub proposal_procedures: Vec<ProposalProcedure>,
 
     /// Voting
-    pub voting_procedures: Vec<(DataHash, VotingProcedures)>,
+    pub voting_procedures: Vec<(TxHash, VotingProcedures)>,
 
     /// Alonzo-compatible (from Shelley) and Babbage updates
     pub alonzo_babbage_updates: Vec<AlonzoBabbageUpdateProposal>,
@@ -166,6 +167,15 @@ pub struct SPOStakeDistributionMessage {
 
     /// SPO stake distribution by operator ID
     pub spos: Vec<(KeyHash, DelegatedStake)>,
+}
+
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SPORewardsMessage {
+    /// Epoch which has ended
+    pub epoch: u64,
+
+    /// SPO rewards by operator ID (total rewards before distribution, pool operator's rewards)
+    pub spos: Vec<(KeyHash, SPORewards)>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -224,6 +234,7 @@ pub enum CardanoMessage {
     // Stake distribution info
     DRepStakeDistribution(DRepStakeDistributionMessage), // Info about drep stake
     SPOStakeDistribution(SPOStakeDistributionMessage),   // SPO delegation distribution (SPDD)
+    SPORewards(SPORewardsMessage),                       // SPO rewards distribution (SPRD)
     StakeAddressDeltas(StakeAddressDeltasMessage),       // Stake part of address deltas
 }
 
@@ -315,6 +326,7 @@ pub enum StateQuery {
     Pools(PoolsStateQuery),
     Scripts(ScriptsStateQuery),
     Transactions(TransactionsStateQuery),
+    Parameters(ParametersStateQuery),
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -332,4 +344,5 @@ pub enum StateQueryResponse {
     Pools(PoolsStateQueryResponse),
     Scripts(ScriptsStateQueryResponse),
     Transactions(TransactionsStateQueryResponse),
+    Parameters(ParametersStateQueryResponse),
 }

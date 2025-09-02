@@ -1,4 +1,9 @@
+use std::collections::HashMap;
+
 use crate::{DRepChoice, KeyHash};
+
+pub const DEFAULT_ACCOUNTS_QUERY_TOPIC: (&str, &str) =
+    ("accounts-state-query-topic", "cardano.query.accounts");
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum AccountsStateQuery {
@@ -13,9 +18,14 @@ pub enum AccountsStateQuery {
     GetAccountAssets { stake_key: Vec<u8> },
     GetAccountAssetsTotals { stake_key: Vec<u8> },
     GetAccountUTxOs { stake_key: Vec<u8> },
+    GetAccountsBalancesMap { stake_keys: Vec<Vec<u8>> },
+    GetAccountsBalancesSum { stake_keys: Vec<Vec<u8>> },
 
     // Pools related queries
     GetPoolsLiveStakes { pools_operators: Vec<Vec<u8>> },
+
+    // Dreps related queries
+    GetAccountsDrepDelegationsMap { stake_keys: Vec<Vec<u8>> },
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -31,9 +41,14 @@ pub enum AccountsStateQueryResponse {
     AccountAssets(AccountAssets),
     AccountAssetsTotals(AccountAssetsTotals),
     AccountUTxOs(AccountUTxOs),
+    AccountsBalancesMap(HashMap<Vec<u8>, u64>),
+    AccountsBalancesSum(u64),
 
     // Pools related responses
     PoolsLiveStakes(PoolsLiveStakes),
+
+    // DReps related responses
+    AccountsDrepDelegationsMap(HashMap<Vec<u8>, Option<DRepChoice>>),
 
     NotFound,
     Error(String),

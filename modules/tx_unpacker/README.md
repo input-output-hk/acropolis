@@ -35,7 +35,7 @@ references:
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TxOutput {
     /// Tx hash
-    pub tx_hash: Vec<u8>,
+    pub tx_hash: TxHash,
 
     /// Output index in tx
     pub index: u32,
@@ -51,7 +51,7 @@ pub struct TxOutput {
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TxInput {
     /// Tx hash of referenced UTXO
-    pub tx_hash: Vec<u8>,
+    pub tx_hash: TxHash,
 
     /// Index of UTXO in referenced tx
     pub index: u64,
