@@ -15,6 +15,7 @@ pub fn default_store_config() -> StoreConfig {
         store_updates: false,
         store_delegators: false,
         store_votes: false,
+        store_stake_addresses: false,
     }
 }
 
@@ -26,6 +27,7 @@ pub fn save_history_store_config() -> StoreConfig {
         store_updates: false,
         store_delegators: false,
         store_votes: false,
+        store_stake_addresses: false,
     }
 }
 
@@ -37,6 +39,7 @@ pub fn save_retired_pools_store_config() -> StoreConfig {
         store_updates: false,
         store_delegators: false,
         store_votes: false,
+        store_stake_addresses: false,
     }
 }
 

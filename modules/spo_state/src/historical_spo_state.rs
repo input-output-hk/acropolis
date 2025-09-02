@@ -12,9 +12,10 @@ pub struct HistoricalSPOState {
     pub registration: Option<PoolRegistration>,
     pub updates: Option<Vec<PoolUpdateEvent>>,
 
-    // SPO's delegator's stake credential and its live_stake
-    pub delegators: Option<Vec<(StakeCredential, u64)>>,
+    // SPO's delegator's stake credential
+    pub delegators: Option<Vec<StakeCredential>>,
 
+    // SPO's votes
     pub votes: Option<Vec<VoteRecord>>,
 }
 

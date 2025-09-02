@@ -9,14 +9,34 @@ use acropolis_common::{
 };
 use anyhow::Result;
 use imbl::HashMap;
+use serde::Serialize;
 use serde_with::{hex::Hex, serde_as};
 use std::sync::Arc;
 use tracing::{debug, error, info};
 
 use crate::{historical_spo_state::HistoricalSPOState, store_config::StoreConfig};
 
+/// State of an individual stake address
+/// We don't care about DRep they are delegated to
 #[serde_as]
-#[derive(Default, Debug, Clone, serde::Serialize)]
+#[derive(Debug, Default, Clone, Serialize)]
+pub struct StakeAddressState {
+    /// Is it registered (or only used in addresses)?
+    pub registered: bool,
+
+    /// Total value in UTXO addresses
+    pub utxo_value: u64,
+
+    /// Value in reward account
+    pub rewards: u64,
+
+    /// SPO ID they are delegated to ("operator" ID)
+    #[serde_as(as = "Option<Hex>")]
+    pub delegated_spo: Option<KeyHash>,
+}
+
+#[serde_as]
+#[derive(Default, Debug, Clone, Serialize)]
 pub struct State {
     block: u64,
 
@@ -35,6 +55,9 @@ pub struct State {
     /// historical spo state
     /// keyed by pool operator id
     historical_spos: Option<HashMap<KeyHash, HistoricalSPOState>>,
+
+    /// stake_addresses (We save stake_addresses according to store_config)
+    stake_addresses: Option<HashMap<KeyHash, StakeAddressState>>,
 }
 
 impl State {
@@ -46,6 +69,11 @@ impl State {
             pending_deregistrations: HashMap::new(),
             vrf_key_to_pool_id_map: HashMap::new(),
             historical_spos: if config.store_historical_state() {
+                Some(HashMap::new())
+            } else {
+                None
+            },
+            stake_addresses: if config.store_stake_addresses {
                 Some(HashMap::new())
             } else {
                 None
@@ -71,6 +99,7 @@ impl From<SPOState> for State {
             pending_deregistrations,
             vrf_key_to_pool_id_map,
             historical_spos: None,
+            stake_addresses: None,
         }
     }
 }
