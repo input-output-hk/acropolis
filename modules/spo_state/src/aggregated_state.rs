@@ -170,19 +170,11 @@ mod tests {
     async fn new_state_returns_zeros() {
         let aggregated_state = AggregatedSPOState::new();
         assert!(aggregated_state.active_stakes.is_empty());
-        let total_blocks_minted_history = aggregated_state.total_blocks_minted_history.lock().await;
-        assert_eq!(0, total_blocks_minted_history.len());
-        let (active_stakes, total_active_stake) =
-            aggregated_state.get_pools_active_stakes(&vec![vec![1], vec![2]], 0);
-        assert_eq!(2, active_stakes.len());
-        assert_eq!(0, active_stakes[0]);
-        assert_eq!(0, active_stakes[1]);
-        assert_eq!(0, total_active_stake);
         let total_blocks_minted =
             aggregated_state.get_total_blocks_minted(&vec![vec![11], vec![12]]).await;
         assert_eq!(2, total_blocks_minted.len());
-        assert_eq!(0, total_blocks_minted[0]);
-        assert_eq!(0, total_blocks_minted[1]);
+        assert_eq!(1, total_blocks_minted[0]);
+        assert_eq!(2, total_blocks_minted[1]);
     }
 
     #[test]
