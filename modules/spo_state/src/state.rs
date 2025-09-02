@@ -227,6 +227,65 @@ impl State {
         )))
     }
 
+    fn handle_pool_registration(&mut self, block: &BlockInfo, reg: &PoolRegistration) {
+        debug!(
+            block = block.number,
+            "Registering SPO {}",
+            hex::encode(&reg.operator)
+        );
+        self.spos.insert(reg.operator.clone(), reg.clone());
+        self.vrf_key_to_pool_id_map.insert(reg.vrf_key_hash.clone(), reg.operator.clone());
+
+        // Remove any existing queued deregistrations
+        for (epoch, deregistrations) in &mut self.pending_deregistrations.iter_mut() {
+            let old_len = deregistrations.len();
+            deregistrations.retain(|d| *d != reg.operator);
+            if deregistrations.len() != old_len {
+                debug!(
+                    "Removed pending deregistration of SPO {} from epoch {}",
+                    hex::encode(&reg.operator),
+                    epoch
+                );
+            }
+        }
+    }
+
+    fn handle_pool_retirement(&mut self, block: &BlockInfo, ret: &PoolRetirement) {
+        debug!(
+            "SPO {} wants to retire at the end of epoch {} (cert in block number {})",
+            hex::encode(&ret.operator),
+            ret.epoch,
+            block.number
+        );
+        if ret.epoch <= self.epoch {
+            error!(
+                "SPO retirement received for current or past epoch {} for SPO {}",
+                ret.epoch,
+                hex::encode(&ret.operator)
+            );
+        } else if ret.epoch > self.epoch + TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH {
+            error!(
+                "SPO retirement received for epoch {} that exceeds future limit for SPO {}",
+                ret.epoch,
+                hex::encode(&ret.operator)
+            );
+        } else {
+            // Replace any existing queued deregistrations
+            for (epoch, deregistrations) in &mut self.pending_deregistrations.iter_mut() {
+                let old_len = deregistrations.len();
+                deregistrations.retain(|d| *d != ret.operator);
+                if deregistrations.len() != old_len {
+                    debug!(
+                        "Replaced pending deregistration of SPO {} from epoch {}",
+                        hex::encode(&ret.operator),
+                        epoch
+                    );
+                }
+            }
+            self.pending_deregistrations.entry(ret.epoch).or_default().push(ret.operator.clone());
+        }
+    }
+
     /// Handle TxCertificates with SPO registrations / de-registrations
     /// Returns an optional state message for end of epoch
     pub fn handle_tx_certs(
@@ -242,64 +301,15 @@ impl State {
         // Handle certificates
         for tx_cert in tx_certs_msg.certificates.iter() {
             match tx_cert {
+                // for spo_state
                 TxCertificate::PoolRegistration(reg) => {
-                    debug!(
-                        block = block.number,
-                        "Registering SPO {}",
-                        hex::encode(&reg.operator)
-                    );
-                    self.spos.insert(reg.operator.clone(), reg.clone());
-                    self.vrf_key_to_pool_id_map
-                        .insert(reg.vrf_key_hash.clone(), reg.operator.clone());
-
-                    // Remove any existing queued deregistrations
-                    for (epoch, deregistrations) in &mut self.pending_deregistrations.iter_mut() {
-                        let old_len = deregistrations.len();
-                        deregistrations.retain(|d| *d != reg.operator);
-                        if deregistrations.len() != old_len {
-                            debug!(
-                                "Removed pending deregistration of SPO {} from epoch {}",
-                                hex::encode(&reg.operator),
-                                epoch
-                            );
-                        }
-                    }
+                    self.handle_pool_registration(block, reg);
                 }
                 TxCertificate::PoolRetirement(ret) => {
-                    debug!(
-                        "SPO {} wants to retire at the end of epoch {} (cert in block number {})",
-                        hex::encode(&ret.operator),
-                        ret.epoch,
-                        block.number
-                    );
-                    if ret.epoch <= self.epoch {
-                        error!(
-                            "SPO retirement received for current or past epoch {} for SPO {}",
-                            ret.epoch,
-                            hex::encode(&ret.operator)
-                        );
-                    } else if ret.epoch > self.epoch + TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH {
-                        error!("SPO retirement received for epoch {} that exceeds future limit for SPO {}", ret.epoch, hex::encode(&ret.operator));
-                    } else {
-                        // Replace any existing queued deregistrations
-                        for (epoch, deregistrations) in &mut self.pending_deregistrations.iter_mut()
-                        {
-                            let old_len = deregistrations.len();
-                            deregistrations.retain(|d| *d != ret.operator);
-                            if deregistrations.len() != old_len {
-                                debug!(
-                                    "Replaced pending deregistration of SPO {} from epoch {}",
-                                    hex::encode(&ret.operator),
-                                    epoch
-                                );
-                            }
-                        }
-                        self.pending_deregistrations
-                            .entry(ret.epoch)
-                            .or_default()
-                            .push(ret.operator.clone());
-                    }
+                    self.handle_pool_retirement(block, ret);
                 }
+                // for stake_addresses
+                // handle tx certs
                 _ => (),
             }
         }
