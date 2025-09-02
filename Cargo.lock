@@ -67,6 +67,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "acropolis_module_chain_store"
+version = "0.1.0"
+dependencies = [
+ "acropolis_common",
+ "anyhow",
+ "caryatid_sdk",
+ "config",
+ "fjall",
+ "hex",
+ "minicbor 0.26.5",
+ "pallas-traverse",
+ "tempfile",
+]
+
+[[package]]
 name = "acropolis_module_drdd_state"
 version = "0.1.0"
 dependencies = [
