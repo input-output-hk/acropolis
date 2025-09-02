@@ -1,6 +1,6 @@
 use acropolis_common::{
-    rational_number::RationalNumber, ConwayParams, GovernanceAction, ProposalProcedure,
-    ProtocolParamType, ProtocolParamUpdate, VotesCount,
+    protocol_params::ConwayParams, rational_number::RationalNumber, GovernanceAction,
+    ProposalProcedure, ProtocolParamType, ProtocolParamUpdate, VotesCount,
 };
 use anyhow::Result;
 use std::{cmp::max, fmt};
@@ -107,7 +107,7 @@ impl VotingRegistrationState {
             || p.max_value_size.is_some()
             || p.max_block_ex_units.is_some()
             || p.governance_action_deposit.is_some()
-            || p.ada_per_utxo_byte.is_some()
+            || p.coins_per_utxo_byte.is_some()
             || p.minfee_refscript_cost_per_byte.is_some()
             || p.minfee_a.is_some()
             || p.minfee_b.is_some()
@@ -133,7 +133,7 @@ impl VotingRegistrationState {
             || p.expansion_rate.is_some()
             || p.treasury_growth_rate.is_some()
             || p.min_pool_cost.is_some()
-            || p.ada_per_utxo_byte.is_some()
+            || p.coins_per_utxo_byte.is_some()
             || p.execution_costs.is_some()
             || p.minfee_refscript_cost_per_byte.is_some()
         {

@@ -1,10 +1,9 @@
 use crate::alonzo_genesis;
 use acropolis_common::{
-    protocol_params::ShelleyParams,
+    protocol_params::{AlonzoParams, BabbageParams, ByronParams, ConwayParams, ShelleyParams},
     rational_number::{rational_number_from_f32, RationalNumber},
-    AlonzoParams, Anchor, BlockVersionData, ByronParams, Committee, Constitution, ConwayParams,
-    CostModel, Credential, DRepVotingThresholds, Era, PoolVotingThresholds, ProtocolConsts,
-    SoftForkRule, TxFeePolicy,
+    Anchor, BlockVersionData, Committee, Constitution, CostModel, Credential, DRepVotingThresholds,
+    Era, PoolVotingThresholds, ProtocolConsts, SoftForkRule, TxFeePolicy,
 };
 use anyhow::{anyhow, bail, Result};
 use hex::decode;
@@ -218,6 +217,16 @@ pub fn read_alonzo_genesis(network: &str) -> Result<AlonzoParams> {
         Era::Alonzo,
         alonzo_genesis::map_alonzo,
     )
+}
+
+pub fn apply_babbage_transition(alonzo_params_opt: Option<&AlonzoParams>) -> Result<BabbageParams> {
+    match alonzo_params_opt {
+        Some(alonzo_params) => Ok(BabbageParams {
+            coins_per_utxo_byte: alonzo_params.lovelace_per_utxo_word / 8,
+            plutus_v2_cost_model: None,
+        }),
+        None => bail!("Alonzo params must be set before babbage transition"),
+    }
 }
 
 pub fn read_conway_genesis(network: &str) -> Result<ConwayParams> {
