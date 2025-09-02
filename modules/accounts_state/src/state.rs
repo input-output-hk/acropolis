@@ -589,14 +589,22 @@ impl State {
             match self.spos.get(id) {
                 Some(old_spo) => {
                     if spo.pledge != old_spo.pledge {
-                        info!(epoch=spo_msg.epoch, pledge=spo.pledge,
-                              "Updated pledge for SPO {}", hex::encode(id));
+                        info!(
+                            epoch = spo_msg.epoch,
+                            pledge = spo.pledge,
+                            "Updated pledge for SPO {}",
+                            hex::encode(id)
+                        );
                     }
                 }
 
                 _ => {
-                    info!(epoch=spo_msg.epoch, pledge=spo.pledge,
-                          "Registered new SPO {}", hex::encode(id));
+                    info!(
+                        epoch = spo_msg.epoch,
+                        pledge = spo.pledge,
+                        "Registered new SPO {}",
+                        hex::encode(id)
+                    );
                 }
             }
         }
