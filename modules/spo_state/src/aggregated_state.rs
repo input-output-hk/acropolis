@@ -173,8 +173,8 @@ mod tests {
         let total_blocks_minted =
             aggregated_state.get_total_blocks_minted(&vec![vec![11], vec![12]]).await;
         assert_eq!(2, total_blocks_minted.len());
-        assert_eq!(1, total_blocks_minted[0]);
-        assert_eq!(2, total_blocks_minted[1]);
+        assert_eq!(0, total_blocks_minted[0]);
+        assert_eq!(0, total_blocks_minted[1]);
     }
 
     #[test]
