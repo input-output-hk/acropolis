@@ -310,7 +310,8 @@ impl State {
                     info!(
                         block = block.number,
                         "Registering SPO {} {:?}",
-                        hex::encode(&reg.operator), reg
+                        hex::encode(&reg.operator),
+                        reg
                     );
                     current.spos.insert(reg.operator.clone(), reg.clone());
                     current
@@ -332,7 +333,7 @@ impl State {
                     }
                 }
                 TxCertificate::PoolRetirement(ret) => {
-                   info!(
+                    info!(
                         "SPO {} wants to retire at the end of epoch {} (cert in block number {})",
                         hex::encode(&ret.operator),
                         ret.epoch,

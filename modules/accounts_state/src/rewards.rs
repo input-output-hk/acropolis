@@ -71,9 +71,8 @@ pub fn calculate_rewards(
     let mut num_delegators_paid: usize = 0;
     for (operator_id, spo) in staking.spos.iter() {
         // Actual blocks produced for epoch i, no rewards if none
-        let blocks_produced = performance.spos.get(operator_id)
-            .map(|s| s.blocks_produced)
-            .unwrap_or(0);
+        let blocks_produced =
+            performance.spos.get(operator_id).map(|s| s.blocks_produced).unwrap_or(0);
 
         if blocks_produced == 0 {
             continue;

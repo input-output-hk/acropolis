@@ -583,8 +583,10 @@ impl State {
 
     /// Handle an EpochActivityMessage giving total fees and block counts by VRF key for
     /// the just-ended epoch
-    pub async fn handle_epoch_activity(&mut self, ea_msg: &EpochActivityMessage,
-                                       verifier: &Option<PotsVerifier>
+    pub async fn handle_epoch_activity(
+        &mut self,
+        ea_msg: &EpochActivityMessage,
+        verifier: &Option<PotsVerifier>,
     ) -> Result<Vec<(KeyHash, SPORewards)>> {
         let mut spo_rewards: Vec<(KeyHash, SPORewards)> = Vec::new();
 
@@ -630,7 +632,12 @@ impl State {
             }
         };
         // Enter epoch - note the message specifies the epoch that has just *ended*
-        self.enter_epoch(ea_msg.epoch + 1, ea_msg.total_fees, spo_block_counts, verifier)?;
+        self.enter_epoch(
+            ea_msg.epoch + 1,
+            ea_msg.total_fees,
+            spo_block_counts,
+            verifier,
+        )?;
         Ok(spo_rewards)
     }
 

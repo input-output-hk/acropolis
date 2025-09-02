@@ -1,18 +1,16 @@
 //! Verification of pots values against captured CSV
-use std::collections::BTreeMap;
-use anyhow::Result;
 use crate::state::Pots;
-use tracing::{error, warn, info};
+use anyhow::Result;
+use std::collections::BTreeMap;
+use tracing::{error, info, warn};
 
 /// Pots verifier
 pub struct PotsVerifier {
-
     /// Map of pots values for every epoch
     epoch_pots: BTreeMap<u64, Pots>,
 }
 
 impl PotsVerifier {
-
     /// Read a CSV file
     pub fn new(path: &str) -> Result<Self> {
         let mut reader = csv::Reader::from_path(path)?;
@@ -36,35 +34,39 @@ impl PotsVerifier {
 
     /// Verify an epoch, logging any errors
     pub fn verify(&self, epoch: u64, pots: &Pots) {
-
         if let Some(desired_pots) = self.epoch_pots.get(&epoch) {
-
             if pots.reserves != desired_pots.reserves {
-                error!(epoch=epoch,
-                       calculated=pots.reserves,
-                       desired=desired_pots.reserves,
-                       difference=desired_pots.reserves as i64-pots.reserves as i64,
-                       "Verification mismatch: reserves for");
+                error!(
+                    epoch = epoch,
+                    calculated = pots.reserves,
+                    desired = desired_pots.reserves,
+                    difference = desired_pots.reserves as i64 - pots.reserves as i64,
+                    "Verification mismatch: reserves for"
+                );
             }
 
             if pots.treasury != desired_pots.treasury {
-                error!(epoch=epoch,
-                       calculated=pots.treasury,
-                       desired=desired_pots.treasury,
-                       difference=desired_pots.treasury as i64-pots.treasury as i64,
-                       "Verification mismatch: treasury for");
+                error!(
+                    epoch = epoch,
+                    calculated = pots.treasury,
+                    desired = desired_pots.treasury,
+                    difference = desired_pots.treasury as i64 - pots.treasury as i64,
+                    "Verification mismatch: treasury for"
+                );
             }
 
             if pots.deposits != desired_pots.deposits {
-                error!(epoch=epoch,
-                       calculated=pots.deposits,
-                       desired=desired_pots.deposits,
-                       difference=desired_pots.deposits as i64-pots.deposits as i64,
-                       "Verification mismatch: deposits for");
+                error!(
+                    epoch = epoch,
+                    calculated = pots.deposits,
+                    desired = desired_pots.deposits,
+                    difference = desired_pots.deposits as i64 - pots.deposits as i64,
+                    "Verification mismatch: deposits for"
+                );
             }
 
             if pots == desired_pots {
-                info!(epoch=epoch, "Verification success for");
+                info!(epoch = epoch, "Verification success for");
             }
         } else {
             warn!("Epoch {epoch} not represented in verify test data");

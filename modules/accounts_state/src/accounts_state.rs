@@ -8,7 +8,7 @@ use acropolis_common::{
     state_history::{StateHistory, StateHistoryStore},
     BlockInfo, BlockStatus,
 };
-use anyhow::{Result, Context as AnyhowContext};
+use anyhow::{Context as AnyhowContext, Result};
 use caryatid_sdk::{message_bus::Subscription, module, Context, Module};
 use config::Config;
 use std::sync::Arc;
@@ -28,11 +28,11 @@ mod rest;
 mod rewards;
 mod snapshot;
 mod verify;
-use verify::PotsVerifier;
 use acropolis_common::queries::accounts::{
     AccountInfo, AccountsStateQuery, AccountsStateQueryResponse,
 };
 use rest::handle_pots;
+use verify::PotsVerifier;
 
 const DEFAULT_SPO_STATE_TOPIC: &str = "cardano.spo.state";
 const DEFAULT_EPOCH_ACTIVITY_TOPIC: &str = "cardano.epoch.activity";
@@ -81,8 +81,10 @@ impl AccountsState {
 
         // Read pots CSV if verifying
         let verifier: Option<PotsVerifier> = maybe_verify_pots_file
-            .map(|file| PotsVerifier::new(&file)
-                 .with_context(|| format!("failed to load pots CSV from {file} - not verifying")))
+            .map(|file| {
+                PotsVerifier::new(&file)
+                    .with_context(|| format!("failed to load pots CSV from {file} - not verifying"))
+            })
             .transpose()?;
 
         // Initialisation messages
