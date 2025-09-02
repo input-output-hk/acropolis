@@ -37,6 +37,7 @@ store-registration = false
 store-updates = false
 store-delegators = false
 store-votes = false
+store-stake-addresses = false
 
 [module.spdd-state]
 store-spdd = false

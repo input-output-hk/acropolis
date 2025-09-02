@@ -8,6 +8,7 @@ const DEFAULT_STORE_REGISTRATION: (&str, bool) = ("store-registration", false);
 const DEFAULT_STORE_UPDATES: (&str, bool) = ("store-updates", false);
 const DEFAULT_STORE_DELEGATORS: (&str, bool) = ("store-delegators", false);
 const DEFAULT_STORE_VOTES: (&str, bool) = ("store-votes", false);
+const DEFAULT_STORE_STAKE_ADDRESSES: (&str, bool) = ("store-stake-addresses", false);
 
 #[derive(Debug, Clone)]
 pub struct StoreConfig {
@@ -17,6 +18,7 @@ pub struct StoreConfig {
     pub store_updates: bool,
     pub store_delegators: bool,
     pub store_votes: bool,
+    pub store_stake_addresses: bool,
 }
 
 impl StoreConfig {
@@ -27,6 +29,7 @@ impl StoreConfig {
         store_updates: bool,
         store_delegators: bool,
         store_votes: bool,
+        store_stake_addresses: bool,
     ) -> Self {
         Self {
             store_epochs_history,
@@ -35,6 +38,7 @@ impl StoreConfig {
             store_updates,
             store_delegators,
             store_votes,
+            store_stake_addresses,
         }
     }
 
@@ -62,6 +66,9 @@ impl From<Arc<Config>> for StoreConfig {
                 .get_bool(DEFAULT_STORE_DELEGATORS.0)
                 .unwrap_or(DEFAULT_STORE_DELEGATORS.1),
             store_votes: config.get_bool(DEFAULT_STORE_VOTES.0).unwrap_or(DEFAULT_STORE_VOTES.1),
+            store_stake_addresses: config
+                .get_bool(DEFAULT_STORE_STAKE_ADDRESSES.0)
+                .unwrap_or(DEFAULT_STORE_STAKE_ADDRESSES.1),
         }
     }
 }
