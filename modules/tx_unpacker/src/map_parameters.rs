@@ -890,28 +890,5 @@ pub fn map_value(pallas_value: &MultiEraValue) -> Value {
             _ => {}
         }
     }
-    canonicalize_assets(&mut assets);
     Value::new(lovelace, assets)
-}
-
-// Sorts by policy_id and name
-// merges duplicates and sums their amounts
-fn canonicalize_assets(assets: &mut Vec<NativeAsset>) {
-    if assets.len() <= 1 {
-        return;
-    }
-
-    assets.sort_unstable_by(|a, b| match a.policy_id.cmp(&b.policy_id) {
-        std::cmp::Ordering::Equal => a.name.cmp(&b.name),
-        ord => ord,
-    });
-
-    assets.dedup_by(|left, right| {
-        if left.policy_id == right.policy_id && left.name == right.name {
-            left.amount = left.amount.saturating_add(right.amount);
-            true
-        } else {
-            false
-        }
-    });
 }
