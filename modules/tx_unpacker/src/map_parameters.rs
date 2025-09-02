@@ -8,7 +8,7 @@ use pallas::ledger::{
         ProtocolVersion as PallasProtocolVersion, Relay as PallasRelay, ScriptHash,
         StakeCredential as PallasStakeCredential,
     },
-    traverse::MultiEraCert,
+    traverse::{MultiEraCert, MultiEraPolicyAssets, MultiEraValue},
     *,
 };
 
@@ -854,4 +854,64 @@ pub fn map_all_governance_voting_procedures(
     }
 
     Ok(procs)
+}
+
+pub fn map_value(pallas_value: &MultiEraValue) -> Value {
+    let lovelace = pallas_value.coin();
+    let pallas_assets = pallas_value.assets();
+
+    let mut assets = Vec::<NativeAsset>::new();
+
+    for policy_group in pallas_assets {
+        match policy_group {
+            MultiEraPolicyAssets::AlonzoCompatibleOutput(policy, kvps) => {
+                let policy_id: [u8; 28] =
+                    policy.as_ref().try_into().expect("Policy id must be 28 bytes");
+                for (name, amt) in kvps.iter() {
+                    assets.push(NativeAsset {
+                        policy_id,
+                        name: name.to_vec(),
+                        amount: *amt,
+                    });
+                }
+            }
+            MultiEraPolicyAssets::ConwayOutput(policy, kvps) => {
+                let policy_id: [u8; 28] =
+                    policy.as_ref().try_into().expect("Policy id must be 28 bytes");
+                for (name, amt) in kvps.iter() {
+                    let amount: u64 = u64::from(*amt);
+                    assets.push(NativeAsset {
+                        policy_id,
+                        name: name.to_vec(),
+                        amount,
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+    canonicalize_assets(&mut assets);
+    Value::new(lovelace, assets)
+}
+
+// Sorts by policy_id and name
+// merges duplicates and sums their amounts
+fn canonicalize_assets(assets: &mut Vec<NativeAsset>) {
+    if assets.len() <= 1 {
+        return;
+    }
+
+    assets.sort_unstable_by(|a, b| match a.policy_id.cmp(&b.policy_id) {
+        std::cmp::Ordering::Equal => a.name.cmp(&b.name),
+        ord => ord,
+    });
+
+    assets.dedup_by(|left, right| {
+        if left.policy_id == right.policy_id && left.name == right.name {
+            left.amount = left.amount.saturating_add(right.amount);
+            true
+        } else {
+            false
+        }
+    });
 }

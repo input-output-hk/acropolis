@@ -139,6 +139,35 @@ pub struct StakeAddressDelta {
     pub delta: i64,
 }
 
+/// Value (lovelace + multiasset)
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Value {
+    pub lovelace: u64,
+    pub assets: MultiAssets,
+}
+
+pub type MultiAssets = Vec<NativeAsset>;
+
+pub type PolicyId = [u8; 28];
+pub type AssetName = Vec<u8>;
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct NativeAsset {
+    pub policy_id: PolicyId,
+    pub name: AssetName,
+    pub amount: u64,
+}
+
+impl Value {
+    pub fn new(lovelace: u64, assets: Vec<NativeAsset>) -> Self {
+        Self { lovelace, assets }
+    }
+
+    pub fn coin(&self) -> u64 {
+        self.lovelace
+    }
+}
+
 /// Transaction output (UTXO)
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TxOutput {
@@ -152,7 +181,7 @@ pub struct TxOutput {
     pub address: Address,
 
     /// Output value (Lovelace)
-    pub value: u64,
+    pub value: Value,
     // todo: Implement datum    /// Datum (raw)
     // !!!    pub datum: Vec<u8>,
 }

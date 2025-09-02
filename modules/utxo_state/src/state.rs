@@ -254,7 +254,11 @@ impl State {
     pub async fn observe_output(&mut self, output: &TxOutput, block: &BlockInfo) -> Result<()> {
         if tracing::enabled!(tracing::Level::DEBUG) {
             debug!("UTXO >> {}:{}", encode(&output.tx_hash), output.index);
-            debug!("        - adding {} to {:?}", output.value, output.address);
+            debug!(
+                "        - adding {} to {:?}",
+                output.value.coin(),
+                output.address
+            );
         }
 
         // Insert the UTXO, checking if it already existed
@@ -262,7 +266,7 @@ impl State {
 
         let value = UTXOValue {
             address: output.address.clone(),
-            value: output.value,
+            value: output.value.coin(),
         };
 
         // Add to volatile or immutable maps
@@ -288,7 +292,7 @@ impl State {
 
         // Tell the observer
         if let Some(observer) = self.address_delta_observer.as_ref() {
-            observer.observe_delta(&output.address, output.value as i64).await;
+            observer.observe_delta(&output.address, output.value.coin() as i64).await;
         }
 
         Ok(())
@@ -396,7 +400,7 @@ impl State {
 mod tests {
     use super::*;
     use crate::InMemoryImmutableUTXOStore;
-    use acropolis_common::{ByronAddress, Era};
+    use acropolis_common::{ByronAddress, Era, Value};
     use config::Config;
     use tokio::sync::Mutex;
 
@@ -441,7 +445,7 @@ mod tests {
             tx_hash: TxHash::default(),
             index: 0,
             address: create_address(99),
-            value: 42,
+            value: Value::new(42, Vec::new()),
         };
 
         let block = create_block(BlockStatus::Immutable, 1, 1);
@@ -470,7 +474,7 @@ mod tests {
             tx_hash: TxHash::default(),
             index: 0,
             address: create_address(99),
-            value: 42,
+            value: Value::new(42, Vec::new()),
         };
 
         let block1 = create_block(BlockStatus::Immutable, 1, 1);
@@ -496,7 +500,7 @@ mod tests {
             tx_hash: TxHash::default(),
             index: 0,
             address: create_address(99),
-            value: 42,
+            value: Value::new(42, Vec::new()),
         };
 
         let block10 = create_block(BlockStatus::Volatile, 10, 10);
@@ -521,7 +525,7 @@ mod tests {
             tx_hash: TxHash::default(),
             index: 0,
             address: create_address(99),
-            value: 42,
+            value: Value::new(42, Vec::new()),
         };
 
         let block10 = create_block(BlockStatus::Volatile, 10, 10);
@@ -558,7 +562,7 @@ mod tests {
             tx_hash: TxHash::default(),
             index: 0,
             address: create_address(99),
-            value: 42,
+            value: Value::new(42, Vec::new()),
         };
 
         let block1 = create_block(BlockStatus::Volatile, 1, 1);
@@ -590,7 +594,7 @@ mod tests {
             tx_hash: TxHash::default(),
             index: 0,
             address: create_address(99),
-            value: 42,
+            value: Value::new(42, Vec::new()),
         };
 
         let block1 = create_block(BlockStatus::Volatile, 1, 1);
@@ -661,7 +665,7 @@ mod tests {
             tx_hash: TxHash::default(),
             index: 0,
             address: create_address(99),
-            value: 42,
+            value: Value::new(42, Vec::new()),
         };
 
         let block1 = create_block(BlockStatus::Immutable, 1, 1);
@@ -692,7 +696,7 @@ mod tests {
             tx_hash: TxHash::default(),
             index: 0,
             address: create_address(99),
-            value: 42,
+            value: Value::new(42, Vec::new()),
         };
 
         let block10 = create_block(BlockStatus::Volatile, 10, 10);
@@ -721,7 +725,7 @@ mod tests {
             tx_hash: TxHash::default(),
             index: 0,
             address: create_address(99),
-            value: 42,
+            value: Value::new(42, Vec::new()),
         };
 
         let block10 = create_block(BlockStatus::Volatile, 10, 10);
