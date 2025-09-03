@@ -13,12 +13,9 @@ use bitmask_enum::bitmask;
 use hex::decode;
 use serde::{Deserialize, Serialize};
 use serde_with::{hex::Hex, serde_as};
+use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
-use std::{
-    cmp::Ordering,
-    net::{Ipv4Addr, Ipv6Addr},
-};
 
 /// Protocol era
 #[derive(
@@ -402,61 +399,12 @@ pub struct MultiHostName {
     pub dns_name: String,
 }
 
-/// Pool Relay as enum
+/// Pool Relay
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Eq, PartialEq)]
 pub enum Relay {
     SingleHostAddr(SingleHostAddr),
     SingleHostName(SingleHostName),
     MultiHostName(MultiHostName),
-}
-
-impl TryFrom<PoolRelay> for Relay {
-    type Error = String;
-
-    fn try_from(value: PoolRelay) -> std::result::Result<Self, Self::Error> {
-        if let Some(dns_name) = value.dns_srv {
-            return Ok(Relay::MultiHostName(MultiHostName { dns_name }));
-        }
-
-        if let Some(dns_name) = value.dns {
-            return Ok(Relay::SingleHostName(SingleHostName {
-                port: Some(value.port),
-                dns_name,
-            }));
-        }
-
-        let ipv4 = match value.ip_v4 {
-            None => None,
-            Some(ipv4_str) => {
-                let ipv4_addr = ipv4_str.parse::<Ipv4Addr>().map_err(|e| e.to_string())?;
-                Some(ipv4_addr.octets())
-            }
-        };
-
-        let ipv6 = match value.ip_v6 {
-            None => None,
-            Some(ipv6_str) => {
-                let ipv6_addr = ipv6_str.parse::<Ipv6Addr>().map_err(|e| e.to_string())?;
-                Some(ipv6_addr.octets())
-            }
-        };
-
-        Ok(Relay::SingleHostAddr(SingleHostAddr {
-            port: Some(value.port),
-            ipv4,
-            ipv6,
-        }))
-    }
-}
-
-/// Pool Relay actual response from blockfrost
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Eq, PartialEq)]
-pub struct PoolRelay {
-    pub ip_v4: Option<String>,
-    pub ip_v6: Option<String>,
-    pub dns: Option<String>,
-    pub dns_srv: Option<String>,
-    pub port: u16,
 }
 
 /// Pool metadata

@@ -1,15 +1,10 @@
 //! Acropolis SPOState: State storage
 
 use acropolis_common::{
-    ledger_state::SPOState,
-    messages::{
+    ledger_state::SPOState, messages::{
         CardanoMessage, EpochActivityMessage, Message, SPOStakeDistributionMessage,
         SPOStateMessage, TxCertificatesMessage,
-    },
-    params::TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH,
-    serialization::SerializeMapAs,
-    state_history::{StateHistory, StateHistoryStore},
-    BlockInfo, KeyHash, PoolMetadata, PoolRegistration, PoolRetirement, TxCertificate,
+    }, params::TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH, serialization::SerializeMapAs, state_history::{StateHistory, StateHistoryStore}, BlockInfo, KeyHash, PoolMetadata, PoolRegistration, PoolRetirement, Relay, TxCertificate
 };
 use anyhow::Result;
 use dashmap::DashMap;
@@ -171,6 +166,13 @@ impl State {
         self.current()
             .and_then(|state| state.spos.get(pool_id).map(|p| p.pool_metadata.clone()))
             .flatten()
+    }
+
+    /// Get pool relay
+    pub fn get_pool_relays(&self, pool_id: &KeyHash ) -> Option<Vec<Relay>> {
+        self.current()
+        .and_then(|state| state.spos.get(pool_id).map(|p| p.relays.clone()))
+        .flatten()
     }
 
     /// Get Pools Active Stakes by epoch and total active stake
