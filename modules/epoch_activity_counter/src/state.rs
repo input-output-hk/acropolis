@@ -88,26 +88,51 @@ impl State {
     }
 
     /// Get current epoch's blocks minted for each vrf key hash
-    /// ### NOTE:
-    /// This function only works when `store_history` is enabled.
     pub fn get_blocks_minted_by_pools(&self, vrf_key_hashes: &Vec<KeyHash>) -> Vec<u64> {
         vrf_key_hashes
             .iter()
             .map(|key_hash| self.blocks_minted.get(key_hash).map(|v| *v as u64).unwrap_or(0))
             .collect()
     }
+
+    /// Get epoch's total blocks minted for each vrf key hash till current block number
+    pub fn get_total_blocks_minted_by_pools(&self, vrf_key_hashes: &Vec<KeyHash>) -> Vec<u64> {
+        vrf_key_hashes
+            .iter()
+            .map(|key_hash| self.total_blocks_minted.get(key_hash).map(|v| *v as u64).unwrap_or(0))
+            .collect()
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
-    use acropolis_common::{crypto::keyhash, BlockInfo, BlockStatus, Era};
+    use acropolis_common::{
+        crypto::keyhash,
+        state_history::{StateHistory, StateHistoryStore},
+        BlockInfo, BlockStatus, Era,
+    };
+    use tokio::sync::Mutex;
 
     fn make_block(epoch: u64) -> BlockInfo {
         BlockInfo {
             status: BlockStatus::Immutable,
-            slot: 99,
-            number: 42,
+            slot: 0,
+            number: epoch * 10,
+            hash: Vec::new(),
+            epoch,
+            new_epoch: false,
+            era: Era::Conway,
+        }
+    }
+
+    fn make_rolled_back_block(epoch: u64) -> BlockInfo {
+        BlockInfo {
+            status: BlockStatus::RolledBack,
+            slot: 0,
+            number: epoch * 10,
             hash: Vec::new(),
             epoch,
             new_epoch: false,
@@ -138,6 +163,7 @@ mod tests {
         assert_eq!(state.epoch_blocks, 2);
         assert_eq!(state.blocks_minted.len(), 1);
         assert_eq!(state.blocks_minted.get(&keyhash(vrf)), Some(&2));
+        assert_eq!(state.total_blocks_minted.get(&keyhash(vrf)), Some(&2));
     }
 
     #[test]
@@ -197,5 +223,57 @@ mod tests {
         assert_eq!(state.epoch_blocks, 0);
         assert_eq!(state.epoch_fees, 0);
         assert!(state.blocks_minted.is_empty());
+    }
+
+    #[tokio::test]
+    async fn state_is_rolled_back() {
+        let history = Arc::new(Mutex::new(StateHistory::<State>::new(
+            "epoch_activity_counter",
+            StateHistoryStore::default_block_store(),
+        )));
+        let mut state = history.lock().await.get_current_state();
+        let mut block = make_block(1);
+        state.handle_mint(&block, Some(b"vrf_1"));
+        state.handle_fees(&block, 123);
+        history.lock().await.commit(block.number, state);
+
+        let mut state = history.lock().await.get_current_state();
+        block.number += 1;
+        state.handle_mint(&block, Some(b"vrf_1"));
+        state.handle_fees(&block, 123);
+        history.lock().await.commit(block.number, state);
+
+        let mut state = history.lock().await.get_current_state();
+        block = make_block(2);
+        let _ = state.end_epoch(&block);
+        state.handle_mint(&block, Some(b"vrf_1"));
+        state.handle_fees(&block, 123);
+        history.lock().await.commit(block.number, state);
+
+        let state = history.lock().await.get_current_state();
+        assert_eq!(state.epoch_blocks, 1);
+        assert_eq!(state.epoch_fees, 123);
+        assert_eq!(
+            1,
+            state.get_blocks_minted_by_pools(&vec![keyhash(b"vrf_1")])[0]
+        );
+        assert_eq!(
+            3,
+            state.get_total_blocks_minted_by_pools(&vec![keyhash(b"vrf_1")])[0]
+        );
+
+        // roll back of epoch 2
+        block = make_rolled_back_block(2);
+        let mut state = history.lock().await.get_rolled_back_state(block.number);
+        let _ = state.end_epoch(&block);
+        state.handle_mint(&block, Some(b"vrf_2"));
+        state.handle_fees(&block, 123);
+        history.lock().await.commit(block.number, state);
+
+        let state = history.lock().await.get_current_state();
+        assert_eq!(
+            2,
+            state.get_total_blocks_minted_by_pools(&vec![keyhash(b"vrf_1")])[0]
+        );
     }
 }

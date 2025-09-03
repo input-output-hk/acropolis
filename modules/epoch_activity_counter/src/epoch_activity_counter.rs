@@ -5,7 +5,7 @@ use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::epochs::{
         BlocksMintedByPools, EpochsStateQuery, EpochsStateQueryResponse, LatestEpoch,
-        DEFAULT_EPOCHS_QUERY_TOPIC,
+        TotalBlocksMintedByPools, DEFAULT_EPOCHS_QUERY_TOPIC,
     },
     rest_helper::{handle_rest, handle_rest_with_path_parameter},
     state_history::{StateHistory, StateHistoryStore},
@@ -147,6 +147,11 @@ impl EpochActivityCounter {
 
                 _ => error!("Unexpected message type: {message:?}"),
             }
+
+            // Commit the new state
+            if let Some(block_info) = current_block {
+                history.lock().await.commit(block_info.number, state);
+            }
         }
     }
 
@@ -210,6 +215,7 @@ impl EpochActivityCounter {
         // handle epochs query
         context.handle(&epochs_query_topic, move |message| {
             let history = history_query.clone();
+
             async move {
                 let Message::StateQuery(StateQuery::Epochs(query)) = message.as_ref() else {
                     return Arc::new(Message::StateQueryResponse(StateQueryResponse::Epochs(
@@ -229,6 +235,15 @@ impl EpochActivityCounter {
                         EpochsStateQueryResponse::BlocksMintedByPools(BlocksMintedByPools {
                             blocks_minted: state.get_blocks_minted_by_pools(vrf_key_hashes),
                         })
+                    }
+
+                    EpochsStateQuery::GetTotalBlocksMintedByPools { vrf_key_hashes } => {
+                        EpochsStateQueryResponse::TotalBlocksMintedByPools(
+                            TotalBlocksMintedByPools {
+                                total_blocks_minted: state
+                                    .get_total_blocks_minted_by_pools(vrf_key_hashes),
+                            },
+                        )
                     }
 
                     _ => EpochsStateQueryResponse::Error(format!(
