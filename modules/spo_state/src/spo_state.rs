@@ -7,7 +7,9 @@ use acropolis_common::{
         SnapshotStateMessage, StateQuery, StateQueryResponse,
     },
     queries::pools::{
-        PoolHistory, PoolRelays, PoolsActiveStakes, PoolsList, PoolsListWithInfo, PoolsRetiredList, PoolsRetiringList, PoolsStateQuery, PoolsStateQueryResponse, PoolsTotalBlocksMinted, DEFAULT_POOLS_QUERY_TOPIC
+        PoolHistory, PoolRelays, PoolsActiveStakes, PoolsList, PoolsListWithInfo, PoolsRetiredList,
+        PoolsRetiringList, PoolsStateQuery, PoolsStateQueryResponse, PoolsTotalBlocksMinted,
+        DEFAULT_POOLS_QUERY_TOPIC,
     },
 };
 use anyhow::Result;
@@ -326,8 +328,8 @@ impl SPOState {
 
                     PoolsStateQuery::GetPoolRelays { pool_id } => {
                         let pool_relays = guard.get_pool_relays(pool_id);
-                        if let Some(relays) = pool_relays{
-                            PoolsStateQueryResponse::PoolRelays(PoolRelays {relays})
+                        if let Some(relays) = pool_relays {
+                            PoolsStateQueryResponse::PoolRelays(PoolRelays { relays })
                         } else {
                             PoolsStateQueryResponse::NotFound
                         }
