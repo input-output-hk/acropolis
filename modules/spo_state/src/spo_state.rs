@@ -9,8 +9,7 @@ use acropolis_common::{
     },
     queries::pools::{
         PoolHistory, PoolsActiveStakes, PoolsList, PoolsListWithInfo, PoolsRetiredList,
-        PoolsRetiringList, PoolsStateQuery, PoolsStateQueryResponse, PoolsTotalBlocksMinted,
-        DEFAULT_POOLS_QUERY_TOPIC,
+        PoolsRetiringList, PoolsStateQuery, PoolsStateQueryResponse, DEFAULT_POOLS_QUERY_TOPIC,
     },
     state_history::{StateHistory, StateHistoryStore},
     BlockInfo, BlockStatus,
@@ -173,12 +172,8 @@ impl SPOState {
                 {
                     let span =
                         info_span!("spo_state.handle_epoch_activity", block = block_info.number);
-                    async {
+                    span.in_scope(|| {
                         Self::check_sync(&current_block, &block_info);
-                        // update aggregated_state
-                        aggregated_state
-                            .handle_epoch_activity(block_info, epoch_activity_message)
-                            .await;
                         // update epochs_history
                         // epochs_history is keyed by spo not vrf_key_hash
                         let spos = state
@@ -188,9 +183,7 @@ impl SPOState {
                             epoch_activity_message,
                             &spos,
                         );
-                    }
-                    .instrument(span)
-                    .await;
+                    });
                 }
             }
 
@@ -325,14 +318,6 @@ impl SPOState {
                         PoolsStateQueryResponse::PoolsActiveStakes(PoolsActiveStakes {
                             active_stakes,
                             total_active_stake,
-                        })
-                    }
-
-                    PoolsStateQuery::GetPoolsTotalBlocksMinted { vrf_key_hashes } => {
-                        let total_blocks_minted =
-                            aggregated_state.get_total_blocks_minted(vrf_key_hashes).await;
-                        PoolsStateQueryResponse::PoolsTotalBlocksMinted(PoolsTotalBlocksMinted {
-                            total_blocks_minted,
                         })
                     }
 
