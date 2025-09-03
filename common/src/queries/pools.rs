@@ -1,4 +1,6 @@
-use crate::{KeyHash, PoolEpochState, PoolMetadata, PoolRegistration, PoolRetirement};
+use crate::{
+    KeyHash, PoolEpochState, PoolMetadata, PoolRegistration, PoolRelay, PoolRetirement, Relay,
+};
 
 pub const DEFAULT_POOLS_QUERY_TOPIC: (&str, &str) =
     ("pools-state-query-topic", "cardano.query.pools");
@@ -107,7 +109,23 @@ pub struct PoolHistory {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PoolRelays {}
+pub struct PoolRelays {
+    pub relays: Vec<PoolRelay>,
+}
+
+impl PoolRelays {
+    /// Return as a vec of the `Relay` struct
+    pub fn try_into_vec(self) -> Result<Vec<Relay>, String> {
+        let mut relays = vec![];
+
+        for pool_relay in self.relays {
+            let relay = Relay::try_from(pool_relay)?;
+            relays.push(relay);
+        }
+
+        Ok(relays)
+    }
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PoolDelegators {}

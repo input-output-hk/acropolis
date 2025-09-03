@@ -9,7 +9,7 @@ use acropolis_common::{
         utils::query_state,
     },
     serialization::Bech32WithHrp,
-    PoolRetirement,
+    PoolRetirement, Relay,
 };
 use anyhow::Result;
 use caryatid_sdk::Context;
@@ -608,11 +608,61 @@ pub async fn handle_pool_metadata_blockfrost(
 }
 
 pub async fn handle_pool_relays_blockfrost(
-    _context: Arc<Context<Message>>,
-    _params: Vec<String>,
-    _handlers_config: Arc<HandlersConfig>,
+    context: Arc<Context<Message>>,
+    params: Vec<String>,
+    handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
-    Ok(RESTResponse::with_text(501, "Not implemented"))
+    let Some(pool_id) = params.get(0) else {
+        return Ok(RESTResponse::with_text(400, "Missing pool ID parameter"));
+    };
+
+    let Ok(spo) = Vec::<u8>::from_bech32_with_hrp(pool_id, "pool") else {
+        return Ok(RESTResponse::with_text(
+            400,
+            &format!("Invalid Bech32 stake pool ID: {pool_id}"),
+        ));
+    };
+
+    let pool_relay_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
+        PoolsStateQuery::GetPoolRelays { pool_id: spo.clone() }
+    )));
+
+    let pool_relays = query_state(
+        &context,
+        &handlers_config.pools_query_topic,
+        pool_relay_msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::PoolRelays(pool_relays),
+            )) => Ok(pool_relays),
+             Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::NotFound,
+            )) => Err(anyhow::anyhow!("Not found")),
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::Error(e),
+            )) => Err(anyhow::anyhow!(
+                "Internal server error while retrieving pool relays: {e}"
+            )),
+            _ => Err(anyhow::anyhow!("Unexpected message type")),
+        }
+
+    )
+    .await?;
+
+    // Convert PoolRelays to Relays vec
+    match pool_relays.try_into_vec() {
+        Ok(relays ) => match serde_json::to_string(&relays) {
+            Ok(json) => Ok(RESTResponse::with_json(200, &json)),
+            Err(e) => Ok(RESTResponse::with_text(
+                500,
+                &format!("Internal server error while retrieving pool relays: {e}"),
+            )),
+        },
+        
+        Err(e) => 
+            Ok(RESTResponse::with_text(400, &format!("Internal server error while retrieving pool relays: {e}") ))
+    }
+    
 }
 
 pub async fn handle_pool_delegators_blockfrost(
