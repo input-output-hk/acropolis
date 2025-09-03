@@ -304,7 +304,7 @@ async fn handle_pools_extended_blockfrost(
 
     // Get latest parameters from parameters-state
     let latest_parameters_msg = Arc::new(Message::StateQuery(StateQuery::Parameters(
-        ParametersStateQuery::GetLatestParameters,
+        ParametersStateQuery::GetLatestEpochParameters,
     )));
     let latest_parameters = query_state(
         &context,
@@ -312,8 +312,8 @@ async fn handle_pools_extended_blockfrost(
         latest_parameters_msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Parameters(
-                ParametersStateQueryResponse::LatestParameters(res),
-            )) => Ok(res.parameters),
+                ParametersStateQueryResponse::LatestEpochParameters(params),
+            )) => Ok(params),
             Message::StateQueryResponse(StateQueryResponse::Parameters(
                 ParametersStateQueryResponse::Error(e),
             )) => Err(anyhow::anyhow!(

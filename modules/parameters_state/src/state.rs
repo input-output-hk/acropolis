@@ -12,7 +12,7 @@ use tracing::info;
 #[derive(Default, Clone)]
 pub struct State {
     pub network_name: String,
-    pub active_epoch: u64,
+    pub current_epoch: u64,
     pub current_params: ParametersUpdater,
     pub current_era: Option<Era>,
 }
@@ -21,7 +21,7 @@ impl State {
     pub fn new(network_name: String) -> Self {
         Self {
             network_name,
-            active_epoch: 0,
+            current_epoch: 0,
             current_params: ParametersUpdater::new(),
             current_era: None,
         }
@@ -61,6 +61,8 @@ impl State {
         block: &BlockInfo,
         msg: &GovernanceOutcomesMessage,
     ) -> Result<ProtocolParamsMessage> {
+        self.current_epoch = block.epoch;
+
         if self.current_era != Some(block.era) {
             self.apply_genesis(&block)?;
         }
