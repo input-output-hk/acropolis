@@ -637,7 +637,7 @@ pub async fn handle_pool_relays_blockfrost(
             )) => Ok(pool_relays),
              Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::NotFound,
-            )) => Err(anyhow::anyhow!("Not found")),
+            )) => Err(anyhow::anyhow!("Pool Relays Not found")),
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::Error(e),
             )) => Err(anyhow::anyhow!(
