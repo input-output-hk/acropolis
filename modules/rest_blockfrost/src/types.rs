@@ -268,7 +268,7 @@ pub struct PoolRelayRest {
 impl From<Relay> for PoolRelayRest {
     fn from(value: Relay) -> Self {
         //todo: port is required on BlockFrost. Need a default value, if not provided
-        let default_port = 100;
+        let default_port = 3001;
 
         match value {
             Relay::SingleHostAddr(s) => PoolRelayRest {
@@ -282,7 +282,6 @@ impl From<Relay> for PoolRelayRest {
                 }),
                 dns: None,
                 dns_srv: None,
-                // todo: what would be the default port number
                 port: s.port.unwrap_or(default_port),
             },
             Relay::SingleHostName(s) => PoolRelayRest {
@@ -290,7 +289,6 @@ impl From<Relay> for PoolRelayRest {
                 ipv6: None,
                 dns: Some(s.dns_name),
                 dns_srv: None,
-                // todo: what would be the default port number
                 port: s.port.unwrap_or(default_port),
             },
             Relay::MultiHostName(m) => PoolRelayRest {
@@ -298,7 +296,6 @@ impl From<Relay> for PoolRelayRest {
                 ipv6: None,
                 dns: None,
                 dns_srv: Some(m.dns_name),
-                // todo: what would be the default port number
                 port: default_port,
             },
         }
