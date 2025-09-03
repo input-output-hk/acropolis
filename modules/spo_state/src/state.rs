@@ -30,6 +30,9 @@ pub struct BlockState {
     #[serde_as(as = "SerializeMapAs<Hex, _>")]
     spos: HashMap<Vec<u8>, PoolRegistration>,
 
+    #[serde_as(as = "SerializeMapAs<Hex, _>")]
+    pending_updates: HashMap<Vec<u8>, PoolRegistration>,
+
     #[serde_as(as = "SerializeMapAs<_, Vec<Hex>>")]
     pending_deregistrations: HashMap<u64, Vec<Vec<u8>>>,
 
@@ -43,6 +46,7 @@ impl BlockState {
         block: u64,
         epoch: u64,
         spos: HashMap<Vec<u8>, PoolRegistration>,
+        pending_updates: HashMap<Vec<u8>, PoolRegistration>,
         pending_deregistrations: HashMap<u64, Vec<Vec<u8>>>,
         vrf_key_to_pool_id_map: HashMap<Vec<u8>, Vec<u8>>,
     ) -> Self {
@@ -50,6 +54,7 @@ impl BlockState {
             block,
             epoch,
             spos,
+            pending_updates,
             pending_deregistrations,
             vrf_key_to_pool_id_map,
         }
@@ -65,6 +70,7 @@ impl From<SPOState> for BlockState {
             block: 0,
             epoch: 0,
             spos,
+            pending_updates: value.updates.into(),
             pending_deregistrations: value.retiring.into_iter().fold(
                 HashMap::new(),
                 |mut acc, (key_hash, epoch)| {
@@ -81,6 +87,7 @@ impl From<&BlockState> for SPOState {
     fn from(value: &BlockState) -> Self {
         Self {
             pools: value.spos.iter().map(|(key, value)| (key.clone(), value.clone())).collect(),
+            updates: value.pending_updates.iter().map(|(key, value)| (key.clone(), value.clone())).collect(),
             retiring: value
                 .pending_deregistrations
                 .iter()
@@ -274,6 +281,12 @@ impl State {
             // are still included
             let spos = current.spos.values().cloned().collect();
 
+            // Update any pending
+            for (operator, reg) in &current.pending_updates {
+                current.spos.insert(operator.clone(), reg.clone());
+            }
+            current.pending_updates.clear();
+
             // Deregister any pending
             let mut retired_spos: Vec<KeyHash> = Vec::new();
             let deregistrations = current.pending_deregistrations.remove(&current.epoch);
@@ -307,16 +320,26 @@ impl State {
         for tx_cert in tx_certs_msg.certificates.iter() {
             match tx_cert {
                 TxCertificate::PoolRegistration(reg) => {
-                    debug!(
-                        block = block.number,
-                        "Registering SPO {} {:?}",
-                        hex::encode(&reg.operator),
-                        reg
-                    );
-                    current.spos.insert(reg.operator.clone(), reg.clone());
-                    current
-                        .vrf_key_to_pool_id_map
-                        .insert(reg.vrf_key_hash.clone(), reg.operator.clone());
+                    if current.spos.contains_key(&reg.operator) {
+                        debug!(
+                            block = block.number,
+                            "New pending SPO update {} {:?}",
+                            hex::encode(&reg.operator),
+                            reg
+                        );
+                        current.pending_updates.insert(reg.operator.clone(), reg.clone());
+                    } else {
+                        debug!(
+                            block = block.number,
+                            "Registering SPO {} {:?}",
+                            hex::encode(&reg.operator),
+                            reg
+                        );
+                        current.spos.insert(reg.operator.clone(), reg.clone());
+                        current
+                            .vrf_key_to_pool_id_map
+                            .insert(reg.vrf_key_hash.clone(), reg.operator.clone());
+                    }
 
                     // Remove any existing queued deregistrations
                     for (epoch, deregistrations) in &mut current.pending_deregistrations.iter_mut()
@@ -368,6 +391,10 @@ impl State {
                             .entry(ret.epoch)
                             .or_default()
                             .push(ret.operator.clone());
+
+                        // Note: not removing pending updates - the deregistation may happen many
+                        // epochs later than the update, and we apply updates before deregistrations
+                        // so they cannot recreate deregistered SPOs
                     }
                 }
                 _ => (),
