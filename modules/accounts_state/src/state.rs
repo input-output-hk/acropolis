@@ -659,15 +659,20 @@ impl State {
         // Check for how many new SPOs
         let new_count = new_spos.keys().filter(|id| !self.spos.contains_key(*id)).count();
 
-        // Log new ones and pledge changes
+        // Log new ones and pledge/cost/margin changes
         for (id, spo) in new_spos.iter() {
             match self.spos.get(id) {
                 Some(old_spo) => {
-                    if spo.pledge != old_spo.pledge {
+                    if spo.pledge != old_spo.pledge
+                        || spo.cost != old_spo.cost
+                        || spo.margin != old_spo.margin
+                    {
                         info!(
                             epoch = spo_msg.epoch,
                             pledge = spo.pledge,
-                            "Updated pledge for SPO {}",
+                            cost = spo.cost,
+                            margin = ?spo.margin,
+                            "Updated parameters for SPO {}",
                             hex::encode(id)
                         );
                     }
@@ -677,6 +682,8 @@ impl State {
                     info!(
                         epoch = spo_msg.epoch,
                         pledge = spo.pledge,
+                        cost = spo.cost,
+                        margin = ?spo.margin,
                         "Registered new SPO {}",
                         hex::encode(id)
                     );
