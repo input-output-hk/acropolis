@@ -8,7 +8,7 @@ use acropolis_common::{
     state_history::{StateHistory, StateHistoryStore},
     BlockInfo, BlockStatus,
 };
-use anyhow::Result;
+use anyhow::{Context as AnyhowContext, Result};
 use caryatid_sdk::{message_bus::Subscription, module, Context, Module};
 use config::Config;
 use std::sync::Arc;
@@ -27,10 +27,12 @@ mod monetary;
 mod rest;
 mod rewards;
 mod snapshot;
+mod verify;
 use acropolis_common::queries::accounts::{
     AccountInfo, AccountsStateQuery, AccountsStateQueryResponse,
 };
 use rest::handle_pots;
+use verify::PotsVerifier;
 
 const DEFAULT_SPO_STATE_TOPIC: &str = "cardano.spo.state";
 const DEFAULT_EPOCH_ACTIVITY_TOPIC: &str = "cardano.epoch.activity";
@@ -69,12 +71,21 @@ impl AccountsState {
         mut stake_subscription: Box<dyn Subscription<Message>>,
         mut drep_state_subscription: Box<dyn Subscription<Message>>,
         mut parameters_subscription: Box<dyn Subscription<Message>>,
+        maybe_verify_pots_file: Option<String>,
     ) -> Result<()> {
         // Get the stake address deltas from the genesis bootstrap, which we know
         // don't contain any stake, plus an extra parameter state (!unexplained)
         // !TODO this seems overly specific to our startup process
         let _ = stake_subscription.read().await?;
         let _ = parameters_subscription.read().await?;
+
+        // Read pots CSV if verifying
+        let verifier: Option<PotsVerifier> = maybe_verify_pots_file
+            .map(|file| {
+                PotsVerifier::new(&file)
+                    .with_context(|| format!("failed to load pots CSV from {file} - not verifying"))
+            })
+            .transpose()?;
 
         // Initialisation messages
         {
@@ -186,40 +197,7 @@ impl AccountsState {
                     _ => error!("Unexpected message type: {message:?}"),
                 }
 
-                // Handle epoch activity
-                let (_, message) = ea_message_f.await?;
-                match message.as_ref() {
-                    Message::Cardano((block_info, CardanoMessage::EpochActivity(ea_msg))) => {
-                        let span = info_span!(
-                            "account_state.handle_epoch_activity",
-                            block = block_info.number
-                        );
-                        async {
-                            Self::check_sync(&current_block, &block_info);
-                            let spo_rewards = state
-                                .handle_epoch_activity(ea_msg)
-                                .await
-                                .inspect_err(|e| error!("EpochActivity handling error: {e:#}"))
-                                .ok();
-                            // SPO rewards is for previous epoch
-                            if let Some(spo_rewards) = spo_rewards {
-                                if let Err(e) = spo_rewards_publisher
-                                    .publish_spo_rewards(block_info, spo_rewards)
-                                    .await
-                                {
-                                    error!("Error publishing SPO rewards: {e:#}")
-                                }
-                            }
-                        }
-                        .instrument(span)
-                        .await;
-                    }
-
-                    _ => error!("Unexpected message type: {message:?}"),
-                }
-
-                // Update parameters - *after* reward calculation in epoch-activity above
-                // ready for the *next* epoch boundary
+                // Update parameters, ready for monetary/rewards calc triggered by epoch_activity
                 let (_, message) = params_message_f.await?;
                 match message.as_ref() {
                     Message::Cardano((block_info, CardanoMessage::ProtocolParams(params_msg))) => {
@@ -243,6 +221,38 @@ impl AccountsState {
                                 .handle_parameters(params_msg)
                                 .inspect_err(|e| error!("Messaging handling error: {e}"))
                                 .ok();
+                        }
+                        .instrument(span)
+                        .await;
+                    }
+
+                    _ => error!("Unexpected message type: {message:?}"),
+                }
+
+                // Handle epoch activity
+                let (_, message) = ea_message_f.await?;
+                match message.as_ref() {
+                    Message::Cardano((block_info, CardanoMessage::EpochActivity(ea_msg))) => {
+                        let span = info_span!(
+                            "account_state.handle_epoch_activity",
+                            block = block_info.number
+                        );
+                        async {
+                            Self::check_sync(&current_block, &block_info);
+                            let spo_rewards = state
+                                .handle_epoch_activity(ea_msg, &verifier)
+                                .await
+                                .inspect_err(|e| error!("EpochActivity handling error: {e:#}"))
+                                .ok();
+                            // SPO rewards is for previous epoch
+                            if let Some(spo_rewards) = spo_rewards {
+                                if let Err(e) = spo_rewards_publisher
+                                    .publish_spo_rewards(block_info, spo_rewards)
+                                    .await
+                                {
+                                    error!("Error publishing SPO rewards: {e:#}")
+                                }
+                            }
                         }
                         .instrument(span)
                         .await;
@@ -399,6 +409,12 @@ impl AccountsState {
             .unwrap_or(DEFAULT_ACCOUNTS_QUERY_TOPIC.1.to_string());
         info!("Creating query handler on '{}'", accounts_query_topic);
 
+        // Verification
+        let maybe_verify_pots_file = config
+            .get_string("verify-pots-file")
+            .ok()
+            .inspect(|file| info!("Verifying pots against '{file}'"));
+
         // Create history
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "AccountsState",
@@ -545,6 +561,7 @@ impl AccountsState {
                 stake_subscription,
                 drep_state_subscription,
                 parameters_subscription,
+                maybe_verify_pots_file,
             )
             .await
             .unwrap_or_else(|e| error!("Failed: {e}"));
