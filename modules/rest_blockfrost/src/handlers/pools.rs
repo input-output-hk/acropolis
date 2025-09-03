@@ -9,14 +9,14 @@ use acropolis_common::{
         utils::query_state,
     },
     serialization::Bech32WithHrp,
-    PoolRetirement, Relay,
+    PoolRetirement,
 };
 use anyhow::Result;
 use caryatid_sdk::Context;
 use rust_decimal::Decimal;
 use std::{sync::Arc, time::Duration};
 
-use crate::handlers_config::HandlersConfig;
+use crate::{handlers_config::HandlersConfig, types::PoolRelayRest};
 use crate::types::{PoolEpochStateRest, PoolExtendedRest, PoolMetadataRest, PoolRetirementRest};
 use crate::utils::fetch_pool_metadata;
 
@@ -649,20 +649,15 @@ pub async fn handle_pool_relays_blockfrost(
     )
     .await?;
 
-    // Convert PoolRelays to Relays vec
-    match pool_relays.try_into_vec() {
-        Ok(relays ) => match serde_json::to_string(&relays) {
-            Ok(json) => Ok(RESTResponse::with_json(200, &json)),
-            Err(e) => Ok(RESTResponse::with_text(
-                500,
-                &format!("Internal server error while retrieving pool relays: {e}"),
-            )),
-        },
-        
-        Err(e) => 
-            Ok(RESTResponse::with_text(400, &format!("Internal server error while retrieving pool relays: {e}") ))
+    let relays_in_rest = pool_relays.relays.into_iter().map(|r| r.into()).collect::<Vec<PoolRelayRest>>();
+
+    match serde_json::to_string(&relays_in_rest) {
+        Ok(json) => Ok(RESTResponse::with_json(200, &json)),
+        Err(e) => Ok(RESTResponse::with_text(
+            500,
+            &format!("Internal server error while retrieving pool relays: {e}"),
+        )),
     }
-    
 }
 
 pub async fn handle_pool_delegators_blockfrost(
