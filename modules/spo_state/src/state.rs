@@ -32,6 +32,8 @@ pub struct State {
 
     spos: HashMap<Vec<u8>, PoolRegistration>,
 
+    pending_updates: HashMap<Vec<u8>, PoolRegistration>,
+
     pending_deregistrations: HashMap<u64, Vec<Vec<u8>>>,
 
     /// vrf_key_hash -> pool_id mapping
@@ -59,6 +61,7 @@ impl State {
             block: 0,
             epoch: 0,
             spos: HashMap::new(),
+            pending_updates: HashMap::new(),
             pending_deregistrations: HashMap::new(),
             vrf_key_hash_to_pool_id_map: HashMap::new(),
             total_blocks_minted: HashMap::new(),
@@ -120,6 +123,7 @@ impl From<SPOState> for State {
             block: 0,
             epoch: 0,
             spos,
+            pending_updates: value.updates.into(),
             pending_deregistrations,
             vrf_key_hash_to_pool_id_map,
             total_blocks_minted: HashMap::new(),
@@ -134,6 +138,8 @@ impl From<&State> for SPOState {
     fn from(state: &State) -> Self {
         Self {
             pools: state.spos.iter().map(|(key, value)| (key.clone(), value.clone())).collect(),
+            updates: state.pending_updates.iter()
+                .map(|(key, value)| (key.clone(), value.clone())).collect(),
             retiring: state
                 .pending_deregistrations
                 .iter()
@@ -292,6 +298,12 @@ impl State {
         // are still included
         let spos = self.spos.values().cloned().collect();
 
+        // Update any pending
+        for (operator, reg) in &self.pending_updates {
+            self.spos.insert(operator.clone(), reg.clone());
+        }
+        self.pending_updates.clear();
+
         // Deregister any pending
         let mut retired_spos: Vec<KeyHash> = Vec::new();
         let deregistrations = self.pending_deregistrations.remove(&self.epoch);
@@ -331,13 +343,27 @@ impl State {
             tx_hash,
             cert_index,
         } = reg_with_pos;
-        debug!(
-            block = block.number,
-            "Registering SPO {}",
-            hex::encode(&reg.operator)
-        );
-        self.spos.insert(reg.operator.clone(), reg.clone());
-        self.vrf_key_hash_to_pool_id_map.insert(reg.vrf_key_hash.clone(), reg.operator.clone());
+
+        if self.spos.contains_key(&reg.operator) {
+            debug!(
+                block = block.number,
+                "New pending SPO update {} {:?}",
+                hex::encode(&reg.operator),
+                reg
+            );
+            self.pending_updates.insert(reg.operator.clone(), reg.clone());
+        } else {
+            debug!(
+                block = block.number,
+                "Registering SPO {} {:?}",
+                hex::encode(&reg.operator),
+                reg
+            );
+            self.spos.insert(reg.operator.clone(), reg.clone());
+            self
+                .vrf_key_hash_to_pool_id_map
+                .insert(reg.vrf_key_hash.clone(), reg.operator.clone());
+        }
 
         // Remove any existing queued deregistrations
         for (epoch, deregistrations) in &mut self.pending_deregistrations.iter_mut() {
@@ -405,6 +431,10 @@ impl State {
                 }
             }
             self.pending_deregistrations.entry(ret.epoch).or_default().push(ret.operator.clone());
+
+            // Note: not removing pending updates - the deregistation may happen many
+            // epochs later than the update, and we apply updates before deregistrations
+            // so they cannot recreate deregistered SPOs
         }
 
         // update historical spos
