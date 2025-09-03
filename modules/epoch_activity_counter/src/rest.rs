@@ -1,5 +1,5 @@
-use crate::state::State;
-use acropolis_common::messages::RESTResponse;
+use crate::{epochs_history::EpochsHistoryState, state::State};
+use acropolis_common::{messages::RESTResponse, state_history::StateHistory};
 use anyhow::Result;
 use serde::Serialize;
 use std::sync::Arc;
@@ -19,9 +19,9 @@ pub struct VRFKeyCount {
 }
 
 /// Handles /epoch
-pub async fn handle_epoch(state: Arc<Mutex<State>>) -> Result<RESTResponse> {
-    let locked = state.lock().await;
-    let epoch_data = locked.get_current_epoch();
+pub async fn handle_epoch(history: Arc<Mutex<StateHistory<State>>>) -> Result<RESTResponse> {
+    let state = history.lock().await.get_current_state();
+    let epoch_data = state.get_epoch_activity_message();
 
     let response = EpochActivityRest {
         epoch: epoch_data.epoch,
@@ -51,7 +51,7 @@ pub async fn handle_epoch(state: Arc<Mutex<State>>) -> Result<RESTResponse> {
 
 /// Handles /epochs/{epoch}
 pub async fn handle_historical_epoch(
-    state: Arc<Mutex<State>>,
+    epochs_history: EpochsHistoryState,
     epoch: String,
 ) -> Result<RESTResponse> {
     let parsed_epoch = match epoch.parse::<u64>() {
@@ -64,8 +64,7 @@ pub async fn handle_historical_epoch(
         }
     };
 
-    let locked = state.lock().await;
-    match locked.get_historical_epoch(parsed_epoch) {
+    match epochs_history.get_historical_epoch(parsed_epoch) {
         Err(_) => Ok(RESTResponse::with_text(
             501,
             "Historical epoch storage not enabled",
