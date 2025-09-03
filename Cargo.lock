@@ -79,6 +79,7 @@ dependencies = [
  "minicbor 0.26.5",
  "pallas-traverse",
  "tempfile",
+ "tracing",
 ]
 
 [[package]]

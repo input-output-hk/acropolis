@@ -1,6 +1,6 @@
-use std::{collections::HashMap, path::Path, sync::Arc};
+use std::{path::Path, sync::Arc};
 
-use acropolis_common::{BlockInfo, TxHash};
+use acropolis_common::TxHash;
 use anyhow::{bail, Result};
 use config::Config;
 use fjall::{Batch, Keyspace, Partition};
@@ -68,11 +68,6 @@ impl super::Store for FjallStore {
         self.txs.hydrate_block(block)
     }
 
-    fn get_block_by_number(&self, number: u64) -> Result<super::Block> {
-        let block = self.blocks.get_by_number(number)?;
-        self.txs.hydrate_block(block)
-    }
-
     fn get_latest_block(&self) -> Result<super::Block> {
         let block = self.blocks.get_latest()?;
         self.txs.hydrate_block(block)
@@ -133,13 +128,6 @@ impl FjallBlockStore {
     fn get_by_slot(&self, slot: u64) -> Result<PersistedBlock> {
         let Some(hash) = self.block_hashes_by_slot.get(slot.to_be_bytes())? else {
             bail!("No block found for slot {slot}");
-        };
-        self.get_by_hash(&hash)
-    }
-
-    fn get_by_number(&self, number: u64) -> Result<PersistedBlock> {
-        let Some(hash) = self.block_hashes_by_number.get(number.to_be_bytes())? else {
-            bail!("No block found with number {number}");
         };
         self.get_by_hash(&hash)
     }
@@ -248,17 +236,6 @@ mod tests {
         state.store.insert_block(&block).unwrap();
 
         let new_block = state.store.get_block_by_slot(block.slot).unwrap();
-        assert_eq!(block, new_block);
-    }
-
-    #[test]
-    fn should_get_block_by_number() {
-        let state = init_state();
-        let block = test_block();
-
-        state.store.insert_block(&block).unwrap();
-
-        let new_block = state.store.get_block_by_number(block.number).unwrap();
         assert_eq!(block, new_block);
     }
 

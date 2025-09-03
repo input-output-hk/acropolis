@@ -15,6 +15,7 @@ fjall = "2.7.0"
 hex = "0.4"
 minicbor = { version = "0.26.0", features = ["std", "half", "derive"] }
 pallas-traverse = "0.32.1"
+tracing = "0.1.40"
 
 [dev-dependencies]
 tempfile = "3"
