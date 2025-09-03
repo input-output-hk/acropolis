@@ -146,20 +146,19 @@ pub struct Value {
     pub assets: MultiAssets,
 }
 
-pub type MultiAssets = Vec<NativeAsset>;
-
 pub type PolicyId = [u8; 28];
+pub type MultiAssets = Vec<(PolicyId, Vec<NativeAsset>)>;
+
 pub type AssetName = Vec<u8>;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct NativeAsset {
-    pub policy_id: PolicyId,
     pub name: AssetName,
     pub amount: u64,
 }
 
 impl Value {
-    pub fn new(lovelace: u64, assets: Vec<NativeAsset>) -> Self {
+    pub fn new(lovelace: u64, assets: MultiAssets) -> Self {
         Self { lovelace, assets }
     }
 

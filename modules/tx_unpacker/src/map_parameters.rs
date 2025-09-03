@@ -860,32 +860,34 @@ pub fn map_value(pallas_value: &MultiEraValue) -> Value {
     let lovelace = pallas_value.coin();
     let pallas_assets = pallas_value.assets();
 
-    let mut assets = Vec::<NativeAsset>::new();
+    let mut assets: MultiAssets = Vec::new();
 
     for policy_group in pallas_assets {
         match policy_group {
             MultiEraPolicyAssets::AlonzoCompatibleOutput(policy, kvps) => {
                 let policy_id: [u8; 28] =
                     policy.as_ref().try_into().expect("Policy id must be 28 bytes");
+                let mut native_assets = Vec::new();
                 for (name, amt) in kvps.iter() {
-                    assets.push(NativeAsset {
-                        policy_id,
+                    native_assets.push(NativeAsset {
                         name: name.to_vec(),
                         amount: *amt,
                     });
                 }
+                assets.push((policy_id, native_assets));
             }
             MultiEraPolicyAssets::ConwayOutput(policy, kvps) => {
                 let policy_id: [u8; 28] =
                     policy.as_ref().try_into().expect("Policy id must be 28 bytes");
+                let mut native_assets = Vec::new();
                 for (name, amt) in kvps.iter() {
                     let amount: u64 = u64::from(*amt);
-                    assets.push(NativeAsset {
-                        policy_id,
+                    native_assets.push(NativeAsset {
                         name: name.to_vec(),
                         amount,
                     });
                 }
+                assets.push((policy_id, native_assets));
             }
             _ => {}
         }
