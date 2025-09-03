@@ -16,9 +16,9 @@ use caryatid_sdk::Context;
 use rust_decimal::Decimal;
 use std::{sync::Arc, time::Duration};
 
-use crate::{handlers_config::HandlersConfig, types::PoolRelayRest};
 use crate::types::{PoolEpochStateRest, PoolExtendedRest, PoolMetadataRest, PoolRetirementRest};
 use crate::utils::fetch_pool_metadata;
+use crate::{handlers_config::HandlersConfig, types::PoolRelayRest};
 
 /// Handle `/pools` Blockfrost-compatible endpoint
 pub async fn handle_pools_list_blockfrost(
@@ -624,7 +624,9 @@ pub async fn handle_pool_relays_blockfrost(
     };
 
     let pool_relay_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
-        PoolsStateQuery::GetPoolRelays { pool_id: spo.clone() }
+        PoolsStateQuery::GetPoolRelays {
+            pool_id: spo.clone(),
+        },
     )));
 
     let pool_relays = query_state(
@@ -635,7 +637,7 @@ pub async fn handle_pool_relays_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::PoolRelays(pool_relays),
             )) => Ok(pool_relays),
-             Message::StateQueryResponse(StateQueryResponse::Pools(
+            Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::NotFound,
             )) => Err(anyhow::anyhow!("Pool Relays Not found")),
             Message::StateQueryResponse(StateQueryResponse::Pools(
@@ -644,12 +646,12 @@ pub async fn handle_pool_relays_blockfrost(
                 "Internal server error while retrieving pool relays: {e}"
             )),
             _ => Err(anyhow::anyhow!("Unexpected message type")),
-        }
-
+        },
     )
     .await?;
 
-    let relays_in_rest = pool_relays.relays.into_iter().map(|r| r.into()).collect::<Vec<PoolRelayRest>>();
+    let relays_in_rest =
+        pool_relays.relays.into_iter().map(|r| r.into()).collect::<Vec<PoolRelayRest>>();
 
     match serde_json::to_string(&relays_in_rest) {
         Ok(json) => Ok(RESTResponse::with_json(200, &json)),
