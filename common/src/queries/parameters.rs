@@ -1,4 +1,4 @@
-use crate::ProtocolParams;
+use crate::protocol_params::ProtocolParams;
 
 pub const DEFAULT_PARAMETERS_QUERY_TOPIC: (&str, &str) =
     ("parameters-state-query-topic", "cardano.query.parameters");
