@@ -87,7 +87,11 @@ impl From<&BlockState> for SPOState {
     fn from(value: &BlockState) -> Self {
         Self {
             pools: value.spos.iter().map(|(key, value)| (key.clone(), value.clone())).collect(),
-            updates: value.pending_updates.iter().map(|(key, value)| (key.clone(), value.clone())).collect(),
+            updates: value
+                .pending_updates
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect(),
             retiring: value
                 .pending_deregistrations
                 .iter()
