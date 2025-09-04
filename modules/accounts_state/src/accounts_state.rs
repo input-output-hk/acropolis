@@ -405,9 +405,14 @@ impl AccountsState {
         // Create verifier and read comparison data according to config
         let mut verifier = Verifier::new();
 
-        if let Some(verify_pots_file) = config.get_string("verify-pots-file").ok() {
+        if let Ok(verify_pots_file) = config.get_string("verify-pots-file") {
             info!("Verifying pots against '{verify_pots_file}'");
             verifier.read_pots(&verify_pots_file);
+        }
+
+        if let Ok(verify_rewards_files) = config.get_string("verify-rewards-files") {
+            info!("Verifying rewards against '{verify_rewards_files}'");
+            verifier.read_rewards(&verify_rewards_files);
         }
 
         // Create history

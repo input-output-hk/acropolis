@@ -614,10 +614,14 @@ impl State {
                 }
             }
         };
+
         // If rewards have been calculated, save the results
         if let Some(task) = task.take() {
             match task.await {
                 Ok(Ok(reward_result)) => {
+                    // Verify them
+                    verifier.verify_rewards(reward_result.epoch, &reward_result);
+
                     // Pay the rewards
                     for (account, amount) in reward_result.rewards {
                         self.add_to_reward(&account, amount);
