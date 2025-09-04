@@ -497,6 +497,21 @@ pub struct PoolRetirement {
     pub epoch: u64,
 }
 
+/// Pool Update Action
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum PoolUpdateAction {
+    Registered,
+    Deregistered,
+}
+
+/// Pool Update Event
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PoolUpdateEvent {
+    pub tx_hash: TxHash,
+    pub cert_index: u64,
+    pub action: PoolUpdateAction,
+}
+
 /// Pool Epoch History Data
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PoolEpochState {
