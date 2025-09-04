@@ -587,6 +587,12 @@ pub async fn handle_pool_metadata_blockfrost(
         Duration::from_secs(handlers_config.external_api_timeout),
     )
     .await?;
+
+    // Verify hash of the fetched pool metadata, matches with the metadata hash provided by PoolRegistration
+    if let Err(e) = pool_metadata_json.verify(&pool_metadata.hash) {
+        return Ok(RESTResponse::with_text(400, &e));
+    }
+
     let pool_metadata_rest = PoolMetadataRest {
         pool_id: pool_id.to_string(),
         hex: hex::encode(spo),
