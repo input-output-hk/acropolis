@@ -9,8 +9,7 @@ use acropolis_common::{
     },
     queries::pools::{
         PoolHistory, PoolRelays, PoolsActiveStakes, PoolsList, PoolsListWithInfo, PoolsRetiredList,
-        PoolsRetiringList, PoolsStateQuery, PoolsStateQueryResponse
-        DEFAULT_POOLS_QUERY_TOPIC,
+        PoolsRetiringList, PoolsStateQuery, PoolsStateQueryResponse, DEFAULT_POOLS_QUERY_TOPIC,
     },
     state_history::{StateHistory, StateHistoryStore},
     BlockInfo, BlockStatus,
