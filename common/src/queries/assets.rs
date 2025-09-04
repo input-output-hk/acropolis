@@ -1,3 +1,6 @@
+pub const DEFAULT_ASSETS_QUERY_TOPIC: (&str, &str) =
+    ("assets-state-query-topic", "cardano.query.assets");
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum AssetsStateQuery {
     GetAssetsList,
