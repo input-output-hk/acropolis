@@ -8,7 +8,7 @@ use acropolis_common::{
     state_history::{StateHistory, StateHistoryStore},
     BlockInfo, BlockStatus,
 };
-use anyhow::{Context as AnyhowContext, Result};
+use anyhow::Result;
 use caryatid_sdk::{message_bus::Subscription, module, Context, Module};
 use config::Config;
 use std::sync::Arc;
@@ -27,12 +27,12 @@ mod monetary;
 mod rest;
 mod rewards;
 mod snapshot;
-mod verify;
+mod verifier;
 use acropolis_common::queries::accounts::{
     AccountInfo, AccountsStateQuery, AccountsStateQueryResponse,
 };
 use rest::handle_pots;
-use verify::PotsVerifier;
+use verifier::Verifier;
 
 const DEFAULT_SPO_STATE_TOPIC: &str = "cardano.spo.state";
 const DEFAULT_EPOCH_ACTIVITY_TOPIC: &str = "cardano.epoch.activity";
@@ -71,21 +71,13 @@ impl AccountsState {
         mut stake_subscription: Box<dyn Subscription<Message>>,
         mut drep_state_subscription: Box<dyn Subscription<Message>>,
         mut parameters_subscription: Box<dyn Subscription<Message>>,
-        maybe_verify_pots_file: Option<String>,
+        verifier: &Verifier,
     ) -> Result<()> {
         // Get the stake address deltas from the genesis bootstrap, which we know
         // don't contain any stake, plus an extra parameter state (!unexplained)
         // !TODO this seems overly specific to our startup process
         let _ = stake_subscription.read().await?;
         let _ = parameters_subscription.read().await?;
-
-        // Read pots CSV if verifying
-        let verifier: Option<PotsVerifier> = maybe_verify_pots_file
-            .map(|file| {
-                PotsVerifier::new(&file)
-                    .with_context(|| format!("failed to load pots CSV from {file} - not verifying"))
-            })
-            .transpose()?;
 
         // Initialisation messages
         {
@@ -409,11 +401,14 @@ impl AccountsState {
             .unwrap_or(DEFAULT_ACCOUNTS_QUERY_TOPIC.1.to_string());
         info!("Creating query handler on '{}'", accounts_query_topic);
 
-        // Verification
-        let maybe_verify_pots_file = config
-            .get_string("verify-pots-file")
-            .ok()
-            .inspect(|file| info!("Verifying pots against '{file}'"));
+
+        // Create verifier and read comparison data according to config
+        let mut verifier = Verifier::new();
+
+        if let Some(verify_pots_file) = config.get_string("verify-pots-file").ok() {
+            info!("Verifying pots against '{verify_pots_file}'");
+            verifier.read_pots(&verify_pots_file);
+        }
 
         // Create history
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
@@ -561,7 +556,7 @@ impl AccountsState {
                 stake_subscription,
                 drep_state_subscription,
                 parameters_subscription,
-                maybe_verify_pots_file,
+                &verifier,
             )
             .await
             .unwrap_or_else(|e| error!("Failed: {e}"));
