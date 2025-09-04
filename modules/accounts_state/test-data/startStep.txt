@@ -1,0 +1,14 @@
+**** startStep computation: epoch=EpochNo 208, stake=Stake {unStake = fromList []}, blocksMade=0, k=NonZero {unNonZero = 2160}, reserves=13888022852926644, deltaR1=Coin 41664068558779, d=1 % 1, expectedBlocks=0, blocksMade=0, eta=1 % 1, rPot=41664068558779, deltaT1=8332813711755, _R=Coin 33331254847024, activeStake=Coin 0, stakePerPool=fromList []
+￼￼
+**** startStep computation: epoch=EpochNo 209, stake=Stake {unStake = fromList []}, blocksMade=0, k=NonZero {unNonZero = 2160}, reserves=13286160713028443, deltaR1=Coin 39858482139085, d=1 % 1, expectedBlocks=0, blocksMade=0, eta=1 % 1, rPot=39869152351293, deltaT1=7973830470258, _R=Coin 31895321881035, activeStake=Coin 0, stakePerPool=fromList []
+
+
+**** startStep computation: epoch=EpochNo 213, stake=Stake {unStake = fromList [...]}, blocksMade=4230, k=NonZero {unNonZero = 2160}, reserves=13247093198353459, deltaR1=Coin 39741279595060, d=4 % 5, expectedBlocks=4320, blocksMade=4230, eta=1 % 1, rPot=39746857813339, deltaT1=7949371562667, _R=Coin 31797486250672, activeStake=Coin 12106602864871837, stakePerPool=fromList [...]
+
+**** startStep computation: epoch=EpochNo 214, stake=Stake {unStake = fromList [...]}, blocksMade=4625, k=NonZero {unNonZero = 2160}, reserves=13230232787944838, deltaR1=Coin 38629941063285, d=39 % 50, expectedBlocks=4752, blocksMade=4625, eta=4625 % 4752, rPot=38637041656541, deltaT1=7727408331308, _R=Coin 30909633325233, activeStake=Coin 12758829109784350, stakePerPool=fromList [...]
+
+**** startStep computation: epoch=EpochNo 215, stake=Stake {unStake = fromList [...]}, blocksMade=5120, k=NonZero {unNonZero = 2160}, reserves=13212986170770203, deltaR1=Coin 39149588654133, d=19 % 25, expectedBlocks=5184, blocksMade=5120, eta=80 % 81, rPot=39157090487879, deltaT1=7831418097575, _R=Coin 31325672390304, activeStake=Coin 13382718156097189, stakePerPool=fromList [...]
+
+**** startStep computation: epoch=EpochNo 216, stake=Stake {unStake = fromList [...]}, blocksMade=5710, k=NonZero {unNonZero = 2160}, reserves=13195031638588164, deltaR1=Coin 39585094915764, d=37 % 50, expectedBlocks=5616, blocksMade=5710, eta=2855 % 2808, rPot=39593204965038, deltaT1=7918640993007, _R=Coin 31674563972031, activeStake=Coin 13864141914846088, stakePerPool=fromList [...]
+
+**** startStep computation: epoch=EpochNo 217, stake=Stake {unStake = fromList [...]}, blocksMade=5965, k=NonZero {unNonZero = 2160}, reserves=13176528835451373, deltaR1=Coin 38987100448148, d=18 % 25, expectedBlocks=6048, blocksMade=5965, eta=5965 % 6048, rPot=38993036256575, deltaT1=7798607251315, _R=Coin 31194429005260, activeStake=Coin 14396547846613762, stakePerPool=fromList [...]
