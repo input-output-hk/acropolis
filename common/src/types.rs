@@ -100,8 +100,14 @@ pub struct BlockInfo {
     /// Epoch number
     pub epoch: u64,
 
+    /// Epoch slot number
+    pub epoch_slot: u64,
+
     /// Does this block start a new epoch?
     pub new_epoch: bool,
+
+    /// UNIX timestamp
+    pub timestamp: u64,
 
     /// Protocol era
     pub era: Era,

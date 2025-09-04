@@ -91,7 +91,9 @@ impl GenesisBootstrapper {
                     number: 0,
                     hash: Vec::new(),
                     epoch: 0,
+                    epoch_slot: 0,
                     new_epoch: false,
+                    timestamp: genesis.start_time,
                     era: Era::Byron,
                 };
 

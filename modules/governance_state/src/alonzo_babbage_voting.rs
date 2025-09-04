@@ -138,8 +138,10 @@ mod tests {
                 slot,
                 number: slot,
                 epoch,
+                epoch_slot: epoch % 432_000,
                 era: era.try_into()?,
                 new_epoch: new_epoch != 0,
+                timestamp: 0,
                 hash: Vec::new(),
             };
 

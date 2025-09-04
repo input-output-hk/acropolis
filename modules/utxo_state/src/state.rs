@@ -414,7 +414,9 @@ mod tests {
             number,
             hash: vec![],
             epoch: 99,
+            epoch_slot: slot,
             new_epoch: false,
+            timestamp: slot,
             era: Era::Byron,
         }
     }

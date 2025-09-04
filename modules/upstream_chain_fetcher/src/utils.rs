@@ -1,5 +1,7 @@
 use crate::UpstreamCacheRecord;
-use acropolis_common::calculations::slot_to_epoch_with_shelley_params;
+use acropolis_common::calculations::{
+    slot_to_epoch_with_shelley_params, slot_to_timestamp_with_params,
+};
 use acropolis_common::messages::{CardanoMessage, Message};
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::Context;
@@ -20,6 +22,7 @@ const DEFAULT_MAGIC_NUMBER: (&str, u64) = ("magic-number", 764824073);
 const DEFAULT_SYNC_POINT: (&str, SyncPoint) = ("sync-point", SyncPoint::Snapshot);
 const DEFAULT_CACHE_DIR: (&str, &str) = ("cache-dir", "upstream-cache");
 
+const DEFAULT_BYRON_TIMESTAMP: (&str, u64) = ("byron-timestamp", 1506203091);
 const DEFAULT_SHELLEY_EPOCH: (&str, u64) = ("shelley-epoch", 208);
 const DEFAULT_SHELLEY_EPOCH_LEN: (&str, u64) = ("shelley-epoch-len", 432000);
 
@@ -45,6 +48,7 @@ pub struct FetcherConfig {
     pub magic_number: u64,
     pub cache_dir: String,
 
+    pub byron_timestamp: u64,
     pub shelley_epoch: u64,
     pub shelley_epoch_len: u64,
 }
@@ -83,6 +87,9 @@ impl FetcherConfig {
                 .unwrap_or(DEFAULT_MAGIC_NUMBER.1),
             node_address: Self::conf(&config, DEFAULT_NODE_ADDRESS),
             cache_dir: Self::conf(&config, DEFAULT_CACHE_DIR),
+            byron_timestamp: config
+                .get::<u64>(DEFAULT_BYRON_TIMESTAMP.0)
+                .unwrap_or(DEFAULT_BYRON_TIMESTAMP.1),
             shelley_epoch: config
                 .get::<u64>(DEFAULT_SHELLEY_EPOCH.0)
                 .unwrap_or(DEFAULT_SHELLEY_EPOCH.1),
@@ -94,6 +101,10 @@ impl FetcherConfig {
 
     pub fn slot_to_epoch(&self, slot: u64) -> (u64, u64) {
         slot_to_epoch_with_shelley_params(slot, self.shelley_epoch, self.shelley_epoch_len)
+    }
+
+    pub fn slot_to_timestamp(&self, slot: u64) -> u64 {
+        slot_to_timestamp_with_params(slot, self.byron_timestamp, self.shelley_epoch)
     }
 }
 
