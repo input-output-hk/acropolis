@@ -399,7 +399,7 @@ pub struct MultiHostName {
     pub dns_name: String,
 }
 
-/// Pool relay
+/// Pool Relay
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Eq, PartialEq)]
 pub enum Relay {
     SingleHostAddr(SingleHostAddr),
