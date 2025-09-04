@@ -1,7 +1,5 @@
 use acropolis_common::{
-    rest_helper::ToCheckedF64,
-    PoolEpochState,
-    {queries::governance::DRepActionUpdate, Vote},
+    queries::governance::DRepActionUpdate, rest_helper::ToCheckedF64, PoolEpochState, Relay, Vote,
 };
 use rust_decimal::Decimal;
 use serde::Serialize;
@@ -256,4 +254,50 @@ pub struct PoolMetadataRest {
     pub name: String,
     pub description: String,
     pub homepage: String,
+}
+
+#[derive(Serialize)]
+pub struct PoolRelayRest {
+    pub ipv4: Option<String>,
+    pub ipv6: Option<String>,
+    pub dns: Option<String>,
+    pub dns_srv: Option<String>,
+    pub port: u16,
+}
+
+impl From<Relay> for PoolRelayRest {
+    fn from(value: Relay) -> Self {
+        //todo: port is required on BlockFrost. Need a default value, if not provided
+        let default_port = 3001;
+
+        match value {
+            Relay::SingleHostAddr(s) => PoolRelayRest {
+                ipv4: s.ipv4.map(|bytes| {
+                    let ipv4_addr = std::net::Ipv4Addr::from(bytes);
+                    format!("{:?}", ipv4_addr)
+                }),
+                ipv6: s.ipv6.map(|bytes| {
+                    let ipv6_addr = std::net::Ipv6Addr::from(bytes);
+                    format!("{:?}", ipv6_addr)
+                }),
+                dns: None,
+                dns_srv: None,
+                port: s.port.unwrap_or(default_port),
+            },
+            Relay::SingleHostName(s) => PoolRelayRest {
+                ipv4: None,
+                ipv6: None,
+                dns: Some(s.dns_name),
+                dns_srv: None,
+                port: s.port.unwrap_or(default_port),
+            },
+            Relay::MultiHostName(m) => PoolRelayRest {
+                ipv4: None,
+                ipv6: None,
+                dns: None,
+                dns_srv: Some(m.dns_name),
+                port: default_port,
+            },
+        }
+    }
 }

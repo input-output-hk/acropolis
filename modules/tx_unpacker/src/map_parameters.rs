@@ -574,9 +574,10 @@ fn map_conway_protocol_param_update(p: &conway::ProtocolParamUpdate) -> Box<Prot
         desired_number_of_stake_pools: p.desired_number_of_stake_pools.clone(),
         pool_pledge_influence: p.pool_pledge_influence.as_ref().map(&map_unit_interval),
         expansion_rate: p.expansion_rate.as_ref().map(&map_unit_interval),
-        treasury_growth_rate: p.expansion_rate.as_ref().map(&map_unit_interval),
+        treasury_growth_rate: p.treasury_growth_rate.as_ref().map(&map_unit_interval),
         min_pool_cost: p.min_pool_cost.clone(),
-        ada_per_utxo_byte: p.ada_per_utxo_byte.clone(),
+        coins_per_utxo_byte: p.ada_per_utxo_byte.clone(),
+        lovelace_per_utxo_word: None,
         cost_models_for_script_languages: p
             .cost_models_for_script_languages
             .as_ref()
@@ -687,7 +688,8 @@ pub fn map_alonzo_protocol_param_update(
         expansion_rate: p.expansion_rate.as_ref().map(&map_unit_interval),
         treasury_growth_rate: p.treasury_growth_rate.as_ref().map(&map_unit_interval),
         min_pool_cost: p.min_pool_cost.clone(),
-        ada_per_utxo_byte: p.ada_per_utxo_byte.clone(),
+        lovelace_per_utxo_word: p.ada_per_utxo_byte.clone(), // Pre Babbage (Represents cost per 8-byte word)
+        coins_per_utxo_byte: None,
         cost_models_for_script_languages: p
             .cost_models_for_script_languages
             .as_ref()
@@ -744,7 +746,8 @@ pub fn map_babbage_protocol_param_update(
         expansion_rate: p.expansion_rate.as_ref().map(&map_unit_interval),
         treasury_growth_rate: p.treasury_growth_rate.as_ref().map(&map_unit_interval),
         min_pool_cost: p.min_pool_cost.clone(),
-        ada_per_utxo_byte: p.ada_per_utxo_byte.clone(),
+        lovelace_per_utxo_word: None,
+        coins_per_utxo_byte: p.ada_per_utxo_byte.clone(),
         cost_models_for_script_languages: p
             .cost_models_for_script_languages
             .as_ref()
