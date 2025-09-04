@@ -42,6 +42,11 @@ pub struct Snapshot {
     /// Epoch it's for (the new one that has just started)
     pub _epoch: u64,
 
+    /// Stake address states
+    /// TODO this is going to be big - reduce this to actual use case, which is
+    /// registered SPO reward accounts
+    pub stake_addresses: StakeAddressMap,
+
     /// Map of SPOs by operator ID
     pub spos: HashMap<KeyHash, SnapshotSPO>,
 
@@ -64,6 +69,7 @@ impl Snapshot {
     ) -> Self {
         let mut snapshot = Self {
             _epoch: epoch,
+            stake_addresses: stake_addresses.clone(), // TODO expensive!
             pots: pots.clone(),
             blocks,
             ..Self::default()
@@ -73,6 +79,7 @@ impl Snapshot {
         // Note this is _active_ stake, for reward calculations, and hence doesn't include rewards
         let mut total_stake: Lovelace = 0;
         for (hash, sas) in stake_addresses.iter() {
+            // TODO also check for registration status?
             if sas.utxo_value > 0 {
                 if let Some(spo_id) = &sas.delegated_spo {
                     // Only clone if insertion is needed

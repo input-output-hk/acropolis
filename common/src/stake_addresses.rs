@@ -40,7 +40,7 @@ pub struct StakeAddressState {
     pub delegated_drep: Option<DRepChoice>,
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct StakeAddressMap {
     inner: HashMap<KeyHash, StakeAddressState>,
 }

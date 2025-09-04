@@ -2,14 +2,14 @@
 
 use crate::snapshot::{Snapshot, SnapshotSPO};
 use acropolis_common::{
-    protocol_params::ShelleyParams, rational_number::RationalNumber, KeyHash, Lovelace,
-    RewardAccount, SPORewards,
+    address::StakeAddress, protocol_params::ShelleyParams, rational_number::RationalNumber,
+    KeyHash, Lovelace, RewardAccount, SPORewards,
 };
 use anyhow::{bail, Result};
 use bigdecimal::{BigDecimal, One, ToPrimitive, Zero};
 use std::cmp::min;
 use std::sync::Arc;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 /// Result of a rewards calculation
 #[derive(Debug, Default)]
@@ -90,6 +90,7 @@ pub fn calculate_rewards(
             &pledge_influence_factor,
             params,
             staking.clone(),
+            performance.clone(),
             &mut result,
             &mut total_paid_to_pools,
             &mut total_paid_to_delegators,
@@ -122,6 +123,7 @@ fn calculate_spo_rewards(
     pledge_influence_factor: &BigDecimal,
     params: &ShelleyParams,
     staking: Arc<Snapshot>,
+    performance: Arc<Snapshot>,
     result: &mut RewardsResult,
     total_paid_to_pools: &mut Lovelace,
     total_paid_to_delegators: &mut Lovelace,
@@ -189,11 +191,11 @@ fn calculate_spo_rewards(
 
     info!(blocks=blocks_produced, %pool_stake, %relative_pool_stake, %relative_blocks,
           %pool_performance, %optimum_rewards, %pool_rewards, pool_owner_stake, %pool_pledge,
-           "Pool {}", hex::encode(operator_id.clone()));
+           "Pool {}", hex::encode(&operator_id));
 
     // Subtract fixed costs
     let fixed_cost = BigDecimal::from(spo.fixed_cost);
-    let spo_benefit = if pool_rewards <= fixed_cost {
+    let mut spo_benefit = if pool_rewards <= fixed_cost {
         info!("Rewards < cost - all paid to SPO");
 
         // No margin or pledge reward if under cost - all goes to SPO
@@ -233,7 +235,7 @@ fn calculate_spo_rewards(
 
                 // Pool owners don't get member rewards (seems unfair!)
                 if spo.pool_owners.contains(hash) {
-                    info!(
+                    debug!(
                         "Skipping pool owner reward account {}, losing {to_pay}",
                         hex::encode(hash)
                     );
@@ -259,7 +261,44 @@ fn calculate_spo_rewards(
         *total_paid_to_delegators += total_paid;
         costs.to_u64().unwrap_or(0)
     };
-    result.rewards.push((spo.reward_account.clone(), spo_benefit));
+
+    // SPO's reward account must be registered
+    // TODO horrors about the time of registration/deregistration - depends on whether
+    // it was deregistered before 4 * k blocks (actually 4 * k * 20 slots) into the epoch!
+    // We currently use the registration state at the last snapshot
+
+    // TODO should spo.reward_account be a StakeAddress to begin with?
+    match StakeAddress::from_binary(&spo.reward_account) {
+        Ok(spo_reward_address) => {
+            let spo_reward_hash = spo_reward_address.get_hash();
+
+            if performance
+                .stake_addresses
+                .get(spo_reward_hash)
+                .map(|sas| sas.registered)
+                .unwrap_or(false)
+            {
+                result.rewards.push((spo_reward_hash.to_vec(), spo_benefit));
+                result.total_paid += spo_benefit;
+                *total_paid_to_pools += spo_benefit;
+                *num_pools_paid += 1;
+            } else {
+                info!(
+                    "SPO {}'s reward account {} isn't registered - dropping their reward of {}",
+                    hex::encode(&operator_id),
+                    hex::encode(&spo_reward_hash),
+                    spo_benefit,
+                );
+                spo_benefit = 0;
+            }
+        }
+
+        Err(e) => error!(
+            "Can't decode reward address for SPO {}: {e}",
+            hex::encode(&operator_id)
+        ),
+    }
+
     result.spo_rewards.push((
         operator_id.clone(),
         SPORewards {
@@ -267,7 +306,4 @@ fn calculate_spo_rewards(
             operator_rewards: spo_benefit,
         },
     ));
-    result.total_paid += spo_benefit;
-    *total_paid_to_pools += spo_benefit;
-    *num_pools_paid += 1;
 }
