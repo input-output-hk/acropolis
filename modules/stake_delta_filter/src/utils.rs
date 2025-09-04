@@ -541,7 +541,9 @@ mod test {
             number: 1,
             hash: vec![],
             epoch: 1,
+            epoch_slot: 14243,
             new_epoch: true,
+            timestamp: 2498243,
             era: Era::Conway,
         };
 

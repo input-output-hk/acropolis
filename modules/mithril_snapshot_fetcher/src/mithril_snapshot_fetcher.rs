@@ -2,7 +2,7 @@
 //! Fetches a snapshot from Mithril and replays all the blocks in it
 
 use acropolis_common::{
-    calculations::slot_to_epoch,
+    calculations::{slot_to_epoch, slot_to_timestamp},
     messages::{BlockBodyMessage, BlockHeaderMessage, CardanoMessage, Message},
     BlockInfo, BlockStatus, Era,
 };
@@ -290,7 +290,7 @@ impl MithrilSnapshotFetcher {
                         }
                         last_block_number = number;
 
-                        let (epoch, _epoch_slot) = slot_to_epoch(slot);
+                        let (epoch, epoch_slot) = slot_to_epoch(slot);
                         let new_epoch = match last_epoch {
                             Some(last_epoch) => epoch != last_epoch,
                             None => true,
@@ -300,6 +300,8 @@ impl MithrilSnapshotFetcher {
                         if new_epoch {
                             info!(epoch, number, slot, "New epoch");
                         }
+
+                        let timestamp = slot_to_timestamp(slot);
 
                         let era = match block.era() {
                             PallasEra::Byron => Era::Byron,
@@ -317,7 +319,9 @@ impl MithrilSnapshotFetcher {
                             number,
                             hash: block.hash().to_vec(),
                             epoch,
+                            epoch_slot,
                             new_epoch,
+                            timestamp,
                             era,
                         };
 
