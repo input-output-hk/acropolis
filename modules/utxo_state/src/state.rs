@@ -4,6 +4,7 @@ use acropolis_common::{
     messages::UTXODeltasMessage, params::SECURITY_PARAMETER_K, Address, BlockInfo, BlockStatus,
     TxHash, TxInput, TxOutput, UTXODelta,
 };
+use acropolis_common::{Value, ValueDelta};
 use anyhow::Result;
 use async_trait::async_trait;
 use hex::encode;
@@ -57,7 +58,7 @@ pub struct UTXOValue {
     pub address: Address,
 
     /// Value in Lovelace
-    pub value: u64,
+    pub value: Value,
 }
 
 /// Address delta observer
@@ -69,7 +70,7 @@ pub trait AddressDeltaObserver: Send + Sync {
     async fn start_block(&self, block: &BlockInfo);
 
     /// Observe a delta
-    async fn observe_delta(&self, address: &Address, delta: i64);
+    async fn observe_delta(&self, address: &Address, delta: ValueDelta);
 
     /// Finalise a block
     async fn finalise_block(&self, block: &BlockInfo);
@@ -166,7 +167,9 @@ impl State {
                     if let Some(utxo) = self.volatile_utxos.remove(&key) {
                         // Tell the observer to debit it
                         if let Some(observer) = self.address_delta_observer.as_ref() {
-                            observer.observe_delta(&utxo.address, -(utxo.value as i64)).await;
+                            observer
+                                .observe_delta(&utxo.address, -ValueDelta::from(&utxo.value))
+                                .await;
                         }
                     }
                 }
@@ -178,7 +181,9 @@ impl State {
                     if let Some(utxo) = self.volatile_utxos.get(&key) {
                         // Tell the observer to recredit it
                         if let Some(observer) = self.address_delta_observer.as_ref() {
-                            observer.observe_delta(&utxo.address, utxo.value as i64).await;
+                            observer
+                                .observe_delta(&utxo.address, ValueDelta::from(&utxo.value))
+                                .await;
                         }
                     }
                 }
@@ -218,12 +223,16 @@ impl State {
         match self.lookup_utxo(&key).await? {
             Some(utxo) => {
                 if tracing::enabled!(tracing::Level::DEBUG) {
-                    debug!("        - spent {} from {:?}", utxo.value, utxo.address);
+                    debug!(
+                        "        - spent {} lovelace from {:?}",
+                        utxo.value.coin(),
+                        utxo.address
+                    );
                 }
 
                 // Tell the observer it's spent
                 if let Some(observer) = self.address_delta_observer.as_ref() {
-                    observer.observe_delta(&utxo.address, -(utxo.value as i64)).await;
+                    observer.observe_delta(&utxo.address, -ValueDelta::from(&utxo.value)).await;
                 }
 
                 match block.status {
@@ -266,7 +275,7 @@ impl State {
 
         let value = UTXOValue {
             address: output.address.clone(),
-            value: output.value.coin(),
+            value: output.value.clone(),
         };
 
         // Add to volatile or immutable maps
@@ -292,7 +301,7 @@ impl State {
 
         // Tell the observer
         if let Some(observer) = self.address_delta_observer.as_ref() {
-            observer.observe_delta(&output.address, output.value.coin() as i64).await;
+            observer.observe_delta(&output.address, ValueDelta::from(&output.value)).await;
         }
 
         Ok(())
@@ -460,7 +469,7 @@ mod tests {
                     matches!(&value.address, Address::Byron(ByronAddress{ payload })
                     if payload[0] == 99)
                 );
-                assert_eq!(42, value.value);
+                assert_eq!(42, value.value.lovelace);
             }
 
             _ => panic!("UTXO not found"),
@@ -643,13 +652,13 @@ mod tests {
     #[async_trait]
     impl AddressDeltaObserver for TestDeltaObserver {
         async fn start_block(&self, _block: &BlockInfo) {}
-        async fn observe_delta(&self, address: &Address, delta: i64) {
+        async fn observe_delta(&self, address: &Address, delta: ValueDelta) {
             assert!(matches!(&address, Address::Byron(ByronAddress{ payload })
                 if payload[0] == 99));
-            assert!(delta == 42 || delta == -42);
+            assert!(delta.lovelace == 42 || delta.lovelace == -42);
 
             let mut balance = self.balance.lock().await;
-            *balance += delta;
+            *balance += delta.lovelace;
         }
 
         async fn finalise_block(&self, _block: &BlockInfo) {}
