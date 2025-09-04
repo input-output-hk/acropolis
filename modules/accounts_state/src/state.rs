@@ -3,9 +3,7 @@ use crate::monetary::calculate_monetary_change;
 use crate::rewards::{calculate_rewards, RewardsResult};
 use crate::snapshot::Snapshot;
 use acropolis_common::queries::accounts::OptimalPoolSizing;
-use acropolis_common::PoolLiveStakeInfo;
-use crate::verify::PotsVerifier;
-
+use crate::verifier::Verifier;
 use acropolis_common::{
     math::update_value_with_delta,
     messages::{
@@ -16,7 +14,8 @@ use acropolis_common::{
     protocol_params::ProtocolParams,
     stake_addresses::{StakeAddressMap, StakeAddressState},
     DRepChoice, DRepCredential, DelegatedStake, InstantaneousRewardSource,
-    InstantaneousRewardTarget, KeyHash, Lovelace, MoveInstantaneousReward, PoolRegistration, Pot,
+    InstantaneousRewardTarget, KeyHash, Lovelace, MoveInstantaneousReward,
+    PoolLiveStakeInfo, PoolRegistration, Pot,
     SPORewards, StakeAddress, StakeCredential, StakeRewardDelta, TxCertificate,
 };
 use anyhow::Result;
@@ -205,14 +204,14 @@ impl State {
     ///   epoch: Number of epoch we are entering
     ///   total_fees: Total fees taken in previous epoch
     ///   spo_block_counts: Count of blocks minted by operator ID in previous epoch
-    ///   verifier: optional verifier
+    ///   verifier: Verifier against Haskell node output
     // Follows the general scheme in https://docs.cardano.org/about-cardano/learn/pledging-rewards
     fn enter_epoch(
         &mut self,
         epoch: u64,
         total_fees: u64,
         spo_block_counts: HashMap<KeyHash, usize>,
-        verifier: &Option<PotsVerifier>,
+        verifier: &Verifier,
     ) -> Result<Vec<StakeRewardDelta>> {
         // TODO HACK! Investigate why this differs to our calculated reserves after AVVM
         // 13,887,515,255 - as we enter 208 (Shelley)
@@ -265,9 +264,7 @@ impl State {
         reward_deltas.extend(self.pay_mirs());
 
         // Verify pots state
-        if let Some(verifier) = verifier {
-            verifier.verify(epoch, &self.pots);
-        }
+        verifier.verify_pots(epoch, &self.pots);
 
         // Capture a new snapshot and push it to state
         let snapshot = Snapshot::new(
@@ -498,7 +495,7 @@ impl State {
     pub async fn handle_epoch_activity(
         &mut self,
         ea_msg: &EpochActivityMessage,
-        verifier: &Option<PotsVerifier>,
+        verifier: &Verifier,
     ) -> Result<(Vec<(KeyHash, SPORewards)>, Vec<StakeRewardDelta>)> {
         let mut spo_rewards: Vec<(KeyHash, SPORewards)> = Vec::new();
         // Collect stake addresses reward deltas
