@@ -1,5 +1,6 @@
 //! Verification of calculated values against captured CSV from Haskell node / DBSync
 use crate::state::Pots;
+use crate::rewards::RewardsResult;
 use std::collections::BTreeMap;
 use anyhow::Result;
 use tracing::{error, warn, info};
@@ -8,6 +9,9 @@ use tracing::{error, warn, info};
 pub struct Verifier {
     /// Map of pots values for every epoch
     epoch_pots: BTreeMap<u64, Pots>,
+
+    /// Template (with {} for epoch) for rewards files
+    rewards_file_template: Option<String>,
 }
 
 impl Verifier {
@@ -15,6 +19,7 @@ impl Verifier {
     pub fn new() -> Self {
         Self {
             epoch_pots: BTreeMap::new(),
+            rewards_file_template: None,
         }
     }
 
@@ -48,6 +53,12 @@ impl Verifier {
                 },
             );
         }
+    }
+
+    /// Read in rewards files
+    // Actually just stores the template and reads them on demand
+    pub fn read_rewards(&mut self, path: &str) {
+        self.rewards_file_template = Some(path.to_string());
     }
 
     /// Verify an epoch, logging any errors
@@ -92,6 +103,40 @@ impl Verifier {
             }
         } else {
             warn!("Epoch {epoch} not represented in verify test data");
+        }
+    }
+
+    /// Verify rewards, logging any errors
+    pub fn verify_rewards(&self, epoch: u64, rewards: &RewardsResult) {
+        if let Some(template) = &self.rewards_file_template {
+            let path = template.replace("{}", &epoch.to_string());
+
+            let mut reader = match csv::Reader::from_path(&path) {
+                Ok(reader) => reader,
+                Err(err) => {
+                    return;
+                }
+            };
+
+            // Expect CSV header: spo,address,type,amount
+            let mut expected_rewards: BTreeMap<String, (String, String, u64)> = BTreeMap::new();
+            for result in reader.deserialize() {
+                let (spo, address, rtype, amount): (String, String, String, u64) =
+                    match result {
+                        Ok(row) => row,
+                        Err(err) => {
+                            error!("Bad row in {path}: {err} - skipping");
+                            continue;
+                        }
+                    };
+
+                expected_rewards.insert(spo, (address, rtype, amount));
+            }
+
+            info!("Read rewards verification data for {} SPOs", expected_rewards.len());
+
+            // TODO compare rewards with expected_rewards, log missing members/leaders in both
+            // directions, changes of value
         }
     }
 }

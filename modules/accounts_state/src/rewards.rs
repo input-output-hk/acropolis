@@ -14,6 +14,9 @@ use tracing::{debug, info, warn};
 /// Result of a rewards calculation
 #[derive(Debug, Default)]
 pub struct RewardsResult {
+    /// Epoch these rewards were earned in (when blocks produced)
+    pub epoch: u64,
+
     /// Total rewards paid
     pub total_paid: u64,
 
@@ -36,6 +39,7 @@ pub fn calculate_rewards(
     stake_rewards: Lovelace,
 ) -> Result<RewardsResult> {
     let mut result = RewardsResult::default();
+    result.epoch = epoch-1;
 
     // If no blocks produced in previous epoch, don't do anything
     let total_blocks = performance.blocks;

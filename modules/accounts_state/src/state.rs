@@ -529,6 +529,7 @@ impl State {
         if let Some(task) = task.take() {
             match task.await {
                 Ok(Ok(reward_result)) => {
+
                     // Collect rewards to stake addresses reward deltas
                     reward_deltas.extend(
                         reward_result
@@ -540,6 +541,10 @@ impl State {
                             })
                             .collect::<Vec<_>>(),
                     );
+
+                    // Verify them
+                    verifier.verify_rewards(reward_result.epoch, &reward_result);
+
                     // Pay the rewards
                     for (account, amount) in reward_result.rewards {
                         let mut stake_addresses = self.stake_addresses.lock().unwrap();

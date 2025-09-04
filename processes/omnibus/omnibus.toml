@@ -81,6 +81,9 @@ write-full-cache = "false"
 store-history = false
 
 [module.accounts-state]
+# Verify against captured CSV
+verify-pots-file = "../../modules/accounts_state/test-data/pots.mainnet.csv"
+verify-rewards-files = "../../modules/accounts_state/test-data/rewards.mainnet.{}.csv"
 
 [module.assets-state]
 # Enables /assets endpoint
