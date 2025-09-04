@@ -5,6 +5,7 @@ use acropolis_common::{KeyHash, Lovelace, PoolRegistration, Ratio, RewardAccount
 use acropolis_common::stake_addresses::StakeAddressMap;
 use imbl::OrdMap;
 use std::collections::HashMap;
+use std::sync::Arc;
 use tracing::{error, info};
 
 /// SPO data for stake snapshot
@@ -31,8 +32,8 @@ pub struct SnapshotSPO {
     /// Reward account
     pub reward_account: RewardAccount,
 
-    /// Is the reward account registered at the time of the snapshot?
-    pub reward_account_is_registered: bool,
+    /// Is the reward account from two epochs ago registered at the time of this snapshot?
+    pub two_previous_reward_account_is_registered: bool,
 
     /// Pool owners
     pub pool_owners: Vec<KeyHash>,
@@ -63,6 +64,7 @@ impl Snapshot {
         spo_block_counts: &HashMap<KeyHash, usize>,
         pots: &Pots,
         blocks: usize,
+        two_previous_snapshot: Arc<Snapshot>,
     ) -> Self {
         let mut snapshot = Self {
             _epoch: epoch,
@@ -91,31 +93,30 @@ impl Snapshot {
                         // See how many blocks produced
                         let blocks_produced = spo_block_counts.get(spo_id).copied().unwrap_or(0);
 
-                        // Check if the reward account is registered
+                        // Check if the reward account from two epochs ago is still registered
                         // TODO should spo.reward_account be a StakeAddress to begin with?
-                        let reward_account_is_registered =
-                            match StakeAddress::from_binary(&spo.reward_account) {
-                                Ok(spo_reward_address) => {
-                                    let spo_reward_hash = spo_reward_address.get_hash();
-                                    stake_addresses
-                                        .get(spo_reward_hash)
-                                        .map(|sas| sas.registered)
-                                        .unwrap_or(false)
-                                }
-                                Err(e) => {
-                                    error!(
-                                        "Can't decode reward address for SPO {}: {e}",
-                                        hex::encode(&spo_id)
-                                    );
+                        let two_previous_reward_account_is_registered =
+                            match two_previous_snapshot.spos.get(spo_id) {
+                                Some(old_spo) =>
+                                    match StakeAddress::from_binary(&old_spo.reward_account) {
+                                        Ok(spo_reward_address) => {
+                                            let spo_reward_hash = spo_reward_address.get_hash();
+                                            stake_addresses
+                                                .get(spo_reward_hash)
+                                                .map(|sas| sas.registered)
+                                                .unwrap_or(false)
+                                        }
+                                        Err(e) => {
+                                            error!(
+                                                "Can't decode reward address for SPO {}: {e}",
+                                                hex::encode(&spo_id)
+                                            );
 
-                                    false
-                                }
+                                            false
+                                        }
+                                    }
+                                None => false
                             };
-
-                        info!("SPO {} reward account {} registered: {}",
-                              hex::encode(&spo_id),
-                              hex::encode(&spo.reward_account),
-                              reward_account_is_registered);
 
                         // Add the new one
                         snapshot.spos.insert(
@@ -129,7 +130,7 @@ impl Snapshot {
                                 blocks_produced,
                                 pool_owners: spo.pool_owners.clone(),
                                 reward_account: spo.reward_account.clone(),
-                                reward_account_is_registered,
+                                two_previous_reward_account_is_registered,
                             },
                         );
                     }
@@ -257,6 +258,7 @@ mod tests {
             &spo_block_counts,
             &Pots::default(),
             0,
+            Arc::new(Snapshot::default()),
         );
 
         assert_eq!(snapshot.spos.len(), 2);
