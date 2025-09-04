@@ -1,9 +1,9 @@
 //! REST handlers for Acropolis UTxO State module
 
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use crate::state::{State, UTXOKey};
-use acropolis_common::messages::RESTResponse;
+use acropolis_common::{messages::RESTResponse, NativeAssets};
 use anyhow::Result;
 use tokio::sync::Mutex;
 
@@ -11,8 +11,11 @@ use tokio::sync::Mutex;
 #[derive(serde::Serialize)]
 pub struct UTxOBalanceRest {
     pub address: String,
-    pub value: u64,
+    pub lovelace: u64,
+    pub assets: AssetsREST,
 }
+
+pub type AssetsREST = HashMap<String, HashMap<String, u64>>;
 
 /// Handles /utxos/{tx_hash:index}
 pub async fn handle_single_utxo(
@@ -74,9 +77,12 @@ pub async fn handle_single_utxo(
                 }
             };
 
+            let assets = convert_assets(&utxo.value.assets);
+
             let response = UTxOBalanceRest {
                 address: address_text,
-                value: utxo.value,
+                lovelace: utxo.value.lovelace,
+                assets,
             };
 
             match serde_json::to_string(&response) {
@@ -92,4 +98,21 @@ pub async fn handle_single_utxo(
             &format!("UTxO not found. Provided UTxO: {}", param),
         )),
     }
+}
+
+fn convert_assets(assets: &NativeAssets) -> AssetsREST {
+    let mut rest: AssetsREST = HashMap::new();
+
+    for (policy_id, native_assets) in assets {
+        let policy_hex = hex::encode(policy_id);
+        let entry = rest.entry(policy_hex).or_default();
+
+        for na in native_assets {
+            let name = String::from_utf8(na.name.clone()).unwrap_or_else(|_| hex::encode(&na.name));
+
+            entry.insert(name, na.amount);
+        }
+    }
+
+    rest
 }

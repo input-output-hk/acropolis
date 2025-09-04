@@ -860,7 +860,7 @@ pub fn map_value(pallas_value: &MultiEraValue) -> Value {
     let lovelace = pallas_value.coin();
     let pallas_assets = pallas_value.assets();
 
-    let mut assets: MultiAssets = Vec::new();
+    let mut assets: NativeAssets = Vec::new();
 
     for policy_group in pallas_assets {
         match policy_group {
