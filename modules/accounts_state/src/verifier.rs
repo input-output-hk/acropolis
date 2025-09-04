@@ -1,25 +1,44 @@
-//! Verification of pots values against captured CSV
+//! Verification of calculated values against captured CSV from Haskell node / DBSync
 use crate::state::Pots;
-use anyhow::Result;
 use std::collections::BTreeMap;
 use tracing::{error, info, warn};
 
-/// Pots verifier
-pub struct PotsVerifier {
+/// Verifier
+pub struct Verifier {
     /// Map of pots values for every epoch
     epoch_pots: BTreeMap<u64, Pots>,
 }
 
-impl PotsVerifier {
-    /// Read a CSV file
-    pub fn new(path: &str) -> Result<Self> {
-        let mut reader = csv::Reader::from_path(path)?;
-        let mut epoch_pots = BTreeMap::new();
+impl Verifier {
+    /// Construct empty
+    pub fn new() -> Self {
+        Self {
+            epoch_pots: BTreeMap::new(),
+        }
+    }
+
+    /// Read in a pots file
+    pub fn read_pots(&mut self, path: &str) {
+        let mut reader = match csv::Reader::from_path(path) {
+            Ok(reader) => reader,
+            Err(err) => {
+                error!("Failed to load pots CSV from {path}: {err} - not verifying");
+                return;
+            }
+        };
 
         // Expect CSV header: epoch,reserves,treasury,deposits
         for result in reader.deserialize() {
-            let (epoch, reserves, treasury, deposits): (u64, u64, u64, u64) = result?;
-            epoch_pots.insert(
+            let (epoch, reserves, treasury, deposits): (u64, u64, u64, u64) =
+                match result {
+                    Ok(row) => row,
+                    Err(err) => {
+                        error!("Bad row in {path}: {err} - skipping");
+                        continue;
+                    }
+                };
+
+            self.epoch_pots.insert(
                 epoch,
                 Pots {
                     reserves,
@@ -28,12 +47,14 @@ impl PotsVerifier {
                 },
             );
         }
-
-        Ok(Self { epoch_pots })
     }
 
     /// Verify an epoch, logging any errors
-    pub fn verify(&self, epoch: u64, pots: &Pots) {
+    pub fn verify_pots(&self, epoch: u64, pots: &Pots) {
+        if self.epoch_pots.is_empty() {
+            return;
+        }
+
         if let Some(desired_pots) = self.epoch_pots.get(&epoch) {
             if pots.reserves != desired_pots.reserves {
                 error!(
