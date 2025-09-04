@@ -92,7 +92,7 @@ impl FetcherConfig {
         }))
     }
 
-    pub fn slot_to_epoch(&self, slot: u64) -> u64 {
+    pub fn slot_to_epoch(&self, slot: u64) -> (u64, u64) {
         slot_to_epoch_with_shelley_params(slot, self.shelley_epoch, self.shelley_epoch_len)
     }
 }
