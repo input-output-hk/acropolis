@@ -5,7 +5,7 @@ use acropolis_common::{
     messages::{CardanoMessage, Message, SPOStateMessage, TxCertificatesMessage},
     params::TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH,
     serialization::SerializeMapAs,
-    BlockInfo, KeyHash, PoolMetadata, PoolRegistration, PoolRetirement, TxCertificate,
+    BlockInfo, KeyHash, PoolMetadata, PoolRegistration, PoolRetirement, Relay, TxCertificate,
 };
 use anyhow::Result;
 use imbl::HashMap;
@@ -160,6 +160,11 @@ impl State {
     /// Get pool metadata
     pub fn get_pool_metadata(&self, pool_id: &KeyHash) -> Option<PoolMetadata> {
         self.spos.get(pool_id).map(|p| p.pool_metadata.clone()).flatten()
+    }
+
+    /// Get pool relay
+    pub fn get_pool_relays(&self, pool_id: &KeyHash) -> Option<Vec<Relay>> {
+        self.spos.get(pool_id).map(|p| p.relays.clone())
     }
 
     /// Get pools that will be retired in the upcoming epochs
