@@ -14,7 +14,7 @@ use tracing::error;
 
 use crate::stores::{fjall::FjallStore, Block, Store};
 
-const DEFAULT_TRANSACTIONS_TOPIC: &str = "cardano.txs";
+const DEFAULT_BLOCKS_TOPIC: &str = "cardano.block.body";
 const DEFAULT_STORE: &str = "fjall";
 
 #[module(
@@ -26,9 +26,8 @@ pub struct ChainStore;
 
 impl ChainStore {
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
-        let new_txs_topic = config
-            .get_string("transactions-topic")
-            .unwrap_or(DEFAULT_TRANSACTIONS_TOPIC.to_string());
+        let new_blocks_topic =
+            config.get_string("blocks-topic").unwrap_or(DEFAULT_BLOCKS_TOPIC.to_string());
         let block_queries_topic = config
             .get_string(DEFAULT_BLOCKS_QUERY_TOPIC.0)
             .unwrap_or(DEFAULT_BLOCKS_QUERY_TOPIC.1.to_string());
@@ -54,14 +53,14 @@ impl ChainStore {
             }
         });
 
-        let mut new_txs_subscription = context.subscribe(&new_txs_topic).await?;
+        let mut new_blocks_subscription = context.subscribe(&new_blocks_topic).await?;
         context.run(async move {
             loop {
-                let Ok((_, message)) = new_txs_subscription.read().await else {
+                let Ok((_, message)) = new_blocks_subscription.read().await else {
                     return;
                 };
 
-                if let Err(err) = Self::handle_new_txs(&store, &message) {
+                if let Err(err) = Self::handle_new_block(&store, &message) {
                     error!("Could not insert block: {err}");
                 }
             }
@@ -70,13 +69,12 @@ impl ChainStore {
         Ok(())
     }
 
-    fn handle_new_txs(store: &Arc<dyn Store>, message: &Message) -> Result<()> {
-        let Message::Cardano((info, CardanoMessage::ReceivedTxs(txs))) = message else {
+    fn handle_new_block(store: &Arc<dyn Store>, message: &Message) -> Result<()> {
+        let Message::Cardano((info, CardanoMessage::BlockBody(body))) = message else {
             bail!("Unexpected message type: {message:?}");
         };
 
-        let block = Block::from_info_and_txs(info, &txs.txs);
-        store.insert_block(&block)
+        store.insert_block(info, &body.raw)
     }
 
     fn handle_blocks_query(

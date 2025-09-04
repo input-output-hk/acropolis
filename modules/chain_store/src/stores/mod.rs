@@ -4,32 +4,32 @@ use anyhow::{Context, Result};
 pub mod fjall;
 
 pub trait Store: Send + Sync {
-    fn insert_block(&self, block: &Block) -> Result<()>;
+    fn insert_block(&self, info: &BlockInfo, block: &[u8]) -> Result<()>;
 
     fn get_block_by_hash(&self, hash: &[u8]) -> Result<Block>;
     fn get_block_by_slot(&self, slot: u64) -> Result<Block>;
     fn get_latest_block(&self) -> Result<Block>;
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, minicbor::Decode, minicbor::Encode)]
 pub struct Block {
-    slot: u64,
-    number: u64,
-    hash: Vec<u8>,
-    txs: Vec<Vec<u8>>,
-}
-impl Block {
-    pub fn from_info_and_txs(info: &BlockInfo, txs: &[Vec<u8>]) -> Self {
-        Self {
-            slot: info.slot,
-            number: info.number,
-            hash: info.hash.clone(),
-            txs: txs.to_vec(),
-        }
-    }
+    #[n(0)]
+    pub bytes: Vec<u8>,
+    #[n(1)]
+    pub extra: ExtraBlockData,
 }
 
-pub(crate) fn hash_tx(tx: &[u8]) -> Result<TxHash> {
-    let tx = pallas_traverse::MultiEraTx::decode(tx).context("could not decode tx")?;
-    Ok(TxHash::from(*tx.hash()))
+#[derive(Debug, PartialEq, Eq, minicbor::Decode, minicbor::Encode)]
+pub struct ExtraBlockData {
+    #[n(0)]
+    pub epoch: u64,
+    #[n(1)]
+    pub epoch_slot: u64,
+    #[n(2)]
+    pub timestamp: u64,
+}
+
+pub(crate) fn extract_tx_hashes(block: &[u8]) -> Result<Vec<TxHash>> {
+    let block = pallas_traverse::MultiEraBlock::decode(block).context("could not decode block")?;
+    Ok(block.txs().into_iter().map(|tx| TxHash::from(*tx.hash())).collect())
 }
