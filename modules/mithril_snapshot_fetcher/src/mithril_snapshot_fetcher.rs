@@ -290,7 +290,7 @@ impl MithrilSnapshotFetcher {
                         }
                         last_block_number = number;
 
-                        let epoch = slot_to_epoch(slot);
+                        let (epoch, _epoch_slot) = slot_to_epoch(slot);
                         let new_epoch = match last_epoch {
                             Some(last_epoch) => epoch != last_epoch,
                             None => true,

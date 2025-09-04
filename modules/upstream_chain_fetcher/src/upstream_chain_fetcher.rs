@@ -62,8 +62,8 @@ impl UpstreamChainFetcher {
         let mut response_count = 0;
 
         let last_epoch: Option<u64> = match slot {
-            0 => None,                          // If we're starting from origin
-            _ => Some(cfg.slot_to_epoch(slot)), // From slot of last block
+            0 => None,                            // If we're starting from origin
+            _ => Some(cfg.slot_to_epoch(slot).0), // From slot of last block
         };
 
         let (sender, receiver) = bounded(MAX_BODY_FETCHER_CHANNEL_LENGTH);
