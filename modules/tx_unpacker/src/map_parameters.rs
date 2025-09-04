@@ -8,7 +8,7 @@ use pallas::ledger::{
         ProtocolVersion as PallasProtocolVersion, Relay as PallasRelay, ScriptHash,
         StakeCredential as PallasStakeCredential,
     },
-    traverse::MultiEraCert,
+    traverse::{MultiEraCert, MultiEraPolicyAssets},
     *,
 };
 
@@ -854,4 +854,42 @@ pub fn map_all_governance_voting_procedures(
     }
 
     Ok(procs)
+}
+
+pub fn map_mint_burn(
+    policy_group: &MultiEraPolicyAssets<'_>,
+) -> Option<(PolicyId, Vec<NativeAssetDelta>)> {
+    match policy_group {
+        MultiEraPolicyAssets::AlonzoCompatibleMint(policy, kvps) => {
+            let policy_id: [u8; 28] =
+                policy.as_ref().try_into().expect("Policy id must be 28 bytes");
+
+            let deltas = kvps
+                .iter()
+                .map(|(name, amt)| NativeAssetDelta {
+                    name: name.to_vec(),
+                    amount: *amt,
+                })
+                .collect();
+
+            Some((policy_id, deltas))
+        }
+
+        MultiEraPolicyAssets::ConwayMint(policy, kvps) => {
+            let policy_id: [u8; 28] =
+                policy.as_ref().try_into().expect("Policy id must be 28 bytes");
+
+            let deltas = kvps
+                .iter()
+                .map(|(name, amt)| NativeAssetDelta {
+                    name: name.to_vec(),
+                    amount: i64::from(*amt),
+                })
+                .collect();
+
+            Some((policy_id, deltas))
+        }
+
+        _ => None,
+    }
 }

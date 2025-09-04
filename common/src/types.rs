@@ -139,6 +139,23 @@ pub struct StakeAddressDelta {
     pub delta: i64,
 }
 
+pub type PolicyId = [u8; 28];
+pub type NativeAssets = Vec<(PolicyId, Vec<NativeAsset>)>;
+pub type NativeAssetsDelta = Vec<(PolicyId, Vec<NativeAssetDelta>)>;
+pub type AssetName = Vec<u8>;
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct NativeAsset {
+    pub name: AssetName,
+    pub amount: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct NativeAssetDelta {
+    pub name: AssetName,
+    pub amount: i64,
+}
+
 /// Transaction output (UTXO)
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TxOutput {
