@@ -2,14 +2,14 @@
 
 use crate::snapshot::{Snapshot, SnapshotSPO};
 use acropolis_common::{
-    address::StakeAddress, protocol_params::ShelleyParams, rational_number::RationalNumber,
-    KeyHash, Lovelace, RewardAccount, SPORewards,
+    protocol_params::ShelleyParams, rational_number::RationalNumber, KeyHash, Lovelace,
+    RewardAccount, SPORewards,
 };
 use anyhow::{bail, Result};
 use bigdecimal::{BigDecimal, One, ToPrimitive, Zero};
 use std::cmp::min;
 use std::sync::Arc;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 /// Result of a rewards calculation
 #[derive(Debug, Default)]
@@ -71,12 +71,14 @@ pub fn calculate_rewards(
     let mut num_delegators_paid: usize = 0;
     for (operator_id, spo) in staking.spos.iter() {
         // Actual blocks produced for epoch i, no rewards if none
-        let blocks_produced =
-            performance.spos.get(operator_id).map(|s| s.blocks_produced).unwrap_or(0);
-
+        let performance_spo = performance.spos.get(operator_id);
+        let blocks_produced = performance_spo.map(|s| s.blocks_produced).unwrap_or(0);
         if blocks_produced == 0 {
             continue;
         }
+
+        let reward_account_is_registered =
+            performance_spo.map(|s| s.reward_account_is_registered).unwrap_or(false);
 
         calculate_spo_rewards(
             operator_id,
@@ -89,7 +91,7 @@ pub fn calculate_rewards(
             &pledge_influence_factor,
             params,
             staking.clone(),
-            performance.clone(),
+            reward_account_is_registered,
             &mut result,
             &mut total_paid_to_pools,
             &mut total_paid_to_delegators,
@@ -122,7 +124,7 @@ fn calculate_spo_rewards(
     pledge_influence_factor: &BigDecimal,
     params: &ShelleyParams,
     staking: Arc<Snapshot>,
-    performance: Arc<Snapshot>,
+    reward_account_is_registered: bool,
     result: &mut RewardsResult,
     total_paid_to_pools: &mut Lovelace,
     total_paid_to_delegators: &mut Lovelace,
@@ -265,37 +267,19 @@ fn calculate_spo_rewards(
     // TODO horrors about the time of registration/deregistration - depends on whether
     // it was deregistered before 4 * k blocks (actually 4 * k * 20 slots) into the epoch!
     // We currently use the registration state at the last snapshot
-
-    // TODO should spo.reward_account be a StakeAddress to begin with?
-    match StakeAddress::from_binary(&spo.reward_account) {
-        Ok(spo_reward_address) => {
-            let spo_reward_hash = spo_reward_address.get_hash();
-
-            if performance
-                .stake_addresses
-                .get(spo_reward_hash)
-                .map(|sas| sas.registered)
-                .unwrap_or(false)
-            {
-                result.rewards.push((spo_reward_hash.to_vec(), spo_benefit));
-                result.total_paid += spo_benefit;
-                *total_paid_to_pools += spo_benefit;
-                *num_pools_paid += 1;
-            } else {
-                info!(
-                    "SPO {}'s reward account {} isn't registered - dropping their reward of {}",
-                    hex::encode(&operator_id),
-                    hex::encode(&spo_reward_hash),
-                    spo_benefit,
-                );
-                spo_benefit = 0;
-            }
-        }
-
-        Err(e) => error!(
-            "Can't decode reward address for SPO {}: {e}",
-            hex::encode(&operator_id)
-        ),
+    if reward_account_is_registered {
+        result.rewards.push((spo.reward_account.clone(), spo_benefit));
+        result.total_paid += spo_benefit;
+        *total_paid_to_pools += spo_benefit;
+        *num_pools_paid += 1;
+    } else {
+        info!(
+            "SPO {}'s reward account {} isn't registered - dropping their reward of {}",
+            hex::encode(&operator_id),
+            hex::encode(&spo.reward_account),
+            spo_benefit,
+        );
+        spo_benefit = 0;
     }
 
     result.spo_rewards.push((

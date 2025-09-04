@@ -1,10 +1,10 @@
 //! Acropolis AccountsState: snapshot for rewards calculations
 
 use crate::state::{Pots, StakeAddressState};
-use acropolis_common::{KeyHash, Lovelace, PoolRegistration, Ratio, RewardAccount};
+use acropolis_common::{KeyHash, Lovelace, PoolRegistration, Ratio, RewardAccount, StakeAddress};
 use imbl::OrdMap;
 use std::collections::HashMap;
-use tracing::info;
+use tracing::{error, info};
 
 /// SPO data for stake snapshot
 #[derive(Debug, Default)]
@@ -30,6 +30,9 @@ pub struct SnapshotSPO {
     /// Reward account
     pub reward_account: RewardAccount,
 
+    /// Is the reward account registered at the time of the snapshot?
+    pub reward_account_is_registered: bool,
+
     /// Pool owners
     pub pool_owners: Vec<KeyHash>,
 }
@@ -39,11 +42,6 @@ pub struct SnapshotSPO {
 pub struct Snapshot {
     /// Epoch it's for (the new one that has just started)
     pub _epoch: u64,
-
-    /// Stake address states
-    /// TODO this is going to be big - reduce this to actual use case, which is
-    /// registered SPO reward accounts
-    pub stake_addresses: HashMap<KeyHash, StakeAddressState>,
 
     /// Map of SPOs by operator ID
     pub spos: HashMap<KeyHash, SnapshotSPO>,
@@ -67,7 +65,6 @@ impl Snapshot {
     ) -> Self {
         let mut snapshot = Self {
             _epoch: epoch,
-            stake_addresses: stake_addresses.clone(), // TODO expensive!
             pots: pots.clone(),
             blocks,
             ..Self::default()
@@ -77,8 +74,7 @@ impl Snapshot {
         // Note this is _active_ stake, for reward calculations, and hence doesn't include rewards
         let mut total_stake: Lovelace = 0;
         for (hash, sas) in stake_addresses {
-            // TODO also check for registration status?
-            if sas.utxo_value > 0 {
+            if sas.registered && sas.utxo_value > 0 {
                 if let Some(spo_id) = &sas.delegated_spo {
                     // Only clone if insertion is needed
                     if let Some(snap_spo) = snapshot.spos.get_mut(spo_id) {
@@ -93,6 +89,34 @@ impl Snapshot {
 
                         // See how many blocks produced
                         let blocks_produced = spo_block_counts.get(spo_id).copied().unwrap_or(0);
+
+                        // Check if the reward account is registered
+                        // TODO should spo.reward_account be a StakeAddress to begin with?
+                        let reward_account_is_registered =
+                            match StakeAddress::from_binary(&spo.reward_account) {
+                                Ok(spo_reward_address) => {
+                                    let spo_reward_hash = spo_reward_address.get_hash();
+                                    stake_addresses
+                                        .get(spo_reward_hash)
+                                        .map(|sas| sas.registered)
+                                        .unwrap_or(false)
+                                }
+                                Err(e) => {
+                                    error!(
+                                        "Can't decode reward address for SPO {}: {e}",
+                                        hex::encode(&spo_id)
+                                    );
+
+                                    false
+                                }
+                            };
+
+                        info!("SPO {} reward account {} registered: {}",
+                              hex::encode(&spo_id),
+                              hex::encode(&spo.reward_account),
+                              reward_account_is_registered);
+
+                        // Add the new one
                         snapshot.spos.insert(
                             spo_id.clone(),
                             SnapshotSPO {
@@ -104,6 +128,7 @@ impl Snapshot {
                                 blocks_produced,
                                 pool_owners: spo.pool_owners.clone(),
                                 reward_account: spo.reward_account.clone(),
+                                reward_account_is_registered,
                             },
                         );
                     }
@@ -161,7 +186,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn get_stake_snapshot_counts_stake_and_ignores_undelegated_and_zero_values() {
+    fn get_stake_snapshot_counts_stake_and_ignores_unregistered_undelegated_and_zero_values() {
         let spo1: KeyHash = vec![0x01];
         let spo2: KeyHash = vec![0x02];
 
@@ -169,12 +194,14 @@ mod tests {
         let addr2: KeyHash = vec![0x12];
         let addr3: KeyHash = vec![0x13];
         let addr4: KeyHash = vec![0x14];
+        let addr5: KeyHash = vec![0x15];
 
         let mut stake_addresses: HashMap<KeyHash, StakeAddressState> = HashMap::new();
         stake_addresses.insert(
             addr1.clone(),
             StakeAddressState {
                 utxo_value: 42,
+                registered: true,
                 delegated_spo: Some(spo1.clone()),
                 ..StakeAddressState::default()
             },
@@ -183,6 +210,7 @@ mod tests {
             addr2.clone(),
             StakeAddressState {
                 utxo_value: 99,
+                registered: true,
                 delegated_spo: Some(spo2.clone()),
                 ..StakeAddressState::default()
             },
@@ -191,6 +219,7 @@ mod tests {
             addr3.clone(),
             StakeAddressState {
                 utxo_value: 0,
+                registered: true,
                 delegated_spo: Some(spo1.clone()),
                 ..StakeAddressState::default()
             },
@@ -199,6 +228,16 @@ mod tests {
             addr4.clone(),
             StakeAddressState {
                 utxo_value: 1000000,
+                registered: true,
+                delegated_spo: None,
+                ..StakeAddressState::default()
+            },
+        );
+        stake_addresses.insert(
+            addr5.clone(),
+            StakeAddressState {
+                utxo_value: 2000000,
+                registered: false,
                 delegated_spo: None,
                 ..StakeAddressState::default()
             },
