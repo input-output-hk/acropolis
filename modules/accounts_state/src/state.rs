@@ -293,6 +293,9 @@ impl State {
             &spo_block_counts,
             &self.pots,
             total_blocks,
+
+            // Pass in two-previous epoch snapshot for capture of SPO reward accounts
+            self.epoch_snapshots.set.clone(),  // Will become 'go' in the next line!
         );
         self.epoch_snapshots.push(snapshot);
 

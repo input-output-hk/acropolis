@@ -77,8 +77,10 @@ pub fn calculate_rewards(
             continue;
         }
 
-        let reward_account_is_registered =
-            performance_spo.map(|s| s.reward_account_is_registered).unwrap_or(false);
+        // We get the registration status *as it is in performance* for the reward account
+        // *as it was during staking*
+        let staking_reward_account_is_registered =
+            performance_spo.map(|s| s.two_previous_reward_account_is_registered).unwrap_or(false);
 
         calculate_spo_rewards(
             operator_id,
@@ -91,7 +93,7 @@ pub fn calculate_rewards(
             &pledge_influence_factor,
             params,
             staking.clone(),
-            reward_account_is_registered,
+            staking_reward_account_is_registered,
             &mut result,
             &mut total_paid_to_pools,
             &mut total_paid_to_delegators,
@@ -124,7 +126,7 @@ fn calculate_spo_rewards(
     pledge_influence_factor: &BigDecimal,
     params: &ShelleyParams,
     staking: Arc<Snapshot>,
-    reward_account_is_registered: bool,
+    staking_reward_account_is_registered: bool,
     result: &mut RewardsResult,
     total_paid_to_pools: &mut Lovelace,
     total_paid_to_delegators: &mut Lovelace,
@@ -263,11 +265,11 @@ fn calculate_spo_rewards(
         costs.to_u64().unwrap_or(0)
     };
 
-    // SPO's reward account must be registered
+    // SPO's reward account from staking time must be registered now
     // TODO horrors about the time of registration/deregistration - depends on whether
     // it was deregistered before 4 * k blocks (actually 4 * k * 20 slots) into the epoch!
-    // We currently use the registration state at the last snapshot
-    if reward_account_is_registered {
+    // For now, "now" = time of last ('performance') snapshot
+    if staking_reward_account_is_registered {
         result.rewards.push((spo.reward_account.clone(), spo_benefit));
         result.total_paid += spo_benefit;
         *total_paid_to_pools += spo_benefit;
