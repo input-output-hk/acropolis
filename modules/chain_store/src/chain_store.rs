@@ -84,25 +84,37 @@ impl ChainStore {
     ) -> Result<BlocksStateQueryResponse> {
         match query {
             BlocksStateQuery::GetLatestBlock => {
-                let block = store.get_latest_block()?;
-                let info = Self::to_block_info(block)?;
-                Ok(BlocksStateQueryResponse::LatestBlock(info))
+                match store.get_latest_block()? {
+                    Some(block) => {
+                        let info = Self::to_block_info(block, store, true)?;
+                        Ok(BlocksStateQueryResponse::LatestBlock(info))
+                    }
+                    None => Ok(BlocksStateQueryResponse::NotFound)
+                }
             }
             BlocksStateQuery::GetBlockInfo { block_key } => {
-                let block = store.get_block_by_hash(block_key)?;
-                let info = Self::to_block_info(block)?;
-                Ok(BlocksStateQueryResponse::BlockInfo(info))
+                match store.get_block_by_hash(&block_key)? {
+                    Some(block) => {
+                        let info = Self::to_block_info(block, store, false)?;
+                        Ok(BlocksStateQueryResponse::BlockInfo(info))
+                    }
+                    None => Ok(BlocksStateQueryResponse::NotFound)
+                }
             }
             BlocksStateQuery::GetBlockBySlot { slot } => {
-                let block = store.get_block_by_slot(*slot)?;
-                let info = Self::to_block_info(block)?;
-                Ok(BlocksStateQueryResponse::BlockBySlot(info))
+                match store.get_block_by_slot(*slot)? {
+                    Some(block) => {
+                        let info = Self::to_block_info(block, store, false)?;
+                        Ok(BlocksStateQueryResponse::BlockBySlot(info))
+                    }
+                    None => Ok(BlocksStateQueryResponse::NotFound)
+                }
             }
             other => bail!("{other:?} not yet supported"),
         }
     }
 
-    fn to_block_info(block: Block) -> Result<BlockInfo> {
+    fn to_block_info(block: Block, store: &Arc<dyn Store>, is_latest: bool) -> Result<BlockInfo> {
         let decoded = pallas_traverse::MultiEraBlock::decode(&block.bytes)?;
         let header = decoded.header();
         let mut output = None;
@@ -131,6 +143,30 @@ impl ChainStore {
         };
         let op_cert = op_cert_hot_vkey.map(|vkey| keyhash(vkey));
 
+        let (next_block, confirmations) = if is_latest {
+            (None, 0)
+        } else {
+            let number = header.number();
+            let raw_latest_block = store.get_latest_block()?.unwrap();
+            let latest_block = pallas_traverse::MultiEraBlock::decode(&raw_latest_block.bytes)?;
+            let latest_block_number = latest_block.number();
+            let confirmations = latest_block_number - number;
+
+            let next_block_number = number + 1;
+            let next_block_hash = if next_block_number == latest_block_number {
+                Some(latest_block.hash().to_vec())
+            } else {
+                let raw_next_block = store.get_block_by_number(next_block_number)?;
+                if let Some(raw_block) = raw_next_block {
+                    let block = pallas_traverse::MultiEraBlock::decode(&raw_block.bytes)?;
+                    Some(block.hash().to_vec())
+                } else {
+                    None
+                }
+            };
+            (next_block_hash, confirmations)
+        };
+
         Ok(BlockInfo {
             timestamp: block.extra.timestamp,
             number: header.number(),
@@ -147,8 +183,8 @@ impl ChainStore {
             op_cert,
             op_cert_counter,
             previous_block: header.previous_hash().map(|x| x.to_vec()),
-            next_block: None, // TODO
-            confirmations: 0, // TODO
+            next_block,
+            confirmations,
         })
     }
 }

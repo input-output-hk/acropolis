@@ -1,7 +1,7 @@
 use std::{path::Path, sync::Arc};
 
 use acropolis_common::{BlockInfo, TxHash};
-use anyhow::{bail, Result};
+use anyhow::Result;
 use config::Config;
 use fjall::{Batch, Keyspace, Partition};
 
@@ -62,15 +62,19 @@ impl super::Store for FjallStore {
         Ok(())
     }
 
-    fn get_block_by_hash(&self, hash: &[u8]) -> Result<Block> {
+    fn get_block_by_hash(&self, hash: &[u8]) -> Result<Option<Block>> {
         self.blocks.get_by_hash(hash)
     }
 
-    fn get_block_by_slot(&self, slot: u64) -> Result<Block> {
+    fn get_block_by_slot(&self, slot: u64) -> Result<Option<Block>> {
         self.blocks.get_by_slot(slot)
     }
 
-    fn get_latest_block(&self) -> Result<Block> {
+    fn get_block_by_number(&self, number: u64) -> Result<Option<Block>> {
+        self.blocks.get_by_number(number)
+    }
+
+    fn get_latest_block(&self) -> Result<Option<Block>> {
         self.blocks.get_latest()
     }
 }
@@ -119,23 +123,30 @@ impl FjallBlockStore {
         );
     }
 
-    fn get_by_hash(&self, hash: &[u8]) -> Result<Block> {
+    fn get_by_hash(&self, hash: &[u8]) -> Result<Option<Block>> {
         let Some(block) = self.blocks.get(hash)? else {
-            bail!("No block found with hash {}", hex::encode(hash));
+            return Ok(None);
         };
         Ok(minicbor::decode(&block)?)
     }
 
-    fn get_by_slot(&self, slot: u64) -> Result<Block> {
+    fn get_by_slot(&self, slot: u64) -> Result<Option<Block>> {
         let Some(hash) = self.block_hashes_by_slot.get(slot.to_be_bytes())? else {
-            bail!("No block found for slot {slot}");
+            return Ok(None);
         };
         self.get_by_hash(&hash)
     }
 
-    fn get_latest(&self) -> Result<Block> {
+    fn get_by_number(&self, number: u64) -> Result<Option<Block>> {
+        let Some(hash) = self.block_hashes_by_number.get(number.to_be_bytes())? else {
+            return Ok(None);
+        };
+        self.get_by_hash(&hash)
+    }
+
+    fn get_latest(&self) -> Result<Option<Block>> {
         let Some((_, hash)) = self.block_hashes_by_slot.last_key_value()? else {
-            bail!("No blocks found");
+            return Ok(None);
         };
         self.get_by_hash(&hash)
     }
@@ -242,7 +253,14 @@ mod tests {
         state.store.insert_block(&info, &bytes).unwrap();
 
         let new_block = state.store.get_block_by_hash(&info.hash).unwrap();
-        assert_eq!(block, new_block);
+        assert_eq!(block, new_block.unwrap());
+    }
+
+    #[test]
+    fn should_not_error_when_block_not_found() {
+        let state = init_state();
+        let new_block = state.store.get_block_by_hash(&[0xfa, 0x15, 0xe]).unwrap();
+        assert_eq!(new_block, None);
     }
 
     #[test]
@@ -255,7 +273,7 @@ mod tests {
         state.store.insert_block(&info, &bytes).unwrap();
 
         let new_block = state.store.get_block_by_slot(info.slot).unwrap();
-        assert_eq!(block, new_block);
+        assert_eq!(block, new_block.unwrap());
     }
 
     #[test]
@@ -268,6 +286,6 @@ mod tests {
         state.store.insert_block(&info, &bytes).unwrap();
 
         let new_block = state.store.get_latest_block().unwrap();
-        assert_eq!(block, new_block);
+        assert_eq!(block, new_block.unwrap());
     }
 }
