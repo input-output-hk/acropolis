@@ -1,30 +1,38 @@
 use acropolis_common::{
-    calculations::SHELLEY_SLOTS_PER_EPOCH, AlonzoBabbageUpdateProposal, AlonzoBabbageVotingOutcome,
-    BlockInfo, Era, GenesisKeyhash, ProtocolParamUpdate,
+    AlonzoBabbageUpdateProposal, AlonzoBabbageVotingOutcome, BlockInfo, Era, GenesisKeyhash,
+    ProtocolParamUpdate,
 };
 use anyhow::{bail, Result};
 use std::collections::{HashMap, HashSet};
 
 const GENESIS_KEYS_VOTES_THRESHOLD: u64 = 5;
+const MAINNET_SHELLEY_SLOTS_PER_EPOCH: u64 = 432_000;
 
-#[derive(Default)]
 pub struct AlonzoBabbageVoting {
     /// map "enact epoch" (proposal enacts at this epoch end) to voting
     /// "voting": map voter (genesis key) => (vote epoch, vote slot, proposal)
     /// "vote epoch/slot" --- moment, when the vote was cast for the proposal
     proposals: HashMap<u64, HashMap<GenesisKeyhash, (u64, u64, Box<ProtocolParamUpdate>)>>,
+    shelley_slots_per_epoch: u64,
 }
 
 impl AlonzoBabbageVoting {
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            proposals: HashMap::new(),
+            shelley_slots_per_epoch: MAINNET_SHELLEY_SLOTS_PER_EPOCH,
+        }
     }
 
     /// Vote is counted for the new epoch if cast in previous epoch
     /// before 4/10 of its start (not too fresh).
     /// Here is it: [!++++++++++!++++------!]
-    fn is_timely_vote(_epoch: u64, slot: u64, new_block: &BlockInfo) -> bool {
-        slot + (6 * SHELLEY_SLOTS_PER_EPOCH / 10) < new_block.slot
+    fn is_timely_vote(&self, _epoch: u64, slot: u64, new_block: &BlockInfo) -> bool {
+        slot + (6 * self.shelley_slots_per_epoch / 10) < new_block.slot
+    }
+
+    pub fn update_shelley_slots_per_epoch(&mut self, shelley_slots_per_epoch: u64) {
+        self.shelley_slots_per_epoch = shelley_slots_per_epoch;
     }
 
     pub fn process_update_proposals(
@@ -62,7 +70,7 @@ impl AlonzoBabbageVoting {
 
         let proposals = proposals_for_new_epoch
             .iter()
-            .filter(|(_k, (epoch, slot, _proposal))| Self::is_timely_vote(*epoch, *slot, new_blk))
+            .filter(|(_k, (epoch, slot, _proposal))| self.is_timely_vote(*epoch, *slot, new_blk))
             .map(|(k, (_e, _s, proposal))| (k.clone(), proposal.clone()))
             .collect::<Vec<_>>();
 
@@ -104,7 +112,7 @@ impl AlonzoBabbageVoting {
 
 #[cfg(test)]
 mod tests {
-    use crate::alonzo_babbage_voting::AlonzoBabbageVoting;
+    use crate::alonzo_babbage_voting::{AlonzoBabbageVoting, MAINNET_SHELLEY_SLOTS_PER_EPOCH};
     use acropolis_common::{
         rational_number::rational_number_from_f32, AlonzoBabbageUpdateProposal,
         AlonzoBabbageVotingOutcome, BlockInfo, BlockStatus, GenesisKeyhash, ProtocolParamUpdate,
@@ -138,7 +146,7 @@ mod tests {
                 slot,
                 number: slot,
                 epoch,
-                epoch_slot: epoch % 432_000,
+                epoch_slot: epoch % MAINNET_SHELLEY_SLOTS_PER_EPOCH,
                 era: era.try_into()?,
                 new_epoch: new_epoch != 0,
                 timestamp: 0,

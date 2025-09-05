@@ -2,6 +2,7 @@
 //! Reads genesis files and outputs initial UTXO events
 
 use acropolis_common::{
+    genesis_values::GenesisValues,
     messages::{
         CardanoMessage, GenesisCompleteMessage, Message, PotDeltasMessage, UTXODeltasMessage,
     },
@@ -23,7 +24,12 @@ const DEFAULT_NETWORK_NAME: &str = "mainnet";
 
 // Include genesis data (downloaded by build.rs)
 const MAINNET_BYRON_GENESIS: &[u8] = include_bytes!("../downloads/mainnet-byron-genesis.json");
+const MAINNET_SHELLEY_GENESIS: &[u8] = include_bytes!("../downloads/mainnet-shelley-genesis.json");
+const MAINNET_SHELLEY_START_EPOCH: u64 = 208;
 const SANCHONET_BYRON_GENESIS: &[u8] = include_bytes!("../downloads/sanchonet-byron-genesis.json");
+const SANCHONET_SHELLEY_GENESIS: &[u8] =
+    include_bytes!("../downloads/sanchonet-shelley-genesis.json");
+const SANCHONET_SHELLEY_START_EPOCH: u64 = 0;
 
 // Initial reserves (=maximum ever Lovelace supply)
 const INITIAL_RESERVES: Lovelace = 45_000_000_000_000_000;
@@ -70,19 +76,30 @@ impl GenesisBootstrapper {
                 let network_name =
                     config.get_string("network-name").unwrap_or(DEFAULT_NETWORK_NAME.to_string());
 
-                let genesis = match network_name.as_ref() {
-                    "mainnet" => MAINNET_BYRON_GENESIS,
-                    "sanchonet" => SANCHONET_BYRON_GENESIS,
-                    _ => {
-                        error!("Cannot find genesis for {network_name}");
-                        return;
-                    }
-                };
+                let (byron_genesis, shelley_genesis, shelley_start_epoch) =
+                    match network_name.as_ref() {
+                        "mainnet" => (
+                            MAINNET_BYRON_GENESIS,
+                            MAINNET_SHELLEY_GENESIS,
+                            MAINNET_SHELLEY_START_EPOCH,
+                        ),
+                        "sanchonet" => (
+                            SANCHONET_BYRON_GENESIS,
+                            SANCHONET_SHELLEY_GENESIS,
+                            SANCHONET_SHELLEY_START_EPOCH,
+                        ),
+                        _ => {
+                            error!("Cannot find genesis for {network_name}");
+                            return;
+                        }
+                    };
                 info!("Reading genesis for '{network_name}'");
 
                 // Read genesis data
-                let genesis: byron::GenesisFile =
-                    serde_json::from_slice(genesis).expect("Invalid JSON in BYRON_GENESIS file");
+                let byron_genesis: byron::GenesisFile = serde_json::from_slice(byron_genesis)
+                    .expect("Invalid JSON in BYRON_GENESIS file");
+                let shelley_genesis: shelley::GenesisFile = serde_json::from_slice(shelley_genesis)
+                    .expect("Invalid JSON in SHELLEY_GENESIS file");
 
                 // Construct messages
                 let block_info = BlockInfo {
@@ -93,14 +110,14 @@ impl GenesisBootstrapper {
                     epoch: 0,
                     epoch_slot: 0,
                     new_epoch: false,
-                    timestamp: genesis.start_time,
+                    timestamp: byron_genesis.start_time,
                     era: Era::Byron,
                 };
 
                 let mut utxo_deltas_message = UTXODeltasMessage { deltas: Vec::new() };
 
                 // Convert the AVVM distributions into pseudo-UTXOs
-                let gen_utxos = genesis_utxos(&genesis);
+                let gen_utxos = genesis_utxos(&byron_genesis);
                 let mut total_allocated: u64 = 0;
                 for (hash, address, amount) in gen_utxos.iter() {
                     let tx_output = TxOutput {
@@ -147,10 +164,16 @@ impl GenesisBootstrapper {
                     .await
                     .unwrap_or_else(|e| error!("Failed to publish: {e}"));
 
+                let values = GenesisValues {
+                    byron_timestamp: byron_genesis.start_time,
+                    shelley_epoch: shelley_start_epoch,
+                    shelley_epoch_len: shelley_genesis.epoch_length.unwrap() as u64,
+                };
+
                 // Send completion message
                 let message_enum = Message::Cardano((
                     block_info,
-                    CardanoMessage::GenesisComplete(GenesisCompleteMessage {}),
+                    CardanoMessage::GenesisComplete(GenesisCompleteMessage { values }),
                 ));
                 context
                     .message_bus

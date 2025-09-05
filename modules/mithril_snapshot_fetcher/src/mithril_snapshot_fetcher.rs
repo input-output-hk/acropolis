@@ -2,7 +2,7 @@
 //! Fetches a snapshot from Mithril and replays all the blocks in it
 
 use acropolis_common::{
-    calculations::{slot_to_epoch, slot_to_timestamp},
+    genesis_values::GenesisValues,
     messages::{BlockBodyMessage, BlockHeaderMessage, CardanoMessage, Message},
     BlockInfo, BlockStatus, Era,
 };
@@ -233,7 +233,11 @@ impl MithrilSnapshotFetcher {
     }
 
     /// Process the snapshot
-    async fn process_snapshot(context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
+    async fn process_snapshot(
+        context: Arc<Context<Message>>,
+        config: Arc<Config>,
+        genesis: GenesisValues,
+    ) -> Result<()> {
         let header_topic =
             config.get_string("header-topic").unwrap_or(DEFAULT_HEADER_TOPIC.to_string());
         let body_topic = config.get_string("body-topic").unwrap_or(DEFAULT_BODY_TOPIC.to_string());
@@ -290,7 +294,7 @@ impl MithrilSnapshotFetcher {
                         }
                         last_block_number = number;
 
-                        let (epoch, epoch_slot) = slot_to_epoch(slot);
+                        let (epoch, epoch_slot) = genesis.slot_to_epoch(slot);
                         let new_epoch = match last_epoch {
                             Some(last_epoch) => epoch != last_epoch,
                             None => true,
@@ -301,7 +305,7 @@ impl MithrilSnapshotFetcher {
                             info!(epoch, number, slot, "New epoch");
                         }
 
-                        let timestamp = slot_to_timestamp(slot);
+                        let timestamp = genesis.slot_to_timestamp(slot);
 
                         let era = match block.era() {
                             PallasEra::Byron => Era::Byron,
@@ -406,6 +410,8 @@ impl MithrilSnapshotFetcher {
             };
             info!("Received startup message");
 
+            let genesis = GenesisValues::mainnet(); // TODO receive these from genesis
+
             let mut delay = 1;
             loop {
                 match Self::download_snapshot(config.clone()).await {
@@ -420,7 +426,7 @@ impl MithrilSnapshotFetcher {
                 delay = (delay * 2).min(60);
             }
 
-            match Self::process_snapshot(context, config).await {
+            match Self::process_snapshot(context, config, genesis).await {
                 Err(e) => error!("Failed to process Mithril snapshot: {e}"),
                 _ => {}
             }

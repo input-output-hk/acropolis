@@ -3,6 +3,7 @@
 // We don't use these messages in the acropolis_common crate itself
 #![allow(dead_code)]
 
+use crate::genesis_values::GenesisValues;
 use crate::ledger_state::SPOState;
 use crate::protocol_params::ProtocolParams;
 use crate::queries::parameters::{ParametersStateQuery, ParametersStateQueryResponse};
@@ -58,7 +59,9 @@ pub struct RawTxsMessage {
 
 /// Genesis completion message
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct GenesisCompleteMessage {}
+pub struct GenesisCompleteMessage {
+    pub values: GenesisValues,
+}
 
 /// Message encapsulating multiple UTXO deltas, in order
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

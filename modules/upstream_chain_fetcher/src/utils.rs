@@ -1,7 +1,5 @@
 use crate::UpstreamCacheRecord;
-use acropolis_common::calculations::{
-    slot_to_epoch_with_shelley_params, slot_to_timestamp_with_params,
-};
+use acropolis_common::genesis_values::GenesisValues;
 use acropolis_common::messages::{CardanoMessage, Message};
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::Context;
@@ -48,9 +46,7 @@ pub struct FetcherConfig {
     pub magic_number: u64,
     pub cache_dir: String,
 
-    pub byron_timestamp: u64,
-    pub shelley_epoch: u64,
-    pub shelley_epoch_len: u64,
+    pub genesis_values: GenesisValues,
 }
 
 impl FetcherConfig {
@@ -76,6 +72,12 @@ impl FetcherConfig {
     }
 
     pub fn new(context: Arc<Context<Message>>, config: Arc<Config>) -> Result<Arc<Self>> {
+        let byron_timestamp =
+            config.get::<u64>(DEFAULT_BYRON_TIMESTAMP.0).unwrap_or(DEFAULT_BYRON_TIMESTAMP.1);
+        let shelley_epoch =
+            config.get::<u64>(DEFAULT_SHELLEY_EPOCH.0).unwrap_or(DEFAULT_SHELLEY_EPOCH.1);
+        let shelley_epoch_len =
+            config.get::<u64>(DEFAULT_SHELLEY_EPOCH_LEN.0).unwrap_or(DEFAULT_SHELLEY_EPOCH_LEN.1);
         Ok(Arc::new(Self {
             context,
             header_topic: Self::conf(&config, DEFAULT_HEADER_TOPIC),
@@ -87,24 +89,20 @@ impl FetcherConfig {
                 .unwrap_or(DEFAULT_MAGIC_NUMBER.1),
             node_address: Self::conf(&config, DEFAULT_NODE_ADDRESS),
             cache_dir: Self::conf(&config, DEFAULT_CACHE_DIR),
-            byron_timestamp: config
-                .get::<u64>(DEFAULT_BYRON_TIMESTAMP.0)
-                .unwrap_or(DEFAULT_BYRON_TIMESTAMP.1),
-            shelley_epoch: config
-                .get::<u64>(DEFAULT_SHELLEY_EPOCH.0)
-                .unwrap_or(DEFAULT_SHELLEY_EPOCH.1),
-            shelley_epoch_len: config
-                .get::<u64>(DEFAULT_SHELLEY_EPOCH_LEN.0)
-                .unwrap_or(DEFAULT_SHELLEY_EPOCH_LEN.1),
+            genesis_values: GenesisValues {
+                byron_timestamp,
+                shelley_epoch,
+                shelley_epoch_len,
+            },
         }))
     }
 
     pub fn slot_to_epoch(&self, slot: u64) -> (u64, u64) {
-        slot_to_epoch_with_shelley_params(slot, self.shelley_epoch, self.shelley_epoch_len)
+        self.genesis_values.slot_to_epoch(slot)
     }
 
     pub fn slot_to_timestamp(&self, slot: u64) -> u64 {
-        slot_to_timestamp_with_params(slot, self.byron_timestamp, self.shelley_epoch)
+        self.genesis_values.slot_to_timestamp(slot)
     }
 }
 
