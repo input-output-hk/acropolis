@@ -405,12 +405,16 @@ impl MithrilSnapshotFetcher {
 
         let mut subscription = context.subscribe(&startup_topic).await?;
         context.clone().run(async move {
-            let Ok(_) = subscription.read().await else {
+            let Ok((_, startup_message)) = subscription.read().await else {
                 return;
             };
             info!("Received startup message");
-
-            let genesis = GenesisValues::mainnet(); // TODO receive these from genesis
+            let genesis = match startup_message.as_ref() {
+                Message::Cardano((_, CardanoMessage::GenesisComplete(complete))) => {
+                    complete.values.clone()
+                }
+                x => panic!("unexpected startup message: {x:?}"),
+            };
 
             let mut delay = 1;
             loop {
