@@ -56,7 +56,9 @@ pub struct LatestEpochParameters {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct EpochInfo {}
+pub struct EpochInfo {
+    pub epoch: EpochActivityMessage,
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct NextEpochs {}
