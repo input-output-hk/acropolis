@@ -865,30 +865,47 @@ pub fn map_value(pallas_value: &MultiEraValue) -> Value {
     for policy_group in pallas_assets {
         match policy_group {
             MultiEraPolicyAssets::AlonzoCompatibleOutput(policy, kvps) => {
-                let policy_id: [u8; 28] =
-                    policy.as_ref().try_into().expect("Policy id must be 28 bytes");
-                let mut native_assets = Vec::new();
-                for (name, amt) in kvps.iter() {
-                    native_assets.push(NativeAsset {
-                        name: name.to_vec(),
-                        amount: *amt,
-                    });
+                match policy.as_ref().try_into() {
+                    Ok(policy_id) => {
+                        let native_assets = kvps
+                            .iter()
+                            .map(|(name, amt)| NativeAsset {
+                                name: name.to_vec(),
+                                amount: *amt,
+                            })
+                            .collect();
+
+                        assets.push((policy_id, native_assets));
+                    }
+                    Err(_) => {
+                        tracing::error!(
+                            "Invalid policy id length: expected 28 bytes, got {}",
+                            policy.len()
+                        );
+                        continue;
+                    }
                 }
-                assets.push((policy_id, native_assets));
             }
-            MultiEraPolicyAssets::ConwayOutput(policy, kvps) => {
-                let policy_id: [u8; 28] =
-                    policy.as_ref().try_into().expect("Policy id must be 28 bytes");
-                let mut native_assets = Vec::new();
-                for (name, amt) in kvps.iter() {
-                    let amount: u64 = u64::from(*amt);
-                    native_assets.push(NativeAsset {
-                        name: name.to_vec(),
-                        amount,
-                    });
+            MultiEraPolicyAssets::ConwayOutput(policy, kvps) => match policy.as_ref().try_into() {
+                Ok(policy_id) => {
+                    let native_assets = kvps
+                        .iter()
+                        .map(|(name, amt)| NativeAsset {
+                            name: name.to_vec(),
+                            amount: u64::from(*amt),
+                        })
+                        .collect();
+
+                    assets.push((policy_id, native_assets));
                 }
-                assets.push((policy_id, native_assets));
-            }
+                Err(_) => {
+                    tracing::error!(
+                        "Invalid policy id length: expected 28 bytes, got {}",
+                        policy.len()
+                    );
+                    continue;
+                }
+            },
             _ => {}
         }
     }
