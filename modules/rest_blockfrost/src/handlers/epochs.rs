@@ -9,7 +9,6 @@ use acropolis_common::{
 use anyhow::Result;
 use caryatid_sdk::Context;
 use std::sync::Arc;
-use tracing::info;
 
 use crate::{handlers_config::HandlersConfig, types::ProtocolParamsRest};
 
@@ -26,7 +25,6 @@ pub async fn handle_epoch_params_blockfrost(
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
-    info!("Inside handle epoch params");
     if params.len() != 1 {
         return Ok(RESTResponse::with_text(
             400,

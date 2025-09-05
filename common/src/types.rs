@@ -399,7 +399,7 @@ pub struct MultiHostName {
     pub dns_name: String,
 }
 
-/// Pool relay
+/// Pool Relay
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Eq, PartialEq)]
 pub enum Relay {
     SingleHostAddr(SingleHostAddr),
@@ -495,6 +495,21 @@ pub struct PoolRetirement {
 
     /// Epoch it will retire at the end of
     pub epoch: u64,
+}
+
+/// Pool Update Action
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum PoolUpdateAction {
+    Registered,
+    Deregistered,
+}
+
+/// Pool Update Event
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PoolUpdateEvent {
+    pub tx_hash: TxHash,
+    pub cert_index: u64,
+    pub action: PoolUpdateAction,
 }
 
 /// Pool Epoch History Data
