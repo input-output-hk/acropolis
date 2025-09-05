@@ -193,7 +193,7 @@ impl TxUnpacker {
                                                                     tx_hash: *tx.hash(),
                                                                     index: index as u64,
                                                                     address: address,
-                                                                    value: output.value().coin(),
+                                                                    value: map_parameters::map_value(&output.value())
                                                                     // !!! datum
                                                                 };
 
