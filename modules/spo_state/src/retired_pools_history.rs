@@ -8,6 +8,7 @@ use crate::store_config::StoreConfig;
 
 #[derive(Debug, Clone)]
 pub struct RetiredPoolsHistoryState {
+    /// keyed by epoch
     retired_pools_history: Option<Arc<DashMap<u64, Vec<KeyHash>>>>,
 }
 
