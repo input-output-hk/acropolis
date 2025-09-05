@@ -4,10 +4,9 @@
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::epochs::{
-        BlocksMintedByPools, EpochsStateQuery, EpochsStateQueryResponse, LatestEpoch,
+        BlocksMintedByPools, EpochInfo, EpochsStateQuery, EpochsStateQueryResponse, LatestEpoch,
         TotalBlocksMintedByPools, DEFAULT_EPOCHS_QUERY_TOPIC,
     },
-    rest_helper::{handle_rest, handle_rest_with_path_parameter},
     state_history::{StateHistory, StateHistoryStore},
     BlockInfo, BlockStatus, Era,
 };
@@ -24,8 +23,6 @@ mod epochs_history;
 mod state;
 mod store_config;
 use state::State;
-mod rest;
-use rest::{handle_epoch, handle_historical_epoch};
 
 use crate::{
     epoch_activity_publisher::EpochActivityPublisher, epochs_history::EpochsHistoryState,
@@ -199,11 +196,10 @@ impl EpochActivityCounter {
             StateHistoryStore::default_block_store(),
         )));
         let history_query = history.clone();
-        let history_rest = history.clone();
 
         // epochs history
         let epochs_history = EpochsHistoryState::new(&store_config);
-        let epochs_history_rest = epochs_history.clone();
+        let epochs_history_query = epochs_history.clone();
 
         // Publisher
         let epoch_activity_publisher = EpochActivityPublisher::new(context.clone(), publish_topic);
@@ -215,6 +211,7 @@ impl EpochActivityCounter {
         // handle epochs query
         context.handle(&epochs_query_topic, move |message| {
             let history = history_query.clone();
+            let epochs_history = epochs_history_query.clone();
 
             async move {
                 let Message::StateQuery(StateQuery::Epochs(query)) = message.as_ref() else {
@@ -227,8 +224,20 @@ impl EpochActivityCounter {
                 let response = match query {
                     EpochsStateQuery::GetLatestEpoch => {
                         EpochsStateQueryResponse::LatestEpoch(LatestEpoch {
-                            epoch: state.get_epoch_activity_message(),
+                            epoch: state.get_epoch_info(),
                         })
+                    }
+
+                    EpochsStateQuery::GetEpochInfo { epoch_number } => {
+                        match epochs_history.get_historical_epoch(*epoch_number) {
+                            Ok(Some(epoch_info)) => {
+                                EpochsStateQueryResponse::EpochInfo(EpochInfo { epoch: epoch_info })
+                            }
+                            Ok(None) => EpochsStateQueryResponse::NotFound,
+                            Err(_) => EpochsStateQueryResponse::Error(
+                                "Historical epoch storage is disabled".to_string(),
+                            ),
+                        }
                     }
 
                     EpochsStateQuery::GetBlocksMintedByPools { vrf_key_hashes } => {
@@ -255,16 +264,6 @@ impl EpochActivityCounter {
                     response,
                 )))
             }
-        });
-
-        handle_rest(context.clone(), &handle_current_topic, {
-            let history = history_rest.clone();
-            move || handle_epoch(history.clone())
-        });
-
-        handle_rest_with_path_parameter(context.clone(), &handle_historical_topic, {
-            let epochs_history = epochs_history_rest.clone();
-            move |param| handle_historical_epoch(epochs_history.clone(), param[0].to_string())
         });
 
         // Start run task
