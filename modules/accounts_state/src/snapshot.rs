@@ -97,7 +97,7 @@ impl Snapshot {
                         // TODO should spo.reward_account be a StakeAddress to begin with?
                         let two_previous_reward_account_is_registered =
                             match two_previous_snapshot.spos.get(spo_id) {
-                                Some(old_spo) =>
+                                Some(old_spo) => {
                                     match StakeAddress::from_binary(&old_spo.reward_account) {
                                         Ok(spo_reward_address) => {
                                             let spo_reward_hash = spo_reward_address.get_hash();
@@ -115,7 +115,8 @@ impl Snapshot {
                                             false
                                         }
                                     }
-                                None => false
+                                }
+                                None => false,
                             };
 
                         // Add the new one

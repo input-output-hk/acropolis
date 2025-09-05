@@ -8,8 +8,29 @@ use acropolis_common::{
 use anyhow::{bail, Result};
 use bigdecimal::{BigDecimal, One, ToPrimitive, Zero};
 use std::cmp::min;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
+
+/// Type of reward being given
+#[derive(Debug, Clone)]
+pub enum RewardType {
+    Leader,
+    Member,
+}
+
+/// Reward Detail
+#[derive(Debug, Clone)]
+pub struct RewardDetail {
+    /// Account reward paid to
+    pub account: RewardAccount,
+
+    /// Type of reward
+    pub rtype: RewardType,
+
+    /// Reward amount
+    pub amount: Lovelace,
+}
 
 /// Result of a rewards calculation
 #[derive(Debug, Default)]
@@ -21,7 +42,7 @@ pub struct RewardsResult {
     pub total_paid: u64,
 
     /// Rewards to be paid
-    pub rewards: Vec<(RewardAccount, Lovelace)>,
+    pub rewards: BTreeMap<KeyHash, Vec<RewardDetail>>,
 
     /// SPO rewards
     pub spo_rewards: Vec<(KeyHash, SPORewards)>,
@@ -39,7 +60,7 @@ pub fn calculate_rewards(
     stake_rewards: Lovelace,
 ) -> Result<RewardsResult> {
     let mut result = RewardsResult::default();
-    result.epoch = epoch-1;
+    result.epoch = epoch - 1;
 
     // If no blocks produced in previous epoch, don't do anything
     let total_blocks = performance.blocks;
@@ -86,7 +107,7 @@ pub fn calculate_rewards(
         let staking_reward_account_is_registered =
             performance_spo.map(|s| s.two_previous_reward_account_is_registered).unwrap_or(false);
 
-        calculate_spo_rewards(
+        let rewards = calculate_spo_rewards(
             operator_id,
             spo,
             blocks_produced as u64,
@@ -98,12 +119,33 @@ pub fn calculate_rewards(
             params,
             staking.clone(),
             staking_reward_account_is_registered,
-            &mut result,
-            &mut total_paid_to_pools,
-            &mut total_paid_to_delegators,
-            &mut num_pools_paid,
-            &mut num_delegators_paid,
         );
+
+        if !rewards.is_empty() {
+            num_pools_paid += 1;
+
+            let mut spo_rewards = SPORewards {
+                total_rewards: 0,
+                operator_rewards: 0,
+            };
+            for reward in &rewards {
+                match reward.rtype {
+                    RewardType::Leader => {
+                        spo_rewards.operator_rewards += reward.amount;
+                    }
+                    RewardType::Member => {
+                        num_delegators_paid += 1;
+                        total_paid_to_delegators += reward.amount;
+                    }
+                }
+                spo_rewards.total_rewards += reward.amount;
+                total_paid_to_pools += reward.amount;
+                result.total_paid += reward.amount;
+            }
+
+            result.rewards.insert(operator_id.clone(), rewards);
+            result.spo_rewards.push((operator_id.clone(), spo_rewards));
+        }
     }
 
     info!(
@@ -131,12 +173,7 @@ fn calculate_spo_rewards(
     params: &ShelleyParams,
     staking: Arc<Snapshot>,
     staking_reward_account_is_registered: bool,
-    result: &mut RewardsResult,
-    total_paid_to_pools: &mut Lovelace,
-    total_paid_to_delegators: &mut Lovelace,
-    num_pools_paid: &mut usize,
-    num_delegators_paid: &mut usize,
-) {
+) -> Vec<RewardDetail> {
     // Actual blocks produced as proportion of epoch (Beta)
     let relative_blocks = BigDecimal::from(blocks_produced) / BigDecimal::from(total_blocks as u64);
 
@@ -144,7 +181,7 @@ fn calculate_spo_rewards(
     let pool_stake = BigDecimal::from(spo.total_stake);
     if pool_stake.is_zero() {
         // No stake, no rewards or earnings
-        return;
+        return vec![];
     }
 
     // Get the stake actually delegated by the owners accounts to this SPO
@@ -159,7 +196,7 @@ fn calculate_spo_rewards(
             pool_owner_stake,
             spo.pledge
         );
-        return;
+        return vec![];
     }
 
     let pool_pledge = BigDecimal::from(&spo.pledge);
@@ -202,7 +239,8 @@ fn calculate_spo_rewards(
 
     // Subtract fixed costs
     let fixed_cost = BigDecimal::from(spo.fixed_cost);
-    let mut spo_benefit = if pool_rewards <= fixed_cost {
+    let mut rewards = Vec::<RewardDetail>::new();
+    let spo_benefit = if pool_rewards <= fixed_cost {
         info!("Rewards < cost - all paid to SPO");
 
         // No margin or pledge reward if under cost - all goes to SPO
@@ -253,9 +291,11 @@ fn calculate_spo_rewards(
                 // SPOs - check pool's reward address but only before Allegra?
 
                 // Transfer from reserves to this account
-                result.rewards.push((hash.clone(), to_pay));
-                result.total_paid += to_pay;
-
+                rewards.push(RewardDetail {
+                    account: hash.clone(),
+                    rtype: RewardType::Member,
+                    amount: to_pay,
+                });
                 total_paid += to_pay;
                 delegators_paid += 1;
             }
@@ -264,8 +304,6 @@ fn calculate_spo_rewards(
         info!(%fixed_cost, %margin_cost, leader_reward=%costs, %to_delegators, total_paid,
               delegators_paid, "Reward split:");
 
-        *num_delegators_paid += delegators_paid;
-        *total_paid_to_delegators += total_paid;
         costs.to_u64().unwrap_or(0)
     };
 
@@ -274,10 +312,11 @@ fn calculate_spo_rewards(
     // it was deregistered before 4 * k blocks (actually 4 * k * 20 slots) into the epoch!
     // For now, "now" = time of last ('performance') snapshot
     if staking_reward_account_is_registered {
-        result.rewards.push((spo.reward_account.clone(), spo_benefit));
-        result.total_paid += spo_benefit;
-        *total_paid_to_pools += spo_benefit;
-        *num_pools_paid += 1;
+        rewards.push(RewardDetail {
+            account: spo.reward_account.clone(),
+            rtype: RewardType::Leader,
+            amount: spo_benefit,
+        });
     } else {
         info!(
             "SPO {}'s reward account {} isn't registered - dropping their reward of {}",
@@ -285,14 +324,7 @@ fn calculate_spo_rewards(
             hex::encode(&spo.reward_account),
             spo_benefit,
         );
-        spo_benefit = 0;
     }
 
-    result.spo_rewards.push((
-        operator_id.clone(),
-        SPORewards {
-            total_rewards: pool_rewards.to_u64().unwrap_or(0),
-            operator_rewards: spo_benefit,
-        },
-    ));
+    rewards
 }
