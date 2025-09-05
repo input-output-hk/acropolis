@@ -9,15 +9,15 @@ pub enum BlocksStateQuery {
     GetLatestBlockTransactions,
     GetLatestBlockTransactionsCBOR,
     GetBlockInfo {
-        block_key: Vec<u8>,
+        block_key: BlockKey,
     },
     GetNextBlocks {
-        block_key: Vec<u8>,
+        block_key: BlockKey,
         limit: u64,
         skip: u64,
     },
     GetPreviousBlocks {
-        block_key: Vec<u8>,
+        block_key: BlockKey,
         limit: u64,
         skip: u64,
     },
@@ -29,14 +29,20 @@ pub enum BlocksStateQuery {
         slot: u64,
     },
     GetBlockTransactions {
-        block_key: Vec<u8>,
+        block_key: BlockKey,
     },
     GetBlockTransactionsCBOR {
-        block_key: Vec<u8>,
+        block_key: BlockKey,
     },
     GetBlockInvolvedAddresses {
-        block_key: Vec<u8>,
+        block_key: BlockKey,
     },
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum BlockKey {
+    Hash(Vec<u8>),
+    Number(u64),
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

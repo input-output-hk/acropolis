@@ -4,8 +4,9 @@ use acropolis_common::{
     crypto::keyhash,
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::blocks::{
-        BlockInfo, BlockTransaction, BlockTransactions, BlockTransactionsCBOR, BlocksStateQuery,
-        BlocksStateQueryResponse, NextBlocks, PreviousBlocks, DEFAULT_BLOCKS_QUERY_TOPIC,
+        BlockInfo, BlockKey, BlockTransaction, BlockTransactions, BlockTransactionsCBOR,
+        BlocksStateQuery, BlocksStateQueryResponse, NextBlocks, PreviousBlocks,
+        DEFAULT_BLOCKS_QUERY_TOPIC,
     },
     TxHash,
 };
@@ -107,7 +108,7 @@ impl ChainStore {
                 Ok(BlocksStateQueryResponse::LatestBlockTransactionsCBOR(txs))
             }
             BlocksStateQuery::GetBlockInfo { block_key } => {
-                let Some(block) = store.get_block_by_hash(block_key)? else {
+                let Some(block) = Self::get_block_by_key(store, block_key)? else {
                     return Ok(BlocksStateQueryResponse::NotFound);
                 };
                 let info = Self::to_block_info(block, store, false)?;
@@ -137,7 +138,7 @@ impl ChainStore {
                         blocks: vec![],
                     }));
                 }
-                let Some(block) = store.get_block_by_hash(&block_key)? else {
+                let Some(block) = Self::get_block_by_key(store, &block_key)? else {
                     return Ok(BlocksStateQueryResponse::NotFound);
                 };
                 let number = Self::get_block_number(&block)?;
@@ -159,7 +160,7 @@ impl ChainStore {
                         blocks: vec![],
                     }));
                 }
-                let Some(block) = store.get_block_by_hash(&block_key)? else {
+                let Some(block) = Self::get_block_by_key(store, &block_key)? else {
                     return Ok(BlocksStateQueryResponse::NotFound);
                 };
                 let number = Self::get_block_number(&block)?;
@@ -176,14 +177,14 @@ impl ChainStore {
                 }))
             }
             BlocksStateQuery::GetBlockTransactions { block_key } => {
-                let Some(block) = store.get_block_by_hash(block_key)? else {
+                let Some(block) = Self::get_block_by_key(store, block_key)? else {
                     return Ok(BlocksStateQueryResponse::NotFound);
                 };
                 let txs = Self::to_block_transactions(block)?;
                 Ok(BlocksStateQueryResponse::BlockTransactions(txs))
             }
             BlocksStateQuery::GetBlockTransactionsCBOR { block_key } => {
-                let Some(block) = store.get_block_by_hash(block_key)? else {
+                let Some(block) = Self::get_block_by_key(store, block_key)? else {
                     return Ok(BlocksStateQueryResponse::NotFound);
                 };
                 let txs = Self::to_block_transactions_cbor(block)?;
@@ -191,6 +192,13 @@ impl ChainStore {
             }
 
             other => bail!("{other:?} not yet supported"),
+        }
+    }
+
+    fn get_block_by_key(store: &Arc<dyn Store>, block_key: &BlockKey) -> Result<Option<Block>> {
+        match block_key {
+            BlockKey::Hash(hash) => store.get_block_by_hash(hash),
+            BlockKey::Number(number) => store.get_block_by_number(*number),
         }
     }
 
