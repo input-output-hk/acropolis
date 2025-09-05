@@ -1,4 +1,4 @@
-use crate::KeyHash;
+use crate::{KeyHash, TxHash};
 
 pub const DEFAULT_BLOCKS_QUERY_TOPIC: (&str, &str) =
     ("blocks-state-query-topic", "cardano.query.blocks");
@@ -88,10 +88,20 @@ pub struct PreviousBlocks {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct BlockTransactions {}
+pub struct BlockTransactions {
+    pub hashes: Vec<TxHash>,
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct BlockTransactionsCBOR {}
+pub struct BlockTransactionsCBOR {
+    pub txs: Vec<BlockTransaction>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BlockTransaction {
+    pub hash: TxHash,
+    pub cbor: Vec<u8>,
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BlockInvolvedAddresses {}

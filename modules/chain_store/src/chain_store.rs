@@ -4,9 +4,10 @@ use acropolis_common::{
     crypto::keyhash,
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::blocks::{
-        BlockInfo, BlocksStateQuery, BlocksStateQueryResponse, NextBlocks, PreviousBlocks,
-        DEFAULT_BLOCKS_QUERY_TOPIC,
+        BlockInfo, BlockTransaction, BlockTransactions, BlockTransactionsCBOR, BlocksStateQuery,
+        BlocksStateQueryResponse, NextBlocks, PreviousBlocks, DEFAULT_BLOCKS_QUERY_TOPIC,
     },
+    TxHash,
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Module};
@@ -84,37 +85,47 @@ impl ChainStore {
         query: &BlocksStateQuery,
     ) -> Result<BlocksStateQueryResponse> {
         match query {
-            BlocksStateQuery::GetLatestBlock => match store.get_latest_block()? {
-                Some(block) => {
-                    let info = Self::to_block_info(block, store, true)?;
-                    Ok(BlocksStateQueryResponse::LatestBlock(info))
-                }
-                None => Ok(BlocksStateQueryResponse::NotFound),
-            },
-            BlocksStateQuery::GetBlockInfo { block_key } => {
-                match store.get_block_by_hash(block_key)? {
-                    Some(block) => {
-                        let info = Self::to_block_info(block, store, false)?;
-                        Ok(BlocksStateQueryResponse::BlockInfo(info))
-                    }
-                    None => Ok(BlocksStateQueryResponse::NotFound),
-                }
+            BlocksStateQuery::GetLatestBlock => {
+                let Some(block) = store.get_latest_block()? else {
+                    return Ok(BlocksStateQueryResponse::NotFound);
+                };
+                let info = Self::to_block_info(block, store, true)?;
+                Ok(BlocksStateQueryResponse::LatestBlock(info))
             }
-            BlocksStateQuery::GetBlockBySlot { slot } => match store.get_block_by_slot(*slot)? {
-                Some(block) => {
-                    let info = Self::to_block_info(block, store, false)?;
-                    Ok(BlocksStateQueryResponse::BlockBySlot(info))
-                }
-                None => Ok(BlocksStateQueryResponse::NotFound),
-            },
+            BlocksStateQuery::GetLatestBlockTransactions => {
+                let Some(block) = store.get_latest_block()? else {
+                    return Ok(BlocksStateQueryResponse::NotFound);
+                };
+                let txs = Self::to_block_transactions(block)?;
+                Ok(BlocksStateQueryResponse::LatestBlockTransactions(txs))
+            }
+            BlocksStateQuery::GetLatestBlockTransactionsCBOR => {
+                let Some(block) = store.get_latest_block()? else {
+                    return Ok(BlocksStateQueryResponse::NotFound);
+                };
+                let txs = Self::to_block_transactions_cbor(block)?;
+                Ok(BlocksStateQueryResponse::LatestBlockTransactionsCBOR(txs))
+            }
+            BlocksStateQuery::GetBlockInfo { block_key } => {
+                let Some(block) = store.get_block_by_hash(block_key)? else {
+                    return Ok(BlocksStateQueryResponse::NotFound);
+                };
+                let info = Self::to_block_info(block, store, false)?;
+                Ok(BlocksStateQueryResponse::BlockInfo(info))
+            }
+            BlocksStateQuery::GetBlockBySlot { slot } => {
+                let Some(block) = store.get_block_by_slot(*slot)? else {
+                    return Ok(BlocksStateQueryResponse::NotFound);
+                };
+                let info = Self::to_block_info(block, store, false)?;
+                Ok(BlocksStateQueryResponse::BlockBySlot(info))
+            }
             BlocksStateQuery::GetBlockByEpochSlot { epoch, slot } => {
-                match store.get_block_by_epoch_slot(*epoch, *slot)? {
-                    Some(block) => {
-                        let info = Self::to_block_info(block, store, false)?;
-                        Ok(BlocksStateQueryResponse::BlockByEpochSlot(info))
-                    }
-                    None => Ok(BlocksStateQueryResponse::NotFound),
-                }
+                let Some(block) = store.get_block_by_epoch_slot(*epoch, *slot)? else {
+                    return Ok(BlocksStateQueryResponse::NotFound);
+                };
+                let info = Self::to_block_info(block, store, false)?;
+                Ok(BlocksStateQueryResponse::BlockByEpochSlot(info))
             }
             BlocksStateQuery::GetNextBlocks {
                 block_key,
@@ -126,19 +137,17 @@ impl ChainStore {
                         blocks: vec![],
                     }));
                 }
-                match store.get_block_by_hash(&block_key)? {
-                    Some(block) => {
-                        let number = Self::get_block_number(&block)?;
-                        let min_number = number + 1 + skip;
-                        let max_number = min_number + limit - 1;
-                        let blocks = store.get_blocks_by_number_range(min_number, max_number)?;
-                        let info = Self::to_block_info_bulk(blocks, store, false)?;
-                        Ok(BlocksStateQueryResponse::NextBlocks(NextBlocks {
-                            blocks: info,
-                        }))
-                    }
-                    None => Ok(BlocksStateQueryResponse::NotFound),
-                }
+                let Some(block) = store.get_block_by_hash(&block_key)? else {
+                    return Ok(BlocksStateQueryResponse::NotFound);
+                };
+                let number = Self::get_block_number(&block)?;
+                let min_number = number + 1 + skip;
+                let max_number = min_number + limit - 1;
+                let blocks = store.get_blocks_by_number_range(min_number, max_number)?;
+                let info = Self::to_block_info_bulk(blocks, store, false)?;
+                Ok(BlocksStateQueryResponse::NextBlocks(NextBlocks {
+                    blocks: info,
+                }))
             }
             BlocksStateQuery::GetPreviousBlocks {
                 block_key,
@@ -150,23 +159,35 @@ impl ChainStore {
                         blocks: vec![],
                     }));
                 }
-                match store.get_block_by_hash(&block_key)? {
-                    Some(block) => {
-                        let number = Self::get_block_number(&block)?;
-                        let Some(max_number) = number.checked_sub(1 + skip) else {
-                            return Ok(BlocksStateQueryResponse::PreviousBlocks(PreviousBlocks {
-                                blocks: vec![],
-                            }));
-                        };
-                        let min_number = max_number.saturating_sub(limit - 1);
-                        let blocks = store.get_blocks_by_number_range(min_number, max_number)?;
-                        let info = Self::to_block_info_bulk(blocks, store, false)?;
-                        Ok(BlocksStateQueryResponse::PreviousBlocks(PreviousBlocks {
-                            blocks: info,
-                        }))
-                    }
-                    None => Ok(BlocksStateQueryResponse::NotFound),
-                }
+                let Some(block) = store.get_block_by_hash(&block_key)? else {
+                    return Ok(BlocksStateQueryResponse::NotFound);
+                };
+                let number = Self::get_block_number(&block)?;
+                let Some(max_number) = number.checked_sub(1 + skip) else {
+                    return Ok(BlocksStateQueryResponse::PreviousBlocks(PreviousBlocks {
+                        blocks: vec![],
+                    }));
+                };
+                let min_number = max_number.saturating_sub(limit - 1);
+                let blocks = store.get_blocks_by_number_range(min_number, max_number)?;
+                let info = Self::to_block_info_bulk(blocks, store, false)?;
+                Ok(BlocksStateQueryResponse::PreviousBlocks(PreviousBlocks {
+                    blocks: info,
+                }))
+            }
+            BlocksStateQuery::GetBlockTransactions { block_key } => {
+                let Some(block) = store.get_block_by_hash(block_key)? else {
+                    return Ok(BlocksStateQueryResponse::NotFound);
+                };
+                let txs = Self::to_block_transactions(block)?;
+                Ok(BlocksStateQueryResponse::BlockTransactions(txs))
+            }
+            BlocksStateQuery::GetBlockTransactionsCBOR { block_key } => {
+                let Some(block) = store.get_block_by_hash(block_key)? else {
+                    return Ok(BlocksStateQueryResponse::NotFound);
+                };
+                let txs = Self::to_block_transactions_cbor(block)?;
+                Ok(BlocksStateQueryResponse::BlockTransactionsCBOR(txs))
             }
 
             other => bail!("{other:?} not yet supported"),
@@ -278,5 +299,25 @@ impl ChainStore {
 
         block_info.reverse();
         Ok(block_info)
+    }
+
+    fn to_block_transactions(block: Block) -> Result<BlockTransactions> {
+        let decoded = pallas_traverse::MultiEraBlock::decode(&block.bytes)?;
+        let hashes = decoded.txs().iter().map(|tx| TxHash::from(*tx.hash())).collect();
+        Ok(BlockTransactions { hashes })
+    }
+
+    fn to_block_transactions_cbor(block: Block) -> Result<BlockTransactionsCBOR> {
+        let decoded = pallas_traverse::MultiEraBlock::decode(&block.bytes)?;
+        let txs = decoded
+            .txs()
+            .iter()
+            .map(|tx| {
+                let hash = TxHash::from(*tx.hash());
+                let cbor = tx.encode();
+                BlockTransaction { hash, cbor }
+            })
+            .collect();
+        Ok(BlockTransactionsCBOR { txs })
     }
 }
