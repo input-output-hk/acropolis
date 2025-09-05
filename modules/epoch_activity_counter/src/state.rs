@@ -21,7 +21,7 @@ pub struct State {
     // fees seen this epoch
     epoch_fees: u64,
 
-    // Total blocks minted till epoch N
+    // Total blocks minted till block number
     // Keyed by vrf_key_hash
     total_blocks_minted: HashMap<KeyHash, u64>,
 }
