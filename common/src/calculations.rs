@@ -1,15 +1,8 @@
 //! Common calculations for Cardano
 
 const BYRON_SLOTS_PER_EPOCH: u64 = 21_600;
-pub const SHELLEY_SLOTS_PER_EPOCH: u64 = 432_000;
-const SHELLEY_START_EPOCH: u64 = 208;
-const BYRON_START_TIMESTAMP: u64 = 1506203091;
 
 /// Derive an epoch number from a slot, handling Byron/Shelley era changes
-pub fn slot_to_epoch(slot: u64) -> (u64, u64) {
-    slot_to_epoch_with_shelley_params(slot, SHELLEY_START_EPOCH, SHELLEY_SLOTS_PER_EPOCH)
-}
-
 pub fn slot_to_epoch_with_shelley_params(
     slot: u64,
     shelley_epoch: u64,
@@ -27,10 +20,6 @@ pub fn slot_to_epoch_with_shelley_params(
     }
 }
 
-pub fn slot_to_timestamp(slot: u64) -> u64 {
-    slot_to_timestamp_with_params(slot, BYRON_START_TIMESTAMP, SHELLEY_START_EPOCH)
-}
-
 pub fn slot_to_timestamp_with_params(slot: u64, byron_timestamp: u64, shelley_epoch: u64) -> u64 {
     let shelley_start_slot = shelley_epoch * BYRON_SLOTS_PER_EPOCH;
     if slot < shelley_start_slot {
@@ -45,6 +34,17 @@ pub fn slot_to_timestamp_with_params(slot: u64, byron_timestamp: u64, shelley_ep
 #[cfg(test)]
 mod tests {
     use super::*;
+    const SHELLEY_START_EPOCH: u64 = 208;
+    const SHELLEY_SLOTS_PER_EPOCH: u64 = 432_000;
+    const BYRON_START_TIMESTAMP: u64 = 1506203091;
+
+    fn slot_to_epoch(slot: u64) -> (u64, u64) {
+        slot_to_epoch_with_shelley_params(slot, SHELLEY_START_EPOCH, SHELLEY_SLOTS_PER_EPOCH)
+    }
+
+    fn slot_to_timestamp(slot: u64) -> u64 {
+        slot_to_timestamp_with_params(slot, BYRON_START_TIMESTAMP, SHELLEY_START_EPOCH)
+    }
 
     #[test]
     fn byron_epoch_0() {
