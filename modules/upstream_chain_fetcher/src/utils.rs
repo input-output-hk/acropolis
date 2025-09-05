@@ -1,5 +1,5 @@
 use crate::UpstreamCacheRecord;
-use acropolis_common::calculations::slot_to_epoch_with_shelley_params;
+use acropolis_common::genesis_values::GenesisValues;
 use acropolis_common::messages::{CardanoMessage, Message};
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::Context;
@@ -12,7 +12,9 @@ use tracing::info;
 const DEFAULT_HEADER_TOPIC: (&str, &str) = ("header-topic", "cardano.block.header");
 const DEFAULT_BODY_TOPIC: (&str, &str) = ("body-topic", "cardano.block.body");
 const DEFAULT_SNAPSHOT_COMPLETION_TOPIC: (&str, &str) =
-    ("snapshot-complietion-topic", "cardano.snapshot.complete");
+    ("snapshot-completion-topic", "cardano.snapshot.complete");
+const DEFAULT_GENESIS_COMPLETION_TOPIC: (&str, &str) =
+    ("genesis-completion-topic", "cardano.sequence.bootstrapped");
 
 const DEFAULT_NODE_ADDRESS: (&str, &str) = ("node-address", "backbone.cardano.iog.io:3001");
 const DEFAULT_MAGIC_NUMBER: (&str, u64) = ("magic-number", 764824073);
@@ -20,8 +22,9 @@ const DEFAULT_MAGIC_NUMBER: (&str, u64) = ("magic-number", 764824073);
 const DEFAULT_SYNC_POINT: (&str, SyncPoint) = ("sync-point", SyncPoint::Snapshot);
 const DEFAULT_CACHE_DIR: (&str, &str) = ("cache-dir", "upstream-cache");
 
-const DEFAULT_SHELLEY_EPOCH: (&str, u64) = ("shelley-epoch", 208);
-const DEFAULT_SHELLEY_EPOCH_LEN: (&str, u64) = ("shelley-epoch-len", 432000);
+const BYRON_TIMESTAMP: &str = "byron-timestamp";
+const SHELLEY_EPOCH: &str = "shelley-epoch";
+const SHELLEY_EPOCH_LEN: &str = "shelley-epoch-len";
 
 #[derive(Clone, Debug, serde::Deserialize, PartialEq)]
 pub enum SyncPoint {
@@ -41,12 +44,12 @@ pub struct FetcherConfig {
     pub body_topic: String,
     pub sync_point: SyncPoint,
     pub snapshot_completion_topic: String,
+    pub genesis_completion_topic: String,
     pub node_address: String,
     pub magic_number: u64,
     pub cache_dir: String,
 
-    pub shelley_epoch: u64,
-    pub shelley_epoch_len: u64,
+    pub genesis_values: Option<GenesisValues>,
 }
 
 impl FetcherConfig {
@@ -71,29 +74,40 @@ impl FetcherConfig {
         Ok(actual)
     }
 
-    pub fn new(context: Arc<Context<Message>>, config: Arc<Config>) -> Result<Arc<Self>> {
-        Ok(Arc::new(Self {
+    fn conf_genesis(config: &Arc<Config>) -> Option<GenesisValues> {
+        let byron_timestamp = config.get(BYRON_TIMESTAMP).ok()?;
+        let shelley_epoch = config.get(SHELLEY_EPOCH).ok()?;
+        let shelley_epoch_len = config.get(SHELLEY_EPOCH_LEN).ok()?;
+        Some(GenesisValues {
+            byron_timestamp,
+            shelley_epoch,
+            shelley_epoch_len,
+        })
+    }
+
+    pub fn new(context: Arc<Context<Message>>, config: Arc<Config>) -> Result<Self> {
+        Ok(Self {
             context,
             header_topic: Self::conf(&config, DEFAULT_HEADER_TOPIC),
             body_topic: Self::conf(&config, DEFAULT_BODY_TOPIC),
             snapshot_completion_topic: Self::conf(&config, DEFAULT_SNAPSHOT_COMPLETION_TOPIC),
+            genesis_completion_topic: Self::conf(&config, DEFAULT_GENESIS_COMPLETION_TOPIC),
             sync_point: Self::conf_enum::<SyncPoint>(&config, DEFAULT_SYNC_POINT)?,
             magic_number: config
                 .get::<u64>(DEFAULT_MAGIC_NUMBER.0)
                 .unwrap_or(DEFAULT_MAGIC_NUMBER.1),
             node_address: Self::conf(&config, DEFAULT_NODE_ADDRESS),
             cache_dir: Self::conf(&config, DEFAULT_CACHE_DIR),
-            shelley_epoch: config
-                .get::<u64>(DEFAULT_SHELLEY_EPOCH.0)
-                .unwrap_or(DEFAULT_SHELLEY_EPOCH.1),
-            shelley_epoch_len: config
-                .get::<u64>(DEFAULT_SHELLEY_EPOCH_LEN.0)
-                .unwrap_or(DEFAULT_SHELLEY_EPOCH_LEN.1),
-        }))
+            genesis_values: Self::conf_genesis(&config),
+        })
     }
 
-    pub fn slot_to_epoch(&self, slot: u64) -> u64 {
-        slot_to_epoch_with_shelley_params(slot, self.shelley_epoch, self.shelley_epoch_len)
+    pub fn slot_to_epoch(&self, slot: u64) -> (u64, u64) {
+        self.genesis_values.as_ref().unwrap().slot_to_epoch(slot)
+    }
+
+    pub fn slot_to_timestamp(&self, slot: u64) -> u64 {
+        self.genesis_values.as_ref().unwrap().slot_to_timestamp(slot)
     }
 }
 
