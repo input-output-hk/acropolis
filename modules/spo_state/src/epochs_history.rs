@@ -68,7 +68,7 @@ pub struct EpochsHistoryState {
 impl EpochsHistoryState {
     pub fn new(store_config: StoreConfig) -> Self {
         Self {
-            epochs_history: if store_config.store_history {
+            epochs_history: if store_config.store_epochs_history {
                 Some(Arc::new(DashMap::new()))
             } else {
                 None
@@ -149,7 +149,7 @@ impl EpochsHistoryState {
         &self,
         _block: &BlockInfo,
         epoch_activity_message: &EpochActivityMessage,
-        spos: &Vec<(KeyHash, u64)>,
+        spos: &Vec<(KeyHash, usize)>,
     ) {
         let Some(epochs_history) = self.epochs_history.as_ref() else {
             return;

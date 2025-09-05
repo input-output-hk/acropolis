@@ -16,9 +16,9 @@ use caryatid_sdk::Context;
 use rust_decimal::Decimal;
 use std::{sync::Arc, time::Duration};
 
-use crate::handlers_config::HandlersConfig;
 use crate::types::{PoolEpochStateRest, PoolExtendedRest, PoolMetadataRest, PoolRetirementRest};
 use crate::utils::fetch_pool_metadata;
+use crate::{handlers_config::HandlersConfig, types::PoolRelayRest};
 
 /// Handle `/pools` Blockfrost-compatible endpoint
 pub async fn handle_pools_list_blockfrost(
@@ -304,7 +304,7 @@ async fn handle_pools_extended_blockfrost(
 
     // Get latest parameters from parameters-state
     let latest_parameters_msg = Arc::new(Message::StateQuery(StateQuery::Parameters(
-        ParametersStateQuery::GetLatestParameters,
+        ParametersStateQuery::GetLatestEpochParameters,
     )));
     let latest_parameters = query_state(
         &context,
@@ -312,8 +312,8 @@ async fn handle_pools_extended_blockfrost(
         latest_parameters_msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Parameters(
-                ParametersStateQueryResponse::LatestParameters(res),
-            )) => Ok(res.parameters),
+                ParametersStateQueryResponse::LatestEpochParameters(params),
+            )) => Ok(params),
             Message::StateQueryResponse(StateQueryResponse::Parameters(
                 ParametersStateQueryResponse::Error(e),
             )) => Err(anyhow::anyhow!(
@@ -608,11 +608,58 @@ pub async fn handle_pool_metadata_blockfrost(
 }
 
 pub async fn handle_pool_relays_blockfrost(
-    _context: Arc<Context<Message>>,
-    _params: Vec<String>,
-    _handlers_config: Arc<HandlersConfig>,
+    context: Arc<Context<Message>>,
+    params: Vec<String>,
+    handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
-    Ok(RESTResponse::with_text(501, "Not implemented"))
+    let Some(pool_id) = params.get(0) else {
+        return Ok(RESTResponse::with_text(400, "Missing pool ID parameter"));
+    };
+
+    let Ok(spo) = Vec::<u8>::from_bech32_with_hrp(pool_id, "pool") else {
+        return Ok(RESTResponse::with_text(
+            400,
+            &format!("Invalid Bech32 stake pool ID: {pool_id}"),
+        ));
+    };
+
+    let pool_relay_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
+        PoolsStateQuery::GetPoolRelays {
+            pool_id: spo.clone(),
+        },
+    )));
+
+    let pool_relays = query_state(
+        &context,
+        &handlers_config.pools_query_topic,
+        pool_relay_msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::PoolRelays(pool_relays),
+            )) => Ok(pool_relays),
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::NotFound,
+            )) => Err(anyhow::anyhow!("Pool Relays Not found")),
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::Error(e),
+            )) => Err(anyhow::anyhow!(
+                "Internal server error while retrieving pool relays: {e}"
+            )),
+            _ => Err(anyhow::anyhow!("Unexpected message type")),
+        },
+    )
+    .await?;
+
+    let relays_in_rest =
+        pool_relays.relays.into_iter().map(|r| r.into()).collect::<Vec<PoolRelayRest>>();
+
+    match serde_json::to_string(&relays_in_rest) {
+        Ok(json) => Ok(RESTResponse::with_json(200, &json)),
+        Err(e) => Ok(RESTResponse::with_text(
+            500,
+            &format!("Internal server error while retrieving pool relays: {e}"),
+        )),
+    }
 }
 
 pub async fn handle_pool_delegators_blockfrost(
