@@ -592,7 +592,7 @@ pub async fn handle_pool_metadata_blockfrost(
 
     // Verify hash of the fetched pool metadata, matches with the metadata hash provided by PoolRegistration
     if let Err(e) = verify_pool_metadata_hash(&pool_metadata_bytes, &pool_metadata.hash) {
-        return Ok(RESTResponse::with_text(400, &e));
+        return Ok(RESTResponse::with_text(404, &e));
     }
 
     // Convert bytes into an understandable PoolMetadata structure
