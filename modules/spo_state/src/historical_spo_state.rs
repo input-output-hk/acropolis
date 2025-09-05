@@ -1,5 +1,5 @@
 use acropolis_common::{
-    queries::governance::VoteRecord, PoolRegistration, PoolUpdateEvent, StakeCredential,
+    queries::governance::VoteRecord, KeyHash, PoolRegistration, PoolUpdateEvent,
 };
 use serde::{Deserialize, Serialize};
 
@@ -13,7 +13,7 @@ pub struct HistoricalSPOState {
     pub updates: Option<Vec<PoolUpdateEvent>>,
 
     // SPO's delegator's stake credential
-    pub delegators: Option<Vec<StakeCredential>>,
+    pub delegators: Option<Vec<KeyHash>>,
 
     // SPO's votes
     pub votes: Option<Vec<VoteRecord>>,
