@@ -1,6 +1,7 @@
 mod stores;
 
 use acropolis_common::{
+    crypto::keyhash,
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::blocks::{
         BlockInfo, BlocksStateQuery, BlocksStateQueryResponse, DEFAULT_BLOCKS_QUERY_TOPIC,
@@ -84,24 +85,70 @@ impl ChainStore {
         match query {
             BlocksStateQuery::GetLatestBlock => {
                 let block = store.get_latest_block()?;
-                let info = Self::to_block_info(block);
+                let info = Self::to_block_info(block)?;
                 Ok(BlocksStateQueryResponse::LatestBlock(info))
             }
             BlocksStateQuery::GetBlockInfo { block_key } => {
                 let block = store.get_block_by_hash(block_key)?;
-                let info = Self::to_block_info(block);
+                let info = Self::to_block_info(block)?;
                 Ok(BlocksStateQueryResponse::BlockInfo(info))
             }
             BlocksStateQuery::GetBlockBySlot { slot } => {
                 let block = store.get_block_by_slot(*slot)?;
-                let info = Self::to_block_info(block);
+                let info = Self::to_block_info(block)?;
                 Ok(BlocksStateQueryResponse::BlockBySlot(info))
             }
             other => bail!("{other:?} not yet supported"),
         }
     }
 
-    fn to_block_info(_block: Block) -> BlockInfo {
-        BlockInfo {}
+    fn to_block_info(block: Block) -> Result<BlockInfo> {
+        let decoded = pallas_traverse::MultiEraBlock::decode(&block.bytes)?;
+        let header = decoded.header();
+        let mut output = None;
+        let mut fees = None;
+        for tx in decoded.txs() {
+            if let Some(new_fee) = tx.fee() {
+                fees = Some(fees.unwrap_or_default() + new_fee);
+            }
+            for o in tx.outputs() {
+                output = Some(output.unwrap_or_default() + o.value().coin())
+            }
+        }
+        let (op_cert_hot_vkey, op_cert_counter) = match &header {
+            pallas_traverse::MultiEraHeader::BabbageCompatible(h) => {
+                let cert = &h.header_body.operational_cert;
+                (
+                    Some(&cert.operational_cert_hot_vkey),
+                    Some(cert.operational_cert_sequence_number),
+                )
+            }
+            pallas_traverse::MultiEraHeader::ShelleyCompatible(h) => (
+                Some(&h.header_body.operational_cert_hot_vkey),
+                Some(h.header_body.operational_cert_sequence_number),
+            ),
+            _ => (None, None),
+        };
+        let op_cert = op_cert_hot_vkey.map(|vkey| keyhash(vkey));
+
+        Ok(BlockInfo {
+            timestamp: block.extra.timestamp,
+            number: header.number(),
+            hash: header.hash().to_vec(),
+            slot: header.slot(),
+            epoch: block.extra.epoch,
+            epoch_slot: block.extra.epoch_slot,
+            issuer_vkey: header.issuer_vkey().map(|key| key.to_vec()),
+            size: block.bytes.len() as u64,
+            tx_count: decoded.tx_count() as u64,
+            output,
+            fees,
+            block_vrf: header.vrf_vkey().map(|key| key.to_vec()),
+            op_cert,
+            op_cert_counter,
+            previous_block: header.previous_hash().map(|x| x.to_vec()),
+            next_block: None, // TODO
+            confirmations: 0, // TODO
+        })
     }
 }

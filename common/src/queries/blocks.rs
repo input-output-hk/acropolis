@@ -1,3 +1,5 @@
+use crate::KeyHash;
+
 pub const DEFAULT_BLOCKS_QUERY_TOPIC: (&str, &str) =
     ("blocks-state-query-topic", "cardano.query.blocks");
 
@@ -34,7 +36,25 @@ pub enum BlocksStateQueryResponse {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct BlockInfo {}
+pub struct BlockInfo {
+    pub timestamp: u64,
+    pub number: u64,
+    pub hash: Vec<u8>,
+    pub slot: u64,
+    pub epoch: u64,
+    pub epoch_slot: u64,
+    pub issuer_vkey: Option<Vec<u8>>,
+    pub size: u64,
+    pub tx_count: u64,
+    pub output: Option<u64>,
+    pub fees: Option<u64>,
+    pub block_vrf: Option<Vec<u8>>,
+    pub op_cert: Option<KeyHash>,
+    pub op_cert_counter: Option<u64>,
+    pub previous_block: Option<Vec<u8>>,
+    pub next_block: Option<Vec<u8>>,
+    pub confirmations: u64,
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct NextBlocks {}
