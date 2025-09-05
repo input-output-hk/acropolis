@@ -4,7 +4,7 @@
 
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
-    queries::assets::{AssetsStateQueryResponse, DEFAULT_ASSETS_QUERY_TOPIC},
+    queries::assets::{AssetsStateQuery, AssetsStateQueryResponse, DEFAULT_ASSETS_QUERY_TOPIC},
     state_history::{StateHistory, StateHistoryStore},
     BlockStatus,
 };
@@ -60,10 +60,13 @@ impl AssetsState {
                         }
 
                         // Process deltas
-                        state
-                            .handle_deltas(&message.deltas)
-                            .inspect_err(|e| error!("Asset deltas handling error: {e:#}"))
-                            .ok();
+                        state = match state.handle_deltas(&message.deltas) {
+                            Ok(new_state) => new_state,
+                            Err(e) => {
+                                error!("Asset deltas handling error: {e:#}");
+                                state
+                            }
+                        };
 
                         // Commit state
                         {
@@ -124,9 +127,12 @@ impl AssetsState {
                     )));
                 };
 
-                let _locked = history.lock().await;
+                let state = history.lock().await.get_current_state();
 
                 let response = match query {
+                    AssetsStateQuery::GetAssetsList => {
+                        AssetsStateQueryResponse::AssetsList(state.assets)
+                    }
                     _ => AssetsStateQueryResponse::Error(format!(
                         "Unimplemented assets query: {query:?}"
                     )),

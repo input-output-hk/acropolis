@@ -16,6 +16,7 @@ mod types;
 mod utils;
 use handlers::{
     accounts::handle_single_account_blockfrost,
+    assets::handle_assets_list_blockfrost,
     governance::{
         handle_drep_delegators_blockfrost, handle_drep_metadata_blockfrost,
         handle_drep_updates_blockfrost, handle_drep_votes_blockfrost, handle_dreps_list_blockfrost,
@@ -107,6 +108,10 @@ const DEFAULT_HANDLE_POOL_UPDATES_TOPIC: (&str, &str) =
     ("handle-topic-pool-updates", "rest.get.pools.*.updates");
 const DEFAULT_HANDLE_POOL_VOTES_TOPIC: (&str, &str) =
     ("handle-topic-pool-votes", "rest.get.pools.*.votes");
+
+// Assets topics
+const DEFAULT_HANDLE_ASSETS_LIST_TOPIC: (&str, &str) =
+    ("handle-topic-assets-list", "rest.get.assets");
 
 #[module(
     message_type(Message),
@@ -296,6 +301,14 @@ impl BlockfrostREST {
             DEFAULT_HANDLE_POOL_VOTES_TOPIC,
             handlers_config.clone(),
             handle_pool_votes_blockfrost,
+        );
+
+        // Handler for /assets
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_ASSETS_LIST_TOPIC,
+            handlers_config.clone(),
+            handle_assets_list_blockfrost,
         );
 
         Ok(())

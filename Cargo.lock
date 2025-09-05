@@ -21,6 +21,7 @@ dependencies = [
  "futures",
  "gcd",
  "hex",
+ "imbl",
  "lf-queue",
  "minicbor 0.26.5",
  "num-rational",
@@ -61,6 +62,7 @@ dependencies = [
  "anyhow",
  "caryatid_sdk",
  "config",
+ "imbl",
  "tokio",
  "tracing",
 ]

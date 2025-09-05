@@ -2,7 +2,7 @@
 
 use acropolis_common::{AssetName, NativeAssetsDelta, PolicyId};
 use anyhow::Result;
-use std::collections::HashMap;
+use imbl::HashMap;
 use tracing::info;
 
 #[derive(Debug, Default, Clone)]
@@ -37,21 +37,32 @@ impl State {
         Ok(())
     }
 
-    pub fn handle_deltas(&mut self, deltas: &NativeAssetsDelta) -> Result<()> {
+    pub fn handle_deltas(&self, deltas: &NativeAssetsDelta) -> Result<Self> {
+        let mut new_assets = self.assets.clone();
+
         for (policy_id, asset_deltas) in deltas {
-            let policy_entry = self.assets.entry(*policy_id).or_default();
+            let mut policy_entry = new_assets.get(policy_id).cloned().unwrap_or_default();
 
             for delta in asset_deltas {
-                let current = policy_entry.entry(delta.name.clone()).or_insert(0);
-                let new_amt = u64::try_from((*current as i128) + delta.amount as i128)
+                let current = policy_entry.get(&delta.name).cloned().unwrap_or(0);
+                let sum = (current as i128) + (delta.amount as i128);
+
+                let new_amt = u64::try_from(sum)
                     .map_err(|_| anyhow::anyhow!("More asset burned than supply"))?;
+
                 if new_amt == 0 {
                     policy_entry.remove(&delta.name);
                 } else {
-                    *current = new_amt as u64;
+                    policy_entry.insert(delta.name.clone(), new_amt);
                 }
             }
+
+            new_assets.insert(*policy_id, policy_entry);
         }
-        Ok(())
+
+        Ok(Self {
+            _config: self._config.clone(),
+            assets: new_assets,
+        })
     }
 }
