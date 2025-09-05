@@ -301,3 +301,9 @@ impl From<Relay> for PoolRelayRest {
         }
     }
 }
+
+#[derive(Serialize)]
+pub struct AssetListEntryRest {
+    pub asset: String,
+    pub quantity: String,
+}

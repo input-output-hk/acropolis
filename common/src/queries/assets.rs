@@ -1,3 +1,5 @@
+use crate::{AssetName, PolicyId};
+
 pub const DEFAULT_ASSETS_QUERY_TOPIC: (&str, &str) =
     ("assets-state-query-topic", "cardano.query.assets");
 
@@ -13,7 +15,7 @@ pub enum AssetsStateQuery {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum AssetsStateQueryResponse {
-    AssetsList(AssetsList),
+    AssetsList(imbl::HashMap<PolicyId, imbl::HashMap<AssetName, u64>>),
     AssetInfo(AssetInfo),
     AssetHistory(AssetHistory),
     AssetTransactions(AssetTransactions),
