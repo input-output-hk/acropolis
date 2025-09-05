@@ -75,6 +75,10 @@ impl super::Store for FjallStore {
         self.blocks.get_by_number(number)
     }
 
+    fn get_blocks_by_number_range(&self, min_number: u64, max_number: u64) -> Result<Vec<Block>> {
+        self.blocks.get_by_number_range(min_number, max_number)
+    }
+
     fn get_block_by_epoch_slot(&self, epoch: u64, epoch_slot: u64) -> Result<Option<Block>> {
         self.blocks.get_by_epoch_slot(epoch, epoch_slot)
     }
@@ -158,6 +162,24 @@ impl FjallBlockStore {
             return Ok(None);
         };
         self.get_by_hash(&hash)
+    }
+
+    fn get_by_number_range(&self, min_number: u64, max_number: u64) -> Result<Vec<Block>> {
+        let min_number_bytes = min_number.to_be_bytes();
+        let max_number_bytes = max_number.to_be_bytes();
+        let mut hashes = vec![];
+        for res in self.block_hashes_by_number.range(min_number_bytes..=max_number_bytes) {
+            let (_, hash) = res?;
+            hashes.push(hash);
+        }
+
+        let mut blocks = vec![];
+        for hash in hashes {
+            if let Some(block) = self.get_by_hash(&hash)? {
+                blocks.push(block);
+            }
+        }
+        Ok(blocks)
     }
 
     fn get_by_epoch_slot(&self, epoch: u64, epoch_slot: u64) -> Result<Option<Block>> {

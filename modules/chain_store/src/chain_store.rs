@@ -4,7 +4,8 @@ use acropolis_common::{
     crypto::keyhash,
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::blocks::{
-        BlockInfo, BlocksStateQuery, BlocksStateQueryResponse, DEFAULT_BLOCKS_QUERY_TOPIC,
+        BlockInfo, BlocksStateQuery, BlocksStateQueryResponse, NextBlocks, PreviousBlocks,
+        DEFAULT_BLOCKS_QUERY_TOPIC,
     },
 };
 use anyhow::{bail, Result};
@@ -115,81 +116,167 @@ impl ChainStore {
                     None => Ok(BlocksStateQueryResponse::NotFound),
                 }
             }
+            BlocksStateQuery::GetNextBlocks {
+                block_key,
+                limit,
+                skip,
+            } => {
+                if *limit == 0 {
+                    return Ok(BlocksStateQueryResponse::NextBlocks(NextBlocks {
+                        blocks: vec![],
+                    }));
+                }
+                match store.get_block_by_hash(&block_key)? {
+                    Some(block) => {
+                        let number = Self::get_block_number(&block)?;
+                        let min_number = number + 1 + skip;
+                        let max_number = min_number + limit - 1;
+                        let blocks = store.get_blocks_by_number_range(min_number, max_number)?;
+                        let info = Self::to_block_info_bulk(blocks, store, false)?;
+                        Ok(BlocksStateQueryResponse::NextBlocks(NextBlocks {
+                            blocks: info,
+                        }))
+                    }
+                    None => Ok(BlocksStateQueryResponse::NotFound),
+                }
+            }
+            BlocksStateQuery::GetPreviousBlocks {
+                block_key,
+                limit,
+                skip,
+            } => {
+                if *limit == 0 {
+                    return Ok(BlocksStateQueryResponse::PreviousBlocks(PreviousBlocks {
+                        blocks: vec![],
+                    }));
+                }
+                match store.get_block_by_hash(&block_key)? {
+                    Some(block) => {
+                        let number = Self::get_block_number(&block)?;
+                        let Some(max_number) = number.checked_sub(1 + skip) else {
+                            return Ok(BlocksStateQueryResponse::PreviousBlocks(PreviousBlocks {
+                                blocks: vec![],
+                            }));
+                        };
+                        let min_number = max_number.saturating_sub(limit - 1);
+                        let blocks = store.get_blocks_by_number_range(min_number, max_number)?;
+                        let info = Self::to_block_info_bulk(blocks, store, false)?;
+                        Ok(BlocksStateQueryResponse::PreviousBlocks(PreviousBlocks {
+                            blocks: info,
+                        }))
+                    }
+                    None => Ok(BlocksStateQueryResponse::NotFound),
+                }
+            }
+
             other => bail!("{other:?} not yet supported"),
         }
     }
 
+    fn get_block_number(block: &Block) -> Result<u64> {
+        Ok(pallas_traverse::MultiEraBlock::decode(&block.bytes)?.number())
+    }
+
     fn to_block_info(block: Block, store: &Arc<dyn Store>, is_latest: bool) -> Result<BlockInfo> {
-        let decoded = pallas_traverse::MultiEraBlock::decode(&block.bytes)?;
-        let header = decoded.header();
-        let mut output = None;
-        let mut fees = None;
-        for tx in decoded.txs() {
-            if let Some(new_fee) = tx.fee() {
-                fees = Some(fees.unwrap_or_default() + new_fee);
-            }
-            for o in tx.outputs() {
-                output = Some(output.unwrap_or_default() + o.value().coin())
-            }
+        let blocks = vec![block];
+        let mut info = Self::to_block_info_bulk(blocks, store, is_latest)?;
+        Ok(info.remove(0))
+    }
+
+    fn to_block_info_bulk(
+        blocks: Vec<Block>,
+        store: &Arc<dyn Store>,
+        final_block_is_latest: bool,
+    ) -> Result<Vec<BlockInfo>> {
+        if blocks.is_empty() {
+            return Ok(vec![]);
         }
-        let (op_cert_hot_vkey, op_cert_counter) = match &header {
-            pallas_traverse::MultiEraHeader::BabbageCompatible(h) => {
-                let cert = &h.header_body.operational_cert;
-                (
-                    Some(&cert.operational_cert_hot_vkey),
-                    Some(cert.operational_cert_sequence_number),
-                )
-            }
-            pallas_traverse::MultiEraHeader::ShelleyCompatible(h) => (
-                Some(&h.header_body.operational_cert_hot_vkey),
-                Some(h.header_body.operational_cert_sequence_number),
-            ),
-            _ => (None, None),
-        };
-        let op_cert = op_cert_hot_vkey.map(|vkey| keyhash(vkey));
+        let mut decoded_blocks = vec![];
+        for block in &blocks {
+            decoded_blocks.push(pallas_traverse::MultiEraBlock::decode(&block.bytes)?);
+        }
 
-        let (next_block, confirmations) = if is_latest {
-            (None, 0)
+        let (latest_number, latest_hash) = if final_block_is_latest {
+            let latest = decoded_blocks.last().unwrap();
+            (latest.number(), latest.hash())
         } else {
-            let number = header.number();
-            let raw_latest_block = store.get_latest_block()?.unwrap();
-            let latest_block = pallas_traverse::MultiEraBlock::decode(&raw_latest_block.bytes)?;
-            let latest_block_number = latest_block.number();
-            let confirmations = latest_block_number - number;
+            let raw_latest = store.get_latest_block()?.unwrap();
+            let latest = pallas_traverse::MultiEraBlock::decode(&raw_latest.bytes)?;
+            (latest.number(), latest.hash())
+        };
 
-            let next_block_number = number + 1;
-            let next_block_hash = if next_block_number == latest_block_number {
-                Some(latest_block.hash().to_vec())
+        let mut next_hash = if final_block_is_latest {
+            None
+        } else {
+            let next_number = decoded_blocks.last().unwrap().number() + 1;
+            if next_number > latest_number {
+                None
+            } else if next_number == latest_number {
+                Some(latest_hash)
             } else {
-                let raw_next_block = store.get_block_by_number(next_block_number)?;
-                if let Some(raw_block) = raw_next_block {
-                    let block = pallas_traverse::MultiEraBlock::decode(&raw_block.bytes)?;
-                    Some(block.hash().to_vec())
+                let raw_next = store.get_block_by_number(next_number)?;
+                if let Some(raw_next) = raw_next {
+                    let next = pallas_traverse::MultiEraBlock::decode(&raw_next.bytes)?;
+                    Some(next.hash())
                 } else {
                     None
                 }
-            };
-            (next_block_hash, confirmations)
+            }
         };
 
-        Ok(BlockInfo {
-            timestamp: block.extra.timestamp,
-            number: header.number(),
-            hash: header.hash().to_vec(),
-            slot: header.slot(),
-            epoch: block.extra.epoch,
-            epoch_slot: block.extra.epoch_slot,
-            issuer_vkey: header.issuer_vkey().map(|key| key.to_vec()),
-            size: block.bytes.len() as u64,
-            tx_count: decoded.tx_count() as u64,
-            output,
-            fees,
-            block_vrf: header.vrf_vkey().map(|key| key.to_vec()),
-            op_cert,
-            op_cert_counter,
-            previous_block: header.previous_hash().map(|x| x.to_vec()),
-            next_block,
-            confirmations,
-        })
+        let mut block_info = vec![];
+        for (block, decoded) in blocks.iter().zip(decoded_blocks).rev() {
+            let header = decoded.header();
+            let mut output = None;
+            let mut fees = None;
+            for tx in decoded.txs() {
+                if let Some(new_fee) = tx.fee() {
+                    fees = Some(fees.unwrap_or_default() + new_fee);
+                }
+                for o in tx.outputs() {
+                    output = Some(output.unwrap_or_default() + o.value().coin())
+                }
+            }
+            let (op_cert_hot_vkey, op_cert_counter) = match &header {
+                pallas_traverse::MultiEraHeader::BabbageCompatible(h) => {
+                    let cert = &h.header_body.operational_cert;
+                    (
+                        Some(&cert.operational_cert_hot_vkey),
+                        Some(cert.operational_cert_sequence_number),
+                    )
+                }
+                pallas_traverse::MultiEraHeader::ShelleyCompatible(h) => (
+                    Some(&h.header_body.operational_cert_hot_vkey),
+                    Some(h.header_body.operational_cert_sequence_number),
+                ),
+                _ => (None, None),
+            };
+            let op_cert = op_cert_hot_vkey.map(|vkey| keyhash(vkey));
+
+            block_info.push(BlockInfo {
+                timestamp: block.extra.timestamp,
+                number: header.number(),
+                hash: header.hash().to_vec(),
+                slot: header.slot(),
+                epoch: block.extra.epoch,
+                epoch_slot: block.extra.epoch_slot,
+                issuer_vkey: header.issuer_vkey().map(|key| key.to_vec()),
+                size: block.bytes.len() as u64,
+                tx_count: decoded.tx_count() as u64,
+                output,
+                fees,
+                block_vrf: header.vrf_vkey().map(|key| key.to_vec()),
+                op_cert,
+                op_cert_counter,
+                previous_block: header.previous_hash().map(|h| h.to_vec()),
+                next_block: next_hash.map(|h| h.to_vec()),
+                confirmations: latest_number - header.number(),
+            });
+
+            next_hash = Some(header.hash());
+        }
+
+        block_info.reverse();
+        Ok(block_info)
     }
 }

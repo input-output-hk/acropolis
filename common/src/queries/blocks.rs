@@ -8,14 +8,35 @@ pub enum BlocksStateQuery {
     GetLatestBlock,
     GetLatestBlockTransactions,
     GetLatestBlockTransactionsCBOR,
-    GetBlockInfo { block_key: Vec<u8> },
-    GetNextBlocks { block_key: Vec<u8> },
-    GetPreviousBlocks { block_key: Vec<u8> },
-    GetBlockBySlot { slot: u64 },
-    GetBlockByEpochSlot { epoch: u64, slot: u64 },
-    GetBlockTransactions { block_key: Vec<u8> },
-    GetBlockTransactionsCBOR { block_key: Vec<u8> },
-    GetBlockInvolvedAddresses { block_key: Vec<u8> },
+    GetBlockInfo {
+        block_key: Vec<u8>,
+    },
+    GetNextBlocks {
+        block_key: Vec<u8>,
+        limit: u64,
+        skip: u64,
+    },
+    GetPreviousBlocks {
+        block_key: Vec<u8>,
+        limit: u64,
+        skip: u64,
+    },
+    GetBlockBySlot {
+        slot: u64,
+    },
+    GetBlockByEpochSlot {
+        epoch: u64,
+        slot: u64,
+    },
+    GetBlockTransactions {
+        block_key: Vec<u8>,
+    },
+    GetBlockTransactionsCBOR {
+        block_key: Vec<u8>,
+    },
+    GetBlockInvolvedAddresses {
+        block_key: Vec<u8>,
+    },
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -57,10 +78,14 @@ pub struct BlockInfo {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct NextBlocks {}
+pub struct NextBlocks {
+    pub blocks: Vec<BlockInfo>,
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PreviousBlocks {}
+pub struct PreviousBlocks {
+    pub blocks: Vec<BlockInfo>,
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BlockTransactions {}
