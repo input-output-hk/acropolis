@@ -1,10 +1,7 @@
 //! Acropolis UTXO state module for Caryatid
 //! Accepts UTXO events and derives the current ledger state in memory
 
-use acropolis_common::{
-    messages::{CardanoMessage, Message},
-    rest_helper::handle_rest_with_path_parameter,
-};
+use acropolis_common::messages::{CardanoMessage, Message};
 use caryatid_sdk::{module, Context, Module};
 
 use anyhow::{anyhow, Result};
@@ -15,8 +12,6 @@ use tracing::{error, info, info_span, Instrument};
 
 mod state;
 use state::{ImmutableUTXOStore, State};
-mod rest;
-use rest::handle_single_utxo;
 
 mod address_delta_publisher;
 mod volatile_index;
@@ -135,10 +130,6 @@ impl UTXOState {
                     }
                 }
             }
-        });
-
-        handle_rest_with_path_parameter(context.clone(), &single_utxo_topic, move |param| {
-            handle_single_utxo(state.clone(), param[0].to_string())
         });
 
         Ok(())

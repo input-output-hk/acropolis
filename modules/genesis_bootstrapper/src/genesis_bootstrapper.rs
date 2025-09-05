@@ -6,7 +6,7 @@ use acropolis_common::{
         CardanoMessage, GenesisCompleteMessage, Message, PotDeltasMessage, UTXODeltasMessage,
     },
     Address, BlockInfo, BlockStatus, ByronAddress, Era, Lovelace, LovelaceDelta, Pot, PotDelta,
-    TxOutput, UTXODelta,
+    TxOutput, UTXODelta, Value,
 };
 use anyhow::Result;
 use caryatid_sdk::{module, Context, Module};
@@ -107,7 +107,7 @@ impl GenesisBootstrapper {
                         address: Address::Byron(ByronAddress {
                             payload: address.payload.to_vec(),
                         }),
-                        value: *amount,
+                        value: Value::new(*amount, Vec::new()),
                     };
 
                     utxo_deltas_message.deltas.push(UTXODelta::Output(tx_output));
