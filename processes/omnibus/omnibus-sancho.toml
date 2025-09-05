@@ -15,8 +15,6 @@ network-name = "sanchonet" # "sanchonet", "mainnet"
 sync-point = "cache" #"cache" # "origin", "tip", "snapshot"
 node-address = "sancho-testnet.able-pool.io:6002"
 magic-number = 4
-shelley-epoch = 0
-shelley-epoch-len = 86400
 
 [module.block-unpacker]
 

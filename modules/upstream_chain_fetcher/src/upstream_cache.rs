@@ -184,7 +184,9 @@ mod test {
             number: n,
             hash: vec![],
             epoch: 0,
+            epoch_slot: n,
             new_epoch: false,
+            timestamp: n,
             era: Era::default(),
         }
     }

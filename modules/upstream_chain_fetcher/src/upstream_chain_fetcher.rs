@@ -2,6 +2,7 @@
 //! Multi-connection, multi-protocol client interface to the Cardano node
 
 use acropolis_common::{
+    genesis_values::GenesisValues,
     messages::{CardanoMessage, Message},
     BlockInfo,
 };
@@ -62,8 +63,8 @@ impl UpstreamChainFetcher {
         let mut response_count = 0;
 
         let last_epoch: Option<u64> = match slot {
-            0 => None,                          // If we're starting from origin
-            _ => Some(cfg.slot_to_epoch(slot)), // From slot of last block
+            0 => None,                            // If we're starting from origin
+            _ => Some(cfg.slot_to_epoch(slot).0), // From slot of last block
         };
 
         let (sender, receiver) = bounded(MAX_BODY_FETCHER_CHANNEL_LENGTH);
@@ -141,6 +142,18 @@ impl UpstreamChainFetcher {
         Ok(last_block)
     }
 
+    async fn wait_genesis_completion(
+        subscription: &mut Box<dyn Subscription<Message>>,
+    ) -> Result<GenesisValues> {
+        let (_, message) = subscription.read().await?;
+        match message.as_ref() {
+            Message::Cardano((_, CardanoMessage::GenesisComplete(complete))) => {
+                Ok(complete.values.clone())
+            }
+            msg => bail!("Unexpected message in genesis completion topic: {msg:?}"),
+        }
+    }
+
     async fn wait_snapshot_completion(
         subscription: &mut Box<dyn Subscription<Message>>,
     ) -> Result<Option<BlockInfo>> {
@@ -209,8 +222,13 @@ impl UpstreamChainFetcher {
 
     /// Main init function
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
-        let cfg = FetcherConfig::new(context.clone(), config)?;
-        let mut subscription = match cfg.sync_point {
+        let mut cfg = FetcherConfig::new(context.clone(), config)?;
+        let genesis_complete = if cfg.genesis_values.is_none() {
+            Some(cfg.context.subscribe(&cfg.genesis_completion_topic).await?)
+        } else {
+            None
+        };
+        let mut snapshot_complete = match cfg.sync_point {
             SyncPoint::Snapshot => {
                 Some(cfg.context.subscribe(&cfg.snapshot_completion_topic).await?)
             }
@@ -218,7 +236,14 @@ impl UpstreamChainFetcher {
         };
 
         context.clone().run(async move {
-            Self::run_chain_sync(cfg, &mut subscription)
+            if let Some(mut genesis_complete) = genesis_complete {
+                let genesis = Self::wait_genesis_completion(&mut genesis_complete)
+                    .await
+                    .unwrap_or_else(|err| panic!("could not fetch genesis: {err}"));
+                cfg.genesis_values = Some(genesis);
+            }
+            let cfg = Arc::new(cfg);
+            Self::run_chain_sync(cfg, &mut snapshot_complete)
                 .await
                 .unwrap_or_else(|e| error!("Chain sync failed: {e}"));
         });

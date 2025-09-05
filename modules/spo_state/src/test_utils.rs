@@ -50,7 +50,9 @@ pub fn new_block(epoch: u64) -> BlockInfo {
         number: 10 * epoch,
         hash: Vec::<u8>::new(),
         epoch,
+        epoch_slot: 0,
         new_epoch: true,
+        timestamp: epoch,
         era: Era::Byron,
     }
 }
