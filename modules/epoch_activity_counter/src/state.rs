@@ -66,7 +66,7 @@ impl State {
             "End of epoch"
         );
 
-        let epoch_activity = self.get_epoch_activity_message();
+        let epoch_activity = self.get_epoch_info();
 
         // clear epoch state
         self.block = block_info.number;
@@ -78,7 +78,7 @@ impl State {
         epoch_activity
     }
 
-    pub fn get_epoch_activity_message(&self) -> EpochActivityMessage {
+    pub fn get_epoch_info(&self) -> EpochActivityMessage {
         EpochActivityMessage {
             epoch: self.epoch,
             total_blocks: self.epoch_blocks,
