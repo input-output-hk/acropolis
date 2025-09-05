@@ -16,6 +16,7 @@ use serde_with::{hex::Hex, serde_as};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
+use std::ops::Neg;
 
 /// Protocol era
 #[derive(
@@ -126,7 +127,7 @@ pub struct AddressDelta {
     pub address: Address,
 
     /// Balance change
-    pub delta: i64,
+    pub delta: ValueDelta,
 }
 
 /// Stake balance change
@@ -137,6 +138,88 @@ pub struct StakeAddressDelta {
 
     /// Balance change
     pub delta: i64,
+}
+
+/// Value (lovelace + multiasset)
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Value {
+    pub lovelace: u64,
+    pub assets: NativeAssets,
+}
+
+impl Value {
+    pub fn new(lovelace: u64, assets: NativeAssets) -> Self {
+        Self { lovelace, assets }
+    }
+
+    pub fn coin(&self) -> u64 {
+        self.lovelace
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ValueDelta {
+    pub lovelace: i64,
+    pub assets: Vec<(PolicyId, Vec<NativeAssetDelta>)>,
+}
+
+impl ValueDelta {
+    pub fn new(lovelace: i64, assets: Vec<(PolicyId, Vec<NativeAssetDelta>)>) -> Self {
+        Self { lovelace, assets }
+    }
+}
+
+impl From<&Value> for ValueDelta {
+    fn from(v: &Value) -> Self {
+        ValueDelta {
+            lovelace: v.lovelace as i64,
+            assets: v
+                .assets
+                .iter()
+                .map(|(pid, nas)| {
+                    let nas_delta = nas
+                        .iter()
+                        .map(|na| NativeAssetDelta {
+                            name: na.name.clone(),
+                            amount: na.amount as i64,
+                        })
+                        .collect();
+                    (*pid, nas_delta)
+                })
+                .collect(),
+        }
+    }
+}
+
+impl Neg for ValueDelta {
+    type Output = Self;
+
+    fn neg(mut self) -> Self::Output {
+        self.lovelace = -self.lovelace;
+        for (_, nas) in &mut self.assets {
+            for na in nas {
+                na.amount = -na.amount;
+            }
+        }
+        self
+    }
+}
+
+pub type PolicyId = [u8; 28];
+pub type NativeAssets = Vec<(PolicyId, Vec<NativeAsset>)>;
+pub type NativeAssetsDelta = Vec<(PolicyId, Vec<NativeAssetDelta>)>;
+pub type AssetName = Vec<u8>;
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct NativeAsset {
+    pub name: AssetName,
+    pub amount: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct NativeAssetDelta {
+    pub name: AssetName,
+    pub amount: i64,
 }
 
 /// Transaction output (UTXO)
@@ -152,7 +235,7 @@ pub struct TxOutput {
     pub address: Address,
 
     /// Output value (Lovelace)
-    pub value: u64,
+    pub value: Value,
     // todo: Implement datum    /// Datum (raw)
     // !!!    pub datum: Vec<u8>,
 }
