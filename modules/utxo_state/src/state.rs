@@ -409,7 +409,7 @@ impl State {
 mod tests {
     use super::*;
     use crate::InMemoryImmutableUTXOStore;
-    use acropolis_common::{ByronAddress, Era, Value};
+    use acropolis_common::{ByronAddress, Era, NativeAsset, Value};
     use config::Config;
     use tokio::sync::Mutex;
 
@@ -454,7 +454,22 @@ mod tests {
             tx_hash: TxHash::default(),
             index: 0,
             address: create_address(99),
-            value: Value::new(42, Vec::new()),
+            value: Value::new(
+                42,
+                vec![(
+                    [1u8; 28],
+                    vec![
+                        NativeAsset {
+                            name: b"TEST".to_vec(),
+                            amount: 100,
+                        },
+                        NativeAsset {
+                            name: b"FOO".to_vec(),
+                            amount: 200,
+                        },
+                    ],
+                )],
+            ),
         };
 
         let block = create_block(BlockStatus::Immutable, 1, 1);
@@ -470,6 +485,14 @@ mod tests {
                     if payload[0] == 99)
                 );
                 assert_eq!(42, value.value.lovelace);
+
+                assert_eq!(1, value.value.assets.len());
+                let (policy_id, assets) = &value.value.assets[0];
+                assert_eq!([1u8; 28], *policy_id);
+                assert_eq!(2, assets.len());
+
+                assert!(assets.iter().any(|a| a.name == b"TEST".to_vec() && a.amount == 100));
+                assert!(assets.iter().any(|a| a.name == b"FOO".to_vec() && a.amount == 200));
             }
 
             _ => panic!("UTXO not found"),
@@ -483,7 +506,22 @@ mod tests {
             tx_hash: TxHash::default(),
             index: 0,
             address: create_address(99),
-            value: Value::new(42, Vec::new()),
+            value: Value::new(
+                42,
+                vec![(
+                    [1u8; 28],
+                    vec![
+                        NativeAsset {
+                            name: b"TEST".to_vec(),
+                            amount: 100,
+                        },
+                        NativeAsset {
+                            name: b"FOO".to_vec(),
+                            amount: 200,
+                        },
+                    ],
+                )],
+            ),
         };
 
         let block1 = create_block(BlockStatus::Immutable, 1, 1);
@@ -509,7 +547,22 @@ mod tests {
             tx_hash: TxHash::default(),
             index: 0,
             address: create_address(99),
-            value: Value::new(42, Vec::new()),
+            value: Value::new(
+                42,
+                vec![(
+                    [1u8; 28],
+                    vec![
+                        NativeAsset {
+                            name: b"TEST".to_vec(),
+                            amount: 100,
+                        },
+                        NativeAsset {
+                            name: b"FOO".to_vec(),
+                            amount: 200,
+                        },
+                    ],
+                )],
+            ),
         };
 
         let block10 = create_block(BlockStatus::Volatile, 10, 10);
@@ -534,7 +587,22 @@ mod tests {
             tx_hash: TxHash::default(),
             index: 0,
             address: create_address(99),
-            value: Value::new(42, Vec::new()),
+            value: Value::new(
+                42,
+                vec![(
+                    [1u8; 28],
+                    vec![
+                        NativeAsset {
+                            name: b"TEST".to_vec(),
+                            amount: 100,
+                        },
+                        NativeAsset {
+                            name: b"FOO".to_vec(),
+                            amount: 200,
+                        },
+                    ],
+                )],
+            ),
         };
 
         let block10 = create_block(BlockStatus::Volatile, 10, 10);
@@ -571,7 +639,22 @@ mod tests {
             tx_hash: TxHash::default(),
             index: 0,
             address: create_address(99),
-            value: Value::new(42, Vec::new()),
+            value: Value::new(
+                42,
+                vec![(
+                    [1u8; 28],
+                    vec![
+                        NativeAsset {
+                            name: b"TEST".to_vec(),
+                            amount: 100,
+                        },
+                        NativeAsset {
+                            name: b"FOO".to_vec(),
+                            amount: 200,
+                        },
+                    ],
+                )],
+            ),
         };
 
         let block1 = create_block(BlockStatus::Volatile, 1, 1);
@@ -603,7 +686,22 @@ mod tests {
             tx_hash: TxHash::default(),
             index: 0,
             address: create_address(99),
-            value: Value::new(42, Vec::new()),
+            value: Value::new(
+                42,
+                vec![(
+                    [1u8; 28],
+                    vec![
+                        NativeAsset {
+                            name: b"TEST".to_vec(),
+                            amount: 100,
+                        },
+                        NativeAsset {
+                            name: b"FOO".to_vec(),
+                            amount: 200,
+                        },
+                    ],
+                )],
+            ),
         };
 
         let block1 = create_block(BlockStatus::Volatile, 1, 1);
@@ -639,12 +737,14 @@ mod tests {
 
     struct TestDeltaObserver {
         balance: Mutex<i64>,
+        asset_balances: Mutex<HashMap<([u8; 28], Vec<u8>), i64>>,
     }
 
     impl TestDeltaObserver {
         fn new() -> Self {
             Self {
                 balance: Mutex::new(0),
+                asset_balances: Mutex::new(HashMap::new()),
             }
         }
     }
@@ -653,12 +753,29 @@ mod tests {
     impl AddressDeltaObserver for TestDeltaObserver {
         async fn start_block(&self, _block: &BlockInfo) {}
         async fn observe_delta(&self, address: &Address, delta: ValueDelta) {
-            assert!(matches!(&address, Address::Byron(ByronAddress{ payload })
-                if payload[0] == 99));
+            assert!(matches!(
+                &address,
+                Address::Byron(ByronAddress { payload }) if payload[0] == 99
+            ));
             assert!(delta.lovelace == 42 || delta.lovelace == -42);
 
             let mut balance = self.balance.lock().await;
             *balance += delta.lovelace;
+
+            let mut asset_balances = self.asset_balances.lock().await;
+            for (policy, assets) in &delta.assets {
+                assert_eq!([1u8; 28], *policy);
+                for asset in assets {
+                    assert!(
+                        (asset.name == b"TEST".to_vec()
+                            && (asset.amount == 100 || asset.amount == -100))
+                            || (asset.name == b"FOO".to_vec()
+                                && (asset.amount == 200 || asset.amount == -200))
+                    );
+                    let key = (*policy, asset.name.clone());
+                    *asset_balances.entry(key).or_insert(0) += asset.amount;
+                }
+            }
         }
 
         async fn finalise_block(&self, _block: &BlockInfo) {}
@@ -674,7 +791,22 @@ mod tests {
             tx_hash: TxHash::default(),
             index: 0,
             address: create_address(99),
-            value: Value::new(42, Vec::new()),
+            value: Value::new(
+                42,
+                vec![(
+                    [1u8; 28],
+                    vec![
+                        NativeAsset {
+                            name: b"TEST".to_vec(),
+                            amount: 100,
+                        },
+                        NativeAsset {
+                            name: b"FOO".to_vec(),
+                            amount: 200,
+                        },
+                    ],
+                )],
+            ),
         };
 
         let block1 = create_block(BlockStatus::Immutable, 1, 1);
@@ -693,6 +825,9 @@ mod tests {
         assert_eq!(0, state.immutable_utxos.len().await.unwrap());
         assert_eq!(0, state.count_valid_utxos().await);
         assert_eq!(0, *observer.balance.lock().await);
+        let ab = observer.asset_balances.lock().await;
+        assert_eq!(*ab.get(&([1u8; 28], b"TEST".to_vec())).unwrap(), 0);
+        assert_eq!(*ab.get(&([1u8; 28], b"FOO".to_vec())).unwrap(), 0);
     }
 
     #[tokio::test]
@@ -705,7 +840,22 @@ mod tests {
             tx_hash: TxHash::default(),
             index: 0,
             address: create_address(99),
-            value: Value::new(42, Vec::new()),
+            value: Value::new(
+                42,
+                vec![(
+                    [1u8; 28],
+                    vec![
+                        NativeAsset {
+                            name: b"TEST".to_vec(),
+                            amount: 100,
+                        },
+                        NativeAsset {
+                            name: b"FOO".to_vec(),
+                            amount: 200,
+                        },
+                    ],
+                )],
+            ),
         };
 
         let block10 = create_block(BlockStatus::Volatile, 10, 10);
@@ -721,6 +871,10 @@ mod tests {
         assert_eq!(0, state.volatile_utxos.len());
         assert_eq!(0, state.count_valid_utxos().await);
         assert_eq!(0, *observer.balance.lock().await);
+
+        let ab = observer.asset_balances.lock().await;
+        assert_eq!(*ab.get(&([1u8; 28], b"TEST".to_vec())).unwrap(), 0);
+        assert_eq!(*ab.get(&([1u8; 28], b"FOO".to_vec())).unwrap(), 0);
     }
 
     #[tokio::test]
@@ -734,7 +888,22 @@ mod tests {
             tx_hash: TxHash::default(),
             index: 0,
             address: create_address(99),
-            value: Value::new(42, Vec::new()),
+            value: Value::new(
+                42,
+                vec![(
+                    [1u8; 28],
+                    vec![
+                        NativeAsset {
+                            name: b"TEST".to_vec(),
+                            amount: 100,
+                        },
+                        NativeAsset {
+                            name: b"FOO".to_vec(),
+                            amount: 200,
+                        },
+                    ],
+                )],
+            ),
         };
 
         let block10 = create_block(BlockStatus::Volatile, 10, 10);
@@ -765,5 +934,9 @@ mod tests {
         assert_eq!(1, state.volatile_utxos.len());
         assert_eq!(1, state.count_valid_utxos().await);
         assert_eq!(42, *observer.balance.lock().await);
+
+        let ab = observer.asset_balances.lock().await;
+        assert_eq!(*ab.get(&([1u8; 28], b"TEST".to_vec())).unwrap(), 100);
+        assert_eq!(*ab.get(&([1u8; 28], b"FOO".to_vec())).unwrap(), 200);
     }
 }
