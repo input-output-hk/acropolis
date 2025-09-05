@@ -1,5 +1,5 @@
 //! Acropolis Asset State module for Caryatid
-//! Accepts native asset mint and burn events a
+//! Accepts native asset mint and burn events
 //! and derives the Asset State in memory
 
 use acropolis_common::{
@@ -106,11 +106,11 @@ impl AssetsState {
         info!("Creating subscriber on '{asset_deltas_subscribe_topic}'");
 
         let assets_query_topic = get_string_flag(&config, DEFAULT_ASSETS_QUERY_TOPIC);
-        info!("Creating DRep query handler on '{assets_query_topic}'");
+        info!("Creating asset query handler on '{assets_query_topic}'");
 
         // Initalize state history
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
-            "DRepState",
+            "AssetsState",
             StateHistoryStore::default_block_store(),
         )));
         let history_run = history.clone();
