@@ -567,3 +567,9 @@ impl ProtocolParamsRestExt for ProtocolParams {
         Value::Object(map)
     }
 }
+
+#[derive(Serialize)]
+pub struct AssetListEntryRest {
+    pub asset: String,
+    pub quantity: String,
+}

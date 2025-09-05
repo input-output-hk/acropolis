@@ -140,6 +140,23 @@ pub struct StakeAddressDelta {
     pub delta: i64,
 }
 
+pub type PolicyId = [u8; 28];
+pub type NativeAssets = Vec<(PolicyId, Vec<NativeAsset>)>;
+pub type NativeAssetsDelta = Vec<(PolicyId, Vec<NativeAssetDelta>)>;
+pub type AssetName = Vec<u8>;
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct NativeAsset {
+    pub name: AssetName,
+    pub amount: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct NativeAssetDelta {
+    pub name: AssetName,
+    pub amount: i64,
+}
+
 /// Value (lovelace + multiasset)
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Value {
@@ -160,11 +177,11 @@ impl Value {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ValueDelta {
     pub lovelace: i64,
-    pub assets: Vec<(PolicyId, Vec<NativeAssetDelta>)>,
+    pub assets: NativeAssetsDelta,
 }
 
 impl ValueDelta {
-    pub fn new(lovelace: i64, assets: Vec<(PolicyId, Vec<NativeAssetDelta>)>) -> Self {
+    pub fn new(lovelace: i64, assets: NativeAssetsDelta) -> Self {
         Self { lovelace, assets }
     }
 }
@@ -203,23 +220,6 @@ impl Neg for ValueDelta {
         }
         self
     }
-}
-
-pub type PolicyId = [u8; 28];
-pub type NativeAssets = Vec<(PolicyId, Vec<NativeAsset>)>;
-pub type NativeAssetsDelta = Vec<(PolicyId, Vec<NativeAssetDelta>)>;
-pub type AssetName = Vec<u8>;
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct NativeAsset {
-    pub name: AssetName,
-    pub amount: u64,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct NativeAssetDelta {
-    pub name: AssetName,
-    pub amount: i64,
 }
 
 /// Transaction output (UTXO)

@@ -911,3 +911,41 @@ pub fn map_value(pallas_value: &MultiEraValue) -> Value {
     }
     Value::new(lovelace, assets)
 }
+
+pub fn map_mint_burn(
+    policy_group: &MultiEraPolicyAssets<'_>,
+) -> Option<(PolicyId, Vec<NativeAssetDelta>)> {
+    match policy_group {
+        MultiEraPolicyAssets::AlonzoCompatibleMint(policy, kvps) => {
+            let policy_id: [u8; 28] =
+                policy.as_ref().try_into().expect("Policy id must be 28 bytes");
+
+            let deltas = kvps
+                .iter()
+                .map(|(name, amt)| NativeAssetDelta {
+                    name: name.to_vec(),
+                    amount: *amt,
+                })
+                .collect();
+
+            Some((policy_id, deltas))
+        }
+
+        MultiEraPolicyAssets::ConwayMint(policy, kvps) => {
+            let policy_id: [u8; 28] =
+                policy.as_ref().try_into().expect("Policy id must be 28 bytes");
+
+            let deltas = kvps
+                .iter()
+                .map(|(name, amt)| NativeAssetDelta {
+                    name: name.to_vec(),
+                    amount: i64::from(*amt),
+                })
+                .collect();
+
+            Some((policy_id, deltas))
+        }
+
+        _ => None,
+    }
+}

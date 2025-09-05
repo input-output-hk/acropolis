@@ -1,0 +1,21 @@
+# Acropolis reward state module
+
+[package]
+name = "acropolis_module_assets_state"
+version = "0.1.0"
+edition = "2021"
+authors = ["William Hankins <william@sundae.fi>"]
+description = "Native Asset State Tracker"
+license = "Apache-2.0"
+
+[dependencies]
+caryatid_sdk = "0.12"
+acropolis_common = { path = "../../common" }
+config = "0.15.11"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1.40"
+anyhow = "1.0"
+imbl = { version = "5.0.0", features = ["serde"] }
+
+[lib]
+path = "src/assets_state.rs"

@@ -67,6 +67,13 @@ pub struct UTXODeltasMessage {
     pub deltas: Vec<UTXODelta>,
 }
 
+/// Message encapsulating multiple asset deltas
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AssetDeltasMessage {
+    /// Ordered set of deltas
+    pub deltas: NativeAssetsDelta,
+}
+
 /// Message encapsulating multiple transaction certificates, in order
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TxCertificatesMessage {
@@ -218,6 +225,7 @@ pub enum CardanoMessage {
     ReceivedTxs(RawTxsMessage),              // Transaction available
     GenesisComplete(GenesisCompleteMessage), // Genesis UTXOs done + genesis params
     UTXODeltas(UTXODeltasMessage),           // UTXO deltas received
+    AssetDeltas(AssetDeltasMessage),         // Asset mint and burn deltas
     TxCertificates(TxCertificatesMessage),   // Transaction certificates received
     AddressDeltas(AddressDeltasMessage),     // Address deltas received
     Withdrawals(WithdrawalsMessage),         // Withdrawals from reward accounts
