@@ -21,6 +21,7 @@ pub enum EpochsStateQuery {
 
     // Pools related queries
     GetBlocksMintedByPools { vrf_key_hashes: Vec<KeyHash> },
+    GetTotalBlocksMintedByPools { vrf_key_hashes: Vec<KeyHash> },
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -38,6 +39,7 @@ pub enum EpochsStateQueryResponse {
 
     // Pools related responses
     BlocksMintedByPools(BlocksMintedByPools),
+    TotalBlocksMintedByPools(TotalBlocksMintedByPools),
 
     NotFound,
     Error(String),
@@ -54,7 +56,9 @@ pub struct LatestEpochParameters {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct EpochInfo {}
+pub struct EpochInfo {
+    pub epoch: EpochActivityMessage,
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct NextEpochs {}
@@ -81,4 +85,10 @@ pub struct EpochParameters {}
 pub struct BlocksMintedByPools {
     // this is in same order of vrf_key_hashes from EpochsStateQuery::BlocksMintedByPools
     pub blocks_minted: Vec<u64>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TotalBlocksMintedByPools {
+    // this is in same order of vrf_key_hashes from EpochsStateQuery::TotalBlocksMinted
+    pub total_blocks_minted: Vec<u64>,
 }

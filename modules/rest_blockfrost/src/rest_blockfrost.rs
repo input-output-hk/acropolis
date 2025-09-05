@@ -33,11 +33,20 @@ use handlers::{
     },
 };
 
-use crate::handlers_config::HandlersConfig;
+use crate::{
+    handlers::epochs::{handle_latest_epoch_blockfrost, handle_single_epoch_blockfrost},
+    handlers_config::HandlersConfig,
+};
 
 // Accounts topics
 const DEFAULT_HANDLE_SINGLE_ACCOUNT_TOPIC: (&str, &str) =
     ("handle-topic-account-single", "rest.get.accounts.*");
+
+// Epochs topics
+const DEFAULT_HANDLE_LATEST_EPOCH_TOPIC: (&str, &str) =
+    ("handle-topic-epoch-latest", "rest.get.epoch");
+const DEFAULT_HANDLE_SINGLE_EPOCH_TOPIC: (&str, &str) =
+    ("handle-topic-epoch-single", "rest.get.epochs.*");
 
 // Governance topics
 const DEFAULT_HANDLE_DREPS_LIST_TOPIC: (&str, &str) =
@@ -122,12 +131,29 @@ impl BlockfrostREST {
         let handlers_config = Arc::new(HandlersConfig::from(config));
 
         info!("Blockfrost REST enabled");
+
         // Handler for /accounts/{stake_address}
         register_handler(
             context.clone(),
             DEFAULT_HANDLE_SINGLE_ACCOUNT_TOPIC,
             handlers_config.clone(),
             handle_single_account_blockfrost,
+        );
+
+        // Handler for /epochs
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_LATEST_EPOCH_TOPIC,
+            handlers_config.clone(),
+            handle_latest_epoch_blockfrost,
+        );
+
+        // Handler for /epochs/{epoch}
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_SINGLE_EPOCH_TOPIC,
+            handlers_config.clone(),
+            handle_single_epoch_blockfrost,
         );
 
         // Handler for /governance/dreps
