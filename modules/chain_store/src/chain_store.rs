@@ -83,31 +83,36 @@ impl ChainStore {
         query: &BlocksStateQuery,
     ) -> Result<BlocksStateQueryResponse> {
         match query {
-            BlocksStateQuery::GetLatestBlock => {
-                match store.get_latest_block()? {
-                    Some(block) => {
-                        let info = Self::to_block_info(block, store, true)?;
-                        Ok(BlocksStateQueryResponse::LatestBlock(info))
-                    }
-                    None => Ok(BlocksStateQueryResponse::NotFound)
+            BlocksStateQuery::GetLatestBlock => match store.get_latest_block()? {
+                Some(block) => {
+                    let info = Self::to_block_info(block, store, true)?;
+                    Ok(BlocksStateQueryResponse::LatestBlock(info))
                 }
-            }
+                None => Ok(BlocksStateQueryResponse::NotFound),
+            },
             BlocksStateQuery::GetBlockInfo { block_key } => {
-                match store.get_block_by_hash(&block_key)? {
+                match store.get_block_by_hash(block_key)? {
                     Some(block) => {
                         let info = Self::to_block_info(block, store, false)?;
                         Ok(BlocksStateQueryResponse::BlockInfo(info))
                     }
-                    None => Ok(BlocksStateQueryResponse::NotFound)
+                    None => Ok(BlocksStateQueryResponse::NotFound),
                 }
             }
-            BlocksStateQuery::GetBlockBySlot { slot } => {
-                match store.get_block_by_slot(*slot)? {
+            BlocksStateQuery::GetBlockBySlot { slot } => match store.get_block_by_slot(*slot)? {
+                Some(block) => {
+                    let info = Self::to_block_info(block, store, false)?;
+                    Ok(BlocksStateQueryResponse::BlockBySlot(info))
+                }
+                None => Ok(BlocksStateQueryResponse::NotFound),
+            },
+            BlocksStateQuery::GetBlockByEpochSlot { epoch, slot } => {
+                match store.get_block_by_epoch_slot(*epoch, *slot)? {
                     Some(block) => {
                         let info = Self::to_block_info(block, store, false)?;
-                        Ok(BlocksStateQueryResponse::BlockBySlot(info))
+                        Ok(BlocksStateQueryResponse::BlockByEpochSlot(info))
                     }
-                    None => Ok(BlocksStateQueryResponse::NotFound)
+                    None => Ok(BlocksStateQueryResponse::NotFound),
                 }
             }
             other => bail!("{other:?} not yet supported"),

@@ -9,6 +9,7 @@ pub trait Store: Send + Sync {
     fn get_block_by_hash(&self, hash: &[u8]) -> Result<Option<Block>>;
     fn get_block_by_slot(&self, slot: u64) -> Result<Option<Block>>;
     fn get_block_by_number(&self, number: u64) -> Result<Option<Block>>;
+    fn get_block_by_epoch_slot(&self, epoch: u64, epoch_slot: u64) -> Result<Option<Block>>;
     fn get_latest_block(&self) -> Result<Option<Block>>;
 }
 

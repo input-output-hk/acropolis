@@ -17,6 +17,7 @@ const DEFAULT_DATABASE_PATH: &str = "fjall-blocks";
 const BLOCKS_PARTITION: &str = "blocks";
 const BLOCK_HASHES_BY_SLOT_PARTITION: &str = "block-hashes-by-slot";
 const BLOCK_HASHES_BY_NUMBER_PARTITION: &str = "block-hashes-by-number";
+const BLOCK_HASHES_BY_EPOCH_SLOT_PARTITION: &str = "block-hashes-by-epoch-slot";
 const TXS_PARTITION: &str = "txs";
 
 impl FjallStore {
@@ -74,6 +75,10 @@ impl super::Store for FjallStore {
         self.blocks.get_by_number(number)
     }
 
+    fn get_block_by_epoch_slot(&self, epoch: u64, epoch_slot: u64) -> Result<Option<Block>> {
+        self.blocks.get_by_epoch_slot(epoch, epoch_slot)
+    }
+
     fn get_latest_block(&self) -> Result<Option<Block>> {
         self.blocks.get_latest()
     }
@@ -83,6 +88,7 @@ struct FjallBlockStore {
     blocks: Partition,
     block_hashes_by_slot: Partition,
     block_hashes_by_number: Partition,
+    block_hashes_by_epoch_slot: Partition,
 }
 
 impl FjallBlockStore {
@@ -97,10 +103,15 @@ impl FjallBlockStore {
             BLOCK_HASHES_BY_NUMBER_PARTITION,
             fjall::PartitionCreateOptions::default(),
         )?;
+        let block_hashes_by_epoch_slot = keyspace.open_partition(
+            BLOCK_HASHES_BY_EPOCH_SLOT_PARTITION,
+            fjall::PartitionCreateOptions::default(),
+        )?;
         Ok(Self {
             blocks,
             block_hashes_by_slot,
             block_hashes_by_number,
+            block_hashes_by_epoch_slot,
         })
     }
 
@@ -119,6 +130,11 @@ impl FjallBlockStore {
         batch.insert(
             &self.block_hashes_by_number,
             info.number.to_be_bytes(),
+            &info.hash,
+        );
+        batch.insert(
+            &self.block_hashes_by_epoch_slot,
+            epoch_slot_key(info.epoch, info.epoch_slot),
             &info.hash,
         );
     }
@@ -144,12 +160,27 @@ impl FjallBlockStore {
         self.get_by_hash(&hash)
     }
 
+    fn get_by_epoch_slot(&self, epoch: u64, epoch_slot: u64) -> Result<Option<Block>> {
+        let Some(hash) = self.block_hashes_by_epoch_slot.get(epoch_slot_key(epoch, epoch_slot))?
+        else {
+            return Ok(None);
+        };
+        self.get_by_hash(&hash)
+    }
+
     fn get_latest(&self) -> Result<Option<Block>> {
         let Some((_, hash)) = self.block_hashes_by_slot.last_key_value()? else {
             return Ok(None);
         };
         self.get_by_hash(&hash)
     }
+}
+
+fn epoch_slot_key(epoch: u64, epoch_slot: u64) -> [u8; 16] {
+    let mut key = [0; 16];
+    key[..8].copy_from_slice(epoch.to_be_bytes().as_slice());
+    key[8..].copy_from_slice(epoch_slot.to_be_bytes().as_slice());
+    key
 }
 
 struct FjallTXStore {
@@ -273,6 +304,32 @@ mod tests {
         state.store.insert_block(&info, &bytes).unwrap();
 
         let new_block = state.store.get_block_by_slot(info.slot).unwrap();
+        assert_eq!(block, new_block.unwrap());
+    }
+
+    #[test]
+    fn should_get_block_by_number() {
+        let state = init_state();
+        let bytes = test_block_bytes();
+        let info = test_block_info(&bytes);
+        let block = build_block(&info, &bytes);
+
+        state.store.insert_block(&info, &bytes).unwrap();
+
+        let new_block = state.store.get_block_by_number(info.number).unwrap();
+        assert_eq!(block, new_block.unwrap());
+    }
+
+    #[test]
+    fn should_get_block_by_epoch_slot() {
+        let state = init_state();
+        let bytes = test_block_bytes();
+        let info = test_block_info(&bytes);
+        let block = build_block(&info, &bytes);
+
+        state.store.insert_block(&info, &bytes).unwrap();
+
+        let new_block = state.store.get_block_by_epoch_slot(info.epoch, info.epoch_slot).unwrap();
         assert_eq!(block, new_block.unwrap());
     }
 
