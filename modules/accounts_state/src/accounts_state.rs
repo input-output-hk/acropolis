@@ -401,7 +401,6 @@ impl AccountsState {
             .unwrap_or(DEFAULT_ACCOUNTS_QUERY_TOPIC.1.to_string());
         info!("Creating query handler on '{}'", accounts_query_topic);
 
-
         // Create verifier and read comparison data according to config
         let mut verifier = Verifier::new();
 

@@ -291,9 +291,8 @@ impl State {
             &spo_block_counts,
             &self.pots,
             total_blocks,
-
             // Pass in two-previous epoch snapshot for capture of SPO reward accounts
-            self.epoch_snapshots.set.clone(),  // Will become 'go' in the next line!
+            self.epoch_snapshots.set.clone(), // Will become 'go' in the next line!
         );
         self.epoch_snapshots.push(snapshot);
 
@@ -623,8 +622,10 @@ impl State {
                     verifier.verify_rewards(reward_result.epoch, &reward_result);
 
                     // Pay the rewards
-                    for (account, amount) in reward_result.rewards {
-                        self.add_to_reward(&account, amount);
+                    for (_, rewards) in reward_result.rewards {
+                        for reward in rewards {
+                            self.add_to_reward(&reward.account, reward.amount);
+                        }
                     }
 
                     // save SPO rewards
