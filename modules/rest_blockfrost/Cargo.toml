@@ -13,6 +13,7 @@ acropolis_common = { path = "../../common" }
 anyhow = "1.0"
 async-trait = "0.1"
 bech32 = "0.11"
+blake2 = "0.10.6"
 caryatid_sdk = "0.12"
 caryatid_module_rest_server = "0.14"
 config = "0.15.11"
