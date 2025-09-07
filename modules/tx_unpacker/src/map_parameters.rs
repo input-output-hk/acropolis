@@ -8,7 +8,7 @@ use pallas::ledger::{
         ProtocolVersion as PallasProtocolVersion, Relay as PallasRelay, ScriptHash,
         StakeCredential as PallasStakeCredential,
     },
-    traverse::MultiEraCert,
+    traverse::{MultiEraCert, MultiEraPolicyAssets, MultiEraValue},
     *,
 };
 
@@ -854,4 +854,60 @@ pub fn map_all_governance_voting_procedures(
     }
 
     Ok(procs)
+}
+
+pub fn map_value(pallas_value: &MultiEraValue) -> Value {
+    let lovelace = pallas_value.coin();
+    let pallas_assets = pallas_value.assets();
+
+    let mut assets: NativeAssets = Vec::new();
+
+    for policy_group in pallas_assets {
+        match policy_group {
+            MultiEraPolicyAssets::AlonzoCompatibleOutput(policy, kvps) => {
+                match policy.as_ref().try_into() {
+                    Ok(policy_id) => {
+                        let native_assets = kvps
+                            .iter()
+                            .map(|(name, amt)| NativeAsset {
+                                name: name.to_vec(),
+                                amount: *amt,
+                            })
+                            .collect();
+
+                        assets.push((policy_id, native_assets));
+                    }
+                    Err(_) => {
+                        tracing::error!(
+                            "Invalid policy id length: expected 28 bytes, got {}",
+                            policy.len()
+                        );
+                        continue;
+                    }
+                }
+            }
+            MultiEraPolicyAssets::ConwayOutput(policy, kvps) => match policy.as_ref().try_into() {
+                Ok(policy_id) => {
+                    let native_assets = kvps
+                        .iter()
+                        .map(|(name, amt)| NativeAsset {
+                            name: name.to_vec(),
+                            amount: u64::from(*amt),
+                        })
+                        .collect();
+
+                    assets.push((policy_id, native_assets));
+                }
+                Err(_) => {
+                    tracing::error!(
+                        "Invalid policy id length: expected 28 bytes, got {}",
+                        policy.len()
+                    );
+                    continue;
+                }
+            },
+            _ => {}
+        }
+    }
+    Value::new(lovelace, assets)
 }
