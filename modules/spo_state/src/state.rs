@@ -346,7 +346,7 @@ impl State {
         let Some(stake_addresses) = self.stake_addresses.as_mut() else {
             return;
         };
-        
+
         // Get old stake address state, or create one
         if let Some(sas) = stake_addresses.get_mut(&hash) {
             if sas.registered {
@@ -362,6 +362,13 @@ impl State {
                 "Unknown stake address in stake delegation: {}",
                 hex::encode(hash)
             );
+        }
+
+        // Update historical_spo_state's delegators (if set)
+        if let Some(historical_spos) = self.historical_spos.as_mut() {
+            if let Some(historical_spo_state) = historical_spos.get_mut(spo) {
+                historical_spo_state.handle_update_delegators(spo);
+            }
         }
     }
 
@@ -404,14 +411,8 @@ impl State {
                 TxCertificate::StakeDelegation(delegation) => {
                     self.record_stake_delegation(&delegation.credential, &delegation.operator);
                 }
-
-                TxCertificate::VoteDelegation(delegation) => {
-                    self.record_drep_delegation(&delegation.credential, &delegation.drep);
-                }
-
                 TxCertificate::StakeAndVoteDelegation(delegation) => {
                     self.record_stake_delegation(&delegation.credential, &delegation.operator);
-                    self.record_drep_delegation(&delegation.credential, &delegation.drep);
                 }
 
                 TxCertificate::StakeRegistrationAndDelegation(delegation) => {
@@ -421,13 +422,11 @@ impl State {
 
                 TxCertificate::StakeRegistrationAndVoteDelegation(delegation) => {
                     self.register_stake_address(&delegation.credential, Some(delegation.deposit));
-                    self.record_drep_delegation(&delegation.credential, &delegation.drep);
                 }
 
                 TxCertificate::StakeRegistrationAndStakeAndVoteDelegation(delegation) => {
                     self.register_stake_address(&delegation.credential, Some(delegation.deposit));
                     self.record_stake_delegation(&delegation.credential, &delegation.operator);
-                    self.record_drep_delegation(&delegation.credential, &delegation.drep);
                 }
                 _ => (),
             }
