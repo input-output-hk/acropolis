@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use acropolis_common::{
     queries::governance::VoteRecord, KeyHash, PoolRegistration, PoolUpdateEvent,
 };
@@ -13,7 +15,7 @@ pub struct HistoricalSPOState {
     pub updates: Option<Vec<PoolUpdateEvent>>,
 
     // SPO's delegator's stake credential
-    pub delegators: Option<Vec<KeyHash>>,
+    pub delegators: Option<HashSet<KeyHash>>,
 
     // SPO's votes
     pub votes: Option<Vec<VoteRecord>>,
@@ -25,8 +27,14 @@ impl HistoricalSPOState {
         Self {
             registration: store_config.store_registration.then(PoolRegistration::default),
             updates: store_config.store_updates.then(Vec::new),
-            delegators: store_config.store_delegators.then(Vec::new),
+            delegators: store_config.store_delegators.then(HashSet::new),
             votes: store_config.store_votes.then(Vec::new),
+        }
+    }
+
+    pub fn handle_update_delegators(&mut self, spo: &KeyHash) {
+        if let Some(delegators) = self.delegators.as_mut() {
+            delegators.insert(spo.clone());
         }
     }
 }
