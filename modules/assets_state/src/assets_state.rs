@@ -25,8 +25,6 @@ const DEFAULT_ASSET_DELTAS_SUBSCRIBE_TOPIC: (&str, &str) =
 // Configuration defaults
 const DEFAULT_STORE_INFO: (&str, bool) = ("store-info", false);
 const DEFAULT_STORE_HISTORY: (&str, bool) = ("store-history", false);
-const DEFAULT_STORE_TRANSACTIONS: (&str, bool) = ("store-transactions", false);
-const DEFAULT_STORE_ADDRESSES: (&str, bool) = ("store-addresses", false);
 
 /// Assets State module
 #[module(
@@ -60,13 +58,15 @@ impl AssetsState {
                         }
 
                         // Process deltas
-                        state = match state.handle_deltas(&message.deltas) {
-                            Ok(new_state) => new_state,
-                            Err(e) => {
-                                error!("Asset deltas handling error: {e:#}");
-                                state
-                            }
-                        };
+                        for (tx_hash, deltas) in &message.deltas {
+                            state = match state.handle_deltas(tx_hash, deltas) {
+                                Ok(new_state) => new_state,
+                                Err(e) => {
+                                    error!("Asset deltas handling error: {e:#}");
+                                    state
+                                }
+                            };
+                        }
 
                         // Commit state
                         {
@@ -95,10 +95,8 @@ impl AssetsState {
 
         // Get configuration flags and topis
         let storage_config = AssetsStorageConfig {
-            _store_info: get_bool_flag(&config, DEFAULT_STORE_INFO),
-            _store_history: get_bool_flag(&config, DEFAULT_STORE_HISTORY),
-            _store_transactions: get_bool_flag(&config, DEFAULT_STORE_TRANSACTIONS),
-            _store_addresses: get_bool_flag(&config, DEFAULT_STORE_ADDRESSES),
+            store_info: get_bool_flag(&config, DEFAULT_STORE_INFO),
+            store_history: get_bool_flag(&config, DEFAULT_STORE_HISTORY),
         };
 
         let asset_deltas_subscribe_topic =
@@ -106,7 +104,7 @@ impl AssetsState {
         info!("Creating subscriber on '{asset_deltas_subscribe_topic}'");
 
         let assets_query_topic = get_string_flag(&config, DEFAULT_ASSETS_QUERY_TOPIC);
-        info!("Creating asset query handler on '{assets_query_topic}'");
+        info!("Creating assets query handler on '{assets_query_topic}'");
 
         // Initalize state history
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
@@ -131,11 +129,30 @@ impl AssetsState {
 
                 let response = match query {
                     AssetsStateQuery::GetAssetsList => {
-                        AssetsStateQueryResponse::AssetsList(state.assets)
+                        AssetsStateQueryResponse::AssetsList(state.get_asset_list())
                     }
-                    _ => AssetsStateQueryResponse::Error(format!(
-                        "Unimplemented assets query: {query:?}"
-                    )),
+                    AssetsStateQuery::GetAssetInfo {
+                        policy_id,
+                        asset_name,
+                    } => match state.get_asset_info(policy_id, asset_name) {
+                        Ok(Some(info)) => AssetsStateQueryResponse::AssetInfo(info),
+                        Ok(None) => AssetsStateQueryResponse::NotFound,
+                        Err(e) => AssetsStateQueryResponse::Error(e.to_string()),
+                    },
+                    AssetsStateQuery::GetAssetHistory {
+                        policy_id,
+                        asset_name,
+                    } => match state.get_asset_history(policy_id, asset_name) {
+                        Ok(Some(history)) => AssetsStateQueryResponse::AssetHistory(history),
+                        Ok(None) => AssetsStateQueryResponse::NotFound,
+                        Err(e) => AssetsStateQueryResponse::Error(e.to_string()),
+                    },
+                    AssetsStateQuery::GetPolicyIdAssets { policy_id } => {
+                        match state.get_policy_assets(policy_id) {
+                            Some(assets) => AssetsStateQueryResponse::PolicyIdAssets(assets),
+                            None => AssetsStateQueryResponse::NotFound,
+                        }
+                    }
                 };
                 Arc::new(Message::StateQueryResponse(StateQueryResponse::Assets(
                     response,

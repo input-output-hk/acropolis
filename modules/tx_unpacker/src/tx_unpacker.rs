@@ -107,7 +107,8 @@ impl TxUnpacker {
                             }
 
                             let mut utxo_deltas = Vec::new();
-                            let mut asset_deltas: NativeAssetsDelta = Vec::new();
+                            let mut asset_deltas: Vec<(TxHash, NativeAssetsDelta)> = Vec::new();
+                            let mut cip25_metadata_updates = Vec::new();
                             let mut withdrawals = Vec::new();
                             let mut certificates = Vec::new();
                             let mut voting_procedures = Vec::new();
@@ -218,11 +219,19 @@ impl TxUnpacker {
                                         }
 
                                         if publish_asset_deltas_topic.is_some() {
+                                            let tx_hash = *tx.hash();
+                                            let mut deltas_for_tx: NativeAssetsDelta = Vec::new();
                                             for policy_group in tx.mints().iter() {
                                                 if let Some(delta) = map_parameters::map_mint_burn(policy_group) {
-                                                    asset_deltas.push(delta);
+                                                    deltas_for_tx.push(delta);
                                                 }
                                             }
+                                            asset_deltas.push((tx_hash, deltas_for_tx));
+
+                                            if let Some(meta) = tx.metadata().find(721) {
+                                                cip25_metadata_updates.push(meta.clone())
+                                            }
+                                                
                                         }
 
                                         if publish_certificates_topic.is_some() {
@@ -307,6 +316,7 @@ impl TxUnpacker {
                                     block.clone(),
                                     CardanoMessage::AssetDeltas(AssetDeltasMessage {
                                         deltas: asset_deltas,
+                                        metadata_updates: cip25_metadata_updates
                                     })
                                 ));
 

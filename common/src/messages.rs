@@ -71,7 +71,8 @@ pub struct UTXODeltasMessage {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AssetDeltasMessage {
     /// Ordered set of deltas
-    pub deltas: NativeAssetsDelta,
+    pub deltas: Vec<(TxHash, NativeAssetsDelta)>,
+    pub metadata_updates: Metadatum,
 }
 
 /// Message encapsulating multiple transaction certificates, in order
