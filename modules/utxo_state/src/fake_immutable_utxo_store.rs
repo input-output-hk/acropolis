@@ -1,7 +1,7 @@
 //! Fake store for immutable UTXOs
 
 use crate::state::{ImmutableUTXOStore, UTXOKey, UTXOValue};
-use acropolis_common::Address;
+use acropolis_common::{Address, Value};
 use anyhow::Result;
 use async_trait::async_trait;
 use config::Config;
@@ -51,7 +51,7 @@ impl ImmutableUTXOStore for FakeImmutableUTXOStore {
     async fn lookup_utxo(&self, _key: &UTXOKey) -> Result<Option<UTXOValue>> {
         Ok(Some(UTXOValue {
             address: Address::None,
-            value: 42,
+            value: Value::new(42, Vec::new()),
         }))
     }
 
