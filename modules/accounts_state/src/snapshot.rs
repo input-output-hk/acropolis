@@ -77,12 +77,13 @@ impl Snapshot {
         // Note this is _active_ stake, for reward calculations, and hence doesn't include rewards
         let mut total_stake: Lovelace = 0;
         for (hash, sas) in stake_addresses.iter() {
-            if sas.registered && sas.utxo_value > 0 {
+            let active_stake = sas.utxo_value + sas.rewards;
+            if sas.registered && active_stake > 0 {
                 if let Some(spo_id) = &sas.delegated_spo {
                     // Only clone if insertion is needed
                     if let Some(snap_spo) = snapshot.spos.get_mut(spo_id) {
-                        snap_spo.delegators.push((hash.clone(), sas.utxo_value));
-                        snap_spo.total_stake += sas.utxo_value;
+                        snap_spo.delegators.push((hash.clone(), active_stake));
+                        snap_spo.total_stake += active_stake;
                     } else {
                         // Find in the SPO list
                         let Some(spo) = spos.get(spo_id) else {
@@ -123,8 +124,8 @@ impl Snapshot {
                         snapshot.spos.insert(
                             spo_id.clone(),
                             SnapshotSPO {
-                                delegators: vec![(hash.clone(), sas.utxo_value)],
-                                total_stake: sas.utxo_value,
+                                delegators: vec![(hash.clone(), active_stake)],
+                                total_stake: active_stake,
                                 pledge: spo.pledge,
                                 fixed_cost: spo.cost,
                                 margin: spo.margin.clone(),
@@ -136,7 +137,7 @@ impl Snapshot {
                         );
                     }
                 }
-                total_stake += sas.utxo_value;
+                total_stake += active_stake;
             }
         }
 
