@@ -157,6 +157,7 @@ impl BlockfrostREST {
         let handlers_config = Arc::new(HandlersConfig::from(config));
 
         info!("Blockfrost REST enabled");
+
         // Handler for /accounts/{stake_address}
         register_handler(
             context.clone(),
