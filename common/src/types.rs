@@ -140,21 +140,11 @@ pub struct StakeAddressDelta {
     pub delta: i64,
 }
 
-/// Stake Address State Change
-#[derive(Debug, Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct StakeAddressDiff {
+/// Stake Address Reward change
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StakeRewardDelta {
     pub hash: KeyHash,
-    pub change: StakeAddressChange,
-}
-
-/// Stake Address State Change
-#[derive(Debug, Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-pub enum StakeAddressChange {
-    StakeAddressRegistered,
-    StakeAddressDeregistered,
-    DelegatedToSPO(KeyHash),
-    DelegatedToDRep(DRepChoice),
-    ValueDiff(LovelaceDelta),
+    pub delta: i64,
 }
 
 /// Value (lovelace + multiasset)

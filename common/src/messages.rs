@@ -102,12 +102,11 @@ pub struct StakeAddressDeltasMessage {
     pub deltas: Vec<StakeAddressDelta>,
 }
 
-/// Stake address Diffs message
-/// How stake address changes
+/// Stake reward deltas message
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct StakeAddressDiffsMessage {
-    /// Stake Address Changes
-    pub diffs: Vec<StakeAddressDiff>,
+pub struct StakeRewardDeltasMessage {
+    /// Stake Reward Deltas
+    pub deltas: Vec<StakeRewardDelta>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -245,7 +244,7 @@ pub enum CardanoMessage {
     SPOStakeDistribution(SPOStakeDistributionMessage),   // SPO delegation distribution (SPDD)
     SPORewards(SPORewardsMessage),                       // SPO rewards distribution (SPRD)
     StakeAddressDeltas(StakeAddressDeltasMessage),       // Stake part of address deltas
-    StakeAddressDiffs(StakeAddressDiffsMessage),         // Stake Address Diffs
+    StakeRewardDeltas(StakeRewardDeltasMessage),         // Stake Reward Deltas
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

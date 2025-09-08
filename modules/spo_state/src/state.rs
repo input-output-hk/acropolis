@@ -2,12 +2,16 @@
 
 use acropolis_common::{
     ledger_state::SPOState,
-    messages::{CardanoMessage, Message, SPOStateMessage, TxCertificatesMessage},
+    messages::{
+        CardanoMessage, Message, SPOStateMessage, StakeAddressDeltasMessage,
+        StakeRewardDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
+    },
     params::TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH,
     serialization::SerializeMapAs,
-    BlockInfo, KeyHash, PoolMetadata, PoolRegistration, PoolRetirement, Relay, TxCertificate,
+    BlockInfo, KeyHash, PoolMetadata, PoolRegistration, PoolRetirement, Relay, StakeCredential,
+    TxCertificate,
 };
-use anyhow::Result;
+use anyhow::{bail, Result};
 use imbl::HashMap;
 use serde::Serialize;
 use serde_with::{hex::Hex, serde_as};
@@ -291,6 +295,72 @@ impl State {
         }
     }
 
+    fn register_stake_address(&mut self, credential: &StakeCredential) {
+        let Some(stake_addresses) = self.stake_addresses.as_mut() else {
+            return;
+        };
+
+        let hash = credential.get_hash();
+        let sas = stake_addresses.entry(hash.clone()).or_default();
+        if sas.registered {
+            error!(
+                "Stake address hash {} registered when already registered",
+                hex::encode(&hash)
+            );
+            return;
+        } else {
+            sas.registered = true;
+        }
+    }
+
+    fn deregister_stake_address(&mut self, credential: &StakeCredential) {
+        let Some(stake_addresses) = self.stake_addresses.as_mut() else {
+            return;
+        };
+
+        let hash = credential.get_hash();
+        if let Some(sas) = stake_addresses.get_mut(&hash) {
+            if sas.registered {
+                sas.registered = false;
+            } else {
+                error!(
+                    "Deregistration of unregistered stake address hash {}",
+                    hex::encode(hash)
+                );
+            }
+        } else {
+            error!(
+                "Deregistration of unknown stake address hash {}",
+                hex::encode(hash)
+            );
+        }
+    }
+
+    /// Record a stake delegation
+    fn record_stake_delegation(&mut self, credential: &StakeCredential, spo: &KeyHash) {
+        let Some(stake_addresses) = self.stake_addresses.as_mut() else {
+            return;
+        };
+
+        let hash = credential.get_hash();
+        // Get old stake address state, or create one
+        if let Some(sas) = stake_addresses.get_mut(&hash) {
+            if sas.registered {
+                sas.delegated_spo = Some(spo.clone());
+            } else {
+                error!(
+                    "Unregistered stake address in stake delegation: {}",
+                    hex::encode(hash)
+                );
+            }
+        } else {
+            error!(
+                "Unknown stake address in stake delegation: {}",
+                hex::encode(hash)
+            );
+        }
+    }
+
     /// Handle TxCertificates with SPO registrations / de-registrations
     /// Returns an optional state message for end of epoch
     pub fn handle_tx_certs(
@@ -313,10 +383,159 @@ impl State {
                 TxCertificate::PoolRetirement(ret) => {
                     self.handle_pool_retirement(block, ret);
                 }
+
+                // for stake addresses
+                TxCertificate::StakeRegistration(sc_with_pos) => {
+                    self.register_stake_address(&sc_with_pos.stake_credential);
+                }
+                TxCertificate::StakeDeregistration(sc) => {
+                    self.deregister_stake_address(&sc);
+                }
+                TxCertificate::Registration(reg) => {
+                    self.register_stake_address(&reg.credential);
+                }
+                TxCertificate::Deregistration(dreg) => {
+                    self.deregister_stake_address(&dreg.credential);
+                }
+                TxCertificate::StakeDelegation(delegation) => {
+                    self.record_stake_delegation(&delegation.credential, &delegation.operator);
+                }
+                TxCertificate::StakeAndVoteDelegation(delegation) => {
+                    self.record_stake_delegation(&delegation.credential, &delegation.operator);
+                    // don't care about vote delegation
+                }
+                TxCertificate::StakeRegistrationAndDelegation(delegation) => {
+                    self.register_stake_address(&delegation.credential);
+                    self.record_stake_delegation(&delegation.credential, &delegation.operator);
+                }
+                TxCertificate::StakeRegistrationAndVoteDelegation(delegation) => {
+                    self.register_stake_address(&delegation.credential);
+                    // don't care about vote delegation
+                }
+                TxCertificate::StakeRegistrationAndStakeAndVoteDelegation(delegation) => {
+                    self.register_stake_address(&delegation.credential);
+                    self.record_stake_delegation(&delegation.credential, &delegation.operator);
+                    // don't care about vote delegation
+                }
                 _ => (),
             }
         }
         Ok(maybe_message)
+    }
+
+    /// Update an unsigned value with a signed delta, with fences
+    fn update_value_with_delta(value: &mut u64, delta: i64) -> Result<()> {
+        if delta >= 0 {
+            *value = (*value).saturating_add(delta as u64);
+        } else {
+            let abs = (-delta) as u64;
+            if abs > *value {
+                bail!("Value underflow - was {}, delta {}", *value, delta);
+            } else {
+                *value -= abs;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Add a reward to a reward account (by hash)
+    fn update_reward_with_delta(&mut self, account: &KeyHash, delta: i64) {
+        let Some(stake_addresses) = self.stake_addresses.as_mut() else {
+            return;
+        };
+
+        // Get old stake address state, or create one
+        let sas = match stake_addresses.get_mut(account) {
+            Some(existing) => existing,
+            None => {
+                stake_addresses.insert(account.clone(), StakeAddressState::default());
+                stake_addresses.get_mut(account).unwrap()
+            }
+        };
+
+        if let Err(e) = Self::update_value_with_delta(&mut sas.rewards, delta) {
+            error!("Adding to reward account {}: {e}", hex::encode(account));
+        }
+    }
+
+    /// Handle withdrawals
+    pub fn handle_withdrawals(&mut self, withdrawals_msg: &WithdrawalsMessage) -> Result<()> {
+        let Some(stake_addresses) = self.stake_addresses.as_mut() else {
+            return Ok(());
+        };
+
+        for withdrawal in withdrawals_msg.withdrawals.iter() {
+            let hash = withdrawal.address.get_hash();
+            // Get old stake address state - which must exist
+            if let Some(sas) = stake_addresses.get(hash) {
+                // Zero withdrawals are expected, as a way to validate stake addresses (per Pi)
+                if withdrawal.value != 0 {
+                    let mut sas = sas.clone();
+                    if let Err(e) =
+                        Self::update_value_with_delta(&mut sas.rewards, -(withdrawal.value as i64))
+                    {
+                        error!(
+                            "Withdrawing from stake address {} hash {}: {e}",
+                            withdrawal.address.to_string().unwrap_or("???".to_string()),
+                            hex::encode(hash)
+                        );
+                    } else {
+                        // Update the stake address
+                        stake_addresses.insert(hash.to_vec(), sas);
+                    }
+                }
+            } else {
+                error!(
+                    "Unknown stake address in withdrawal: {}",
+                    withdrawal.address.to_string().unwrap_or("???".to_string())
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handle stake deltas
+    pub fn handle_stake_deltas(&mut self, deltas_msg: &StakeAddressDeltasMessage) -> Result<()> {
+        let Some(stake_addresses) = self.stake_addresses.as_mut() else {
+            return Ok(());
+        };
+
+        // Handle deltas
+        for delta in deltas_msg.deltas.iter() {
+            // Fold both stake key and script hashes into one - assuming the chance of
+            // collision is negligible
+            let hash = delta.address.get_hash();
+
+            // Stake addresses don't need to be registered if they aren't used for
+            // stake or drep delegation, but we need to track them in case they are later
+            let sas = stake_addresses.entry(hash.to_vec()).or_default();
+
+            if let Err(e) = Self::update_value_with_delta(&mut sas.utxo_value, delta.delta) {
+                error!("Applying delta to stake hash {}: {e}", hex::encode(hash));
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handle Stake Reward Deltas
+    pub fn handle_stake_reward_deltas(
+        &mut self,
+        _block_info: &BlockInfo,
+        reward_deltas_msg: &StakeRewardDeltasMessage,
+    ) -> Result<()> {
+        let Some(_) = self.stake_addresses.as_mut() else {
+            return Ok(());
+        };
+
+        // Handle deltas
+        for delta in reward_deltas_msg.deltas.iter() {
+            self.update_reward_with_delta(&delta.hash, delta.delta);
+        }
+
+        Ok(())
     }
 
     pub fn dump(&self) -> SPOState {

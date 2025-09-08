@@ -40,11 +40,14 @@ use state::State;
 use store_config::StoreConfig;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.certificates";
+const DEFAULT_WITHDRAWALS_TOPIC: &str = "cardano.withdrawals";
+const DEFAULT_STAKE_DELTAS_TOPIC: &str = "cardano.stake.deltas";
 const DEFAULT_CLOCK_TICK_TOPIC: &str = "clock.tick";
 const DEFAULT_SPO_STATE_TOPIC: &str = "cardano.spo.state";
 const DEFAULT_SPDD_SUBSCRIBE_TOPIC: &str = "cardano.spo.distribution";
 const DEFAULT_EPOCH_ACTIVITY_TOPIC: &str = "cardano.epoch.activity";
 const DEFAULT_SPO_REWARDS_TOPIC: &str = "cardano.spo.rewards";
+const DEFAULT_STAKE_REWARD_DELTAS_TOPIC: &str = "cardano.stake.reward.deltas";
 
 /// SPO State module
 #[module(
@@ -63,6 +66,9 @@ impl SPOState {
         retired_pools_history: RetiredPoolsHistoryState,
         store_config: &StoreConfig,
         mut certs_subscription: Box<dyn Subscription<Message>>,
+        mut stake_deltas_subscription: Box<dyn Subscription<Message>>,
+        mut withdrawals_subscription: Box<dyn Subscription<Message>>,
+        mut stake_reward_deltas_subscription: Box<dyn Subscription<Message>>,
         mut spdd_subscription: Box<dyn Subscription<Message>>,
         mut spo_rewards_subscription: Box<dyn Subscription<Message>>,
         mut epoch_activity_subscription: Box<dyn Subscription<Message>>,
@@ -76,6 +82,8 @@ impl SPOState {
 
             // read per-block topics in parallel
             let certs_message_f = certs_subscription.read();
+            let stake_deltas_message_f = stake_deltas_subscription.read();
+            let withdrawals_message_f = withdrawals_subscription.read();
 
             // Use certs_message as the synchroniser
             let (_, certs_message) = certs_message_f.await?;
@@ -129,6 +137,11 @@ impl SPOState {
                 let spdd_message_f = spdd_subscription.read();
                 let spo_rewards_message_f = spo_rewards_subscription.read();
                 let ea_message_f = epoch_activity_subscription.read();
+                let stake_reward_deltas_message_f = if store_config.store_stake_addresses {
+                    Some(stake_reward_deltas_subscription.read())
+                } else {
+                    None
+                };
 
                 // Handle SPDD
                 let (_, spdd_message) = spdd_message_f.await?;
@@ -163,6 +176,29 @@ impl SPOState {
                     });
                 }
 
+                // Handle Stake Reward Deltas
+                if let Some(stake_reward_deltas_message_f) = stake_reward_deltas_message_f {
+                    let (_, stake_reward_deltas_message) = stake_reward_deltas_message_f.await?;
+                    if let Message::Cardano((
+                        block_info,
+                        CardanoMessage::StakeRewardDeltas(stake_reward_deltas_message),
+                    )) = stake_reward_deltas_message.as_ref()
+                    {
+                        let span = info_span!(
+                            "spo_state.handle_stake_reward_deltas",
+                            block = block_info.number
+                        );
+                        span.in_scope(|| {
+                            Self::check_sync(&current_block, &block_info);
+                            // update epochs_history
+                            state
+                                .handle_stake_reward_deltas(block_info, stake_reward_deltas_message)
+                                .inspect_err(|e| error!("StakeRewardDeltas handling error: {e:#}"))
+                                .ok();
+                        });
+                    }
+                }
+
                 // Handle EochActivityMessage
                 let (_, ea_message) = ea_message_f.await?;
                 if let Message::Cardano((
@@ -184,6 +220,55 @@ impl SPOState {
                             &spos,
                         );
                     });
+                }
+            }
+
+            // Handle withdrawals and stake deltas if we save stake_adresses
+            if store_config.store_stake_addresses {
+                // Handle withdrawals
+                let (_, message) = withdrawals_message_f.await?;
+                match message.as_ref() {
+                    Message::Cardano((
+                        block_info,
+                        CardanoMessage::Withdrawals(withdrawals_msg),
+                    )) => {
+                        let span =
+                            info_span!("spo_state.handle_withdrawals", block = block_info.number);
+                        async {
+                            Self::check_sync(&current_block, &block_info);
+                            state
+                                .handle_withdrawals(withdrawals_msg)
+                                .inspect_err(|e| error!("Withdrawals handling error: {e:#}"))
+                                .ok();
+                        }
+                        .instrument(span)
+                        .await;
+                    }
+
+                    _ => error!("Unexpected message type: {message:?}"),
+                }
+
+                // Handle stake deltas
+                let (_, message) = stake_deltas_message_f.await?;
+                match message.as_ref() {
+                    Message::Cardano((
+                        block_info,
+                        CardanoMessage::StakeAddressDeltas(deltas_msg),
+                    )) => {
+                        let span =
+                            info_span!("spo_state.handle_stake_deltas", block = block_info.number);
+                        async {
+                            Self::check_sync(&current_block, &block_info);
+                            state
+                                .handle_stake_deltas(deltas_msg)
+                                .inspect_err(|e| error!("StakeAddressDeltas handling error: {e:#}"))
+                                .ok();
+                        }
+                        .instrument(span)
+                        .await;
+                    }
+
+                    _ => error!("Unexpected message type: {message:?}"),
                 }
             }
 
@@ -222,6 +307,15 @@ impl SPOState {
             config.get_string("subscribe-topic").unwrap_or(DEFAULT_SUBSCRIBE_TOPIC.to_string());
         info!("Creating subscriber on '{subscribe_topic}'");
 
+        let withdrawals_topic =
+            config.get_string("withdrawals-topic").unwrap_or(DEFAULT_WITHDRAWALS_TOPIC.to_string());
+        info!("Creating withdrawals subscriber on '{withdrawals_topic}'");
+
+        let stake_deltas_topic = config
+            .get_string("stake-deltas-topic")
+            .unwrap_or(DEFAULT_STAKE_DELTAS_TOPIC.to_string());
+        info!("Creating stake deltas subscriber on '{stake_deltas_topic}'");
+
         let clock_tick_topic =
             config.get_string("clock-tick-topic").unwrap_or(DEFAULT_CLOCK_TICK_TOPIC.to_string());
         info!("Creating subscriber on '{clock_tick_topic}'");
@@ -238,6 +332,11 @@ impl SPOState {
         let spo_rewards_topic =
             config.get_string("spo-rewards-topic").unwrap_or(DEFAULT_SPO_REWARDS_TOPIC.to_string());
         info!("Creating SPO rewards publisher on '{spo_rewards_topic}'");
+
+        let stake_reward_deltas_topic = config
+            .get_string("stake-reward-deltas-topic")
+            .unwrap_or(DEFAULT_STAKE_REWARD_DELTAS_TOPIC.to_string());
+        info!("Creating stake reward deltas subscriber on '{stake_reward_deltas_topic}'");
 
         let maybe_snapshot_topic = config
             .get_string("snapshot-topic")
@@ -436,6 +535,11 @@ impl SPOState {
 
         // Subscriptions
         let certs_subscription = context.subscribe(&subscribe_topic).await?;
+        let stake_deltas_subscription = context.subscribe(&stake_deltas_topic).await?;
+        let withdrawals_subscription = context.subscribe(&withdrawals_topic).await?;
+        let stake_reward_deltas_subscription =
+            context.subscribe(&stake_reward_deltas_topic).await?;
+
         let spdd_subscription = context.subscribe(&spdd_topic).await?;
         let spo_rewards_subscription = context.subscribe(&spo_rewards_topic).await?;
         let epoch_activity_subscription = context.subscribe(&epoch_activity_topic).await?;
@@ -449,6 +553,9 @@ impl SPOState {
                 retired_pools_history,
                 &store_config,
                 certs_subscription,
+                stake_deltas_subscription,
+                withdrawals_subscription,
+                stake_reward_deltas_subscription,
                 spdd_subscription,
                 spo_rewards_subscription,
                 epoch_activity_subscription,
