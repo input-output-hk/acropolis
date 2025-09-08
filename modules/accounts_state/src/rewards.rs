@@ -313,7 +313,8 @@ fn calculate_spo_rewards(
     // For now, "now" = time of last ('performance') snapshot
     if staking_reward_account_is_registered {
         rewards.push(RewardDetail {
-            account: spo.reward_account.clone(),
+            // TODO Hack to remove e1 header - needs resolving properly with StakeAddress
+            account: RewardAccount::from(&spo.reward_account[1..]),
             rtype: RewardType::Leader,
             amount: spo_benefit,
         });
