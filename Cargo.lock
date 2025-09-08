@@ -21,6 +21,7 @@ dependencies = [
  "futures",
  "gcd",
  "hex",
+ "imbl 5.0.0",
  "lf-queue",
  "minicbor 0.26.5",
  "num-rational",
@@ -49,6 +50,19 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with 3.14.0",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "acropolis_module_assets_state"
+version = "0.1.0"
+dependencies = [
+ "acropolis_common",
+ "anyhow",
+ "caryatid_sdk",
+ "config",
+ "imbl 5.0.0",
  "tokio",
  "tracing",
 ]
@@ -126,7 +140,7 @@ dependencies = [
  "config",
  "hex",
  "pallas",
- "reqwest 0.11.27",
+ "reqwest 0.12.23",
  "serde_json",
  "tokio",
  "tracing",
@@ -195,6 +209,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "bech32 0.11.0",
+ "blake2 0.10.6",
  "caryatid_module_rest_server",
  "caryatid_sdk",
  "config",
@@ -340,6 +355,7 @@ version = "0.1.0"
 dependencies = [
  "acropolis_common",
  "acropolis_module_accounts_state",
+ "acropolis_module_assets_state",
  "acropolis_module_block_unpacker",
  "acropolis_module_drdd_state",
  "acropolis_module_drep_state",
