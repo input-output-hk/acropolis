@@ -123,7 +123,9 @@ mod tests {
             number: epoch * 10,
             hash: Vec::new(),
             epoch,
+            epoch_slot: 99,
             new_epoch: false,
+            timestamp: 99999,
             era: Era::Conway,
         }
     }

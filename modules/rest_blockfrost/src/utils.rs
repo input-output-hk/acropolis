@@ -1,10 +1,7 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use blake2::{
-    digest::{Update, VariableOutput},
-    Digest,
-};
+use blake2::digest::{Update, VariableOutput};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 

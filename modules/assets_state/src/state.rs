@@ -1,7 +1,10 @@
 //! Acropolis AssetsState: State storage
 
 use acropolis_common::{
-    queries::assets::{AssetInfoRecord, MintRecord},
+    queries::assets::{
+        AssetAddresses, AssetHistory, AssetInfo, AssetInfoRecord, AssetList, AssetTransactions,
+        MintRecord,
+    },
     AssetName, NativeAssetsDelta, PolicyId, TxHash,
 };
 use anyhow::Result;
@@ -12,6 +15,8 @@ use tracing::info;
 pub struct AssetsStorageConfig {
     pub store_info: bool,
     pub store_history: bool,
+    pub store_addresses: bool,
+    pub store_transactions: bool,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -19,6 +24,8 @@ pub struct AssetRecord {
     pub supply: u64,
     pub mint_history: Option<Vec<MintRecord>>,
     pub extended_info: Option<AssetInfoRecord>,
+    pub addresses: Option<AssetAddresses>,
+    pub transactions: Option<AssetTransactions>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -35,7 +42,7 @@ impl State {
         }
     }
 
-    pub fn get_asset_list(&self) -> HashMap<PolicyId, HashMap<AssetName, u64>> {
+    pub fn get_asset_list(&self) -> AssetList {
         let mut result = HashMap::new();
 
         for (policy_id, assets) in &self.assets {
@@ -55,7 +62,7 @@ impl State {
         &self,
         policy_id: &PolicyId,
         asset_name: &AssetName,
-    ) -> Result<Option<(u64, AssetInfoRecord)>> {
+    ) -> Result<Option<AssetInfo>> {
         if !self.config.store_info {
             return Err(anyhow::anyhow!("asset info storage disabled in config"));
         }
@@ -73,7 +80,7 @@ impl State {
         &self,
         policy_id: &PolicyId,
         asset_name: &AssetName,
-    ) -> Result<Option<Vec<MintRecord>>> {
+    ) -> Result<Option<AssetHistory>> {
         if !self.config.store_history {
             return Err(anyhow::anyhow!("asset history storage disabled in config"));
         }
@@ -83,6 +90,42 @@ impl State {
             .get(policy_id)
             .and_then(|policy_entry| policy_entry.get(asset_name))
             .and_then(|asset_entry| asset_entry.mint_history.clone()))
+    }
+
+    pub fn get_asset_addresses(
+        &self,
+        policy_id: &PolicyId,
+        asset_name: &AssetName,
+    ) -> Result<Option<AssetAddresses>> {
+        if !self.config.store_addresses {
+            return Err(anyhow::anyhow!(
+                "asset addresses storage disabled in config"
+            ));
+        }
+
+        Ok(self
+            .assets
+            .get(policy_id)
+            .and_then(|policy_entry| policy_entry.get(asset_name))
+            .and_then(|asset_entry| asset_entry.addresses.clone()))
+    }
+
+    pub fn get_asset_transactions(
+        &self,
+        policy_id: &PolicyId,
+        asset_name: &AssetName,
+    ) -> Result<Option<AssetTransactions>> {
+        if !self.config.store_transactions {
+            return Err(anyhow::anyhow!(
+                "asset transactions storage disabled in config"
+            ));
+        }
+
+        Ok(self
+            .assets
+            .get(policy_id)
+            .and_then(|policy_entry| policy_entry.get(asset_name))
+            .and_then(|asset_entry| asset_entry.transactions.clone()))
     }
 
     pub fn get_policy_assets(&self, policy_id: &PolicyId) -> Option<Vec<(AssetName, u64)>> {
@@ -129,6 +172,16 @@ impl State {
                                 mint_or_burn_count: 0,
                                 onchain_metadata: false,
                             })
+                        } else {
+                            None
+                        },
+                        addresses: if self.config.store_addresses {
+                            Some(Vec::new())
+                        } else {
+                            None
+                        },
+                        transactions: if self.config.store_transactions {
+                            Some(Vec::new())
                         } else {
                             None
                         },

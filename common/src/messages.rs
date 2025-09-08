@@ -75,7 +75,6 @@ pub struct UTXODeltasMessage {
 pub struct AssetDeltasMessage {
     /// Ordered set of deltas
     pub deltas: Vec<(TxHash, NativeAssetsDelta)>,
-    pub metadata_updates: Metadatum,
 }
 
 /// Message encapsulating multiple transaction certificates, in order

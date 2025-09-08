@@ -54,3 +54,35 @@ pub async fn handle_assets_list_blockfrost(
         )),
     }
 }
+
+pub async fn handle_policy_assets_asset_single_blockfrost(
+    _context: Arc<Context<Message>>,
+    _params: Vec<String>,
+    _handlers_config: Arc<HandlersConfig>,
+) -> Result<RESTResponse> {
+    Ok(RESTResponse::with_text(501, "Not implemented"))
+}
+
+pub async fn handle_asset_history_blockfrost(
+    _context: Arc<Context<Message>>,
+    _params: Vec<String>,
+    _handlers_config: Arc<HandlersConfig>,
+) -> Result<RESTResponse> {
+    Ok(RESTResponse::with_text(501, "Not implemented"))
+}
+
+pub async fn handle_asset_transactions_blockfrost(
+    _context: Arc<Context<Message>>,
+    _params: Vec<String>,
+    _handlers_config: Arc<HandlersConfig>,
+) -> Result<RESTResponse> {
+    Ok(RESTResponse::with_text(501, "Not implemented"))
+}
+
+pub async fn handle_asset_addresses_blockfrost(
+    _context: Arc<Context<Message>>,
+    _params: Vec<String>,
+    _handlers_config: Arc<HandlersConfig>,
+) -> Result<RESTResponse> {
+    Ok(RESTResponse::with_text(501, "Not implemented"))
+}

@@ -316,7 +316,6 @@ impl TxUnpacker {
                                     block.clone(),
                                     CardanoMessage::AssetDeltas(AssetDeltasMessage {
                                         deltas: asset_deltas,
-                                        metadata_updates: cip25_metadata_updates
                                     })
                                 ));
 

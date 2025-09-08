@@ -25,6 +25,8 @@ const DEFAULT_ASSET_DELTAS_SUBSCRIBE_TOPIC: (&str, &str) =
 // Configuration defaults
 const DEFAULT_STORE_INFO: (&str, bool) = ("store-info", false);
 const DEFAULT_STORE_HISTORY: (&str, bool) = ("store-history", false);
+const DEFAULT_STORE_ADDRESSES: (&str, bool) = ("store-addresses", false);
+const DEFAULT_STORE_TRANSACTIONS: (&str, bool) = ("store-transactions", false);
 
 /// Assets State module
 #[module(
@@ -97,6 +99,8 @@ impl AssetsState {
         let storage_config = AssetsStorageConfig {
             store_info: get_bool_flag(&config, DEFAULT_STORE_INFO),
             store_history: get_bool_flag(&config, DEFAULT_STORE_HISTORY),
+            store_addresses: get_bool_flag(&config, DEFAULT_STORE_ADDRESSES),
+            store_transactions: get_bool_flag(&config, DEFAULT_STORE_TRANSACTIONS),
         };
 
         let asset_deltas_subscribe_topic =
@@ -153,6 +157,24 @@ impl AssetsState {
                             None => AssetsStateQueryResponse::NotFound,
                         }
                     }
+                    AssetsStateQuery::GetAssetAddresses {
+                        policy_id,
+                        asset_name,
+                    } => match state.get_asset_addresses(policy_id, asset_name) {
+                        Ok(Some(addresses)) => AssetsStateQueryResponse::AssetAddresses(addresses),
+                        Ok(None) => AssetsStateQueryResponse::NotFound,
+                        Err(e) => AssetsStateQueryResponse::Error(e.to_string()),
+                    },
+                    AssetsStateQuery::GetAssetTransactions {
+                        policy_id,
+                        asset_name,
+                    } => match state.get_asset_transactions(policy_id, asset_name) {
+                        Ok(Some(transactions)) => {
+                            AssetsStateQueryResponse::AssetTransactions(transactions)
+                        }
+                        Ok(None) => AssetsStateQueryResponse::NotFound,
+                        Err(e) => AssetsStateQueryResponse::Error(e.to_string()),
+                    },
                 };
                 Arc::new(Message::StateQueryResponse(StateQueryResponse::Assets(
                     response,
