@@ -17,6 +17,7 @@ mod types;
 mod utils;
 use handlers::{
     accounts::handle_single_account_blockfrost,
+    assets::handle_assets_list_blockfrost,
     epochs::{
         handle_epoch_info_blockfrost, handle_epoch_next_blockfrost, handle_epoch_params_blockfrost,
         handle_epoch_pool_blocks_blockfrost, handle_epoch_pool_stakes_blockfrost,
@@ -142,6 +143,10 @@ const DEFAULT_HANDLE_EPOCH_POOL_BLOCKS_TOPIC: (&str, &str) = (
     "handle-topic-epoch-pool-blocks",
     "rest.get.epochs.*.blocks.*",
 );
+
+// Assets topics
+const DEFAULT_HANDLE_ASSETS_LIST_TOPIC: (&str, &str) =
+    ("handle-topic-assets-list", "rest.get.assets");
 
 #[module(
     message_type(Message),
@@ -396,6 +401,14 @@ impl BlockfrostREST {
             DEFAULT_HANDLE_EPOCH_POOL_BLOCKS_TOPIC,
             handlers_config.clone(),
             handle_epoch_pool_blocks_blockfrost,
+        );
+
+        // Handler for /assets
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_ASSETS_LIST_TOPIC,
+            handlers_config.clone(),
+            handle_assets_list_blockfrost,
         );
 
         Ok(())
