@@ -6,13 +6,13 @@ use acropolis_common::{
     queries::accounts::{PoolsLiveStakes, DEFAULT_ACCOUNTS_QUERY_TOPIC},
     rest_helper::handle_rest,
     state_history::{StateHistory, StateHistoryStore},
-    BlockInfo, BlockStatus, StakeAddressDiff,
+    BlockInfo, BlockStatus,
 };
 use anyhow::Result;
 use caryatid_sdk::{message_bus::Subscription, module, Context, Module};
 use config::Config;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::{join, sync::Mutex};
 use tracing::{error, info, info_span, Instrument};
 
 mod drep_distribution_publisher;
@@ -21,9 +21,9 @@ mod spo_distribution_publisher;
 use spo_distribution_publisher::SPODistributionPublisher;
 mod spo_rewards_publisher;
 use spo_rewards_publisher::SPORewardsPublisher;
-mod stake_diffs_publisher;
+mod stake_reward_deltas_publisher;
 mod state;
-use stake_diffs_publisher::StakeDiffsPublisher;
+use stake_reward_deltas_publisher::StakeRewardDeltasPublisher;
 use state::State;
 mod monetary;
 mod rest;
@@ -45,7 +45,7 @@ const DEFAULT_DREP_DISTRIBUTION_TOPIC: &str = "cardano.drep.distribution";
 const DEFAULT_SPO_DISTRIBUTION_TOPIC: &str = "cardano.spo.distribution";
 const DEFAULT_SPO_REWARDS_TOPIC: &str = "cardano.spo.rewards";
 const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: &str = "cardano.protocol.parameters";
-const DEFAULT_STAKE_DIFFS_TOPIC: &str = "cardano.stake.diffs";
+const DEFAULT_STAKE_REWARD_DELTAS_TOPIC: &str = "cardano.stake.reward.deltas";
 
 const DEFAULT_HANDLE_POTS_TOPIC: (&str, &str) = ("handle-topic-pots", "rest.get.pots");
 
@@ -64,7 +64,7 @@ impl AccountsState {
         mut drep_publisher: DRepDistributionPublisher,
         mut spo_publisher: SPODistributionPublisher,
         mut spo_rewards_publisher: SPORewardsPublisher,
-        mut stake_diffs_publisher: StakeDiffsPublisher,
+        mut stake_reward_deltas_publisher: StakeRewardDeltasPublisher,
         mut spos_subscription: Box<dyn Subscription<Message>>,
         mut ea_subscription: Box<dyn Subscription<Message>>,
         mut certs_subscription: Box<dyn Subscription<Message>>,
@@ -117,7 +117,6 @@ impl AccountsState {
             let stake_message_f = stake_subscription.read();
             let withdrawals_message_f = withdrawals_subscription.read();
             let mut current_block: Option<BlockInfo> = None;
-            let mut stake_diffs = Vec::<StakeAddressDiff>::new();
 
             // Use certs_message as the synchroniser, but we have to handle it after the
             // epoch things, because they apply to the new epoch, not the last
@@ -201,20 +200,28 @@ impl AccountsState {
                         );
                         async {
                             Self::check_sync(&current_block, &block_info);
-                            let spo_rewards = state
+                            let after_epoch_result = state
                                 .handle_epoch_activity(ea_msg)
                                 .await
                                 .inspect_err(|e| error!("EpochActivity handling error: {e:#}"))
                                 .ok();
-                            // SPO rewards is for previous epoch
-                            if let Some((spo_rewards, diffs)) = spo_rewards {
-                                if let Err(e) = spo_rewards_publisher
-                                    .publish_spo_rewards(block_info, spo_rewards)
-                                    .await
-                                {
+                            if let Some((spo_rewards, stake_reward_deltas)) = after_epoch_result {
+                                // SPO Rewards Future
+                                let spo_rewards_future = spo_rewards_publisher
+                                    .publish_spo_rewards(block_info, spo_rewards);
+                                // Stake Reward Deltas Future
+                                let stake_reward_deltas_future = stake_reward_deltas_publisher
+                                    .publish_stake_reward_deltas(block_info, stake_reward_deltas);
+
+                                // publish in parallel
+                                let (spo_rewards_result, stake_reward_deltas_result) =
+                                    join!(spo_rewards_future, stake_reward_deltas_future);
+                                spo_rewards_result.unwrap_or_else(|e| {
                                     error!("Error publishing SPO rewards: {e:#}")
-                                }
-                                stake_diffs.extend(diffs);
+                                });
+                                stake_reward_deltas_result.unwrap_or_else(|e| {
+                                    error!("Error publishing stake reward deltas: {e:#}")
+                                });
                             }
                         }
                         .instrument(span)
@@ -264,13 +271,10 @@ impl AccountsState {
                     let span = info_span!("account_state.handle_certs", block = block_info.number);
                     async {
                         Self::check_sync(&current_block, &block_info);
-                        let diffs = state
+                        state
                             .handle_tx_certificates(tx_certs_msg)
                             .inspect_err(|e| error!("TxCertificates handling error: {e:#}"))
                             .ok();
-                        if let Some(diffs) = diffs {
-                            stake_diffs.extend(diffs);
-                        }
                     }
                     .instrument(span)
                     .await;
@@ -289,13 +293,10 @@ impl AccountsState {
                     );
                     async {
                         Self::check_sync(&current_block, &block_info);
-                        let diffs = state
+                        state
                             .handle_withdrawals(withdrawals_msg)
                             .inspect_err(|e| error!("Withdrawals handling error: {e:#}"))
                             .ok();
-                        if let Some(diffs) = diffs {
-                            stake_diffs.extend(diffs);
-                        }
                     }
                     .instrument(span)
                     .await;
@@ -314,13 +315,10 @@ impl AccountsState {
                     );
                     async {
                         Self::check_sync(&current_block, &block_info);
-                        let diffs = state
+                        state
                             .handle_stake_deltas(deltas_msg)
                             .inspect_err(|e| error!("StakeAddressDeltas handling error: {e:#}"))
                             .ok();
-                        if let Some(diffs) = diffs {
-                            stake_diffs.extend(diffs);
-                        }
                     }
                     .instrument(span)
                     .await;
@@ -331,13 +329,6 @@ impl AccountsState {
 
             // Commit the new state
             if let Some(block_info) = current_block {
-                // publish stake address diffs message
-                if let Err(e) =
-                    stake_diffs_publisher.publish_stake_diffs(&block_info, stake_diffs).await
-                {
-                    error!("Error publishing stake diffs: {e:#}")
-                }
-
                 history.lock().await.commit(block_info.number, state);
             }
         }
@@ -409,10 +400,10 @@ impl AccountsState {
             .get_string("publish-spo-rewards-topic")
             .unwrap_or(DEFAULT_SPO_REWARDS_TOPIC.to_string());
 
-        let stake_diffs_topic = config
-            .get_string("publish-stake-diffs-topic")
-            .unwrap_or(DEFAULT_STAKE_DIFFS_TOPIC.to_string());
-        info!("Creating stake diffs subscriber on '{stake_diffs_topic}'");
+        let stake_reward_deltas_topic = config
+            .get_string("publish-stake-reward-deltas-topic")
+            .unwrap_or(DEFAULT_STAKE_REWARD_DELTAS_TOPIC.to_string());
+        info!("Creating stake reward deltas subscriber on '{stake_reward_deltas_topic}'");
 
         // REST handler topics
         let handle_pots_topic = config
@@ -546,7 +537,8 @@ impl AccountsState {
             DRepDistributionPublisher::new(context.clone(), drep_distribution_topic);
         let spo_publisher = SPODistributionPublisher::new(context.clone(), spo_distribution_topic);
         let spo_rewards_publisher = SPORewardsPublisher::new(context.clone(), spo_rewards_topic);
-        let stake_diffs_publisher = StakeDiffsPublisher::new(context.clone(), stake_diffs_topic);
+        let stake_reward_deltas_publisher =
+            StakeRewardDeltasPublisher::new(context.clone(), stake_reward_deltas_topic);
 
         // Subscribe
         let spos_subscription = context.subscribe(&spo_state_topic).await?;
@@ -565,7 +557,7 @@ impl AccountsState {
                 drep_publisher,
                 spo_publisher,
                 spo_rewards_publisher,
-                stake_diffs_publisher,
+                stake_reward_deltas_publisher,
                 spos_subscription,
                 ea_subscription,
                 certs_subscription,

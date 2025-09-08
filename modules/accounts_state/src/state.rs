@@ -12,7 +12,7 @@ use acropolis_common::{
     InstantaneousRewardTarget, KeyHash, Lovelace, MoveInstantaneousReward, PoolRegistration, Pot,
     StakeAddress, StakeCredential, TxCertificate,
 };
-use acropolis_common::{SPORewards, StakeAddressChange, StakeAddressDiff};
+use acropolis_common::{SPORewards, StakeRewardDelta};
 use anyhow::{bail, Result};
 use dashmap::DashMap;
 use imbl::OrdMap;
@@ -205,7 +205,7 @@ impl State {
         epoch: u64,
         total_fees: u64,
         spo_block_counts: HashMap<KeyHash, usize>,
-    ) -> Result<Vec<StakeAddressDiff>> {
+    ) -> Result<Vec<StakeRewardDelta>> {
         // TODO HACK! Investigate why this differs to our calculated reserves after AVVM
         // 13,887,515,255 - as we enter 208 (Shelley)
         if epoch == 208 {
@@ -254,10 +254,10 @@ impl State {
         self.pots = monetary_change.pots;
 
         // Pay the refunds and MIRs
-        let mut diffs = Vec::<StakeAddressDiff>::new();
-        diffs.extend(self.pay_pool_refunds());
-        diffs.extend(self.pay_stake_refunds());
-        diffs.extend(self.pay_mirs());
+        let mut reward_deltas = Vec::<StakeRewardDelta>::new();
+        reward_deltas.extend(self.pay_pool_refunds());
+        reward_deltas.extend(self.pay_stake_refunds());
+        reward_deltas.extend(self.pay_mirs());
 
         // Capture a new snapshot and push it to state
         let snapshot = Snapshot::new(
@@ -286,12 +286,12 @@ impl State {
             )
         }))));
 
-        Ok(diffs)
+        Ok(reward_deltas)
     }
 
     /// Pay pool refunds
-    fn pay_pool_refunds(&mut self) -> Vec<StakeAddressDiff> {
-        let mut diffs = Vec::<StakeAddressDiff>::new();
+    fn pay_pool_refunds(&mut self) -> Vec<StakeRewardDelta> {
+        let mut reward_deltas = Vec::<StakeRewardDelta>::new();
 
         // Get pool deposit amount from parameters, or default
         let deposit = self
@@ -320,9 +320,9 @@ impl State {
                     None => false,
                 }
             } {
-                diffs.push(StakeAddressDiff {
+                reward_deltas.push(StakeRewardDelta {
                     hash: keyhash.clone(),
-                    change: StakeAddressChange::ValueDiff(deposit as i64),
+                    delta: deposit as i64,
                 });
                 self.add_to_reward(&keyhash, deposit);
             } else {
@@ -336,12 +336,12 @@ impl State {
             self.pots.deposits -= deposit;
         }
 
-        diffs
+        reward_deltas
     }
 
     /// Pay stake address refunds
-    fn pay_stake_refunds(&mut self) -> Vec<StakeAddressDiff> {
-        let mut diffs = Vec::<StakeAddressDiff>::new();
+    fn pay_stake_refunds(&mut self) -> Vec<StakeRewardDelta> {
+        let mut reward_deltas = Vec::<StakeRewardDelta>::new();
 
         let refunds = take(&mut self.stake_refunds);
         if !refunds.is_empty() {
@@ -354,20 +354,20 @@ impl State {
 
         // Send them their deposits back
         for (keyhash, deposit) in refunds {
-            diffs.push(StakeAddressDiff {
+            reward_deltas.push(StakeRewardDelta {
                 hash: keyhash.clone(),
-                change: StakeAddressChange::ValueDiff(deposit as i64),
+                delta: deposit as i64,
             });
             self.add_to_reward(&keyhash, deposit);
             self.pots.deposits -= deposit;
         }
 
-        diffs
+        reward_deltas
     }
 
     /// Pay MIRs
-    fn pay_mirs(&mut self) -> Vec<StakeAddressDiff> {
-        let mut diffs = Vec::<StakeAddressDiff>::new();
+    fn pay_mirs(&mut self) -> Vec<StakeRewardDelta> {
+        let mut reward_deltas = Vec::<StakeRewardDelta>::new();
 
         let mirs = take(&mut self.mirs);
         for mir in mirs {
@@ -398,9 +398,9 @@ impl State {
                         let sas = stake_addresses.entry(hash.clone()).or_default();
 
                         // Add to this one
-                        diffs.push(StakeAddressDiff {
+                        reward_deltas.push(StakeRewardDelta {
                             hash: hash.clone(),
-                            change: StakeAddressChange::ValueDiff(*value as i64),
+                            delta: *value,
                         });
                         if let Err(e) = Self::update_value_with_delta(&mut sas.rewards, *value) {
                             error!("MIR to stake hash {}: {e}", hex::encode(hash));
@@ -434,7 +434,7 @@ impl State {
             }
         }
 
-        diffs
+        reward_deltas
     }
 
     /// Add a reward to a reward account (by hash)
@@ -569,13 +569,14 @@ impl State {
     /// Handle an EpochActivityMessage giving total fees and block counts by VRF key for
     /// the just-ended epoch
     /// This also returns SPO rewards for publishing to the SPDD topic (For epoch N)
+    /// and stake reward deltas for publishing to the StakeRewardDeltas topic (For epoch N)
     pub async fn handle_epoch_activity(
         &mut self,
         ea_msg: &EpochActivityMessage,
-    ) -> Result<(Vec<(KeyHash, SPORewards)>, Vec<StakeAddressDiff>)> {
+    ) -> Result<(Vec<(KeyHash, SPORewards)>, Vec<StakeRewardDelta>)> {
         let mut spo_rewards: Vec<(KeyHash, SPORewards)> = Vec::new();
-        // Collect stake addresses diffs
-        let mut diffs = Vec::<StakeAddressDiff>::new();
+        // Collect stake addresses reward deltas
+        let mut reward_deltas = Vec::<StakeRewardDelta>::new();
 
         // Reverse map of VRF key to SPO operator ID
         let vrf_to_operator: HashMap<KeyHash, KeyHash> =
@@ -605,14 +606,14 @@ impl State {
         if let Some(task) = task.take() {
             match task.await {
                 Ok(Ok(reward_result)) => {
-                    // Collect rewards to stake addresses diffs
-                    diffs.extend(
+                    // Collect rewards to stake addresses reward deltas
+                    reward_deltas.extend(
                         reward_result
                             .rewards
                             .iter()
-                            .map(|(account, amount)| StakeAddressDiff {
+                            .map(|(account, amount)| StakeRewardDelta {
                                 hash: account.clone(),
-                                change: StakeAddressChange::ValueDiff(*amount as i64),
+                                delta: *amount as i64,
                             })
                             .collect::<Vec<_>>(),
                     );
@@ -631,9 +632,13 @@ impl State {
             }
         };
         // Enter epoch - note the message specifies the epoch that has just *ended*
-        diffs.extend(self.enter_epoch(ea_msg.epoch + 1, ea_msg.total_fees, spo_block_counts)?);
+        reward_deltas.extend(self.enter_epoch(
+            ea_msg.epoch + 1,
+            ea_msg.total_fees,
+            spo_block_counts,
+        )?);
 
-        Ok((spo_rewards, diffs))
+        Ok((spo_rewards, reward_deltas))
     }
 
     /// Handle an SPOStateMessage with the full set of SPOs valid at the end of the last
@@ -691,11 +696,7 @@ impl State {
     }
 
     /// Register a stake address, with specified deposit if known
-    fn register_stake_address(
-        &mut self,
-        credential: &StakeCredential,
-        deposit: Option<Lovelace>,
-    ) -> Option<StakeAddressDiff> {
+    fn register_stake_address(&mut self, credential: &StakeCredential, deposit: Option<Lovelace>) {
         let hash = credential.get_hash();
 
         // Stake addresses can be registered after being used in UTXOs
@@ -706,7 +707,6 @@ impl State {
                 "Stake address hash {} registered when already registered",
                 hex::encode(&hash)
             );
-            None
         } else {
             sas.registered = true;
 
@@ -724,19 +724,11 @@ impl State {
             };
 
             self.pots.deposits += deposit;
-            Some(StakeAddressDiff {
-                hash: hash.clone(),
-                change: StakeAddressChange::StakeAddressRegistered,
-            })
         }
     }
 
     /// Deregister a stake address, with specified refund if known
-    fn deregister_stake_address(
-        &mut self,
-        credential: &StakeCredential,
-        refund: Option<Lovelace>,
-    ) -> Option<StakeAddressDiff> {
+    fn deregister_stake_address(&mut self, credential: &StakeCredential, refund: Option<Lovelace>) {
         let hash = credential.get_hash();
 
         // Check if it existed
@@ -757,23 +749,17 @@ impl State {
                 };
                 self.pots.deposits -= deposit;
                 sas.registered = false;
-                Some(StakeAddressDiff {
-                    hash: hash.clone(),
-                    change: StakeAddressChange::StakeAddressDeregistered,
-                })
             } else {
                 error!(
                     "Deregistration of unregistered stake address hash {}",
                     hex::encode(hash)
                 );
-                None
             }
         } else {
             error!(
                 "Deregistration of unknown stake address hash {}",
                 hex::encode(hash)
             );
-            None
         }
     }
 
@@ -782,11 +768,7 @@ impl State {
     }
 
     /// Record a stake delegation
-    fn record_stake_delegation(
-        &mut self,
-        credential: &StakeCredential,
-        spo: &KeyHash,
-    ) -> Option<StakeAddressDiff> {
+    fn record_stake_delegation(&mut self, credential: &StakeCredential, spo: &KeyHash) {
         let hash = credential.get_hash();
 
         // Get old stake address state, or create one
@@ -794,23 +776,17 @@ impl State {
         if let Some(sas) = stake_addresses.get_mut(&hash) {
             if sas.registered {
                 sas.delegated_spo = Some(spo.clone());
-                Some(StakeAddressDiff {
-                    hash: hash.clone(),
-                    change: StakeAddressChange::DelegatedToSPO(spo.clone()),
-                })
             } else {
                 error!(
                     "Unregistered stake address in stake delegation: {}",
                     hex::encode(hash)
                 );
-                None
             }
         } else {
             error!(
                 "Unknown stake address in stake delegation: {}",
                 hex::encode(hash)
             );
-            None
         }
     }
 
@@ -837,111 +813,89 @@ impl State {
     }
 
     /// record a drep delegation
-    fn record_drep_delegation(
-        &mut self,
-        credential: &StakeCredential,
-        drep: &DRepChoice,
-    ) -> Option<StakeAddressDiff> {
+    fn record_drep_delegation(&mut self, credential: &StakeCredential, drep: &DRepChoice) {
         let hash = credential.get_hash();
         let mut stake_addresses = self.stake_addresses.lock().unwrap();
         if let Some(sas) = stake_addresses.get_mut(&hash) {
             if sas.registered {
                 sas.delegated_drep = Some(drep.clone());
-                Some(StakeAddressDiff {
-                    hash: hash.clone(),
-                    change: StakeAddressChange::DelegatedToDRep(drep.clone()),
-                })
             } else {
                 error!(
                     "Unregistered stake address in DRep delegation: {}",
                     hex::encode(hash)
                 );
-                None
             }
         } else {
             error!(
                 "Unknown stake address in stake delegation: {}",
                 hex::encode(hash)
             );
-            None
         }
     }
 
     /// Handle TxCertificates
-    pub fn handle_tx_certificates(
-        &mut self,
-        tx_certs_msg: &TxCertificatesMessage,
-    ) -> Result<Vec<StakeAddressDiff>> {
-        let mut diffs = Vec::<StakeAddressDiff>::new();
-
+    pub fn handle_tx_certificates(&mut self, tx_certs_msg: &TxCertificatesMessage) -> Result<()> {
         // Handle certificates
         for tx_cert in tx_certs_msg.certificates.iter() {
-            let new_diffs: Vec<Option<StakeAddressDiff>> = match tx_cert {
+            match tx_cert {
                 TxCertificate::StakeRegistration(sc_with_pos) => {
-                    vec![self.register_stake_address(&sc_with_pos.stake_credential, None)]
+                    self.register_stake_address(&sc_with_pos.stake_credential, None);
                 }
 
                 TxCertificate::StakeDeregistration(sc) => {
-                    vec![self.deregister_stake_address(&sc, None)]
+                    self.deregister_stake_address(&sc, None);
                 }
 
                 TxCertificate::MoveInstantaneousReward(mir) => {
                     self.handle_mir(&mir).unwrap_or_else(|e| error!("MIR failed: {e:#}"));
-                    vec![]
                 }
 
                 TxCertificate::Registration(reg) => {
-                    vec![self.register_stake_address(&reg.credential, Some(reg.deposit))]
+                    self.register_stake_address(&reg.credential, Some(reg.deposit));
                 }
 
                 TxCertificate::Deregistration(dreg) => {
-                    vec![self.deregister_stake_address(&dreg.credential, Some(dreg.refund))]
+                    self.deregister_stake_address(&dreg.credential, Some(dreg.refund));
                 }
 
                 TxCertificate::StakeDelegation(delegation) => {
-                    vec![self.record_stake_delegation(&delegation.credential, &delegation.operator)]
+                    self.record_stake_delegation(&delegation.credential, &delegation.operator);
                 }
 
                 TxCertificate::VoteDelegation(delegation) => {
-                    vec![self.record_drep_delegation(&delegation.credential, &delegation.drep)]
+                    self.record_drep_delegation(&delegation.credential, &delegation.drep);
                 }
 
-                TxCertificate::StakeAndVoteDelegation(delegation) => vec![
-                    self.record_stake_delegation(&delegation.credential, &delegation.operator),
-                    self.record_drep_delegation(&delegation.credential, &delegation.drep),
-                ],
+                TxCertificate::StakeAndVoteDelegation(delegation) => {
+                    self.record_stake_delegation(&delegation.credential, &delegation.operator);
+                    self.record_drep_delegation(&delegation.credential, &delegation.drep);
+                }
 
-                TxCertificate::StakeRegistrationAndDelegation(delegation) => vec![
-                    self.register_stake_address(&delegation.credential, Some(delegation.deposit)),
-                    self.record_stake_delegation(&delegation.credential, &delegation.operator),
-                ],
+                TxCertificate::StakeRegistrationAndDelegation(delegation) => {
+                    self.register_stake_address(&delegation.credential, Some(delegation.deposit));
+                    self.record_stake_delegation(&delegation.credential, &delegation.operator);
+                }
 
-                TxCertificate::StakeRegistrationAndVoteDelegation(delegation) => vec![
-                    self.register_stake_address(&delegation.credential, Some(delegation.deposit)),
-                    self.record_drep_delegation(&delegation.credential, &delegation.drep),
-                ],
+                TxCertificate::StakeRegistrationAndVoteDelegation(delegation) => {
+                    self.register_stake_address(&delegation.credential, Some(delegation.deposit));
+                    self.record_drep_delegation(&delegation.credential, &delegation.drep);
+                }
 
-                TxCertificate::StakeRegistrationAndStakeAndVoteDelegation(delegation) => vec![
-                    self.register_stake_address(&delegation.credential, Some(delegation.deposit)),
-                    self.record_stake_delegation(&delegation.credential, &delegation.operator),
-                    self.record_drep_delegation(&delegation.credential, &delegation.drep),
-                ],
+                TxCertificate::StakeRegistrationAndStakeAndVoteDelegation(delegation) => {
+                    self.register_stake_address(&delegation.credential, Some(delegation.deposit));
+                    self.record_stake_delegation(&delegation.credential, &delegation.operator);
+                    self.record_drep_delegation(&delegation.credential, &delegation.drep);
+                }
 
-                _ => vec![],
+                _ => (),
             };
-            diffs.extend(new_diffs.into_iter().filter_map(|d| d));
         }
 
-        Ok(diffs)
+        Ok(())
     }
 
     /// Handle withdrawals
-    pub fn handle_withdrawals(
-        &mut self,
-        withdrawals_msg: &WithdrawalsMessage,
-    ) -> Result<Vec<StakeAddressDiff>> {
-        let mut diffs = Vec::<StakeAddressDiff>::new();
-
+    pub fn handle_withdrawals(&mut self, withdrawals_msg: &WithdrawalsMessage) -> Result<()> {
         for withdrawal in withdrawals_msg.withdrawals.iter() {
             let hash = withdrawal.address.get_hash();
 
@@ -962,10 +916,6 @@ impl State {
                     } else {
                         // Update the stake address
                         stake_addresses.insert(hash.to_vec(), sas);
-                        diffs.push(StakeAddressDiff {
-                            hash: hash.to_vec(),
-                            change: StakeAddressChange::ValueDiff(-(withdrawal.value as i64)),
-                        });
                     }
                 }
             } else {
@@ -976,7 +926,7 @@ impl State {
             }
         }
 
-        Ok(diffs)
+        Ok(())
     }
 
     /// Handle pots
@@ -1002,12 +952,7 @@ impl State {
     }
 
     /// Handle stake deltas
-    pub fn handle_stake_deltas(
-        &mut self,
-        deltas_msg: &StakeAddressDeltasMessage,
-    ) -> Result<Vec<StakeAddressDiff>> {
-        let mut diffs = Vec::<StakeAddressDiff>::new();
-
+    pub fn handle_stake_deltas(&mut self, deltas_msg: &StakeAddressDeltasMessage) -> Result<()> {
         // Handle deltas
         for delta in deltas_msg.deltas.iter() {
             // Fold both stake key and script hashes into one - assuming the chance of
@@ -1021,15 +966,10 @@ impl State {
 
             if let Err(e) = Self::update_value_with_delta(&mut sas.utxo_value, delta.delta) {
                 error!("Applying delta to stake hash {}: {e}", hex::encode(hash));
-            } else {
-                diffs.push(StakeAddressDiff {
-                    hash: hash.to_vec(),
-                    change: StakeAddressChange::ValueDiff(delta.delta),
-                });
             }
         }
 
-        Ok(diffs)
+        Ok(())
     }
 }
 
@@ -1075,10 +1015,7 @@ mod tests {
             }],
         };
 
-        let diffs = state.handle_stake_deltas(&msg).unwrap();
-        assert_eq!(diffs.len(), 1);
-        assert_eq!(diffs[0].hash, STAKE_KEY_HASH.to_vec());
-        assert_eq!(diffs[0].change, StakeAddressChange::ValueDiff(42));
+        state.handle_stake_deltas(&msg).unwrap();
 
         {
             let stake_addresses = state.stake_addresses.lock().unwrap();
@@ -1173,10 +1110,7 @@ mod tests {
             }],
         };
 
-        let diffs = state.handle_stake_deltas(&msg1).unwrap();
-        assert_eq!(diffs.len(), 1);
-        assert_eq!(diffs[0].hash, addr1.to_vec());
-        assert_eq!(diffs[0].change, StakeAddressChange::ValueDiff(42));
+        state.handle_stake_deltas(&msg1).unwrap();
 
         let msg2 = StakeAddressDeltasMessage {
             deltas: vec![StakeAddressDelta {
@@ -1185,10 +1119,7 @@ mod tests {
             }],
         };
 
-        let diffs = state.handle_stake_deltas(&msg2).unwrap();
-        assert_eq!(diffs.len(), 1);
-        assert_eq!(diffs[0].hash, addr2.to_vec());
-        assert_eq!(diffs[0].change, StakeAddressChange::ValueDiff(21));
+        state.handle_stake_deltas(&msg2).unwrap();
 
         // Get the SPDD
         let spdd = state.generate_spdd();
@@ -1264,8 +1195,8 @@ mod tests {
         };
 
         state.handle_mir(&mir).unwrap();
-        let diffs = state.pay_mirs();
-        assert_eq!(diffs.len(), 0);
+        let reward_deltas = state.pay_mirs();
+        assert_eq!(reward_deltas.len(), 0);
         assert_eq!(state.pots.reserves, 68);
         assert_eq!(state.pots.treasury, 32);
         assert_eq!(state.pots.deposits, 0);
@@ -1279,11 +1210,7 @@ mod tests {
         state.pots.reserves = 100;
 
         // Set up one stake address
-        let diff = state
-            .register_stake_address(&StakeCredential::AddrKeyHash(STAKE_KEY_HASH.to_vec()), None)
-            .unwrap();
-        assert_eq!(diff.hash, STAKE_KEY_HASH.to_vec());
-        assert_eq!(diff.change, StakeAddressChange::StakeAddressRegistered);
+        state.register_stake_address(&StakeCredential::AddrKeyHash(STAKE_KEY_HASH.to_vec()), None);
 
         let msg = StakeAddressDeltasMessage {
             deltas: vec![StakeAddressDelta {
@@ -1291,10 +1218,7 @@ mod tests {
                 delta: 99,
             }],
         };
-        let diffs = state.handle_stake_deltas(&msg).unwrap();
-        assert_eq!(diffs.len(), 1);
-        assert_eq!(diffs[0].hash, STAKE_KEY_HASH.to_vec());
-        assert_eq!(diffs[0].change, StakeAddressChange::ValueDiff(99));
+        state.handle_stake_deltas(&msg).unwrap();
 
         {
             let stake_addresses = state.stake_addresses.lock().unwrap();
@@ -1314,15 +1238,10 @@ mod tests {
         };
 
         state.handle_mir(&mir).unwrap();
-        let diffs = state.pay_mirs();
+        state.pay_mirs();
         assert_eq!(state.pots.reserves, 58);
         assert_eq!(state.pots.treasury, 0);
         assert_eq!(state.pots.deposits, 2_000_000); // Paid deposit
-        assert_eq!(diffs.len(), 2);
-        assert_eq!(diffs[0].hash, STAKE_KEY_HASH.to_vec());
-        assert_eq!(diffs[0].change, StakeAddressChange::ValueDiff(47));
-        assert_eq!(diffs[1].hash, STAKE_KEY_HASH.to_vec());
-        assert_eq!(diffs[1].change, StakeAddressChange::ValueDiff(-5));
 
         let stake_addresses = state.stake_addresses.lock().unwrap();
         let sas = stake_addresses.get(&STAKE_KEY_HASH.to_vec()).unwrap();
@@ -1371,7 +1290,7 @@ mod tests {
         assert_eq!(state.pots.reserves, 58);
         assert_eq!(diffs.len(), 1);
         assert_eq!(diffs[0].hash, STAKE_KEY_HASH.to_vec());
-        assert_eq!(diffs[0].change, StakeAddressChange::ValueDiff(42));
+        assert_eq!(diffs[0].delta, 42);
 
         {
             let stake_addresses = state.stake_addresses.lock().unwrap();
@@ -1387,10 +1306,7 @@ mod tests {
             }],
         };
 
-        let diffs = state.handle_withdrawals(&withdrawals).unwrap();
-        assert_eq!(diffs.len(), 1);
-        assert_eq!(diffs[0].hash, STAKE_KEY_HASH.to_vec());
-        assert_eq!(diffs[0].change, StakeAddressChange::ValueDiff(-39));
+        state.handle_withdrawals(&withdrawals).unwrap();
 
         let stake_addresses = state.stake_addresses.lock().unwrap();
         let sas = stake_addresses.get(&STAKE_KEY_HASH.to_vec()).unwrap();
@@ -1478,8 +1394,7 @@ mod tests {
             ),
         ];
 
-        let diffs = state.handle_tx_certificates(&TxCertificatesMessage { certificates })?;
-        assert_eq!(diffs.len(), 10);
+        state.handle_tx_certificates(&TxCertificatesMessage { certificates })?;
 
         let deltas = vec![
             StakeAddressDelta {
