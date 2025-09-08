@@ -23,21 +23,10 @@ https://github.com/cardano-foundation/CIPs/blob/master/CIP-0059/feature-table.md
 
 ## header `variant` field from Pallas header parser (chain-sync protocol)
 
-It *seems*, that it's TipInfo from Haskell node. 
+It seems `variant` is TipInfo from Haskell node or something similar.
 ouroboros-consensus-cardano/Ouroboros/Consensus/Cardano/Block.hs
-
-```
-        {-# COMPLETE TipInfoByron
-                   , TipInfoShelley
-                   , TipInfoAllegra
-                   , TipInfoMary
-                   , TipInfoAlonzo
-                   , TipInfoBabbage
-                   , TipInfoConway
-          #-}
-```
-
-Numbers are given in another place:
+This is indirect observation, but the epochs are numbered like this in
+multiple occurrences and used to distinguish block version:
 
 ```
         pattern TagByron   x =                   Z x
@@ -48,6 +37,3 @@ Numbers are given in another place:
         pattern TagBabbage x =    S (S (S (S (S (Z x)))))
         pattern TagConway  x = S (S (S (S (S (S (Z x))))))
 ```
-
-But the question needs additional research.
-
