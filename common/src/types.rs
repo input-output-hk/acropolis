@@ -140,6 +140,23 @@ pub struct StakeAddressDelta {
     pub delta: i64,
 }
 
+/// Stake Address State Change
+#[derive(Debug, Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct StakeAddressDiff {
+    pub hash: KeyHash,
+    pub change: StakeAddressChange,
+}
+
+/// Stake Address State Change
+#[derive(Debug, Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum StakeAddressChange {
+    StakeAddressRegistered,
+    StakeAddressDeregistered,
+    DelegatedToSPO(KeyHash),
+    DelegatedToDRep(DRepChoice),
+    ValueDiff(LovelaceDelta),
+}
+
 /// Value (lovelace + multiasset)
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Value {
@@ -698,7 +715,7 @@ pub struct Deregistration {
 }
 
 /// DRepChoice (=CDDL drep, badly named)
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum DRepChoice {
     /// Address key
     Key(KeyHash),
