@@ -24,7 +24,6 @@ use tracing::{error, info, info_span, Instrument};
 mod aggregated_state;
 mod epochs_history;
 mod historical_spo_state;
-mod rest;
 mod retired_pools_history;
 mod spo_state_publisher;
 mod state;
