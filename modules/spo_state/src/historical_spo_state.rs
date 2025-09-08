@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use acropolis_common::{
-    queries::governance::VoteRecord, KeyHash, PoolRegistration, PoolUpdateEvent, StakeCredential,
+    queries::governance::VoteRecord, KeyHash, PoolRegistration, PoolUpdateEvent,
 };
 use serde::{Deserialize, Serialize};
 
@@ -22,7 +22,7 @@ pub struct HistoricalSPOState {
 
 impl HistoricalSPOState {
     #[allow(dead_code)]
-    pub fn new(store_config: StoreConfig) -> Self {
+    pub fn new(store_config: &StoreConfig) -> Self {
         Self {
             registration: store_config.store_registration.then(PoolRegistration::default),
             updates: store_config.store_updates.then(Vec::new),
@@ -31,7 +31,17 @@ impl HistoricalSPOState {
         }
     }
 
-    pub fn handle_stake_delegation(&mut self, credential: &StakeCredential, spo: &KeyHash) {
-        let hash = credential.get_hash();
+    pub fn add_delegator(&mut self, delegator: &KeyHash) -> Option<bool> {
+        let Some(delegators) = self.delegators.as_mut() else {
+            return None;
+        };
+        Some(delegators.insert(delegator.clone()))
+    }
+
+    pub fn remove_delegator(&mut self, delegator: &KeyHash) -> Option<bool> {
+        let Some(delegators) = self.delegators.as_mut() else {
+            return None;
+        };
+        Some(delegators.remove(delegator))
     }
 }

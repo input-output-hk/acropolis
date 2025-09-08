@@ -42,6 +42,8 @@ pub struct StakeAddressState {
 #[serde_as]
 #[derive(Default, Debug, Clone, Serialize)]
 pub struct State {
+    store_config: StoreConfig,
+
     block: u64,
 
     epoch: u64,
@@ -67,6 +69,7 @@ pub struct State {
 impl State {
     pub fn new(config: &StoreConfig) -> Self {
         Self {
+            store_config: config.clone(),
             block: 0,
             epoch: 0,
             spos: HashMap::new(),
@@ -97,6 +100,7 @@ impl From<SPOState> for State {
                 acc
             });
         Self {
+            store_config: StoreConfig::default(),
             block: 0,
             epoch: 0,
             spos,
@@ -322,6 +326,23 @@ impl State {
         if let Some(sas) = stake_addresses.get_mut(&hash) {
             if sas.registered {
                 sas.registered = false;
+                // update historical_spos
+                if let Some(historical_spos) = self.historical_spos.as_mut() {
+                    if let Some(old_spo) = sas.delegated_spo.as_ref() {
+                        // remove delegators from old_spo
+                        if let Some(historical_spo) = historical_spos.get_mut(old_spo) {
+                            if let Some(removed) = historical_spo.remove_delegator(&hash) {
+                                if !removed {
+                                    error!(
+                                        "Historical SPO state for {} does not contain delegator {}",
+                                        hex::encode(old_spo),
+                                        hex::encode(&hash)
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
             } else {
                 error!(
                     "Deregistration of unregistered stake address hash {}",
@@ -337,6 +358,7 @@ impl State {
     }
 
     /// Record a stake delegation
+    /// Update historical_spo_state's delegators
     fn record_stake_delegation(&mut self, credential: &StakeCredential, spo: &KeyHash) {
         let Some(stake_addresses) = self.stake_addresses.as_mut() else {
             return;
@@ -346,7 +368,44 @@ impl State {
         // Get old stake address state, or create one
         if let Some(sas) = stake_addresses.get_mut(&hash) {
             if sas.registered {
+                let old_spo = sas.delegated_spo.take();
                 sas.delegated_spo = Some(spo.clone());
+                // update historical_spos
+                if let Some(historical_spos) = self.historical_spos.as_mut() {
+                    // Remove old delegator
+                    if let Some(old_spo) = old_spo {
+                        match historical_spos.get_mut(&old_spo) {
+                            Some(historical_spo) => {
+                                if let Some(removed) = historical_spo.remove_delegator(&hash) {
+                                    if !removed {
+                                        error!(
+                                            "Historical SPO state for {} does not contain delegator {}",
+                                            hex::encode(old_spo),
+                                            hex::encode(&hash)
+                                        );
+                                    }
+                                }
+                            }
+                            _ => {
+                                error!("Missing Historical SPO state for {}", hex::encode(old_spo));
+                            }
+                        }
+                    }
+
+                    // get old one or create from store_config
+                    let historical_spo = historical_spos
+                        .entry(spo.clone())
+                        .or_insert_with(|| HistoricalSPOState::new(&self.store_config));
+                    if let Some(added) = historical_spo.add_delegator(&hash) {
+                        if !added {
+                            error!(
+                                "Historical SPO state for {} already contains delegator {}",
+                                hex::encode(spo),
+                                hex::encode(&hash)
+                            );
+                        }
+                    }
+                }
             } else {
                 error!(
                     "Unregistered stake address in stake delegation: {}",
@@ -393,9 +452,11 @@ impl State {
                 }
                 TxCertificate::Registration(reg) => {
                     self.register_stake_address(&reg.credential);
+                    // we don't care deposite
                 }
                 TxCertificate::Deregistration(dreg) => {
                     self.deregister_stake_address(&dreg.credential);
+                    // we don't care refund
                 }
                 TxCertificate::StakeDelegation(delegation) => {
                     self.record_stake_delegation(&delegation.credential, &delegation.operator);
