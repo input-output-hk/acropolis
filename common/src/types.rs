@@ -102,12 +102,14 @@ pub struct BlockInfo {
     pub epoch: u64,
 
     /// Epoch slot number
+    #[serde(default)]
     pub epoch_slot: u64,
 
     /// Does this block start a new epoch?
     pub new_epoch: bool,
 
     /// UNIX timestamp
+    #[serde(default)]
     pub timestamp: u64,
 
     /// Protocol era
