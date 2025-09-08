@@ -317,7 +317,7 @@ impl MithrilSnapshotFetcher {
                             PallasEra::Conway => Era::Conway,
                             x => bail!(
                                 "Block slot {slot}, number {number} has impossible era: {x:?}"
-                            )
+                            ),
                         };
 
                         let block_info = BlockInfo {
