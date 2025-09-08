@@ -6,7 +6,7 @@ use acropolis_common::{
     messages::{BlockBodyMessage, BlockHeaderMessage, CardanoMessage, Message},
     BlockInfo, BlockStatus, Era,
 };
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{module, Context, Module};
 use chrono::{Duration, Utc};
 use config::Config;
@@ -314,7 +314,10 @@ impl MithrilSnapshotFetcher {
                             PallasEra::Mary => Era::Mary,
                             PallasEra::Alonzo => Era::Alonzo,
                             PallasEra::Babbage => Era::Babbage,
-                            _ => Era::Conway,
+                            PallasEra::Conway => Era::Conway,
+                            x => bail!(
+                                "Block slot {slot}, number {number} has impossible era: {x:?}"
+                            )
                         };
 
                         let block_info = BlockInfo {
