@@ -213,6 +213,7 @@ dependencies = [
  "caryatid_module_rest_server",
  "caryatid_sdk",
  "config",
+ "digest 0.10.7",
  "hex",
  "num-traits",
  "reqwest 0.12.23",

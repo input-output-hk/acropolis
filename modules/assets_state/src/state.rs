@@ -166,7 +166,9 @@ impl State {
                             Some(AssetInfoRecord {
                                 initial_mint_tx_hash: tx_hash.clone(),
                                 mint_or_burn_count: 0,
-                                onchain_metadata: false,
+                                onchain_metadata: None,
+                                metadata_standard: None,
+                                metadata_extra: None,
                             })
                         } else {
                             None

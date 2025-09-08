@@ -2,7 +2,10 @@ use crate::cost_models::{PLUTUS_V1, PLUTUS_V2, PLUTUS_V3};
 use acropolis_common::{
     messages::EpochActivityMessage,
     protocol_params::{Nonce, NonceVariant, ProtocolParams},
-    queries::governance::DRepActionUpdate,
+    queries::{
+        assets::{AssetMetadataStandard, MintRecord},
+        governance::DRepActionUpdate,
+    },
     rest_helper::ToCheckedF64,
     PoolEpochState, Relay, Vote,
 };
@@ -610,4 +613,50 @@ impl ProtocolParamsRestExt for ProtocolParams {
 pub struct AssetListEntryRest {
     pub asset: String,
     pub quantity: String,
+}
+
+#[derive(Serialize)]
+pub struct AssetInfoRest {
+    pub asset: String,
+    pub policy_id: String,
+    pub asset_name: String,
+    pub fingerprint: String,
+    pub quantity: String,
+    pub initial_mint_tx_hash: String,
+    pub mint_or_burn_count: u64,
+    pub onchain_metadata: Option<Value>,
+    pub onchain_metadata_standard: Option<AssetMetadataStandard>,
+    pub onchain_metadata_extra: Option<String>,
+    pub metadata: Option<AssetMetadata>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct AssetMetadata {
+    pub name: String,
+    pub description: String,
+    pub ticker: Option<String>,
+    pub url: Option<String>,
+    pub logo: Option<String>,
+    pub decimals: Option<u8>,
+}
+
+#[derive(Serialize)]
+pub struct MintRecordRest {
+    pub tx_hash: String,
+    pub action: String,
+    pub amount: String,
+}
+
+impl From<MintRecord> for MintRecordRest {
+    fn from(rec: MintRecord) -> Self {
+        MintRecordRest {
+            tx_hash: hex::encode(rec.tx_hash),
+            action: if rec.burn {
+                "burned".into()
+            } else {
+                "minted".into()
+            },
+            amount: rec.amount.to_string(),
+        }
+    }
 }

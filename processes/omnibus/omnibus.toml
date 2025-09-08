@@ -73,6 +73,10 @@ store-history = false
 [module.accounts-state]
 
 [module.assets-state]
+store-info = true
+store-history = true
+store-addresses = false
+store-transactions = false
 
 [module.clock]
 

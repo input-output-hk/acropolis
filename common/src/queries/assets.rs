@@ -1,3 +1,5 @@
+use serde_json::Value;
+
 use crate::{AssetName, PolicyId, ShelleyAddress, TxHash};
 
 pub const DEFAULT_ASSETS_QUERY_TOPIC: (&str, &str) =
@@ -57,5 +59,16 @@ pub struct MintRecord {
 pub struct AssetInfoRecord {
     pub initial_mint_tx_hash: TxHash,
     pub mint_or_burn_count: u64,
-    pub onchain_metadata: bool,
+    pub onchain_metadata: Option<Value>,
+    pub metadata_standard: Option<AssetMetadataStandard>,
+    pub metadata_extra: Option<Vec<u8>>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum AssetMetadataStandard {
+    CIP25v1,
+    CIP25v2,
+    CIP68v1,
+    CIP68v2,
+    CIP68v3,
 }
