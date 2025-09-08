@@ -43,10 +43,7 @@ impl BodyFetcher {
         })
     }
 
-    async fn fetch_block(
-        &mut self,
-        point: Point,
-    ) -> Result<Arc<BlockBodyMessage>> {
+    async fn fetch_block(&mut self, point: Point) -> Result<Arc<BlockBodyMessage>> {
         // Fetch the block body
         debug!("Requesting single block {point:?}");
         let body = self.peer.blockfetch().fetch_single(point.clone()).await;
@@ -88,23 +85,26 @@ impl BodyFetcher {
         let era = match header {
             MultiEraHeader::EpochBoundary(_) => return Ok(()), // Ignore EBBs
             MultiEraHeader::Byron(_) => Era::Byron,
-            MultiEraHeader::ShelleyCompatible(_) => match h.variant { // TPraos eras
+            MultiEraHeader::ShelleyCompatible(_) => match h.variant {
+                // TPraos eras
                 1 => Era::Shelley,
                 2 => Era::Allegra,
                 3 => Era::Mary,
                 4 => Era::Alonzo,
-                x => bail!("Epoch {epoch}, block {number}, slot {slot}: \
+                x => bail!(
+                    "Epoch {epoch}, block {number}, slot {slot}: \
                                Impossible header variant {x} for ShelleyCompatible (TPraos)"
-                )
-            }
-            MultiEraHeader::BabbageCompatible(_) =>
-                match h.variant { // Praos eras
-                    5 => Era::Babbage,
-                    6 => Era::Conway,
-                    x => bail!("Epoch {epoch}, block {number}, slot {slot}: \
+                ),
+            },
+            MultiEraHeader::BabbageCompatible(_) => match h.variant {
+                // Praos eras
+                5 => Era::Babbage,
+                6 => Era::Conway,
+                x => bail!(
+                    "Epoch {epoch}, block {number}, slot {slot}: \
                                    Impossible header variant {x} for BabbaageCompatible (Praos)"
-                    )
-                }
+                ),
+            },
         };
 
         // Fetch and publish the block itself - note we need to
@@ -127,7 +127,7 @@ impl BodyFetcher {
             epoch_slot,
             new_epoch,
             timestamp,
-            era
+            era,
         };
 
         let msg_hdr = Arc::new(BlockHeaderMessage { raw: h.cbor });
