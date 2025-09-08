@@ -31,10 +31,4 @@ impl HistoricalSPOState {
             votes: store_config.store_votes.then(Vec::new),
         }
     }
-
-    pub fn handle_update_delegators(&mut self, spo: &KeyHash) {
-        if let Some(delegators) = self.delegators.as_mut() {
-            delegators.insert(spo.clone());
-        }
-    }
 }

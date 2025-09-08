@@ -5,8 +5,7 @@ use acropolis_common::{
     messages::{CardanoMessage, Message, SPOStateMessage, TxCertificatesMessage},
     params::TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH,
     serialization::SerializeMapAs,
-    BlockInfo, KeyHash, Lovelace, PoolMetadata, PoolRegistration, PoolRetirement, Relay,
-    StakeCredential, TxCertificate,
+    BlockInfo, KeyHash, PoolMetadata, PoolRegistration, PoolRetirement, Relay, TxCertificate,
 };
 use anyhow::Result;
 use imbl::HashMap;
@@ -292,86 +291,6 @@ impl State {
         }
     }
 
-    /// Register a stake address, with specified deposit if known
-    fn register_stake_address(&mut self, credential: &StakeCredential, _deposit: Option<Lovelace>) {
-        let hash = credential.get_hash();
-        let Some(stake_addresses) = self.stake_addresses.as_mut() else {
-            return;
-        };
-
-        // Stake addresses can be registered after being used in UTXOs
-        let sas = stake_addresses.entry(hash.clone()).or_default();
-        if sas.registered {
-            error!(
-                "Stake address hash {} registered when already registered",
-                hex::encode(&hash)
-            );
-        } else {
-            sas.registered = true;
-        }
-    }
-
-    /// Deregister a stake address, with specified refund if known
-    fn deregister_stake_address(
-        &mut self,
-        credential: &StakeCredential,
-        _refund: Option<Lovelace>,
-    ) {
-        let hash = credential.get_hash();
-        let Some(stake_addresses) = self.stake_addresses.as_mut() else {
-            return;
-        };
-
-        if let Some(sas) = stake_addresses.get_mut(&hash) {
-            if sas.registered {
-                sas.registered = false;
-            } else {
-                error!(
-                    "Deregistration of unregistered stake address hash {}",
-                    hex::encode(hash)
-                );
-            }
-        } else {
-            error!(
-                "Deregistration of unknown stake address hash {}",
-                hex::encode(hash)
-            );
-        }
-    }
-
-    /// Record a stake delegation
-    fn record_stake_delegation(&mut self, credential: &StakeCredential, spo: &KeyHash) {
-        let hash = credential.get_hash();
-
-        let Some(stake_addresses) = self.stake_addresses.as_mut() else {
-            return;
-        };
-
-        // Get old stake address state, or create one
-        if let Some(sas) = stake_addresses.get_mut(&hash) {
-            if sas.registered {
-                sas.delegated_spo = Some(spo.clone());
-            } else {
-                error!(
-                    "Unregistered stake address in stake delegation: {}",
-                    hex::encode(hash)
-                );
-            }
-        } else {
-            error!(
-                "Unknown stake address in stake delegation: {}",
-                hex::encode(hash)
-            );
-        }
-
-        // Update historical_spo_state's delegators (if set)
-        if let Some(historical_spos) = self.historical_spos.as_mut() {
-            if let Some(historical_spo_state) = historical_spos.get_mut(spo) {
-                historical_spo_state.handle_update_delegators(spo);
-            }
-        }
-    }
-
     /// Handle TxCertificates with SPO registrations / de-registrations
     /// Returns an optional state message for end of epoch
     pub fn handle_tx_certs(
@@ -393,40 +312,6 @@ impl State {
                 }
                 TxCertificate::PoolRetirement(ret) => {
                     self.handle_pool_retirement(block, ret);
-                }
-                // for stake_addresses
-                TxCertificate::StakeRegistration(sc_with_pos) => {
-                    self.register_stake_address(&sc_with_pos.stake_credential, None);
-                }
-                TxCertificate::StakeDeregistration(sc) => {
-                    self.deregister_stake_address(&sc, None);
-                }
-                TxCertificate::Registration(reg) => {
-                    self.register_stake_address(&reg.credential, Some(reg.deposit));
-                }
-
-                TxCertificate::Deregistration(dreg) => {
-                    self.deregister_stake_address(&dreg.credential, Some(dreg.refund));
-                }
-                TxCertificate::StakeDelegation(delegation) => {
-                    self.record_stake_delegation(&delegation.credential, &delegation.operator);
-                }
-                TxCertificate::StakeAndVoteDelegation(delegation) => {
-                    self.record_stake_delegation(&delegation.credential, &delegation.operator);
-                }
-
-                TxCertificate::StakeRegistrationAndDelegation(delegation) => {
-                    self.register_stake_address(&delegation.credential, Some(delegation.deposit));
-                    self.record_stake_delegation(&delegation.credential, &delegation.operator);
-                }
-
-                TxCertificate::StakeRegistrationAndVoteDelegation(delegation) => {
-                    self.register_stake_address(&delegation.credential, Some(delegation.deposit));
-                }
-
-                TxCertificate::StakeRegistrationAndStakeAndVoteDelegation(delegation) => {
-                    self.register_stake_address(&delegation.credential, Some(delegation.deposit));
-                    self.record_stake_delegation(&delegation.credential, &delegation.operator);
                 }
                 _ => (),
             }
