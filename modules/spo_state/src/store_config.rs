@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use config::Config;
+use serde::Serialize;
 
 const DEFAULT_STORE_EPOCHS_HISTORY: (&str, bool) = ("store-epochs-history", false);
 const DEFAULT_STORE_RETIRED_POOLS: (&str, bool) = ("store-retired-pools", false);
@@ -10,7 +11,7 @@ const DEFAULT_STORE_DELEGATORS: (&str, bool) = ("store-delegators", false);
 const DEFAULT_STORE_VOTES: (&str, bool) = ("store-votes", false);
 const DEFAULT_STORE_STAKE_ADDRESSES: (&str, bool) = ("store-stake-addresses", false);
 
-#[derive(Debug, Clone)]
+#[derive(Default, Debug, Clone, Serialize)]
 pub struct StoreConfig {
     pub store_epochs_history: bool,
     pub store_retired_pools: bool,
