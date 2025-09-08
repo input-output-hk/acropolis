@@ -1,4 +1,6 @@
+use crate::cost_models::{PLUTUS_V1, PLUTUS_V2, PLUTUS_V3};
 use acropolis_common::{
+    messages::EpochActivityMessage,
     protocol_params::{Nonce, NonceVariant, ProtocolParams},
     queries::governance::DRepActionUpdate,
     rest_helper::ToCheckedF64,
@@ -10,7 +12,38 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 
-use crate::cost_models::{PLUTUS_V1, PLUTUS_V2, PLUTUS_V3};
+// REST response structure for /epoch
+#[derive(Serialize)]
+pub struct EpochActivityRest {
+    pub epoch: u64,
+    pub total_blocks: usize,
+    pub total_fees: u64,
+    pub vrf_vkey_hashes: Vec<VRFKeyCount>,
+}
+
+#[derive(Serialize)]
+pub struct VRFKeyCount {
+    pub vrf_key_hash: String,
+    pub block_count: usize,
+}
+
+impl From<EpochActivityMessage> for EpochActivityRest {
+    fn from(ea_message: EpochActivityMessage) -> Self {
+        Self {
+            epoch: ea_message.epoch,
+            total_blocks: ea_message.total_blocks,
+            total_fees: ea_message.total_fees,
+            vrf_vkey_hashes: ea_message
+                .vrf_vkey_hashes
+                .iter()
+                .map(|(key, count)| VRFKeyCount {
+                    vrf_key_hash: hex::encode(key),
+                    block_count: *count,
+                })
+                .collect(),
+        }
+    }
+}
 
 // REST response structure for /governance/dreps
 #[derive(Serialize)]
@@ -206,6 +239,7 @@ pub struct ProposalMetadataREST {
     pub bytes: String,
 }
 
+// RET response structure for /pools/extended
 #[derive(Serialize)]
 pub struct PoolExtendedRest {
     pub pool_id: String,
@@ -219,12 +253,14 @@ pub struct PoolExtendedRest {
     pub fixed_cost: String, // u64 in string
 }
 
+// REST response structure for /pools/retired and /pools/retiring
 #[derive(Serialize)]
 pub struct PoolRetirementRest {
     pub pool_id: String,
     pub epoch: u64,
 }
 
+// REST response structure for /pools/{pool_id}/history
 #[derive(Serialize)]
 pub struct PoolEpochStateRest {
     pub epoch: u64,
@@ -250,6 +286,7 @@ impl From<PoolEpochState> for PoolEpochStateRest {
     }
 }
 
+// REST response structure for /pools/{pool_id}/metadata
 #[derive(Serialize)]
 pub struct PoolMetadataRest {
     pub pool_id: String,
@@ -262,6 +299,7 @@ pub struct PoolMetadataRest {
     pub homepage: String,
 }
 
+// REST response structure for /pools/{pool_id}/relays
 #[derive(Serialize)]
 pub struct PoolRelayRest {
     pub ipv4: Option<String>,

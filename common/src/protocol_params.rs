@@ -66,7 +66,7 @@ pub struct ShelleyProtocolParams {
     pub minfee_b: u32,
     pub pool_deposit: u64,
 
-    /// AKA desired_number_of_stake_pools, n_opt, technical parameter k
+    /// AKA desired_number_of_stake_pools, optimal_pool_count, n_opt, technical parameter k
     /// Important: *not to be mixed* with security parameter k, which is not here
     #[serde(rename = "nOpt")]
     pub stake_pool_target_num: u32,

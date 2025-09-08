@@ -6,18 +6,87 @@ use acropolis_common::{
         utils::query_state,
     },
 };
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
 use std::sync::Arc;
 
-use crate::{handlers_config::HandlersConfig, types::ProtocolParamsRest};
+use crate::{
+    handlers_config::HandlersConfig,
+    types::{EpochActivityRest, ProtocolParamsRest},
+};
 
 pub async fn handle_epoch_info_blockfrost(
-    _context: Arc<Context<Message>>,
-    _params: Vec<String>,
-    _handlers_config: Arc<HandlersConfig>,
+    context: Arc<Context<Message>>,
+    params: Vec<String>,
+    handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
-    Ok(RESTResponse::with_text(501, "Not implemented"))
+    if params.len() != 1 {
+        return Ok(RESTResponse::with_text(
+            400,
+            "Expected one parameter: 'latest' or an epoch number",
+        ));
+    }
+    let param = &params[0];
+    let query;
+
+    // query to get latest epoch or epoch info
+    if param == "latest" {
+        query = EpochsStateQuery::GetLatestEpoch;
+    } else {
+        let parsed = match param.parse::<u64>() {
+            Ok(num) => num,
+            Err(_) => {
+                return Ok(RESTResponse::with_text(
+                    400,
+                    "Invalid epoch number parameter",
+                ));
+            }
+        };
+        query = EpochsStateQuery::GetEpochInfo {
+            epoch_number: parsed,
+        };
+    }
+
+    // Get current epoch number from epochs-state
+    let epoch_info_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(query)));
+    let epoch_info_response = query_state(
+        &context,
+        &handlers_config.epochs_query_topic,
+        epoch_info_msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Epochs(response)) => Ok(response),
+            _ => {
+                return Err(anyhow!(
+                    "Unexpected message type while retrieving latest epoch"
+                ))
+            }
+        },
+    )
+    .await?;
+
+    let ea_message = match epoch_info_response {
+        EpochsStateQueryResponse::LatestEpoch(response) => Ok(response.epoch),
+        EpochsStateQueryResponse::EpochInfo(response) => Ok(response.epoch),
+        EpochsStateQueryResponse::NotFound => Err(anyhow!("Epoch not found")),
+        EpochsStateQueryResponse::Error(e) => Err(anyhow!(
+            "Internal server error while retrieving epoch info: {e}"
+        )),
+        _ => Err(anyhow!(
+            "Unexpected message type while retrieving epoch info"
+        )),
+    }?;
+
+    let response = EpochActivityRest::from(ea_message);
+    let json = match serde_json::to_string(&response) {
+        Ok(j) => j,
+        Err(e) => {
+            return Ok(RESTResponse::with_text(
+                500,
+                &format!("Internal server error while retrieving latest epoch: {e}"),
+            ));
+        }
+    };
+    Ok(RESTResponse::with_json(200, &json))
 }
 
 pub async fn handle_epoch_params_blockfrost(

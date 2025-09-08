@@ -2,7 +2,7 @@
 //! Fetches a snapshot from Mithril and replays all the blocks in it
 
 use acropolis_common::{
-    calculations::slot_to_epoch,
+    genesis_values::GenesisValues,
     messages::{BlockBodyMessage, BlockHeaderMessage, CardanoMessage, Message},
     BlockInfo, BlockStatus, Era,
 };
@@ -233,7 +233,11 @@ impl MithrilSnapshotFetcher {
     }
 
     /// Process the snapshot
-    async fn process_snapshot(context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
+    async fn process_snapshot(
+        context: Arc<Context<Message>>,
+        config: Arc<Config>,
+        genesis: GenesisValues,
+    ) -> Result<()> {
         let header_topic =
             config.get_string("header-topic").unwrap_or(DEFAULT_HEADER_TOPIC.to_string());
         let body_topic = config.get_string("body-topic").unwrap_or(DEFAULT_BODY_TOPIC.to_string());
@@ -290,7 +294,7 @@ impl MithrilSnapshotFetcher {
                         }
                         last_block_number = number;
 
-                        let epoch = slot_to_epoch(slot);
+                        let (epoch, epoch_slot) = genesis.slot_to_epoch(slot);
                         let new_epoch = match last_epoch {
                             Some(last_epoch) => epoch != last_epoch,
                             None => true,
@@ -300,6 +304,8 @@ impl MithrilSnapshotFetcher {
                         if new_epoch {
                             info!(epoch, number, slot, "New epoch");
                         }
+
+                        let timestamp = genesis.slot_to_timestamp(slot);
 
                         let era = match block.era() {
                             PallasEra::Byron => Era::Byron,
@@ -317,7 +323,9 @@ impl MithrilSnapshotFetcher {
                             number,
                             hash: block.hash().to_vec(),
                             epoch,
+                            epoch_slot,
                             new_epoch,
+                            timestamp,
                             era,
                         };
 
@@ -397,10 +405,16 @@ impl MithrilSnapshotFetcher {
 
         let mut subscription = context.subscribe(&startup_topic).await?;
         context.clone().run(async move {
-            let Ok(_) = subscription.read().await else {
+            let Ok((_, startup_message)) = subscription.read().await else {
                 return;
             };
             info!("Received startup message");
+            let genesis = match startup_message.as_ref() {
+                Message::Cardano((_, CardanoMessage::GenesisComplete(complete))) => {
+                    complete.values.clone()
+                }
+                x => panic!("unexpected startup message: {x:?}"),
+            };
 
             let mut delay = 1;
             loop {
@@ -416,7 +430,7 @@ impl MithrilSnapshotFetcher {
                 delay = (delay * 2).min(60);
             }
 
-            match Self::process_snapshot(context, config).await {
+            match Self::process_snapshot(context, config, genesis).await {
                 Err(e) => error!("Failed to process Mithril snapshot: {e}"),
                 _ => {}
             }

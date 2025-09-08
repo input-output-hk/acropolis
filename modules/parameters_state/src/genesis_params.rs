@@ -280,4 +280,16 @@ mod test {
         }
         Ok(())
     }
+
+    #[test]
+    fn test_pool_pledge_influence() -> Result<()> {
+        for net in get_networks().iter() {
+            let shelley_params = genesis_params::read_shelley_genesis(net)?.protocol_params;
+            assert_eq!(
+                shelley_params.pool_pledge_influence,
+                RationalNumber::new(3, 10)
+            );
+        }
+        Ok(())
+    }
 }

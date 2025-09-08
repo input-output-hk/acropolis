@@ -83,12 +83,13 @@ impl BodyFetcher {
         let number = header.number();
         let hash = header.hash().to_vec();
 
-        let epoch = self.cfg.slot_to_epoch(slot);
+        let (epoch, epoch_slot) = self.cfg.slot_to_epoch(slot);
         let new_epoch = match self.last_epoch {
             Some(last_epoch) => epoch != last_epoch,
             None => true,
         };
         self.last_epoch = Some(epoch);
+        let timestamp = self.cfg.slot_to_timestamp(slot);
 
         if new_epoch {
             info!(epoch, number, slot, "New epoch");
@@ -116,7 +117,9 @@ impl BodyFetcher {
             number,
             hash: hash.clone(),
             epoch,
+            epoch_slot,
             new_epoch,
+            timestamp,
             era,
         };
 
