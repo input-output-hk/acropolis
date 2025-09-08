@@ -77,6 +77,9 @@ impl State {
         &mut self,
         message: &ProtocolParamsMessage,
     ) -> Result<()> {
+        if let Some(shelley) = &message.params.shelley {
+            self.alonzo_babbage_voting.update_shelley_slots_per_epoch(shelley.epoch_length as u64);
+        }
         if message.params.conway.is_some() {
             self.conway = message.params.conway.clone();
         }

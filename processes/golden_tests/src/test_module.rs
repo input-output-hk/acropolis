@@ -48,7 +48,9 @@ impl TestModule {
                 number: 1,
                 hash: vec![],
                 epoch: 1,
+                epoch_slot: 1,
                 new_epoch: false,
+                timestamp: 1,
                 era: Era::Conway,
             },
             CardanoMessage::ReceivedTxs(RawTxsMessage {
