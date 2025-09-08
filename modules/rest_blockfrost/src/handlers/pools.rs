@@ -16,9 +16,11 @@ use caryatid_sdk::Context;
 use rust_decimal::Decimal;
 use std::{sync::Arc, time::Duration};
 
-use crate::types::{PoolEpochStateRest, PoolExtendedRest, PoolMetadataRest, PoolRetirementRest};
-use crate::utils::fetch_pool_metadata;
 use crate::{handlers_config::HandlersConfig, types::PoolRelayRest};
+use crate::{
+    types::{PoolEpochStateRest, PoolExtendedRest, PoolMetadataRest, PoolRetirementRest},
+    utils::{fetch_pool_metadata_as_bytes, verify_pool_metadata_hash, PoolMetadataJson},
+};
 
 /// Handle `/pools` Blockfrost-compatible endpoint
 pub async fn handle_pools_list_blockfrost(
@@ -548,11 +550,25 @@ pub async fn handle_pool_metadata_blockfrost(
     )
     .await?;
 
-    let pool_metadata_json = fetch_pool_metadata(
+    let pool_metadata_bytes = fetch_pool_metadata_as_bytes(
         pool_metadata.url.clone(),
         Duration::from_secs(handlers_config.external_api_timeout),
     )
     .await?;
+
+    // Verify hash of the fetched pool metadata, matches with the metadata hash provided by PoolRegistration
+    if let Err(e) = verify_pool_metadata_hash(&pool_metadata_bytes, &pool_metadata.hash) {
+        return Ok(RESTResponse::with_text(404, &e));
+    }
+
+    // Convert bytes into an understandable PoolMetadata structure
+    let Ok(pool_metadata_json) = PoolMetadataJson::try_from(pool_metadata_bytes) else {
+        return Ok(RESTResponse::with_text(
+            400,
+            &format!("Failed PoolMetadata Json conversion"),
+        ));
+    };
+
     let pool_metadata_rest = PoolMetadataRest {
         pool_id: pool_id.to_string(),
         hex: hex::encode(spo),

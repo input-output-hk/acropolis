@@ -3,6 +3,7 @@
 // We don't use these messages in the acropolis_common crate itself
 #![allow(dead_code)]
 
+use crate::genesis_values::GenesisValues;
 use crate::ledger_state::SPOState;
 use crate::protocol_params::ProtocolParams;
 use crate::queries::parameters::{ParametersStateQuery, ParametersStateQueryResponse};
@@ -58,13 +59,22 @@ pub struct RawTxsMessage {
 
 /// Genesis completion message
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct GenesisCompleteMessage {}
+pub struct GenesisCompleteMessage {
+    pub values: GenesisValues,
+}
 
 /// Message encapsulating multiple UTXO deltas, in order
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct UTXODeltasMessage {
     /// Ordered set of deltas
     pub deltas: Vec<UTXODelta>,
+}
+
+/// Message encapsulating multiple asset deltas
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AssetDeltasMessage {
+    /// Ordered set of deltas
+    pub deltas: NativeAssetsDelta,
 }
 
 /// Message encapsulating multiple transaction certificates, in order
@@ -225,6 +235,7 @@ pub enum CardanoMessage {
     ReceivedTxs(RawTxsMessage),              // Transaction available
     GenesisComplete(GenesisCompleteMessage), // Genesis UTXOs done + genesis params
     UTXODeltas(UTXODeltasMessage),           // UTXO deltas received
+    AssetDeltas(AssetDeltasMessage),         // Asset mint and burn deltas
     TxCertificates(TxCertificatesMessage),   // Transaction certificates received
     AddressDeltas(AddressDeltasMessage),     // Address deltas received
     Withdrawals(WithdrawalsMessage),         // Withdrawals from reward accounts

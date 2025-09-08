@@ -21,6 +21,7 @@ magic-number = 764824073
 
 [module.tx-unpacker]
 publish-utxo-deltas-topic = "cardano.utxo.deltas"
+publish-asset-deltas-topic = "cardano.asset.deltas"
 publish-withdrawals-topic = "cardano.withdrawals"
 publish-certificates-topic = "cardano.certificates"
 publish-governance-topic = "cardano.governance"
@@ -70,6 +71,8 @@ write-full-cache = "false"
 store-history = false
 
 [module.accounts-state]
+
+[module.assets-state]
 
 [module.clock]
 
