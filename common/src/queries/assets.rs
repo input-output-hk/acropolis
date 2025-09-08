@@ -3,7 +3,7 @@ use crate::{AssetName, PolicyId, ShelleyAddress, TxHash};
 pub const DEFAULT_ASSETS_QUERY_TOPIC: (&str, &str) =
     ("assets-state-query-topic", "cardano.query.assets");
 
-pub type AssetList = imbl::HashMap<PolicyId, imbl::HashMap<AssetName, u64>>;
+pub type AssetList = Vec<(PolicyId, AssetName, u64)>;
 pub type AssetInfo = (u64, AssetInfoRecord);
 pub type AssetHistory = Vec<MintRecord>;
 pub type PolicyIdAssets = Vec<(AssetName, u64)>;

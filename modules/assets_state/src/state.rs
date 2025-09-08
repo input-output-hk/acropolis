@@ -22,7 +22,7 @@ pub struct AssetsStorageConfig {
 #[derive(Debug, Default, Clone)]
 pub struct AssetRecord {
     pub supply: u64,
-    pub mint_history: Option<Vec<MintRecord>>,
+    pub history: Option<AssetHistory>,
     pub extended_info: Option<AssetInfoRecord>,
     pub addresses: Option<AssetAddresses>,
     pub transactions: Option<AssetTransactions>,
@@ -43,16 +43,12 @@ impl State {
     }
 
     pub fn get_asset_list(&self) -> AssetList {
-        let mut result = HashMap::new();
+        let mut result = Vec::new();
 
         for (policy_id, assets) in &self.assets {
-            let mut inner = HashMap::new();
-
             for (asset_name, record) in assets {
-                inner.insert(asset_name.clone(), record.supply);
+                result.push((*policy_id, asset_name.clone(), record.supply));
             }
-
-            result.insert(*policy_id, inner);
         }
 
         result
@@ -89,7 +85,7 @@ impl State {
             .assets
             .get(policy_id)
             .and_then(|policy_entry| policy_entry.get(asset_name))
-            .and_then(|asset_entry| asset_entry.mint_history.clone()))
+            .and_then(|asset_entry| asset_entry.history.clone()))
     }
 
     pub fn get_asset_addresses(
@@ -161,7 +157,7 @@ impl State {
                 let mut record =
                     policy_entry.get(&delta.name).cloned().unwrap_or_else(|| AssetRecord {
                         supply: 0,
-                        mint_history: if self.config.store_history {
+                        history: if self.config.store_history {
                             Some(Vec::new())
                         } else {
                             None
@@ -193,7 +189,7 @@ impl State {
                     .map_err(|_| anyhow::anyhow!("More asset burned than supply"))?;
 
                 // Append to history if enabled
-                if let Some(history) = record.mint_history.as_mut() {
+                if let Some(history) = record.history.as_mut() {
                     history.push(MintRecord {
                         tx_hash: tx_hash.clone(),
                         amount,
