@@ -4,7 +4,6 @@
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::accounts::{PoolsLiveStakes, DEFAULT_ACCOUNTS_QUERY_TOPIC},
-    rest_helper::handle_rest,
     state_history::{StateHistory, StateHistoryStore},
     BlockInfo, BlockStatus,
 };
@@ -26,13 +25,11 @@ mod state;
 use stake_reward_deltas_publisher::StakeRewardDeltasPublisher;
 use state::State;
 mod monetary;
-mod rest;
 mod rewards;
 mod snapshot;
 use acropolis_common::queries::accounts::{
     AccountInfo, AccountsStateQuery, AccountsStateQueryResponse,
 };
-use rest::handle_pots;
 
 const DEFAULT_SPO_STATE_TOPIC: &str = "cardano.spo.state";
 const DEFAULT_EPOCH_ACTIVITY_TOPIC: &str = "cardano.epoch.activity";
@@ -46,8 +43,6 @@ const DEFAULT_SPO_DISTRIBUTION_TOPIC: &str = "cardano.spo.distribution";
 const DEFAULT_SPO_REWARDS_TOPIC: &str = "cardano.spo.rewards";
 const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: &str = "cardano.protocol.parameters";
 const DEFAULT_STAKE_REWARD_DELTAS_TOPIC: &str = "cardano.stake.reward.deltas";
-
-const DEFAULT_HANDLE_POTS_TOPIC: (&str, &str) = ("handle-topic-pots", "rest.get.pots");
 
 /// Accounts State module
 #[module(
@@ -405,12 +400,6 @@ impl AccountsState {
             .unwrap_or(DEFAULT_STAKE_REWARD_DELTAS_TOPIC.to_string());
         info!("Creating stake reward deltas subscriber on '{stake_reward_deltas_topic}'");
 
-        // REST handler topics
-        let handle_pots_topic = config
-            .get_string(DEFAULT_HANDLE_POTS_TOPIC.0)
-            .unwrap_or(DEFAULT_HANDLE_POTS_TOPIC.1.to_string());
-        info!("Creating request handler on '{}'", handle_pots_topic);
-
         // Query topics
         let accounts_query_topic = config
             .get_string(DEFAULT_ACCOUNTS_QUERY_TOPIC.0)
@@ -423,7 +412,6 @@ impl AccountsState {
             StateHistoryStore::default_block_store(),
         )));
         let history_account_state = history.clone();
-        let history_pots = history.clone();
         let history_tick = history.clone();
 
         context.handle(&accounts_query_topic, move |message| {
@@ -504,10 +492,6 @@ impl AccountsState {
                     response,
                 )))
             }
-        });
-
-        handle_rest(context.clone(), &handle_pots_topic, move || {
-            handle_pots(history_pots.clone())
         });
 
         // Ticker to log stats
