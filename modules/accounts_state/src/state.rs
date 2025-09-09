@@ -23,7 +23,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::mem::take;
 use std::sync::{atomic::AtomicU64, Arc, Mutex};
 use tokio::task::{spawn_blocking, JoinHandle};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 const DEFAULT_KEY_DEPOSIT: u64 = 2_000_000;
 const DEFAULT_POOL_DEPOSIT: u64 = 500_000_000;
@@ -673,7 +673,7 @@ impl State {
                         || spo.cost != old_spo.cost
                         || spo.margin != old_spo.margin
                     {
-                        info!(
+                        debug!(
                             epoch = spo_msg.epoch,
                             pledge = spo.pledge,
                             cost = spo.cost,
@@ -685,7 +685,7 @@ impl State {
                 }
 
                 _ => {
-                    info!(
+                    debug!(
                         epoch = spo_msg.epoch,
                         pledge = spo.pledge,
                         cost = spo.cost,
