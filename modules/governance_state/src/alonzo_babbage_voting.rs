@@ -313,7 +313,7 @@ mod tests {
     //    run_voting_with_parameters(3, 83_600)
     //}
 
-    const SANCHONET_PROPOSALS_JSON: &[u8] = include_bytes!("./ab_sanchonet_voting.json");
+    const SANCHONET_PROPOSALS_JSON: &[u8] = include_bytes!("./ab_sancho_voting.json");
 
     fn extract_sanchonet_parameter<T: Clone>(
         f: impl Fn(&ProtocolParamUpdate) -> Option<T>,
