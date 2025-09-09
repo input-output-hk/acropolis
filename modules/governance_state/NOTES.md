@@ -95,6 +95,24 @@ That is, previous votes for the key expire immediately.
 cast at slot with number greater than 4/10 of the epoch length, it'll be counted 
 to the next epoch.
 
+### Votes epochs
+
+Example: parameter d=9/10 is proposed at epoch 210 and voted at epoch 210,
+so it should be enacted (and used) in epoch 211.
+
+Expected behaviour (note delay, new parameter set is published almost immediately after
+epoch 210 ends):
+
+17:16:14.357308 acropolis_module_mithril_snapshot_fetcher: New epoch 211 ...
+17:16:14.358807 acropolis_module_epoch_activity_counter::state: End of epoch 210 ...
+17:16:14.380193 acropolis_module_accounts_state::state: New parameter set: ProtocolParams { 
+   byron: ..., 
+   alonzo: None, 
+   shelley: Some(ShelleyParams { ..., decentralisation_param: Ratio { numer: 9, denom: 10 }, ... }), 
+   babbage: None, 
+   conway: None 
+}
+
 ### Testing
 
 https://cexplorer.io/params
