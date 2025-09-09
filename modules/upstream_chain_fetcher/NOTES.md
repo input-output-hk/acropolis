@@ -15,7 +15,8 @@ Block Height 3203471
 
 ## Protocol versions
 SanchoNet has version 6.0 (Alonzo, 2nd version, after intra-era hardfork) in genesis.
-In epoch 2 (or 3?) it upgrades to 8.0 (Babbage, Valentine HF).
+In epoch 2 it upgrades to 7.0 (Babbage)
+In epoch 3 it upgrades to 8.0 (Babbage, Valentine HF).
 It stays 8.0 till epoch 492, where it upgrades to 9.0 (Conway, ChangHF).
 
 Version numbers are taken from CIP-0059:

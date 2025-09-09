@@ -291,6 +291,7 @@ mod tests {
 
         Ok(())
     }
+
     #[test]
     fn test_desired_number_of_stake_pools() -> Result<()> {
         let dcu = extract_mainnet_parameter(|p| p.desired_number_of_stake_pools)?;
@@ -307,4 +308,30 @@ mod tests {
     //fn run_sanchonet_voting() -> Result<Vec<(BlockInfo, Vec<AlonzoBabbageVotingOutcome>)>> {
     //    run_voting_with_parameters(3, 83_600)
     //}
+
+
+    const SANCHONET_PROPOSALS_JSON: &[u8] = include_bytes!("./ab_sanchonet_voting.json");
+
+    fn extract_sanchonet_parameter<T: Clone>(
+        f: impl Fn(&ProtocolParamUpdate) -> Option<T>,
+    ) -> Result<Vec<(u64, T)>> {
+        extract_parameter(3, 86_400, &SANCHONET_PROPOSALS_JSON, f)
+    }
+
+    const SANCHONET_PROTOCOL_VERSION: [(u64, (u64, u64)); 3] = [
+        (2, (7, 0)),
+        (3, (8, 0)),
+        (492, (9, 0)),
+    ];
+
+    #[test]
+    fn test_sanchonet_protocol_version() -> Result<()> {
+        let dcu = extract_sanchonet_parameter(|p| {
+            p.protocol_version.as_ref().map(|version| (version.major, version.minor))
+        })?;
+
+        assert_eq!(SANCHONET_PROTOCOL_VERSION.to_vec(), dcu);
+
+        Ok(())
+    }
 }
