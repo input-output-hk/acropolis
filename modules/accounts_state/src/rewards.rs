@@ -10,7 +10,7 @@ use bigdecimal::{BigDecimal, One, ToPrimitive, Zero};
 use std::cmp::min;
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 /// Type of reward being given
 #[derive(Debug, Clone)]
@@ -190,7 +190,7 @@ fn calculate_spo_rewards(
 
     // If they haven't met their pledge, no dice
     if pool_owner_stake < spo.pledge {
-        warn!(
+        debug!(
             "SPO {} has owner stake {} less than pledge {} - skipping",
             hex::encode(&operator_id),
             pool_owner_stake,
@@ -289,7 +289,7 @@ fn calculate_spo_rewards(
                 // Check pool's reward address - removing e1 prefix
                 // TODO use StakeAddress.get_hash()
                 if spo.reward_account[1..] == *hash {
-                    warn!(
+                    debug!(
                         "Skipping pool reward account {}, losing {to_pay}",
                         hex::encode(hash)
                     );

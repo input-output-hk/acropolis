@@ -713,7 +713,7 @@ impl State {
                 match StakeAddress::from_binary(&retired_spo.reward_account) {
                     Ok(stake_address) => {
                         let keyhash = stake_address.get_hash();
-                        info!(
+                        debug!(
                             "SPO {} has retired - refunding their deposit to {}",
                             hex::encode(id),
                             hex::encode(keyhash)
