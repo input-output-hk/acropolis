@@ -108,14 +108,22 @@ updates. However, this may change.
 
 ### Voting timing/epochs
 
-Each Alonzo proposal has a parameter, specifying voting epoch: the parameter becomes
-effective after the epoch ends. Let's give some comprehensive example for that.
+Each Alonzo/Babbage update proposal has a parameter (`enactment_epoch`), 
+specifying moment of the enactment. The proposal (if approved) becomes effective after 
+the specified epoch ends. Let's give some comprehensive example for that.
 
 Example: parameter d=9/10 in Mainnet is proposed at epoch 210 and voted at epoch 210,
 so it should be enacted (and used) in epoch 211.
+This proposal is serialized (in .json test) as follows:
 
-Expected behaviour (note delay, new parameter set is published almost immediately after
-epoch 210 ends):
+```
+[5357060,210,1,0,[[210,[
+    ["Fi+UVUrIwiU4OiJIwkVlntqHDqqC0O8l/H3Ngg==",{"decentralisation_constant":[9,10]}],
+    ...
+]]]]
+```
+
+Expected behaviour:
 
 ```
 17:16:14.357308 acropolis_module_mithril_snapshot_fetcher: New epoch 211 ...
@@ -128,6 +136,10 @@ epoch 210 ends):
    conway: None 
 }
 ```
+
+Since there is no special 'end of epoch' block, then we use the first block as the 
+signal for the previous epoch end. The governance module discovers end of the epoch,
+publishes update, then parameter state module catches it and publishes new parameters.
 
 ### Testing
 
