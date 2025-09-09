@@ -127,8 +127,6 @@ mod tests {
             new_epoch: false,
             timestamp: 99999,
             era: Era::Conway,
-            epoch_slot: 0,
-            timestamp: 0,
         }
     }
 
