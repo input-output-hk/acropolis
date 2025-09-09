@@ -287,6 +287,16 @@ fn calculate_spo_rewards(
                     continue;
                 }
 
+                // Check pool's reward address - removing e1 prefix
+                // TODO use StakeAddress.get_hash()
+                if spo.reward_account[1..] == *hash {
+                    warn!(
+                        "Skipping pool reward account {}, losing {to_pay}",
+                        hex::encode(hash)
+                    );
+                    continue;
+                }
+
                 // TODO Shelley-until-Allegra bug if same reward account used for multiple
                 // SPOs - check pool's reward address but only before Allegra?
 
