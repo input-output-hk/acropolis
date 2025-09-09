@@ -7,11 +7,11 @@ use acropolis_common::{
         StakeRewardDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
     },
     params::TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH,
-    serialization::SerializeMapAs,
     BlockInfo, KeyHash, PoolMetadata, PoolRegistration, PoolRetirement, Relay, StakeCredential,
     TxCertificate,
 };
 use anyhow::{bail, Result};
+use dashmap::DashMap;
 use imbl::HashMap;
 use serde::Serialize;
 use serde_with::{hex::Hex, serde_as};
@@ -39,8 +39,7 @@ pub struct StakeAddressState {
     pub delegated_spo: Option<KeyHash>,
 }
 
-#[serde_as]
-#[derive(Default, Debug, Clone, Serialize)]
+#[derive(Default, Debug, Clone)]
 pub struct State {
     store_config: StoreConfig,
 
@@ -48,14 +47,11 @@ pub struct State {
 
     epoch: u64,
 
-    #[serde_as(as = "SerializeMapAs<Hex, _>")]
     spos: HashMap<Vec<u8>, PoolRegistration>,
 
-    #[serde_as(as = "SerializeMapAs<_, Vec<Hex>>")]
     pending_deregistrations: HashMap<u64, Vec<Vec<u8>>>,
 
     /// vrf_key_hash -> pool_id mapping
-    #[serde_as(as = "SerializeMapAs<Hex, Hex>")]
     vrf_key_to_pool_id_map: HashMap<Vec<u8>, Vec<u8>>,
 
     /// historical spo state
@@ -63,7 +59,7 @@ pub struct State {
     historical_spos: Option<HashMap<KeyHash, HistoricalSPOState>>,
 
     /// stake_addresses (We save stake_addresses according to store_config)
-    stake_addresses: Option<HashMap<KeyHash, StakeAddressState>>,
+    stake_addresses: Option<Arc<DashMap<KeyHash, StakeAddressState>>>,
 }
 
 impl State {
@@ -81,7 +77,7 @@ impl State {
                 None
             },
             stake_addresses: if config.store_stake_addresses {
-                Some(HashMap::new())
+                Some(Arc::new(DashMap::new()))
             } else {
                 None
             },
@@ -343,7 +339,7 @@ impl State {
         };
 
         let hash = credential.get_hash();
-        let sas = stake_addresses.entry(hash.clone()).or_default();
+        let mut sas = stake_addresses.entry(hash.clone()).or_default();
         if sas.registered {
             error!(
                 "Stake address hash {} registered when already registered",
@@ -361,7 +357,7 @@ impl State {
         };
 
         let hash = credential.get_hash();
-        if let Some(sas) = stake_addresses.get_mut(&hash) {
+        if let Some(mut sas) = stake_addresses.get_mut(&hash) {
             if sas.registered {
                 sas.registered = false;
                 // update historical_spos
@@ -404,7 +400,7 @@ impl State {
 
         let hash = credential.get_hash();
         // Get old stake address state, or create one
-        if let Some(sas) = stake_addresses.get_mut(&hash) {
+        if let Some(mut sas) = stake_addresses.get_mut(&hash) {
             if sas.registered {
                 let old_spo = sas.delegated_spo.take();
                 sas.delegated_spo = Some(spo.clone());
@@ -545,7 +541,7 @@ impl State {
         };
 
         // Get old stake address state, or create one
-        let sas = match stake_addresses.get_mut(account) {
+        let mut sas = match stake_addresses.get_mut(account) {
             Some(existing) => existing,
             None => {
                 stake_addresses.insert(account.clone(), StakeAddressState::default());
@@ -609,7 +605,7 @@ impl State {
 
             // Stake addresses don't need to be registered if they aren't used for
             // stake or drep delegation, but we need to track them in case they are later
-            let sas = stake_addresses.entry(hash.to_vec()).or_default();
+            let mut sas = stake_addresses.entry(hash.to_vec()).or_default();
 
             if let Err(e) = Self::update_value_with_delta(&mut sas.utxo_value, delta.delta) {
                 error!("Applying delta to stake hash {}: {e}", hex::encode(hash));
@@ -869,7 +865,6 @@ mod tests {
             epoch: 1,
         }));
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
-        println!("{}", serde_json::to_string_pretty(&state).unwrap());
         history.lock().await.commit(block.number, state);
 
         let mut state = history.lock().await.get_current_state();
@@ -877,7 +872,6 @@ mod tests {
         block.number = 2;
         msg = new_certs_msg();
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
-        println!("{}", serde_json::to_string_pretty(&state).unwrap());
         assert!(state.spos.is_empty());
         history.lock().await.commit(block.number, state);
 
@@ -886,7 +880,6 @@ mod tests {
         let msg = new_certs_msg();
         let mut state = history.lock().await.get_rolled_back_state(block.number);
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
-        println!("{}", serde_json::to_string_pretty(&state).unwrap());
         assert_eq!(1, state.spos.len());
         let spo = state.spos.get(&vec![0]);
         assert!(!spo.is_none());
