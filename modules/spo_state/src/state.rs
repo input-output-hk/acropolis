@@ -179,29 +179,26 @@ impl State {
     }
 
     /// Get Pool Delegators
-    pub fn get_pool_delegators(&self, pool_id: &KeyHash) -> Option<Vec<StakeCredential>> {
-        let delegators = self
-            .historical_spos
-            .as_ref()
-            .map(|h| h.get(pool_id).map(|s| s.delegators.clone()).flatten())
-            .flatten();
-        delegators.map(|d| d.into_iter().map(|h| StakeCredential::AddrKeyHash(h)).collect())
-    }
-
-    /// Balances of stake_keys (utxo + rewards)
-    pub fn get_accounts_balances(&self, stake_keys: &Vec<KeyHash>) -> Option<Vec<u64>> {
+    pub fn get_pool_delegators(&self, pool_id: &KeyHash) -> Option<Vec<(KeyHash, u64)>> {
         let Some(stake_addresses) = self.stake_addresses.as_ref() else {
             return None;
         };
-        let mut balances = Vec::<u64>::new();
+        let Some(historical_spos) = self.historical_spos.as_ref() else {
+            return None;
+        };
 
-        for key in stake_keys {
-            let account = stake_addresses.get(key)?;
+        let delegators = historical_spos.get(pool_id).map(|s| s.delegators.clone()).flatten();
+        let Some(delegators) = delegators.as_ref() else {
+            return None;
+        };
+
+        let mut delegators_with_live_stakes = Vec::<(KeyHash, u64)>::new();
+        for delegator in delegators {
+            let account = stake_addresses.get(delegator)?;
             let balance = account.utxo_value + account.rewards;
-            balances.push(balance);
+            delegators_with_live_stakes.push((delegator.clone(), balance));
         }
-
-        Some(balances)
+        Some(delegators_with_live_stakes)
     }
 
     /// Get pool relay

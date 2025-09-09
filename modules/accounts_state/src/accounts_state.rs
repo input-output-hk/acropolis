@@ -3,7 +3,7 @@
 
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
-    queries::accounts::{PoolsLiveStakes, DEFAULT_ACCOUNTS_QUERY_TOPIC},
+    queries::accounts::{PoolDelegators, PoolsLiveStakes, DEFAULT_ACCOUNTS_QUERY_TOPIC},
     state_history::{StateHistory, StateHistoryStore},
     BlockInfo, BlockStatus,
 };
@@ -452,6 +452,12 @@ impl AccountsState {
                     AccountsStateQuery::GetPoolsLiveStakes { pools_operators } => {
                         AccountsStateQueryResponse::PoolsLiveStakes(PoolsLiveStakes {
                             live_stakes: state.get_pools_live_stakes(pools_operators),
+                        })
+                    }
+
+                    AccountsStateQuery::GetPoolDelegators { pool_operator } => {
+                        AccountsStateQueryResponse::PoolDelegators(PoolDelegators {
+                            delegators: state.get_pool_delegators(pool_operator),
                         })
                     }
 

@@ -8,9 +8,9 @@ use acropolis_common::{
         SnapshotStateMessage, StateQuery, StateQueryResponse,
     },
     queries::pools::{
-        AccountsBalances, PoolDelegators, PoolHistory, PoolRelays, PoolsActiveStakes, PoolsList,
-        PoolsListWithInfo, PoolsRetiredList, PoolsRetiringList, PoolsStateQuery,
-        PoolsStateQueryResponse, DEFAULT_POOLS_QUERY_TOPIC,
+        PoolDelegators, PoolHistory, PoolRelays, PoolsActiveStakes, PoolsList, PoolsListWithInfo,
+        PoolsRetiredList, PoolsRetiringList, PoolsStateQuery, PoolsStateQueryResponse,
+        DEFAULT_POOLS_QUERY_TOPIC,
     },
     state_history::{StateHistory, StateHistoryStore},
     BlockInfo, BlockStatus,
@@ -474,7 +474,7 @@ impl SPOState {
                     }
 
                     PoolsStateQuery::GetPoolDelegators { pool_id } => {
-                        if state.is_historical_delegators_enabled() {
+                        if state.is_historical_delegators_enabled() && state.is_stake_address_enabled() {
                             let pool_delegators = state.get_pool_delegators(pool_id);
                             if let Some(pool_delegators) = pool_delegators {
                                 PoolsStateQueryResponse::PoolDelegators(PoolDelegators {
@@ -484,24 +484,7 @@ impl SPOState {
                                 PoolsStateQueryResponse::NotFound
                             }
                         } else {
-                            PoolsStateQueryResponse::Error("Pool delegators are not enabled".into())
-                        }
-                    }
-
-                    PoolsStateQuery::GetAccountsBalances { stake_keys } => {
-                        if state.is_stake_address_enabled() {
-                            match state.get_accounts_balances(stake_keys) {
-                                Some(balances) => {
-                                    PoolsStateQueryResponse::AccountsBalances(AccountsBalances {
-                                        balances,
-                                    })
-                                }
-                                None => PoolsStateQueryResponse::Error(
-                                    "One or more accounts not found".to_string(),
-                                ),
-                            }
-                        } else {
-                            PoolsStateQueryResponse::Error("Stake Addresses are not enabled".into())
+                            PoolsStateQueryResponse::Error("Pool delegators are not enabled or stake addresses are not enabled".into())
                         }
                     }
 
