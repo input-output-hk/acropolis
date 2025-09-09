@@ -249,7 +249,6 @@ impl State {
     }
 
     fn handle_pool_registration(&mut self, block: &BlockInfo, reg: &PoolRegistration) {
-
         // Insert or update the SPO
         if self.spos.contains_key(&reg.operator) {
             debug!(
@@ -267,9 +266,7 @@ impl State {
                 reg
             );
             self.spos.insert(reg.operator.clone(), reg.clone());
-            self
-                .vrf_key_to_pool_id_map
-                .insert(reg.vrf_key_hash.clone(), reg.operator.clone());
+            self.vrf_key_to_pool_id_map.insert(reg.vrf_key_hash.clone(), reg.operator.clone());
         }
 
         // Remove any existing queued deregistrations
