@@ -242,6 +242,7 @@ impl Verifier {
                                                expected.amount,
                                                actual.amount,
                                                actual.amount as i64-expected.amount as i64);
+                                        errors += 1;
                                     } else {
                                         debug!(
                                             "Reward match: SPO {} account {} {:?} {}",
@@ -258,8 +259,10 @@ impl Verifier {
                 }
             }
 
-            if errors != 0 {
-                error!(epoch, errors);
+            if errors == 0 {
+                info!(epoch, "Rewards verification OK");
+            } else {
+                error!(errors, epoch, "Rewards verification:");
             }
         }
     }
