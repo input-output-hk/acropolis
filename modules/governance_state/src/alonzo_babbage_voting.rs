@@ -85,6 +85,7 @@ impl AlonzoBabbageVoting {
                     .collect();
 
                 for v in &votes {
+                    // TODO Check keys (whether they are genesis keys)
                     cast_votes.insert(v.clone());
                 }
 
@@ -109,7 +110,7 @@ impl AlonzoBabbageVoting {
 
 #[cfg(test)]
 mod tests {
-    use crate::alonzo_babbage_voting::{AlonzoBabbageVoting};
+    use crate::alonzo_babbage_voting::AlonzoBabbageVoting;
     use acropolis_common::{
         rational_number::rational_number_from_f32, AlonzoBabbageUpdateProposal,
         AlonzoBabbageVotingOutcome, BlockInfo, BlockStatus, GenesisKeyhash, ProtocolParamUpdate,
@@ -121,13 +122,13 @@ mod tests {
     #[derive(serde::Deserialize, Debug)]
     struct ReplayerGenesisKeyhash(#[serde_as(as = "Base64")] GenesisKeyhash);
 
-    /// Returns list of voting results:
-    /// (epoch number, outcomes), where 
-    /// epoch number is the voting outcome where it must become effective
+    /// Returns list of voting results: list of pairs (BlockInfo, outcomes), where
+    /// BlockInfo is the first block of the epoch, where the new parameters must
+    /// be actual (parameter update should happen right before this block is processed).
     fn run_voting(
         update_quorum: u32,
         slots_per_epoch: u32,
-        update_proposal_json: &[u8]
+        update_proposal_json: &[u8],
     ) -> Result<Vec<(BlockInfo, Vec<AlonzoBabbageVotingOutcome>)>> {
         let mut voting = AlonzoBabbageVoting::default();
         voting.update_parameters(update_quorum, slots_per_epoch);
@@ -312,7 +313,6 @@ mod tests {
     //    run_voting_with_parameters(3, 83_600)
     //}
 
-
     const SANCHONET_PROPOSALS_JSON: &[u8] = include_bytes!("./ab_sanchonet_voting.json");
 
     fn extract_sanchonet_parameter<T: Clone>(
@@ -321,11 +321,8 @@ mod tests {
         extract_parameter(3, 86_400, &SANCHONET_PROPOSALS_JSON, f)
     }
 
-    const SANCHONET_PROTOCOL_VERSION: [(u64, (u64, u64)); 3] = [
-        (2, (7, 0)),
-        (3, (8, 0)),
-        (492, (9, 0)),
-    ];
+    const SANCHONET_PROTOCOL_VERSION: [(u64, (u64, u64)); 3] =
+        [(2, (7, 0)), (3, (8, 0)), (492, (9, 0))];
 
     #[test]
     fn test_sanchonet_protocol_version() -> Result<()> {
