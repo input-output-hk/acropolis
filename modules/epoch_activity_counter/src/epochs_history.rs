@@ -64,7 +64,9 @@ mod tests {
             number: 42,
             hash: Vec::new(),
             epoch,
+            epoch_slot: 99,
             new_epoch: false,
+            timestamp: 99999,
             era: Era::Conway,
         }
     }
