@@ -9,7 +9,7 @@ use acropolis_common::{
         utils::query_state,
     },
     serialization::Bech32WithHrp,
-    PoolRetirement,
+    PoolRetirement, StakeCredential,
 };
 use anyhow::Result;
 use caryatid_sdk::Context;
@@ -677,53 +677,14 @@ pub async fn handle_pool_delegators_blockfrost(
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::PoolDelegators(pool_delegators),
-            )) => Ok(pool_delegators.delegators),
+            )) => Ok(Some(pool_delegators.delegators)),
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::NotFound,
             )) => Err(anyhow::anyhow!("Pool Delegators Not found")),
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::Error(e),
-            )) => Err(anyhow::anyhow!(
-                "Internal server error while retrieving pool delegators: {e}"
-            )),
-            _ => Err(anyhow::anyhow!("Unexpected message type")),
-        },
-    )
-    .await?;
-
-    let delegators_keys = pool_delegators.iter().map(|d| d.get_hash()).collect::<Vec<_>>();
-    let delegators_bech32 = match pool_delegators
-        .iter()
-        .map(|d| d.to_stake_bech32())
-        .collect::<Result<Vec<String>, _>>()
-    {
-        Ok(bech32) => bech32,
-        Err(_) => {
-            return Ok(RESTResponse::with_text(
-                500,
-                "Invalid stake address in pool delegators",
-            ))
-        }
-    };
-
-    // Query from spo-state
-    let spo_accounts_balances_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
-        PoolsStateQuery::GetAccountsBalances {
-            stake_keys: delegators_keys.clone(),
-        },
-    )));
-    let spo_accounts_balances = query_state(
-        &context,
-        &handlers_config.pools_query_topic,
-        spo_accounts_balances_msg,
-        |message| match message {
-            Message::StateQueryResponse(StateQueryResponse::Pools(
-                PoolsStateQueryResponse::AccountsBalances(delegators_balances),
-            )) => Ok(Some(delegators_balances.balances)),
-            Message::StateQueryResponse(StateQueryResponse::Pools(
-                PoolsStateQueryResponse::Error(e),
             )) => {
-                warn!("Error while retrieving accounts balances from spo_state: {e}; Fallback to query from accounts_state");
+                warn!("Error while retrieving pool delegators from spo_state: {e}; Fallback to query from accounts_state");
                 Ok(None)
             },
             _ => Err(anyhow::anyhow!("Unexpected message type")),
@@ -731,43 +692,46 @@ pub async fn handle_pool_delegators_blockfrost(
     )
     .await?;
 
-    // Query from Accounts state
-    let balance_map_msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
-        AccountsStateQuery::GetAccountsBalancesMap {
-            stake_keys: delegators_keys.clone(),
-        },
-    )));
-    let accounts_balance_map = query_state(
-        &context,
-        &handlers_config.accounts_query_topic,
-        balance_map_msg,
-        |message| match message {
-            Message::StateQueryResponse(StateQueryResponse::Accounts(
-                AccountsStateQueryResponse::AccountsBalancesMap(balances_map),
-            )) => Ok(balances_map),
-            Message::StateQueryResponse(StateQueryResponse::Accounts(
-                AccountsStateQueryResponse::Error(e),
-            )) => Err(anyhow::anyhow!(
-                "Error while retrieving accounts balances from accounts_state: {e}"
-            )),
-            _ => Err(anyhow::anyhow!("Unexpected message type")),
-        },
-    )
-    .await?;
+    let pool_delegators = match pool_delegators {
+        Some(delegators) => delegators,
+        None => {
+            // Query from Accounts state
+            let pool_delegators_msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
+                AccountsStateQuery::GetPoolDelegators {
+                    pool_operator: spo.clone(),
+                },
+            )));
+            let pool_delegators = query_state(
+                &context,
+                &handlers_config.accounts_query_topic,
+                pool_delegators_msg,
+                |message| match message {
+                    Message::StateQueryResponse(StateQueryResponse::Accounts(
+                        AccountsStateQueryResponse::PoolDelegators(pool_delegators),
+                    )) => Ok(pool_delegators.delegators),
+                    Message::StateQueryResponse(StateQueryResponse::Accounts(
+                        AccountsStateQueryResponse::Error(e),
+                    )) => Err(anyhow::anyhow!(
+                        "Error while retrieving pool delegators from accounts_state: {e}"
+                    )),
+                    _ => Err(anyhow::anyhow!("Unexpected message type")),
+                },
+            )
+            .await?;
+            pool_delegators
+        }
+    };
 
-    let delegators_rest = delegators_bech32
-        .iter()
-        .enumerate()
-        .map(|(i, delegator_bech32)| PoolDelegatorRest {
-            address: delegator_bech32.clone(),
-            live_stake: accounts_balance_map.get(&delegators_keys[i]).unwrap_or(&0).to_string(),
-            spo_live_stake: spo_accounts_balances
-                .as_ref()
-                .map(|balances| balances.get(i).unwrap_or(&0))
-                .unwrap_or(&0)
-                .to_string(),
-        })
-        .collect::<Vec<PoolDelegatorRest>>();
+    let mut delegators_rest = Vec::<PoolDelegatorRest>::new();
+    for (d, l) in pool_delegators {
+        let bech32 = StakeCredential::AddrKeyHash(d.clone())
+            .to_stake_bech32()
+            .map_err(|e| anyhow::anyhow!("Invalid stake address in pool delegators: {e}"))?;
+        delegators_rest.push(PoolDelegatorRest {
+            address: bech32,
+            live_stake: l.to_string(),
+        });
+    }
 
     match serde_json::to_string(&delegators_rest) {
         Ok(json) => Ok(RESTResponse::with_json(200, &json)),

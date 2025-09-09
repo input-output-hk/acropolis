@@ -1,6 +1,4 @@
-use crate::{
-    KeyHash, PoolEpochState, PoolMetadata, PoolRegistration, PoolRetirement, Relay, StakeCredential,
-};
+use crate::{KeyHash, PoolEpochState, PoolMetadata, PoolRegistration, PoolRetirement, Relay};
 
 pub const DEFAULT_POOLS_QUERY_TOPIC: (&str, &str) =
     ("pools-state-query-topic", "cardano.query.pools");
@@ -30,9 +28,6 @@ pub enum PoolsStateQuery {
     GetPoolDelegators {
         pool_id: Vec<u8>,
     },
-    GetAccountsBalances {
-        stake_keys: Vec<KeyHash>,
-    },
     GetPoolBlocks {
         pool_id: Vec<u8>,
     },
@@ -56,7 +51,6 @@ pub enum PoolsStateQueryResponse {
     PoolMetadata(PoolMetadata),
     PoolRelays(PoolRelays),
     PoolDelegators(PoolDelegators),
-    AccountsBalances(AccountsBalances),
     PoolBlocks(PoolBlocks),
     PoolUpdates(PoolUpdates),
     PoolVotes(PoolVotes),
@@ -107,12 +101,7 @@ pub struct PoolRelays {
 }
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PoolDelegators {
-    pub delegators: Vec<StakeCredential>,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct AccountsBalances {
-    pub balances: Vec<u64>,
+    pub delegators: Vec<(KeyHash, u64)>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

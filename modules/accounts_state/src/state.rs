@@ -138,6 +138,28 @@ impl State {
             .collect()
     }
 
+    /// Get Pool Delegators with live_stakes
+    pub fn get_pool_delegators(&self, pool_operator: &KeyHash) -> Vec<(KeyHash, u64)> {
+        let stake_addresses = self.stake_addresses.lock().unwrap();
+
+        // Find stake addresses delegated to pool_operator
+        let delegators: Vec<(KeyHash, u64)> = stake_addresses
+            .iter()
+            .filter_map(|(stake_key, sas)| match sas.delegated_spo.as_ref() {
+                Some(delegated_spo) => {
+                    if delegated_spo.eq(pool_operator) {
+                        Some((stake_key.clone(), sas.utxo_value))
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            })
+            .collect();
+
+        delegators
+    }
+
     /// Map stake_keys to their total balances (utxo + rewards)
     pub fn get_accounts_balances_map(
         &self,
