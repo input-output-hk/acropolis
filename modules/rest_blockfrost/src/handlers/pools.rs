@@ -15,8 +15,12 @@ use anyhow::Result;
 use caryatid_sdk::Context;
 use rust_decimal::Decimal;
 use std::{sync::Arc, time::Duration};
+use tracing::warn;
 
-use crate::{handlers_config::HandlersConfig, types::PoolRelayRest};
+use crate::{
+    handlers_config::HandlersConfig,
+    types::{PoolDelegatorRest, PoolRelayRest},
+};
 use crate::{
     types::{PoolEpochStateRest, PoolExtendedRest, PoolMetadataRest, PoolRetirementRest},
     utils::{fetch_pool_metadata_as_bytes, verify_pool_metadata_hash, PoolMetadataJson},
@@ -645,11 +649,133 @@ pub async fn handle_pool_relays_blockfrost(
 }
 
 pub async fn handle_pool_delegators_blockfrost(
-    _context: Arc<Context<Message>>,
-    _params: Vec<String>,
-    _handlers_config: Arc<HandlersConfig>,
+    context: Arc<Context<Message>>,
+    params: Vec<String>,
+    handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
-    Ok(RESTResponse::with_text(501, "Not implemented"))
+    let Some(pool_id) = params.get(0) else {
+        return Ok(RESTResponse::with_text(400, "Missing pool ID parameter"));
+    };
+
+    let Ok(spo) = Vec::<u8>::from_bech32_with_hrp(pool_id, "pool") else {
+        return Ok(RESTResponse::with_text(
+            400,
+            &format!("Invalid Bech32 stake pool ID: {pool_id}"),
+        ));
+    };
+
+    let pool_delegators_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
+        PoolsStateQuery::GetPoolDelegators {
+            pool_id: spo.clone(),
+        },
+    )));
+
+    let pool_delegators = query_state(
+        &context,
+        &handlers_config.pools_query_topic,
+        pool_delegators_msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::PoolDelegators(pool_delegators),
+            )) => Ok(pool_delegators.delegators),
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::NotFound,
+            )) => Err(anyhow::anyhow!("Pool Delegators Not found")),
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::Error(e),
+            )) => Err(anyhow::anyhow!(
+                "Internal server error while retrieving pool delegators: {e}"
+            )),
+            _ => Err(anyhow::anyhow!("Unexpected message type")),
+        },
+    )
+    .await?;
+
+    let delegators_keys = pool_delegators.iter().map(|d| d.get_hash()).collect::<Vec<_>>();
+    let delegators_bech32 = match pool_delegators
+        .iter()
+        .map(|d| d.to_stake_bech32())
+        .collect::<Result<Vec<String>, _>>()
+    {
+        Ok(bech32) => bech32,
+        Err(_) => {
+            return Ok(RESTResponse::with_text(
+                500,
+                "Invalid stake address in pool delegators",
+            ))
+        }
+    };
+
+    // Query from spo-state
+    let spo_accounts_balances_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
+        PoolsStateQuery::GetAccountsBalances {
+            stake_keys: delegators_keys.clone(),
+        },
+    )));
+    let spo_accounts_balances = query_state(
+        &context,
+        &handlers_config.pools_query_topic,
+        spo_accounts_balances_msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::AccountsBalances(delegators_balances),
+            )) => Ok(Some(delegators_balances.balances)),
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::Error(e),
+            )) => {
+                warn!("Error while retrieving accounts balances from spo_state: {e}; Fallback to query from accounts_state");
+                Ok(None)
+            },
+            _ => Err(anyhow::anyhow!("Unexpected message type")),
+        },
+    )
+    .await?;
+
+    // Query from Accounts state
+    let balance_map_msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
+        AccountsStateQuery::GetAccountsBalancesMap {
+            stake_keys: delegators_keys.clone(),
+        },
+    )));
+    let accounts_balance_map = query_state(
+        &context,
+        &handlers_config.accounts_query_topic,
+        balance_map_msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Accounts(
+                AccountsStateQueryResponse::AccountsBalancesMap(balances_map),
+            )) => Ok(balances_map),
+            Message::StateQueryResponse(StateQueryResponse::Accounts(
+                AccountsStateQueryResponse::Error(e),
+            )) => Err(anyhow::anyhow!(
+                "Error while retrieving accounts balances from accounts_state: {e}"
+            )),
+            _ => Err(anyhow::anyhow!("Unexpected message type")),
+        },
+    )
+    .await?;
+
+    let delegators_rest = delegators_bech32
+        .iter()
+        .enumerate()
+        .map(|(i, delegator_bech32)| PoolDelegatorRest {
+            address: delegator_bech32.clone(),
+            live_stake: accounts_balance_map.get(&delegators_keys[i]).unwrap_or(&0).to_string(),
+            spo_live_stake: spo_accounts_balances
+                .as_ref()
+                .map(|balances| balances.get(i).unwrap_or(&0))
+                .unwrap_or(&0)
+                .to_string(),
+        })
+        .collect::<Vec<PoolDelegatorRest>>();
+
+    match serde_json::to_string(&delegators_rest) {
+        Ok(json) => Ok(RESTResponse::with_json(200, &json)),
+        Err(e) => Ok(RESTResponse::with_text(
+            500,
+            &format!("Internal server error while retrieving pool delegators: {e}"),
+        )),
+    }
 }
 
 pub async fn handle_pool_blocks_blockfrost(

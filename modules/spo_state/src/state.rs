@@ -87,6 +87,18 @@ impl State {
             },
         }
     }
+
+    pub fn is_historical_state_enabled(&self) -> bool {
+        self.historical_spos.is_some()
+    }
+
+    pub fn is_historical_delegators_enabled(&self) -> bool {
+        self.store_config.store_delegators
+    }
+
+    pub fn is_stake_address_enabled(&self) -> bool {
+        self.store_config.store_stake_addresses
+    }
 }
 
 impl From<SPOState> for State {
@@ -168,6 +180,32 @@ impl State {
     /// Get pool metadata
     pub fn get_pool_metadata(&self, pool_id: &KeyHash) -> Option<PoolMetadata> {
         self.spos.get(pool_id).map(|p| p.pool_metadata.clone()).flatten()
+    }
+
+    /// Get Pool Delegators
+    pub fn get_pool_delegators(&self, pool_id: &KeyHash) -> Option<Vec<StakeCredential>> {
+        let delegators = self
+            .historical_spos
+            .as_ref()
+            .map(|h| h.get(pool_id).map(|s| s.delegators.clone()).flatten())
+            .flatten();
+        delegators.map(|d| d.into_iter().map(|h| StakeCredential::AddrKeyHash(h)).collect())
+    }
+
+    /// Balances of stake_keys (utxo + rewards)
+    pub fn get_accounts_balances(&self, stake_keys: &Vec<KeyHash>) -> Option<Vec<u64>> {
+        let Some(stake_addresses) = self.stake_addresses.as_ref() else {
+            return None;
+        };
+        let mut balances = Vec::<u64>::new();
+
+        for key in stake_keys {
+            let account = stake_addresses.get(key)?;
+            let balance = account.utxo_value + account.rewards;
+            balances.push(balance);
+        }
+
+        Some(balances)
     }
 
     /// Get pool relay
