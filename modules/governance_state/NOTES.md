@@ -79,8 +79,10 @@ messages with this epoch in its beginning. Need to sort out.
 Speicified in separate field of Alonzo-compatible transactions.
 Votes are not divided into propositions and voting.
 Votes are cast by genesis key holders.
-The proposal needs 5 votes: that is, 5 genesis key holders must
+The proposal needs `update_quorum` votes.
+* This is five for mainnet: five genesis key holders must
 cast identical proposals.
+* This is three for SanchoNet.
 
 ### Votes counting and expiration
 
@@ -95,14 +97,27 @@ That is, previous votes for the key expire immediately.
 cast at slot with number greater than 4/10 of the epoch length, it'll be counted 
 to the next epoch.
 
-### Votes epochs
+### Known issues, unfinished work in current implementation (TODO)
 
-Example: parameter d=9/10 is proposed at epoch 210 and voted at epoch 210,
+* Check, whether cast votes are really genesis keys. Currently we believe to the
+user.
+
+All Alonzo votes in Mainnet were successful, so there is no immediate need to fix
+this. The main purpose of voting support is to support proper timing of parameter
+updates. However, this may change.
+
+### Voting timing/epochs
+
+Each Alonzo proposal has a parameter, specifying voting epoch: the parameter becomes
+effective after the epoch ends. Let's give some comprehensive example for that.
+
+Example: parameter d=9/10 in Mainnet is proposed at epoch 210 and voted at epoch 210,
 so it should be enacted (and used) in epoch 211.
 
 Expected behaviour (note delay, new parameter set is published almost immediately after
 epoch 210 ends):
 
+```
 17:16:14.357308 acropolis_module_mithril_snapshot_fetcher: New epoch 211 ...
 17:16:14.358807 acropolis_module_epoch_activity_counter::state: End of epoch 210 ...
 17:16:14.380193 acropolis_module_accounts_state::state: New parameter set: ProtocolParams { 
@@ -112,6 +127,7 @@ epoch 210 ends):
    babbage: None, 
    conway: None 
 }
+```
 
 ### Testing
 
