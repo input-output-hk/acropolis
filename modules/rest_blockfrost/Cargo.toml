@@ -13,6 +13,7 @@ acropolis_common = { path = "../../common" }
 anyhow = "1.0"
 async-trait = "0.1"
 bech32 = "0.11"
+blake2 = "0.10.6"
 caryatid_sdk = "0.12"
 caryatid_module_rest_server = "0.14"
 config = "0.15.11"
@@ -24,6 +25,7 @@ tokio = { version = "1", features = ["full"] }
 tracing = "0.1.40"
 rust_decimal = "1.37.2"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+num-traits = "0.2"
 
 [lib]
 path = "src/rest_blockfrost.rs"

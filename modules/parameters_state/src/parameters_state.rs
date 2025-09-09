@@ -4,10 +4,8 @@
 use acropolis_common::{
     messages::{CardanoMessage, Message, ProtocolParamsMessage, StateQuery, StateQueryResponse},
     queries::parameters::{
-        LatestParameters, ParametersStateQuery, ParametersStateQueryResponse,
-        DEFAULT_PARAMETERS_QUERY_TOPIC,
+        ParametersStateQuery, ParametersStateQueryResponse, DEFAULT_PARAMETERS_QUERY_TOPIC,
     },
-    rest_helper::handle_rest,
     state_history::{StateHistory, StateHistoryStore},
     BlockInfo, BlockStatus,
 };
@@ -17,20 +15,14 @@ use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, info_span, Instrument};
-
 mod alonzo_genesis;
 mod genesis_params;
 mod parameters_updater;
-mod rest;
 mod state;
-
 use parameters_updater::ParametersUpdater;
-use rest::handle_current;
 use state::State;
 
 const DEFAULT_ENACT_STATE_TOPIC: (&str, &str) = ("enact-state-topic", "cardano.enact.state");
-const DEFAULT_HANDLE_CURRENT_TOPIC: (&str, &str) =
-    ("handle-current-params-topic", "rest.get.epoch.parameters");
 const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: (&str, &str) =
     ("publish-parameters-topic", "cardano.protocol.parameters");
 const DEFAULT_NETWORK_NAME: (&str, &str) = ("network-name", "mainnet");
@@ -48,7 +40,6 @@ struct ParametersStateConfig {
     pub context: Arc<Context<Message>>,
     pub network_name: String,
     pub enact_state_topic: String,
-    pub handle_current_topic: String,
     pub protocol_parameters_topic: String,
     pub parameters_query_topic: String,
     pub store_history: bool,
@@ -72,7 +63,6 @@ impl ParametersStateConfig {
             context,
             network_name: Self::conf(config, DEFAULT_NETWORK_NAME),
             enact_state_topic: Self::conf(config, DEFAULT_ENACT_STATE_TOPIC),
-            handle_current_topic: Self::conf(config, DEFAULT_HANDLE_CURRENT_TOPIC),
             protocol_parameters_topic: Self::conf(config, DEFAULT_PROTOCOL_PARAMETERS_TOPIC),
             parameters_query_topic: Self::conf(config, DEFAULT_PARAMETERS_QUERY_TOPIC),
             store_history: Self::conf_bool(config, DEFAULT_STORE_HISTORY),
@@ -155,9 +145,10 @@ impl ParametersState {
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         let cfg = ParametersStateConfig::new(context.clone(), &config);
         let enact = cfg.context.subscribe(&cfg.enact_state_topic).await?;
+        let store_history = cfg.store_history;
 
         // Initalize state history
-        let history = if cfg.store_history {
+        let history = if store_history {
             Arc::new(Mutex::new(StateHistory::<State>::new(
                 "ParameterState",
                 StateHistoryStore::Unbounded,
@@ -171,11 +162,6 @@ impl ParametersState {
 
         let query_state = history.clone();
 
-        let state_rest = history.clone();
-        handle_rest(cfg.context.clone(), &cfg.handle_current_topic, move || {
-            handle_current(state_rest.clone())
-        });
-
         // Handle parameters queries
         context.handle(&cfg.parameters_query_topic, move |message| {
             let history = query_state.clone();
@@ -188,12 +174,27 @@ impl ParametersState {
                     )));
                 };
 
-                let state = history.lock().await.get_current_state();
+                let lock = history.lock().await;
                 let response = match query {
-                    ParametersStateQuery::GetLatestParameters => {
-                        ParametersStateQueryResponse::LatestParameters(LatestParameters {
-                            parameters: state.current_params.get_params(),
-                        })
+                    ParametersStateQuery::GetLatestEpochParameters => {
+                        ParametersStateQueryResponse::LatestEpochParameters(
+                            lock.get_current_state().current_params.get_params(),
+                        )
+                    }
+                    ParametersStateQuery::GetEpochParameters { epoch_number } => {
+                        if !store_history {
+                            ParametersStateQueryResponse::Error(
+                                "Historical protocol parameter storage disabled by config"
+                                    .to_string(),
+                            )
+                        } else {
+                            match lock.get_at_or_before(*epoch_number) {
+                                Some(state) => ParametersStateQueryResponse::EpochParameters(
+                                    state.current_params.get_params(),
+                                ),
+                                None => ParametersStateQueryResponse::NotFound,
+                            }
+                        }
                     }
                 };
                 Arc::new(Message::StateQueryResponse(StateQueryResponse::Parameters(

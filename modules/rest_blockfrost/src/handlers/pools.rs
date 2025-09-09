@@ -16,9 +16,11 @@ use caryatid_sdk::Context;
 use rust_decimal::Decimal;
 use std::{sync::Arc, time::Duration};
 
-use crate::handlers_config::HandlersConfig;
-use crate::types::{PoolEpochStateRest, PoolExtendedRest, PoolMetadataRest, PoolRetirementRest};
-use crate::utils::fetch_pool_metadata;
+use crate::{handlers_config::HandlersConfig, types::PoolRelayRest};
+use crate::{
+    types::{PoolEpochStateRest, PoolExtendedRest, PoolMetadataRest, PoolRetirementRest},
+    utils::{fetch_pool_metadata_as_bytes, verify_pool_metadata_hash, PoolMetadataJson},
+};
 
 /// Handle `/pools` Blockfrost-compatible endpoint
 pub async fn handle_pools_list_blockfrost(
@@ -240,23 +242,23 @@ async fn handle_pools_extended_blockfrost(
     )
     .await?;
 
-    // Get total blocks minted for each pool from SPO state
-    let total_blocks_minted_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
-        PoolsStateQuery::GetPoolsTotalBlocksMinted {
-            vrf_key_hashes: pools_vrf_key_hashes.clone(),
+    // Get total blocks minted for each pool from epoch-activity-counter
+    let total_blocks_minted_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
+        EpochsStateQuery::GetTotalBlocksMintedByPools {
+            vrf_key_hashes: pools_vrf_key_hashes,
         },
     )));
     let total_blocks_minted = query_state(
         &context,
-        &handlers_config.pools_query_topic,
+        &handlers_config.epochs_query_topic,
         total_blocks_minted_msg,
         |message| match message {
-            Message::StateQueryResponse(StateQueryResponse::Pools(
-                PoolsStateQueryResponse::PoolsTotalBlocksMinted(res),
+            Message::StateQueryResponse(StateQueryResponse::Epochs(
+                EpochsStateQueryResponse::TotalBlocksMintedByPools(res),
             )) => Ok(res.total_blocks_minted),
 
-            Message::StateQueryResponse(StateQueryResponse::Pools(
-                PoolsStateQueryResponse::Error(e),
+            Message::StateQueryResponse(StateQueryResponse::Epochs(
+                EpochsStateQueryResponse::Error(e),
             )) => {
                 return Err(anyhow::anyhow!(
                     "Internal server error while retrieving pools total blocks minted: {e}"
@@ -268,43 +270,9 @@ async fn handle_pools_extended_blockfrost(
     )
     .await?;
 
-    // Get current epoch's blocks minted for each pool from epoch-activity-counter
-    let current_blocks_minted_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
-        EpochsStateQuery::GetBlocksMintedByPools {
-            vrf_key_hashes: pools_vrf_key_hashes,
-        },
-    )));
-    let current_blocks_minted = query_state(
-        &context,
-        &handlers_config.epochs_query_topic,
-        current_blocks_minted_msg,
-        |message| match message {
-            Message::StateQueryResponse(StateQueryResponse::Epochs(
-                EpochsStateQueryResponse::BlocksMintedByPools(res),
-            )) => Ok(res.blocks_minted),
-
-            Message::StateQueryResponse(StateQueryResponse::Epochs(
-                EpochsStateQueryResponse::Error(e),
-            )) => {
-                return Err(anyhow::anyhow!(
-                    "Internal server error while retrieving pools current blocks minted: {e}"
-                ));
-            }
-
-            _ => return Err(anyhow::anyhow!("Unexpected message type")),
-        },
-    )
-    .await?;
-
-    let aggregated_blocks_minted = total_blocks_minted
-        .iter()
-        .zip(current_blocks_minted.iter())
-        .map(|(total, current)| total + current)
-        .collect::<Vec<_>>();
-
     // Get latest parameters from parameters-state
     let latest_parameters_msg = Arc::new(Message::StateQuery(StateQuery::Parameters(
-        ParametersStateQuery::GetLatestParameters,
+        ParametersStateQuery::GetLatestEpochParameters,
     )));
     let latest_parameters = query_state(
         &context,
@@ -312,8 +280,8 @@ async fn handle_pools_extended_blockfrost(
         latest_parameters_msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Parameters(
-                ParametersStateQueryResponse::LatestParameters(res),
-            )) => Ok(res.parameters),
+                ParametersStateQueryResponse::LatestEpochParameters(params),
+            )) => Ok(params),
             Message::StateQueryResponse(StateQueryResponse::Parameters(
                 ParametersStateQueryResponse::Error(e),
             )) => Err(anyhow::anyhow!(
@@ -340,7 +308,7 @@ async fn handle_pools_extended_blockfrost(
                     hex: hex::encode(pool_operator),
                     active_stake: pools_active_stakes[i].to_string(),
                     live_stake: pools_live_stakes[i].to_string(),
-                    blocks_minted: aggregated_blocks_minted[i],
+                    blocks_minted: total_blocks_minted[i],
                     live_saturation: if total_active_stake > 0 {
                         Decimal::from(pools_live_stakes[i]) * Decimal::from(stake_pool_target_num)
                             / Decimal::from(total_active_stake)
@@ -582,11 +550,25 @@ pub async fn handle_pool_metadata_blockfrost(
     )
     .await?;
 
-    let pool_metadata_json = fetch_pool_metadata(
+    let pool_metadata_bytes = fetch_pool_metadata_as_bytes(
         pool_metadata.url.clone(),
         Duration::from_secs(handlers_config.external_api_timeout),
     )
     .await?;
+
+    // Verify hash of the fetched pool metadata, matches with the metadata hash provided by PoolRegistration
+    if let Err(e) = verify_pool_metadata_hash(&pool_metadata_bytes, &pool_metadata.hash) {
+        return Ok(RESTResponse::with_text(404, &e));
+    }
+
+    // Convert bytes into an understandable PoolMetadata structure
+    let Ok(pool_metadata_json) = PoolMetadataJson::try_from(pool_metadata_bytes) else {
+        return Ok(RESTResponse::with_text(
+            400,
+            &format!("Failed PoolMetadata Json conversion"),
+        ));
+    };
+
     let pool_metadata_rest = PoolMetadataRest {
         pool_id: pool_id.to_string(),
         hex: hex::encode(spo),
@@ -608,11 +590,58 @@ pub async fn handle_pool_metadata_blockfrost(
 }
 
 pub async fn handle_pool_relays_blockfrost(
-    _context: Arc<Context<Message>>,
-    _params: Vec<String>,
-    _handlers_config: Arc<HandlersConfig>,
+    context: Arc<Context<Message>>,
+    params: Vec<String>,
+    handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
-    Ok(RESTResponse::with_text(501, "Not implemented"))
+    let Some(pool_id) = params.get(0) else {
+        return Ok(RESTResponse::with_text(400, "Missing pool ID parameter"));
+    };
+
+    let Ok(spo) = Vec::<u8>::from_bech32_with_hrp(pool_id, "pool") else {
+        return Ok(RESTResponse::with_text(
+            400,
+            &format!("Invalid Bech32 stake pool ID: {pool_id}"),
+        ));
+    };
+
+    let pool_relay_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
+        PoolsStateQuery::GetPoolRelays {
+            pool_id: spo.clone(),
+        },
+    )));
+
+    let pool_relays = query_state(
+        &context,
+        &handlers_config.pools_query_topic,
+        pool_relay_msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::PoolRelays(pool_relays),
+            )) => Ok(pool_relays),
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::NotFound,
+            )) => Err(anyhow::anyhow!("Pool Relays Not found")),
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::Error(e),
+            )) => Err(anyhow::anyhow!(
+                "Internal server error while retrieving pool relays: {e}"
+            )),
+            _ => Err(anyhow::anyhow!("Unexpected message type")),
+        },
+    )
+    .await?;
+
+    let relays_in_rest =
+        pool_relays.relays.into_iter().map(|r| r.into()).collect::<Vec<PoolRelayRest>>();
+
+    match serde_json::to_string(&relays_in_rest) {
+        Ok(json) => Ok(RESTResponse::with_json(200, &json)),
+        Err(e) => Ok(RESTResponse::with_text(
+            500,
+            &format!("Internal server error while retrieving pool relays: {e}"),
+        )),
+    }
 }
 
 pub async fn handle_pool_delegators_blockfrost(

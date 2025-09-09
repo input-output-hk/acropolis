@@ -5,13 +5,14 @@ pub const DEFAULT_PARAMETERS_QUERY_TOPIC: (&str, &str) =
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum ParametersStateQuery {
-    GetLatestParameters,
+    GetLatestEpochParameters,
+    GetEpochParameters { epoch_number: u64 },
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum ParametersStateQueryResponse {
-    LatestParameters(LatestParameters),
-
+    LatestEpochParameters(ProtocolParams),
+    EpochParameters(ProtocolParams),
     NotFound,
     Error(String),
 }

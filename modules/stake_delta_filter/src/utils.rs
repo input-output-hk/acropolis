@@ -277,13 +277,13 @@ impl Tracker {
                     .map(|a| a.to_string())
                     .unwrap_or(Ok("(none)".to_owned()))
                     .unwrap_or("(???)".to_owned());
-                delta += event.address_delta.delta;
+                delta += event.address_delta.delta.lovelace;
 
                 chunk.push(format!(
                     "   blk {}, {}: {} ({:?}) => {} ({:?})",
                     event.block.number,
                     src_addr,
-                    event.address_delta.delta,
+                    event.address_delta.delta.lovelace,
                     event.address_delta.address,
                     dst_addr,
                     event.stake_address
@@ -388,7 +388,7 @@ pub fn process_message(
 
         let stake_delta = StakeAddressDelta {
             address: stake_address,
-            delta: d.delta,
+            delta: d.delta.lovelace,
         };
         result.deltas.push(stake_delta);
     }
@@ -402,7 +402,7 @@ mod test {
     use acropolis_common::{
         messages::AddressDeltasMessage, Address, AddressDelta, BlockInfo, BlockStatus,
         ByronAddress, Era, ShelleyAddress, ShelleyAddressDelegationPart, ShelleyAddressPaymentPart,
-        ShelleyAddressPointer, StakeAddress, StakeAddressPayload,
+        ShelleyAddressPointer, StakeAddress, StakeAddressPayload, ValueDelta,
     };
     use bech32::{Bech32, Hrp};
 
@@ -410,7 +410,7 @@ mod test {
         let a = pallas_addresses::Address::from_bech32(s)?;
         Ok(AddressDelta {
             address: map_address(&a)?,
-            delta: 1,
+            delta: ValueDelta::new(1, Vec::new()),
         })
     }
 
@@ -541,7 +541,9 @@ mod test {
             number: 1,
             hash: vec![],
             epoch: 1,
+            epoch_slot: 14243,
             new_epoch: true,
+            timestamp: 2498243,
             era: Era::Conway,
         };
 

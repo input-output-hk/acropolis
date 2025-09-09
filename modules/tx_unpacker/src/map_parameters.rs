@@ -8,7 +8,7 @@ use pallas::ledger::{
         ProtocolVersion as PallasProtocolVersion, Relay as PallasRelay, ScriptHash,
         StakeCredential as PallasStakeCredential,
     },
-    traverse::MultiEraCert,
+    traverse::{MultiEraCert, MultiEraPolicyAssets, MultiEraValue},
     *,
 };
 
@@ -854,4 +854,98 @@ pub fn map_all_governance_voting_procedures(
     }
 
     Ok(procs)
+}
+
+pub fn map_value(pallas_value: &MultiEraValue) -> Value {
+    let lovelace = pallas_value.coin();
+    let pallas_assets = pallas_value.assets();
+
+    let mut assets: NativeAssets = Vec::new();
+
+    for policy_group in pallas_assets {
+        match policy_group {
+            MultiEraPolicyAssets::AlonzoCompatibleOutput(policy, kvps) => {
+                match policy.as_ref().try_into() {
+                    Ok(policy_id) => {
+                        let native_assets = kvps
+                            .iter()
+                            .map(|(name, amt)| NativeAsset {
+                                name: name.to_vec(),
+                                amount: *amt,
+                            })
+                            .collect();
+
+                        assets.push((policy_id, native_assets));
+                    }
+                    Err(_) => {
+                        tracing::error!(
+                            "Invalid policy id length: expected 28 bytes, got {}",
+                            policy.len()
+                        );
+                        continue;
+                    }
+                }
+            }
+            MultiEraPolicyAssets::ConwayOutput(policy, kvps) => match policy.as_ref().try_into() {
+                Ok(policy_id) => {
+                    let native_assets = kvps
+                        .iter()
+                        .map(|(name, amt)| NativeAsset {
+                            name: name.to_vec(),
+                            amount: u64::from(*amt),
+                        })
+                        .collect();
+
+                    assets.push((policy_id, native_assets));
+                }
+                Err(_) => {
+                    tracing::error!(
+                        "Invalid policy id length: expected 28 bytes, got {}",
+                        policy.len()
+                    );
+                    continue;
+                }
+            },
+            _ => {}
+        }
+    }
+    Value::new(lovelace, assets)
+}
+
+pub fn map_mint_burn(
+    policy_group: &MultiEraPolicyAssets<'_>,
+) -> Option<(PolicyId, Vec<NativeAssetDelta>)> {
+    match policy_group {
+        MultiEraPolicyAssets::AlonzoCompatibleMint(policy, kvps) => {
+            let policy_id: [u8; 28] =
+                policy.as_ref().try_into().expect("Policy id must be 28 bytes");
+
+            let deltas = kvps
+                .iter()
+                .map(|(name, amt)| NativeAssetDelta {
+                    name: name.to_vec(),
+                    amount: *amt,
+                })
+                .collect();
+
+            Some((policy_id, deltas))
+        }
+
+        MultiEraPolicyAssets::ConwayMint(policy, kvps) => {
+            let policy_id: [u8; 28] =
+                policy.as_ref().try_into().expect("Policy id must be 28 bytes");
+
+            let deltas = kvps
+                .iter()
+                .map(|(name, amt)| NativeAssetDelta {
+                    name: name.to_vec(),
+                    amount: i64::from(*amt),
+                })
+                .collect();
+
+            Some((policy_id, deltas))
+        }
+
+        _ => None,
+    }
 }

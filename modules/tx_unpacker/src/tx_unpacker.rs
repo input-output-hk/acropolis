@@ -3,7 +3,7 @@
 
 use acropolis_common::{
     messages::{
-        BlockFeesMessage, CardanoMessage, GovernanceProceduresMessage, Message,
+        AssetDeltasMessage, BlockFeesMessage, CardanoMessage, GovernanceProceduresMessage, Message,
         TxCertificatesMessage, UTXODeltasMessage, WithdrawalsMessage,
     },
     *,
@@ -66,6 +66,11 @@ impl TxUnpacker {
             info!("Publishing UTXO deltas on '{topic}'");
         }
 
+        let publish_asset_deltas_topic = config.get_string("publish-asset-deltas-topic").ok();
+        if let Some(ref topic) = publish_asset_deltas_topic {
+            info!("Publishing native asset deltas on '{topic}'");
+        }
+
         let publish_withdrawals_topic = config.get_string("publish-withdrawals-topic").ok();
         if let Some(ref topic) = publish_withdrawals_topic {
             info!("Publishing withdrawals on '{topic}'");
@@ -101,7 +106,8 @@ impl TxUnpacker {
                                     txs_msg.txs.len(), block.slot);
                             }
 
-                            let mut deltas = Vec::new();
+                            let mut utxo_deltas = Vec::new();
+                            let mut asset_deltas: NativeAssetsDelta = Vec::new();
                             let mut withdrawals = Vec::new();
                             let mut certificates = Vec::new();
                             let mut voting_procedures = Vec::new();
@@ -178,7 +184,7 @@ impl TxUnpacker {
                                                     index: oref.index(),
                                                 };
 
-                                                deltas.push(UTXODelta::Input(tx_input));
+                                                utxo_deltas.push(UTXODelta::Input(tx_input));
                                             }
 
                                             // Add all the outputs
@@ -193,11 +199,11 @@ impl TxUnpacker {
                                                                     tx_hash: *tx.hash(),
                                                                     index: index as u64,
                                                                     address: address,
-                                                                    value: output.value().coin(),
+                                                                    value: map_parameters::map_value(&output.value())
                                                                     // !!! datum
                                                                 };
 
-                                                                deltas.push(UTXODelta::Output(tx_output));
+                                                                utxo_deltas.push(UTXODelta::Output(tx_output));
                                                             }
 
                                                             Err(e) =>
@@ -207,6 +213,14 @@ impl TxUnpacker {
 
                                                     Err(e) =>
                                                         error!("Can't parse output {index} in tx: {e}")
+                                                }
+                                            }
+                                        }
+
+                                        if publish_asset_deltas_topic.is_some() {
+                                            for policy_group in tx.mints().iter() {
+                                                if let Some(delta) = map_parameters::map_mint_burn(policy_group) {
+                                                    asset_deltas.push(delta);
                                                 }
                                             }
                                         }
@@ -281,7 +295,18 @@ impl TxUnpacker {
                                 let msg = Message::Cardano((
                                     block.clone(),
                                     CardanoMessage::UTXODeltas(UTXODeltasMessage {
-                                        deltas,
+                                        deltas: utxo_deltas,
+                                    })
+                                ));
+
+                                futures.push(context.message_bus.publish(&topic, Arc::new(msg)));
+                            }
+
+                            if let Some(ref topic) = publish_asset_deltas_topic {
+                                let msg = Message::Cardano((
+                                    block.clone(),
+                                    CardanoMessage::AssetDeltas(AssetDeltasMessage {
+                                        deltas: asset_deltas,
                                     })
                                 ));
 

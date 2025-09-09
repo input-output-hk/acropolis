@@ -10,12 +10,20 @@ use anyhow::Result;
 use caryatid_sdk::{module, Context, Module};
 use config::Config;
 use tracing::info;
+mod cost_models;
 mod handlers;
 mod handlers_config;
 mod types;
 mod utils;
 use handlers::{
     accounts::handle_single_account_blockfrost,
+    assets::handle_assets_list_blockfrost,
+    epochs::{
+        handle_epoch_info_blockfrost, handle_epoch_next_blockfrost, handle_epoch_params_blockfrost,
+        handle_epoch_pool_blocks_blockfrost, handle_epoch_pool_stakes_blockfrost,
+        handle_epoch_previous_blockfrost, handle_epoch_total_blocks_blockfrost,
+        handle_epoch_total_stakes_blockfrost,
+    },
     governance::{
         handle_drep_delegators_blockfrost, handle_drep_metadata_blockfrost,
         handle_drep_updates_blockfrost, handle_drep_votes_blockfrost, handle_dreps_list_blockfrost,
@@ -108,6 +116,38 @@ const DEFAULT_HANDLE_POOL_UPDATES_TOPIC: (&str, &str) =
 const DEFAULT_HANDLE_POOL_VOTES_TOPIC: (&str, &str) =
     ("handle-topic-pool-votes", "rest.get.pools.*.votes");
 
+// Epochs topics
+const DEFAULT_HANDLE_EPOCH_INFO_TOPIC: (&str, &str) =
+    ("handle-topic-epoch-info", "rest.get.epoch.*"); // Both latest and specific
+const DEFAULT_HANDLE_EPOCH_PARAMS_TOPIC: (&str, &str) = (
+    "handle-topic-epoch-parameters",
+    "rest.get.epochs.*.parameters",
+); // Both latest and specific
+const DEFAULT_HANDLE_EPOCH_NEXT_TOPIC: (&str, &str) =
+    ("handle-topic-epoch-next", "rest.get.epochs.*.next");
+const DEFAULT_HANDLE_EPOCH_PREVIOUS_TOPIC: (&str, &str) =
+    ("handle-topic-epoch-previous", "rest.get.epochs.*.previous");
+const DEFAULT_HANDLE_EPOCH_TOTAL_STAKES_TOPIC: (&str, &str) = (
+    "handle-topic-epoch-total-stakes",
+    "rest.get.epochs.*.stakes",
+);
+const DEFAULT_HANDLE_EPOCH_POOL_STAKES_TOPIC: (&str, &str) = (
+    "handle-topic-epoch-pool-stakes",
+    "rest.get.epochs.*.stakes.*",
+);
+const DEFAULT_HANDLE_EPOCH_TOTAL_BLOCKS_TOPIC: (&str, &str) = (
+    "handle-topic-epoch-total-blocks",
+    "rest.get.epochs.*.blocks",
+);
+const DEFAULT_HANDLE_EPOCH_POOL_BLOCKS_TOPIC: (&str, &str) = (
+    "handle-topic-epoch-pool-blocks",
+    "rest.get.epochs.*.blocks.*",
+);
+
+// Assets topics
+const DEFAULT_HANDLE_ASSETS_LIST_TOPIC: (&str, &str) =
+    ("handle-topic-assets-list", "rest.get.assets");
+
 #[module(
     message_type(Message),
     name = "rest-blockfrost",
@@ -122,6 +162,7 @@ impl BlockfrostREST {
         let handlers_config = Arc::new(HandlersConfig::from(config));
 
         info!("Blockfrost REST enabled");
+
         // Handler for /accounts/{stake_address}
         register_handler(
             context.clone(),
@@ -296,6 +337,78 @@ impl BlockfrostREST {
             DEFAULT_HANDLE_POOL_VOTES_TOPIC,
             handlers_config.clone(),
             handle_pool_votes_blockfrost,
+        );
+
+        // Handler for /epochs/latest and /epoches/{number}
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_EPOCH_INFO_TOPIC,
+            handlers_config.clone(),
+            handle_epoch_info_blockfrost,
+        );
+
+        // Handler for /epochs/latest/parameters and /epochs/{number}/parameters
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_EPOCH_PARAMS_TOPIC,
+            handlers_config.clone(),
+            handle_epoch_params_blockfrost,
+        );
+
+        // Handler for /epochs/{number}/next
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_EPOCH_NEXT_TOPIC,
+            handlers_config.clone(),
+            handle_epoch_next_blockfrost,
+        );
+
+        // Handler for /epochs/{number}/previous
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_EPOCH_PREVIOUS_TOPIC,
+            handlers_config.clone(),
+            handle_epoch_previous_blockfrost,
+        );
+
+        // Handler for /epochs/{number}/stakes
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_EPOCH_TOTAL_STAKES_TOPIC,
+            handlers_config.clone(),
+            handle_epoch_total_stakes_blockfrost,
+        );
+
+        // Handler for /epochs/{number}/stakes/{pool_id}
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_EPOCH_POOL_STAKES_TOPIC,
+            handlers_config.clone(),
+            handle_epoch_pool_stakes_blockfrost,
+        );
+
+        // Handler for /epochs/{number}/blocks
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_EPOCH_TOTAL_BLOCKS_TOPIC,
+            handlers_config.clone(),
+            handle_epoch_total_blocks_blockfrost,
+        );
+
+        // Handler for /epochs/{number}/blocks/{pool_id}
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_EPOCH_POOL_BLOCKS_TOPIC,
+            handlers_config.clone(),
+            handle_epoch_pool_blocks_blockfrost,
+        );
+
+        // Handler for /assets
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_ASSETS_LIST_TOPIC,
+            handlers_config.clone(),
+            handle_assets_list_blockfrost,
         );
 
         Ok(())
