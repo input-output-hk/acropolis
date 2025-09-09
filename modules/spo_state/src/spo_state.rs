@@ -8,8 +8,9 @@ use acropolis_common::{
         SnapshotStateMessage, StateQuery, StateQueryResponse,
     },
     queries::pools::{
-        PoolHistory, PoolRelays, PoolsActiveStakes, PoolsList, PoolsListWithInfo, PoolsRetiredList,
-        PoolsRetiringList, PoolsStateQuery, PoolsStateQueryResponse, DEFAULT_POOLS_QUERY_TOPIC,
+        AccountsBalances, PoolDelegators, PoolHistory, PoolRelays, PoolsActiveStakes, PoolsList,
+        PoolsListWithInfo, PoolsRetiredList, PoolsRetiringList, PoolsStateQuery,
+        PoolsStateQueryResponse, DEFAULT_POOLS_QUERY_TOPIC,
     },
     state_history::{StateHistory, StateHistoryStore},
     BlockInfo, BlockStatus,
@@ -66,14 +67,24 @@ impl SPOState {
         retired_pools_history: RetiredPoolsHistoryState,
         store_config: &StoreConfig,
         mut certs_subscription: Box<dyn Subscription<Message>>,
-        mut stake_deltas_subscription: Box<dyn Subscription<Message>>,
-        mut withdrawals_subscription: Box<dyn Subscription<Message>>,
-        mut stake_reward_deltas_subscription: Box<dyn Subscription<Message>>,
+        mut stake_deltas_subscription: Option<Box<dyn Subscription<Message>>>,
+        mut withdrawals_subscription: Option<Box<dyn Subscription<Message>>>,
+        mut stake_reward_deltas_subscription: Option<Box<dyn Subscription<Message>>>,
         mut spdd_subscription: Box<dyn Subscription<Message>>,
         mut spo_rewards_subscription: Box<dyn Subscription<Message>>,
         mut epoch_activity_subscription: Box<dyn Subscription<Message>>,
         mut spo_state_publisher: SPOStatePublisher,
     ) -> Result<()> {
+        // Get the stake address deltas from the genesis bootstrap, which we know
+        // don't contain any stake, plus an extra parameter state (!unexplained)
+        // !TODO this seems overly specific to our startup process
+        match stake_deltas_subscription.as_mut() {
+            Some(sub) => {
+                let _ = sub.read().await?;
+            }
+            None => {}
+        }
+
         // Main loop of synchronised messages
         loop {
             // Get a mutable state
@@ -82,8 +93,8 @@ impl SPOState {
 
             // read per-block topics in parallel
             let certs_message_f = certs_subscription.read();
-            let stake_deltas_message_f = stake_deltas_subscription.read();
-            let withdrawals_message_f = withdrawals_subscription.read();
+            let stake_deltas_message_f = stake_deltas_subscription.as_mut().map(|s| s.read());
+            let withdrawals_message_f = withdrawals_subscription.as_mut().map(|s| s.read());
 
             // Use certs_message as the synchroniser
             let (_, certs_message) = certs_message_f.await?;
@@ -137,11 +148,8 @@ impl SPOState {
                 let spdd_message_f = spdd_subscription.read();
                 let spo_rewards_message_f = spo_rewards_subscription.read();
                 let ea_message_f = epoch_activity_subscription.read();
-                let stake_reward_deltas_message_f = if store_config.store_stake_addresses {
-                    Some(stake_reward_deltas_subscription.read())
-                } else {
-                    None
-                };
+                let stake_reward_deltas_message_f =
+                    stake_reward_deltas_subscription.as_mut().map(|s| s.read());
 
                 // Handle SPDD
                 let (_, spdd_message) = spdd_message_f.await?;
@@ -223,9 +231,8 @@ impl SPOState {
                 }
             }
 
-            // Handle withdrawals and stake deltas if we save stake_adresses
-            if store_config.store_stake_addresses {
-                // Handle withdrawals
+            // Handle withdrawals
+            if let Some(withdrawals_message_f) = withdrawals_message_f {
                 let (_, message) = withdrawals_message_f.await?;
                 match message.as_ref() {
                     Message::Cardano((
@@ -247,8 +254,10 @@ impl SPOState {
 
                     _ => error!("Unexpected message type: {message:?}"),
                 }
+            }
 
-                // Handle stake deltas
+            // Handle stake deltas
+            if let Some(stake_deltas_message_f) = stake_deltas_message_f {
                 let (_, message) = stake_deltas_message_f.await?;
                 match message.as_ref() {
                     Message::Cardano((
@@ -465,6 +474,38 @@ impl SPOState {
                         }
                     }
 
+                    PoolsStateQuery::GetPoolDelegators { pool_id } => {
+                        if state.is_historical_delegators_enabled() {
+                            let pool_delegators = state.get_pool_delegators(pool_id);
+                            if let Some(pool_delegators) = pool_delegators {
+                                PoolsStateQueryResponse::PoolDelegators(PoolDelegators {
+                                    delegators: pool_delegators,
+                                })
+                            } else {
+                                PoolsStateQueryResponse::NotFound
+                            }
+                        } else {
+                            PoolsStateQueryResponse::Error("Pool delegators are not enabled".into())
+                        }
+                    }
+
+                    PoolsStateQuery::GetAccountsBalances { stake_keys } => {
+                        if state.is_stake_address_enabled() {
+                            match state.get_accounts_balances(stake_keys) {
+                                Some(balances) => {
+                                    PoolsStateQueryResponse::AccountsBalances(AccountsBalances {
+                                        balances,
+                                    })
+                                }
+                                None => PoolsStateQueryResponse::Error(
+                                    "One or more accounts not found".to_string(),
+                                ),
+                            }
+                        } else {
+                            PoolsStateQueryResponse::Error("Stake Addresses are not enabled".into())
+                        }
+                    }
+
                     PoolsStateQuery::GetPoolRelays { pool_id } => {
                         let pool_relays = state.get_pool_relays(pool_id);
                         if let Some(relays) = pool_relays {
@@ -535,10 +576,21 @@ impl SPOState {
 
         // Subscriptions
         let certs_subscription = context.subscribe(&subscribe_topic).await?;
-        let stake_deltas_subscription = context.subscribe(&stake_deltas_topic).await?;
-        let withdrawals_subscription = context.subscribe(&withdrawals_topic).await?;
-        let stake_reward_deltas_subscription =
-            context.subscribe(&stake_reward_deltas_topic).await?;
+        let stake_deltas_subscription = if store_config.store_stake_addresses {
+            Some(context.subscribe(&stake_deltas_topic).await?)
+        } else {
+            None
+        };
+        let withdrawals_subscription = if store_config.store_stake_addresses {
+            Some(context.subscribe(&withdrawals_topic).await?)
+        } else {
+            None
+        };
+        let stake_reward_deltas_subscription = if store_config.store_stake_addresses {
+            Some(context.subscribe(&stake_reward_deltas_topic).await?)
+        } else {
+            None
+        };
 
         let spdd_subscription = context.subscribe(&spdd_topic).await?;
         let spo_rewards_subscription = context.subscribe(&spo_rewards_topic).await?;

@@ -125,6 +125,8 @@ mod tests {
             epoch,
             new_epoch: false,
             era: Era::Conway,
+            epoch_slot: 0,
+            timestamp: 0,
         }
     }
 

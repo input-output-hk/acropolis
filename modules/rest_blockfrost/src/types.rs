@@ -299,6 +299,17 @@ pub struct PoolMetadataRest {
     pub homepage: String,
 }
 
+// REST response structure for /pools/{pool_id}/delegators
+#[derive(Serialize)]
+pub struct PoolDelegatorRest {
+    // stake bech32
+    pub address: String,
+    // live stake from accounts_state
+    pub live_stake: String,
+    // live state from spo_state
+    pub spo_live_stake: String,
+}
+
 // REST response structure for /pools/{pool_id}/relays
 #[derive(Serialize)]
 pub struct PoolRelayRest {
