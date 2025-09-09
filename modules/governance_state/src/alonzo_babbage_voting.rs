@@ -121,6 +121,9 @@ mod tests {
     #[derive(serde::Deserialize, Debug)]
     struct ReplayerGenesisKeyhash(#[serde_as(as = "Base64")] GenesisKeyhash);
 
+    /// Returns list of voting results:
+    /// (epoch number, outcomes), where 
+    /// epoch number is the voting outcome where it must become effective
     fn run_voting(
         update_quorum: u32,
         slots_per_epoch: u32,
