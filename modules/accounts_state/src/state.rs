@@ -19,7 +19,7 @@ use dashmap::DashMap;
 use imbl::OrdMap;
 use rayon::prelude::*;
 use serde_with::{hex::Hex, serde_as};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::mem::take;
 use std::sync::{atomic::AtomicU64, Arc, Mutex};
 use tokio::task::{spawn_blocking, JoinHandle};
@@ -221,6 +221,7 @@ impl State {
     /// Process entry into a new epoch
     ///   epoch: Number of epoch we are entering
     ///   total_fees: Total fees taken in previous epoch
+    ///   total_blocks: Total blocks minted (both SPO and OBFT)
     ///   spo_block_counts: Count of blocks minted by operator ID in previous epoch
     ///   verifier: Verifier against Haskell node output
     // Follows the general scheme in https://docs.cardano.org/about-cardano/learn/pledging-rewards
@@ -228,6 +229,7 @@ impl State {
         &mut self,
         epoch: u64,
         total_fees: u64,
+        total_blocks: usize,
         spo_block_counts: HashMap<KeyHash, usize>,
         verifier: &Verifier,
     ) -> Result<()> {
@@ -258,14 +260,7 @@ impl State {
 
         // Filter the block counts for SPOs that are registered - treating any we don't know
         // as 'OBFT' style (the legacy nodes)
-        let total_blocks: usize = spo_block_counts.values().sum();
-        let known_vrf_keys: HashSet<_> = self.spos.values().map(|spo| &spo.vrf_key_hash).collect();
-        let obft_block_count: usize = spo_block_counts
-            .iter()
-            .filter(|(vrf_key, _)| !known_vrf_keys.contains(vrf_key))
-            .map(|(_, count)| count)
-            .sum();
-        let total_non_obft_blocks = total_blocks - obft_block_count;
+        let total_non_obft_blocks = spo_block_counts.values().sum();
         info!(total_blocks, total_non_obft_blocks, "Block counts:");
 
         info!(
@@ -595,6 +590,7 @@ impl State {
             self.spos.iter().map(|(id, spo)| (spo.vrf_key_hash.clone(), id.clone())).collect();
 
         // Create a map of operator ID to block count
+        let total_blocks: usize = ea_msg.vrf_vkey_hashes.iter().map(|(_, count)| count).sum();
         let spo_block_counts: HashMap<KeyHash, usize> = ea_msg
             .vrf_vkey_hashes
             .iter()
@@ -641,6 +637,7 @@ impl State {
         self.enter_epoch(
             ea_msg.epoch + 1,
             ea_msg.total_fees,
+            total_blocks,
             spo_block_counts,
             verifier,
         )?;
