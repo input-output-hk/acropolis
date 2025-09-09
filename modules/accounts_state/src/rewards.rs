@@ -233,15 +233,15 @@ fn calculate_spo_rewards(
     // Get actual pool rewards
     let pool_rewards = (&optimum_rewards * &pool_performance).with_scale(0);
 
-    info!(blocks=blocks_produced, %pool_stake, %relative_pool_stake, %relative_blocks,
-          %pool_performance, %optimum_rewards, %pool_rewards, pool_owner_stake, %pool_pledge,
+    debug!(blocks=blocks_produced, %pool_stake, %relative_pool_stake, %relative_blocks,
+           %pool_performance, %optimum_rewards, %pool_rewards, pool_owner_stake, %pool_pledge,
            "Pool {}", hex::encode(&operator_id));
 
     // Subtract fixed costs
     let fixed_cost = BigDecimal::from(spo.fixed_cost);
     let mut rewards = Vec::<RewardDetail>::new();
     let spo_benefit = if pool_rewards <= fixed_cost {
-        info!("Rewards < cost - all paid to SPO");
+        debug!("Rewards < cost - all paid to SPO");
 
         // No margin or pledge reward if under cost - all goes to SPO
         pool_rewards.to_u64().unwrap_or(0)
@@ -262,8 +262,7 @@ fn calculate_spo_rewards(
 
         // You'd think this was just pool_rewards-costs here, but the Haskell code recalculates
         // the margin without the relative_owner_stake term !?
-        let to_delegators =
-            ((&pool_rewards - &fixed_cost) * (BigDecimal::one() - &margin)).with_scale(0);
+        let to_delegators = (&pool_rewards - &fixed_cost) * (BigDecimal::one() - &margin); // Note keep frac part
         let mut total_paid: u64 = 0;
         let mut delegators_paid: usize = 0;
         if !to_delegators.is_zero() {
@@ -311,8 +310,8 @@ fn calculate_spo_rewards(
             }
         }
 
-        info!(%fixed_cost, %margin_cost, leader_reward=%costs, %to_delegators, total_paid,
-              delegators_paid, "Reward split:");
+        debug!(%fixed_cost, %margin_cost, leader_reward=%costs, %to_delegators, total_paid,
+               delegators_paid, "Reward split:");
 
         costs.to_u64().unwrap_or(0)
     };

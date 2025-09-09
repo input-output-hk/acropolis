@@ -5,10 +5,10 @@ use acropolis_common::{KeyHash, RewardAccount};
 use hex::FromHex;
 use itertools::EitherOrBoth::{Both, Left, Right};
 use itertools::Itertools;
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use anyhow::Result;
 use tracing::{debug, error, info, warn};
-use std::cmp::Ordering;
 
 /// Verifier
 pub struct Verifier {
@@ -173,9 +173,10 @@ impl Verifier {
                 });
             }
 
-            info!(epoch,
-                  "Read rewards verification data for {} SPOs",
-                  expected_rewards.len()
+            info!(
+                epoch,
+                "Read rewards verification data for {} SPOs",
+                expected_rewards.len()
             );
 
             // TODO compare rewards with expected_rewards, log missing members/leaders in both

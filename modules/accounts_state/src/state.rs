@@ -599,7 +599,7 @@ impl State {
                         || spo.cost != old_spo.cost
                         || spo.margin != old_spo.margin
                     {
-                        info!(
+                        debug!(
                             epoch = spo_msg.epoch,
                             pledge = spo.pledge,
                             cost = spo.cost,
@@ -611,7 +611,7 @@ impl State {
                 }
 
                 _ => {
-                    info!(
+                    debug!(
                         epoch = spo_msg.epoch,
                         pledge = spo.pledge,
                         cost = spo.cost,
