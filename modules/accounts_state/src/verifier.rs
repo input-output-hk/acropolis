@@ -6,7 +6,8 @@ use hex::FromHex;
 use itertools::EitherOrBoth::{Both, Left, Right};
 use itertools::Itertools;
 use std::collections::BTreeMap;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
+use std::cmp::Ordering;
 
 /// Verifier
 pub struct Verifier {
@@ -108,16 +109,24 @@ impl Verifier {
         }
     }
 
+    /// Sort rewards for zipper compare - type first, then by account
+    fn sort_rewards(left: &RewardDetail, right: &RewardDetail) -> Ordering {
+        match (&left.rtype, &right.rtype) {
+            (RewardType::Leader, RewardType::Member) => Ordering::Less,
+            (RewardType::Member, RewardType::Leader) => Ordering::Greater,
+            _ => left.account.cmp(&right.account),
+        }
+    }
+
     /// Verify rewards, logging any errors
     pub fn verify_rewards(&self, epoch: u64, rewards: &RewardsResult) {
         if let Some(template) = &self.rewards_file_template {
             let path = template.replace("{}", &epoch.to_string());
 
+            // Silently return if there's no file for it
             let mut reader = match csv::Reader::from_path(&path) {
                 Ok(reader) => reader,
-                Err(err) => {
-                    return;
-                }
+                _ => return,
             };
 
             // Expect CSV header: spo,address,type,amount
@@ -139,25 +148,38 @@ impl Verifier {
                     error!("Bad hex in {path} for address: {address} - skipping");
                     continue;
                 };
+
+                // Ignore 0 amounts
+                if amount == 0 {
+                    continue;
+                }
+
+                // Convert from string and ignore refunds
+                let rtype = match rtype.as_str() {
+                    "leader" => RewardType::Leader,
+                    "member" => RewardType::Member,
+                    _ => continue,
+                };
+
+                // Convert account with e1 header to just hash
+                // TODO: use StakeAddress, skipping first byte (e1) for now
+                let account = RewardAccount::from(&account[1..]);
+
                 expected_rewards.entry(spo).or_default().push(RewardDetail {
-                    // TODO: use StakeAddress, skipping first byte (e1) for now
-                    account: RewardAccount::from(&account[1..]),
-                    rtype: if rtype == "leader" {
-                        RewardType::Leader
-                    } else {
-                        RewardType::Member
-                    },
+                    account,
+                    rtype,
                     amount,
                 });
             }
 
-            info!(
-                "Read rewards verification data for {} SPOs",
-                expected_rewards.len()
+            info!(epoch,
+                  "Read rewards verification data for {} SPOs",
+                  expected_rewards.len()
             );
 
             // TODO compare rewards with expected_rewards, log missing members/leaders in both
             // directions, changes of value
+            let mut errors: usize = 0;
             for either in expected_rewards
                 .into_iter()
                 .merge_join_by(rewards.rewards.clone().into_iter(), |i, j| i.0.cmp(&j.0))
@@ -165,21 +187,23 @@ impl Verifier {
                 match either {
                     Left(expected_spo) => {
                         error!(
-                            "Verification mismatch: SPO rewards missing: {} {} rewards",
-                            hex::encode(expected_spo.0),
+                            "Missing rewards SPO: {} {} rewards",
+                            hex::encode(&expected_spo.0),
                             expected_spo.1.len()
                         );
+                        errors += 1;
                     }
                     Right(actual_spo) => {
                         error!(
-                            "Verification mismatch: Unexpected SPO rewards: {} {} rewards",
-                            hex::encode(actual_spo.0),
+                            "Extra rewards SPO: {} {} rewards",
+                            hex::encode(&actual_spo.0),
                             actual_spo.1.len()
                         );
+                        errors += 1;
                     }
                     Both(mut expected_spo, mut actual_spo) => {
-                        expected_spo.1.sort_by(|a, b| a.account.cmp(&b.account));
-                        actual_spo.1.sort_by(|a, b| a.account.cmp(&b.account));
+                        expected_spo.1.sort_by(Self::sort_rewards);
+                        actual_spo.1.sort_by(Self::sort_rewards);
                         for either in expected_spo
                             .1
                             .into_iter()
@@ -189,22 +213,52 @@ impl Verifier {
                         {
                             match either {
                                 Left(expected) => {
-                                    error!("Verification mismatch: Missing SPO reward: {} account {} {:?} {}", hex::encode(expected_spo.0.clone()), hex::encode(expected.account), expected.rtype, expected.amount);
+                                    error!(
+                                        "Missing reward: SPO {} account {} {:?} {}",
+                                        hex::encode(&expected_spo.0),
+                                        hex::encode(&expected.account),
+                                        expected.rtype,
+                                        expected.amount
+                                    );
+                                    errors += 1;
                                 }
                                 Right(actual) => {
-                                    error!("Verification mismatch: Unexpected SPO reward: {} account {} {:?} {}", hex::encode(actual_spo.0.clone()), hex::encode(actual.account), actual.rtype, actual.amount);
+                                    error!(
+                                        "Extra reward: SPO {} account {} {:?} {}",
+                                        hex::encode(&actual_spo.0),
+                                        hex::encode(&actual.account),
+                                        actual.rtype,
+                                        actual.amount
+                                    );
+                                    errors += 1;
                                 }
                                 Both(expected, actual) => {
                                     if expected.amount != actual.amount {
-                                        error!("Verification mismatch: Differing SPO reward amount: {} account {} {:?} expected {}, actual {}", hex::encode(expected_spo.0.clone()), hex::encode(expected.account), expected.rtype, expected.amount, actual.amount);
+                                        error!("Different reward: SPO {} account {} {:?} expected {}, actual {} ({})",
+                                               hex::encode(&expected_spo.0),
+                                               hex::encode(&expected.account),
+                                               expected.rtype,
+                                               expected.amount,
+                                               actual.amount,
+                                               actual.amount as i64-expected.amount as i64);
                                     } else {
-                                        info!("Verification success: SPO reward {} account {} {:?} expected {}, actual {}", hex::encode(expected_spo.0.clone()), hex::encode(expected.account), expected.rtype, expected.amount, actual.amount);
+                                        debug!(
+                                            "Reward match: SPO {} account {} {:?} {}",
+                                            hex::encode(&expected_spo.0),
+                                            hex::encode(&expected.account),
+                                            expected.rtype,
+                                            expected.amount
+                                        );
                                     }
                                 }
                             }
                         }
                     }
                 }
+            }
+
+            if errors != 0 {
+                error!(epoch, errors);
             }
         }
     }
