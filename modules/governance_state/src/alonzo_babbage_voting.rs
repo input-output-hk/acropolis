@@ -5,34 +5,27 @@ use acropolis_common::{
 use anyhow::{bail, Result};
 use std::collections::{HashMap, HashSet};
 
-const GENESIS_KEYS_VOTES_THRESHOLD: u64 = 5;
-const MAINNET_SHELLEY_SLOTS_PER_EPOCH: u64 = 432_000;
-
+#[derive(Default)]
 pub struct AlonzoBabbageVoting {
     /// map "enact epoch" (proposal enacts at this epoch end) to voting
     /// "voting": map voter (genesis key) => (vote epoch, vote slot, proposal)
     /// "vote epoch/slot" --- moment, when the vote was cast for the proposal
     proposals: HashMap<u64, HashMap<GenesisKeyhash, (u64, u64, Box<ProtocolParamUpdate>)>>,
-    shelley_slots_per_epoch: u64,
+    slots_per_epoch: u32,
+    update_quorum: u32,
 }
 
 impl AlonzoBabbageVoting {
-    pub fn new() -> Self {
-        Self {
-            proposals: HashMap::new(),
-            shelley_slots_per_epoch: MAINNET_SHELLEY_SLOTS_PER_EPOCH,
-        }
-    }
-
     /// Vote is counted for the new epoch if cast in previous epoch
     /// before 4/10 of its start (not too fresh).
     /// Here is it: [!++++++++++!++++------!]
-    fn is_timely_vote(&self, _epoch: u64, slot: u64, new_block: &BlockInfo) -> bool {
-        slot + (6 * self.shelley_slots_per_epoch / 10) < new_block.slot
+    fn is_timely_vote(&self, slot: u64, new_block: &BlockInfo) -> bool {
+        slot + (6 * self.slots_per_epoch as u64 / 10) < new_block.slot
     }
 
-    pub fn update_shelley_slots_per_epoch(&mut self, shelley_slots_per_epoch: u64) {
-        self.shelley_slots_per_epoch = shelley_slots_per_epoch;
+    pub fn update_parameters(&mut self, slots_per_epoch: u32, update_quorum: u32) {
+        self.slots_per_epoch = slots_per_epoch;
+        self.update_quorum = update_quorum;
     }
 
     pub fn process_update_proposals(
@@ -45,7 +38,11 @@ impl AlonzoBabbageVoting {
         }
 
         if block_info.era < Era::Shelley {
-            bail!("Cannot process Alonzo/Babbage update proposals in pre-Shelley era");
+            bail!("Processing Alonzo/Babbage update proposals in pre-Shelley era");
+        }
+
+        if self.slots_per_epoch == u32::default() || self.update_quorum == u32::default() {
+            bail!("Processing Alonzo/Babbage update proposals with unknown protocol parameters");
         }
 
         for pp in updates.iter() {
@@ -70,7 +67,7 @@ impl AlonzoBabbageVoting {
 
         let proposals = proposals_for_new_epoch
             .iter()
-            .filter(|(_k, (epoch, slot, _proposal))| self.is_timely_vote(*epoch, *slot, new_blk))
+            .filter(|(_k, (_epoch, slot, _proposal))| self.is_timely_vote(*slot, new_blk))
             .map(|(k, (_e, _s, proposal))| (k.clone(), proposal.clone()))
             .collect::<Vec<_>>();
 
@@ -91,12 +88,12 @@ impl AlonzoBabbageVoting {
                     cast_votes.insert(v.clone());
                 }
 
-                let votes_len = votes.len() as u64;
+                let votes_len = votes.len() as u32;
 
                 Some(AlonzoBabbageVotingOutcome {
-                    votes_threshold: GENESIS_KEYS_VOTES_THRESHOLD,
+                    votes_threshold: self.update_quorum,
                     voting: votes,
-                    accepted: votes_len >= GENESIS_KEYS_VOTES_THRESHOLD,
+                    accepted: votes_len >= self.update_quorum,
                     parameter_update: parameter_update.clone(),
                 })
             })
@@ -112,7 +109,7 @@ impl AlonzoBabbageVoting {
 
 #[cfg(test)]
 mod tests {
-    use crate::alonzo_babbage_voting::{AlonzoBabbageVoting, MAINNET_SHELLEY_SLOTS_PER_EPOCH};
+    use crate::alonzo_babbage_voting::{AlonzoBabbageVoting};
     use acropolis_common::{
         rational_number::rational_number_from_f32, AlonzoBabbageUpdateProposal,
         AlonzoBabbageVotingOutcome, BlockInfo, BlockStatus, GenesisKeyhash, ProtocolParamUpdate,
@@ -124,10 +121,14 @@ mod tests {
     #[derive(serde::Deserialize, Debug)]
     struct ReplayerGenesisKeyhash(#[serde_as(as = "Base64")] GenesisKeyhash);
 
-    fn run_voting() -> Result<Vec<(BlockInfo, Vec<AlonzoBabbageVotingOutcome>)>> {
-        let mut voting = AlonzoBabbageVoting::new();
+    fn run_voting(
+        update_quorum: u32,
+        slots_per_epoch: u32,
+        update_proposal_json: &[u8]
+    ) -> Result<Vec<(BlockInfo, Vec<AlonzoBabbageVotingOutcome>)>> {
+        let mut voting = AlonzoBabbageVoting::default();
+        voting.update_parameters(update_quorum, slots_per_epoch);
 
-        let update_proposal_json = include_bytes!("./alonzo_babbage_voting.json");
         let update_proposal_msgs = serde_json::from_slice::<
             Vec<(
                 u64,
@@ -146,7 +147,7 @@ mod tests {
                 slot,
                 number: slot,
                 epoch,
-                epoch_slot: epoch % MAINNET_SHELLEY_SLOTS_PER_EPOCH,
+                epoch_slot: 0,
                 era: era.try_into()?,
                 new_epoch: new_epoch != 0,
                 timestamp: 0,
@@ -179,9 +180,12 @@ mod tests {
     }
 
     fn extract_parameter<T: Clone>(
+        update_quorum: u32,
+        slots_per_epoch: u32,
+        update_proposals_json: &[u8],
         f: impl Fn(&ProtocolParamUpdate) -> Option<T>,
     ) -> Result<Vec<(u64, T)>> {
-        let updates = run_voting()?;
+        let updates = run_voting(slots_per_epoch, update_quorum, update_proposals_json)?;
         let mut dcu = Vec::new();
 
         for (blk, upd) in updates {
@@ -199,8 +203,16 @@ mod tests {
     }
 
     //
-    // Tests
+    // Mainnet Tests
     //
+
+    const MAINNET_PROPOSALS_JSON: &[u8] = include_bytes!("./alonzo_babbage_voting.json");
+
+    fn extract_mainnet_parameter<T: Clone>(
+        f: impl Fn(&ProtocolParamUpdate) -> Option<T>,
+    ) -> Result<Vec<(u64, T)>> {
+        extract_parameter(5, 432_000, &MAINNET_PROPOSALS_JSON, f)
+    }
 
     const DECENTRALISATION: [(u64, f32); 39] = [
         (211, 0.9),
@@ -258,7 +270,7 @@ mod tests {
 
     #[test]
     fn test_decentralisation_updates() -> Result<()> {
-        let dcu = extract_parameter(|p| p.decentralisation_constant)?;
+        let dcu = extract_mainnet_parameter(|p| p.decentralisation_constant)?;
 
         assert_eq!(DECENTRALISATION.len(), dcu.len());
         for i in 0..dcu.len() {
@@ -271,7 +283,7 @@ mod tests {
 
     #[test]
     fn test_protocol_version() -> Result<()> {
-        let dcu = extract_parameter(|p| {
+        let dcu = extract_mainnet_parameter(|p| {
             p.protocol_version.as_ref().map(|version| (version.major, version.minor))
         })?;
 
@@ -281,10 +293,18 @@ mod tests {
     }
     #[test]
     fn test_desired_number_of_stake_pools() -> Result<()> {
-        let dcu = extract_parameter(|p| p.desired_number_of_stake_pools)?;
+        let dcu = extract_mainnet_parameter(|p| p.desired_number_of_stake_pools)?;
 
         assert_eq!(STAKE_POOLS.to_vec(), dcu);
 
         Ok(())
     }
+
+    //
+    // SanchoNet Tests
+    //
+
+    //fn run_sanchonet_voting() -> Result<Vec<(BlockInfo, Vec<AlonzoBabbageVotingOutcome>)>> {
+    //    run_voting_with_parameters(3, 83_600)
+    //}
 }

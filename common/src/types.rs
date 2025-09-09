@@ -1435,7 +1435,7 @@ pub enum GovernanceOutcomeVariant {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AlonzoBabbageVotingOutcome {
     pub voting: Vec<GenesisKeyhash>,
-    pub votes_threshold: u64,
+    pub votes_threshold: u32,
     pub accepted: bool,
     pub parameter_update: Box<ProtocolParamUpdate>,
 }
