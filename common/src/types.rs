@@ -102,12 +102,14 @@ pub struct BlockInfo {
     pub epoch: u64,
 
     /// Epoch slot number
+    #[serde(default)]
     pub epoch_slot: u64,
 
     /// Does this block start a new epoch?
     pub new_epoch: bool,
 
     /// UNIX timestamp
+    #[serde(default)]
     pub timestamp: u64,
 
     /// Protocol era
@@ -1433,7 +1435,7 @@ pub enum GovernanceOutcomeVariant {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AlonzoBabbageVotingOutcome {
     pub voting: Vec<GenesisKeyhash>,
-    pub votes_threshold: u64,
+    pub votes_threshold: u32,
     pub accepted: bool,
     pub parameter_update: Box<ProtocolParamUpdate>,
 }
