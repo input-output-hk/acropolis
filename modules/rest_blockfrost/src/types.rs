@@ -305,8 +305,7 @@ pub struct PoolDelegatorRest {
     // stake bech32
     pub address: String,
     // live stake
-    pub account_live_stake: String,
-    pub spo_live_stake: String,
+    pub live_stake: String,
 }
 
 // REST response structure for /pools/{pool_id}/relays
