@@ -96,7 +96,7 @@ pub struct BlockInfo {
     pub number: u64,
 
     /// Block hash
-    pub hash: Vec<u8>,
+    pub hash: BlockHash,
 
     /// Epoch number
     pub epoch: u64,
@@ -293,6 +293,19 @@ pub type DataHash = Vec<u8>;
 
 /// Transaction hash
 pub type TxHash = [u8; 32];
+
+/// Block hash
+pub type BlockHash = [u8; 32];
+
+impl HashTraits for BlockHash {
+    fn new() -> Self {
+        [0; 32]
+    }
+}
+
+pub trait HashTraits {
+    fn new() -> Self;
+}
 
 /// Amount of Ada, in Lovelace
 pub type Lovelace = u64;

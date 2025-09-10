@@ -1,11 +1,17 @@
 //! Acropolis epoch activity counter: state storage
 
-use acropolis_common::{crypto::keyhash, messages::EpochActivityMessage, BlockInfo, KeyHash};
-use imbl::HashMap;
-use tracing::info;
+use acropolis_common::{
+    crypto::keyhash, messages::EpochActivityMessage, BlockHash, BlockInfo, KeyHash,
+};
+use imbl::{HashMap, Vector};
+use tracing::{error, info};
+
+use crate::store_config::StoreConfig;
 
 #[derive(Default, Debug, Clone)]
 pub struct State {
+    store_config: StoreConfig,
+
     // block number
     block: u64,
 
@@ -24,29 +30,57 @@ pub struct State {
     // Total blocks minted till block number
     // Keyed by vrf_key_hash
     total_blocks_minted: HashMap<KeyHash, u64>,
+
+    // block hashes by vrf_key_hash
+    block_hashes: Option<HashMap<KeyHash, Vector<BlockHash>>>,
 }
 
 impl State {
     // Constructor
-    pub fn new() -> Self {
+    pub fn new(store_config: &StoreConfig) -> Self {
         Self {
+            store_config: store_config.clone(),
             block: 0,
             epoch: 0,
             blocks_minted: HashMap::new(),
             epoch_blocks: 0,
             epoch_fees: 0,
             total_blocks_minted: HashMap::new(),
+            block_hashes: if store_config.store_block_hashes {
+                Some(HashMap::new())
+            } else {
+                None
+            },
         }
     }
 
+    pub fn is_block_hashes_enabled(&self) -> bool {
+        self.store_config.store_block_hashes
+    }
+
     // Handle a block minting, taking the SPO's VRF vkey
-    pub fn handle_mint(&mut self, _block: &BlockInfo, vrf_vkey: Option<&[u8]>) {
+    pub fn handle_mint(&mut self, block: &BlockInfo, vrf_vkey: Option<&[u8]>) {
         self.epoch_blocks += 1;
         if let Some(vrf_vkey) = vrf_vkey {
             let vrf_key_hash = keyhash(vrf_vkey);
             // Count one on this hash
             *(self.blocks_minted.entry(vrf_key_hash.clone()).or_insert(0)) += 1;
             *(self.total_blocks_minted.entry(vrf_key_hash.clone()).or_insert(0)) += 1;
+
+            if let Some(block_hashes) = self.block_hashes.as_mut() {
+                let block_hash: Option<BlockHash> = block
+                    .hash
+                    .clone()
+                    .try_into()
+                    .inspect_err(|_| error!("Block hash is not 32 bytes"))
+                    .ok();
+                if let Some(block_hash) = block_hash {
+                    block_hashes
+                        .entry(vrf_key_hash.clone())
+                        .or_insert_with(Vector::new)
+                        .push_back(block_hash);
+                }
+            }
         }
     }
 
@@ -102,6 +136,15 @@ impl State {
             .map(|key_hash| self.total_blocks_minted.get(key_hash).map(|v| *v as u64).unwrap_or(0))
             .collect()
     }
+
+    /// Get Block Hashes by Vrf Key Hash
+    pub fn get_block_hashes(&self, vrf_key_hash: &KeyHash) -> Option<Vec<BlockHash>> {
+        let Some(block_hashes) = self.block_hashes.as_ref() else {
+            return None;
+        };
+
+        block_hashes.get(vrf_key_hash).map(|hashes| hashes.into_iter().cloned().collect())
+    }
 }
 
 #[cfg(test)]
@@ -112,7 +155,7 @@ mod tests {
     use acropolis_common::{
         crypto::keyhash,
         state_history::{StateHistory, StateHistoryStore},
-        BlockInfo, BlockStatus, Era,
+        BlockHash, BlockInfo, BlockStatus, Era, HashTraits,
     };
     use tokio::sync::Mutex;
 
@@ -121,7 +164,7 @@ mod tests {
             status: BlockStatus::Immutable,
             slot: 0,
             number: epoch * 10,
-            hash: Vec::new(),
+            hash: BlockHash::new(),
             epoch,
             epoch_slot: 99,
             new_epoch: false,
@@ -135,7 +178,7 @@ mod tests {
             status: BlockStatus::RolledBack,
             slot: 0,
             number: epoch * 10,
-            hash: Vec::new(),
+            hash: BlockHash::new(),
             epoch,
             epoch_slot: 99,
             new_epoch: false,
@@ -146,15 +189,16 @@ mod tests {
 
     #[test]
     fn initial_state_is_zeroed() {
-        let state = State::new();
+        let state = State::new(&StoreConfig::default());
         assert_eq!(state.epoch_blocks, 0);
         assert_eq!(state.epoch_fees, 0);
         assert!(state.blocks_minted.is_empty());
+        assert!(state.block_hashes.is_none());
     }
 
     #[test]
     fn handle_mint_single_vrf_records_counts() {
-        let mut state = State::new();
+        let mut state = State::new(&StoreConfig::default());
         let vrf = b"vrf_key";
         let mut block = make_block(100);
         state.handle_mint(&block, Some(vrf));
@@ -172,7 +216,7 @@ mod tests {
 
     #[test]
     fn handle_mint_multiple_vrf_records_counts() {
-        let mut state = State::new();
+        let mut state = State::new(&StoreConfig::default());
         let mut block = make_block(100);
         state.handle_mint(&block, Some(b"vrf_1"));
         block.number += 1;
@@ -193,8 +237,27 @@ mod tests {
     }
 
     #[test]
+    fn store_block_hashes_after_handle_mint() {
+        let mut state = State::new(&StoreConfig::new(false, true));
+        let mut block = make_block(100);
+        state.handle_mint(&block, Some(b"vrf_1"));
+        block.number += 1;
+        state.handle_mint(&block, Some(b"vrf_2"));
+        block.number += 1;
+        state.handle_mint(&block, Some(b"vrf_2"));
+
+        let block_hashes_1 = state.get_block_hashes(&keyhash(b"vrf_1")).unwrap();
+        assert_eq!(block_hashes_1.len(), 1);
+        assert_eq!(block_hashes_1[0], block.hash);
+        let block_hashes_2 = state.get_block_hashes(&keyhash(b"vrf_2")).unwrap();
+        assert_eq!(block_hashes_2.len(), 2);
+        assert_eq!(block_hashes_2[0], block.hash);
+        assert_eq!(block_hashes_2[1], block.hash);
+    }
+
+    #[test]
     fn handle_fees_counts_fees() {
-        let mut state = State::new();
+        let mut state = State::new(&StoreConfig::default());
         let mut block = make_block(100);
 
         state.handle_fees(&block, 100);
@@ -206,7 +269,7 @@ mod tests {
 
     #[test]
     fn end_epoch_resets_and_returns_message() {
-        let mut state = State::new();
+        let mut state = State::new(&StoreConfig::default());
         let block = make_block(1);
         state.handle_mint(&block, Some(b"vrf_1"));
         state.handle_fees(&block, 123);
