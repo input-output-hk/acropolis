@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use acropolis_common::queries::{
     accounts::DEFAULT_ACCOUNTS_QUERY_TOPIC,
+    blocks::DEFAULT_BLOCKS_QUERY_TOPIC,
     epochs::DEFAULT_EPOCHS_QUERY_TOPIC,
     governance::{DEFAULT_DREPS_QUERY_TOPIC, DEFAULT_GOVERNANCE_QUERY_TOPIC},
     parameters::DEFAULT_PARAMETERS_QUERY_TOPIC,
@@ -14,6 +15,7 @@ const DEFAULT_EXTERNAL_API_TIMEOUT: (&str, i64) = ("external_api_timeout", 3); /
 #[derive(Clone)]
 pub struct HandlersConfig {
     pub accounts_query_topic: String,
+    pub blocks_query_topic: String,
     pub pools_query_topic: String,
     pub dreps_query_topic: String,
     pub governance_query_topic: String,
@@ -27,6 +29,10 @@ impl From<Arc<Config>> for HandlersConfig {
         let accounts_query_topic = config
             .get_string(DEFAULT_ACCOUNTS_QUERY_TOPIC.0)
             .unwrap_or(DEFAULT_ACCOUNTS_QUERY_TOPIC.1.to_string());
+
+        let blocks_query_topic = config
+            .get_string(DEFAULT_BLOCKS_QUERY_TOPIC.0)
+            .unwrap_or(DEFAULT_BLOCKS_QUERY_TOPIC.1.to_string());
 
         let pools_query_topic = config
             .get_string(DEFAULT_POOLS_QUERY_TOPIC.0)
@@ -54,6 +60,7 @@ impl From<Arc<Config>> for HandlersConfig {
 
         Self {
             accounts_query_topic,
+            blocks_query_topic,
             pools_query_topic,
             dreps_query_topic,
             governance_query_topic,

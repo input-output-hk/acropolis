@@ -17,6 +17,9 @@ mod types;
 mod utils;
 use handlers::{
     accounts::handle_single_account_blockfrost,
+    blocks::{
+        handle_blocks_latest_blockfrost,
+    },
     epochs::{
         handle_epoch_info_blockfrost, handle_epoch_next_blockfrost, handle_epoch_params_blockfrost,
         handle_epoch_pool_blocks_blockfrost, handle_epoch_pool_stakes_blockfrost,
@@ -45,6 +48,10 @@ use crate::handlers_config::HandlersConfig;
 // Accounts topics
 const DEFAULT_HANDLE_SINGLE_ACCOUNT_TOPIC: (&str, &str) =
     ("handle-topic-account-single", "rest.get.accounts.*");
+
+// Blocks topics
+const DEFAULT_HANDLE_BLOCKS_LATEST_TOPIC: (&str, &str) =
+    ("handle-blocks-latest", "rest.get.blocks.latest");
 
 // Governance topics
 const DEFAULT_HANDLE_DREPS_LIST_TOPIC: (&str, &str) =
@@ -163,6 +170,14 @@ impl BlockfrostREST {
             DEFAULT_HANDLE_SINGLE_ACCOUNT_TOPIC,
             handlers_config.clone(),
             handle_single_account_blockfrost,
+        );
+
+        // Handler for /blocks/latest
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_BLOCKS_LATEST_TOPIC,
+            handlers_config.clone(),
+            handle_blocks_latest_blockfrost,
         );
 
         // Handler for /governance/dreps

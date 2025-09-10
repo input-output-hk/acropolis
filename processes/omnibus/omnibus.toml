@@ -71,6 +71,8 @@ store-history = false
 
 [module.accounts-state]
 
+[module.chain-store]
+
 [module.clock]
 
 [module.rest-server]

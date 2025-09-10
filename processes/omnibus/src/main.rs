@@ -11,6 +11,7 @@ use tracing_subscriber;
 // External modules
 use acropolis_module_accounts_state::AccountsState;
 use acropolis_module_block_unpacker::BlockUnpacker;
+use acropolis_module_chain_store::ChainStore;
 use acropolis_module_drdd_state::DRDDState;
 use acropolis_module_drep_state::DRepState;
 use acropolis_module_epoch_activity_counter::EpochActivityCounter;
@@ -101,6 +102,7 @@ pub async fn main() -> Result<()> {
     BlockfrostREST::register(&mut process);
     SPDDState::register(&mut process);
     DRDDState::register(&mut process);
+    ChainStore::register(&mut process);
 
     Clock::<Message>::register(&mut process);
     RESTServer::<Message>::register(&mut process);

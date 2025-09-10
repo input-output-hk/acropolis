@@ -355,6 +355,7 @@ dependencies = [
  "acropolis_common",
  "acropolis_module_accounts_state",
  "acropolis_module_block_unpacker",
+ "acropolis_module_chain_store",
  "acropolis_module_drdd_state",
  "acropolis_module_drep_state",
  "acropolis_module_epoch_activity_counter",
