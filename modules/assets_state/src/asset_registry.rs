@@ -40,6 +40,14 @@ impl AssetRegistry {
         }
     }
 
+    pub fn lookup_id(&self, policy: &PolicyId, name: &AssetName) -> Option<AssetId> {
+        let key = AssetKey {
+            policy: Arc::new(policy.clone()),
+            name: Arc::new(name.clone()),
+        };
+        self.key_to_id.get(&key).copied()
+    }
+
     pub fn lookup(&self, id: AssetId) -> Option<&AssetKey> {
         self.id_to_key.get(id.0 as usize)
     }
