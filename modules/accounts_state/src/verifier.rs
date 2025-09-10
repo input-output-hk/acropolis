@@ -210,7 +210,7 @@ impl Verifier {
                             .1
                             .into_iter()
                             .merge_join_by(actual_spo.1.into_iter(), |i, j| {
-                                i.account.cmp(&j.account.clone())
+                                Self::sort_rewards(i, j)
                             })
                         {
                             match either {
