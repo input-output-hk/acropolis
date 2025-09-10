@@ -29,7 +29,7 @@ pub async fn handle_assets_list_blockfrost(
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Assets(
                 AssetsStateQueryResponse::AssetsList(assets),
-            )) => Ok(assets), // already Vec<AssetListEntry>
+            )) => Ok(assets),
             _ => Err(anyhow::anyhow!(
                 "Unexpected response while retrieving assets list",
             )),

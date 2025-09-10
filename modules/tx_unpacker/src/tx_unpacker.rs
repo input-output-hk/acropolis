@@ -218,7 +218,6 @@ impl TxUnpacker {
                                         }
 
                                         if publish_asset_deltas_topic.is_some() {
-                                            // Convert the pallas Hash<32> into your TxHash ([u8; 32])
                                             let tx_hash: TxHash = tx.hash().to_vec().try_into().expect("invalid tx hash length");
 
                                             let mut tx_deltas: Vec<(PolicyId, Vec<NativeAssetDelta>)> = Vec::new();
