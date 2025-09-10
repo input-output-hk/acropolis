@@ -72,6 +72,9 @@ pub struct State {
     /// Map of active SPOs by operator ID
     spos: OrdMap<KeyHash, PoolRegistration>,
 
+    /// List of SPOs (by operator ID) retiring in the current epoch
+    retiring_spos: Vec<KeyHash>,
+
     /// Map of staking address values
     /// Wrapped in an Arc so it doesn't get cloned in full by StateHistory
     stake_addresses: Arc<Mutex<StakeAddressMap>>,
@@ -316,6 +319,12 @@ impl State {
                 monetary_change.stake_rewards,
             )
         }))));
+
+        // Now retire the SPOs fully
+        // TODO - wipe any delegations to retired pools
+        for id in self.retiring_spos.drain(..) {
+            self.spos.remove(&id);
+        }
 
         Ok(reward_deltas)
     }
@@ -589,7 +598,7 @@ impl State {
     /// epoch
     pub fn handle_spo_state(&mut self, spo_msg: &SPOStateMessage) -> Result<()> {
         // Capture current SPOs, mapped by operator ID
-        let mut new_spos: OrdMap<KeyHash, PoolRegistration> =
+        let new_spos: OrdMap<KeyHash, PoolRegistration> =
             spo_msg.spos.iter().cloned().map(|spo| (spo.operator.clone(), spo)).collect();
 
         // Get pool deposit amount from parameters, or default
@@ -661,9 +670,9 @@ impl State {
                     Err(e) => error!("Error repaying SPO deposit: {e}"),
                 }
 
-                // Remove from our list
-                new_spos.remove(id);
-                // TODO - wipe any delegations to retired pools
+                // Schedule to retire - we need them to still be in place when we count
+                // blocks for the previous epoch
+                self.retiring_spos.push(id.to_vec());
             }
         }
 
