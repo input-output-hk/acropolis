@@ -14,7 +14,8 @@ use anyhow::{bail, Result};
 use imbl::HashMap;
 use serde::Serialize;
 use serde_with::{hex::Hex, serde_as};
-use std::sync::Arc;
+use std::collections::HashMap as StdHashMap;
+use std::sync::{Arc, Mutex};
 use tracing::{debug, error, info};
 
 use crate::{historical_spo_state::HistoricalSPOState, store_config::StoreConfig};
@@ -42,7 +43,6 @@ pub struct StakeAddressState {
 pub struct State {
     store_config: StoreConfig,
 
-    #[allow(dead_code)]
     block: u64,
 
     epoch: u64,
@@ -59,7 +59,7 @@ pub struct State {
     historical_spos: Option<HashMap<KeyHash, HistoricalSPOState>>,
 
     /// stake_addresses (We save stake_addresses according to store_config)
-    stake_addresses: Option<HashMap<KeyHash, StakeAddressState>>,
+    stake_addresses: Option<Arc<Mutex<StdHashMap<KeyHash, StakeAddressState>>>>,
 }
 
 impl State {
@@ -77,7 +77,7 @@ impl State {
                 None
             },
             stake_addresses: if config.store_stake_addresses {
-                Some(HashMap::new())
+                Some(Arc::new(Mutex::new(StdHashMap::new())))
             } else {
                 None
             },
@@ -187,6 +187,7 @@ impl State {
             return None;
         };
 
+        let stake_addresses = stake_addresses.lock().unwrap();
         let delegators = historical_spos.get(pool_id).map(|s| s.delegators.clone()).flatten();
         let Some(delegators) = delegators.as_ref() else {
             return None;
@@ -331,9 +332,10 @@ impl State {
     }
 
     fn register_stake_address(&mut self, credential: &StakeCredential) {
-        let Some(stake_addresses) = self.stake_addresses.as_mut() else {
+        let Some(stake_addresses) = self.stake_addresses.as_ref() else {
             return;
         };
+        let mut stake_addresses = stake_addresses.lock().unwrap();
 
         let hash = credential.get_hash();
         let sas = stake_addresses.entry(hash.clone()).or_default();
@@ -349,9 +351,10 @@ impl State {
     }
 
     fn deregister_stake_address(&mut self, credential: &StakeCredential) {
-        let Some(stake_addresses) = self.stake_addresses.as_mut() else {
+        let Some(stake_addresses) = self.stake_addresses.as_ref() else {
             return;
         };
+        let mut stake_addresses = stake_addresses.lock().unwrap();
 
         let hash = credential.get_hash();
         if let Some(sas) = stake_addresses.get_mut(&hash) {
@@ -391,9 +394,10 @@ impl State {
     /// Record a stake delegation
     /// Update historical_spo_state's delegators
     fn record_stake_delegation(&mut self, credential: &StakeCredential, spo: &KeyHash) {
-        let Some(stake_addresses) = self.stake_addresses.as_mut() else {
+        let Some(stake_addresses) = self.stake_addresses.as_ref() else {
             return;
         };
+        let mut stake_addresses = stake_addresses.lock().unwrap();
 
         let hash = credential.get_hash();
         // Get old stake address state, or create one
@@ -533,9 +537,10 @@ impl State {
 
     /// Add a reward to a reward account (by hash)
     fn update_reward_with_delta(&mut self, account: &KeyHash, delta: i64) {
-        let Some(stake_addresses) = self.stake_addresses.as_mut() else {
+        let Some(stake_addresses) = self.stake_addresses.as_ref() else {
             return;
         };
+        let mut stake_addresses = stake_addresses.lock().unwrap();
 
         // Get old stake address state, or create one
         let sas = match stake_addresses.get_mut(account) {
@@ -553,9 +558,10 @@ impl State {
 
     /// Handle withdrawals
     pub fn handle_withdrawals(&mut self, withdrawals_msg: &WithdrawalsMessage) -> Result<()> {
-        let Some(stake_addresses) = self.stake_addresses.as_mut() else {
+        let Some(stake_addresses) = self.stake_addresses.as_ref() else {
             return Ok(());
         };
+        let mut stake_addresses = stake_addresses.lock().unwrap();
 
         for withdrawal in withdrawals_msg.withdrawals.iter() {
             let hash = withdrawal.address.get_hash();
@@ -590,9 +596,10 @@ impl State {
 
     /// Handle stake deltas
     pub fn handle_stake_deltas(&mut self, deltas_msg: &StakeAddressDeltasMessage) -> Result<()> {
-        let Some(stake_addresses) = self.stake_addresses.as_mut() else {
+        let Some(stake_addresses) = self.stake_addresses.as_ref() else {
             return Ok(());
         };
+        let mut stake_addresses = stake_addresses.lock().unwrap();
 
         // Handle deltas
         for delta in deltas_msg.deltas.iter() {
