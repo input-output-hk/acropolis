@@ -38,11 +38,9 @@ pub async fn handle_assets_list_blockfrost(
 
     let rest: Vec<AssetListEntryRest> = response
         .into_iter()
-        .flat_map(|(policy_id, asset_map)| {
-            asset_map.into_iter().map(move |(name, amount)| AssetListEntryRest {
-                asset: format!("{}{}", hex::encode(policy_id), hex::encode(name)),
-                quantity: amount.to_string(),
-            })
+        .map(|(policy_id, name, amount)| AssetListEntryRest {
+            asset: format!("{}{}", hex::encode(policy_id), hex::encode(name.as_slice())),
+            quantity: amount.to_string(),
         })
         .collect();
 

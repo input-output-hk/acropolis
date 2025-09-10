@@ -15,7 +15,7 @@ pub enum AssetsStateQuery {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum AssetsStateQueryResponse {
-    AssetsList(imbl::HashMap<PolicyId, imbl::HashMap<AssetName, u64>>),
+    AssetsList(Vec<(PolicyId, AssetName, u64)>),
     AssetInfo(AssetInfo),
     AssetHistory(AssetHistory),
     AssetTransactions(AssetTransactions),
