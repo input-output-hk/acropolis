@@ -692,44 +692,78 @@ pub async fn handle_pool_delegators_blockfrost(
     )
     .await?;
 
-    let pool_delegators = match pool_delegators {
-        Some(delegators) => delegators,
-        None => {
-            // Query from Accounts state
-            let pool_delegators_msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
-                AccountsStateQuery::GetPoolDelegators {
-                    pool_operator: spo.clone(),
-                },
-            )));
-            let pool_delegators = query_state(
-                &context,
-                &handlers_config.accounts_query_topic,
-                pool_delegators_msg,
-                |message| match message {
-                    Message::StateQueryResponse(StateQueryResponse::Accounts(
-                        AccountsStateQueryResponse::PoolDelegators(pool_delegators),
-                    )) => Ok(pool_delegators.delegators),
-                    Message::StateQueryResponse(StateQueryResponse::Accounts(
-                        AccountsStateQueryResponse::Error(e),
-                    )) => Err(anyhow::anyhow!(
-                        "Error while retrieving pool delegators from accounts_state: {e}"
-                    )),
-                    _ => Err(anyhow::anyhow!("Unexpected message type")),
-                },
-            )
-            .await?;
-            pool_delegators
-        }
-    };
+    // let pool_delegators = match pool_delegators {
+    //     Some(delegators) => delegators,
+    //     None => {
+    //         // Query from Accounts state
+    //         let pool_delegators_msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
+    //             AccountsStateQuery::GetPoolDelegators {
+    //                 pool_operator: spo.clone(),
+    //             },
+    //         )));
+    //         let pool_delegators = query_state(
+    //             &context,
+    //             &handlers_config.accounts_query_topic,
+    //             pool_delegators_msg,
+    //             |message| match message {
+    //                 Message::StateQueryResponse(StateQueryResponse::Accounts(
+    //                     AccountsStateQueryResponse::PoolDelegators(pool_delegators),
+    //                 )) => Ok(pool_delegators.delegators),
+    //                 Message::StateQueryResponse(StateQueryResponse::Accounts(
+    //                     AccountsStateQueryResponse::Error(e),
+    //                 )) => Err(anyhow::anyhow!(
+    //                     "Error while retrieving pool delegators from accounts_state: {e}"
+    //                 )),
+    //                 _ => Err(anyhow::anyhow!("Unexpected message type")),
+    //             },
+    //         )
+    //         .await?;
+    //         pool_delegators
+    //     }
+    // };
+
+    // Query from Accounts state
+    let accounts_pool_delegators_msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
+        AccountsStateQuery::GetPoolDelegators {
+            pool_operator: spo.clone(),
+        },
+    )));
+    let accounts_pool_delegators = query_state(
+        &context,
+        &handlers_config.accounts_query_topic,
+        accounts_pool_delegators_msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Accounts(
+                AccountsStateQueryResponse::PoolDelegators(pool_delegators),
+            )) => Ok(pool_delegators.delegators),
+            Message::StateQueryResponse(StateQueryResponse::Accounts(
+                AccountsStateQueryResponse::Error(e),
+            )) => Err(anyhow::anyhow!(
+                "Error while retrieving pool delegators from accounts_state: {e}"
+            )),
+            _ => Err(anyhow::anyhow!("Unexpected message type")),
+        },
+    )
+    .await?;
 
     let mut delegators_rest = Vec::<PoolDelegatorRest>::new();
-    for (d, l) in pool_delegators {
+    for (d, l) in accounts_pool_delegators {
         let bech32 = StakeCredential::AddrKeyHash(d.clone())
             .to_stake_bech32()
             .map_err(|e| anyhow::anyhow!("Invalid stake address in pool delegators: {e}"))?;
         delegators_rest.push(PoolDelegatorRest {
             address: bech32,
-            live_stake: l.to_string(),
+            account_live_stake: l.to_string(),
+            spo_live_stake: pool_delegators
+                .as_ref()
+                .map(|delegators| {
+                    delegators
+                        .iter()
+                        .find(|(delegator, _)| delegator.eq(&d))
+                        .map(|(_, live_stake)| live_stake.to_string())
+                })
+                .flatten()
+                .unwrap_or("0".to_string()),
         });
     }
 
