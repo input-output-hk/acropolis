@@ -415,6 +415,14 @@ impl SPOState {
                         };
                         PoolsStateQueryResponse::PoolsListWithInfo(pools_list_with_info)
                     }
+                    PoolsStateQuery::GetPoolInfo { pool_id } => {
+                        let pool_info = state.get(pool_id);
+                        if let Some(pool_info) = pool_info {
+                            PoolsStateQueryResponse::PoolInfo(pool_info.clone())
+                        } else {
+                            PoolsStateQueryResponse::NotFound
+                        }
+                    }
 
                     PoolsStateQuery::GetPoolsActiveStakes {
                         pools_operators,

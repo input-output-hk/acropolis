@@ -138,12 +138,15 @@ impl State {
     }
 
     /// Get Block Hashes by Vrf Key Hash
-    pub fn get_block_hashes(&self, vrf_key_hash: &KeyHash) -> Option<Vec<BlockHash>> {
+    pub fn get_block_hashes(&self, vrf_key_hash: &KeyHash) -> Vec<BlockHash> {
         let Some(block_hashes) = self.block_hashes.as_ref() else {
-            return None;
+            return vec![];
         };
 
-        block_hashes.get(vrf_key_hash).map(|hashes| hashes.into_iter().cloned().collect())
+        block_hashes
+            .get(vrf_key_hash)
+            .map(|hashes| hashes.into_iter().cloned().collect())
+            .unwrap_or_default()
     }
 }
 
@@ -246,10 +249,10 @@ mod tests {
         block.number += 1;
         state.handle_mint(&block, Some(b"vrf_2"));
 
-        let block_hashes_1 = state.get_block_hashes(&keyhash(b"vrf_1")).unwrap();
+        let block_hashes_1 = state.get_block_hashes(&keyhash(b"vrf_1"));
         assert_eq!(block_hashes_1.len(), 1);
         assert_eq!(block_hashes_1[0], block.hash);
-        let block_hashes_2 = state.get_block_hashes(&keyhash(b"vrf_2")).unwrap();
+        let block_hashes_2 = state.get_block_hashes(&keyhash(b"vrf_2"));
         assert_eq!(block_hashes_2.len(), 2);
         assert_eq!(block_hashes_2[0], block.hash);
         assert_eq!(block_hashes_2[1], block.hash);

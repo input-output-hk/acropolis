@@ -743,11 +743,81 @@ pub async fn handle_pool_delegators_blockfrost(
 }
 
 pub async fn handle_pool_blocks_blockfrost(
-    _context: Arc<Context<Message>>,
-    _params: Vec<String>,
-    _handlers_config: Arc<HandlersConfig>,
+    context: Arc<Context<Message>>,
+    params: Vec<String>,
+    handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
-    Ok(RESTResponse::with_text(501, "Not implemented"))
+    let Some(pool_id) = params.get(0) else {
+        return Ok(RESTResponse::with_text(400, "Missing pool ID parameter"));
+    };
+
+    let Ok(spo) = Vec::<u8>::from_bech32_with_hrp(pool_id, "pool") else {
+        return Ok(RESTResponse::with_text(
+            400,
+            &format!("Invalid Bech32 stake pool ID: {pool_id}"),
+        ));
+    };
+
+    // query pool registration from pool state
+    let pool_info_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
+        PoolsStateQuery::GetPoolInfo {
+            pool_id: spo.clone(),
+        },
+    )));
+
+    let pool_info = query_state(
+        &context,
+        &handlers_config.pools_query_topic,
+        pool_info_msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::PoolInfo(pool_info),
+            )) => Ok(pool_info),
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::NotFound,
+            )) => Err(anyhow::anyhow!("Pool Not found")),
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::Error(e),
+            )) => Err(anyhow::anyhow!(
+                "Internal server error while retrieving pool info: {e}"
+            )),
+            _ => Err(anyhow::anyhow!("Unexpected message type")),
+        },
+    )
+    .await?;
+
+    let vrf_key_hash = pool_info.vrf_key_hash;
+
+    // query block hashes by vrf key hash
+    // from epoch-activity_counter state
+    let pool_blocks_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
+        EpochsStateQuery::GetBlockHashesByPool { vrf_key_hash },
+    )));
+
+    let pool_blocks = query_state(
+        &context,
+        &handlers_config.epochs_query_topic,
+        pool_blocks_msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Epochs(
+                EpochsStateQueryResponse::BlockHashesByPool(pool_blocks),
+            )) => Ok(pool_blocks.hashes),
+            Message::StateQueryResponse(StateQueryResponse::Epochs(
+                EpochsStateQueryResponse::Error(_),
+            )) => Err(anyhow::anyhow!("Block hashes are not enabled")),
+            _ => Err(anyhow::anyhow!("Unexpected message type")),
+        },
+    )
+    .await?;
+
+    let pool_blocks_rest = pool_blocks.into_iter().map(|b| hex::encode(b)).collect::<Vec<_>>();
+    match serde_json::to_string(&pool_blocks_rest) {
+        Ok(json) => Ok(RESTResponse::with_json(200, &json)),
+        Err(e) => Ok(RESTResponse::with_text(
+            500,
+            &format!("Internal server error while retrieving pool blocks: {e}"),
+        )),
+    }
 }
 
 pub async fn handle_pool_updates_blockfrost(

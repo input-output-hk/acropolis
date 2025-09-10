@@ -28,9 +28,6 @@ pub enum PoolsStateQuery {
     GetPoolDelegators {
         pool_id: Vec<u8>,
     },
-    GetPoolBlocks {
-        pool_id: Vec<u8>,
-    },
     GetPoolUpdates {
         pool_id: Vec<u8>,
     },
@@ -46,12 +43,11 @@ pub enum PoolsStateQueryResponse {
     PoolsRetiredList(PoolsRetiredList),
     PoolsRetiringList(PoolsRetiringList),
     PoolsActiveStakes(PoolsActiveStakes),
-    PoolInfo(PoolInfo),
+    PoolInfo(PoolRegistration),
     PoolHistory(PoolHistory),
     PoolMetadata(PoolMetadata),
     PoolRelays(PoolRelays),
     PoolDelegators(PoolDelegators),
-    PoolBlocks(PoolBlocks),
     PoolUpdates(PoolUpdates),
     PoolVotes(PoolVotes),
     NotFound,
@@ -88,9 +84,6 @@ pub struct PoolsActiveStakes {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PoolInfo {}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PoolHistory {
     pub history: Vec<PoolEpochState>,
 }
@@ -103,9 +96,6 @@ pub struct PoolRelays {
 pub struct PoolDelegators {
     pub delegators: Vec<(KeyHash, u64)>,
 }
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PoolBlocks {}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PoolUpdates {}

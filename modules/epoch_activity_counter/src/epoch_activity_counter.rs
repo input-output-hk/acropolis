@@ -260,13 +260,9 @@ impl EpochActivityCounter {
                     EpochsStateQuery::GetBlockHashesByPool { vrf_key_hash } => {
                         if state.is_block_hashes_enabled() {
                             let hashes = state.get_block_hashes(vrf_key_hash);
-                            if let Some(hashes) = hashes {
-                                EpochsStateQueryResponse::BlockHashesByPool(BlockHashesByPool {
-                                    hashes,
-                                })
-                            } else {
-                                EpochsStateQueryResponse::NotFound
-                            }
+                            EpochsStateQueryResponse::BlockHashesByPool(BlockHashesByPool {
+                                hashes,
+                            })
                         } else {
                             EpochsStateQueryResponse::Error(
                                 "Block hashes are not enabled".to_string(),
