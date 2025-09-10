@@ -4,8 +4,9 @@
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::epochs::{
-        BlocksMintedByPools, EpochInfo, EpochsStateQuery, EpochsStateQueryResponse, LatestEpoch,
-        TotalBlocksMintedByPools, DEFAULT_EPOCHS_QUERY_TOPIC,
+        BlockHashesByPool, BlocksMintedByPools, EpochInfo, EpochsStateQuery,
+        EpochsStateQueryResponse, LatestEpoch, TotalBlocksMintedByPools,
+        DEFAULT_EPOCHS_QUERY_TOPIC,
     },
     state_history::{StateHistory, StateHistoryStore},
     BlockInfo, BlockStatus, Era,
@@ -49,13 +50,14 @@ impl EpochActivityCounter {
     async fn run(
         history: Arc<Mutex<StateHistory<State>>>,
         epochs_history: EpochsHistoryState,
+        store_config: &StoreConfig,
         mut headers_subscription: Box<dyn Subscription<Message>>,
         mut fees_subscription: Box<dyn Subscription<Message>>,
         mut epoch_activity_publisher: EpochActivityPublisher,
     ) -> Result<()> {
         loop {
             // Get a mutable state
-            let mut state = history.lock().await.get_or_init_with(|| State::new());
+            let mut state = history.lock().await.get_or_init_with(|| State::new(store_config));
             let mut current_block: Option<BlockInfo> = None;
 
             // Read both topics in parallel
@@ -255,6 +257,23 @@ impl EpochActivityCounter {
                         )
                     }
 
+                    EpochsStateQuery::GetBlockHashesByPool { vrf_key_hash } => {
+                        if state.is_block_hashes_enabled() {
+                            let hashes = state.get_block_hashes(vrf_key_hash);
+                            if let Some(hashes) = hashes {
+                                EpochsStateQueryResponse::BlockHashesByPool(BlockHashesByPool {
+                                    hashes,
+                                })
+                            } else {
+                                EpochsStateQueryResponse::NotFound
+                            }
+                        } else {
+                            EpochsStateQueryResponse::Error(
+                                "Block hashes are not enabled".to_string(),
+                            )
+                        }
+                    }
+
                     _ => EpochsStateQueryResponse::Error(format!(
                         "Unimplemented query variant: {:?}",
                         query
@@ -271,6 +290,7 @@ impl EpochActivityCounter {
             Self::run(
                 history,
                 epochs_history,
+                &store_config,
                 headers_subscription,
                 fees_subscription,
                 epoch_activity_publisher,

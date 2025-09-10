@@ -5,7 +5,7 @@ use acropolis_common::{
         CardanoMessage, DRepStakeDistributionMessage, GovernanceProceduresMessage, Message,
         SPOStakeDistributionMessage,
     },
-    BlockInfo,
+    BlockHash, BlockInfo, HashTraits,
 };
 use anyhow::{anyhow, bail, ensure, Result};
 use caryatid_sdk::{module, Context, Module};
@@ -121,7 +121,7 @@ impl PlaybackRunner {
         let mut curr_blk = prev_blk.clone();
         curr_blk.slot += curr_block_num - prev_blk.number;
         curr_blk.number = curr_block_num;
-        curr_blk.hash = Vec::new();
+        curr_blk.hash = BlockHash::new();
         curr_blk.new_epoch = false;
 
         ensure!(curr_blk.slot < pending_blk.slot);
