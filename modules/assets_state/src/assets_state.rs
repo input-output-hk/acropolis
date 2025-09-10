@@ -65,10 +65,10 @@ impl AssetsState {
                             state = history.lock().await.get_rolled_back_state(block.number);
                         }
 
-                        // Process deltas
+                        // Process mint deltas
                         if storage_config.store_assets {
                             let mut reg = registry.lock().await;
-                            state = match state.handle_deltas(&message.deltas, &mut *reg) {
+                            state = match state.handle_mint_deltas(&message.deltas, &mut *reg) {
                                 Ok(new_state) => new_state,
                                 Err(e) => {
                                     error!("Asset deltas handling error: {e:#}");
@@ -126,7 +126,7 @@ impl AssetsState {
         )));
         let history_run = history.clone();
         let query_history = history.clone();
-        let ticker_history = history.clone();
+        let tick_history = history.clone();
 
         // Initialize asset registry
         let registry = Arc::new(Mutex::new(asset_registry::AssetRegistry::new()));
@@ -152,9 +152,57 @@ impl AssetsState {
                         Ok(list) => AssetsStateQueryResponse::AssetsList(list),
                         Err(e) => AssetsStateQueryResponse::Error(e.to_string()),
                     },
-                    _ => AssetsStateQueryResponse::Error(format!(
-                        "Unimplemented assets query: {query:?}"
-                    )),
+                    AssetsStateQuery::GetAssetInfo { policy, name } => {
+                        match reg.lookup_id(&policy, &name) {
+                            Some(asset_id) => match state.get_asset_info(&asset_id) {
+                                Ok(Some(info)) => AssetsStateQueryResponse::AssetInfo(info),
+                                Ok(None) => AssetsStateQueryResponse::NotFound,
+                                Err(e) => AssetsStateQueryResponse::Error(e.to_string()),
+                            },
+                            None => AssetsStateQueryResponse::NotFound,
+                        }
+                    }
+                    AssetsStateQuery::GetAssetHistory { policy, name } => {
+                        match reg.lookup_id(&policy, &name) {
+                            Some(asset_id) => match state.get_asset_history(&asset_id) {
+                                Ok(Some(history)) => {
+                                    AssetsStateQueryResponse::AssetHistory(history)
+                                }
+                                Ok(None) => AssetsStateQueryResponse::NotFound,
+                                Err(e) => AssetsStateQueryResponse::Error(e.to_string()),
+                            },
+                            None => AssetsStateQueryResponse::NotFound,
+                        }
+                    }
+                    AssetsStateQuery::GetAssetAddresses { policy, name } => {
+                        match reg.lookup_id(&policy, &name) {
+                            Some(asset_id) => match state.get_asset_addresses(&asset_id) {
+                                Ok(Some(addresses)) => {
+                                    AssetsStateQueryResponse::AssetAddresses(addresses)
+                                }
+                                Ok(None) => AssetsStateQueryResponse::NotFound,
+                                Err(e) => AssetsStateQueryResponse::Error(e.to_string()),
+                            },
+                            None => AssetsStateQueryResponse::NotFound,
+                        }
+                    }
+                    AssetsStateQuery::GetAssetTransactions { policy, name } => {
+                        match reg.lookup_id(&policy, &name) {
+                            Some(asset_id) => match state.get_asset_transactions(&asset_id) {
+                                Ok(Some(txs)) => AssetsStateQueryResponse::AssetTransactions(txs),
+                                Ok(None) => AssetsStateQueryResponse::NotFound,
+                                Err(e) => AssetsStateQueryResponse::Error(e.to_string()),
+                            },
+                            None => AssetsStateQueryResponse::NotFound,
+                        }
+                    }
+                    AssetsStateQuery::GetPolicyIdAssets { policy } => {
+                        match state.get_policy_assets(&policy, &reg) {
+                            Ok(Some(assets)) => AssetsStateQueryResponse::PolicyIdAssets(assets),
+                            Ok(None) => AssetsStateQueryResponse::NotFound,
+                            Err(e) => AssetsStateQueryResponse::Error(e.to_string()),
+                        }
+                    }
                 };
                 Arc::new(Message::StateQueryResponse(StateQueryResponse::Assets(
                     response,
@@ -173,9 +221,9 @@ impl AssetsState {
                     if message.number % 60 == 0 {
                         let span = info_span!("assets_state.tick", number = message.number);
                         async {
-                            let guard = ticker_history.lock().await;
+                            let guard = tick_history.lock().await;
                             if let Some(state) = guard.current() {
-                                if let Err(e) = state.tick().await {
+                                if let Err(e) = state.tick() {
                                     error!("Tick error: {e}");
                                 }
                             } else {

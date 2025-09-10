@@ -107,7 +107,7 @@ impl TxUnpacker {
                             }
 
                             let mut utxo_deltas = Vec::new();
-                            let mut asset_deltas: NativeAssetsDelta = Vec::new();
+                            let mut asset_deltas = Vec::new();
                             let mut withdrawals = Vec::new();
                             let mut certificates = Vec::new();
                             let mut voting_procedures = Vec::new();
@@ -218,10 +218,19 @@ impl TxUnpacker {
                                         }
 
                                         if publish_asset_deltas_topic.is_some() {
+                                            // Convert the pallas Hash<32> into your TxHash ([u8; 32])
+                                            let tx_hash: TxHash = tx.hash().to_vec().try_into().expect("invalid tx hash length");
+
+                                            let mut tx_deltas: Vec<(PolicyId, Vec<NativeAssetDelta>)> = Vec::new();
+
                                             for policy_group in tx.mints().iter() {
-                                                if let Some(delta) = map_parameters::map_mint_burn(policy_group) {
-                                                    asset_deltas.push(delta);
+                                                if let Some((policy_id, deltas)) = map_parameters::map_mint_burn(policy_group) {
+                                                    tx_deltas.push((policy_id, deltas));
                                                 }
+                                            }
+
+                                            if !tx_deltas.is_empty() {
+                                                asset_deltas.push((tx_hash, tx_deltas));
                                             }
                                         }
 

@@ -1,44 +1,130 @@
-use crate::{AssetName, PolicyId};
+use serde::Serialize;
+
+use crate::{AssetName, PolicyId, ShelleyAddress, TxHash};
 
 pub const DEFAULT_ASSETS_QUERY_TOPIC: (&str, &str) =
     ("assets-state-query-topic", "cardano.query.assets");
 
+pub type AssetList = Vec<AssetListEntry>;
+pub type AssetInfo = (u64, AssetInfoRecord);
+pub type AssetHistory = Vec<MintRecord>;
+pub type AssetAddresses = Vec<(ShelleyAddress, u64)>;
+pub type AssetTransactions = Vec<TxHash>;
+pub type PolicyAssets = Vec<PolicyAsset>;
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum AssetsStateQuery {
     GetAssetsList,
-    GetAssetInfo { asset_key: Vec<u8> },
-    GetAssetHistory { asset_key: Vec<u8> },
-    GetAssetTransactions { asset_key: Vec<u8> },
-    GetAssetAddresses { asset_key: Vec<u8> },
-    GetPolicyIdAssets { policyid_key: Vec<u8> },
+    GetAssetInfo { policy: PolicyId, name: AssetName },
+    GetAssetHistory { policy: PolicyId, name: AssetName },
+    GetPolicyIdAssets { policy: PolicyId },
+    GetAssetAddresses { policy: PolicyId, name: AssetName },
+    GetAssetTransactions { policy: PolicyId, name: AssetName },
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum AssetsStateQueryResponse {
-    AssetsList(Vec<(PolicyId, AssetName, u64)>),
+    AssetsList(AssetList),
     AssetInfo(AssetInfo),
     AssetHistory(AssetHistory),
-    AssetTransactions(AssetTransactions),
     AssetAddresses(AssetAddresses),
-    PolicyIdAssets(PolicyIdAssets),
+    AssetTransactions(AssetTransactions),
+    PolicyIdAssets(PolicyAssets),
     NotFound,
     Error(String),
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct AssetsList {}
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct AssetListEntry {
+    pub policy: PolicyId,
+    pub name: AssetName,
+    pub quantity: u64,
+}
+
+impl Serialize for AssetListEntry {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeMap;
+
+        let mut map = serializer.serialize_map(Some(2))?;
+        let asset_hex = format!(
+            "{}{}",
+            hex::encode(self.policy),
+            hex::encode(self.name.as_slice())
+        );
+        map.serialize_entry("asset", &asset_hex)?;
+        map.serialize_entry("quantity", &self.quantity.to_string())?;
+        map.end()
+    }
+}
+
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AssetInfoRecord {
+    pub initial_mint_tx_hash: TxHash,
+    pub mint_or_burn_count: u64,
+    pub onchain_metadata: Option<Vec<u8>>,
+    pub metadata_standard: Option<AssetMetadataStandard>,
+    pub metadata_extra: Option<Vec<u8>>,
+}
+
+#[derive(Debug, Default, Clone, serde::Deserialize)]
+pub struct MintRecord {
+    pub tx_hash: TxHash,
+    pub amount: u64,
+    pub burn: bool,
+}
+
+impl serde::Serialize for MintRecord {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeMap;
+
+        let mut map = serializer.serialize_map(Some(3))?;
+        map.serialize_entry("tx_hash", &hex::encode(self.tx_hash))?;
+
+        let action = if self.burn { "burned" } else { "minted" };
+        map.serialize_entry("action", action)?;
+
+        map.serialize_entry("amount", &self.amount.to_string())?;
+        map.end()
+    }
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct AssetInfo {}
+pub enum AssetMetadataStandard {
+    CIP25v1,
+    CIP25v2,
+    CIP68v1,
+    CIP68v2,
+    CIP68v3,
+}
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct AssetHistory {}
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct PolicyAsset {
+    pub policy: PolicyId,
+    pub name: AssetName,
+    pub quantity: u64,
+}
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct AssetTransactions {}
+impl Serialize for PolicyAsset {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeMap;
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct AssetAddresses {}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PolicyIdAssets {}
+        let mut map = serializer.serialize_map(Some(2))?;
+        let asset_hex = format!(
+            "{}{}",
+            hex::encode(self.policy),
+            hex::encode(self.name.as_slice())
+        );
+        map.serialize_entry("asset", &asset_hex)?;
+        map.serialize_entry("quantity", &self.quantity.to_string())?;
+        map.end()
+    }
+}
