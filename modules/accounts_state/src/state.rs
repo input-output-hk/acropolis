@@ -88,6 +88,9 @@ pub struct State {
     /// Protocol parameters that apply during this epoch
     protocol_parameters: Option<ProtocolParams>,
 
+    /// Protocol parameters that applied in the previous epoch
+    previous_protocol_parameters: Option<ProtocolParams>,
+
     /// Pool refunds to apply next epoch (list of reward accounts to refund to)
     pool_refunds: Vec<KeyHash>,
 
@@ -219,6 +222,8 @@ impl State {
     ) -> Result<Vec<StakeRewardDelta>> {
         // TODO HACK! Investigate why this differs to our calculated reserves after AVVM
         // 13,887,515,255 - as we enter 208 (Shelley)
+        // TODO this will only work in Mainnet - need to know when Shelley starts across networks
+        // and the reserves value, if we can't properly calculate it
         if epoch == 208 {
             // Fix reserves to that given in the CF Java implementation:
             // https://github.com/cardano-foundation/cf-java-rewards-calculation/blob/b05eddf495af6dc12d96c49718f27c34fa2042b1/calculation/src/main/java/org/cardanofoundation/rewards/calculation/config/NetworkConfig.java#L45C57-L45C74
@@ -232,13 +237,20 @@ impl State {
             );
         }
 
-        // Get Shelley parameters, silently return if too early in the chain so no
+        // Get previous Shelley parameters, silently return if too early in the chain so no
         // rewards to calculate
-        let shelley_params = match &self.protocol_parameters {
+        // In the first epoch of Shelley, there are no previous_protocol_parameters, so we
+        // have to use the genesis parameters we just received
+        let shelley_params = match &self.previous_protocol_parameters {
             Some(ProtocolParams {
                 shelley: Some(sp), ..
             }) => sp,
-            _ => return Ok(vec![]),
+            _ => match &self.protocol_parameters {
+                Some(ProtocolParams {
+                    shelley: Some(sp), ..
+                }) => sp,
+                _ => return Ok(vec![]),
+            }
         }
         .clone();
 
@@ -478,9 +490,10 @@ impl State {
 
         if different {
             info!("New parameter set: {:?}", params_msg.params);
+            self.previous_protocol_parameters = self.protocol_parameters.clone();
+            self.protocol_parameters = Some(params_msg.params.clone());
         }
 
-        self.protocol_parameters = Some(params_msg.params.clone());
         Ok(())
     }
 
