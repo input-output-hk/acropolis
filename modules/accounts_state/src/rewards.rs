@@ -8,9 +8,9 @@ use acropolis_common::{
 use anyhow::{bail, Result};
 use bigdecimal::{BigDecimal, One, ToPrimitive, Zero};
 use std::cmp::min;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 /// Type of reward being given
 #[derive(Debug, Clone)]
@@ -58,6 +58,7 @@ pub fn calculate_rewards(
     staking: Arc<Snapshot>,
     params: &ShelleyParams,
     stake_rewards: Lovelace,
+    previous_epoch_deregistrations: &HashSet<KeyHash>,
 ) -> Result<RewardsResult> {
     let mut result = RewardsResult::default();
     result.epoch = epoch - 1;
@@ -119,6 +120,7 @@ pub fn calculate_rewards(
             params,
             staking.clone(),
             staking_reward_account_is_registered,
+            previous_epoch_deregistrations,
         );
 
         if !rewards.is_empty() {
@@ -173,6 +175,7 @@ fn calculate_spo_rewards(
     params: &ShelleyParams,
     staking: Arc<Snapshot>,
     staking_reward_account_is_registered: bool,
+    previous_epoch_deregistrations: &HashSet<KeyHash>,
 ) -> Vec<RewardDetail> {
     // Actual blocks produced as proportion of epoch (Beta)
     let relative_blocks = BigDecimal::from(blocks_produced) / BigDecimal::from(total_blocks as u64);
@@ -296,8 +299,16 @@ fn calculate_spo_rewards(
                     continue;
                 }
 
+                // Check if it was deregistered during previous epoch
+                if previous_epoch_deregistrations.contains(hash) {
+                    info!(
+                        "Recently deregistered member account {}, losing {to_pay}",
+                        hex::encode(hash)
+                    );
+                    continue;
+                }
+
                 // TODO Shelley-until-Allegra bug if same reward account used for multiple
-                // SPOs - check pool's reward address but only before Allegra?
 
                 // Transfer from reserves to this account
                 rewards.push(RewardDetail {
