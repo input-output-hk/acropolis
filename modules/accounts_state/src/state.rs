@@ -1,7 +1,8 @@
 //! Acropolis AccountsState: State storage
 use crate::monetary::calculate_monetary_change;
-use crate::rewards::{RewardsResult, RewardsState};
+use crate::rewards::{calculate_rewards, RewardsResult};
 use crate::snapshot::Snapshot;
+use crate::verifier::Verifier;
 use acropolis_common::protocol_params::ProtocolParams;
 use acropolis_common::SPORewards;
 use acropolis_common::{
@@ -56,7 +57,7 @@ pub struct DRepDelegationDistribution {
 }
 
 /// Global 'pot' account state
-#[derive(Debug, Default, Clone, serde::Serialize)]
+#[derive(Debug, Default, PartialEq, Clone, serde::Serialize)]
 pub struct Pots {
     /// Unallocated reserves
     pub reserves: Lovelace,
@@ -66,6 +67,28 @@ pub struct Pots {
 
     /// Deposits
     pub deposits: Lovelace,
+}
+
+/// State for rewards calculation
+#[derive(Debug, Default, Clone)]
+pub struct EpochSnapshots {
+    /// Latest snapshot (epoch i)
+    pub mark: Arc<Snapshot>,
+
+    /// Previous snapshot (epoch i-1)
+    pub set: Arc<Snapshot>,
+
+    /// One before that (epoch i-2)
+    pub go: Arc<Snapshot>,
+}
+
+impl EpochSnapshots {
+    /// Push a new snapshot
+    pub fn push(&mut self, latest: Snapshot) {
+        self.go = self.set.clone();
+        self.set = self.mark.clone();
+        self.mark = Arc::new(latest);
+    }
 }
 
 /// Overall state - stored per block
@@ -78,8 +101,8 @@ pub struct State {
     /// Wrapped in an Arc so it doesn't get cloned in full by StateHistory
     stake_addresses: Arc<Mutex<HashMap<KeyHash, StakeAddressState>>>,
 
-    /// Reward state - short history of snapshots
-    rewards_state: RewardsState,
+    /// Short history of snapshots
+    epoch_snapshots: EpochSnapshots,
 
     /// Global account pots
     pots: Pots,
@@ -199,12 +222,14 @@ impl State {
     ///   epoch: Number of epoch we are entering
     ///   total_fees: Total fees taken in previous epoch
     ///   spo_block_counts: Count of blocks minted by operator ID in previous epoch
+    ///   verifier: Verifier against Haskell node output
     // Follows the general scheme in https://docs.cardano.org/about-cardano/learn/pledging-rewards
     fn enter_epoch(
         &mut self,
         epoch: u64,
         total_fees: u64,
         spo_block_counts: HashMap<KeyHash, usize>,
+        verifier: &Verifier,
     ) -> Result<()> {
         // TODO HACK! Investigate why this differs to our calculated reserves after AVVM
         // 13,887,515,255 - as we enter 208 (Shelley)
@@ -243,20 +268,20 @@ impl State {
         let total_non_obft_blocks = total_blocks - obft_block_count;
         info!(total_blocks, total_non_obft_blocks, "Block counts:");
 
-        // Update the reserves and treasury (monetary.rs)
-        // TODO note using last-but-one epoch's fees for reward pot - why?
-        let monetary_change = calculate_monetary_change(
-            &shelley_params,
-            &self.pots,
-            self.rewards_state.mark.fees,
-            total_non_obft_blocks,
-        )?;
-        self.pots = monetary_change.pots;
+        info!(
+            epoch,
+            reserves = self.pots.reserves,
+            treasury = self.pots.treasury,
+            "Entering"
+        );
 
         // Pay the refunds and MIRs
         self.pay_pool_refunds();
         self.pay_stake_refunds();
         self.pay_mirs();
+
+        // Verify pots state
+        verifier.verify_pots(epoch, &self.pots);
 
         // Capture a new snapshot and push it to state
         let snapshot = Snapshot::new(
@@ -265,22 +290,37 @@ impl State {
             &self.spos,
             &spo_block_counts,
             &self.pots,
-            total_fees,
+            total_blocks,
+            // Pass in two-previous epoch snapshot for capture of SPO reward accounts
+            self.epoch_snapshots.set.clone(), // Will become 'go' in the next line!
         );
-        self.rewards_state.push(snapshot);
+        self.epoch_snapshots.push(snapshot);
 
-        // Stop here if no blocks to pay out on
-        if total_blocks == 0 {
-            return Ok(());
-        }
+        // Update the reserves and treasury (monetary.rs)
+        let monetary_change = calculate_monetary_change(
+            &shelley_params,
+            &self.pots,
+            total_fees,
+            total_non_obft_blocks,
+        )?;
+        self.pots = monetary_change.pots;
 
-        let rs = self.rewards_state.clone();
+        info!(
+            epoch,
+            reserves = self.pots.reserves,
+            treasury = self.pots.treasury,
+            "After monetary change"
+        );
+
+        let performance = self.epoch_snapshots.mark.clone();
+        let staking = self.epoch_snapshots.go.clone();
         self.epoch_rewards_task = Arc::new(Mutex::new(Some(spawn_blocking(move || {
             // Calculate reward payouts
-            rs.calculate_rewards(
+            calculate_rewards(
                 epoch,
+                performance,
+                staking,
                 &shelley_params,
-                total_blocks,
                 monetary_change.stake_rewards,
             )
         }))));
@@ -543,12 +583,13 @@ impl State {
 
     /// Handle an EpochActivityMessage giving total fees and block counts by VRF key for
     /// the just-ended epoch
-    /// This also returns SPO rewards for publishing to the SPDD topic (For epoch N)
     pub async fn handle_epoch_activity(
         &mut self,
         ea_msg: &EpochActivityMessage,
+        verifier: &Verifier,
     ) -> Result<Vec<(KeyHash, SPORewards)>> {
         let mut spo_rewards: Vec<(KeyHash, SPORewards)> = Vec::new();
+
         // Reverse map of VRF key to SPO operator ID
         let vrf_to_operator: HashMap<KeyHash, KeyHash> =
             self.spos.iter().map(|(id, spo)| (spo.vrf_key_hash.clone(), id.clone())).collect();
@@ -572,13 +613,19 @@ impl State {
                 }
             }
         };
+
         // If rewards have been calculated, save the results
         if let Some(task) = task.take() {
             match task.await {
                 Ok(Ok(reward_result)) => {
+                    // Verify them
+                    verifier.verify_rewards(reward_result.epoch, &reward_result);
+
                     // Pay the rewards
-                    for (account, amount) in reward_result.rewards {
-                        self.add_to_reward(&account, amount);
+                    for (_, rewards) in reward_result.rewards {
+                        for reward in rewards {
+                            self.add_to_reward(&reward.account, reward.amount);
+                        }
                     }
 
                     // save SPO rewards
@@ -591,8 +638,12 @@ impl State {
             }
         };
         // Enter epoch - note the message specifies the epoch that has just *ended*
-        self.enter_epoch(ea_msg.epoch + 1, ea_msg.total_fees, spo_block_counts)?;
-
+        self.enter_epoch(
+            ea_msg.epoch + 1,
+            ea_msg.total_fees,
+            spo_block_counts,
+            verifier,
+        )?;
         Ok(spo_rewards)
     }
 
@@ -613,6 +664,38 @@ impl State {
 
         // Check for how many new SPOs
         let new_count = new_spos.keys().filter(|id| !self.spos.contains_key(*id)).count();
+
+        // Log new ones and pledge/cost/margin changes
+        for (id, spo) in new_spos.iter() {
+            match self.spos.get(id) {
+                Some(old_spo) => {
+                    if spo.pledge != old_spo.pledge
+                        || spo.cost != old_spo.cost
+                        || spo.margin != old_spo.margin
+                    {
+                        debug!(
+                            epoch = spo_msg.epoch,
+                            pledge = spo.pledge,
+                            cost = spo.cost,
+                            margin = ?spo.margin,
+                            "Updated parameters for SPO {}",
+                            hex::encode(id)
+                        );
+                    }
+                }
+
+                _ => {
+                    debug!(
+                        epoch = spo_msg.epoch,
+                        pledge = spo.pledge,
+                        cost = spo.cost,
+                        margin = ?spo.margin,
+                        "Registered new SPO {}",
+                        hex::encode(id)
+                    );
+                }
+            }
+        }
 
         // They've each paid their deposit, so increment that (the UTXO spend is taken
         // care of in UTXOState)
