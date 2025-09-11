@@ -62,7 +62,9 @@ dependencies = [
  "anyhow",
  "caryatid_sdk",
  "config",
+ "hex",
  "imbl 5.0.0",
+ "serde_cbor",
  "tokio",
  "tracing",
 ]
@@ -218,6 +220,7 @@ dependencies = [
  "reqwest 0.12.23",
  "rust_decimal",
  "serde",
+ "serde_cbor",
  "serde_json",
  "serde_with 3.14.0",
  "tokio",

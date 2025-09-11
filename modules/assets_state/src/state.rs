@@ -3,13 +3,14 @@
 use crate::asset_registry::{AssetId, AssetRegistry};
 use acropolis_common::{
     queries::assets::{
-        AssetHistory, AssetInfoRecord, AssetListEntry, MintRecord, PolicyAsset, PolicyAssets,
+        AssetHistory, AssetInfoRecord, AssetListEntry, AssetMetadataStandard, MintRecord,
+        PolicyAsset, PolicyAssets,
     },
-    NativeAssetDelta, PolicyId, ShelleyAddress, TxHash,
+    AssetName, Datum, NativeAssetDelta, PolicyId, ShelleyAddress, TxHash, UTXODelta,
 };
 use anyhow::Result;
 use imbl::{HashMap, Vector};
-use tracing::info;
+use tracing::{error, info};
 
 #[derive(Debug, Default, Clone)]
 pub struct AssetsStorageConfig {
@@ -327,6 +328,180 @@ impl State {
             addresses: new_addresses,
             transactions: new_transactions,
             policy_index: new_index,
+        })
+    }
+
+    pub fn handle_cip25_metadata(
+        &self,
+        registry: &mut AssetRegistry,
+        blobs: &[Vec<u8>],
+    ) -> Result<Self> {
+        let mut new_info = self.info.clone();
+
+        for raw in blobs {
+            let decoded: serde_cbor::Value = serde_cbor::from_slice(raw)
+                .map_err(|e| anyhow::anyhow!("Failed to decode CIP-25 blob: {e}"))?;
+
+            let serde_cbor::Value::Map(policy_map) = decoded else {
+                continue;
+            };
+
+            // Default to v1
+            let mut standard = AssetMetadataStandard::CIP25v1;
+
+            // Detect version
+            if let Some(ver_val) = policy_map.get(&serde_cbor::Value::Text("version".into())) {
+                if let serde_cbor::Value::Text(ver) = ver_val {
+                    if ver == "2.0" {
+                        standard = AssetMetadataStandard::CIP25v2;
+                    }
+                }
+            }
+
+            for (pk, assets_val) in policy_map {
+                let serde_cbor::Value::Text(policy_hex) = pk else {
+                    continue;
+                };
+                if policy_hex == "version" {
+                    continue;
+                }
+
+                let policy_bytes = hex::decode(&policy_hex)?;
+                let policy_id: PolicyId = policy_bytes
+                    .try_into()
+                    .map_err(|_| anyhow::anyhow!("PolicyId wrong length"))?;
+
+                let serde_cbor::Value::Map(asset_map) = assets_val else {
+                    continue;
+                };
+
+                for (ak, metadata_val) in asset_map {
+                    let serde_cbor::Value::Text(asset_hex) = ak else {
+                        continue;
+                    };
+
+                    let asset_bytes = if asset_hex.chars().all(|c| c.is_ascii_hexdigit()) {
+                        hex::decode(&asset_hex)?
+                    } else {
+                        asset_hex.as_bytes().to_vec()
+                    };
+
+                    let Some(asset_name) = AssetName::new(&asset_bytes) else {
+                        return Err(anyhow::anyhow!("Asset name too long"));
+                    };
+
+                    let Some(asset_id) = registry.lookup_id(&policy_id, &asset_name) else {
+                        error!(
+                            "Got CIP-25 metadata for unknown asset: {}.{}",
+                            hex::encode(policy_id),
+                            hex::encode(asset_name.as_slice())
+                        );
+                        continue;
+                    };
+
+                    let metadata_raw = match serde_cbor::to_vec(&metadata_val) {
+                        Ok(bytes) => bytes,
+                        Err(e) => {
+                            error!(
+                                "Failed to encode CIP-25 metadata for {}.{}: {e}",
+                                hex::encode(policy_id),
+                                hex::encode(asset_name.as_slice())
+                            );
+                            continue;
+                        }
+                    };
+
+                    if let Some(info_map) = new_info.as_mut() {
+                        if let Some(record) = info_map.get_mut(&asset_id) {
+                            if matches!(
+                                record.metadata_standard,
+                                Some(
+                                    AssetMetadataStandard::CIP68v1
+                                        | AssetMetadataStandard::CIP68v2
+                                        | AssetMetadataStandard::CIP68v3
+                                )
+                            ) {
+                                continue;
+                            }
+                            record.onchain_metadata = Some(metadata_raw);
+                            record.metadata_standard = Some(standard);
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(Self {
+            config: self.config.clone(),
+            supply: self.supply.clone(),
+            info: new_info,
+            history: self.history.clone(),
+            transactions: self.transactions.clone(),
+            addresses: self.addresses.clone(),
+            policy_index: self.policy_index.clone(),
+        })
+    }
+
+    pub fn handle_cip68_metadata(
+        &self,
+        deltas: &[UTXODelta],
+        registry: &mut AssetRegistry,
+    ) -> Result<Self> {
+        let mut new_info = self.info.clone();
+
+        for delta in deltas {
+            let UTXODelta::Output(output) = delta else {
+                continue;
+            };
+            let Some(Datum::Inline(blob)) = &output.datum else {
+                continue;
+            };
+
+            for (policy_id, native_assets) in &output.value.assets {
+                for asset in native_assets {
+                    let name = &asset.name;
+
+                    // Filter for CIP-68 reference tokens
+                    if name.len() <= 2 || name.as_slice()[0] != 0x00 {
+                        continue;
+                    }
+
+                    let standard = match name.as_slice()[1] {
+                        0x00 => Some(AssetMetadataStandard::CIP68v1),
+                        0x01 => Some(AssetMetadataStandard::CIP68v2),
+                        0x02 => Some(AssetMetadataStandard::CIP68v3),
+                        _ => None,
+                    };
+                    let Some(standard) = standard else { continue };
+
+                    let Some(asset_id) = registry.lookup_id(policy_id, name) else {
+                        error!(
+                            "Got CIP-68 datum for unknown asset: {}.{}",
+                            hex::encode(policy_id),
+                            hex::encode(name.as_slice())
+                        );
+                        continue;
+                    };
+
+                    if let Some(info_map) = new_info.as_mut() {
+                        if let Some(record) = info_map.get_mut(&asset_id) {
+                            record.onchain_metadata = Some(blob.clone());
+                            record.metadata_standard = Some(standard);
+                            record.metadata_extra = Some(blob.clone());
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(Self {
+            config: self.config.clone(),
+            supply: self.supply.clone(),
+            info: new_info,
+            history: self.history.clone(),
+            transactions: self.transactions.clone(),
+            addresses: self.addresses.clone(),
+            policy_index: self.policy_index.clone(),
         })
     }
 }

@@ -6,7 +6,7 @@ use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::assets::{AssetsStateQuery, AssetsStateQueryResponse, DEFAULT_ASSETS_QUERY_TOPIC},
     state_history::{StateHistory, StateHistoryStore},
-    BlockStatus,
+    BlockInfo, BlockStatus,
 };
 use anyhow::Result;
 use caryatid_sdk::{module, Context, Module, Subscription};
@@ -25,6 +25,8 @@ mod state;
 // Subscription topics
 const DEFAULT_ASSET_DELTAS_SUBSCRIBE_TOPIC: (&str, &str) =
     ("asset-deltas-subscribe-topic", "cardano.asset.deltas");
+const DEFAULT_UTXO_DELTAS_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("utxo-deltas-subscribe-topic", "cardano.utxo.deltas");
 
 // Configuration defaults
 const DEFAULT_STORE_ASSETS: (&str, bool) = ("store-assets", false);
@@ -44,52 +46,118 @@ pub struct AssetsState;
 impl AssetsState {
     async fn run(
         history: Arc<Mutex<StateHistory<State>>>,
-        mut deltas_subscription: Box<dyn Subscription<Message>>,
+        mut asset_deltas_subscription: Box<dyn Subscription<Message>>,
+        mut utxo_deltas_subscription: Option<Box<dyn Subscription<Message>>>,
         storage_config: AssetsStorageConfig,
         registry: Arc<Mutex<AssetRegistry>>,
     ) -> Result<()> {
+        if let Some(sub) = utxo_deltas_subscription.as_mut() {
+            let _ = sub.read().await?;
+            info!("Consumed initial message from utxo_deltas_subscription");
+        }
         // Main loop of synchronised messages
         loop {
-            match deltas_subscription.read().await?.1.as_ref() {
-                Message::Cardano((block, CardanoMessage::AssetDeltas(message))) => {
-                    let span = info_span!("assets_state.handle", number = block.number);
-                    async {
-                        // Get current state and current params
-                        let mut state = {
-                            let mut h = history.lock().await;
-                            h.get_or_init_with(|| State::new(storage_config.clone()))
+            // Get current state snapshot
+            let mut state = {
+                let mut h = history.lock().await;
+                h.get_or_init_with(|| State::new(storage_config.clone()))
+            };
+            let current_block: BlockInfo;
+
+            // Asset deltas are the synchroniser
+            let (_, asset_msg) = asset_deltas_subscription.read().await?;
+            match asset_msg.as_ref() {
+                Message::Cardano((ref block_info, CardanoMessage::AssetDeltas(deltas_msg))) => {
+                    // rollback only on asset deltas
+                    if block_info.status == BlockStatus::RolledBack {
+                        state = history.lock().await.get_rolled_back_state(block_info.number);
+                    }
+                    current_block = block_info.clone();
+
+                    // Handle the asset deltas
+                    let span = info_span!("assets_state.handle_deltas", block = block_info.number);
+                    let _enter = span.enter();
+
+                    if storage_config.store_assets {
+                        let mut reg = registry.lock().await;
+
+                        state = match state.handle_mint_deltas(&deltas_msg.deltas, &mut *reg) {
+                            Ok(new_state) => new_state,
+                            Err(e) => {
+                                error!("Asset deltas handling error: {e:#}");
+                                state
+                            }
                         };
+                    }
 
-                        // Handle rollback if needed
-                        if block.status == BlockStatus::RolledBack {
-                            state = history.lock().await.get_rolled_back_state(block.number);
-                        }
+                    if storage_config.store_info {
+                        let mut reg = registry.lock().await;
+                        state = match state
+                            .handle_cip25_metadata(&mut *reg, &deltas_msg.cip25_metadata_updates)
+                        {
+                            Ok(new_state) => new_state,
+                            Err(e) => {
+                                error!("CIP-25 metadata handling error: {e:#}");
+                                state
+                            }
+                        };
+                    }
+                }
+                other => {
+                    error!("Unexpected message on asset-deltas subscription: {other:?}");
+                    continue;
+                }
+            }
 
-                        // Process mint deltas
-                        if storage_config.store_assets {
-                            let mut reg = registry.lock().await;
-                            state = match state.handle_mint_deltas(&message.deltas, &mut *reg) {
+            // Handle UTxO deltas if store-info or store-transactions is enabled
+            if let Some(sub) = utxo_deltas_subscription.as_mut() {
+                let (_, utxo_msg) = sub.read().await?;
+                match utxo_msg.as_ref() {
+                    Message::Cardano((
+                        ref block_info,
+                        CardanoMessage::UTXODeltas(utxo_deltas_msg),
+                    )) => {
+                        Self::check_sync(&current_block, block_info, "utxo");
+                        let span =
+                            info_span!("assets_state.handle_utxo", block = block_info.number);
+                        let _enter = span.enter();
+
+                        let mut reg = registry.lock().await;
+
+                        state =
+                            match state.handle_cip68_metadata(&utxo_deltas_msg.deltas, &mut *reg) {
                                 Ok(new_state) => new_state,
                                 Err(e) => {
-                                    error!("Asset deltas handling error: {e:#}");
+                                    info!("CIP-68 metadata handling error: {e:#}");
                                     state
                                 }
                             };
-                        }
-
-                        // Commit state
-                        {
-                            let mut h = history.lock().await;
-                            h.commit(block.number, state);
-                        }
-
-                        Ok::<(), anyhow::Error>(())
                     }
-                    .instrument(span)
-                    .await?;
+                    other => error!("Unexpected message on utxo-deltas subscription: {other:?}"),
                 }
-                msg => error!("Unexpected message {msg:?} for enact state topic"),
             }
+
+            // Commit state at the end of the block
+            history.lock().await.commit(current_block.number, state);
+        }
+    }
+
+    /// Check for synchronisation
+    fn check_sync(expected: &BlockInfo, actual: &BlockInfo, source: &str) {
+        if expected.number != actual.number {
+            error!(
+                expected = expected.number,
+                actual = actual.number,
+                source = source,
+                "Messages out of sync (expected block {}, got {} from {})",
+                expected.number,
+                actual.number,
+                source,
+            );
+            panic!(
+                "Message streams diverged: {} at {} vs {} from {}",
+                source, expected.number, actual.number, source,
+            );
         }
     }
 
@@ -115,6 +183,13 @@ impl AssetsState {
         let asset_deltas_subscribe_topic =
             get_string_flag(&config, DEFAULT_ASSET_DELTAS_SUBSCRIBE_TOPIC);
         info!("Creating subscriber on '{asset_deltas_subscribe_topic}'");
+
+        let mut utxo_deltas_subscribe_topic = String::new();
+        if storage_config.store_info {
+            utxo_deltas_subscribe_topic =
+                get_string_flag(&config, DEFAULT_UTXO_DELTAS_SUBSCRIBE_TOPIC);
+            info!("Creating subscriber on '{utxo_deltas_subscribe_topic}'");
+        }
 
         let assets_query_topic = get_string_flag(&config, DEFAULT_ASSETS_QUERY_TOPIC);
         info!("Creating asset query handler on '{assets_query_topic}'");
@@ -238,13 +313,24 @@ impl AssetsState {
         });
 
         // Subscribe to enabled topics
-        let deltas_sub = context.subscribe(&asset_deltas_subscribe_topic).await?;
+        let asset_deltas_sub = context.subscribe(&asset_deltas_subscribe_topic).await?;
+        let utxo_deltas_sub = if storage_config.store_info {
+            Some(context.subscribe(&utxo_deltas_subscribe_topic).await?)
+        } else {
+            None
+        };
 
         // Start run task
         context.run(async move {
-            Self::run(history_run, deltas_sub, storage_config, registry_run)
-                .await
-                .unwrap_or_else(|e| error!("Failed: {e}"));
+            Self::run(
+                history_run,
+                asset_deltas_sub,
+                utxo_deltas_sub,
+                storage_config,
+                registry_run,
+            )
+            .await
+            .unwrap_or_else(|e| error!("Failed: {e}"));
         });
 
         Ok(())
