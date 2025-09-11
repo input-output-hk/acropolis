@@ -3,12 +3,15 @@
 use acropolis_common::{
     ledger_state::SPOState,
     messages::{
-        CardanoMessage, Message, SPOStateMessage, StakeAddressDeltasMessage,
-        StakeRewardDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
+        CardanoMessage, Message, SPOStateMessage,
+        StakeAddressDeltasMessage, StakeRewardDeltasMessage, TxCertificatesMessage,
+        WithdrawalsMessage,
     },
     params::TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH,
+    queries::governance::VoteRecord,
     BlockInfo, KeyHash, PoolMetadata, PoolRegistration, PoolRegistrationWithPos, PoolRetirement,
-    PoolRetirementWithPos, PoolUpdateEvent, Relay, StakeCredential, TxCertificate,
+    PoolRetirementWithPos, PoolUpdateEvent, Relay, StakeCredential, TxCertificate, TxHash, Voter,
+    VotingProcedures,
 };
 use anyhow::{bail, Result};
 use imbl::HashMap;
@@ -626,6 +629,40 @@ impl State {
             }
         }
 
+        Ok(())
+    }
+
+    pub fn handle_governance(
+        &mut self,
+        voting_procedures: &[(TxHash, VotingProcedures)],
+    ) -> Result<()> {
+        // when we save historical spo's vote
+        let Some(historical_spos) = self.historical_spos.as_mut() else {
+            return Ok(());
+        };
+
+        for (tx_hash, voting_procedures) in voting_procedures {
+            for (voter, single_votes) in &voting_procedures.votes {
+                let spo = match voter {
+                    Voter::StakePoolKey(spo) => spo,
+                    _ => continue,
+                };
+
+                let historical_spo = historical_spos
+                    .entry(spo.clone())
+                    .or_insert_with(|| HistoricalSPOState::new(&self.store_config));
+
+                if let Some(votes) = historical_spo.votes.as_mut() {
+                    for (_, vp) in &single_votes.voting_procedures {
+                        votes.push(VoteRecord {
+                            tx_hash: tx_hash.clone(),
+                            vote_index: vp.vote_index,
+                            vote: vp.vote.clone(),
+                        });
+                    }
+                }
+            }
+        }
         Ok(())
     }
 
