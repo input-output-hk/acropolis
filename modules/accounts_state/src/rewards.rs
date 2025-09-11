@@ -8,9 +8,9 @@ use acropolis_common::{
 use anyhow::{bail, Result};
 use bigdecimal::{BigDecimal, One, ToPrimitive, Zero};
 use std::cmp::min;
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
-use std::cmp::Ordering;
 use tracing::{debug, info, warn};
 
 /// Type of reward being given
@@ -77,7 +77,13 @@ pub fn calculate_rewards(
     // equivalently (max-supply-reserves) - this is the denominator
     // for sigma, z0, s
     let total_supply = BigDecimal::from(params.max_lovelace_supply - performance.pots.reserves);
-    info!(epoch, %total_supply, %stake_rewards, total_blocks, "Calculating rewards:");
+
+    // Get total active stake across all SPOs
+    let total_active_stake =
+        BigDecimal::from(staking.spos.values().map(|s| s.total_stake).sum::<Lovelace>());
+
+    info!(epoch, %total_supply, %total_active_stake, %stake_rewards, total_blocks,
+          "Calculating rewards:");
 
     // Relative pool saturation size (z0)
     let k = BigDecimal::from(&params.protocol_params.stake_pool_target_num);
@@ -121,7 +127,8 @@ pub fn calculate_rewards(
             // Check all SPOs to see if they match this reward account
             for (other_id, other_spo) in staking.spos.iter() {
                 if other_spo.reward_account == spo.reward_account
-                    && other_id.cmp(&operator_id) == Ordering::Less // Lower ID (hash) wins
+                    && other_id.cmp(&operator_id) == Ordering::Less
+                // Lower ID (hash) wins
                 {
                     // It must have been paid a reward - we assume that checking it produced
                     // any blocks is enough here - if not we'll have to do this as a post-process
@@ -135,7 +142,10 @@ pub fn calculate_rewards(
                 }
             }
         } else {
-            info!("Reward account for SPO {} was deregistered", hex::encode(operator_id))
+            info!(
+                "Reward account for SPO {} was deregistered",
+                hex::encode(operator_id)
+            )
         }
 
         // Calculate rewards for this SPO
@@ -146,6 +156,7 @@ pub fn calculate_rewards(
             total_blocks,
             &stake_rewards,
             &total_supply,
+            &total_active_stake,
             &relative_pool_saturation_size,
             &pledge_influence_factor,
             params,
@@ -155,8 +166,6 @@ pub fn calculate_rewards(
         );
 
         if !rewards.is_empty() {
-            num_pools_paid += 1;
-
             let mut spo_rewards = SPORewards {
                 total_rewards: 0,
                 operator_rewards: 0,
@@ -164,7 +173,9 @@ pub fn calculate_rewards(
             for reward in &rewards {
                 match reward.rtype {
                     RewardType::Leader => {
+                        num_pools_paid += 1;
                         spo_rewards.operator_rewards += reward.amount;
+                        total_paid_to_pools += reward.amount;
                     }
                     RewardType::Member => {
                         num_delegators_paid += 1;
@@ -172,7 +183,6 @@ pub fn calculate_rewards(
                     }
                 }
                 spo_rewards.total_rewards += reward.amount;
-                total_paid_to_pools += reward.amount;
                 result.total_paid += reward.amount;
             }
 
@@ -201,6 +211,7 @@ fn calculate_spo_rewards(
     total_blocks: usize,
     stake_rewards: &BigDecimal,
     total_supply: &BigDecimal,
+    total_active_stake: &BigDecimal,
     relative_pool_saturation_size: &BigDecimal,
     pledge_influence_factor: &BigDecimal,
     params: &ShelleyParams,
@@ -258,16 +269,17 @@ fn calculate_spo_rewards(
     // If decentralisation_param >= 0.8 => performance = 1
     // Shelley Delegation Spec 3.8.3
     let decentralisation = &params.protocol_params.decentralisation_param;
+    let relative_active_stake = &pool_stake / total_active_stake;
     let pool_performance = if decentralisation >= &RationalNumber::new(8, 10) {
         BigDecimal::one()
     } else {
-        relative_blocks.clone() / relative_pool_stake.clone()
+        &relative_blocks / &relative_active_stake
     };
 
     // Get actual pool rewards
     let pool_rewards = (&optimum_rewards * &pool_performance).with_scale(0);
 
-    debug!(blocks=blocks_produced, %pool_stake, %relative_pool_stake, %relative_blocks,
+    info!(blocks=blocks_produced, %pool_stake, %relative_pool_stake, %relative_blocks,
            %pool_performance, %optimum_rewards, %pool_rewards, pool_owner_stake, %pool_pledge,
            "Pool {}", hex::encode(&operator_id));
 
