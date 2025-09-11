@@ -97,11 +97,14 @@ pub struct State {
     /// Pool refunds to apply next epoch (list of reward accounts to refund to)
     pool_refunds: Vec<KeyHash>,
 
-    // Stake address refunds to apply next epoch
+    /// Stake address refunds to apply next epoch
     stake_refunds: Vec<(KeyHash, Lovelace)>,
 
-    // MIRs to pay next epoch
+    /// MIRs to pay next epoch
     mirs: Vec<MoveInstantaneousReward>,
+
+    /// Addresses deregistered in current epoch
+    current_epoch_deregistrations: HashSet<KeyHash>,
 
     // Task for rewards calculation if necessary
     epoch_rewards_task: Arc<Mutex<Option<JoinHandle<Result<RewardsResult>>>>>,
@@ -307,8 +310,12 @@ impl State {
             "After monetary change"
         );
 
+        // Set up background task for rewards, capturing and emptying current deregistrations
+        // TODO delay starting calculation until 4k into epoch, to capture late deregistrations
+        // wrongly counted in early Shelley
         let performance = self.epoch_snapshots.mark.clone();
         let staking = self.epoch_snapshots.go.clone();
+        let previous_epoch_deregistrations = std::mem::take(&mut self.current_epoch_deregistrations);
         self.epoch_rewards_task = Arc::new(Mutex::new(Some(spawn_blocking(move || {
             // Calculate reward payouts
             calculate_rewards(
@@ -317,6 +324,7 @@ impl State {
                 staking,
                 &shelley_params,
                 monetary_change.stake_rewards,
+                &previous_epoch_deregistrations,
             )
         }))));
 
@@ -700,6 +708,9 @@ impl State {
 
             self.pots.deposits += deposit;
         }
+
+        // Remove from current deregistrations in case they flip it
+        self.current_epoch_deregistrations.remove(&credential.get_hash());
     }
 
     /// Deregister a stake address, with specified refund if known
@@ -720,6 +731,7 @@ impl State {
                 }
             };
             self.pots.deposits -= deposit;
+            self.current_epoch_deregistrations.insert(credential.get_hash());
         }
     }
 
