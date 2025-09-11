@@ -615,13 +615,17 @@ pub struct PoolRetirement {
 /// Pool Update Action
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum PoolUpdateAction {
+    #[serde(rename = "registered")]
     Registered,
+    #[serde(rename = "deregistered")]
     Deregistered,
 }
 
 /// Pool Update Event
+#[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PoolUpdateEvent {
+    #[serde_as(as = "Hex")]
     pub tx_hash: TxHash,
     pub cert_index: u64,
     pub action: PoolUpdateAction,
@@ -1381,8 +1385,11 @@ impl Display for Voter {
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Clone)]
 pub enum Vote {
+    #[serde(rename = "no")]
     No,
+    #[serde(rename = "yes")]
     Yes,
+    #[serde(rename = "abstain")]
     Abstain,
 }
 

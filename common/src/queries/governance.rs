@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use serde_with::{hex::Hex, serde_as};
+
 use crate::{
     Anchor, Credential, DRepCredential, GovActionId, Lovelace, ProposalProcedure, TxHash, Vote,
     Voter, VotingProcedure,
@@ -93,8 +95,10 @@ pub struct DRepVotes {
     pub votes: Vec<VoteRecord>,
 }
 
+#[serde_as]
 #[derive(Clone, serde::Serialize, serde::Deserialize, Debug)]
 pub struct VoteRecord {
+    #[serde_as(as = "Hex")]
     pub tx_hash: TxHash,
     pub vote_index: u32,
     pub vote: Vote,

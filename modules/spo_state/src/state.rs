@@ -3,9 +3,8 @@
 use acropolis_common::{
     ledger_state::SPOState,
     messages::{
-        CardanoMessage, Message, SPOStateMessage,
-        StakeAddressDeltasMessage, StakeRewardDeltasMessage, TxCertificatesMessage,
-        WithdrawalsMessage,
+        CardanoMessage, Message, SPOStateMessage, StakeAddressDeltasMessage,
+        StakeRewardDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
     },
     params::TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH,
     queries::governance::VoteRecord,
@@ -93,6 +92,14 @@ impl State {
 
     pub fn is_historical_delegators_enabled(&self) -> bool {
         self.store_config.store_delegators
+    }
+
+    pub fn is_historical_updates_enabled(&self) -> bool {
+        self.store_config.store_updates
+    }
+
+    pub fn is_historical_votes_enabled(&self) -> bool {
+        self.store_config.store_votes
     }
 
     pub fn is_stake_address_enabled(&self) -> bool {
@@ -202,6 +209,28 @@ impl State {
             delegators_with_live_stakes.push((delegator.clone(), balance));
         }
         Some(delegators_with_live_stakes)
+    }
+
+    /// Get Pool Updates
+    pub fn get_pool_updates(&self, pool_id: &KeyHash) -> Option<Vec<PoolUpdateEvent>> {
+        let Some(historical_spos) = self.historical_spos.as_ref() else {
+            return None;
+        };
+
+        let updates: Option<Vec<PoolUpdateEvent>> =
+            historical_spos.get(pool_id).map(|s| s.updates.clone()).flatten();
+        updates
+    }
+
+    /// Get Pool Votes
+    pub fn get_pool_votes(&self, pool_id: &KeyHash) -> Option<Vec<VoteRecord>> {
+        let Some(historical_spos) = self.historical_spos.as_ref() else {
+            return None;
+        };
+
+        let votes: Option<Vec<VoteRecord>> =
+            historical_spos.get(pool_id).map(|s| s.votes.clone()).flatten();
+        votes
     }
 
     /// Get pool relay

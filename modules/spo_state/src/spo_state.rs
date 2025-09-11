@@ -8,9 +8,7 @@ use acropolis_common::{
         SnapshotStateMessage, StateQuery, StateQueryResponse,
     },
     queries::pools::{
-        PoolDelegators, PoolHistory, PoolRelays, PoolsActiveStakes, PoolsList, PoolsListWithInfo,
-        PoolsRetiredList, PoolsRetiringList, PoolsStateQuery, PoolsStateQueryResponse,
-        DEFAULT_POOLS_QUERY_TOPIC,
+        PoolDelegators, PoolHistory, PoolRelays, PoolUpdates, PoolVotes, PoolsActiveStakes, PoolsList, PoolsListWithInfo, PoolsRetiredList, PoolsRetiringList, PoolsStateQuery, PoolsStateQueryResponse, DEFAULT_POOLS_QUERY_TOPIC
     },
     state_history::{StateHistory, StateHistoryStore},
     BlockInfo, BlockStatus,
@@ -493,18 +491,6 @@ impl SPOState {
                         })
                     }
 
-                    PoolsStateQuery::GetPoolHistory { pool_id } => {
-                        if epochs_history.is_enabled() {
-                            let history =
-                                epochs_history.get_pool_history(pool_id).unwrap_or(Vec::new());
-                            PoolsStateQueryResponse::PoolHistory(PoolHistory { history })
-                        } else {
-                            PoolsStateQueryResponse::Error(
-                                "Pool Epoch history is not enabled".into(),
-                            )
-                        }
-                    }
-
                     PoolsStateQuery::GetPoolsRetiringList => {
                         let retiring_pools = state.get_retiring_pools();
                         PoolsStateQueryResponse::PoolsRetiringList(PoolsRetiringList {
@@ -525,6 +511,18 @@ impl SPOState {
                         }
                     }
 
+                    PoolsStateQuery::GetPoolHistory { pool_id } => {
+                        if epochs_history.is_enabled() {
+                            let history =
+                                epochs_history.get_pool_history(pool_id).unwrap_or(Vec::new());
+                            PoolsStateQueryResponse::PoolHistory(PoolHistory { history })
+                        } else {
+                            PoolsStateQueryResponse::Error(
+                                "Pool Epoch history is not enabled".into(),
+                            )
+                        }
+                    }
+
                     PoolsStateQuery::GetPoolMetadata { pool_id } => {
                         // NOTE:
                         // we need to check retired pools metadata
@@ -533,6 +531,15 @@ impl SPOState {
                         let pool_metadata = state.get_pool_metadata(pool_id);
                         if let Some(pool_metadata) = pool_metadata {
                             PoolsStateQueryResponse::PoolMetadata(pool_metadata)
+                        } else {
+                            PoolsStateQueryResponse::NotFound
+                        }
+                    }
+
+                    PoolsStateQuery::GetPoolRelays { pool_id } => {
+                        let pool_relays = state.get_pool_relays(pool_id);
+                        if let Some(relays) = pool_relays {
+                            PoolsStateQueryResponse::PoolRelays(PoolRelays { relays })
                         } else {
                             PoolsStateQueryResponse::NotFound
                         }
@@ -553,19 +560,35 @@ impl SPOState {
                         }
                     }
 
-                    PoolsStateQuery::GetPoolRelays { pool_id } => {
-                        let pool_relays = state.get_pool_relays(pool_id);
-                        if let Some(relays) = pool_relays {
-                            PoolsStateQueryResponse::PoolRelays(PoolRelays { relays })
+                    PoolsStateQuery::GetPoolUpdates { pool_id } => {
+                        if state.is_historical_updates_enabled() {
+                            let pool_updates = state.get_pool_updates(pool_id);
+                            if let Some(pool_updates) = pool_updates {
+                                PoolsStateQueryResponse::PoolUpdates(PoolUpdates {
+                                    updates: pool_updates,
+                                })
+                            } else {
+                                PoolsStateQueryResponse::NotFound
+                            }
                         } else {
-                            PoolsStateQueryResponse::NotFound
+                            PoolsStateQueryResponse::Error("Pool updates are not enabled".into())
                         }
                     }
 
-                    _ => PoolsStateQueryResponse::Error(format!(
-                        "Unimplemented query variant: {:?}",
-                        query
-                    )),
+                    PoolsStateQuery::GetPoolVotes { pool_id } => {
+                        if state.is_historical_votes_enabled() {
+                            let pool_votes = state.get_pool_votes(pool_id);
+                            if let Some(pool_votes) = pool_votes {
+                                PoolsStateQueryResponse::PoolVotes(PoolVotes {
+                                    votes: pool_votes,
+                                })
+                            } else {
+                                PoolsStateQueryResponse::NotFound
+                            }
+                        } else {
+                            PoolsStateQueryResponse::Error("Pool updates are not enabled".into())
+                        }
+                    }
                 };
 
                 Arc::new(Message::StateQueryResponse(StateQueryResponse::Pools(
