@@ -256,7 +256,7 @@ impl State {
                     shelley: Some(sp), ..
                 }) => sp,
                 _ => return Ok(vec![]),
-            }
+            },
         }
         .clone();
 
@@ -315,7 +315,8 @@ impl State {
         // wrongly counted in early Shelley
         let performance = self.epoch_snapshots.mark.clone();
         let staking = self.epoch_snapshots.go.clone();
-        let previous_epoch_deregistrations = std::mem::take(&mut self.current_epoch_deregistrations);
+        let previous_epoch_deregistrations =
+            std::mem::take(&mut self.current_epoch_deregistrations);
         self.epoch_rewards_task = Arc::new(Mutex::new(Some(spawn_blocking(move || {
             // Calculate reward payouts
             calculate_rewards(
