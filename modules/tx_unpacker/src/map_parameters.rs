@@ -972,3 +972,15 @@ pub fn map_mint_burn(
         _ => None,
     }
 }
+
+pub fn map_datum(datum: &Option<conway::MintedDatumOption>) -> Option<Datum> {
+    match datum {
+        Some(pallas::ledger::primitives::conway::MintedDatumOption::Hash(h)) => {
+            Some(Datum::Hash(h.to_vec()))
+        }
+        Some(pallas::ledger::primitives::conway::MintedDatumOption::Data(d)) => {
+            Some(Datum::Inline(d.raw_cbor().to_vec()))
+        }
+        None => None,
+    }
+}

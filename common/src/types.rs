@@ -169,6 +169,10 @@ impl AssetName {
         })
     }
 
+    pub fn len(&self) -> usize {
+        self.len as usize
+    }
+
     pub fn as_slice(&self) -> &[u8] {
         &self.bytes[..self.len as usize]
     }
@@ -184,6 +188,13 @@ pub struct NativeAsset {
 pub struct NativeAssetDelta {
     pub name: AssetName,
     pub amount: i64,
+}
+
+/// Datum (inline or hash)
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum Datum {
+    Hash(Vec<u8>),
+    Inline(Vec<u8>),
 }
 
 /// Value (lovelace + multiasset)
@@ -265,8 +276,9 @@ pub struct TxOutput {
 
     /// Output value (Lovelace)
     pub value: Value,
-    // todo: Implement datum    /// Datum (raw)
-    // !!!    pub datum: Vec<u8>,
+
+    /// Datum (Inline or Hash)
+    pub datum: Option<Datum>,
 }
 
 /// Transaction input (UTXO reference)

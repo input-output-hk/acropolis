@@ -94,7 +94,7 @@ impl serde::Serialize for MintRecord {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub enum AssetMetadataStandard {
     CIP25v1,
     CIP25v2,
