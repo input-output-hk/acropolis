@@ -234,7 +234,7 @@ impl TxUnpacker {
                                             if let Some(metadata) = tx.metadata().find(721) {
                                                 let mut metadata_raw = Vec::new();
                                                 encode(metadata, &mut metadata_raw).expect("failed to encode metadatum");
-                                                cip25_metadata_updates.push(metadata_raw);   
+                                                cip25_metadata_updates.push(metadata_raw);
                                             }
 
                                             if !tx_deltas.is_empty() {

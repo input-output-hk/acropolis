@@ -213,6 +213,7 @@ impl State {
         Ok(Some(result))
     }
 
+    // TODO: Allow tick to log based on any enabled field instead of only supply
     pub fn tick(&self) -> Result<()> {
         match (&self.supply, &self.policy_index) {
             (Some(supply), Some(policy_index)) => {
@@ -226,7 +227,7 @@ impl State {
             }
             (Some(supply), None) => {
                 let asset_count = supply.len();
-                info!(asset_count, "Tracking {asset_count} assets");
+                info!("Tracking {asset_count} assets");
             }
             _ => {
                 info!("asset_state storage disabled in config");
@@ -331,45 +332,45 @@ impl State {
         })
     }
 
+    // TODO: Potentially store metadata for assets that have not been minted yet (pre-mint metadata)
     pub fn handle_cip25_metadata(
         &self,
         registry: &mut AssetRegistry,
-        blobs: &[Vec<u8>],
+        metadata_bytes: &[Vec<u8>],
     ) -> Result<Self> {
         let mut new_info = self.info.clone();
+        let Some(info_map) = new_info.as_mut() else {
+            return Ok(self.clone());
+        };
 
-        for raw in blobs {
-            let decoded: serde_cbor::Value = serde_cbor::from_slice(raw)
-                .map_err(|e| anyhow::anyhow!("Failed to decode CIP-25 blob: {e}"))?;
+        for bytes in metadata_bytes {
+            let decoded: serde_cbor::Value = match serde_cbor::from_slice(bytes) {
+                Ok(val) => val,
+                Err(_) => continue,
+            };
 
-            let serde_cbor::Value::Map(policy_map) = decoded else {
+            let serde_cbor::Value::Map(mut policy_map) = decoded else {
                 continue;
             };
 
-            // Default to v1
-            let mut standard = AssetMetadataStandard::CIP25v1;
-
             // Detect version
-            if let Some(ver_val) = policy_map.get(&serde_cbor::Value::Text("version".into())) {
-                if let serde_cbor::Value::Text(ver) = ver_val {
-                    if ver == "2.0" {
-                        standard = AssetMetadataStandard::CIP25v2;
-                    }
+            let version_key = serde_cbor::Value::Text("version".to_string());
+            let mut standard = AssetMetadataStandard::CIP25v1;
+            if let Some(serde_cbor::Value::Text(ver)) = policy_map.get(&version_key) {
+                if ver == "2.0" {
+                    standard = AssetMetadataStandard::CIP25v2;
                 }
             }
+            policy_map.remove(&version_key);
 
             for (pk, assets_val) in policy_map {
                 let serde_cbor::Value::Text(policy_hex) = pk else {
                     continue;
                 };
-                if policy_hex == "version" {
+                let Some(policy_id) = hex::decode(&policy_hex).ok().and_then(|b| b.try_into().ok())
+                else {
                     continue;
-                }
-
-                let policy_bytes = hex::decode(&policy_hex)?;
-                let policy_id: PolicyId = policy_bytes
-                    .try_into()
-                    .map_err(|_| anyhow::anyhow!("PolicyId wrong length"))?;
+                };
 
                 let serde_cbor::Value::Map(asset_map) = assets_val else {
                     continue;
@@ -380,66 +381,41 @@ impl State {
                         continue;
                     };
 
-                    let asset_bytes = if asset_hex.chars().all(|c| c.is_ascii_hexdigit()) {
-                        hex::decode(&asset_hex)?
-                    } else {
-                        asset_hex.as_bytes().to_vec()
-                    };
+                    let asset_bytes =
+                        hex::decode(&asset_hex).unwrap_or_else(|_| asset_hex.as_bytes().to_vec());
 
                     let Some(asset_name) = AssetName::new(&asset_bytes) else {
-                        return Err(anyhow::anyhow!("Asset name too long"));
+                        continue;
                     };
-
                     let Some(asset_id) = registry.lookup_id(&policy_id, &asset_name) else {
-                        error!(
-                            "Got CIP-25 metadata for unknown asset: {}.{}",
-                            hex::encode(policy_id),
-                            hex::encode(asset_name.as_slice())
-                        );
                         continue;
                     };
 
-                    let metadata_raw = match serde_cbor::to_vec(&metadata_val) {
-                        Ok(bytes) => bytes,
-                        Err(e) => {
-                            error!(
-                                "Failed to encode CIP-25 metadata for {}.{}: {e}",
-                                hex::encode(policy_id),
-                                hex::encode(asset_name.as_slice())
-                            );
-                            continue;
-                        }
+                    let Ok(metadata_raw) = serde_cbor::to_vec(&metadata_val) else {
+                        continue;
                     };
 
-                    if let Some(info_map) = new_info.as_mut() {
-                        if let Some(record) = info_map.get_mut(&asset_id) {
-                            if matches!(
-                                record.metadata_standard,
-                                Some(
-                                    AssetMetadataStandard::CIP68v1
-                                        | AssetMetadataStandard::CIP68v2
-                                        | AssetMetadataStandard::CIP68v3
-                                )
-                            ) {
-                                continue;
-                            }
-                            record.onchain_metadata = Some(metadata_raw);
-                            record.metadata_standard = Some(standard);
+                    if let Some(record) = info_map.get_mut(&asset_id) {
+                        if matches!(
+                            record.metadata_standard,
+                            Some(
+                                AssetMetadataStandard::CIP68v1
+                                    | AssetMetadataStandard::CIP68v2
+                                    | AssetMetadataStandard::CIP68v3
+                            )
+                        ) {
+                            continue;
                         }
+                        record.onchain_metadata = Some(metadata_raw);
+                        record.metadata_standard = Some(standard);
                     }
                 }
             }
         }
 
-        Ok(Self {
-            config: self.config.clone(),
-            supply: self.supply.clone(),
-            info: new_info,
-            history: self.history.clone(),
-            transactions: self.transactions.clone(),
-            addresses: self.addresses.clone(),
-            policy_index: self.policy_index.clone(),
-        })
+        let mut new_state = self.clone();
+        new_state.info = new_info;
+        Ok(new_state)
     }
 
     pub fn handle_cip68_metadata(
@@ -494,14 +470,8 @@ impl State {
             }
         }
 
-        Ok(Self {
-            config: self.config.clone(),
-            supply: self.supply.clone(),
-            info: new_info,
-            history: self.history.clone(),
-            transactions: self.transactions.clone(),
-            addresses: self.addresses.clone(),
-            policy_index: self.policy_index.clone(),
-        })
+        let mut new_state = self.clone();
+        new_state.info = new_info;
+        Ok(new_state)
     }
 }
