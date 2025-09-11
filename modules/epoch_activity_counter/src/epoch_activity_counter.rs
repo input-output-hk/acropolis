@@ -33,9 +33,6 @@ use crate::{
 const DEFAULT_SUBSCRIBE_HEADERS_TOPIC: &str = "cardano.block.header";
 const DEFAULT_SUBSCRIBE_FEES_TOPIC: &str = "cardano.block.fees";
 const DEFAULT_PUBLISH_TOPIC: &str = "cardano.epoch.activity";
-const DEFAULT_HANDLE_CURRENT_TOPIC: (&str, &str) = ("handle-topic-current-epoch", "rest.get.epoch");
-const DEFAULT_HANDLE_HISTORICAL_TOPIC: (&str, &str) =
-    ("handle-topic-historical-epoch", "rest.get.epochs.*");
 
 /// Epoch activity counter module
 #[module(
@@ -166,17 +163,6 @@ impl EpochActivityCounter {
             .get_string("subscribe-fees-topic")
             .unwrap_or(DEFAULT_SUBSCRIBE_FEES_TOPIC.to_string());
         info!("Creating subscriber for fees on '{subscribe_fees_topic}'");
-
-        // REST handler topics
-        let handle_current_topic = config
-            .get_string(DEFAULT_HANDLE_CURRENT_TOPIC.0)
-            .unwrap_or(DEFAULT_HANDLE_CURRENT_TOPIC.1.to_string());
-        info!("Creating request handler on '{}'", handle_current_topic);
-
-        let handle_historical_topic = config
-            .get_string(DEFAULT_HANDLE_HISTORICAL_TOPIC.0)
-            .unwrap_or(DEFAULT_HANDLE_HISTORICAL_TOPIC.1.to_string());
-        info!("Creating request handler on '{}'", handle_historical_topic);
 
         // Publish topic
         let publish_topic =

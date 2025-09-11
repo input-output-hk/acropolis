@@ -172,7 +172,7 @@ mod test {
     use crate::upstream_cache::{Storage, UpstreamCacheImpl, UpstreamCacheRecord};
     use acropolis_common::{
         messages::{BlockBodyMessage, BlockHeaderMessage},
-        BlockHash, BlockInfo, BlockStatus, Era, HashTraits,
+        BlockHash, BlockInfo, BlockStatus, Era,
     };
     use anyhow::Result;
     use std::{collections::HashMap, sync::Arc};
@@ -182,7 +182,7 @@ mod test {
             status: BlockStatus::Volatile,
             slot: n,
             number: n,
-            hash: BlockHash::new(),
+            hash: BlockHash::default(),
             epoch: 0,
             epoch_slot: n,
             new_epoch: false,

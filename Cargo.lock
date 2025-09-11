@@ -131,6 +131,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "acropolis_module_epochs_state"
+version = "0.1.0"
+dependencies = [
+ "acropolis_common",
+ "anyhow",
+ "caryatid_sdk",
+ "config",
+ "dashmap",
+ "hex",
+ "imbl 6.0.0",
+ "pallas",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "acropolis_module_genesis_bootstrapper"
 version = "0.1.0"
 dependencies = [

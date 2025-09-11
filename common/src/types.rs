@@ -297,16 +297,6 @@ pub type TxHash = [u8; 32];
 /// Block hash
 pub type BlockHash = [u8; 32];
 
-impl HashTraits for BlockHash {
-    fn new() -> Self {
-        [0; 32]
-    }
-}
-
-pub trait HashTraits {
-    fn new() -> Self;
-}
-
 /// Amount of Ada, in Lovelace
 pub type Lovelace = u64;
 pub type LovelaceDelta = i64;
@@ -541,6 +531,14 @@ pub struct PoolMetadata {
 
 pub type RewardAccount = Vec<u8>;
 
+/// Pool registration with position
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PoolRegistrationWithPos {
+    pub reg: PoolRegistration,
+    pub tx_hash: TxHash,
+    pub cert_index: u64,
+}
+
 /// Pool registration data
 #[serde_as]
 #[derive(
@@ -596,6 +594,14 @@ pub struct PoolRegistration {
     pub pool_metadata: Option<PoolMetadata>,
 }
 
+// Pool Retirment with position
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PoolRetirementWithPos {
+    pub ret: PoolRetirement,
+    pub tx_hash: TxHash,
+    pub cert_index: u64,
+}
+
 /// Pool retirement data
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PoolRetirement {
@@ -619,6 +625,24 @@ pub struct PoolUpdateEvent {
     pub tx_hash: TxHash,
     pub cert_index: u64,
     pub action: PoolUpdateAction,
+}
+
+impl PoolUpdateEvent {
+    pub fn register_event(tx_hash: TxHash, cert_index: u64) -> Self {
+        Self {
+            tx_hash,
+            cert_index,
+            action: PoolUpdateAction::Registered,
+        }
+    }
+
+    pub fn retire_event(tx_hash: TxHash, cert_index: u64) -> Self {
+        Self {
+            tx_hash,
+            cert_index,
+            action: PoolUpdateAction::Deregistered,
+        }
+    }
 }
 
 /// Pool Epoch History Data
@@ -1493,11 +1517,11 @@ pub enum TxCertificate {
     /// Stake Delegation to a pool
     StakeDelegation(StakeDelegation),
 
-    /// Pool registration
-    PoolRegistration(PoolRegistration),
+    /// Pool registration With position
+    PoolRegistrationWithPos(PoolRegistrationWithPos),
 
     /// Pool retirement
-    PoolRetirement(PoolRetirement),
+    PoolRetirementWithPos(PoolRetirementWithPos),
 
     /// Genesis key delegation
     GenesisKeyDelegation(GenesisKeyDelegation),

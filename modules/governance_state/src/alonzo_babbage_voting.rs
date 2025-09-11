@@ -115,7 +115,7 @@ mod tests {
     use crate::alonzo_babbage_voting::{AlonzoBabbageVoting, MAINNET_SHELLEY_SLOTS_PER_EPOCH};
     use acropolis_common::{
         rational_number::rational_number_from_f32, AlonzoBabbageUpdateProposal,
-        AlonzoBabbageVotingOutcome, BlockHash, BlockInfo, BlockStatus, GenesisKeyhash, HashTraits,
+        AlonzoBabbageVotingOutcome, BlockHash, BlockInfo, BlockStatus, GenesisKeyhash,
         ProtocolParamUpdate,
     };
     use anyhow::Result;
@@ -151,7 +151,7 @@ mod tests {
                 era: era.try_into()?,
                 new_epoch: new_epoch != 0,
                 timestamp: 0,
-                hash: BlockHash::new(),
+                hash: BlockHash::default(),
             };
 
             for prop in proposals {

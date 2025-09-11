@@ -158,7 +158,7 @@ mod tests {
     use acropolis_common::{
         crypto::keyhash,
         state_history::{StateHistory, StateHistoryStore},
-        BlockHash, BlockInfo, BlockStatus, Era, HashTraits,
+        BlockHash, BlockInfo, BlockStatus, Era,
     };
     use tokio::sync::Mutex;
 
@@ -167,7 +167,7 @@ mod tests {
             status: BlockStatus::Immutable,
             slot: 0,
             number: epoch * 10,
-            hash: BlockHash::new(),
+            hash: BlockHash::default(),
             epoch,
             epoch_slot: 99,
             new_epoch: false,
@@ -181,7 +181,7 @@ mod tests {
             status: BlockStatus::RolledBack,
             slot: 0,
             number: epoch * 10,
-            hash: BlockHash::new(),
+            hash: BlockHash::default(),
             epoch,
             epoch_slot: 99,
             new_epoch: false,
