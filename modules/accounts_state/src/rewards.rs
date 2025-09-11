@@ -10,6 +10,7 @@ use bigdecimal::{BigDecimal, One, ToPrimitive, Zero};
 use std::cmp::min;
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
+use std::cmp::Ordering;
 use tracing::{debug, info, warn};
 
 /// Type of reward being given
@@ -103,11 +104,41 @@ pub fn calculate_rewards(
             continue;
         }
 
+        // SPO's reward account from staking time must be registered now
+        // TODO horrors about the time of registration/deregistration - depends on whether
+        // it was deregistered before 4 * k blocks (actually 4 * k * 20 slots) into the epoch!
+        // For now, "now" = time of last ('performance') snapshot
         // We get the registration status *as it is in performance* for the reward account
         // *as it was during staking*
-        let staking_reward_account_is_registered =
+        let mut pay_to_pool_reward_account =
             performance_spo.map(|s| s.two_previous_reward_account_is_registered).unwrap_or(false);
 
+        // There was a bug in the original node from Shelley until Allegra where if multiple SPOs
+        // shared a reward account, only one of them would get paid.
+        // QUESTION: Which one?  Lowest hash seems to work in epoch 212
+        // TODO turn this off at Allegra start
+        if pay_to_pool_reward_account {
+            // Check all SPOs to see if they match this reward account
+            for (other_id, other_spo) in staking.spos.iter() {
+                if other_spo.reward_account == spo.reward_account
+                    && other_id.cmp(&operator_id) == Ordering::Less // Lower ID (hash) wins
+                {
+                    // It must have been paid a reward - we assume that checking it produced
+                    // any blocks is enough here - if not we'll have to do this as a post-process
+                    if performance.spos.get(other_id).map(|s| s.blocks_produced).unwrap_or(0) > 0 {
+                        pay_to_pool_reward_account = false;
+                        warn!("Shelley shared reward account bug: Dropping reward to {} in favour of {}",
+                              hex::encode(&operator_id),
+                              hex::encode(&other_id));
+                        break;
+                    }
+                }
+            }
+        } else {
+            info!("Reward account for SPO {} was deregistered", hex::encode(operator_id))
+        }
+
+        // Calculate rewards for this SPO
         let rewards = calculate_spo_rewards(
             operator_id,
             spo,
@@ -119,7 +150,7 @@ pub fn calculate_rewards(
             &pledge_influence_factor,
             params,
             staking.clone(),
-            staking_reward_account_is_registered,
+            pay_to_pool_reward_account,
             previous_epoch_deregistrations,
         );
 
@@ -174,7 +205,7 @@ fn calculate_spo_rewards(
     pledge_influence_factor: &BigDecimal,
     params: &ShelleyParams,
     staking: Arc<Snapshot>,
-    staking_reward_account_is_registered: bool,
+    pay_to_pool_reward_account: bool,
     previous_epoch_deregistrations: &HashSet<KeyHash>,
 ) -> Vec<RewardDetail> {
     // Actual blocks produced as proportion of epoch (Beta)
@@ -308,8 +339,6 @@ fn calculate_spo_rewards(
                     continue;
                 }
 
-                // TODO Shelley-until-Allegra bug if same reward account used for multiple
-
                 // Transfer from reserves to this account
                 rewards.push(RewardDetail {
                     account: hash.clone(),
@@ -327,11 +356,7 @@ fn calculate_spo_rewards(
         costs.to_u64().unwrap_or(0)
     };
 
-    // SPO's reward account from staking time must be registered now
-    // TODO horrors about the time of registration/deregistration - depends on whether
-    // it was deregistered before 4 * k blocks (actually 4 * k * 20 slots) into the epoch!
-    // For now, "now" = time of last ('performance') snapshot
-    if staking_reward_account_is_registered {
+    if pay_to_pool_reward_account {
         rewards.push(RewardDetail {
             // TODO Hack to remove e1 header - needs resolving properly with StakeAddress
             account: RewardAccount::from(&spo.reward_account[1..]),
@@ -340,7 +365,7 @@ fn calculate_spo_rewards(
         });
     } else {
         info!(
-            "SPO {}'s reward account {} isn't registered - dropping their reward of {}",
+            "SPO {}'s reward account {} not paid {}",
             hex::encode(&operator_id),
             hex::encode(&spo.reward_account),
             spo_benefit,
