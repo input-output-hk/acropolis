@@ -8,9 +8,7 @@ use acropolis_common::{
         SnapshotStateMessage, StateQuery, StateQueryResponse,
     },
     queries::pools::{
-        PoolDelegators, PoolHistory, PoolRelays, PoolsActiveStakes, PoolsList, PoolsListWithInfo,
-        PoolsRetiredList, PoolsRetiringList, PoolsStateQuery, PoolsStateQueryResponse,
-        DEFAULT_POOLS_QUERY_TOPIC,
+        PoolDelegators, PoolHistory, PoolRelays, PoolUpdates, PoolVotes, PoolsActiveStakes, PoolsList, PoolsListWithInfo, PoolsRetiredList, PoolsRetiringList, PoolsStateQuery, PoolsStateQueryResponse, DEFAULT_POOLS_QUERY_TOPIC
     },
     state_history::{StateHistory, StateHistoryStore},
     BlockInfo, BlockStatus,
@@ -39,15 +37,32 @@ use crate::{
 use state::State;
 use store_config::StoreConfig;
 
-const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.certificates";
-const DEFAULT_WITHDRAWALS_TOPIC: &str = "cardano.withdrawals";
-const DEFAULT_STAKE_DELTAS_TOPIC: &str = "cardano.stake.deltas";
-const DEFAULT_CLOCK_TICK_TOPIC: &str = "clock.tick";
-const DEFAULT_SPO_STATE_TOPIC: &str = "cardano.spo.state";
-const DEFAULT_SPDD_SUBSCRIBE_TOPIC: &str = "cardano.spo.distribution";
-const DEFAULT_EPOCH_ACTIVITY_TOPIC: &str = "cardano.epoch.activity";
-const DEFAULT_SPO_REWARDS_TOPIC: &str = "cardano.spo.rewards";
-const DEFAULT_STAKE_REWARD_DELTAS_TOPIC: &str = "cardano.stake.reward.deltas";
+// Subscribe Topics
+const DEFAULT_CERTIFICATES_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("certificates-subscribe-topic", "cardano.certificates");
+const DEFAULT_WITHDRAWALS_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("withdrawals-subscribe-topic", "cardano.withdrawals");
+const DEFAULT_GOVERNANCE_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("governance-subscribe-topic", "cardano.governance");
+const DEFAULT_EPOCH_ACTIVITY_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("epoch-activity-subscribe-topic", "cardano.epoch.activity");
+const DEFAULT_SPDD_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("spdd-subscribe-topic", "cardano.spo.distribution");
+const DEFAULT_STAKE_DELTAS_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("stake-deltas-subscribe-topic", "cardano.stake.deltas");
+const DEFAULT_SPO_REWARDS_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("spo-rewards-subscribe-topic", "cardano.spo.rewards");
+const DEFAULT_STAKE_REWARD_DELTAS_SUBSCRIBE_TOPIC: (&str, &str) = (
+    "stake-reward-deltas-subscribe-topic",
+    "cardano.stake.reward.deltas",
+);
+const DEFAULT_CLOCK_TICK_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("clock-tick-subscribe-topic", "clock.tick");
+const MAYBE_SNAPSHOT_SUBSCRIBE_TOPIC: &str = "snapshot-subscribe-topic";
+
+// Publish Topics
+const DEFAULT_SPO_STATE_PUBLISH_TOPIC: (&str, &str) =
+    ("publish-spo-state-topic", "cardano.spo.state");
 
 /// SPO State module
 #[module(
@@ -65,13 +80,16 @@ impl SPOState {
         epochs_history: EpochsHistoryState,
         retired_pools_history: RetiredPoolsHistoryState,
         store_config: &StoreConfig,
-        mut certs_subscription: Box<dyn Subscription<Message>>,
-        mut stake_deltas_subscription: Option<Box<dyn Subscription<Message>>>,
+        // subscribers
+        mut certificates_subscription: Box<dyn Subscription<Message>>,
         mut withdrawals_subscription: Option<Box<dyn Subscription<Message>>>,
-        mut stake_reward_deltas_subscription: Option<Box<dyn Subscription<Message>>>,
-        mut spdd_subscription: Box<dyn Subscription<Message>>,
-        mut spo_rewards_subscription: Box<dyn Subscription<Message>>,
+        mut governance_subscription: Option<Box<dyn Subscription<Message>>>,
         mut epoch_activity_subscription: Box<dyn Subscription<Message>>,
+        mut spdd_subscription: Box<dyn Subscription<Message>>,
+        mut stake_deltas_subscription: Option<Box<dyn Subscription<Message>>>,
+        mut spo_rewards_subscription: Option<Box<dyn Subscription<Message>>>,
+        mut stake_reward_deltas_subscription: Option<Box<dyn Subscription<Message>>>,
+        // publishers
         mut spo_state_publisher: SPOStatePublisher,
     ) -> Result<()> {
         // Get the stake address deltas from the genesis bootstrap, which we know
@@ -91,9 +109,10 @@ impl SPOState {
             let mut current_block: Option<BlockInfo> = None;
 
             // read per-block topics in parallel
-            let certs_message_f = certs_subscription.read();
-            let stake_deltas_message_f = stake_deltas_subscription.as_mut().map(|s| s.read());
+            let certs_message_f = certificates_subscription.read();
             let withdrawals_message_f = withdrawals_subscription.as_mut().map(|s| s.read());
+            let governance_message_f = governance_subscription.as_mut().map(|s| s.read());
+            let stake_deltas_message_f = stake_deltas_subscription.as_mut().map(|s| s.read());
 
             // Use certs_message as the synchroniser
             let (_, certs_message) = certs_message_f.await?;
@@ -145,7 +164,7 @@ impl SPOState {
             // read from epoch-boundary messages only when it's a new epoch
             if new_epoch {
                 let spdd_message_f = spdd_subscription.read();
-                let spo_rewards_message_f = spo_rewards_subscription.read();
+                let spo_rewards_message_f = spo_rewards_subscription.as_mut().map(|s| s.read());
                 let ea_message_f = epoch_activity_subscription.read();
                 let stake_reward_deltas_message_f =
                     stake_reward_deltas_subscription.as_mut().map(|s| s.read());
@@ -168,19 +187,21 @@ impl SPOState {
                 }
 
                 // Handle SPO rewards
-                let (_, spo_rewards_message) = spo_rewards_message_f.await?;
-                if let Message::Cardano((
-                    block_info,
-                    CardanoMessage::SPORewards(spo_rewards_message),
-                )) = spo_rewards_message.as_ref()
-                {
-                    let span =
-                        info_span!("spo_state.handle_spo_rewards", block = block_info.number);
-                    span.in_scope(|| {
-                        Self::check_sync(&current_block, &block_info);
-                        // update epochs_history
-                        epochs_history.handle_spo_rewards(block_info, spo_rewards_message);
-                    });
+                if let Some(spo_rewards_message_f) = spo_rewards_message_f {
+                    let (_, spo_rewards_message) = spo_rewards_message_f.await?;
+                    if let Message::Cardano((
+                        block_info,
+                        CardanoMessage::SPORewards(spo_rewards_message),
+                    )) = spo_rewards_message.as_ref()
+                    {
+                        let span =
+                            info_span!("spo_state.handle_spo_rewards", block = block_info.number);
+                        span.in_scope(|| {
+                            Self::check_sync(&current_block, &block_info);
+                            // update epochs_history
+                            epochs_history.handle_spo_rewards(block_info, spo_rewards_message);
+                        });
+                    }
                 }
 
                 // Handle Stake Reward Deltas
@@ -280,6 +301,29 @@ impl SPOState {
                 }
             }
 
+            // Handle governance
+            if let Some(governance_message_f) = governance_message_f {
+                let (_, message) = governance_message_f.await?;
+                match message.as_ref() {
+                    Message::Cardano((
+                        block_info,
+                        CardanoMessage::GovernanceProcedures(governance_msg),
+                    )) => {
+                        let span =
+                            info_span!("spo_state.handle_governance", block = block_info.number);
+                        span.in_scope(|| {
+                            Self::check_sync(&current_block, &block_info);
+                            state
+                                .handle_governance(&governance_msg.voting_procedures)
+                                .inspect_err(|e| error!("Governance handling error: {e:#}"))
+                                .ok();
+                        });
+                    }
+
+                    _ => error!("Unexpected message type: {message:?}"),
+                }
+            }
+
             // Commit the new state
             if let Some(block_info) = current_block {
                 history.lock().await.commit(block_info.number, state);
@@ -311,50 +355,61 @@ impl SPOState {
 
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // Get configuration
-        let subscribe_topic =
-            config.get_string("subscribe-topic").unwrap_or(DEFAULT_SUBSCRIBE_TOPIC.to_string());
-        info!("Creating subscriber on '{subscribe_topic}'");
+        let certificates_subscribe_topic = config
+            .get_string(DEFAULT_CERTIFICATES_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_CERTIFICATES_SUBSCRIBE_TOPIC.1.to_string());
+        info!("Creating subscriber on '{certificates_subscribe_topic}'");
 
-        let withdrawals_topic =
-            config.get_string("withdrawals-topic").unwrap_or(DEFAULT_WITHDRAWALS_TOPIC.to_string());
-        info!("Creating withdrawals subscriber on '{withdrawals_topic}'");
+        let withdrawals_subscribe_topic = config
+            .get_string(DEFAULT_WITHDRAWALS_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_WITHDRAWALS_SUBSCRIBE_TOPIC.1.to_string());
+        info!("Creating withdrawals subscriber on '{withdrawals_subscribe_topic}'");
 
-        let stake_deltas_topic = config
-            .get_string("stake-deltas-topic")
-            .unwrap_or(DEFAULT_STAKE_DELTAS_TOPIC.to_string());
-        info!("Creating stake deltas subscriber on '{stake_deltas_topic}'");
+        let governance_subscribe_topic = config
+            .get_string(DEFAULT_GOVERNANCE_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_GOVERNANCE_SUBSCRIBE_TOPIC.1.to_string());
+        info!("Creating governance subscriber on '{governance_subscribe_topic}'");
 
-        let clock_tick_topic =
-            config.get_string("clock-tick-topic").unwrap_or(DEFAULT_CLOCK_TICK_TOPIC.to_string());
-        info!("Creating subscriber on '{clock_tick_topic}'");
+        let stake_deltas_subscribe_topic = config
+            .get_string(DEFAULT_STAKE_DELTAS_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_STAKE_DELTAS_SUBSCRIBE_TOPIC.1.to_string());
+        info!("Creating stake deltas subscriber on '{stake_deltas_subscribe_topic}'");
 
-        let spdd_topic =
-            config.get_string("spdd-topic").unwrap_or(DEFAULT_SPDD_SUBSCRIBE_TOPIC.to_string());
-        info!("Creating subscriber on '{spdd_topic}'");
+        let epoch_activity_subscribe_topic = config
+            .get_string(DEFAULT_EPOCH_ACTIVITY_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_EPOCH_ACTIVITY_SUBSCRIBE_TOPIC.1.to_string());
+        info!("Creating subscriber on '{epoch_activity_subscribe_topic}'");
 
-        let epoch_activity_topic = config
-            .get_string("epoch-activity-topic")
-            .unwrap_or(DEFAULT_EPOCH_ACTIVITY_TOPIC.to_string());
-        info!("Creating subscriber on '{epoch_activity_topic}'");
+        let spdd_subscribe_topic = config
+            .get_string(DEFAULT_SPDD_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_SPDD_SUBSCRIBE_TOPIC.1.to_string());
+        info!("Creating subscriber on '{spdd_subscribe_topic}'");
 
-        let spo_rewards_topic =
-            config.get_string("spo-rewards-topic").unwrap_or(DEFAULT_SPO_REWARDS_TOPIC.to_string());
-        info!("Creating SPO rewards publisher on '{spo_rewards_topic}'");
+        let spo_rewards_subscribe_topic = config
+            .get_string(DEFAULT_SPO_REWARDS_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_SPO_REWARDS_SUBSCRIBE_TOPIC.1.to_string());
+        info!("Creating SPO rewards subscriber on '{spo_rewards_subscribe_topic}'");
 
-        let stake_reward_deltas_topic = config
-            .get_string("stake-reward-deltas-topic")
-            .unwrap_or(DEFAULT_STAKE_REWARD_DELTAS_TOPIC.to_string());
-        info!("Creating stake reward deltas subscriber on '{stake_reward_deltas_topic}'");
+        let stake_reward_deltas_subscribe_topic = config
+            .get_string(DEFAULT_STAKE_REWARD_DELTAS_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_STAKE_REWARD_DELTAS_SUBSCRIBE_TOPIC.1.to_string());
+        info!("Creating stake reward deltas subscriber on '{stake_reward_deltas_subscribe_topic}'");
+
+        let clock_tick_subscribe_topic = config
+            .get_string(DEFAULT_CLOCK_TICK_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_CLOCK_TICK_SUBSCRIBE_TOPIC.1.to_string());
+        info!("Creating subscriber on '{clock_tick_subscribe_topic}'");
 
         let maybe_snapshot_topic = config
-            .get_string("snapshot-topic")
+            .get_string(MAYBE_SNAPSHOT_SUBSCRIBE_TOPIC)
             .ok()
             .inspect(|snapshot_topic| info!("Creating subscriber on '{snapshot_topic}'"));
 
-        let spo_state_topic = config
-            .get_string("publish-spo-state-topic")
-            .unwrap_or(DEFAULT_SPO_STATE_TOPIC.to_string());
-        info!("Creating SPO state publisher on '{spo_state_topic}'");
+        // Publish Topics
+        let spo_state_publish_topic = config
+            .get_string(DEFAULT_SPO_STATE_PUBLISH_TOPIC.0)
+            .unwrap_or(DEFAULT_SPO_STATE_PUBLISH_TOPIC.1.to_string());
+        info!("Creating SPO state publisher on '{spo_state_publish_topic}'");
 
         // query topic
         let pools_query_topic = config
@@ -415,6 +470,14 @@ impl SPOState {
                         };
                         PoolsStateQueryResponse::PoolsListWithInfo(pools_list_with_info)
                     }
+                    PoolsStateQuery::GetPoolInfo { pool_id } => {
+                        let pool_info = state.get(pool_id);
+                        if let Some(pool_info) = pool_info {
+                            PoolsStateQueryResponse::PoolInfo(pool_info.clone())
+                        } else {
+                            PoolsStateQueryResponse::NotFound
+                        }
+                    }
 
                     PoolsStateQuery::GetPoolsActiveStakes {
                         pools_operators,
@@ -426,18 +489,6 @@ impl SPOState {
                             active_stakes,
                             total_active_stake,
                         })
-                    }
-
-                    PoolsStateQuery::GetPoolHistory { pool_id } => {
-                        if epochs_history.is_enabled() {
-                            let history =
-                                epochs_history.get_pool_history(pool_id).unwrap_or(Vec::new());
-                            PoolsStateQueryResponse::PoolHistory(PoolHistory { history })
-                        } else {
-                            PoolsStateQueryResponse::Error(
-                                "Pool Epoch history is not enabled".into(),
-                            )
-                        }
                     }
 
                     PoolsStateQuery::GetPoolsRetiringList => {
@@ -460,6 +511,18 @@ impl SPOState {
                         }
                     }
 
+                    PoolsStateQuery::GetPoolHistory { pool_id } => {
+                        if epochs_history.is_enabled() {
+                            let history =
+                                epochs_history.get_pool_history(pool_id).unwrap_or(Vec::new());
+                            PoolsStateQueryResponse::PoolHistory(PoolHistory { history })
+                        } else {
+                            PoolsStateQueryResponse::Error(
+                                "Pool Epoch history is not enabled".into(),
+                            )
+                        }
+                    }
+
                     PoolsStateQuery::GetPoolMetadata { pool_id } => {
                         // NOTE:
                         // we need to check retired pools metadata
@@ -468,6 +531,15 @@ impl SPOState {
                         let pool_metadata = state.get_pool_metadata(pool_id);
                         if let Some(pool_metadata) = pool_metadata {
                             PoolsStateQueryResponse::PoolMetadata(pool_metadata)
+                        } else {
+                            PoolsStateQueryResponse::NotFound
+                        }
+                    }
+
+                    PoolsStateQuery::GetPoolRelays { pool_id } => {
+                        let pool_relays = state.get_pool_relays(pool_id);
+                        if let Some(relays) = pool_relays {
+                            PoolsStateQueryResponse::PoolRelays(PoolRelays { relays })
                         } else {
                             PoolsStateQueryResponse::NotFound
                         }
@@ -488,19 +560,35 @@ impl SPOState {
                         }
                     }
 
-                    PoolsStateQuery::GetPoolRelays { pool_id } => {
-                        let pool_relays = state.get_pool_relays(pool_id);
-                        if let Some(relays) = pool_relays {
-                            PoolsStateQueryResponse::PoolRelays(PoolRelays { relays })
+                    PoolsStateQuery::GetPoolUpdates { pool_id } => {
+                        if state.is_historical_updates_enabled() {
+                            let pool_updates = state.get_pool_updates(pool_id);
+                            if let Some(pool_updates) = pool_updates {
+                                PoolsStateQueryResponse::PoolUpdates(PoolUpdates {
+                                    updates: pool_updates,
+                                })
+                            } else {
+                                PoolsStateQueryResponse::NotFound
+                            }
                         } else {
-                            PoolsStateQueryResponse::NotFound
+                            PoolsStateQueryResponse::Error("Pool updates are not enabled".into())
                         }
                     }
 
-                    _ => PoolsStateQueryResponse::Error(format!(
-                        "Unimplemented query variant: {:?}",
-                        query
-                    )),
+                    PoolsStateQuery::GetPoolVotes { pool_id } => {
+                        if state.is_historical_votes_enabled() {
+                            let pool_votes = state.get_pool_votes(pool_id);
+                            if let Some(pool_votes) = pool_votes {
+                                PoolsStateQueryResponse::PoolVotes(PoolVotes {
+                                    votes: pool_votes,
+                                })
+                            } else {
+                                PoolsStateQueryResponse::NotFound
+                            }
+                        } else {
+                            PoolsStateQueryResponse::Error("Pool updates are not enabled".into())
+                        }
+                    }
                 };
 
                 Arc::new(Message::StateQueryResponse(StateQueryResponse::Pools(
@@ -553,31 +641,44 @@ impl SPOState {
             });
         }
 
-        // Publishers
-        let spo_state_publisher = SPOStatePublisher::new(context.clone(), spo_state_topic);
-
         // Subscriptions
-        let certs_subscription = context.subscribe(&subscribe_topic).await?;
-        let stake_deltas_subscription = if store_config.store_stake_addresses {
-            Some(context.subscribe(&stake_deltas_topic).await?)
+        let certificates_subscription = context.subscribe(&certificates_subscribe_topic).await?;
+        // only when stake_addresses are enabled
+        let withdrawals_subscription = if store_config.store_stake_addresses {
+            Some(context.subscribe(&withdrawals_subscribe_topic).await?)
         } else {
             None
         };
-        let withdrawals_subscription = if store_config.store_stake_addresses {
-            Some(context.subscribe(&withdrawals_topic).await?)
+        // when historical spo's votes are enabled
+        let governance_subscription = if store_config.store_votes {
+            Some(context.subscribe(&governance_subscribe_topic).await?)
+        } else {
+            None
+        };
+        let epoch_activity_subscription =
+            context.subscribe(&epoch_activity_subscribe_topic).await?;
+        let spdd_subscription = context.subscribe(&spdd_subscribe_topic).await?;
+        // when epochs_history is enabled
+        let spo_rewards_subscription = if store_config.store_epochs_history {
+            Some(context.subscribe(&spo_rewards_subscribe_topic).await?)
+        } else {
+            None
+        };
+        // when state_addresses are enabled
+        let stake_deltas_subscription = if store_config.store_stake_addresses {
+            Some(context.subscribe(&stake_deltas_subscribe_topic).await?)
         } else {
             None
         };
         let stake_reward_deltas_subscription = if store_config.store_stake_addresses {
-            Some(context.subscribe(&stake_reward_deltas_topic).await?)
+            Some(context.subscribe(&stake_reward_deltas_subscribe_topic).await?)
         } else {
             None
         };
+        let clock_tick_subscription = context.subscribe(&clock_tick_subscribe_topic).await?;
 
-        let spdd_subscription = context.subscribe(&spdd_topic).await?;
-        let spo_rewards_subscription = context.subscribe(&spo_rewards_topic).await?;
-        let epoch_activity_subscription = context.subscribe(&epoch_activity_topic).await?;
-        let clock_tick_subscription = context.subscribe(&clock_tick_topic).await?;
+        // Publishers
+        let spo_state_publisher = SPOStatePublisher::new(context.clone(), spo_state_publish_topic);
 
         context.run(async move {
             Self::run(
@@ -586,13 +687,14 @@ impl SPOState {
                 epochs_history,
                 retired_pools_history,
                 &store_config,
-                certs_subscription,
-                stake_deltas_subscription,
+                certificates_subscription,
                 withdrawals_subscription,
-                stake_reward_deltas_subscription,
-                spdd_subscription,
-                spo_rewards_subscription,
+                governance_subscription,
                 epoch_activity_subscription,
+                spdd_subscription,
+                stake_deltas_subscription,
+                spo_rewards_subscription,
+                stake_reward_deltas_subscription,
                 spo_state_publisher,
             )
             .await

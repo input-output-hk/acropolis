@@ -1,25 +1,27 @@
 # Top-level configuration for Acropolis omnibus process
 
 [module.genesis-bootstrapper]
-network-name = "sanchonet" # "sanchonet", "mainnet"
 
-#[module.mithril-snapshot-fetcher]
-#Turned off with SanchoNet
-#aggregator-url = "https://aggregator.release-mainnet.api.mithril.network/aggregator"
-#genesis-key = "5b3139312c36362c3134302c3138352c3133382c31312c3233372c3230372c3235302c3134342c32372c322c3138382c33302c31322c38312c3135352c3230342c31302c3137392c37352c32332c3133382c3139362c3231372c352c31342c32302c35372c37392c33392c3137365d"
-#download = false
-
-[module.rest-blockfrost]
+[module.mithril-snapshot-fetcher]
+aggregator-url = "https://aggregator.release-mainnet.api.mithril.network/aggregator"
+genesis-key = "5b3139312c36362c3134302c3138352c3133382c31312c3233372c3230372c3235302c3134342c32372c322c3138382c33302c31322c38312c3135352c3230342c31302c3137392c37352c32332c3133382c3139362c3231372c352c31342c32302c35372c37392c33392c3137365d"
+# Download max age in hours. E.g. 8 means 8 hours (if there isn't any snapshot within this time range download from Mithril)
+download-max-age = "never"
+# Pause constraint E.g. "epoch:100", "block:1200"
+pause = "none"
 
 [module.upstream-chain-fetcher]
-sync-point = "cache" #"cache" # "origin", "tip", "snapshot"
-node-address = "sancho-testnet.able-pool.io:6002"
-magic-number = 4
+sync-point = "snapshot"
+node-address = "backbone.cardano.iog.io:3001"
+magic-number = 764824073
 
 [module.block-unpacker]
 
+[module.rest-blockfrost]
+
 [module.tx-unpacker]
 publish-utxo-deltas-topic = "cardano.utxo.deltas"
+publish-asset-deltas-topic = "cardano.asset.deltas"
 publish-withdrawals-topic = "cardano.withdrawals"
 publish-certificates-topic = "cardano.certificates"
 publish-governance-topic = "cardano.governance"
@@ -30,23 +32,57 @@ store = "memory" # "memory", "dashmap", "fjall", "fjall-async", "sled", "sled-as
 address-delta-topic = "cardano.address.delta"
 
 [module.spo-state]
+# Enables /pools/{pool_id}/history endpoint
+store-epochs-history = false
+# Enable /pools/retired
+store-retired-pools = false
+# Enables /pools/{pool_id} endpoint
+store-registration = false
+# # Enables /pools/{pool_id}/updates endpoint
+store-updates = false
+# Enables /pools/{pool_id}/delegators endpoint (Requires store-stake-addresses to be enabled)
+store-delegators = false
+# Enables /pools/{pool_id}/votes endpoint
+store-votes = false
+# Store stake_addresses
+store-stake-addresses = false
+
+[module.spdd-state]
+store-spdd = false
 
 [module.drep-state]
+# Enables /governance/dreps/{drep_id} endpoint (Requires store-delegators to be enabled)
+store-info = false
+# Enables /governance/dreps/{drep_id}/delegators endpoint
+store-delegators = false
+# Enables /governance/dreps/{drep_id}/metadata endpoint
+store-metadata = false
+# Enables /governance/dreps/{drep_id}/updates endpoint
+store-updates = false
+# Enables /governance/dreps/{drep_id}/votes endpoint
+store-votes = false
+
+[module.drdd-state]
+store-drdd = false
 
 [module.governance-state]
 
 [module.parameters-state]
 store-history = false
-network-name = "sanchonet" # "sanchonet", "mainnet"
 
 [module.stake-delta-filter]
-cache-mode = "write" # "predefined", "read", "write", "write-if-absent"
+cache-mode = "predefined" # "predefined", "read", "write", "write-if-absent"
 write-full-cache = "false"
 
-[module.epoch-activity-counter]
+[module.epochs-state]
+# Enables /epochs/{number} endpoint (for historical epochs)
 store-history = false
+# Enables /pools/{pool_id}/blocks endpoint
+store-block-hashes = false
 
 [module.accounts-state]
+
+[module.assets-state]
 
 [module.clock]
 
@@ -56,7 +92,7 @@ port = 4340
 
 [module.spy]
 # Enable for message spying
-#topic = "cardano.drep.state"
+#topic = "cardano.#"
 
 [startup]
 topic = "cardano.sequence.start"

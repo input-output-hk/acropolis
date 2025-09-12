@@ -190,7 +190,7 @@ impl UpstreamChainFetcher {
                 let mut upstream_cache = UpstreamCache::new(&cfg.cache_dir);
                 let point = match Self::read_cache(cfg.clone(), &mut upstream_cache).await? {
                     None => Point::Origin,
-                    Some(blk) => Point::Specific(blk.slot, blk.hash),
+                    Some(blk) => Point::Specific(blk.slot, blk.hash.to_vec()),
                 };
 
                 Self::sync_to_point(cfg, peer.clone(), Some(upstream_cache), point).await?;
@@ -210,7 +210,7 @@ impl UpstreamChainFetcher {
                             "Notified snapshot complete at slot {} block number {}",
                             block.slot, block.number
                         );
-                        let point = Point::Specific(block.slot, block.hash.clone());
+                        let point = Point::Specific(block.slot, block.hash.to_vec());
                         Self::sync_to_point(cfg, peer, None, point).await?;
                     }
                     None => info!("Completion not received. Exiting ..."),

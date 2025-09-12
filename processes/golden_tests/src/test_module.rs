@@ -4,7 +4,7 @@ use acropolis_common::{
         CardanoMessage, Message, RawTxsMessage, SnapshotDumpMessage, SnapshotMessage,
         SnapshotStateMessage,
     },
-    BlockInfo, BlockStatus, Era,
+    BlockHash, BlockInfo, BlockStatus, Era,
 };
 use anyhow::{Context as AnyhowContext, Result};
 use caryatid_sdk::{module, Context, Module};
@@ -46,7 +46,7 @@ impl TestModule {
                 status: BlockStatus::Volatile,
                 slot: 1,
                 number: 1,
-                hash: vec![],
+                hash: BlockHash::default(),
                 epoch: 1,
                 epoch_slot: 1,
                 new_epoch: false,

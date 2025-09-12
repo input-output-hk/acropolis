@@ -7,9 +7,11 @@ use acropolis_common::{
         StakeRewardDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
     },
     params::TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH,
+    queries::governance::VoteRecord,
     stake_addresses::StakeAddressMap,
-    BlockInfo, KeyHash, PoolMetadata, PoolRegistration, PoolRetirement, Relay, StakeCredential,
-    TxCertificate,
+    BlockInfo, KeyHash, PoolMetadata, PoolRegistration, PoolRegistrationWithPos, PoolRetirement,
+    PoolRetirementWithPos, PoolUpdateEvent, Relay, StakeCredential, TxCertificate, TxHash, Voter,
+    VotingProcedures,
 };
 use anyhow::Result;
 use imbl::HashMap;
@@ -70,6 +72,14 @@ impl State {
 
     pub fn is_historical_delegators_enabled(&self) -> bool {
         self.store_config.store_delegators
+    }
+
+    pub fn is_historical_updates_enabled(&self) -> bool {
+        self.store_config.store_updates
+    }
+
+    pub fn is_historical_votes_enabled(&self) -> bool {
+        self.store_config.store_votes
     }
 
     pub fn is_stake_address_enabled(&self) -> bool {
@@ -182,6 +192,28 @@ impl State {
         Some(delegators_with_live_stakes)
     }
 
+    /// Get Pool Updates
+    pub fn get_pool_updates(&self, pool_id: &KeyHash) -> Option<Vec<PoolUpdateEvent>> {
+        let Some(historical_spos) = self.historical_spos.as_ref() else {
+            return None;
+        };
+
+        let updates: Option<Vec<PoolUpdateEvent>> =
+            historical_spos.get(pool_id).map(|s| s.updates.clone()).flatten();
+        updates
+    }
+
+    /// Get Pool Votes
+    pub fn get_pool_votes(&self, pool_id: &KeyHash) -> Option<Vec<VoteRecord>> {
+        let Some(historical_spos) = self.historical_spos.as_ref() else {
+            return None;
+        };
+
+        let votes: Option<Vec<VoteRecord>> =
+            historical_spos.get(pool_id).map(|s| s.votes.clone()).flatten();
+        votes
+    }
+
     /// Get pool relay
     pub fn get_pool_relays(&self, pool_id: &KeyHash) -> Option<Vec<Relay>> {
         self.spos.get(pool_id).map(|p| p.relays.clone())
@@ -252,7 +284,16 @@ impl State {
         )))
     }
 
-    fn handle_pool_registration(&mut self, block: &BlockInfo, reg: &PoolRegistration) {
+    fn handle_pool_registration(
+        &mut self,
+        block: &BlockInfo,
+        reg_with_pos: &PoolRegistrationWithPos,
+    ) {
+        let PoolRegistrationWithPos {
+            reg,
+            tx_hash,
+            cert_index,
+        } = reg_with_pos;
         debug!(
             block = block.number,
             "Registering SPO {}",
@@ -273,9 +314,28 @@ impl State {
                 );
             }
         }
+
+        // update historical spos
+        if let Some(historical_spos) = self.historical_spos.as_mut() {
+            // Don't check there was registration already or not
+            // because we don't remove registration when pool is retired.
+            let historical_spo = historical_spos
+                .entry(reg.operator.clone())
+                .or_insert_with(|| HistoricalSPOState::new(&self.store_config));
+            historical_spo.add_pool_registration(reg);
+            historical_spo.add_pool_updates(PoolUpdateEvent::register_event(
+                tx_hash.clone(),
+                *cert_index,
+            ));
+        }
     }
 
-    fn handle_pool_retirement(&mut self, block: &BlockInfo, ret: &PoolRetirement) {
+    fn handle_pool_retirement(&mut self, block: &BlockInfo, ret_with_pos: &PoolRetirementWithPos) {
+        let PoolRetirementWithPos {
+            ret,
+            tx_hash,
+            cert_index,
+        } = ret_with_pos;
         debug!(
             "SPO {} wants to retire at the end of epoch {} (cert in block number {})",
             hex::encode(&ret.operator),
@@ -308,6 +368,19 @@ impl State {
                 }
             }
             self.pending_deregistrations.entry(ret.epoch).or_default().push(ret.operator.clone());
+        }
+
+        // update historical spos
+        if let Some(historical_spos) = self.historical_spos.as_mut() {
+            if let Some(historical_spo) = historical_spos.get_mut(&ret.operator) {
+                historical_spo
+                    .add_pool_updates(PoolUpdateEvent::retire_event(tx_hash.clone(), *cert_index));
+            } else {
+                error!(
+                    "Historical SPO for {} not registered when try to retire it",
+                    hex::encode(&ret.operator)
+                );
+            }
         }
     }
 
@@ -414,11 +487,11 @@ impl State {
         for tx_cert in tx_certs_msg.certificates.iter() {
             match tx_cert {
                 // for spo_state
-                TxCertificate::PoolRegistration(reg) => {
-                    self.handle_pool_registration(block, reg);
+                TxCertificate::PoolRegistrationWithPos(reg_with_pos) => {
+                    self.handle_pool_registration(block, &reg_with_pos);
                 }
-                TxCertificate::PoolRetirement(ret) => {
-                    self.handle_pool_retirement(block, ret);
+                TxCertificate::PoolRetirementWithPos(ret_with_pos) => {
+                    self.handle_pool_retirement(block, &ret_with_pos);
                 }
 
                 // for stake addresses
@@ -475,6 +548,40 @@ impl State {
         Ok(())
     }
 
+    pub fn handle_governance(
+        &mut self,
+        voting_procedures: &[(TxHash, VotingProcedures)],
+    ) -> Result<()> {
+        // when we save historical spo's vote
+        let Some(historical_spos) = self.historical_spos.as_mut() else {
+            return Ok(());
+        };
+
+        for (tx_hash, voting_procedures) in voting_procedures {
+            for (voter, single_votes) in &voting_procedures.votes {
+                let spo = match voter {
+                    Voter::StakePoolKey(spo) => spo,
+                    _ => continue,
+                };
+
+                let historical_spo = historical_spos
+                    .entry(spo.clone())
+                    .or_insert_with(|| HistoricalSPOState::new(&self.store_config));
+
+                if let Some(votes) = historical_spo.votes.as_mut() {
+                    for (_, vp) in &single_votes.voting_procedures {
+                        votes.push(VoteRecord {
+                            tx_hash: tx_hash.clone(),
+                            vote_index: vp.vote_index,
+                            vote: vp.vote.clone(),
+                        });
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Handle stake deltas
     pub fn handle_stake_deltas(&mut self, deltas_msg: &StakeAddressDeltasMessage) -> Result<()> {
         let Some(stake_addresses) = self.stake_addresses.as_ref() else {
@@ -521,7 +628,7 @@ mod tests {
     use crate::test_utils::*;
     use acropolis_common::{
         state_history::{StateHistory, StateHistoryStore},
-        PoolRetirement, Ratio, TxCertificate,
+        PoolRetirement, Ratio, TxCertificate, TxHash,
     };
     use tokio::sync::Mutex;
 
@@ -556,20 +663,26 @@ mod tests {
     async fn spo_gets_registered() {
         let mut state = State::default();
         let mut msg = new_certs_msg();
-        msg.certificates.push(TxCertificate::PoolRegistration(PoolRegistration {
-            operator: vec![0],
-            vrf_key_hash: vec![0],
-            pledge: 0,
-            cost: 0,
-            margin: Ratio {
-                numerator: 0,
-                denominator: 0,
+        msg.certificates.push(TxCertificate::PoolRegistrationWithPos(
+            PoolRegistrationWithPos {
+                reg: PoolRegistration {
+                    operator: vec![0],
+                    vrf_key_hash: vec![0],
+                    pledge: 0,
+                    cost: 0,
+                    margin: Ratio {
+                        numerator: 0,
+                        denominator: 0,
+                    },
+                    reward_account: vec![0],
+                    pool_owners: vec![vec![0]],
+                    relays: vec![],
+                    pool_metadata: None,
+                },
+                tx_hash: TxHash::default(),
+                cert_index: 1,
             },
-            reward_account: vec![0],
-            pool_owners: vec![vec![0]],
-            relays: vec![],
-            pool_metadata: None,
-        }));
+        ));
         let block = new_block(1);
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
         assert_eq!(1, state.spos.len());
@@ -581,10 +694,16 @@ mod tests {
     async fn pending_deregistration_gets_queued() {
         let mut state = State::default();
         let mut msg = new_certs_msg();
-        msg.certificates.push(TxCertificate::PoolRetirement(PoolRetirement {
-            operator: vec![0],
-            epoch: 1,
-        }));
+        msg.certificates.push(TxCertificate::PoolRetirementWithPos(
+            PoolRetirementWithPos {
+                ret: PoolRetirement {
+                    operator: vec![0],
+                    epoch: 1,
+                },
+                tx_hash: TxHash::default(),
+                cert_index: 0,
+            },
+        ));
         let block = new_block(0);
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
         assert_eq!(1, state.pending_deregistrations.len());
@@ -601,18 +720,30 @@ mod tests {
         let mut state = State::default();
         let mut block = new_block(0);
         let mut msg = new_certs_msg();
-        msg.certificates.push(TxCertificate::PoolRetirement(PoolRetirement {
-            operator: vec![0],
-            epoch: 2,
-        }));
+        msg.certificates.push(TxCertificate::PoolRetirementWithPos(
+            PoolRetirementWithPos {
+                ret: PoolRetirement {
+                    operator: vec![0],
+                    epoch: 2,
+                },
+                tx_hash: TxHash::default(),
+                cert_index: 0,
+            },
+        ));
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
 
         block.number = 1;
         msg = new_certs_msg();
-        msg.certificates.push(TxCertificate::PoolRetirement(PoolRetirement {
-            operator: vec![1],
-            epoch: 2,
-        }));
+        msg.certificates.push(TxCertificate::PoolRetirementWithPos(
+            PoolRetirementWithPos {
+                ret: PoolRetirement {
+                    operator: vec![1],
+                    epoch: 2,
+                },
+                tx_hash: TxHash::default(),
+                cert_index: 0,
+            },
+        ));
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
 
         assert_eq!(1, state.pending_deregistrations.len());
@@ -634,20 +765,32 @@ mod tests {
         let mut state = history.lock().await.get_current_state();
         let mut block = new_block(0);
         let mut msg = new_certs_msg();
-        msg.certificates.push(TxCertificate::PoolRetirement(PoolRetirement {
-            operator: vec![0],
-            epoch: 2,
-        }));
+        msg.certificates.push(TxCertificate::PoolRetirementWithPos(
+            PoolRetirementWithPos {
+                ret: PoolRetirement {
+                    operator: vec![0],
+                    epoch: 2,
+                },
+                tx_hash: TxHash::default(),
+                cert_index: 0,
+            },
+        ));
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
         history.lock().await.commit(block.number, state);
 
         let mut state = history.lock().await.get_current_state();
         block.number = 1;
         msg = new_certs_msg();
-        msg.certificates.push(TxCertificate::PoolRetirement(PoolRetirement {
-            operator: vec![1],
-            epoch: 2,
-        }));
+        msg.certificates.push(TxCertificate::PoolRetirementWithPos(
+            PoolRetirementWithPos {
+                ret: PoolRetirement {
+                    operator: vec![1],
+                    epoch: 2,
+                },
+                tx_hash: TxHash::default(),
+                cert_index: 0,
+            },
+        ));
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
         history.lock().await.commit(block.number, state);
 
@@ -669,20 +812,26 @@ mod tests {
         let mut state = State::default();
         let mut block = new_block(0);
         let mut msg = new_certs_msg();
-        msg.certificates.push(TxCertificate::PoolRegistration(PoolRegistration {
-            operator: vec![0],
-            vrf_key_hash: vec![0],
-            pledge: 0,
-            cost: 0,
-            margin: Ratio {
-                numerator: 0,
-                denominator: 0,
+        msg.certificates.push(TxCertificate::PoolRegistrationWithPos(
+            PoolRegistrationWithPos {
+                reg: PoolRegistration {
+                    operator: vec![0],
+                    vrf_key_hash: vec![0],
+                    pledge: 0,
+                    cost: 0,
+                    margin: Ratio {
+                        numerator: 0,
+                        denominator: 0,
+                    },
+                    reward_account: vec![0],
+                    pool_owners: vec![vec![0]],
+                    relays: vec![],
+                    pool_metadata: None,
+                },
+                tx_hash: TxHash::default(),
+                cert_index: 0,
             },
-            reward_account: vec![0],
-            pool_owners: vec![vec![0]],
-            relays: vec![],
-            pool_metadata: None,
-        }));
+        ));
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
 
         assert_eq!(1, state.spos.len());
@@ -691,10 +840,16 @@ mod tests {
 
         block.number = 1;
         let mut msg = new_certs_msg();
-        msg.certificates.push(TxCertificate::PoolRetirement(PoolRetirement {
-            operator: vec![0],
-            epoch: 1,
-        }));
+        msg.certificates.push(TxCertificate::PoolRetirementWithPos(
+            PoolRetirementWithPos {
+                ret: PoolRetirement {
+                    operator: vec![0],
+                    epoch: 1,
+                },
+                tx_hash: TxHash::default(),
+                cert_index: 0,
+            },
+        ));
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
 
         block.epoch = 1; // SPO get retired at the start of the epoch it requests
@@ -713,20 +868,26 @@ mod tests {
         let mut state = history.lock().await.get_current_state();
         let mut block = new_block(0);
         let mut msg = new_certs_msg();
-        msg.certificates.push(TxCertificate::PoolRegistration(PoolRegistration {
-            operator: vec![0],
-            vrf_key_hash: vec![0],
-            pledge: 0,
-            cost: 0,
-            margin: Ratio {
-                numerator: 0,
-                denominator: 0,
+        msg.certificates.push(TxCertificate::PoolRegistrationWithPos(
+            PoolRegistrationWithPos {
+                reg: PoolRegistration {
+                    operator: vec![0],
+                    vrf_key_hash: vec![0],
+                    pledge: 0,
+                    cost: 0,
+                    margin: Ratio {
+                        numerator: 0,
+                        denominator: 0,
+                    },
+                    reward_account: vec![0],
+                    pool_owners: vec![vec![0]],
+                    relays: vec![],
+                    pool_metadata: None,
+                },
+                tx_hash: TxHash::default(),
+                cert_index: 0,
             },
-            reward_account: vec![0],
-            pool_owners: vec![vec![0]],
-            relays: vec![],
-            pool_metadata: None,
-        }));
+        ));
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
         assert_eq!(1, state.spos.len());
         let spo = state.spos.get(&vec![0u8]);
@@ -736,10 +897,16 @@ mod tests {
         let mut state = history.lock().await.get_current_state();
         block.number = 1;
         msg = new_certs_msg();
-        msg.certificates.push(TxCertificate::PoolRetirement(PoolRetirement {
-            operator: vec![0],
-            epoch: 1,
-        }));
+        msg.certificates.push(TxCertificate::PoolRetirementWithPos(
+            PoolRetirementWithPos {
+                ret: PoolRetirement {
+                    operator: vec![0],
+                    epoch: 1,
+                },
+                tx_hash: TxHash::default(),
+                cert_index: 0,
+            },
+        ));
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
         history.lock().await.commit(block.number, state);
 
@@ -772,18 +939,30 @@ mod tests {
         let mut state = State::default();
         let mut block = new_block(0);
         let mut msg = new_certs_msg();
-        msg.certificates.push(TxCertificate::PoolRetirement(PoolRetirement {
-            operator: vec![0],
-            epoch: 2,
-        }));
+        msg.certificates.push(TxCertificate::PoolRetirementWithPos(
+            PoolRetirementWithPos {
+                ret: PoolRetirement {
+                    operator: vec![0],
+                    epoch: 2,
+                },
+                tx_hash: TxHash::default(),
+                cert_index: 0,
+            },
+        ));
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
 
         block.number = 1;
         msg = new_certs_msg();
-        msg.certificates.push(TxCertificate::PoolRetirement(PoolRetirement {
-            operator: vec![1],
-            epoch: 3,
-        }));
+        msg.certificates.push(TxCertificate::PoolRetirementWithPos(
+            PoolRetirementWithPos {
+                ret: PoolRetirement {
+                    operator: vec![1],
+                    epoch: 3,
+                },
+                tx_hash: TxHash::default(),
+                cert_index: 0,
+            },
+        ));
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
         let mut retiring_pools = state.get_retiring_pools();
         retiring_pools.sort_by_key(|p| p.epoch);

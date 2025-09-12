@@ -96,7 +96,7 @@ pub struct BlockInfo {
     pub number: u64,
 
     /// Block hash
-    pub hash: Vec<u8>,
+    pub hash: BlockHash,
 
     /// Epoch number
     pub epoch: u64,
@@ -293,6 +293,9 @@ pub type DataHash = Vec<u8>;
 
 /// Transaction hash
 pub type TxHash = [u8; 32];
+
+/// Block hash
+pub type BlockHash = [u8; 32];
 
 /// Amount of Ada, in Lovelace
 pub type Lovelace = u64;
@@ -528,6 +531,14 @@ pub struct PoolMetadata {
 
 pub type RewardAccount = Vec<u8>;
 
+/// Pool registration with position
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PoolRegistrationWithPos {
+    pub reg: PoolRegistration,
+    pub tx_hash: TxHash,
+    pub cert_index: u64,
+}
+
 /// Pool registration data
 #[serde_as]
 #[derive(
@@ -583,6 +594,14 @@ pub struct PoolRegistration {
     pub pool_metadata: Option<PoolMetadata>,
 }
 
+// Pool Retirment with position
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PoolRetirementWithPos {
+    pub ret: PoolRetirement,
+    pub tx_hash: TxHash,
+    pub cert_index: u64,
+}
+
 /// Pool retirement data
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PoolRetirement {
@@ -596,16 +615,38 @@ pub struct PoolRetirement {
 /// Pool Update Action
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum PoolUpdateAction {
+    #[serde(rename = "registered")]
     Registered,
+    #[serde(rename = "deregistered")]
     Deregistered,
 }
 
 /// Pool Update Event
+#[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PoolUpdateEvent {
+    #[serde_as(as = "Hex")]
     pub tx_hash: TxHash,
     pub cert_index: u64,
     pub action: PoolUpdateAction,
+}
+
+impl PoolUpdateEvent {
+    pub fn register_event(tx_hash: TxHash, cert_index: u64) -> Self {
+        Self {
+            tx_hash,
+            cert_index,
+            action: PoolUpdateAction::Registered,
+        }
+    }
+
+    pub fn retire_event(tx_hash: TxHash, cert_index: u64) -> Self {
+        Self {
+            tx_hash,
+            cert_index,
+            action: PoolUpdateAction::Deregistered,
+        }
+    }
 }
 
 /// Pool Epoch History Data
@@ -1344,8 +1385,11 @@ impl Display for Voter {
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Clone)]
 pub enum Vote {
+    #[serde(rename = "no")]
     No,
+    #[serde(rename = "yes")]
     Yes,
+    #[serde(rename = "abstain")]
     Abstain,
 }
 
@@ -1480,11 +1524,11 @@ pub enum TxCertificate {
     /// Stake Delegation to a pool
     StakeDelegation(StakeDelegation),
 
-    /// Pool registration
-    PoolRegistration(PoolRegistration),
+    /// Pool registration With position
+    PoolRegistrationWithPos(PoolRegistrationWithPos),
 
     /// Pool retirement
-    PoolRetirement(PoolRetirement),
+    PoolRetirementWithPos(PoolRetirementWithPos),
 
     /// Genesis key delegation
     GenesisKeyDelegation(GenesisKeyDelegation),

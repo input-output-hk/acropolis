@@ -62,7 +62,7 @@ mod tests {
             status: BlockStatus::Immutable,
             slot: 99,
             number: 42,
-            hash: Vec::new(),
+            hash: [0; 32],
             epoch,
             epoch_slot: 99,
             new_epoch: false,
@@ -73,19 +73,19 @@ mod tests {
 
     #[test]
     fn epochs_history_is_none_when_store_history_is_false() {
-        let epochs_history = EpochsHistoryState::new(&StoreConfig::new(false));
+        let epochs_history = EpochsHistoryState::new(&StoreConfig::new(false, false));
         assert!(epochs_history.epochs_history.is_none());
     }
 
     #[test]
     fn epochs_history_is_some_when_store_history_is_true() {
-        let epochs_history = EpochsHistoryState::new(&StoreConfig::new(true));
+        let epochs_history = EpochsHistoryState::new(&StoreConfig::new(true, false));
         assert!(epochs_history.epochs_history.is_some());
     }
 
     #[test]
     fn handle_epoch_activity_saves_history() {
-        let epochs_history = EpochsHistoryState::new(&StoreConfig::new(true));
+        let epochs_history = EpochsHistoryState::new(&StoreConfig::new(true, false));
         let block = make_block(200);
         epochs_history.handle_epoch_activity(
             &block,
