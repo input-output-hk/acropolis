@@ -1,6 +1,7 @@
 mod stores;
 
 use acropolis_common::{
+    BlockHash,
     crypto::keyhash,
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::blocks::{
@@ -285,7 +286,7 @@ impl ChainStore {
             block_info.push(BlockInfo {
                 timestamp: block.extra.timestamp,
                 number: header.number(),
-                hash: header.hash().to_vec(),
+                hash: BlockHash(*header.hash()),
                 slot: header.slot(),
                 epoch: block.extra.epoch,
                 epoch_slot: block.extra.epoch_slot,
@@ -297,8 +298,8 @@ impl ChainStore {
                 block_vrf: header.vrf_vkey().map(|key| key.to_vec()),
                 op_cert,
                 op_cert_counter,
-                previous_block: header.previous_hash().map(|h| h.to_vec()),
-                next_block: next_hash.map(|h| h.to_vec()),
+                previous_block: header.previous_hash().map(|h| BlockHash(*h)),
+                next_block: next_hash.map(|h| BlockHash(*h)),
                 confirmations: latest_number - header.number(),
             });
 

@@ -1,5 +1,6 @@
 use acropolis_common::{
     protocol_params::{Nonce, NonceVariant, ProtocolParams},
+    queries::blocks::BlockInfo,
     queries::governance::DRepActionUpdate,
     rest_helper::ToCheckedF64,
     PoolEpochState, Relay, Vote,
@@ -11,6 +12,10 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 
 use crate::cost_models::{PLUTUS_V1, PLUTUS_V2, PLUTUS_V3};
+
+// REST response structure for /blocks/latest
+#[derive(Serialize)]
+pub struct BlockInfoREST<'a>(pub &'a BlockInfo);
 
 // REST response structure for /governance/dreps
 #[derive(Serialize)]

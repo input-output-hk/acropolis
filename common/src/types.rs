@@ -82,6 +82,14 @@ pub enum BlockStatus {
     RolledBack, // Volatile, restarted after rollback
 }
 
+/// Block hash
+#[serde_as]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct BlockHash(
+    #[serde_as(as = "Hex")]
+    pub [u8; 32],
+);
+
 /// Block info, shared across multiple messages
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BlockInfo {

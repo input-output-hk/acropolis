@@ -11,6 +11,7 @@ use caryatid_sdk::Context;
 use std::sync::Arc;
 
 use crate::handlers_config::HandlersConfig;
+use crate::types::BlockInfoREST;
 
 /// Handle `/blocks/latest`
 pub async fn handle_blocks_latest_blockfrost(
@@ -45,7 +46,7 @@ pub async fn handle_blocks_latest_blockfrost(
     )
     .await?;
 
-    match serde_json::to_string(&block_info) {
+    match serde_json::to_string(&BlockInfoREST(&block_info)) {
         Ok(json) => Ok(RESTResponse::with_json(200, &json)),
         Err(e) => Ok(RESTResponse::with_text(
             500,
