@@ -223,13 +223,13 @@ impl AssetsState {
                 let reg = registry.lock().await;
 
                 let response = match query {
-                    AssetsStateQuery::GetAssetsList => match state.get_assets_list(&*reg) {
+                    AssetsStateQuery::GetAssetsList => match state.get_assets_list(&reg) {
                         Ok(list) => AssetsStateQueryResponse::AssetsList(list),
                         Err(e) => AssetsStateQueryResponse::Error(e.to_string()),
                     },
                     AssetsStateQuery::GetAssetInfo { policy, name } => {
                         match reg.lookup_id(&policy, &name) {
-                            Some(asset_id) => match state.get_asset_info(&asset_id) {
+                            Some(asset_id) => match state.get_asset_info(&asset_id, &reg) {
                                 Ok(Some(info)) => AssetsStateQueryResponse::AssetInfo(info),
                                 Ok(None) => AssetsStateQueryResponse::NotFound,
                                 Err(e) => AssetsStateQueryResponse::Error(e.to_string()),

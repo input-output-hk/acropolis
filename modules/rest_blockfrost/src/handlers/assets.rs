@@ -12,8 +12,10 @@ use blake2::{digest::consts::U20, Blake2b, Digest};
 use caryatid_sdk::Context;
 use hex::FromHex;
 use reqwest::Client;
-use serde_json::Value;
+use serde_cbor::Value as CborValue;
+use serde_json::{json, Value};
 use std::sync::Arc;
+use tracing::info;
 
 use crate::{handlers_config::HandlersConfig, types::AssetInfoRest};
 
@@ -88,9 +90,21 @@ pub async fn handle_asset_single_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Assets(
                 AssetsStateQueryResponse::AssetInfo((quantity, info)),
             )) => {
-                let onchain_metadata_json = info.onchain_metadata.as_ref().and_then(|arc| {
-                    serde_cbor::from_slice::<serde_json::Value>(arc.as_slice()).ok()
-                });
+                if let Some(raw) = info.onchain_metadata.as_ref() {
+                    info!(
+                        "Raw onchain_metadata (len={}): {}",
+                        raw.len(),
+                        hex::encode(raw.as_slice())
+                    );
+                } else {
+                    info!("Raw onchain_metadata: None");
+                }
+
+                let (onchain_metadata_json, onchain_metadata_extra) = info
+                    .onchain_metadata
+                    .as_ref()
+                    .map(|arc| normalize_onchain_metadata(arc.as_slice()))
+                    .unwrap_or((None, None));
 
                 let response = AssetInfoRest {
                     asset: asset_for_closure.clone(),
@@ -102,10 +116,7 @@ pub async fn handle_asset_single_blockfrost(
                     mint_or_burn_count: info.mint_or_burn_count,
                     onchain_metadata: onchain_metadata_json,
                     onchain_metadata_standard: info.metadata_standard,
-                    onchain_metadata_extra: info
-                        .metadata_extra
-                        .as_ref()
-                        .map(|arc| hex::encode(arc.as_slice())),
+                    onchain_metadata_extra,
                     metadata: metadata_for_closure.clone(),
                 };
 
@@ -295,9 +306,100 @@ pub async fn fetch_asset_metadata(asset: &str) -> Option<Value> {
     let client = Client::new();
     let res = client.get(&url).send().await.ok()?;
 
-    if res.status().is_success() {
-        res.json::<Value>().await.ok()
-    } else {
-        None
+    if !res.status().is_success() {
+        return None;
+    }
+
+    let raw: Value = res.json().await.ok()?;
+
+    let output = json!({
+        "name": raw.get("name").and_then(|f| f.get("value")),
+        "ticker": raw.get("ticker").and_then(|f| f.get("value")),
+        "decimals": raw.get("decimals").and_then(|f| f.get("value")),
+        "description": raw.get("description").and_then(|f| f.get("value")),
+        "logo": raw.get("logo").and_then(|f| f.get("value")),
+        "url": raw.get("url").and_then(|f| f.get("value")),
+    });
+
+    Some(output)
+}
+
+/// Normalize on-chain metadata for both CIP-25 and CIP-68 into a flat JSON.
+pub fn normalize_onchain_metadata(raw: &[u8]) -> (Option<Value>, Option<String>) {
+    let decoded: CborValue = match serde_cbor::from_slice(raw) {
+        Ok(val) => val,
+        Err(_) => return (None, None),
+    };
+
+    match decoded {
+        // CIP-68 inline datum
+        CborValue::Tag(_, boxed) => {
+            normalize_onchain_metadata(&serde_cbor::to_vec(&*boxed).unwrap())
+        }
+        CborValue::Array(mut arr) if arr.len() == 3 => {
+            let metadata = arr.remove(0);
+            let _version = arr.remove(0);
+            let extra = arr.remove(0);
+
+            let json_meta = match metadata {
+                CborValue::Map(map) => {
+                    let mut obj = serde_json::Map::new();
+                    for (k, v) in map {
+                        if let CborValue::Bytes(b) = k {
+                            if let Ok(key) = String::from_utf8(b.clone()) {
+                                obj.insert(key, cbor_to_json(v));
+                            } else {
+                                obj.insert(hex::encode(b), cbor_to_json(v));
+                            }
+                        }
+                    }
+                    Some(Value::Object(obj))
+                }
+                _ => None,
+            };
+
+            let extra_hex = serde_cbor::to_vec(&extra).ok().map(hex::encode);
+            (json_meta, extra_hex)
+        }
+        // CIP-25: plain map
+        CborValue::Map(map) => {
+            let mut obj = serde_json::Map::new();
+            for (k, v) in map {
+                if let CborValue::Text(key) = k {
+                    obj.insert(key, cbor_to_json(v));
+                }
+            }
+            (Some(Value::Object(obj)), None)
+        }
+        _ => (None, None),
+    }
+}
+
+// TODO: Order fields deterministically to align with blockfrost
+fn cbor_to_json(val: CborValue) -> Value {
+    match val {
+        CborValue::Text(s) => Value::String(s),
+        CborValue::Integer(i) => {
+            if let Some(n) = serde_json::Number::from_i128(i) {
+                Value::Number(n)
+            } else {
+                Value::String(i.to_string())
+            }
+        }
+        CborValue::Bytes(b) => match String::from_utf8(b.clone()) {
+            Ok(s) => Value::String(s),
+            Err(_) => Value::String(hex::encode(b)),
+        },
+        CborValue::Array(arr) => Value::Array(arr.into_iter().map(cbor_to_json).collect()),
+        CborValue::Map(map) => {
+            let mut obj = serde_json::Map::new();
+            for (k, v) in map {
+                if let CborValue::Text(key) = k {
+                    obj.insert(key, cbor_to_json(v));
+                }
+            }
+            Value::Object(obj)
+        }
+        _ => Value::Null,
     }
 }

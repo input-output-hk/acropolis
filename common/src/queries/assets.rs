@@ -66,7 +66,6 @@ pub struct AssetInfoRecord {
     pub mint_or_burn_count: u64,
     pub onchain_metadata: Option<Vec<u8>>,
     pub metadata_standard: Option<AssetMetadataStandard>,
-    pub metadata_extra: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Default, Clone, serde::Deserialize)]
