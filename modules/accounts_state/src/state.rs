@@ -2,7 +2,9 @@
 use crate::monetary::calculate_monetary_change;
 use crate::rewards::{RewardsResult, RewardsState};
 use crate::snapshot::Snapshot;
+use acropolis_common::messages::DRepDelegationDistribution;
 use acropolis_common::protocol_params::ProtocolParams;
+use acropolis_common::stake_addresses::{StakeAddressMap, StakeAddressState};
 use acropolis_common::{
     messages::{
         DRepStateMessage, EpochActivityMessage, PotDeltasMessage, ProtocolParamsMessage,
@@ -14,46 +16,15 @@ use acropolis_common::{
 };
 use acropolis_common::{SPORewards, StakeRewardDelta};
 use anyhow::{bail, Result};
-use dashmap::DashMap;
 use imbl::OrdMap;
-use rayon::prelude::*;
-use serde_with::{hex::Hex, serde_as};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::mem::take;
-use std::sync::{atomic::AtomicU64, Arc, Mutex};
+use std::sync::{Arc, Mutex};
 use tokio::task::{spawn_blocking, JoinHandle};
 use tracing::{debug, error, info, warn};
 
 const DEFAULT_KEY_DEPOSIT: u64 = 2_000_000;
 const DEFAULT_POOL_DEPOSIT: u64 = 500_000_000;
-
-/// State of an individual stake address
-#[serde_as]
-#[derive(Debug, Default, Clone, serde::Serialize)]
-pub struct StakeAddressState {
-    /// Is it registered (or only used in addresses)?
-    pub registered: bool,
-
-    /// Total value in UTXO addresses
-    pub utxo_value: u64,
-
-    /// Value in reward account
-    pub rewards: u64,
-
-    /// SPO ID they are delegated to ("operator" ID)
-    #[serde_as(as = "Option<Hex>")]
-    pub delegated_spo: Option<KeyHash>,
-
-    /// DRep they are delegated to
-    pub delegated_drep: Option<DRepChoice>,
-}
-
-#[derive(Default, Debug, PartialEq, Eq)]
-pub struct DRepDelegationDistribution {
-    pub abstain: Lovelace,
-    pub no_confidence: Lovelace,
-    pub dreps: Vec<(DRepCredential, Lovelace)>,
-}
 
 /// Global 'pot' account state
 #[derive(Debug, Default, Clone, serde::Serialize)]
@@ -76,7 +47,7 @@ pub struct State {
 
     /// Map of staking address values
     /// Wrapped in an Arc so it doesn't get cloned in full by StateHistory
-    stake_addresses: Arc<Mutex<HashMap<KeyHash, StakeAddressState>>>,
+    stake_addresses: Arc<Mutex<StakeAddressMap>>,
 
     /// Reward state - short history of snapshots
     rewards_state: RewardsState,
@@ -106,7 +77,7 @@ pub struct State {
 impl State {
     /// Get the stake address state for a give stake key
     pub fn get_stake_state(&self, stake_key: &KeyHash) -> Option<StakeAddressState> {
-        self.stake_addresses.lock().unwrap().get(stake_key).cloned()
+        self.stake_addresses.lock().unwrap().get(stake_key)
     }
 
     /// Get the current pot balances
@@ -115,49 +86,13 @@ impl State {
     }
 
     /// Get Pools Live stake
-    pub fn get_pools_live_stakes(&self, pools_operators: &Vec<KeyHash>) -> Vec<u64> {
-        let stake_addresses = self.stake_addresses.lock().unwrap();
-        let mut live_stakes_map = HashMap::<KeyHash, u64>::new();
-
-        // Collect the SPO keys and UTXO
-        let sas_data: Vec<(KeyHash, u64)> = stake_addresses
-            .values()
-            .filter_map(|sas| sas.delegated_spo.as_ref().map(|spo| (spo.clone(), sas.utxo_value)))
-            .collect();
-
-        sas_data.iter().for_each(|(spo, utxo_value)| {
-            live_stakes_map
-                .entry(spo.clone())
-                .and_modify(|v| *v += utxo_value)
-                .or_insert(*utxo_value);
-        });
-
-        pools_operators
-            .iter()
-            .map(|pool_operator| live_stakes_map.get(pool_operator).map(|v| *v).unwrap_or(0))
-            .collect()
+    pub fn get_pools_live_stakes(&self, pool_operators: &Vec<KeyHash>) -> Vec<u64> {
+        self.stake_addresses.lock().unwrap().get_pools_live_stakes(pool_operators)
     }
 
     /// Get Pool Delegators with live_stakes
     pub fn get_pool_delegators(&self, pool_operator: &KeyHash) -> Vec<(KeyHash, u64)> {
-        let stake_addresses = self.stake_addresses.lock().unwrap();
-
-        // Find stake addresses delegated to pool_operator
-        let delegators: Vec<(KeyHash, u64)> = stake_addresses
-            .iter()
-            .filter_map(|(stake_key, sas)| match sas.delegated_spo.as_ref() {
-                Some(delegated_spo) => {
-                    if delegated_spo.eq(pool_operator) {
-                        Some((stake_key.clone(), sas.utxo_value + sas.rewards))
-                    } else {
-                        None
-                    }
-                }
-                _ => None,
-            })
-            .collect();
-
-        delegators
+        self.stake_addresses.lock().unwrap().get_pool_delegators(pool_operator)
     }
 
     /// Map stake_keys to their total balances (utxo + rewards)
@@ -165,16 +100,8 @@ impl State {
         &self,
         stake_keys: &[Vec<u8>],
     ) -> Option<HashMap<Vec<u8>, u64>> {
-        let accounts = self.stake_addresses.lock().unwrap();
-        let mut map = HashMap::new();
-
-        for key in stake_keys {
-            let account = accounts.get(key)?;
-            let balance = account.utxo_value + account.rewards;
-            map.insert(key.clone(), balance);
-        }
-
-        Some(map)
+        let stake_addresses = self.stake_addresses.lock().ok()?; // If lock fails, return None
+        stake_addresses.get_accounts_balances_map(stake_keys)
     }
 
     /// Map stake_keys to their delegated DRep
@@ -182,33 +109,19 @@ impl State {
         &self,
         stake_keys: &[Vec<u8>],
     ) -> Option<HashMap<Vec<u8>, Option<DRepChoice>>> {
-        let accounts = self.stake_addresses.lock().ok()?; // If lock fails, return None
-
-        let mut map = HashMap::new();
-
-        for stake_key in stake_keys {
-            let account = accounts.get(stake_key)?;
-            let maybe_drep = account.delegated_drep.clone();
-            map.insert(stake_key.clone(), maybe_drep);
-        }
-
-        Some(map)
+        let stake_addresses = self.stake_addresses.lock().ok()?; // If lock fails, return None
+        stake_addresses.get_drep_delegations_map(stake_keys)
     }
 
     /// Sum stake_keys balances (utxo + rewards)
     pub fn get_account_balances_sum(&self, stake_keys: &[Vec<u8>]) -> Option<u64> {
-        let accounts = self.stake_addresses.lock().unwrap();
-        let mut total = 0;
-        for key in stake_keys {
-            let account = accounts.get(key)?;
-            total += account.utxo_value + account.rewards;
-        }
-        Some(total)
+        let stake_addresses = self.stake_addresses.lock().ok()?; // If lock fails, return None
+        stake_addresses.get_account_balances_sum(stake_keys)
     }
 
     /// Log statistics
     fn log_stats(&self) {
-        info!(num_stake_addresses = self.stake_addresses.lock().unwrap().keys().len(),);
+        info!(num_stake_addresses = self.stake_addresses.lock().unwrap().len());
     }
 
     /// Background tick
@@ -335,18 +248,13 @@ impl State {
         // Send them their deposits back
         for keyhash in refunds {
             // If their reward account has been deregistered, it goes to Treasury
-            if {
-                let stake_addresses = self.stake_addresses.lock().unwrap();
-                match stake_addresses.get(&keyhash) {
-                    Some(sas) => sas.registered,
-                    None => false,
-                }
-            } {
+            let mut stake_addresses = self.stake_addresses.lock().unwrap();
+            if stake_addresses.is_registered(&keyhash) {
                 reward_deltas.push(StakeRewardDelta {
                     hash: keyhash.clone(),
                     delta: deposit as i64,
                 });
-                self.add_to_reward(&keyhash, deposit);
+                stake_addresses.add_to_reward(&keyhash, deposit);
             } else {
                 warn!(
                     "SPO reward account {} deregistered - paying refund to treasury",
@@ -376,11 +284,12 @@ impl State {
 
         // Send them their deposits back
         for (keyhash, deposit) in refunds {
+            let mut stake_addresses = self.stake_addresses.lock().unwrap();
             reward_deltas.push(StakeRewardDelta {
                 hash: keyhash.clone(),
                 delta: deposit as i64,
             });
-            self.add_to_reward(&keyhash, deposit);
+            stake_addresses.add_to_reward(&keyhash, deposit);
             self.pots.deposits -= deposit;
         }
 
@@ -459,117 +368,20 @@ impl State {
         reward_deltas
     }
 
-    /// Add a reward to a reward account (by hash)
-    fn add_to_reward(&mut self, account: &KeyHash, amount: Lovelace) {
-        // Get old stake address state, or create one
-        let mut stake_addresses = self.stake_addresses.lock().unwrap();
-
-        // Get or create account entry, avoiding clone when existing
-        let sas = match stake_addresses.get_mut(account) {
-            Some(existing) => existing,
-            None => {
-                stake_addresses.insert(account.clone(), StakeAddressState::default());
-                stake_addresses.get_mut(account).unwrap()
-            }
-        };
-
-        if let Err(e) = Self::update_value_with_delta(&mut sas.rewards, amount as i64) {
-            error!("Adding to reward account {}: {e}", hex::encode(account));
-        }
-    }
-
     /// Derive the Stake Pool Delegation Distribution (SPDD) - a map of total stake values
     /// (both with and without rewards) for each active SPO
     /// And Stake Pool Reward State (rewards and delegators_count for each pool)
     /// Key of returned map is the SPO 'operator' ID
     pub fn generate_spdd(&self) -> BTreeMap<KeyHash, DelegatedStake> {
-        // Shareable Dashmap with referenced keys
-        let spo_stakes = DashMap::<KeyHash, DelegatedStake>::new();
-
-        // Total stake across all addresses in parallel, first collecting into a vector
-        // because imbl::OrdMap doesn't work in Rayon
         let stake_addresses = self.stake_addresses.lock().unwrap();
-
-        // Collect the SPO keys and UTXO, reward values
-        let sas_data: Vec<(KeyHash, (u64, u64))> = stake_addresses
-            .values()
-            .filter_map(|sas| {
-                sas.delegated_spo.as_ref().map(|spo| (spo.clone(), (sas.utxo_value, sas.rewards)))
-            })
-            .collect();
-
-        // Parallel sum all the stakes into the spo_stake map
-        sas_data
-            .par_iter() // Rayon multi-threaded iterator
-            .for_each(|(spo, (utxo_value, rewards))| {
-                spo_stakes
-                    .entry(spo.clone())
-                    .and_modify(|v| {
-                        v.active += *utxo_value;
-                        v.active_delegators_count += 1;
-                        v.live += *utxo_value + *rewards;
-                    })
-                    .or_insert(DelegatedStake {
-                        active: *utxo_value,
-                        active_delegators_count: 1,
-                        live: *utxo_value + *rewards,
-                    });
-            });
-
-        // Collect into a plain BTreeMap, so that it is ordered on output
-        spo_stakes.iter().map(|entry| (entry.key().clone(), entry.value().clone())).collect()
+        stake_addresses.generate_spdd()
     }
 
     /// Derive the DRep Delegation Distribution (SPDD) - the total amount
     /// delegated to each DRep, including the special "abstain" and "no confidence" dreps.
     pub fn generate_drdd(&self) -> DRepDelegationDistribution {
-        let abstain = AtomicU64::new(0);
-        let no_confidence = AtomicU64::new(0);
-        let dreps = self
-            .dreps
-            .iter()
-            .map(|(cred, deposit)| (cred.clone(), AtomicU64::new(*deposit)))
-            .collect::<BTreeMap<_, _>>();
-        self.stake_addresses.lock().unwrap().values().collect::<Vec<_>>().par_iter().for_each(
-            |state| {
-                let Some(drep) = state.delegated_drep.clone() else {
-                    return;
-                };
-                let total = match drep {
-                    DRepChoice::Key(hash) => {
-                        let cred = DRepCredential::AddrKeyHash(hash);
-                        let Some(total) = dreps.get(&cred) else {
-                            warn!("Delegated to unregistered DRep address {cred:?}");
-                            return;
-                        };
-                        total
-                    }
-                    DRepChoice::Script(hash) => {
-                        let cred = DRepCredential::ScriptHash(hash);
-                        let Some(total) = dreps.get(&cred) else {
-                            warn!("Delegated to unregistered DRep script {cred:?}");
-                            return;
-                        };
-                        total
-                    }
-                    DRepChoice::Abstain => &abstain,
-                    DRepChoice::NoConfidence => &no_confidence,
-                };
-                let stake = state.utxo_value + state.rewards;
-                total.fetch_add(stake, std::sync::atomic::Ordering::Relaxed);
-            },
-        );
-        let abstain = abstain.load(std::sync::atomic::Ordering::Relaxed);
-        let no_confidence = no_confidence.load(std::sync::atomic::Ordering::Relaxed);
-        let dreps = dreps
-            .into_iter()
-            .map(|(k, v)| (k, v.load(std::sync::atomic::Ordering::Relaxed)))
-            .collect();
-        DRepDelegationDistribution {
-            abstain,
-            no_confidence,
-            dreps,
-        }
+        let stake_addresses = self.stake_addresses.lock().unwrap();
+        stake_addresses.generate_drdd(&self.dreps)
     }
 
     /// Handle an ProtocolParamsMessage with the latest parameters at the start of a new
@@ -641,7 +453,8 @@ impl State {
                     );
                     // Pay the rewards
                     for (account, amount) in reward_result.rewards {
-                        self.add_to_reward(&account, amount);
+                        let mut stake_addresses = self.stake_addresses.lock().unwrap();
+                        stake_addresses.add_to_reward(&account, amount);
                     }
 
                     // save SPO rewards
@@ -719,19 +532,9 @@ impl State {
 
     /// Register a stake address, with specified deposit if known
     fn register_stake_address(&mut self, credential: &StakeCredential, deposit: Option<Lovelace>) {
-        let hash = credential.get_hash();
-
         // Stake addresses can be registered after being used in UTXOs
         let mut stake_addresses = self.stake_addresses.lock().unwrap();
-        let sas = stake_addresses.entry(hash.clone()).or_default();
-        if sas.registered {
-            error!(
-                "Stake address hash {} registered when already registered",
-                hex::encode(&hash)
-            );
-        } else {
-            sas.registered = true;
-
+        if stake_addresses.register_stake_address(credential) {
             // Account for the deposit
             let deposit = match deposit {
                 Some(deposit) => deposit,
@@ -751,37 +554,22 @@ impl State {
 
     /// Deregister a stake address, with specified refund if known
     fn deregister_stake_address(&mut self, credential: &StakeCredential, refund: Option<Lovelace>) {
-        let hash = credential.get_hash();
-
         // Check if it existed
         let mut stake_addresses = self.stake_addresses.lock().unwrap();
-        if let Some(sas) = stake_addresses.get_mut(&hash) {
-            if sas.registered {
-                // Account for the deposit, if registered before
-                let deposit = match refund {
-                    Some(deposit) => deposit,
-                    None => {
-                        // Get stake deposit amount from parameters, or default
-                        self.protocol_parameters
-                            .as_ref()
-                            .and_then(|pp| pp.shelley.as_ref())
-                            .map(|sp| sp.protocol_params.key_deposit)
-                            .unwrap_or(DEFAULT_KEY_DEPOSIT)
-                    }
-                };
-                self.pots.deposits -= deposit;
-                sas.registered = false;
-            } else {
-                error!(
-                    "Deregistration of unregistered stake address hash {}",
-                    hex::encode(hash)
-                );
-            }
-        } else {
-            error!(
-                "Deregistration of unknown stake address hash {}",
-                hex::encode(hash)
-            );
+        if stake_addresses.deregister_stake_address(credential) {
+            // Account for the deposit, if registered before
+            let deposit = match refund {
+                Some(deposit) => deposit,
+                None => {
+                    // Get stake deposit amount from parameters, or default
+                    self.protocol_parameters
+                        .as_ref()
+                        .and_then(|pp| pp.shelley.as_ref())
+                        .map(|sp| sp.protocol_params.key_deposit)
+                        .unwrap_or(DEFAULT_KEY_DEPOSIT)
+                }
+            };
+            self.pots.deposits -= deposit;
         }
     }
 
@@ -791,25 +579,8 @@ impl State {
 
     /// Record a stake delegation
     fn record_stake_delegation(&mut self, credential: &StakeCredential, spo: &KeyHash) {
-        let hash = credential.get_hash();
-
-        // Get old stake address state, or create one
         let mut stake_addresses = self.stake_addresses.lock().unwrap();
-        if let Some(sas) = stake_addresses.get_mut(&hash) {
-            if sas.registered {
-                sas.delegated_spo = Some(spo.clone());
-            } else {
-                error!(
-                    "Unregistered stake address in stake delegation: {}",
-                    hex::encode(hash)
-                );
-            }
-        } else {
-            error!(
-                "Unknown stake address in stake delegation: {}",
-                hex::encode(hash)
-            );
-        }
+        stake_addresses.record_stake_delegation(credential, spo);
     }
 
     /// Handle an MoveInstantaneousReward (pre-Conway only)
@@ -836,23 +607,8 @@ impl State {
 
     /// record a drep delegation
     fn record_drep_delegation(&mut self, credential: &StakeCredential, drep: &DRepChoice) {
-        let hash = credential.get_hash();
         let mut stake_addresses = self.stake_addresses.lock().unwrap();
-        if let Some(sas) = stake_addresses.get_mut(&hash) {
-            if sas.registered {
-                sas.delegated_drep = Some(drep.clone());
-            } else {
-                error!(
-                    "Unregistered stake address in DRep delegation: {}",
-                    hex::encode(hash)
-                );
-            }
-        } else {
-            error!(
-                "Unknown stake address in stake delegation: {}",
-                hex::encode(hash)
-            );
-        }
+        stake_addresses.record_drep_delegation(credential, drep);
     }
 
     /// Handle TxCertificates
@@ -919,33 +675,8 @@ impl State {
     /// Handle withdrawals
     pub fn handle_withdrawals(&mut self, withdrawals_msg: &WithdrawalsMessage) -> Result<()> {
         for withdrawal in withdrawals_msg.withdrawals.iter() {
-            let hash = withdrawal.address.get_hash();
-
-            // Get old stake address state - which must exist
             let mut stake_addresses = self.stake_addresses.lock().unwrap();
-            if let Some(sas) = stake_addresses.get(hash) {
-                // Zero withdrawals are expected, as a way to validate stake addresses (per Pi)
-                if withdrawal.value != 0 {
-                    let mut sas = sas.clone();
-                    if let Err(e) =
-                        Self::update_value_with_delta(&mut sas.rewards, -(withdrawal.value as i64))
-                    {
-                        error!(
-                            "Withdrawing from stake address {} hash {}: {e}",
-                            withdrawal.address.to_string().unwrap_or("???".to_string()),
-                            hex::encode(hash)
-                        );
-                    } else {
-                        // Update the stake address
-                        stake_addresses.insert(hash.to_vec(), sas);
-                    }
-                }
-            } else {
-                error!(
-                    "Unknown stake address in withdrawal: {}",
-                    withdrawal.address.to_string().unwrap_or("???".to_string())
-                );
-            }
+            stake_addresses.process_withdrawal(withdrawal);
         }
 
         Ok(())

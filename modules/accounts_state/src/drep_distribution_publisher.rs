@@ -1,9 +1,9 @@
-use acropolis_common::messages::{CardanoMessage, DRepStakeDistributionMessage, Message};
+use acropolis_common::messages::{
+    CardanoMessage, DRepDelegationDistribution, DRepStakeDistributionMessage, Message,
+};
 use acropolis_common::BlockInfo;
 use caryatid_sdk::Context;
 use std::sync::Arc;
-
-use crate::state::DRepDelegationDistribution;
 
 /// Message publisher for DRep Delegation Distribution (DRDD)
 pub struct DRepDistributionPublisher {
@@ -34,9 +34,7 @@ impl DRepDistributionPublisher {
                     block.clone(),
                     CardanoMessage::DRepStakeDistribution(DRepStakeDistributionMessage {
                         epoch: block.epoch,
-                        abstain: drdd.abstain,
-                        no_confidence: drdd.no_confidence,
-                        dreps: drdd.dreps,
+                        drdd,
                     }),
                 ))),
             )

@@ -163,11 +163,8 @@ pub struct DRepStateMessage {
     pub dreps: Vec<(DRepCredential, Lovelace)>,
 }
 
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
-pub struct DRepStakeDistributionMessage {
-    /// Epoch which has ended
-    pub epoch: u64,
-
+#[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct DRepDelegationDistribution {
     /// DRep stake assigned to the special "abstain" DRep.
     pub abstain: Lovelace,
 
@@ -176,6 +173,15 @@ pub struct DRepStakeDistributionMessage {
 
     /// DRep stake distribution by ID
     pub dreps: Vec<(DRepCredential, Lovelace)>,
+}
+
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DRepStakeDistributionMessage {
+    /// Epoch which has ended
+    pub epoch: u64,
+
+    /// DRep delegation distribution
+    pub drdd: DRepDelegationDistribution,
 }
 
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
