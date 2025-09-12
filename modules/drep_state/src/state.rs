@@ -450,10 +450,9 @@ impl State {
     where
         F: FnOnce(&mut HistoricalDRepState),
     {
-        let hist = self
-            .historical_dreps
-            .as_mut()
-            .ok_or_else(|| anyhow!("No historical map configured"))?;
+        let Some(hist) = self.historical_dreps.as_mut() else {
+            return Ok(());
+        };
 
         if create_if_missing {
             let cfg = self.config.clone();

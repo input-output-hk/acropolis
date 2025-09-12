@@ -127,6 +127,7 @@ impl GenesisBootstrapper {
                             payload: address.payload.to_vec(),
                         }),
                         value: Value::new(*amount, Vec::new()),
+                        datum: None,
                     };
 
                     utxo_deltas_message.deltas.push(UTXODelta::Output(tx_output));

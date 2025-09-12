@@ -2,7 +2,7 @@ use crate::cost_models::{PLUTUS_V1, PLUTUS_V2, PLUTUS_V3};
 use acropolis_common::{
     messages::EpochActivityMessage,
     protocol_params::{Nonce, NonceVariant, ProtocolParams},
-    queries::governance::DRepActionUpdate,
+    queries::{assets::AssetMetadataStandard, governance::DRepActionUpdate},
     rest_helper::ToCheckedF64,
     PoolEpochState, Relay, Vote,
 };
@@ -607,7 +607,16 @@ impl ProtocolParamsRestExt for ProtocolParams {
 }
 
 #[derive(Serialize)]
-pub struct AssetListEntryRest {
+pub struct AssetInfoRest {
     pub asset: String,
+    pub policy_id: String,
+    pub asset_name: String,
+    pub fingerprint: String,
     pub quantity: String,
+    pub initial_mint_tx_hash: String,
+    pub mint_or_burn_count: u64,
+    pub onchain_metadata: Option<Value>,
+    pub onchain_metadata_standard: Option<AssetMetadataStandard>,
+    pub onchain_metadata_extra: Option<String>,
+    pub metadata: Option<Value>,
 }

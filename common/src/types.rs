@@ -151,7 +151,34 @@ pub struct StakeAddressDelta {
 pub type PolicyId = [u8; 28];
 pub type NativeAssets = Vec<(PolicyId, Vec<NativeAsset>)>;
 pub type NativeAssetsDelta = Vec<(PolicyId, Vec<NativeAssetDelta>)>;
-pub type AssetName = Vec<u8>;
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct AssetName {
+    len: u8,
+    bytes: [u8; 32],
+}
+
+impl AssetName {
+    pub fn new(data: &[u8]) -> Option<Self> {
+        if data.len() > 32 {
+            return None;
+        }
+        let mut bytes = [0u8; 32];
+        bytes[..data.len()].copy_from_slice(data);
+        Some(Self {
+            len: data.len() as u8,
+            bytes,
+        })
+    }
+
+    pub fn len(&self) -> usize {
+        self.len as usize
+    }
+
+    pub fn as_slice(&self) -> &[u8] {
+        &self.bytes[..self.len as usize]
+    }
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct NativeAsset {
@@ -163,6 +190,13 @@ pub struct NativeAsset {
 pub struct NativeAssetDelta {
     pub name: AssetName,
     pub amount: i64,
+}
+
+/// Datum (inline or hash)
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum Datum {
+    Hash(Vec<u8>),
+    Inline(Vec<u8>),
 }
 
 /// Value (lovelace + multiasset)
@@ -244,8 +278,9 @@ pub struct TxOutput {
 
     /// Output value (Lovelace)
     pub value: Value,
-    // todo: Implement datum    /// Datum (raw)
-    // !!!    pub datum: Vec<u8>,
+
+    /// Datum (Inline or Hash)
+    pub datum: Option<Datum>,
 }
 
 /// Transaction input (UTXO reference)
