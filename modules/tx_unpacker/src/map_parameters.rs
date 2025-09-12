@@ -869,11 +869,13 @@ pub fn map_value(pallas_value: &MultiEraValue) -> Value {
                     Ok(policy_id) => {
                         let native_assets = kvps
                             .iter()
-                            .map(|(name, amt)| NativeAsset {
-                                name: name.to_vec(),
-                                amount: *amt,
+                            .filter_map(|(name, amt)| {
+                                AssetName::new(name).map(|asset_name| NativeAsset {
+                                    name: asset_name,
+                                    amount: *amt,
+                                })
                             })
-                            .collect();
+                            .collect::<Vec<_>>();
 
                         assets.push((policy_id, native_assets));
                     }
@@ -890,9 +892,11 @@ pub fn map_value(pallas_value: &MultiEraValue) -> Value {
                 Ok(policy_id) => {
                     let native_assets = kvps
                         .iter()
-                        .map(|(name, amt)| NativeAsset {
-                            name: name.to_vec(),
-                            amount: u64::from(*amt),
+                        .filter_map(|(name, amt)| {
+                            AssetName::new(name).map(|asset_name| NativeAsset {
+                                name: asset_name,
+                                amount: u64::from(*amt),
+                            })
                         })
                         .collect();
 
@@ -917,32 +921,51 @@ pub fn map_mint_burn(
 ) -> Option<(PolicyId, Vec<NativeAssetDelta>)> {
     match policy_group {
         MultiEraPolicyAssets::AlonzoCompatibleMint(policy, kvps) => {
-            let policy_id: [u8; 28] =
-                policy.as_ref().try_into().expect("Policy id must be 28 bytes");
+            let policy_id: PolicyId = match policy.as_ref().try_into() {
+                Ok(id) => id,
+                Err(_) => {
+                    tracing::error!(
+                        "Invalid policy id length: expected 28 bytes, got {}",
+                        policy.len()
+                    );
+                    return None;
+                }
+            };
 
             let deltas = kvps
                 .iter()
-                .map(|(name, amt)| NativeAssetDelta {
-                    name: name.to_vec(),
-                    amount: *amt,
+                .filter_map(|(name, amt)| {
+                    AssetName::new(name).map(|asset_name| NativeAssetDelta {
+                        name: asset_name,
+                        amount: *amt,
+                    })
                 })
-                .collect();
+                .collect::<Vec<_>>();
 
             Some((policy_id, deltas))
         }
 
         MultiEraPolicyAssets::ConwayMint(policy, kvps) => {
-            let policy_id: [u8; 28] =
-                policy.as_ref().try_into().expect("Policy id must be 28 bytes");
+            let policy_id: PolicyId = match policy.as_ref().try_into() {
+                Ok(id) => id,
+                Err(_) => {
+                    tracing::error!(
+                        "Invalid policy id length: expected 28 bytes, got {}",
+                        policy.len()
+                    );
+                    return None;
+                }
+            };
 
             let deltas = kvps
                 .iter()
-                .map(|(name, amt)| NativeAssetDelta {
-                    name: name.to_vec(),
-                    amount: i64::from(*amt),
+                .filter_map(|(name, amt)| {
+                    AssetName::new(name).map(|asset_name| NativeAssetDelta {
+                        name: asset_name,
+                        amount: i64::from(*amt),
+                    })
                 })
-                .collect();
-
+                .collect::<Vec<_>>();
             Some((policy_id, deltas))
         }
 
