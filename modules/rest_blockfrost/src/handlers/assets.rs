@@ -1,7 +1,7 @@
 use acropolis_common::{
     messages::{Message, RESTResponse, StateQuery, StateQueryResponse},
     queries::{
-        assets::{AssetsStateQuery, AssetsStateQueryResponse},
+        assets::{AssetMetadataStandard, AssetsStateQuery, AssetsStateQueryResponse},
         utils::query_state,
     },
     serialization::Bech32WithHrp,
@@ -100,11 +100,13 @@ pub async fn handle_asset_single_blockfrost(
                     info!("Raw onchain_metadata: None");
                 }
 
-                let (onchain_metadata_json, onchain_metadata_extra) = info
+                let (onchain_metadata_json, onchain_metadata_extra, cip68_version) = info
                     .onchain_metadata
                     .as_ref()
                     .map(|arc| normalize_onchain_metadata(arc.as_slice()))
-                    .unwrap_or((None, None));
+                    .unwrap_or((None, None, None));
+
+                let onchain_metadata_standard = cip68_version.or(info.metadata_standard);
 
                 let response = AssetInfoRest {
                     asset: asset_for_closure.clone(),
@@ -115,7 +117,7 @@ pub async fn handle_asset_single_blockfrost(
                     initial_mint_tx_hash: hex::encode(info.initial_mint_tx_hash),
                     mint_or_burn_count: info.mint_or_burn_count,
                     onchain_metadata: onchain_metadata_json,
-                    onchain_metadata_standard: info.metadata_standard,
+                    onchain_metadata_standard,
                     onchain_metadata_extra,
                     metadata: metadata_for_closure.clone(),
                 };
@@ -324,34 +326,47 @@ pub async fn fetch_asset_metadata(asset: &str) -> Option<Value> {
     Some(output)
 }
 
-/// Normalize on-chain metadata for both CIP-25 and CIP-68 into a flat JSON.
-pub fn normalize_onchain_metadata(raw: &[u8]) -> (Option<Value>, Option<String>) {
+/// Normalize on-chain metadata for CIP-25 and CIP-68.
+/// Returns (metadata_json, metadata_extra, cip68_version).
+pub fn normalize_onchain_metadata(
+    raw: &[u8],
+) -> (Option<Value>, Option<String>, Option<AssetMetadataStandard>) {
     let decoded: CborValue = match serde_cbor::from_slice(raw) {
         Ok(val) => val,
-        Err(_) => return (None, None),
+        Err(_) => return (None, None, None),
     };
 
     match decoded {
-        // CIP-68 inline datum
         CborValue::Tag(_, boxed) => {
-            normalize_onchain_metadata(&serde_cbor::to_vec(&*boxed).unwrap())
+            normalize_onchain_metadata(&serde_cbor::to_vec(&*boxed).unwrap_or_default())
         }
-        CborValue::Array(mut arr) if arr.len() == 3 => {
+
+        // CIP-68
+        CborValue::Array(mut arr) if arr.len() >= 2 => {
             let metadata = arr.remove(0);
-            let _version = arr.remove(0);
-            let extra = arr.remove(0);
+            let version = match arr.remove(0) {
+                CborValue::Integer(i) => match i {
+                    1 => Some(AssetMetadataStandard::CIP68v1),
+                    2 => Some(AssetMetadataStandard::CIP68v2),
+                    3 => Some(AssetMetadataStandard::CIP68v3),
+                    _ => Some(AssetMetadataStandard::CIP68v1),
+                },
+                _ => Some(AssetMetadataStandard::CIP68v1),
+            };
+            let extra = arr.pop().unwrap_or(CborValue::Array(vec![]));
 
             let json_meta = match metadata {
                 CborValue::Map(map) => {
                     let mut obj = serde_json::Map::new();
                     for (k, v) in map {
-                        if let CborValue::Bytes(b) = k {
-                            if let Ok(key) = String::from_utf8(b.clone()) {
-                                obj.insert(key, cbor_to_json(v));
-                            } else {
-                                obj.insert(hex::encode(b), cbor_to_json(v));
+                        let key_str = match k {
+                            CborValue::Bytes(b) => {
+                                String::from_utf8(b.clone()).unwrap_or_else(|_| hex::encode(b))
                             }
-                        }
+                            CborValue::Text(t) => t,
+                            _ => continue,
+                        };
+                        obj.insert(key_str, cbor_to_json(v));
                     }
                     Some(Value::Object(obj))
                 }
@@ -359,8 +374,9 @@ pub fn normalize_onchain_metadata(raw: &[u8]) -> (Option<Value>, Option<String>)
             };
 
             let extra_hex = serde_cbor::to_vec(&extra).ok().map(hex::encode);
-            (json_meta, extra_hex)
+            (json_meta, extra_hex, version)
         }
+
         // CIP-25: plain map
         CborValue::Map(map) => {
             let mut obj = serde_json::Map::new();
@@ -369,9 +385,10 @@ pub fn normalize_onchain_metadata(raw: &[u8]) -> (Option<Value>, Option<String>)
                     obj.insert(key, cbor_to_json(v));
                 }
             }
-            (Some(Value::Object(obj)), None)
+            (Some(Value::Object(obj)), None, None)
         }
-        _ => (None, None),
+
+        _ => (None, None, None),
     }
 }
 

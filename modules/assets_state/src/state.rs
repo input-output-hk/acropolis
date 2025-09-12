@@ -10,7 +10,6 @@ use acropolis_common::{
 };
 use anyhow::Result;
 use imbl::{HashMap, Vector};
-use std::io::{self, Write};
 use tracing::{error, info};
 
 #[derive(Debug, Default, Clone)]
@@ -127,15 +126,18 @@ impl State {
         }
 
         let supply = self.supply.as_ref().and_then(|supply_map| supply_map.get(asset_id));
-
         let mut info = self.info.as_ref().and_then(|info_map| info_map.get(asset_id)).cloned();
 
+        // Overwrite asset metadata if an associated CIP68 reference token is found
         if let Some(ref_info) = self.resolve_cip68_metadata(asset_id, registry) {
             if let Some(info_mut) = info.as_mut() {
-                info_mut.onchain_metadata = ref_info.onchain_metadata;
-                info_mut.metadata_standard = ref_info.metadata_standard;
+                info_mut.onchain_metadata = ref_info.onchain_metadata.clone();
+                info_mut.metadata_standard = ref_info.metadata_standard.clone();
+            } else {
+                info = Some(ref_info);
             }
         }
+
         Ok(match (supply, info) {
             (Some(supply), Some(info)) => Some((*supply, info)),
             _ => None,
@@ -147,35 +149,46 @@ impl State {
         asset_id: &AssetId,
         registry: &AssetRegistry,
     ) -> Option<AssetInfoRecord> {
-        if let Some(key) = registry.lookup(*asset_id) {
-            let name_bytes = key.name.as_slice();
+        let key = registry.lookup(*asset_id)?;
+        let name_bytes = key.name.as_slice();
 
-            // Must be at least 4 bytes to contain a CIP-67 label
-            if name_bytes.len() < 4 {
-                return None;
-            }
+        if name_bytes.len() < 4 {
+            return None;
+        }
 
-            // Decode first 4 bytes as label
-            let label: u32 =
-                u32::from_be_bytes([name_bytes[0], name_bytes[1], name_bytes[2], name_bytes[3]]);
-            match label {
-                0x000643b0 => return None, // already a reference NFT, nothing to resolve
-                0x000de140 | 0x000de141 => { /* 222 user NFT */ }
-                0x00014d0 => { /* 333 FT */ }
-                0x001b4e20 => { /* 444 RFT */ }
-                _ => return None,
-            }
+        let label =
+            u32::from_be_bytes([name_bytes[0], name_bytes[1], name_bytes[2], name_bytes[3]]);
 
-            // Build reference NFT asset name (replace prefix with 100)
+        match label {
+        // Reference NFT (100) label 
+        0x000643b0 => {
+            return self.info.as_ref()?.get(asset_id).map(|rec| {
+                let mut copy = rec.clone();
+                // Remove metadata for reference asset queries (Per Blockfrost spec)
+                copy.onchain_metadata = None;
+                copy.metadata_standard = None;
+                copy
+            });
+        }
+
+        // Assets that should resolve to their reference NFT
+        0x000de140 | // CIP-67 prefix for label 222
+        0x0014df10 | // CIP-67 prefix for label 333
+        0x001b4e20   // CIP-67 prefix for label 444
+        => {
             let mut ref_bytes = name_bytes.to_vec();
             ref_bytes[0..4].copy_from_slice(&[0x00, 0x06, 0x43, 0xb0]);
 
             if let Some(ref_name) = AssetName::new(&ref_bytes) {
                 if let Some(ref_id) = registry.lookup_id(&key.policy, &ref_name) {
-                    return self.info.as_ref().and_then(|info_map| info_map.get(&ref_id)).cloned();
+                    return self.info.as_ref()?.get(&ref_id).cloned();
                 }
             }
         }
+
+        _ => return None,
+    }
+
         None
     }
 
@@ -303,7 +316,6 @@ impl State {
                     for delta in asset_deltas {
                         let asset_id = registry.get_or_insert(*policy_id, delta.name.clone());
 
-                        // update supply
                         let current = supply.get(&asset_id).copied().unwrap_or(0);
                         let sum = (current as i128) + (delta.amount as i128);
 
@@ -312,7 +324,6 @@ impl State {
 
                         let existed = supply.insert(asset_id, new_amt).is_some();
 
-                        // update info if enabled
                         if let Some(info_map) = new_info.as_mut() {
                             if !existed {
                                 info_map.insert(
@@ -329,7 +340,6 @@ impl State {
                             }
                         }
 
-                        // update policy index if enabled
                         if !existed {
                             if let Some(index) = new_index.as_mut() {
                                 index
@@ -339,21 +349,18 @@ impl State {
                             }
                         }
 
-                        // initialize addresses if enabled
                         if !existed {
                             if let Some(addr_map) = new_addresses.as_mut() {
                                 addr_map.insert(asset_id, Vector::new());
                             }
                         }
 
-                        // initialize transactions if enabled
                         if !existed {
                             if let Some(tx_map) = new_transactions.as_mut() {
                                 tx_map.insert(asset_id, Vector::new());
                             }
                         }
 
-                        // update history if enabled
                         if let Some(hist_map) = new_history.as_mut() {
                             hist_map.entry(asset_id).or_insert_with(Vector::new).push_back(
                                 AssetMintRecord {
@@ -400,7 +407,7 @@ impl State {
                 continue;
             };
 
-            // Detect version
+            // Retrieve CIP25 version from map and default to v1 if missing
             let version_key = serde_cbor::Value::Text("version".to_string());
             let mut standard = AssetMetadataStandard::CIP25v1;
             if let Some(serde_cbor::Value::Text(ver)) = policy_map.get(&version_key) {
@@ -411,26 +418,24 @@ impl State {
             }
 
             for (pk, assets_val) in policy_map {
-                let serde_cbor::Value::Text(policy_hex) = pk else {
-                    continue;
-                };
-                let Some(policy_id) = hex::decode(&policy_hex).ok().and_then(|b| b.try_into().ok())
+                let (serde_cbor::Value::Text(policy_hex), serde_cbor::Value::Map(asset_map)) =
+                    (pk, assets_val)
                 else {
                     continue;
                 };
 
-                let serde_cbor::Value::Map(asset_map) = assets_val else {
+                let Some(policy_id) = hex::decode(policy_hex).ok().and_then(|b| b.try_into().ok())
+                else {
                     continue;
                 };
 
-                for (ak, metadata_val) in asset_map {
-                    let serde_cbor::Value::Text(asset_hex) = ak else {
+                for (asset_key, metadata_val) in asset_map {
+                    let serde_cbor::Value::Text(asset_hex) = asset_key else {
                         continue;
                     };
 
                     let asset_bytes =
                         hex::decode(&asset_hex).unwrap_or_else(|_| asset_hex.as_bytes().to_vec());
-
                     let Some(asset_name) = AssetName::new(&asset_bytes) else {
                         continue;
                     };
@@ -455,6 +460,7 @@ impl State {
         Ok(new_state)
     }
 
+    // TODO: Potentially store metadata for user tokens that have not been minted yet (pre-mint metadata)
     pub fn handle_cip68_metadata(
         &self,
         deltas: &[UTXODelta],
@@ -474,25 +480,10 @@ impl State {
                 for asset in native_assets {
                     let name = &asset.name;
 
-                    // Filter for CIP-68 reference tokens
                     const CIP68_REFERENCE_PREFIX: [u8; 4] = [0x00, 0x06, 0x43, 0xb0];
-
                     if name.len() < 4 || !name.as_slice().starts_with(&CIP68_REFERENCE_PREFIX) {
                         continue;
                     }
-                    print!("Reference token detected for policy {policy_id:?}. Press Enter to continue...");
-
-                    io::stdout().flush().unwrap();
-                    let mut input = String::new();
-                    io::stdin().read_line(&mut input).unwrap();
-
-                    /*let standard = match name.as_slice()[1] {
-                        0x00 => Some(AssetMetadataStandard::CIP68v1),
-                        0x01 => Some(AssetMetadataStandard::CIP68v2),
-                        0x02 => Some(AssetMetadataStandard::CIP68v3),
-                        _ => None,
-                    };
-                    let Some(standard) = standard else { continue };*/
 
                     let Some(asset_id) = registry.lookup_id(policy_id, name) else {
                         error!(
@@ -503,33 +494,11 @@ impl State {
                         continue;
                     };
 
+                    // NOTE: CIP68 metadata version is included in the blob and is decoded in REST handler
                     if let Some(info_map) = new_info.as_mut() {
-                        /*if let Some(record) = info_map.get_mut(&asset_id) {
-                            print!(
-                                "Paused before updating {asset_id:?}. Press Enter to continue..."
-                            );
-
-                            io::stdout().flush().unwrap();
-                            let mut input = String::new();
-                            io::stdin().read_line(&mut input).unwrap();
+                        if let Some(record) = info_map.get_mut(&asset_id) {
                             record.onchain_metadata = Some(blob.clone());
-                            record.metadata_standard = Some(AssetMetadataStandard::CIP68v1);
                         }
-                        */
-                        let record = info_map.entry(asset_id).or_insert(AssetInfoRecord {
-                            initial_mint_tx_hash: output.tx_hash.clone(),
-                            mint_or_burn_count: 0,
-                            onchain_metadata: None,
-                            metadata_standard: None,
-                        });
-
-                        print!("Paused before updating {asset_id:?}. Press Enter to continue...");
-                        io::stdout().flush().unwrap();
-                        let mut input = String::new();
-                        io::stdin().read_line(&mut input).unwrap();
-
-                        record.onchain_metadata = Some(blob.clone());
-                        record.metadata_standard = Some(AssetMetadataStandard::CIP68v1);
                     }
                 }
             }
