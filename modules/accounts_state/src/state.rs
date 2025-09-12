@@ -2,20 +2,20 @@
 use crate::monetary::calculate_monetary_change;
 use crate::rewards::{RewardsResult, RewardsState};
 use crate::snapshot::Snapshot;
-use acropolis_common::messages::DRepDelegationDistribution;
-use acropolis_common::protocol_params::ProtocolParams;
-use acropolis_common::stake_addresses::{StakeAddressMap, StakeAddressState};
 use acropolis_common::{
+    math::update_value_with_delta,
     messages::{
-        DRepStateMessage, EpochActivityMessage, PotDeltasMessage, ProtocolParamsMessage,
-        SPOStateMessage, StakeAddressDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
+        DRepDelegationDistribution, DRepStateMessage, EpochActivityMessage, PotDeltasMessage,
+        ProtocolParamsMessage, SPOStateMessage, StakeAddressDeltasMessage, TxCertificatesMessage,
+        WithdrawalsMessage,
     },
+    protocol_params::ProtocolParams,
+    stake_addresses::{StakeAddressMap, StakeAddressState},
     DRepChoice, DRepCredential, DelegatedStake, InstantaneousRewardSource,
     InstantaneousRewardTarget, KeyHash, Lovelace, MoveInstantaneousReward, PoolRegistration, Pot,
-    StakeAddress, StakeCredential, TxCertificate,
+    SPORewards, StakeAddress, StakeCredential, StakeRewardDelta, TxCertificate,
 };
-use acropolis_common::{SPORewards, StakeRewardDelta};
-use anyhow::{bail, Result};
+use anyhow::Result;
 use imbl::OrdMap;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::mem::take;
@@ -333,16 +333,16 @@ impl State {
                             hash: hash.clone(),
                             delta: *value,
                         });
-                        if let Err(e) = Self::update_value_with_delta(&mut sas.rewards, *value) {
+                        if let Err(e) = update_value_with_delta(&mut sas.rewards, *value) {
                             error!("MIR to stake hash {}: {e}", hex::encode(hash));
                         }
 
                         // Update the source
-                        if let Err(e) = Self::update_value_with_delta(source, -*value) {
+                        if let Err(e) = update_value_with_delta(source, -*value) {
                             error!("MIR from {source_name}: {e}");
                         }
 
-                        let _ = Self::update_value_with_delta(&mut total_value, *value);
+                        let _ = update_value_with_delta(&mut total_value, *value);
                     }
 
                     info!(
@@ -353,10 +353,10 @@ impl State {
 
                 InstantaneousRewardTarget::OtherAccountingPot(value) => {
                     // Transfer between pots
-                    if let Err(e) = Self::update_value_with_delta(source, -(*value as i64)) {
+                    if let Err(e) = update_value_with_delta(source, -(*value as i64)) {
                         error!("MIR from {source_name}: {e}");
                     }
-                    if let Err(e) = Self::update_value_with_delta(other, *value as i64) {
+                    if let Err(e) = update_value_with_delta(other, *value as i64) {
                         error!("MIR to {other_name}: {e}");
                     }
 
@@ -589,22 +589,6 @@ impl State {
         Ok(())
     }
 
-    /// Update an unsigned value with a signed delta, with fences
-    pub fn update_value_with_delta(value: &mut u64, delta: i64) -> Result<()> {
-        if delta >= 0 {
-            *value = (*value).saturating_add(delta as u64);
-        } else {
-            let abs = (-delta) as u64;
-            if abs > *value {
-                bail!("Value underflow - was {}, delta {}", *value, delta);
-            } else {
-                *value -= abs;
-            }
-        }
-
-        Ok(())
-    }
-
     /// record a drep delegation
     fn record_drep_delegation(&mut self, credential: &StakeCredential, drep: &DRepChoice) {
         let mut stake_addresses = self.stake_addresses.lock().unwrap();
@@ -682,6 +666,17 @@ impl State {
         Ok(())
     }
 
+    /// Handle stake deltas
+    pub fn handle_stake_deltas(&mut self, deltas_msg: &StakeAddressDeltasMessage) -> Result<()> {
+        // Handle deltas
+        for delta in deltas_msg.deltas.iter() {
+            let mut stake_addresses = self.stake_addresses.lock().unwrap();
+            stake_addresses.process_stake_delta(delta);
+        }
+
+        Ok(())
+    }
+
     /// Handle pots
     pub fn handle_pot_deltas(&mut self, pot_deltas_msg: &PotDeltasMessage) -> Result<()> {
         for pot_delta in pot_deltas_msg.deltas.iter() {
@@ -691,34 +686,13 @@ impl State {
                 Pot::Deposits => &mut self.pots.deposits,
             };
 
-            if let Err(e) = Self::update_value_with_delta(pot, pot_delta.delta) {
+            if let Err(e) = update_value_with_delta(pot, pot_delta.delta) {
                 error!("Applying pot delta {pot_delta:?}: {e}");
             } else {
                 info!(
                     "Pot delta for {:?} {} => {}",
                     pot_delta.pot, pot_delta.delta, *pot
                 );
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Handle stake deltas
-    pub fn handle_stake_deltas(&mut self, deltas_msg: &StakeAddressDeltasMessage) -> Result<()> {
-        // Handle deltas
-        for delta in deltas_msg.deltas.iter() {
-            // Fold both stake key and script hashes into one - assuming the chance of
-            // collision is negligible
-            let hash = delta.address.get_hash();
-
-            // Stake addresses don't need to be registered if they aren't used for
-            // stake or drep delegation, but we need to track them in case they are later
-            let mut stake_addresses = self.stake_addresses.lock().unwrap();
-            let sas = stake_addresses.entry(hash.to_vec()).or_default();
-
-            if let Err(e) = Self::update_value_with_delta(&mut sas.utxo_value, delta.delta) {
-                error!("Applying delta to stake hash {}: {e}", hex::encode(hash));
             }
         }
 
