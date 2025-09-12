@@ -7,9 +7,11 @@ use acropolis_common::{
         StakeRewardDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
     },
     params::TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH,
+    queries::governance::VoteRecord,
     stake_addresses::StakeAddressMap,
-    BlockInfo, KeyHash, PoolMetadata, PoolRegistration, PoolRetirement, Relay, StakeCredential,
-    TxCertificate,
+    BlockInfo, KeyHash, PoolMetadata, PoolRegistration, PoolRegistrationWithPos, PoolRetirement,
+    PoolRetirementWithPos, PoolUpdateEvent, Relay, StakeCredential, TxCertificate, TxHash, Voter,
+    VotingProcedures,
 };
 use anyhow::Result;
 use imbl::HashMap;
