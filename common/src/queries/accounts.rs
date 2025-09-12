@@ -23,6 +23,7 @@ pub enum AccountsStateQuery {
 
     // Pools related queries
     GetPoolsLiveStakes { pools_operators: Vec<Vec<u8>> },
+    GetPoolDelegators { pool_operator: KeyHash },
 
     // Dreps related queries
     GetAccountsDrepDelegationsMap { stake_keys: Vec<Vec<u8>> },
@@ -46,6 +47,7 @@ pub enum AccountsStateQueryResponse {
 
     // Pools related responses
     PoolsLiveStakes(PoolsLiveStakes),
+    PoolDelegators(PoolDelegators),
 
     // DReps related responses
     AccountsDrepDelegationsMap(HashMap<Vec<u8>, Option<DRepChoice>>),
@@ -96,4 +98,9 @@ pub struct AccountUTxOs {}
 pub struct PoolsLiveStakes {
     // this is in same order of pools_operator from AccountsStateQuery::GetPoolsLiveStakes
     pub live_stakes: Vec<u64>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PoolDelegators {
+    pub delegators: Vec<(KeyHash, u64)>,
 }

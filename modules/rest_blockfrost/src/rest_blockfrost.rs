@@ -118,7 +118,7 @@ const DEFAULT_HANDLE_POOL_VOTES_TOPIC: (&str, &str) =
 
 // Epochs topics
 const DEFAULT_HANDLE_EPOCH_INFO_TOPIC: (&str, &str) =
-    ("handle-topic-epoch-info", "rest.get.epoch.*"); // Both latest and specific
+    ("handle-topic-epoch-info", "rest.get.epochs.*"); // Both latest and specific
 const DEFAULT_HANDLE_EPOCH_PARAMS_TOPIC: (&str, &str) = (
     "handle-topic-epoch-parameters",
     "rest.get.epochs.*.parameters",

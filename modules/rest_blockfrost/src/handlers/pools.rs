@@ -9,14 +9,18 @@ use acropolis_common::{
         utils::query_state,
     },
     serialization::Bech32WithHrp,
-    PoolRetirement,
+    PoolRetirement, StakeCredential,
 };
 use anyhow::Result;
 use caryatid_sdk::Context;
 use rust_decimal::Decimal;
 use std::{sync::Arc, time::Duration};
+use tracing::warn;
 
-use crate::{handlers_config::HandlersConfig, types::PoolRelayRest};
+use crate::{
+    handlers_config::HandlersConfig,
+    types::{PoolDelegatorRest, PoolRelayRest},
+};
 use crate::{
     types::{PoolEpochStateRest, PoolExtendedRest, PoolMetadataRest, PoolRetirementRest},
     utils::{fetch_pool_metadata_as_bytes, verify_pool_metadata_hash, PoolMetadataJson},
@@ -645,11 +649,97 @@ pub async fn handle_pool_relays_blockfrost(
 }
 
 pub async fn handle_pool_delegators_blockfrost(
-    _context: Arc<Context<Message>>,
-    _params: Vec<String>,
-    _handlers_config: Arc<HandlersConfig>,
+    context: Arc<Context<Message>>,
+    params: Vec<String>,
+    handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
-    Ok(RESTResponse::with_text(501, "Not implemented"))
+    let Some(pool_id) = params.get(0) else {
+        return Ok(RESTResponse::with_text(400, "Missing pool ID parameter"));
+    };
+
+    let Ok(spo) = Vec::<u8>::from_bech32_with_hrp(pool_id, "pool") else {
+        return Ok(RESTResponse::with_text(
+            400,
+            &format!("Invalid Bech32 stake pool ID: {pool_id}"),
+        ));
+    };
+
+    let pool_delegators_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
+        PoolsStateQuery::GetPoolDelegators {
+            pool_id: spo.clone(),
+        },
+    )));
+
+    let pool_delegators = query_state(
+        &context,
+        &handlers_config.pools_query_topic,
+        pool_delegators_msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::PoolDelegators(pool_delegators),
+            )) => Ok(Some(pool_delegators.delegators)),
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::NotFound,
+            )) => Err(anyhow::anyhow!("Pool Delegators Not found")),
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::Error(e),
+            )) => {
+                warn!("Error while retrieving pool delegators from spo_state: {e}; Fallback to query from accounts_state");
+                Ok(None)
+            },
+            _ => Err(anyhow::anyhow!("Unexpected message type")),
+        },
+    )
+    .await?;
+
+    let pool_delegators = match pool_delegators {
+        Some(delegators) => delegators,
+        None => {
+            // Query from Accounts state
+            let pool_delegators_msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
+                AccountsStateQuery::GetPoolDelegators {
+                    pool_operator: spo.clone(),
+                },
+            )));
+            let pool_delegators = query_state(
+                &context,
+                &handlers_config.accounts_query_topic,
+                pool_delegators_msg,
+                |message| match message {
+                    Message::StateQueryResponse(StateQueryResponse::Accounts(
+                        AccountsStateQueryResponse::PoolDelegators(pool_delegators),
+                    )) => Ok(pool_delegators.delegators),
+                    Message::StateQueryResponse(StateQueryResponse::Accounts(
+                        AccountsStateQueryResponse::Error(e),
+                    )) => Err(anyhow::anyhow!(
+                        "Error while retrieving pool delegators from accounts_state: {e}"
+                    )),
+                    _ => Err(anyhow::anyhow!("Unexpected message type")),
+                },
+            )
+            .await?;
+            pool_delegators
+        }
+    };
+
+    let mut delegators_rest = Vec::<PoolDelegatorRest>::new();
+    for (d, l) in pool_delegators {
+        let bech32 = StakeCredential::AddrKeyHash(d.clone())
+            .to_stake_bech32()
+            .map_err(|e| anyhow::anyhow!("Invalid stake address in pool delegators: {e}"))?;
+        delegators_rest.push(PoolDelegatorRest {
+            address: bech32,
+            live_stake: l.to_string(),
+        });
+    }
+
+    match serde_json::to_string(&delegators_rest) {
+        Ok(json) => Ok(RESTResponse::with_json(200, &json)),
+        Err(e) => Ok(RESTResponse::with_text(
+            500,
+            &format!("Internal server error while retrieving pool delegators: {e}"),
+        )),
+    }
 }
 
 pub async fn handle_pool_blocks_blockfrost(

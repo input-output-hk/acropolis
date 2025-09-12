@@ -93,7 +93,7 @@ impl State {
         spo_message: &SPOStakeDistributionMessage,
     ) -> Result<()> {
         self.drep_stake_messages_count += 1;
-        self.drep_stake = HashMap::from_iter(drep_message.dreps.iter().cloned());
+        self.drep_stake = HashMap::from_iter(drep_message.drdd.dreps.iter().cloned());
         self.spo_stake = HashMap::from_iter(spo_message.spos.iter().cloned());
 
         Ok(())

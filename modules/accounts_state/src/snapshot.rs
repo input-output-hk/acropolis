@@ -1,7 +1,9 @@
 //! Acropolis AccountsState: snapshot for rewards calculations
 
-use crate::state::{Pots, StakeAddressState};
-use acropolis_common::{KeyHash, Lovelace, PoolRegistration, Ratio, RewardAccount};
+use crate::state::Pots;
+use acropolis_common::{
+    stake_addresses::StakeAddressMap, KeyHash, Lovelace, PoolRegistration, Ratio, RewardAccount,
+};
 use imbl::OrdMap;
 use std::collections::HashMap;
 use tracing::info;
@@ -54,7 +56,7 @@ impl Snapshot {
     /// Get a stake snapshot based the current stake addresses
     pub fn new(
         epoch: u64,
-        stake_addresses: &HashMap<KeyHash, StakeAddressState>,
+        stake_addresses: &StakeAddressMap,
         spos: &OrdMap<KeyHash, PoolRegistration>,
         spo_block_counts: &HashMap<KeyHash, usize>,
         pots: &Pots,
@@ -70,7 +72,7 @@ impl Snapshot {
         // Scan all stake addresses and post to their delegated SPO's list
         // Note this is _active_ stake, for reward calculations, and hence doesn't include rewards
         let mut total_stake: Lovelace = 0;
-        for (hash, sas) in stake_addresses {
+        for (hash, sas) in stake_addresses.iter() {
             if sas.utxo_value > 0 {
                 if let Some(spo_id) = &sas.delegated_spo {
                     // Only clone if insertion is needed
@@ -151,6 +153,8 @@ impl Snapshot {
 
 #[cfg(test)]
 mod tests {
+    use acropolis_common::stake_addresses::StakeAddressState;
+
     use super::*;
 
     #[test]
@@ -163,7 +167,7 @@ mod tests {
         let addr3: KeyHash = vec![0x13];
         let addr4: KeyHash = vec![0x14];
 
-        let mut stake_addresses: HashMap<KeyHash, StakeAddressState> = HashMap::new();
+        let mut stake_addresses: StakeAddressMap = StakeAddressMap::new();
         stake_addresses.insert(
             addr1.clone(),
             StakeAddressState {

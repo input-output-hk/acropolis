@@ -34,6 +34,8 @@ futures = "0.3.31"
 minicbor = { version = "0.26.0", features = ["std", "half", "derive"] }
 num-traits = "0.2"
 imbl = { version = "5.0.0", features = ["serde"] }
+dashmap = "6.1.0"
+rayon = "1.11.0"
 
 [lib]
 crate-type = ["rlib"]
