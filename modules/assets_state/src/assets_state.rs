@@ -1,6 +1,6 @@
 //! Acropolis Asset State module for Caryatid
-//! Accepts native asset mint and burn events
-//! and derives the Asset State in memory
+//! Accepts native asset mint and burn events for supply and mint history tracking
+//! as well as utxo delta events for CIP68 metadata and asset transactions tracking
 
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
@@ -35,6 +35,7 @@ const DEFAULT_STORE_HISTORY: (&str, bool) = ("store-history", false);
 const DEFAULT_STORE_TRANSACTIONS: (&str, bool) = ("store-transactions", false);
 const DEFAULT_STORE_ADDRESSES: (&str, bool) = ("store-addresses", false);
 const DEFAULT_INDEX_BY_POLICY: (&str, bool) = ("index-by-policy", false);
+
 /// Assets State module
 #[module(
     message_type(Message),
@@ -60,7 +61,7 @@ impl AssetsState {
             // Get current state snapshot
             let mut state = {
                 let mut h = history.lock().await;
-                h.get_or_init_with(|| State::new(storage_config.clone()))
+                h.get_or_init_with(|| State::new(storage_config))
             };
             let current_block: BlockInfo;
 
@@ -74,13 +75,9 @@ impl AssetsState {
                     }
                     current_block = block_info.clone();
 
-                    // Handle the asset deltas
-                    let span = info_span!("assets_state.handle_deltas", block = block_info.number);
-                    let _enter = span.enter();
-
-                    if storage_config.store_assets {
+                    // Always handle the mint deltas (This how assets get initialized)
+                    {
                         let mut reg = registry.lock().await;
-
                         state = match state.handle_mint_deltas(&deltas_msg.deltas, &mut *reg) {
                             Ok(new_state) => new_state,
                             Err(e) => {
@@ -90,6 +87,7 @@ impl AssetsState {
                         };
                     }
 
+                    // Process CIP25 metadata updates
                     if storage_config.store_info {
                         let mut reg = registry.lock().await;
                         state = match state
@@ -109,7 +107,7 @@ impl AssetsState {
                 }
             }
 
-            // Handle UTxO deltas if store-info or store-transactions is enabled
+            // Handle UTxO deltas if subscription is registered (store-info or store-transactions enabled)
             if let Some(sub) = utxo_deltas_subscription.as_mut() {
                 let (_, utxo_msg) = sub.read().await?;
                 match utxo_msg.as_ref() {
@@ -220,14 +218,17 @@ impl AssetsState {
                 };
 
                 let state = history.lock().await.get_current_state();
-                let reg = registry.lock().await;
 
                 let response = match query {
-                    AssetsStateQuery::GetAssetsList => match state.get_assets_list(&reg) {
-                        Ok(list) => AssetsStateQueryResponse::AssetsList(list),
-                        Err(e) => AssetsStateQueryResponse::Error(e.to_string()),
-                    },
+                    AssetsStateQuery::GetAssetsList => {
+                        let reg = registry.lock().await;
+                        match state.get_assets_list(&reg) {
+                            Ok(list) => AssetsStateQueryResponse::AssetsList(list),
+                            Err(e) => AssetsStateQueryResponse::Error(e.to_string()),
+                        }
+                    }
                     AssetsStateQuery::GetAssetInfo { policy, name } => {
+                        let reg = registry.lock().await;
                         match reg.lookup_id(&policy, &name) {
                             Some(asset_id) => match state.get_asset_info(&asset_id, &reg) {
                                 Ok(Some(info)) => AssetsStateQueryResponse::AssetInfo(info),
@@ -238,6 +239,7 @@ impl AssetsState {
                         }
                     }
                     AssetsStateQuery::GetAssetHistory { policy, name } => {
+                        let reg = registry.lock().await;
                         match reg.lookup_id(&policy, &name) {
                             Some(asset_id) => match state.get_asset_history(&asset_id) {
                                 Ok(Some(history)) => {
@@ -250,6 +252,7 @@ impl AssetsState {
                         }
                     }
                     AssetsStateQuery::GetAssetAddresses { policy, name } => {
+                        let reg = registry.lock().await;
                         match reg.lookup_id(&policy, &name) {
                             Some(asset_id) => match state.get_asset_addresses(&asset_id) {
                                 Ok(Some(addresses)) => {
@@ -262,6 +265,7 @@ impl AssetsState {
                         }
                     }
                     AssetsStateQuery::GetAssetTransactions { policy, name } => {
+                        let reg = registry.lock().await;
                         match reg.lookup_id(&policy, &name) {
                             Some(asset_id) => match state.get_asset_transactions(&asset_id) {
                                 Ok(Some(txs)) => AssetsStateQueryResponse::AssetTransactions(txs),
@@ -272,6 +276,7 @@ impl AssetsState {
                         }
                     }
                     AssetsStateQuery::GetPolicyIdAssets { policy } => {
+                        let reg = registry.lock().await;
                         match state.get_policy_assets(&policy, &reg) {
                             Ok(Some(assets)) => AssetsStateQueryResponse::PolicyIdAssets(assets),
                             Ok(None) => AssetsStateQueryResponse::NotFound,
@@ -314,7 +319,7 @@ impl AssetsState {
 
         // Subscribe to enabled topics
         let asset_deltas_sub = context.subscribe(&asset_deltas_subscribe_topic).await?;
-        let utxo_deltas_sub = if storage_config.store_info {
+        let utxo_deltas_sub = if storage_config.store_info || storage_config.store_transactions {
             Some(context.subscribe(&utxo_deltas_subscribe_topic).await?)
         } else {
             None
