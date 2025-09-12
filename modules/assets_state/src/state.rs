@@ -2,9 +2,7 @@
 
 use crate::asset_registry::{AssetId, AssetRegistry};
 use acropolis_common::{
-    queries::assets::{
-        AssetHistory, AssetInfoRecord, AssetListEntry, MintRecord, PolicyAsset, PolicyAssets,
-    },
+    queries::assets::{AssetHistory, AssetInfoRecord, MintRecord, PolicyAsset, PolicyAssets},
     NativeAssetDelta, PolicyId, ShelleyAddress, TxHash,
 };
 use anyhow::Result;
@@ -95,7 +93,7 @@ impl State {
         }
     }
 
-    pub fn get_assets_list(&self, registry: &AssetRegistry) -> Result<Vec<AssetListEntry>> {
+    pub fn get_assets_list(&self, registry: &AssetRegistry) -> Result<Vec<PolicyAsset>> {
         let supply = self
             .supply
             .as_ref()
@@ -104,7 +102,7 @@ impl State {
         let mut out = Vec::with_capacity(supply.len());
         for (id, amount) in supply {
             if let Some(key) = registry.lookup(*id) {
-                out.push(AssetListEntry {
+                out.push(PolicyAsset {
                     policy: *key.policy,
                     name: (*key.name).clone(),
                     quantity: *amount,
