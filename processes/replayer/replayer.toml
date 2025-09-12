@@ -46,7 +46,7 @@ subscribe-topic = "cardano.governance"
 cache-mode = "predefined" # "predefined", "read", "write", "write-if-absent"
 write-full-cache = "false"
 
-[module.epoch-activity-counter]
+[module.epochs-state]
 
 [module.accounts-state]
 

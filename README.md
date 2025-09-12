@@ -58,7 +58,7 @@ structure is highly subject to change:
 * [DRep State](modules/drep_state) - tracks DRep registrations
 * [Governance State](modules/governance_state) - tracks Governance Actions and voting
 * [Stake Delta Filter](modules/stake_delta_filter) - filters out stake address changes and handles stake pointer references
-* [Epoch Activity Counter](modules/epoch_activity_counter) - counts fees and block production for rewards
+* [Epochs State](modules/epochs_state) - track fees blocks minted and epochs history
 * [Accounts State](modules/accounts_state) - stake and reward accounts tracker
 
 ```mermaid
@@ -74,7 +74,7 @@ graph LR
    DRepState(DRep State)
    GovernanceState(Governance State)
    StakeDeltaFilter(Stake Delta Filter)
-   EpochActivityCounter(Epoch Activity Counter)
+   EpochsState(EpochsState)
    AccountsState(Accounts State)
 
    UpstreamChainFetcher --> BlockUnpacker
@@ -82,16 +82,16 @@ graph LR
    BlockUnpacker --> TxUnpacker
    GenesisBootstrapper --> UTXOState
    TxUnpacker --> UTXOState
-   TxUnpacker --> EpochActivityCounter
+   TxUnpacker --> EpochsState
    TxUnpacker --> AccountsState
    TxUnpacker --> SPOState
    TxUnpacker --> DRepState
    TxUnpacker --> GovernanceState
    UTXOState --> StakeDeltaFilter
    StakeDeltaFilter --> AccountsState
-   UpstreamChainFetcher --> EpochActivityCounter
-   MithrilSnapshotFetcher --> EpochActivityCounter
-   EpochActivityCounter --> AccountsState
+   UpstreamChainFetcher --> EpochsState
+   MithrilSnapshotFetcher --> EpochsState
+   EpochsState --> AccountsState
    SPOState --> AccountsState
    DRepState --> GovernanceState
    GovernanceState --> AccountsState

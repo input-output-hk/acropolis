@@ -74,7 +74,7 @@ store-history = false
 cache-mode = "predefined" # "predefined", "read", "write", "write-if-absent"
 write-full-cache = "false"
 
-[module.epoch-activity-counter]
+[module.epochs-state]
 # Enables /epochs/{number} endpoint (for historical epochs)
 store-history = false
 # Enables /pools/{pool_id}/blocks endpoint

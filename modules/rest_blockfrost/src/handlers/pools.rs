@@ -246,7 +246,7 @@ async fn handle_pools_extended_blockfrost(
     )
     .await?;
 
-    // Get total blocks minted for each pool from epoch-activity-counter
+    // Get total blocks minted for each pool from epochs_state
     let total_blocks_minted_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
         EpochsStateQuery::GetTotalBlocksMintedByPools {
             vrf_key_hashes: pools_vrf_key_hashes,
@@ -789,7 +789,7 @@ pub async fn handle_pool_blocks_blockfrost(
     let vrf_key_hash = pool_info.vrf_key_hash;
 
     // query block hashes by vrf key hash
-    // from epoch-activity_counter state
+    // from epochs_state
     let pool_blocks_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
         EpochsStateQuery::GetBlockHashesByPool { vrf_key_hash },
     )));

@@ -18,8 +18,7 @@ members = [
     "modules/parameters_state",         # Keeps track of protocol parameters
     "modules/governance_state",         # Governance state
     "modules/stake_delta_filter",       # Filters address deltas
-    "modules/epoch_activity_counter",   # Counts fees and block producers for rewards
-    "modules/epochs_state",             # Tracks epochs history and block hashes minted by pools
+    "modules/epochs_state",             # Tracks fees and blocks minted and epochs history
     "modules/accounts_state",           # Tracks stake and reward accounts
     "modules/assets_state",             # Tracks native asset mints and burns
 

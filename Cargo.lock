@@ -113,24 +113,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "acropolis_module_epoch_activity_counter"
-version = "0.1.0"
-dependencies = [
- "acropolis_common",
- "anyhow",
- "caryatid_sdk",
- "config",
- "dashmap",
- "hex",
- "imbl 6.0.0",
- "pallas",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "acropolis_module_epochs_state"
 version = "0.1.0"
 dependencies = [
@@ -377,7 +359,7 @@ dependencies = [
  "acropolis_module_block_unpacker",
  "acropolis_module_drdd_state",
  "acropolis_module_drep_state",
- "acropolis_module_epoch_activity_counter",
+ "acropolis_module_epochs_state",
  "acropolis_module_genesis_bootstrapper",
  "acropolis_module_governance_state",
  "acropolis_module_mithril_snapshot_fetcher",
@@ -418,7 +400,7 @@ dependencies = [
  "acropolis_module_accounts_state",
  "acropolis_module_block_unpacker",
  "acropolis_module_drep_state",
- "acropolis_module_epoch_activity_counter",
+ "acropolis_module_epochs_state",
  "acropolis_module_genesis_bootstrapper",
  "acropolis_module_governance_state",
  "acropolis_module_mithril_snapshot_fetcher",
@@ -452,7 +434,7 @@ dependencies = [
  "acropolis_module_accounts_state",
  "acropolis_module_block_unpacker",
  "acropolis_module_drep_state",
- "acropolis_module_epoch_activity_counter",
+ "acropolis_module_epochs_state",
  "acropolis_module_governance_state",
  "acropolis_module_mithril_snapshot_fetcher",
  "acropolis_module_parameters_state",
