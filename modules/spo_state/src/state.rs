@@ -7,36 +7,16 @@ use acropolis_common::{
         StakeRewardDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
     },
     params::TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH,
+    stake_addresses::StakeAddressMap,
     BlockInfo, KeyHash, PoolMetadata, PoolRegistration, PoolRetirement, Relay, StakeCredential,
     TxCertificate,
 };
-use anyhow::{bail, Result};
+use anyhow::Result;
 use imbl::HashMap;
-use serde::Serialize;
-use serde_with::{hex::Hex, serde_as};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tracing::{debug, error, info};
 
 use crate::{historical_spo_state::HistoricalSPOState, store_config::StoreConfig};
-
-/// State of an individual stake address
-/// We don't care about DRep they are delegated to
-#[serde_as]
-#[derive(Debug, Default, Clone, Serialize)]
-pub struct StakeAddressState {
-    /// Is it registered (or only used in addresses)?
-    pub registered: bool,
-
-    /// Total value in UTXO addresses
-    pub utxo_value: u64,
-
-    /// Value in reward account
-    pub rewards: u64,
-
-    /// SPO ID they are delegated to ("operator" ID)
-    #[serde_as(as = "Option<Hex>")]
-    pub delegated_spo: Option<KeyHash>,
-}
 
 #[derive(Default, Debug, Clone)]
 pub struct State {
@@ -59,7 +39,7 @@ pub struct State {
     historical_spos: Option<HashMap<KeyHash, HistoricalSPOState>>,
 
     /// stake_addresses (We save stake_addresses according to store_config)
-    stake_addresses: Option<HashMap<KeyHash, StakeAddressState>>,
+    stake_addresses: Option<Arc<Mutex<StakeAddressMap>>>,
 }
 
 impl State {
@@ -77,7 +57,7 @@ impl State {
                 None
             },
             stake_addresses: if config.store_stake_addresses {
-                Some(HashMap::new())
+                Some(Arc::new(Mutex::new(StakeAddressMap::new())))
             } else {
                 None
             },
@@ -179,15 +159,16 @@ impl State {
     }
 
     /// Get Pool Delegators
-    pub fn get_pool_delegators(&self, pool_id: &KeyHash) -> Option<Vec<(KeyHash, u64)>> {
+    pub fn get_pool_delegators(&self, pool_operator: &KeyHash) -> Option<Vec<(KeyHash, u64)>> {
         let Some(stake_addresses) = self.stake_addresses.as_ref() else {
             return None;
         };
         let Some(historical_spos) = self.historical_spos.as_ref() else {
             return None;
         };
+        let stake_addresses = stake_addresses.lock().unwrap();
 
-        let delegators = historical_spos.get(pool_id).map(|s| s.delegators.clone()).flatten();
+        let delegators = historical_spos.get(pool_operator).map(|s| s.delegators.clone()).flatten();
         let Some(delegators) = delegators.as_ref() else {
             return None;
         };
@@ -331,37 +312,59 @@ impl State {
     }
 
     fn register_stake_address(&mut self, credential: &StakeCredential) {
-        let Some(stake_addresses) = self.stake_addresses.as_mut() else {
+        let Some(stake_addresses) = self.stake_addresses.as_ref() else {
             return;
         };
-
-        let hash = credential.get_hash();
-        let sas = stake_addresses.entry(hash.clone()).or_default();
-        if sas.registered {
-            error!(
-                "Stake address hash {} registered when already registered",
-                hex::encode(&hash)
-            );
-            return;
-        } else {
-            sas.registered = true;
-        }
+        let mut stake_addresses = stake_addresses.lock().unwrap();
+        stake_addresses.register_stake_address(credential);
     }
 
     fn deregister_stake_address(&mut self, credential: &StakeCredential) {
-        let Some(stake_addresses) = self.stake_addresses.as_mut() else {
+        let Some(stake_addresses) = self.stake_addresses.as_ref() else {
             return;
         };
-
         let hash = credential.get_hash();
-        if let Some(sas) = stake_addresses.get_mut(&hash) {
-            if sas.registered {
-                sas.registered = false;
-                // update historical_spos
-                if let Some(historical_spos) = self.historical_spos.as_mut() {
-                    if let Some(old_spo) = sas.delegated_spo.as_ref() {
-                        // remove delegators from old_spo
-                        if let Some(historical_spo) = historical_spos.get_mut(old_spo) {
+        let mut stake_addresses = stake_addresses.lock().unwrap();
+        let old_spo = stake_addresses.get(&hash).map(|s| s.delegated_spo.clone()).flatten();
+
+        if stake_addresses.deregister_stake_address(credential) {
+            // update historical_spos
+            if let Some(historical_spos) = self.historical_spos.as_mut() {
+                if let Some(old_spo) = old_spo.as_ref() {
+                    // remove delegators from old_spo
+                    if let Some(historical_spo) = historical_spos.get_mut(old_spo) {
+                        if let Some(removed) = historical_spo.remove_delegator(&hash) {
+                            if !removed {
+                                error!(
+                                    "Historical SPO state for {} does not contain delegator {}",
+                                    hex::encode(old_spo),
+                                    hex::encode(&hash)
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Record a stake delegation
+    /// Update historical_spo_state's delegators
+    fn record_stake_delegation(&mut self, credential: &StakeCredential, spo: &KeyHash) {
+        let Some(stake_addresses) = self.stake_addresses.as_ref() else {
+            return;
+        };
+        let hash = credential.get_hash();
+        let mut stake_addresses = stake_addresses.lock().unwrap();
+        let old_spo = stake_addresses.get(&hash).map(|s| s.delegated_spo.clone()).flatten();
+
+        if stake_addresses.record_stake_delegation(credential, spo) {
+            // update historical_spos
+            if let Some(historical_spos) = self.historical_spos.as_mut() {
+                // Remove old delegator
+                if let Some(old_spo) = old_spo.as_ref() {
+                    match historical_spos.get_mut(old_spo) {
+                        Some(historical_spo) => {
                             if let Some(removed) = historical_spo.remove_delegator(&hash) {
                                 if !removed {
                                     error!(
@@ -372,82 +375,26 @@ impl State {
                                 }
                             }
                         }
-                    }
-                }
-            } else {
-                error!(
-                    "Deregistration of unregistered stake address hash {}",
-                    hex::encode(hash)
-                );
-            }
-        } else {
-            error!(
-                "Deregistration of unknown stake address hash {}",
-                hex::encode(hash)
-            );
-        }
-    }
-
-    /// Record a stake delegation
-    /// Update historical_spo_state's delegators
-    fn record_stake_delegation(&mut self, credential: &StakeCredential, spo: &KeyHash) {
-        let Some(stake_addresses) = self.stake_addresses.as_mut() else {
-            return;
-        };
-
-        let hash = credential.get_hash();
-        // Get old stake address state, or create one
-        if let Some(sas) = stake_addresses.get_mut(&hash) {
-            if sas.registered {
-                let old_spo = sas.delegated_spo.take();
-                sas.delegated_spo = Some(spo.clone());
-                // update historical_spos
-                if let Some(historical_spos) = self.historical_spos.as_mut() {
-                    // Remove old delegator
-                    if let Some(old_spo) = old_spo {
-                        match historical_spos.get_mut(&old_spo) {
-                            Some(historical_spo) => {
-                                if let Some(removed) = historical_spo.remove_delegator(&hash) {
-                                    if !removed {
-                                        error!(
-                                            "Historical SPO state for {} does not contain delegator {}",
-                                            hex::encode(old_spo),
-                                            hex::encode(&hash)
-                                        );
-                                    }
-                                }
-                            }
-                            _ => {
-                                error!("Missing Historical SPO state for {}", hex::encode(old_spo));
-                            }
-                        }
-                    }
-
-                    // get old one or create from store_config
-                    let historical_spo = historical_spos
-                        .entry(spo.clone())
-                        .or_insert_with(|| HistoricalSPOState::new(&self.store_config));
-                    if let Some(added) = historical_spo.add_delegator(&hash) {
-                        if !added {
-                            error!(
-                                "Historical SPO state for {} already contains delegator {}",
-                                hex::encode(spo),
-                                hex::encode(&hash)
-                            );
+                        _ => {
+                            error!("Missing Historical SPO state for {}", hex::encode(old_spo));
                         }
                     }
                 }
-            } else {
-                error!(
-                    "Unregistered stake address in stake delegation: {}",
-                    hex::encode(hash)
-                );
+
+                // get old one or create from store_config
+                let historical_spo = historical_spos
+                    .entry(spo.clone())
+                    .or_insert_with(|| HistoricalSPOState::new(&self.store_config));
+                if let Some(added) = historical_spo.add_delegator(&hash) {
+                    if !added {
+                        error!(
+                            "Historical SPO state for {} already contains delegator {}",
+                            hex::encode(spo),
+                            hex::encode(&hash)
+                        );
+                    }
+                }
             }
-        } else {
-            error!(
-                "Unknown stake address in stake delegation: {}",
-                hex::encode(hash)
-            );
         }
     }
 
@@ -515,74 +462,14 @@ impl State {
         Ok(maybe_message)
     }
 
-    /// Update an unsigned value with a signed delta, with fences
-    fn update_value_with_delta(value: &mut u64, delta: i64) -> Result<()> {
-        if delta >= 0 {
-            *value = (*value).saturating_add(delta as u64);
-        } else {
-            let abs = (-delta) as u64;
-            if abs > *value {
-                bail!("Value underflow - was {}, delta {}", *value, delta);
-            } else {
-                *value -= abs;
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Add a reward to a reward account (by hash)
-    fn update_reward_with_delta(&mut self, account: &KeyHash, delta: i64) {
-        let Some(stake_addresses) = self.stake_addresses.as_mut() else {
-            return;
-        };
-
-        // Get old stake address state, or create one
-        let sas = match stake_addresses.get_mut(account) {
-            Some(existing) => existing,
-            None => {
-                stake_addresses.insert(account.clone(), StakeAddressState::default());
-                stake_addresses.get_mut(account).unwrap()
-            }
-        };
-
-        if let Err(e) = Self::update_value_with_delta(&mut sas.rewards, delta) {
-            error!("Adding to reward account {}: {e}", hex::encode(account));
-        }
-    }
-
     /// Handle withdrawals
     pub fn handle_withdrawals(&mut self, withdrawals_msg: &WithdrawalsMessage) -> Result<()> {
-        let Some(stake_addresses) = self.stake_addresses.as_mut() else {
+        let Some(stake_addresses) = self.stake_addresses.as_ref() else {
             return Ok(());
         };
-
+        let mut stake_addresses = stake_addresses.lock().unwrap();
         for withdrawal in withdrawals_msg.withdrawals.iter() {
-            let hash = withdrawal.address.get_hash();
-            // Get old stake address state - which must exist
-            if let Some(sas) = stake_addresses.get(hash) {
-                // Zero withdrawals are expected, as a way to validate stake addresses (per Pi)
-                if withdrawal.value != 0 {
-                    let mut sas = sas.clone();
-                    if let Err(e) =
-                        Self::update_value_with_delta(&mut sas.rewards, -(withdrawal.value as i64))
-                    {
-                        error!(
-                            "Withdrawing from stake address {} hash {}: {e}",
-                            withdrawal.address.to_string().unwrap_or("???".to_string()),
-                            hex::encode(hash)
-                        );
-                    } else {
-                        // Update the stake address
-                        stake_addresses.insert(hash.to_vec(), sas);
-                    }
-                }
-            } else {
-                error!(
-                    "Unknown stake address in withdrawal: {}",
-                    withdrawal.address.to_string().unwrap_or("???".to_string())
-                );
-            }
+            stake_addresses.process_withdrawal(withdrawal);
         }
 
         Ok(())
@@ -590,23 +477,12 @@ impl State {
 
     /// Handle stake deltas
     pub fn handle_stake_deltas(&mut self, deltas_msg: &StakeAddressDeltasMessage) -> Result<()> {
-        let Some(stake_addresses) = self.stake_addresses.as_mut() else {
+        let Some(stake_addresses) = self.stake_addresses.as_ref() else {
             return Ok(());
         };
-
-        // Handle deltas
+        let mut stake_addresses = stake_addresses.lock().unwrap();
         for delta in deltas_msg.deltas.iter() {
-            // Fold both stake key and script hashes into one - assuming the chance of
-            // collision is negligible
-            let hash = delta.address.get_hash();
-
-            // Stake addresses don't need to be registered if they aren't used for
-            // stake or drep delegation, but we need to track them in case they are later
-            let sas = stake_addresses.entry(hash.to_vec()).or_default();
-
-            if let Err(e) = Self::update_value_with_delta(&mut sas.utxo_value, delta.delta) {
-                error!("Applying delta to stake hash {}: {e}", hex::encode(hash));
-            }
+            stake_addresses.process_stake_delta(delta);
         }
 
         Ok(())
@@ -618,13 +494,16 @@ impl State {
         _block_info: &BlockInfo,
         reward_deltas_msg: &StakeRewardDeltasMessage,
     ) -> Result<()> {
-        let Some(_) = self.stake_addresses.as_ref() else {
+        let Some(stake_addresses) = self.stake_addresses.as_ref() else {
             return Ok(());
         };
 
         // Handle deltas
         for delta in reward_deltas_msg.deltas.iter() {
-            self.update_reward_with_delta(&delta.hash, delta.delta);
+            let mut stake_addresses = stake_addresses.lock().unwrap();
+            if let Err(e) = stake_addresses.update_reward(&delta.hash, delta.delta) {
+                error!("Updating reward account {}: {e}", hex::encode(&delta.hash));
+            }
         }
 
         Ok(())
