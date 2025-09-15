@@ -53,7 +53,7 @@ impl State {
             conway: None,
             current_era: Era::default(),
 
-            alonzo_babbage_voting: AlonzoBabbageVoting::new(),
+            alonzo_babbage_voting: AlonzoBabbageVoting::default(),
             proposals: HashMap::new(),
             votes: HashMap::new(),
 
@@ -77,8 +77,8 @@ impl State {
         &mut self,
         message: &ProtocolParamsMessage,
     ) -> Result<()> {
-        if let Some(shelley) = &message.params.shelley {
-            self.alonzo_babbage_voting.update_shelley_slots_per_epoch(shelley.epoch_length as u64);
+        if let Some(p) = &message.params.shelley {
+            self.alonzo_babbage_voting.update_parameters(p.epoch_length, p.update_quorum);
         }
         if message.params.conway.is_some() {
             self.conway = message.params.conway.clone();
@@ -93,7 +93,7 @@ impl State {
         spo_message: &SPOStakeDistributionMessage,
     ) -> Result<()> {
         self.drep_stake_messages_count += 1;
-        self.drep_stake = HashMap::from_iter(drep_message.dreps.iter().cloned());
+        self.drep_stake = HashMap::from_iter(drep_message.drdd.dreps.iter().cloned());
         self.spo_stake = HashMap::from_iter(spo_message.spos.iter().cloned());
 
         Ok(())
