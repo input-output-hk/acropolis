@@ -51,7 +51,7 @@ pub struct Snapshot {
     /// Persistent pot values
     pub pots: Pots,
 
-    /// Total blocks
+    /// Total SPO (non-OBFT) blocks produced
     pub blocks: usize,
 }
 

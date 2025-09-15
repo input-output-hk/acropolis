@@ -222,7 +222,6 @@ impl State {
         &mut self,
         epoch: u64,
         total_fees: u64,
-        total_blocks: usize,
         spo_block_counts: HashMap<KeyHash, usize>,
         verifier: &Verifier,
     ) -> Result<Vec<StakeRewardDelta>> {
@@ -260,11 +259,6 @@ impl State {
         }
         .clone();
 
-        // Filter the block counts for SPOs that are registered - treating any we don't know
-        // as 'OBFT' style (the legacy nodes)
-        let total_non_obft_blocks = spo_block_counts.values().sum();
-        info!(total_blocks, total_non_obft_blocks, "Block counts:");
-
         info!(
             epoch,
             reserves = self.pots.reserves,
@@ -281,6 +275,10 @@ impl State {
         // Verify pots state
         verifier.verify_pots(epoch, &self.pots);
 
+        // Filter the block counts for SPOs that are registered - treating any we don't know
+        // as 'OBFT' style (the legacy nodes)
+        let total_non_obft_blocks = spo_block_counts.values().sum();
+
         // Capture a new snapshot and push it to state
         let snapshot = Snapshot::new(
             epoch,
@@ -288,7 +286,7 @@ impl State {
             &self.spos,
             &spo_block_counts,
             &self.pots,
-            total_blocks,
+            total_non_obft_blocks,
             // Pass in two-previous epoch snapshot for capture of SPO reward accounts
             self.epoch_snapshots.set.clone(), // Will become 'go' in the next line!
         );
@@ -533,7 +531,6 @@ impl State {
             self.spos.iter().map(|(id, spo)| (spo.vrf_key_hash.clone(), id.clone())).collect();
 
         // Create a map of operator ID to block count
-        let total_blocks: usize = ea_msg.vrf_vkey_hashes.iter().map(|(_, count)| count).sum();
         let spo_block_counts: HashMap<KeyHash, usize> = ea_msg
             .vrf_vkey_hashes
             .iter()
@@ -595,7 +592,6 @@ impl State {
         reward_deltas.extend(self.enter_epoch(
             ea_msg.epoch + 1,
             ea_msg.total_fees,
-            total_blocks,
             spo_block_counts,
             verifier,
         )?);
