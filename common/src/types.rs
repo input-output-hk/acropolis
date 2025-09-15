@@ -148,6 +148,13 @@ pub struct StakeAddressDelta {
     pub delta: i64,
 }
 
+/// Stake Address Reward change
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StakeRewardDelta {
+    pub hash: KeyHash,
+    pub delta: i64,
+}
+
 pub type PolicyId = [u8; 28];
 pub type NativeAssets = Vec<(PolicyId, Vec<NativeAsset>)>;
 pub type NativeAssetsDelta = Vec<(PolicyId, Vec<NativeAssetDelta>)>;
@@ -706,7 +713,7 @@ pub struct Deregistration {
 }
 
 /// DRepChoice (=CDDL drep, badly named)
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum DRepChoice {
     /// Address key
     Key(KeyHash),
