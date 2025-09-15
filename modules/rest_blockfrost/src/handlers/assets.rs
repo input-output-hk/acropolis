@@ -222,3 +222,56 @@ fn split_policy_and_asset(hex_str: &str) -> Result<(PolicyId, AssetName), RESTRe
 
     Ok((policy_id, asset_name))
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::handlers::assets::split_policy_and_asset;
+    use hex;
+
+    fn policy_bytes() -> [u8; 28] {
+        [0u8; 28]
+    }
+
+    #[test]
+    fn invalid_hex_string() {
+        let result = split_policy_and_asset("zzzz");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.code, 400);
+        assert_eq!(err.body, "Invalid hex string");
+    }
+
+    #[test]
+    fn too_short_input() {
+        let hex_str = hex::encode([1u8, 2, 3]);
+        let result = split_policy_and_asset(&hex_str);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.code, 400);
+        assert_eq!(err.body, "Asset identifier must be at least 28 bytes");
+    }
+
+    #[test]
+    fn invalid_asset_name_too_long() {
+        let mut bytes = policy_bytes().to_vec();
+        bytes.extend(vec![0u8; 33]);
+        let hex_str = hex::encode(bytes);
+        let result = split_policy_and_asset(&hex_str);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.code, 400);
+        assert_eq!(err.body, "Asset name must be less than 32 bytes");
+    }
+
+    #[test]
+    fn valid_policy_and_asset() {
+        let mut bytes = policy_bytes().to_vec();
+        bytes.extend_from_slice(b"MyToken");
+        let hex_str = hex::encode(bytes);
+        let result = split_policy_and_asset(&hex_str);
+        assert!(result.is_ok());
+        let (policy, name) = result.unwrap();
+        assert_eq!(policy, policy_bytes());
+        assert_eq!(name.as_slice(), b"MyToken");
+    }
+}
