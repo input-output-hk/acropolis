@@ -15,6 +15,7 @@ use anyhow::Result;
 use caryatid_sdk::Context;
 use rust_decimal::Decimal;
 use std::{sync::Arc, time::Duration};
+use tokio::join;
 use tracing::warn;
 
 use crate::{
@@ -443,7 +444,7 @@ async fn handle_pools_spo_blockfrost(
         },
     )));
 
-    let pool_info = query_state(
+    let pool_info_f = query_state(
         &context,
         &handlers_config.pools_query_topic,
         pool_info_msg,
@@ -461,33 +462,13 @@ async fn handle_pools_spo_blockfrost(
             )),
             _ => Err(anyhow::anyhow!("Unexpected message type")),
         },
-    )
-    .await?;
-
-    // query blocks minted data from epochs_state
-    let blocks_minted_data_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
-        EpochsStateQuery::GetBlocksMintedInfoByPool {
-            vrf_key_hash: pool_info.vrf_key_hash.clone(),
-        },
-    )));
-    let blocks_minted_data = query_state(
-        &context,
-        &handlers_config.epochs_query_topic,
-        blocks_minted_data_msg,
-        |message| match message {
-            Message::StateQueryResponse(StateQueryResponse::Epochs(
-                EpochsStateQueryResponse::BlocksMintedInfoByPool(res),
-            )) => Ok(res),
-            _ => Err(anyhow::anyhow!("Unexpected message type")),
-        },
-    )
-    .await?;
+    );
 
     // Get Latest Epoch from epochs-state
     let latest_epoch_info_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
         EpochsStateQuery::GetLatestEpoch,
     )));
-    let latest_epoch_info = query_state(
+    let latest_epoch_info_f = query_state(
         &context,
         &handlers_config.epochs_query_topic,
         latest_epoch_info_msg,
@@ -508,17 +489,15 @@ async fn handle_pools_spo_blockfrost(
                 ))
             }
         },
-    )
-    .await?;
-    let latest_epoch = latest_epoch_info.epoch;
+    );
 
     // query live stakes info from accounts_state
     let live_stakes_info_msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
         AccountsStateQuery::GetPoolLiveStakeInfo {
-            pool_operator: pool_info.operator.clone(),
+            pool_operator: pool_operator.clone(),
         },
     )));
-    let live_stakes_info = query_state(
+    let live_stakes_info_f = query_state(
         &context,
         &handlers_config.accounts_query_topic,
         live_stakes_info_msg,
@@ -528,14 +507,13 @@ async fn handle_pools_spo_blockfrost(
             )) => Ok(res),
             _ => Err(anyhow::anyhow!("Unexpected message type")),
         },
-    )
-    .await?;
+    );
 
     // Get optimal_pool_sizing from accounts_state
     let optimal_pool_sizing_msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
         AccountsStateQuery::GetOptimalPoolSizing,
     )));
-    let optimal_pool_sizing = query_state(
+    let optimal_pool_sizing_f = query_state(
         &context,
         &handlers_config.accounts_query_topic,
         optimal_pool_sizing_msg,
@@ -548,17 +526,96 @@ async fn handle_pools_spo_blockfrost(
             )) => Ok(None),
             _ => Err(anyhow::anyhow!("Unexpected message type")),
         },
-    )
-    .await?;
-    let Some(optimal_pool_sizing) = optimal_pool_sizing else {
+    );
+
+    // Query pool update events from spo_state
+    let pool_updates_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
+        PoolsStateQuery::GetPoolUpdates {
+            pool_id: pool_operator.clone(),
+        },
+    )));
+    let pool_updates_f = query_state(
+        &context,
+        &handlers_config.pools_query_topic,
+        pool_updates_msg,
+        |message: Message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::PoolUpdates(pool_updates),
+            )) => Ok(Some(pool_updates.updates)),
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::NotFound,
+            )) => Err(anyhow::anyhow!("Pool Not found")),
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::Error(_e),
+            )) => Ok(None),
+            _ => Err(anyhow::anyhow!("Unexpected message type")),
+        },
+    );
+
+    let (pool_info, latest_epoch_info, live_stakes_info, optimal_pool_sizing, pool_updates) = join!(
+        pool_info_f,
+        latest_epoch_info_f,
+        live_stakes_info_f,
+        optimal_pool_sizing_f,
+        pool_updates_f
+    );
+    let pool_info = pool_info?;
+    let latest_epoch_info = latest_epoch_info?;
+    let latest_epoch = latest_epoch_info.epoch;
+    let live_stakes_info = live_stakes_info?;
+    let Some(optimal_pool_sizing) = optimal_pool_sizing? else {
         // if it is before Shelly Era
         return Ok(RESTResponse::with_json(404, "Pool Not Found"));
     };
+    let pool_updates = pool_updates?;
+    let registrations: Option<Vec<TxHash>> = pool_updates.as_ref().map(|updates| {
+        updates
+            .iter()
+            .filter_map(|update| {
+                if update.action == PoolUpdateAction::Registered {
+                    Some(update.tx_hash)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    });
+    let retirements: Option<Vec<TxHash>> = pool_updates.as_ref().map(|updates| {
+        updates
+            .iter()
+            .filter_map(|update| {
+                if update.action == PoolUpdateAction::Deregistered {
+                    Some(update.tx_hash)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    });
+
+    // query blocks minted data from epochs_state
+    let blocks_minted_data_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
+        EpochsStateQuery::GetBlocksMintedInfoByPool {
+            vrf_key_hash: pool_info.vrf_key_hash.clone(),
+        },
+    )));
+    let blocks_minted_data = query_state(
+        &context,
+        &handlers_config.epochs_query_topic,
+        blocks_minted_data_msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Epochs(
+                EpochsStateQueryResponse::BlocksMintedInfoByPool(res),
+            )) => Ok(res),
+            _ => Err(anyhow::anyhow!("Unexpected message type")),
+        },
+    )
+    .await?;
 
     // query active stakes info from spo_state
     let active_stakes_info_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
         PoolsStateQuery::GetPoolActiveStakeInfo {
-            pool_operator: pool_info.operator.clone(),
+            pool_operator: pool_operator.clone(),
             epoch: latest_epoch,
         },
     )));
@@ -603,55 +660,6 @@ async fn handle_pools_spo_blockfrost(
         },
     )
     .await?;
-
-    // Query pool update events from spo_state
-    let pool_updates_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
-        PoolsStateQuery::GetPoolUpdates {
-            pool_id: pool_info.operator.clone(),
-        },
-    )));
-    let pool_updates = query_state(
-        &context,
-        &handlers_config.pools_query_topic,
-        pool_updates_msg,
-        |message: Message| match message {
-            Message::StateQueryResponse(StateQueryResponse::Pools(
-                PoolsStateQueryResponse::PoolUpdates(pool_updates),
-            )) => Ok(Some(pool_updates.updates)),
-            Message::StateQueryResponse(StateQueryResponse::Pools(
-                PoolsStateQueryResponse::NotFound,
-            )) => Err(anyhow::anyhow!("Pool Not found")),
-            Message::StateQueryResponse(StateQueryResponse::Pools(
-                PoolsStateQueryResponse::Error(_e),
-            )) => Ok(None),
-            _ => Err(anyhow::anyhow!("Unexpected message type")),
-        },
-    )
-    .await?;
-    let registrations: Option<Vec<TxHash>> = pool_updates.as_ref().map(|updates| {
-        updates
-            .iter()
-            .filter_map(|update| {
-                if update.action == PoolUpdateAction::Registered {
-                    Some(update.tx_hash)
-                } else {
-                    None
-                }
-            })
-            .collect()
-    });
-    let retirements: Option<Vec<TxHash>> = pool_updates.as_ref().map(|updates| {
-        updates
-            .iter()
-            .filter_map(|update| {
-                if update.action == PoolUpdateAction::Deregistered {
-                    Some(update.tx_hash)
-                } else {
-                    None
-                }
-            })
-            .collect()
-    });
 
     let pool_id = pool_info.operator.to_bech32_with_hrp("pool").unwrap();
     let reward_account = pool_info.reward_account.to_bech32_with_hrp("stake");
