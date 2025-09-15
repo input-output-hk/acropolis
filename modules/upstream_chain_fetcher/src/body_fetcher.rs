@@ -43,29 +43,13 @@ impl BodyFetcher {
         })
     }
 
-    async fn fetch_block(
-        &mut self,
-        point: Point,
-        block_info: &BlockInfo,
-    ) -> Result<Arc<BlockBodyMessage>> {
+    async fn fetch_block(&mut self, point: Point) -> Result<Arc<BlockBodyMessage>> {
         // Fetch the block body
         debug!("Requesting single block {point:?}");
         let body = self.peer.blockfetch().fetch_single(point.clone()).await;
 
         match body {
-            Ok(body) => {
-                if block_info.number % 100 == 0 {
-                    info!(
-                        number = block_info.number,
-                        size = body.len(),
-                        "Fetched block"
-                    );
-                }
-
-                // Construct message
-                Ok(Arc::new(BlockBodyMessage { raw: body }))
-            }
-
+            Ok(body) => Ok(Arc::new(BlockBodyMessage { raw: body })),
             Err(e) => bail!("Can't fetch block at {point:?}: {e}"),
         }
     }
@@ -92,19 +76,42 @@ impl BodyFetcher {
         let timestamp = self.cfg.slot_to_timestamp(slot);
 
         if new_epoch {
-            info!(epoch, number, slot, "New epoch");
+            info!(epoch, number, slot, h.variant, tag, "New epoch");
         }
 
-        // Derive era from header - not complete but enough to drive
-        // MultiEraHeader::decode() again at the receiver
-        // TODO do this properly once we understand the values of the 'variant'
-        // byte
+        // It seems that `variant` field is 'TipInfo' from Haskell Node:
+        // ouroboros-consensus-cardano/Ouroboros/Consensus/Cardano/Block.hs
+        // TODO: should we parse protocol version from header?
         let era = match header {
             MultiEraHeader::EpochBoundary(_) => return Ok(()), // Ignore EBBs
             MultiEraHeader::Byron(_) => Era::Byron,
-            MultiEraHeader::ShelleyCompatible(_) => Era::Shelley,
-            MultiEraHeader::BabbageCompatible(_) => Era::Babbage,
+            MultiEraHeader::ShelleyCompatible(_) => match h.variant {
+                // TPraos eras
+                1 => Era::Shelley,
+                2 => Era::Allegra,
+                3 => Era::Mary,
+                4 => Era::Alonzo,
+                x => bail!(
+                    "Epoch {epoch}, block {number}, slot {slot}: \
+                               Impossible header variant {x} for ShelleyCompatible (TPraos)"
+                ),
+            },
+            MultiEraHeader::BabbageCompatible(_) => match h.variant {
+                // Praos eras
+                5 => Era::Babbage,
+                6 => Era::Conway,
+                x => bail!(
+                    "Epoch {epoch}, block {number}, slot {slot}: \
+                                   Impossible header variant {x} for BabbaageCompatible (Praos)"
+                ),
+            },
         };
+
+        // Fetch and publish the block itself - note we need to
+        // reconstruct a Point from the header because the one we get
+        // in the RollForward is the *tip*, not the next read point
+        let fetch_point = Point::Specific(slot, hash.to_vec());
+        let msg_body = self.fetch_block(fetch_point).await?;
 
         // Construct message
         let block_info = BlockInfo {
@@ -124,13 +131,6 @@ impl BodyFetcher {
         };
 
         let msg_hdr = Arc::new(BlockHeaderMessage { raw: h.cbor });
-
-        // Fetch and publish the block itself - note we need to
-        // reconstruct a Point from the header because the one we get
-        // in the RollForward is the *tip*, not the next read point
-        let fetch_point = Point::Specific(slot, hash.to_vec());
-        let msg_body = self.fetch_block(fetch_point, &block_info).await?;
-
         let record = UpstreamCacheRecord {
             id: block_info.clone(),
             hdr: msg_hdr.clone(),
