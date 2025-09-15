@@ -1,6 +1,5 @@
 use crate::{
-    queries::governance::VoteRecord, KeyHash, PoolEpochState, PoolMetadata, PoolRegistration,
-    PoolRetirement, PoolUpdateEvent, Relay,
+    queries::governance::VoteRecord, rational_number::RationalNumber, KeyHash, PoolEpochState, PoolMetadata, PoolRegistration, PoolRetirement, PoolUpdateEvent, Relay
 };
 
 pub const DEFAULT_POOLS_QUERY_TOPIC: (&str, &str) =
@@ -12,6 +11,10 @@ pub enum PoolsStateQuery {
     GetPoolsListWithInfo,
     GetPoolsRetiredList,
     GetPoolsRetiringList,
+    GetPoolActiveStakeInfo {
+        pool_operator: KeyHash,
+        epoch: u64,
+    },
     GetPoolsActiveStakes {
         pools_operators: Vec<Vec<u8>>,
         epoch: u64,
@@ -45,6 +48,7 @@ pub enum PoolsStateQueryResponse {
     PoolsListWithInfo(PoolsListWithInfo),
     PoolsRetiredList(PoolsRetiredList),
     PoolsRetiringList(PoolsRetiringList),
+    PoolActiveStakeInfo(PoolActiveStakeInfo),
     PoolsActiveStakes(PoolsActiveStakes),
     PoolInfo(PoolRegistration),
     PoolHistory(PoolHistory),
@@ -79,11 +83,15 @@ pub struct PoolsRetiringList {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PoolActiveStakeInfo {
+    pub active_stake: u64,
+    pub active_size: RationalNumber,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PoolsActiveStakes {
     // this is in same order of pools_operator from PoolsStateQuery::GetPoolsActiveStakes
     pub active_stakes: Vec<u64>,
-    // this is total active stake for current epoch
-    pub total_active_stake: u64,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

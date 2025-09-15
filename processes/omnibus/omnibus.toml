@@ -32,7 +32,7 @@ store = "memory" # "memory", "dashmap", "fjall", "fjall-async", "sled", "sled-as
 address-delta-topic = "cardano.address.delta"
 
 [module.spo-state]
-# Enables /pools/{pool_id}/history endpoint
+# Enables /pools/{pool_id}/history endpoint, enables to query active_stakes
 store-epochs-history = false
 # Enable /pools/retired
 store-retired-pools = false

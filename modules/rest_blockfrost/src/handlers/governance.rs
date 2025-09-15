@@ -217,7 +217,7 @@ pub async fn handle_drep_delegators_blockfrost(
             }
 
             let msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
-                AccountsStateQuery::GetAccountsBalancesMap { stake_keys },
+                AccountsStateQuery::GetAccountsUtxoValuesMap { stake_keys },
             )));
 
             let raw_msg =
@@ -226,11 +226,11 @@ pub async fn handle_drep_delegators_blockfrost(
 
             match message {
                 Message::StateQueryResponse(StateQueryResponse::Accounts(
-                    AccountsStateQueryResponse::AccountsBalancesMap(map),
+                    AccountsStateQueryResponse::AccountsUtxoValuesMap(map),
                 )) => {
                     let mut response = Vec::new();
 
-                    for (key, amount) in map {
+                    for (key, utxo_value) in map {
                         let Some(bech32) = stake_key_to_bech32.get(&key) else {
                             return Ok(RESTResponse::with_text(
                                 500,
@@ -240,7 +240,7 @@ pub async fn handle_drep_delegators_blockfrost(
 
                         response.push(serde_json::json!({
                             "address": bech32,
-                            "amount": amount.to_string(),
+                            "amount": utxo_value.to_string(),
                         }));
                     }
 

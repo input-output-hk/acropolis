@@ -613,7 +613,7 @@ pub struct PoolRetirement {
 }
 
 /// Pool Update Action
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PoolUpdateAction {
     #[serde(rename = "registered")]
     Registered,

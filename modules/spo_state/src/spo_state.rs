@@ -8,8 +8,11 @@ use acropolis_common::{
         SnapshotStateMessage, StateQuery, StateQueryResponse,
     },
     queries::pools::{
-        PoolDelegators, PoolHistory, PoolRelays, PoolUpdates, PoolVotes, PoolsActiveStakes, PoolsList, PoolsListWithInfo, PoolsRetiredList, PoolsRetiringList, PoolsStateQuery, PoolsStateQueryResponse, DEFAULT_POOLS_QUERY_TOPIC
+        PoolActiveStakeInfo, PoolDelegators, PoolHistory, PoolRelays, PoolUpdates, PoolVotes,
+        PoolsActiveStakes, PoolsList, PoolsListWithInfo, PoolsRetiredList, PoolsRetiringList,
+        PoolsStateQuery, PoolsStateQueryResponse, DEFAULT_POOLS_QUERY_TOPIC,
     },
+    rational_number::RationalNumber,
     state_history::{StateHistory, StateHistoryStore},
     BlockInfo, BlockStatus,
 };
@@ -20,7 +23,6 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, info_span, Instrument};
 
-mod aggregated_state;
 mod epochs_history;
 mod historical_spo_state;
 mod retired_pools_history;
@@ -31,8 +33,8 @@ mod store_config;
 mod test_utils;
 
 use crate::{
-    aggregated_state::AggregatedSPOState, epochs_history::EpochsHistoryState,
-    retired_pools_history::RetiredPoolsHistoryState, spo_state_publisher::SPOStatePublisher,
+    epochs_history::EpochsHistoryState, retired_pools_history::RetiredPoolsHistoryState,
+    spo_state_publisher::SPOStatePublisher,
 };
 use state::State;
 use store_config::StoreConfig;
@@ -76,7 +78,6 @@ impl SPOState {
     /// Main async run loop
     async fn run(
         history: Arc<Mutex<StateHistory<State>>>,
-        aggregated_state: AggregatedSPOState,
         epochs_history: EpochsHistoryState,
         retired_pools_history: RetiredPoolsHistoryState,
         store_config: &StoreConfig,
@@ -179,8 +180,6 @@ impl SPOState {
                     let span = info_span!("spo_state.handle_spdd", block = block_info.number);
                     span.in_scope(|| {
                         Self::check_sync(&current_block, &block_info);
-                        // update aggregated state
-                        aggregated_state.handle_spdd(block_info, spdd_message);
                         // update epochs_history
                         epochs_history.handle_spdd(block_info, spdd_message);
                     });
@@ -429,10 +428,6 @@ impl SPOState {
         let history_tick = history.clone();
         let history_snapshot = history.clone();
 
-        // Create Aggregated State
-        let aggregated_state = AggregatedSPOState::new();
-        let aggregated_state_spo_state = aggregated_state.clone();
-
         // Create epochs history
         let epochs_history = EpochsHistoryState::new(store_config.clone());
         let epochs_history_spo_state = epochs_history.clone();
@@ -444,7 +439,6 @@ impl SPOState {
         // handle pools-state query
         context.handle(&pools_query_topic, move |message| {
             let history = history_spo_state.clone();
-            let aggregated_state = aggregated_state_spo_state.clone();
             let epochs_history = epochs_history_spo_state.clone();
             let retired_pools_history = retired_pools_history_spo_state.clone();
 
@@ -479,16 +473,30 @@ impl SPOState {
                         }
                     }
 
+                    PoolsStateQuery::GetPoolActiveStakeInfo { pool_operator, epoch } => {
+                        if epochs_history.is_enabled() {
+                            let epoch_state = epochs_history.get_epoch_state(pool_operator, *epoch);
+                            PoolsStateQueryResponse::PoolActiveStakeInfo(PoolActiveStakeInfo {
+                                active_stake: epoch_state.as_ref().and_then(|state| state.active_stake).unwrap_or(0),
+                                active_size: epoch_state.as_ref().and_then(|state| state.active_size).unwrap_or(RationalNumber::from(0)),
+                            })
+                        } else {
+                            PoolsStateQueryResponse::Error("Epochs history is not enabled".into())
+                        }
+                    },
+
                     PoolsStateQuery::GetPoolsActiveStakes {
                         pools_operators,
                         epoch,
                     } => {
-                        let (active_stakes, total_active_stake) =
-                            aggregated_state.get_pools_active_stakes(pools_operators, *epoch);
-                        PoolsStateQueryResponse::PoolsActiveStakes(PoolsActiveStakes {
-                            active_stakes,
-                            total_active_stake,
-                        })
+                        if epochs_history.is_enabled() {
+                            let active_stakes = epochs_history.get_pools_active_stakes(pools_operators, *epoch);
+                            PoolsStateQueryResponse::PoolsActiveStakes(PoolsActiveStakes {
+                                active_stakes: active_stakes.unwrap_or(vec![0; pools_operators.len()]),
+                            })
+                        } else {
+                            PoolsStateQueryResponse::Error("Epochs history is not enabled".into())
+                        }
                     }
 
                     PoolsStateQuery::GetPoolsRetiringList => {
@@ -683,7 +691,6 @@ impl SPOState {
         context.run(async move {
             Self::run(
                 history,
-                aggregated_state,
                 epochs_history,
                 retired_pools_history,
                 &store_config,

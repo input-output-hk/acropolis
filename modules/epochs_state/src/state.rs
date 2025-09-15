@@ -137,6 +137,13 @@ impl State {
             .collect()
     }
 
+    pub fn get_blocks_minted_data_by_pool(&self, vrf_key_hash: &KeyHash) -> (u64, u64) {
+        (
+            self.total_blocks_minted.get(vrf_key_hash).map(|v| *v as u64).unwrap_or(0),
+            self.blocks_minted.get(vrf_key_hash).map(|v| *v as u64).unwrap_or(0),
+        )
+    }
+
     /// Get Block Hashes by Vrf Key Hash
     pub fn get_block_hashes(&self, vrf_key_hash: &KeyHash) -> Vec<BlockHash> {
         let Some(block_hashes) = self.block_hashes.as_ref() else {
@@ -237,6 +244,10 @@ mod tests {
             state.blocks_minted.iter().find(|(k, _)| *k == &keyhash(b"vrf_2")).map(|(_, v)| *v),
             Some(2)
         );
+
+        let blocks_minted_data = state.get_blocks_minted_data_by_pool(&keyhash(b"vrf_2"));
+        assert_eq!(blocks_minted_data.0, 2);
+        assert_eq!(blocks_minted_data.1, 2);
     }
 
     #[test]
@@ -293,6 +304,10 @@ mod tests {
         assert_eq!(state.epoch_blocks, 0);
         assert_eq!(state.epoch_fees, 0);
         assert!(state.blocks_minted.is_empty());
+
+        let blocks_minted_data = state.get_blocks_minted_data_by_pool(&keyhash(b"vrf_1"));
+        assert_eq!(blocks_minted_data.0, 1);
+        assert_eq!(blocks_minted_data.1, 0);
     }
 
     #[tokio::test]

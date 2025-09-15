@@ -4,8 +4,8 @@
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::epochs::{
-        BlockHashesByPool, BlocksMintedByPools, EpochInfo, EpochsStateQuery,
-        EpochsStateQueryResponse, LatestEpoch, TotalBlocksMintedByPools,
+        BlockHashesByPool, BlocksMintedByPools, BlocksMintedInfoByPool, EpochInfo,
+        EpochsStateQuery, EpochsStateQueryResponse, LatestEpoch, TotalBlocksMintedByPools,
         DEFAULT_EPOCHS_QUERY_TOPIC,
     },
     state_history::{StateHistory, StateHistoryStore},
@@ -244,6 +244,15 @@ impl EpochsState {
                                     .get_total_blocks_minted_by_pools(vrf_key_hashes),
                             },
                         )
+                    }
+
+                    EpochsStateQuery::GetBlocksMintedInfoByPool { vrf_key_hash } => {
+                        let (total_blocks_minted, epoch_blocks_minted) =
+                            state.get_blocks_minted_data_by_pool(vrf_key_hash);
+                        EpochsStateQueryResponse::BlocksMintedInfoByPool(BlocksMintedInfoByPool {
+                            total_blocks_minted,
+                            epoch_blocks_minted,
+                        })
                     }
 
                     EpochsStateQuery::GetBlockHashesByPool { vrf_key_hash } => {

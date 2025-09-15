@@ -449,6 +449,24 @@ impl AccountsState {
                         }
                     }
 
+                    AccountsStateQuery::GetOptimalPoolSizing => {
+                        let optimal_pool_sizing = state.get_optimal_pool_sizing();
+                        match optimal_pool_sizing {
+                            Some(optimal_pool_sizing) => {
+                                AccountsStateQueryResponse::OptimalPoolSizing(optimal_pool_sizing)
+                            }
+                            _ => {
+                                AccountsStateQueryResponse::Error("Not Shelly Era yet".to_string())
+                            }
+                        }
+                    }
+
+                    AccountsStateQuery::GetPoolLiveStakeInfo { pool_operator } => {
+                        AccountsStateQueryResponse::PoolLiveStakeInfo(
+                            state.get_pool_live_stake_info(pool_operator),
+                        )
+                    }
+
                     AccountsStateQuery::GetPoolsLiveStakes { pools_operators } => {
                         AccountsStateQueryResponse::PoolsLiveStakes(PoolsLiveStakes {
                             live_stakes: state.get_pools_live_stakes(pools_operators),
@@ -469,6 +487,24 @@ impl AccountsState {
                             "Error retrieving DRep delegations map".to_string(),
                         ),
                     },
+
+                    AccountsStateQuery::GetAccountsUtxoValuesMap { stake_keys } => {
+                        match state.get_accounts_utxo_values_map(stake_keys) {
+                            Some(map) => AccountsStateQueryResponse::AccountsUtxoValuesMap(map),
+                            None => AccountsStateQueryResponse::Error(
+                                "One or more accounts not found".to_string(),
+                            ),
+                        }
+                    }
+
+                    AccountsStateQuery::GetAccountsUtxoValuesSum { stake_keys } => {
+                        match state.get_accounts_utxo_values_sum(stake_keys) {
+                            Some(sum) => AccountsStateQueryResponse::AccountsUtxoValuesSum(sum),
+                            None => AccountsStateQueryResponse::Error(
+                                "One or more accounts not found".to_string(),
+                            ),
+                        }
+                    }
 
                     AccountsStateQuery::GetAccountsBalancesMap { stake_keys } => {
                         match state.get_accounts_balances_map(stake_keys) {
