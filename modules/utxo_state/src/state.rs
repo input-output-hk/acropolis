@@ -409,7 +409,7 @@ impl State {
 mod tests {
     use super::*;
     use crate::InMemoryImmutableUTXOStore;
-    use acropolis_common::{ByronAddress, Era, NativeAsset, Value};
+    use acropolis_common::{AssetName, ByronAddress, Era, NativeAsset, Value};
     use config::Config;
     use tokio::sync::Mutex;
 
@@ -462,11 +462,11 @@ mod tests {
                     [1u8; 28],
                     vec![
                         NativeAsset {
-                            name: b"TEST".to_vec(),
+                            name: AssetName::new(b"TEST").unwrap(),
                             amount: 100,
                         },
                         NativeAsset {
-                            name: b"FOO".to_vec(),
+                            name: AssetName::new(b"FOO").unwrap(),
                             amount: 200,
                         },
                     ],
@@ -493,8 +493,12 @@ mod tests {
                 assert_eq!([1u8; 28], *policy_id);
                 assert_eq!(2, assets.len());
 
-                assert!(assets.iter().any(|a| a.name == b"TEST".to_vec() && a.amount == 100));
-                assert!(assets.iter().any(|a| a.name == b"FOO".to_vec() && a.amount == 200));
+                assert!(assets
+                    .iter()
+                    .any(|a| a.name == AssetName::new(b"TEST").unwrap() && a.amount == 100));
+                assert!(assets
+                    .iter()
+                    .any(|a| a.name == AssetName::new(b"FOO").unwrap() && a.amount == 200));
             }
 
             _ => panic!("UTXO not found"),
@@ -514,11 +518,11 @@ mod tests {
                     [1u8; 28],
                     vec![
                         NativeAsset {
-                            name: b"TEST".to_vec(),
+                            name: AssetName::new(b"TEST").unwrap(),
                             amount: 100,
                         },
                         NativeAsset {
-                            name: b"FOO".to_vec(),
+                            name: AssetName::new(b"FOO").unwrap(),
                             amount: 200,
                         },
                     ],
@@ -555,11 +559,11 @@ mod tests {
                     [1u8; 28],
                     vec![
                         NativeAsset {
-                            name: b"TEST".to_vec(),
+                            name: AssetName::new(b"TEST").unwrap(),
                             amount: 100,
                         },
                         NativeAsset {
-                            name: b"FOO".to_vec(),
+                            name: AssetName::new(b"FOO").unwrap(),
                             amount: 200,
                         },
                     ],
@@ -595,11 +599,11 @@ mod tests {
                     [1u8; 28],
                     vec![
                         NativeAsset {
-                            name: b"TEST".to_vec(),
+                            name: AssetName::new(b"TEST").unwrap(),
                             amount: 100,
                         },
                         NativeAsset {
-                            name: b"FOO".to_vec(),
+                            name: AssetName::new(b"FOO").unwrap(),
                             amount: 200,
                         },
                     ],
@@ -647,11 +651,11 @@ mod tests {
                     [1u8; 28],
                     vec![
                         NativeAsset {
-                            name: b"TEST".to_vec(),
+                            name: AssetName::new(b"TEST").unwrap(),
                             amount: 100,
                         },
                         NativeAsset {
-                            name: b"FOO".to_vec(),
+                            name: AssetName::new(b"FOO").unwrap(),
                             amount: 200,
                         },
                     ],
@@ -694,11 +698,11 @@ mod tests {
                     [1u8; 28],
                     vec![
                         NativeAsset {
-                            name: b"TEST".to_vec(),
+                            name: AssetName::new(b"TEST").unwrap(),
                             amount: 100,
                         },
                         NativeAsset {
-                            name: b"FOO".to_vec(),
+                            name: AssetName::new(b"FOO").unwrap(),
                             amount: 200,
                         },
                     ],
@@ -739,7 +743,7 @@ mod tests {
 
     struct TestDeltaObserver {
         balance: Mutex<i64>,
-        asset_balances: Mutex<HashMap<([u8; 28], Vec<u8>), i64>>,
+        asset_balances: Mutex<HashMap<([u8; 28], AssetName), i64>>,
     }
 
     impl TestDeltaObserver {
@@ -769,9 +773,9 @@ mod tests {
                 assert_eq!([1u8; 28], *policy);
                 for asset in assets {
                     assert!(
-                        (asset.name == b"TEST".to_vec()
+                        (asset.name == AssetName::new(b"TEST").unwrap()
                             && (asset.amount == 100 || asset.amount == -100))
-                            || (asset.name == b"FOO".to_vec()
+                            || (asset.name == AssetName::new(b"FOO").unwrap()
                                 && (asset.amount == 200 || asset.amount == -200))
                     );
                     let key = (*policy, asset.name.clone());
@@ -799,11 +803,11 @@ mod tests {
                     [1u8; 28],
                     vec![
                         NativeAsset {
-                            name: b"TEST".to_vec(),
+                            name: AssetName::new(b"TEST").unwrap(),
                             amount: 100,
                         },
                         NativeAsset {
-                            name: b"FOO".to_vec(),
+                            name: AssetName::new(b"FOO").unwrap(),
                             amount: 200,
                         },
                     ],
@@ -828,8 +832,14 @@ mod tests {
         assert_eq!(0, state.count_valid_utxos().await);
         assert_eq!(0, *observer.balance.lock().await);
         let ab = observer.asset_balances.lock().await;
-        assert_eq!(*ab.get(&([1u8; 28], b"TEST".to_vec())).unwrap(), 0);
-        assert_eq!(*ab.get(&([1u8; 28], b"FOO".to_vec())).unwrap(), 0);
+        assert_eq!(
+            *ab.get(&([1u8; 28], AssetName::new(b"TEST").unwrap())).unwrap(),
+            0
+        );
+        assert_eq!(
+            *ab.get(&([1u8; 28], AssetName::new(b"FOO").unwrap())).unwrap(),
+            0
+        );
     }
 
     #[tokio::test]
@@ -848,11 +858,11 @@ mod tests {
                     [1u8; 28],
                     vec![
                         NativeAsset {
-                            name: b"TEST".to_vec(),
+                            name: AssetName::new(b"TEST").unwrap(),
                             amount: 100,
                         },
                         NativeAsset {
-                            name: b"FOO".to_vec(),
+                            name: AssetName::new(b"FOO").unwrap(),
                             amount: 200,
                         },
                     ],
@@ -875,8 +885,14 @@ mod tests {
         assert_eq!(0, *observer.balance.lock().await);
 
         let ab = observer.asset_balances.lock().await;
-        assert_eq!(*ab.get(&([1u8; 28], b"TEST".to_vec())).unwrap(), 0);
-        assert_eq!(*ab.get(&([1u8; 28], b"FOO".to_vec())).unwrap(), 0);
+        assert_eq!(
+            *ab.get(&([1u8; 28], AssetName::new(b"TEST").unwrap())).unwrap(),
+            0
+        );
+        assert_eq!(
+            *ab.get(&([1u8; 28], AssetName::new(b"FOO").unwrap())).unwrap(),
+            0
+        );
     }
 
     #[tokio::test]
@@ -896,11 +912,11 @@ mod tests {
                     [1u8; 28],
                     vec![
                         NativeAsset {
-                            name: b"TEST".to_vec(),
+                            name: AssetName::new(b"TEST").unwrap(),
                             amount: 100,
                         },
                         NativeAsset {
-                            name: b"FOO".to_vec(),
+                            name: AssetName::new(b"FOO").unwrap(),
                             amount: 200,
                         },
                     ],
@@ -938,7 +954,13 @@ mod tests {
         assert_eq!(42, *observer.balance.lock().await);
 
         let ab = observer.asset_balances.lock().await;
-        assert_eq!(*ab.get(&([1u8; 28], b"TEST".to_vec())).unwrap(), 100);
-        assert_eq!(*ab.get(&([1u8; 28], b"FOO".to_vec())).unwrap(), 200);
+        assert_eq!(
+            *ab.get(&([1u8; 28], AssetName::new(b"TEST").unwrap())).unwrap(),
+            100
+        );
+        assert_eq!(
+            *ab.get(&([1u8; 28], AssetName::new(b"FOO").unwrap())).unwrap(),
+            200
+        );
     }
 }
