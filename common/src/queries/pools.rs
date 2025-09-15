@@ -100,7 +100,9 @@ pub struct PoolRelays {
     pub relays: Vec<Relay>,
 }
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PoolDelegators {}
+pub struct PoolDelegators {
+    pub delegators: Vec<(KeyHash, u64)>,
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PoolBlocks {}
