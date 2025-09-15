@@ -3,7 +3,17 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct AssetId(pub u32);
+pub struct AssetId(pub usize);
+
+impl AssetId {
+    pub fn new(index: usize) -> Self {
+        AssetId(index)
+    }
+
+    pub fn index(self) -> usize {
+        self.0
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AssetKey {
@@ -33,7 +43,7 @@ impl AssetRegistry {
         if let Some(&id) = self.key_to_id.get(&key) {
             id
         } else {
-            let id = AssetId(self.id_to_key.len() as u32);
+            let id = AssetId::new(self.id_to_key.len());
             self.id_to_key.push(key.clone());
             self.key_to_id.insert(key, id);
             id
@@ -49,6 +59,6 @@ impl AssetRegistry {
     }
 
     pub fn lookup(&self, id: AssetId) -> Option<&AssetKey> {
-        self.id_to_key.get(id.0 as usize)
+        self.id_to_key.get(id.index())
     }
 }

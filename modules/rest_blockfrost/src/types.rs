@@ -2,7 +2,10 @@ use crate::cost_models::{PLUTUS_V1, PLUTUS_V2, PLUTUS_V3};
 use acropolis_common::{
     messages::EpochActivityMessage,
     protocol_params::{Nonce, NonceVariant, ProtocolParams},
-    queries::governance::DRepActionUpdate,
+    queries::{
+        assets::{MintRecord, PolicyAsset},
+        governance::DRepActionUpdate,
+    },
     rest_helper::ToCheckedF64,
     PoolEpochState, Relay, Vote,
 };
@@ -612,5 +615,49 @@ impl ProtocolParamsRestExt for ProtocolParams {
         }
 
         Value::Object(map)
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct MintRecordRest {
+    tx_hash: String,
+    amount: String,
+    action: String,
+}
+
+impl From<&MintRecord> for MintRecordRest {
+    fn from(record: &MintRecord) -> Self {
+        let action = if !record.burn {
+            "minted".to_string()
+        } else {
+            "burned".to_string()
+        };
+
+        MintRecordRest {
+            tx_hash: hex::encode(record.tx_hash.as_ref()),
+            amount: record.amount.to_string(),
+            action,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct PolicyAssetRest {
+    asset: String,
+    quantity: String,
+}
+
+impl From<&PolicyAsset> for PolicyAssetRest {
+    fn from(asset: &PolicyAsset) -> Self {
+        let asset_hex = format!(
+            "{}{}",
+            hex::encode(asset.policy),
+            hex::encode(asset.name.as_slice())
+        );
+
+        PolicyAssetRest {
+            asset: asset_hex,
+            quantity: asset.quantity.to_string(),
+        }
     }
 }
