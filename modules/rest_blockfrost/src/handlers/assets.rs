@@ -11,7 +11,10 @@ use caryatid_sdk::Context;
 use hex::FromHex;
 use std::sync::Arc;
 
-use crate::handlers_config::HandlersConfig;
+use crate::{
+    handlers_config::HandlersConfig,
+    types::{MintRecordRest, PolicyAssetRest},
+};
 
 pub async fn handle_assets_list_blockfrost(
     context: Arc<Context<Message>>,
@@ -29,20 +32,22 @@ pub async fn handle_assets_list_blockfrost(
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Assets(
                 AssetsStateQueryResponse::AssetsList(assets),
-            )) => Ok(assets),
+            )) => {
+                let rest_assets: Vec<PolicyAssetRest> = assets.iter().map(Into::into).collect();
+                serde_json::to_string_pretty(&rest_assets)
+                    .map(|json| RESTResponse::with_json(200, &json))
+                    .map_err(|e| anyhow::anyhow!("Failed to serialize assets list: {e}"))
+            }
             _ => Err(anyhow::anyhow!(
                 "Unexpected response while retrieving assets list",
             )),
         },
     )
-    .await?;
+    .await;
 
-    match serde_json::to_string_pretty(&response) {
-        Ok(json) => Ok(RESTResponse::with_json(200, &json)),
-        Err(e) => Ok(RESTResponse::with_text(
-            500,
-            &format!("Failed to serialize assets list: {e}"),
-        )),
+    match response {
+        Ok(rest) => Ok(rest),
+        Err(e) => Ok(RESTResponse::with_text(500, &format!("Query failed: {e}"))),
     }
 }
 
@@ -75,13 +80,17 @@ pub async fn handle_asset_history_blockfrost(
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Assets(
                 AssetsStateQueryResponse::AssetHistory(history),
-            )) => match serde_json::to_string_pretty(&history) {
-                Ok(json) => Ok(RESTResponse::with_json(200, &json)),
-                Err(e) => Ok(RESTResponse::with_text(
-                    500,
-                    &format!("Failed to serialize asset history: {e}"),
-                )),
-            },
+            )) => {
+                let rest_history: Vec<MintRecordRest> =
+                    history.iter().map(MintRecordRest::from).collect();
+                match serde_json::to_string_pretty(&rest_history) {
+                    Ok(json) => Ok(RESTResponse::with_json(200, &json)),
+                    Err(e) => Ok(RESTResponse::with_text(
+                        500,
+                        &format!("Failed to serialize asset history: {e}"),
+                    )),
+                }
+            }
             Message::StateQueryResponse(StateQueryResponse::Assets(
                 AssetsStateQueryResponse::NotFound,
             )) => Ok(RESTResponse::with_text(404, "Asset history not found")),
@@ -145,9 +154,12 @@ pub async fn handle_policy_assets_blockfrost(
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Assets(
                 AssetsStateQueryResponse::PolicyIdAssets(assets),
-            )) => serde_json::to_string_pretty(&assets)
-                .map(|json| RESTResponse::with_json(200, &json))
-                .map_err(|e| anyhow::anyhow!("Failed to serialize assets list: {e}")),
+            )) => {
+                let rest_assets: Vec<PolicyAssetRest> = assets.iter().map(Into::into).collect();
+                serde_json::to_string_pretty(&rest_assets)
+                    .map(|json| RESTResponse::with_json(200, &json))
+                    .map_err(|e| anyhow::anyhow!("Failed to serialize assets list: {e}"))
+            }
             Message::StateQueryResponse(StateQueryResponse::Assets(
                 AssetsStateQueryResponse::NotFound,
             )) => Ok(RESTResponse::with_text(404, "Policy assets not found")),
