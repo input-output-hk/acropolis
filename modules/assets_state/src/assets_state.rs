@@ -115,17 +115,13 @@ impl AssetsState {
                         CardanoMessage::UTXODeltas(utxo_deltas_msg),
                     )) => {
                         Self::check_sync(&current_block, block_info, "utxo");
-                        let span =
-                            info_span!("assets_state.handle_utxo", block = block_info.number);
-                        let _enter = span.enter();
 
                         let mut reg = registry.lock().await;
-
                         state =
                             match state.handle_cip68_metadata(&utxo_deltas_msg.deltas, &mut *reg) {
                                 Ok(new_state) => new_state,
                                 Err(e) => {
-                                    info!("CIP-68 metadata handling error: {e:#}");
+                                    error!("CIP-68 metadata handling error: {e:#}");
                                     state
                                 }
                             };
@@ -134,8 +130,11 @@ impl AssetsState {
                 }
             }
 
-            // Commit state at the end of the block
-            history.lock().await.commit(current_block.number, state);
+            // Commit state
+            {
+                let mut h = history.lock().await;
+                h.commit(current_block.number, state);
+            }
         }
     }
 
@@ -181,13 +180,14 @@ impl AssetsState {
             get_string_flag(&config, DEFAULT_ASSET_DELTAS_SUBSCRIBE_TOPIC);
         info!("Creating subscriber on '{asset_deltas_subscribe_topic}'");
 
-        let mut utxo_deltas_subscribe_topic = String::new();
-        if storage_config.store_info {
-            utxo_deltas_subscribe_topic =
-                get_string_flag(&config, DEFAULT_UTXO_DELTAS_SUBSCRIBE_TOPIC);
-            info!("Creating subscriber on '{utxo_deltas_subscribe_topic}'");
-        }
-
+        let utxo_deltas_subscribe_topic: Option<String> =
+            if storage_config.store_info || storage_config.store_transactions {
+                let topic = get_string_flag(&config, DEFAULT_UTXO_DELTAS_SUBSCRIBE_TOPIC);
+                info!("Creating subscriber on '{topic}'");
+                Some(topic)
+            } else {
+                None
+            };
         let assets_query_topic = get_string_flag(&config, DEFAULT_ASSETS_QUERY_TOPIC);
         info!("Creating asset query handler on '{assets_query_topic}'");
 
@@ -350,8 +350,8 @@ impl AssetsState {
 
         // Subscribe to enabled topics
         let asset_deltas_sub = context.subscribe(&asset_deltas_subscribe_topic).await?;
-        let utxo_deltas_sub = if storage_config.store_info || storage_config.store_transactions {
-            Some(context.subscribe(&utxo_deltas_subscribe_topic).await?)
+        let utxo_deltas_sub = if let Some(topic) = &utxo_deltas_subscribe_topic {
+            Some(context.subscribe(topic).await?)
         } else {
             None
         };
