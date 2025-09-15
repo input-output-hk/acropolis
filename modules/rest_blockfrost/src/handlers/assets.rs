@@ -1,3 +1,7 @@
+use crate::{
+    handlers_config::HandlersConfig,
+    types::{AssetInfoRest, AssetMetadata, AssetMintRecordRest, PolicyAssetRest},
+};
 use acropolis_common::{
     messages::{Message, RESTResponse, StateQuery, StateQueryResponse},
     queries::{
@@ -13,11 +17,8 @@ use caryatid_sdk::Context;
 use hex::FromHex;
 use reqwest::Client;
 use serde_cbor::Value as CborValue;
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::sync::Arc;
-use tracing::info;
-
-use crate::{handlers_config::HandlersConfig, types::AssetInfoRest};
 
 pub async fn handle_assets_list_blockfrost(
     context: Arc<Context<Message>>,
@@ -35,20 +36,29 @@ pub async fn handle_assets_list_blockfrost(
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Assets(
                 AssetsStateQueryResponse::AssetsList(assets),
-            )) => Ok(assets),
-            _ => Err(anyhow::anyhow!(
-                "Unexpected response while retrieving assets list",
+            )) => {
+                let rest_assets: Vec<PolicyAssetRest> = assets.iter().map(Into::into).collect();
+                serde_json::to_string_pretty(&rest_assets)
+                    .map(|json| RESTResponse::with_json(200, &json))
+                    .map_err(|e| anyhow::anyhow!("Failed to serialize assets list: {e}"))
+            }
+            Message::StateQueryResponse(StateQueryResponse::Assets(
+                AssetsStateQueryResponse::Error(_),
+            )) => Ok(RESTResponse::with_text(
+                500,
+                "Asset storage is disabled in config",
+            )),
+            _ => Ok(RESTResponse::with_text(
+                500,
+                "Unexpected response while retrieving asset list",
             )),
         },
     )
-    .await?;
+    .await;
 
-    match serde_json::to_string_pretty(&response) {
-        Ok(json) => Ok(RESTResponse::with_json(200, &json)),
-        Err(e) => Ok(RESTResponse::with_text(
-            500,
-            &format!("Failed to serialize assets list: {e}"),
-        )),
+    match response {
+        Ok(rest) => Ok(rest),
+        Err(e) => Ok(RESTResponse::with_text(500, &format!("Query failed: {e}"))),
     }
 }
 
@@ -92,16 +102,6 @@ pub async fn handle_asset_single_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Assets(
                 AssetsStateQueryResponse::AssetInfo((quantity, info)),
             )) => {
-                if let Some(raw) = info.onchain_metadata.as_ref() {
-                    info!(
-                        "Raw onchain_metadata (len={}): {}",
-                        raw.len(),
-                        hex::encode(raw.as_slice())
-                    );
-                } else {
-                    info!("Raw onchain_metadata: None");
-                }
-
                 let (onchain_metadata_json, onchain_metadata_extra, cip68_version) = info
                     .onchain_metadata
                     .as_ref()
@@ -172,13 +172,17 @@ pub async fn handle_asset_history_blockfrost(
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Assets(
                 AssetsStateQueryResponse::AssetHistory(history),
-            )) => match serde_json::to_string_pretty(&history) {
-                Ok(json) => Ok(RESTResponse::with_json(200, &json)),
-                Err(e) => Ok(RESTResponse::with_text(
-                    500,
-                    &format!("Failed to serialize asset history: {e}"),
-                )),
-            },
+            )) => {
+                let rest_history: Vec<AssetMintRecordRest> =
+                    history.iter().map(Into::into).collect();
+                match serde_json::to_string_pretty(&rest_history) {
+                    Ok(json) => Ok(RESTResponse::with_json(200, &json)),
+                    Err(e) => Ok(RESTResponse::with_text(
+                        500,
+                        &format!("Failed to serialize asset history: {e}"),
+                    )),
+                }
+            }
             Message::StateQueryResponse(StateQueryResponse::Assets(
                 AssetsStateQueryResponse::NotFound,
             )) => Ok(RESTResponse::with_text(404, "Asset history not found")),
@@ -242,9 +246,12 @@ pub async fn handle_policy_assets_blockfrost(
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Assets(
                 AssetsStateQueryResponse::PolicyIdAssets(assets),
-            )) => serde_json::to_string_pretty(&assets)
-                .map(|json| RESTResponse::with_json(200, &json))
-                .map_err(|e| anyhow::anyhow!("Failed to serialize assets list: {e}")),
+            )) => {
+                let rest_assets: Vec<PolicyAssetRest> = assets.iter().map(Into::into).collect();
+                serde_json::to_string_pretty(&rest_assets)
+                    .map(|json| RESTResponse::with_json(200, &json))
+                    .map_err(|e| anyhow::anyhow!("Failed to serialize assets list: {e}"))
+            }
             Message::StateQueryResponse(StateQueryResponse::Assets(
                 AssetsStateQueryResponse::NotFound,
             )) => Ok(RESTResponse::with_text(404, "Policy assets not found")),
@@ -301,7 +308,7 @@ fn split_policy_and_asset(hex_str: &str) -> Result<(PolicyId, AssetName), RESTRe
     Ok((policy_id, asset_name))
 }
 
-pub async fn fetch_asset_metadata(asset: &str) -> Option<Value> {
+pub async fn fetch_asset_metadata(asset: &str) -> Option<AssetMetadata> {
     let url = format!(
         "https://raw.githubusercontent.com/cardano-foundation/cardano-token-registry/master/mappings/{}.json",
         asset
@@ -309,23 +316,37 @@ pub async fn fetch_asset_metadata(asset: &str) -> Option<Value> {
 
     let client = Client::new();
     let res = client.get(&url).send().await.ok()?;
-
     if !res.status().is_success() {
         return None;
     }
 
     let raw: Value = res.json().await.ok()?;
 
-    let output = json!({
-        "name": raw.get("name").and_then(|f| f.get("value")),
-        "ticker": raw.get("ticker").and_then(|f| f.get("value")),
-        "decimals": raw.get("decimals").and_then(|f| f.get("value")),
-        "description": raw.get("description").and_then(|f| f.get("value")),
-        "logo": raw.get("logo").and_then(|f| f.get("value")),
-        "url": raw.get("url").and_then(|f| f.get("value")),
-    });
+    // Name and description are required
+    let get_str = |key: &str| {
+        raw.get(key).and_then(|f| f.get("value")).and_then(|v| v.as_str()).map(|s| s.to_string())
+    };
+    let name = get_str("name")?;
+    let description = get_str("description")?;
 
-    Some(output)
+    // Remaining fields are optional
+    let ticker = get_str("ticker");
+    let url = get_str("url");
+    let logo = get_str("logo");
+    let decimals = raw
+        .get("decimals")
+        .and_then(|f| f.get("value"))
+        .and_then(|v| v.as_u64())
+        .and_then(|n| u8::try_from(n).ok());
+
+    Some(AssetMetadata {
+        name,
+        description,
+        ticker,
+        url,
+        logo,
+        decimals,
+    })
 }
 
 /// Normalize on-chain metadata for CIP-25 and CIP-68.
@@ -375,7 +396,7 @@ pub fn normalize_onchain_metadata(
             let extra_hex = serde_cbor::to_vec(&extra)
                 .ok()
                 .map(hex::encode)
-                .filter(|val| val != "80" && val != "f6");
+                .filter(|val| !matches!(val.as_str(), "80" | "f6"));
             (json_meta, extra_hex, version)
         }
 
@@ -420,5 +441,58 @@ fn cbor_to_json(val: CborValue) -> Value {
             Value::Object(obj)
         }
         _ => Value::Null,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::handlers::assets::split_policy_and_asset;
+    use hex;
+
+    fn policy_bytes() -> [u8; 28] {
+        [0u8; 28]
+    }
+
+    #[test]
+    fn invalid_hex_string() {
+        let result = split_policy_and_asset("zzzz");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.code, 400);
+        assert_eq!(err.body, "Invalid hex string");
+    }
+
+    #[test]
+    fn too_short_input() {
+        let hex_str = hex::encode([1u8, 2, 3]);
+        let result = split_policy_and_asset(&hex_str);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.code, 400);
+        assert_eq!(err.body, "Asset identifier must be at least 28 bytes");
+    }
+
+    #[test]
+    fn invalid_asset_name_too_long() {
+        let mut bytes = policy_bytes().to_vec();
+        bytes.extend(vec![0u8; 33]);
+        let hex_str = hex::encode(bytes);
+        let result = split_policy_and_asset(&hex_str);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.code, 400);
+        assert_eq!(err.body, "Asset name must be less than 32 bytes");
+    }
+
+    #[test]
+    fn valid_policy_and_asset() {
+        let mut bytes = policy_bytes().to_vec();
+        bytes.extend_from_slice(b"MyToken");
+        let hex_str = hex::encode(bytes);
+        let result = split_policy_and_asset(&hex_str);
+        assert!(result.is_ok());
+        let (policy, name) = result.unwrap();
+        assert_eq!(policy, policy_bytes());
+        assert_eq!(name.as_slice(), b"MyToken");
     }
 }

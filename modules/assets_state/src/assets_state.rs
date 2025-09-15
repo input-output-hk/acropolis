@@ -2,6 +2,10 @@
 //! Accepts native asset mint and burn events for supply and mint history tracking
 //! as well as utxo delta events for CIP68 metadata and asset transactions tracking
 
+use crate::{
+    asset_registry::AssetRegistry,
+    state::{AssetsStorageConfig, State},
+};
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::assets::{AssetsStateQuery, AssetsStateQueryResponse, DEFAULT_ASSETS_QUERY_TOPIC},
@@ -14,11 +18,6 @@ use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, info_span, Instrument};
-
-use crate::{
-    asset_registry::AssetRegistry,
-    state::{AssetsStorageConfig, State},
-};
 pub mod asset_registry;
 mod state;
 
@@ -75,7 +74,7 @@ impl AssetsState {
                     }
                     current_block = block_info.clone();
 
-                    // Always handle the mint deltas (This how assets get initialized)
+                    // Always handle the mint deltas (This is how assets get initialized)
                     {
                         let mut reg = registry.lock().await;
                         state = match state.handle_mint_deltas(&deltas_msg.deltas, &mut *reg) {
@@ -235,7 +234,15 @@ impl AssetsState {
                                 Ok(None) => AssetsStateQueryResponse::NotFound,
                                 Err(e) => AssetsStateQueryResponse::Error(e.to_string()),
                             },
-                            None => AssetsStateQueryResponse::NotFound,
+                            None => {
+                                if state.config.store_info {
+                                    AssetsStateQueryResponse::NotFound
+                                } else {
+                                    AssetsStateQueryResponse::Error(
+                                        "asset info storage disabled in config".to_string(),
+                                    )
+                                }
+                            }
                         }
                     }
                     AssetsStateQuery::GetAssetHistory { policy, name } => {
@@ -248,7 +255,15 @@ impl AssetsState {
                                 Ok(None) => AssetsStateQueryResponse::NotFound,
                                 Err(e) => AssetsStateQueryResponse::Error(e.to_string()),
                             },
-                            None => AssetsStateQueryResponse::NotFound,
+                            None => {
+                                if state.config.store_history {
+                                    AssetsStateQueryResponse::NotFound
+                                } else {
+                                    AssetsStateQueryResponse::Error(
+                                        "asset history storage disabled in config".to_string(),
+                                    )
+                                }
+                            }
                         }
                     }
                     AssetsStateQuery::GetAssetAddresses { policy, name } => {
@@ -261,7 +276,15 @@ impl AssetsState {
                                 Ok(None) => AssetsStateQueryResponse::NotFound,
                                 Err(e) => AssetsStateQueryResponse::Error(e.to_string()),
                             },
-                            None => AssetsStateQueryResponse::NotFound,
+                            None => {
+                                if state.config.store_addresses {
+                                    AssetsStateQueryResponse::NotFound
+                                } else {
+                                    AssetsStateQueryResponse::Error(
+                                        "asset addresses storage disabled in config".to_string(),
+                                    )
+                                }
+                            }
                         }
                     }
                     AssetsStateQuery::GetAssetTransactions { policy, name } => {
@@ -272,7 +295,15 @@ impl AssetsState {
                                 Ok(None) => AssetsStateQueryResponse::NotFound,
                                 Err(e) => AssetsStateQueryResponse::Error(e.to_string()),
                             },
-                            None => AssetsStateQueryResponse::NotFound,
+                            None => {
+                                if state.config.store_transactions {
+                                    AssetsStateQueryResponse::NotFound
+                                } else {
+                                    AssetsStateQueryResponse::Error(
+                                        "asset transactions storage disabled in config".to_string(),
+                                    )
+                                }
+                            }
                         }
                     }
                     AssetsStateQuery::GetPolicyIdAssets { policy } => {
