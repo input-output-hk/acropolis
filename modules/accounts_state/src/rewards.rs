@@ -219,8 +219,6 @@ fn calculate_spo_rewards(
     pay_to_pool_reward_account: bool,
     previous_epoch_deregistrations: &HashSet<KeyHash>,
 ) -> Vec<RewardDetail> {
-    // Actual blocks produced as proportion of epoch (Beta)
-    let relative_blocks = BigDecimal::from(blocks_produced) / BigDecimal::from(total_blocks as u64);
 
     // Active stake (sigma)
     let pool_stake = BigDecimal::from(spo.total_stake);
@@ -269,18 +267,23 @@ fn calculate_spo_rewards(
     // If decentralisation_param >= 0.8 => performance = 1
     // Shelley Delegation Spec 3.8.3
     let decentralisation = &params.protocol_params.decentralisation_param;
-    let relative_active_stake = &pool_stake / total_active_stake;
     let pool_performance = if decentralisation >= &RationalNumber::new(8, 10) {
         BigDecimal::one()
     } else {
+        let relative_active_stake = &pool_stake / total_active_stake;
+        let relative_blocks = BigDecimal::from(blocks_produced)  // Beta
+            / BigDecimal::from(total_blocks as u64);
+
+        info!(blocks_produced, %relative_blocks, %pool_stake, %relative_active_stake,
+              "Pool performance calc:");
         &relative_blocks / &relative_active_stake
     };
 
     // Get actual pool rewards
     let pool_rewards = (&optimum_rewards * &pool_performance).with_scale(0);
 
-    info!(blocks=blocks_produced, %pool_stake, %relative_pool_stake, %relative_blocks,
-           %pool_performance, %optimum_rewards, %pool_rewards, pool_owner_stake, %pool_pledge,
+    info!(%pool_stake, %relative_pool_stake, %pool_performance,
+          %optimum_rewards, %pool_rewards, pool_owner_stake, %pool_pledge,
            "Pool {}", hex::encode(&operator_id));
 
     // Subtract fixed costs
@@ -306,9 +309,10 @@ fn calculate_spo_rewards(
         // Pay the delegators - split remainder in proportional to delegated stake,
         // * as it was 2 epochs ago *
 
-        // You'd think this was just pool_rewards-costs here, but the Haskell code recalculates
+        // You'd think this was just (pool_rewards - costs) here, but the Haskell code recalculates
         // the margin without the relative_owner_stake term !?
-        let to_delegators = (&pool_rewards - &fixed_cost) * (BigDecimal::one() - &margin); // Note keep frac part
+        // Note keeping fractional part, which is non-obvious
+        let to_delegators = (&pool_rewards - &fixed_cost) * (BigDecimal::one() - &margin);
         let mut total_paid: u64 = 0;
         let mut delegators_paid: usize = 0;
         if !to_delegators.is_zero() {
@@ -362,7 +366,7 @@ fn calculate_spo_rewards(
             }
         }
 
-        debug!(%fixed_cost, %margin_cost, leader_reward=%costs, %to_delegators, total_paid,
+        info!(%fixed_cost, %margin_cost, leader_reward=%costs, %to_delegators, total_paid,
                delegators_paid, "Reward split:");
 
         costs.to_u64().unwrap_or(0)
