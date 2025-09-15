@@ -1,5 +1,6 @@
 use crate::{
-    queries::governance::VoteRecord, rational_number::RationalNumber, KeyHash, PoolEpochState, PoolMetadata, PoolRegistration, PoolRetirement, PoolUpdateEvent, Relay
+    queries::governance::VoteRecord, rational_number::RationalNumber, KeyHash, PoolEpochState,
+    PoolMetadata, PoolRegistration, PoolRetirement, PoolUpdateEvent, Relay,
 };
 
 pub const DEFAULT_POOLS_QUERY_TOPIC: (&str, &str) =

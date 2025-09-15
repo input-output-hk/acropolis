@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{ DRepChoice, KeyHash};
+use crate::{DRepChoice, KeyHash};
 
 pub const DEFAULT_ACCOUNTS_QUERY_TOPIC: (&str, &str) =
     ("accounts-state-query-topic", "cardano.query.accounts");
