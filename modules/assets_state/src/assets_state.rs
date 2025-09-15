@@ -2,11 +2,15 @@
 //! Accepts native asset mint and burn events
 //! and derives the Asset State in memory
 
+use crate::{
+    asset_registry::AssetRegistry,
+    state::{AssetsStorageConfig, State},
+};
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::assets::{AssetsStateQuery, AssetsStateQueryResponse, DEFAULT_ASSETS_QUERY_TOPIC},
     state_history::{StateHistory, StateHistoryStore},
-    BlockStatus,
+    BlockInfo, BlockStatus,
 };
 use anyhow::Result;
 use caryatid_sdk::{module, Context, Module, Subscription};
@@ -14,11 +18,6 @@ use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, info_span, Instrument};
-
-use crate::{
-    asset_registry::AssetRegistry,
-    state::{AssetsStorageConfig, State},
-};
 pub mod asset_registry;
 mod state;
 
@@ -33,6 +32,7 @@ const DEFAULT_STORE_HISTORY: (&str, bool) = ("store-history", false);
 const DEFAULT_STORE_TRANSACTIONS: (&str, bool) = ("store-transactions", false);
 const DEFAULT_STORE_ADDRESSES: (&str, bool) = ("store-addresses", false);
 const DEFAULT_INDEX_BY_POLICY: (&str, bool) = ("index-by-policy", false);
+
 /// Assets State module
 #[module(
     message_type(Message),
@@ -44,51 +44,51 @@ pub struct AssetsState;
 impl AssetsState {
     async fn run(
         history: Arc<Mutex<StateHistory<State>>>,
-        mut deltas_subscription: Box<dyn Subscription<Message>>,
+        mut asset_deltas_subscription: Box<dyn Subscription<Message>>,
         storage_config: AssetsStorageConfig,
         registry: Arc<Mutex<AssetRegistry>>,
     ) -> Result<()> {
         // Main loop of synchronised messages
         loop {
-            match deltas_subscription.read().await?.1.as_ref() {
-                Message::Cardano((block, CardanoMessage::AssetDeltas(message))) => {
-                    let span = info_span!("assets_state.handle", number = block.number);
-                    async {
-                        // Get current state and current params
-                        let mut state = {
-                            let mut h = history.lock().await;
-                            h.get_or_init_with(|| State::new(storage_config.clone()))
-                        };
+            // Get current state snapshot
+            let mut state = {
+                let mut h = history.lock().await;
+                h.get_or_init_with(|| State::new(storage_config))
+            };
+            let current_block: BlockInfo;
 
-                        // Handle rollback if needed
-                        if block.status == BlockStatus::RolledBack {
-                            state = history.lock().await.get_rolled_back_state(block.number);
-                        }
-
-                        // Process mint deltas
-                        if storage_config.store_assets {
-                            let mut reg = registry.lock().await;
-                            state = match state.handle_mint_deltas(&message.deltas, &mut *reg) {
-                                Ok(new_state) => new_state,
-                                Err(e) => {
-                                    error!("Asset deltas handling error: {e:#}");
-                                    state
-                                }
-                            };
-                        }
-
-                        // Commit state
-                        {
-                            let mut h = history.lock().await;
-                            h.commit(block.number, state);
-                        }
-
-                        Ok::<(), anyhow::Error>(())
+            // Asset deltas are the synchroniser
+            let (_, asset_msg) = asset_deltas_subscription.read().await?;
+            match asset_msg.as_ref() {
+                Message::Cardano((ref block_info, CardanoMessage::AssetDeltas(deltas_msg))) => {
+                    // rollback only on asset deltas
+                    if block_info.status == BlockStatus::RolledBack {
+                        state = history.lock().await.get_rolled_back_state(block_info.number);
                     }
-                    .instrument(span)
-                    .await?;
+                    current_block = block_info.clone();
+
+                    // Always handle the mint deltas (This is how assets get initialized)
+                    {
+                        let mut reg = registry.lock().await;
+                        state = match state.handle_mint_deltas(&deltas_msg.deltas, &mut *reg) {
+                            Ok(new_state) => new_state,
+                            Err(e) => {
+                                error!("Asset deltas handling error: {e:#}");
+                                state
+                            }
+                        };
+                    }
                 }
-                msg => error!("Unexpected message {msg:?} for enact state topic"),
+                other => {
+                    error!("Unexpected message on asset-deltas subscription: {other:?}");
+                    continue;
+                }
+            }
+
+            // Commit state
+            {
+                let mut h = history.lock().await;
+                h.commit(current_block.number, state);
             }
         }
     }
@@ -148,7 +148,7 @@ impl AssetsState {
                 let reg = registry.lock().await;
 
                 let response = match query {
-                    AssetsStateQuery::GetAssetsList => match state.get_assets_list(&*reg) {
+                    AssetsStateQuery::GetAssetsList => match state.get_assets_list(&reg) {
                         Ok(list) => AssetsStateQueryResponse::AssetsList(list),
                         Err(e) => AssetsStateQueryResponse::Error(e.to_string()),
                     },
@@ -159,7 +159,15 @@ impl AssetsState {
                                 Ok(None) => AssetsStateQueryResponse::NotFound,
                                 Err(e) => AssetsStateQueryResponse::Error(e.to_string()),
                             },
-                            None => AssetsStateQueryResponse::NotFound,
+                            None => {
+                                if state.config.store_info {
+                                    AssetsStateQueryResponse::NotFound
+                                } else {
+                                    AssetsStateQueryResponse::Error(
+                                        "asset info storage disabled in config".to_string(),
+                                    )
+                                }
+                            }
                         }
                     }
                     AssetsStateQuery::GetAssetHistory { policy, name } => {
@@ -171,7 +179,15 @@ impl AssetsState {
                                 Ok(None) => AssetsStateQueryResponse::NotFound,
                                 Err(e) => AssetsStateQueryResponse::Error(e.to_string()),
                             },
-                            None => AssetsStateQueryResponse::NotFound,
+                            None => {
+                                if state.config.store_history {
+                                    AssetsStateQueryResponse::NotFound
+                                } else {
+                                    AssetsStateQueryResponse::Error(
+                                        "asset history storage disabled in config".to_string(),
+                                    )
+                                }
+                            }
                         }
                     }
                     AssetsStateQuery::GetAssetAddresses { policy, name } => {
@@ -183,7 +199,15 @@ impl AssetsState {
                                 Ok(None) => AssetsStateQueryResponse::NotFound,
                                 Err(e) => AssetsStateQueryResponse::Error(e.to_string()),
                             },
-                            None => AssetsStateQueryResponse::NotFound,
+                            None => {
+                                if state.config.store_addresses {
+                                    AssetsStateQueryResponse::NotFound
+                                } else {
+                                    AssetsStateQueryResponse::Error(
+                                        "asset addresses storage disabled in config".to_string(),
+                                    )
+                                }
+                            }
                         }
                     }
                     AssetsStateQuery::GetAssetTransactions { policy, name } => {
@@ -193,7 +217,15 @@ impl AssetsState {
                                 Ok(None) => AssetsStateQueryResponse::NotFound,
                                 Err(e) => AssetsStateQueryResponse::Error(e.to_string()),
                             },
-                            None => AssetsStateQueryResponse::NotFound,
+                            None => {
+                                if state.config.store_transactions {
+                                    AssetsStateQueryResponse::NotFound
+                                } else {
+                                    AssetsStateQueryResponse::Error(
+                                        "asset transactions storage disabled in config".to_string(),
+                                    )
+                                }
+                            }
                         }
                     }
                     AssetsStateQuery::GetPolicyIdAssets { policy } => {

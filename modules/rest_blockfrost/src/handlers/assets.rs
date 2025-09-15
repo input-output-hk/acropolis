@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use crate::{
     handlers_config::HandlersConfig,
-    types::{MintRecordRest, PolicyAssetRest},
+    types::{AssetMintRecordRest, PolicyAssetRest},
 };
 
 pub async fn handle_assets_list_blockfrost(
@@ -38,8 +38,15 @@ pub async fn handle_assets_list_blockfrost(
                     .map(|json| RESTResponse::with_json(200, &json))
                     .map_err(|e| anyhow::anyhow!("Failed to serialize assets list: {e}"))
             }
-            _ => Err(anyhow::anyhow!(
-                "Unexpected response while retrieving assets list",
+            Message::StateQueryResponse(StateQueryResponse::Assets(
+                AssetsStateQueryResponse::Error(_),
+            )) => Ok(RESTResponse::with_text(
+                500,
+                "Asset storage is disabled in config",
+            )),
+            _ => Ok(RESTResponse::with_text(
+                500,
+                "Unexpected response while retrieving asset list",
             )),
         },
     )
@@ -81,8 +88,8 @@ pub async fn handle_asset_history_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Assets(
                 AssetsStateQueryResponse::AssetHistory(history),
             )) => {
-                let rest_history: Vec<MintRecordRest> =
-                    history.iter().map(MintRecordRest::from).collect();
+                let rest_history: Vec<AssetMintRecordRest> =
+                    history.iter().map(Into::into).collect();
                 match serde_json::to_string_pretty(&rest_history) {
                     Ok(json) => Ok(RESTResponse::with_json(200, &json)),
                     Err(e) => Ok(RESTResponse::with_text(

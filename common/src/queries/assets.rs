@@ -5,7 +5,7 @@ pub const DEFAULT_ASSETS_QUERY_TOPIC: (&str, &str) =
 
 pub type AssetList = Vec<PolicyAsset>;
 pub type AssetInfo = (u64, AssetInfoRecord);
-pub type AssetHistory = Vec<MintRecord>;
+pub type AssetHistory = Vec<AssetMintRecord>;
 pub type AssetAddresses = Vec<(ShelleyAddress, u64)>;
 pub type AssetTransactions = Vec<TxHash>;
 pub type PolicyAssets = Vec<PolicyAsset>;
@@ -38,11 +38,10 @@ pub struct AssetInfoRecord {
     pub mint_or_burn_count: u64,
     pub onchain_metadata: Option<Vec<u8>>,
     pub metadata_standard: Option<AssetMetadataStandard>,
-    pub metadata_extra: Option<Vec<u8>>,
 }
 
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
-pub struct MintRecord {
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct AssetMintRecord {
     pub tx_hash: TxHash,
     pub amount: u64,
     pub burn: bool,

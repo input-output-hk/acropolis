@@ -3,7 +3,7 @@ use acropolis_common::{
     messages::EpochActivityMessage,
     protocol_params::{Nonce, NonceVariant, ProtocolParams},
     queries::{
-        assets::{MintRecord, PolicyAsset},
+        assets::{AssetMintRecord, PolicyAsset},
         governance::DRepActionUpdate,
     },
     rest_helper::ToCheckedF64,
@@ -619,21 +619,21 @@ impl ProtocolParamsRestExt for ProtocolParams {
 }
 
 #[derive(Debug, Serialize)]
-pub struct MintRecordRest {
+pub struct AssetMintRecordRest {
     tx_hash: String,
     amount: String,
     action: String,
 }
 
-impl From<&MintRecord> for MintRecordRest {
-    fn from(record: &MintRecord) -> Self {
+impl From<&AssetMintRecord> for AssetMintRecordRest {
+    fn from(record: &AssetMintRecord) -> Self {
         let action = if !record.burn {
             "minted".to_string()
         } else {
             "burned".to_string()
         };
 
-        MintRecordRest {
+        AssetMintRecordRest {
             tx_hash: hex::encode(record.tx_hash.as_ref()),
             amount: record.amount.to_string(),
             action,

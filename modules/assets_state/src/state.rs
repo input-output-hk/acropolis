@@ -2,14 +2,14 @@
 
 use crate::asset_registry::{AssetId, AssetRegistry};
 use acropolis_common::{
-    queries::assets::{AssetHistory, AssetInfoRecord, MintRecord, PolicyAsset, PolicyAssets},
+    queries::assets::{AssetHistory, AssetInfoRecord, AssetMintRecord, PolicyAsset, PolicyAssets},
     NativeAssetDelta, PolicyId, ShelleyAddress, TxHash,
 };
 use anyhow::Result;
 use imbl::{HashMap, Vector};
 use tracing::info;
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, Copy)]
 pub struct AssetsStorageConfig {
     pub store_assets: bool,
     pub store_info: bool,
@@ -17,13 +17,6 @@ pub struct AssetsStorageConfig {
     pub store_transactions: bool,
     pub store_addresses: bool,
     pub index_by_policy: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct AssetMintRecord {
-    pub tx_hash: TxHash,
-    pub amount: u64,
-    pub burn: bool,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -133,18 +126,11 @@ impl State {
             return Err(anyhow::anyhow!("asset history storage disabled in config"));
         }
 
-        let maybe_vec =
-            self.history.as_ref().and_then(|hist_map| hist_map.get(asset_id)).map(|v| {
-                v.iter()
-                    .map(|rec| MintRecord {
-                        tx_hash: rec.tx_hash.clone(),
-                        amount: rec.amount,
-                        burn: rec.burn,
-                    })
-                    .collect::<Vec<MintRecord>>()
-            });
-
-        Ok(maybe_vec)
+        Ok(self
+            .history
+            .as_ref()
+            .and_then(|hist_map| hist_map.get(asset_id))
+            .map(|v| v.iter().cloned().collect()))
     }
 
     pub fn get_asset_addresses(
@@ -183,6 +169,9 @@ impl State {
         policy_id: &PolicyId,
         registry: &AssetRegistry,
     ) -> Result<Option<PolicyAssets>> {
+        if !self.config.store_assets {
+            return Err(anyhow::anyhow!("asset storage is disabled in config"));
+        }
         if !self.config.index_by_policy {
             return Err(anyhow::anyhow!("policy index disabled in config"));
         }
@@ -245,73 +234,72 @@ impl State {
         let mut new_addresses = self.addresses.clone();
         let mut new_transactions = self.transactions.clone();
 
-        if let Some(supply) = new_supply.as_mut() {
-            for (tx_hash, tx_deltas) in deltas {
-                for (policy_id, asset_deltas) in tx_deltas {
-                    for delta in asset_deltas {
-                        let asset_id = registry.get_or_insert(*policy_id, delta.name.clone());
+        for (tx_hash, tx_deltas) in deltas {
+            for (policy_id, asset_deltas) in tx_deltas {
+                for delta in asset_deltas {
+                    let asset_id = registry.get_or_insert(*policy_id, delta.name.clone());
 
-                        // update supply
-                        let current = supply.get(&asset_id).copied().unwrap_or(0);
-                        let sum = (current as i128) + (delta.amount as i128);
+                    if let Some(supply) = new_supply.as_mut() {
+                        let delta_amount = delta.amount;
 
-                        let new_amt = u64::try_from(sum)
-                            .map_err(|_| anyhow::anyhow!("More asset burned than supply"))?;
-
-                        let existed = supply.insert(asset_id, new_amt).is_some();
-
-                        // update info if enabled
-                        if let Some(info_map) = new_info.as_mut() {
-                            if !existed {
-                                info_map.insert(
-                                    asset_id,
-                                    AssetInfoRecord {
-                                        initial_mint_tx_hash: tx_hash.clone(),
-                                        mint_or_burn_count: 1,
-                                        onchain_metadata: None,
-                                        metadata_standard: None,
-                                        metadata_extra: None,
-                                    },
-                                );
-                            } else if let Some(info) = info_map.get_mut(&asset_id) {
-                                info.mint_or_burn_count += 1;
+                        let new_amt = match supply.get(&asset_id) {
+                            Some(&current) => {
+                                let sum = (current as i128) + (delta_amount as i128);
+                                u64::try_from(sum).map_err(|_| {
+                                    anyhow::anyhow!("Burn amount is greater than asset supply")
+                                })?
                             }
-                        }
-
-                        // update policy index if enabled
-                        if !existed {
-                            if let Some(index) = new_index.as_mut() {
-                                index
-                                    .entry(*policy_id)
-                                    .or_insert_with(Vector::new)
-                                    .push_back(asset_id);
+                            None => {
+                                if delta_amount < 0 {
+                                    return Err(anyhow::anyhow!("First detected tx is a burn"));
+                                }
+                                delta_amount as u64
                             }
-                        }
+                        };
 
-                        // initialize addresses if enabled
-                        if !existed {
-                            if let Some(addr_map) = new_addresses.as_mut() {
-                                addr_map.insert(asset_id, Vector::new());
-                            }
-                        }
+                        supply.insert(asset_id, new_amt);
+                    }
 
-                        // initialize transactions if enabled
-                        if !existed {
-                            if let Some(tx_map) = new_transactions.as_mut() {
-                                tx_map.insert(asset_id, Vector::new());
-                            }
-                        }
+                    // update info if enabled
+                    if let Some(info_map) = new_info.as_mut() {
+                        info_map
+                            .entry(asset_id)
+                            .and_modify(|rec| rec.mint_or_burn_count += 1)
+                            .or_insert(AssetInfoRecord {
+                                initial_mint_tx_hash: tx_hash.clone(),
+                                mint_or_burn_count: 1,
+                                onchain_metadata: None,
+                                metadata_standard: None,
+                            });
+                    }
 
-                        // update history if enabled
-                        if let Some(hist_map) = new_history.as_mut() {
-                            hist_map.entry(asset_id).or_insert_with(Vector::new).push_back(
-                                AssetMintRecord {
-                                    tx_hash: tx_hash.clone(),
-                                    amount: delta.amount.unsigned_abs(),
-                                    burn: delta.amount < 0,
-                                },
-                            );
+                    // update history if enabled
+                    if let Some(hist_map) = new_history.as_mut() {
+                        hist_map.entry(asset_id).or_insert_with(Vector::new).push_back(
+                            AssetMintRecord {
+                                tx_hash: tx_hash.clone(),
+                                amount: delta.amount.unsigned_abs(),
+                                burn: delta.amount < 0,
+                            },
+                        );
+                    }
+
+                    // update policy index if enabled
+                    if let Some(index) = new_index.as_mut() {
+                        let ids = index.entry(*policy_id).or_insert_with(Vector::new);
+                        if !ids.contains(&asset_id) {
+                            ids.push_back(asset_id);
                         }
+                    }
+
+                    // initialize addresses if enabled
+                    if let Some(addr_map) = new_addresses.as_mut() {
+                        addr_map.entry(asset_id).or_insert_with(Vector::new);
+                    }
+
+                    // initialize transactions if enabled
+                    if let Some(tx_map) = new_transactions.as_mut() {
+                        tx_map.entry(asset_id).or_insert_with(Vector::new);
                     }
                 }
             }
@@ -503,6 +491,31 @@ mod tests {
 
         // correct amount stored for burn record
         assert_eq!(hist[1].amount, 40);
+    }
+
+    #[test]
+    fn first_tx_as_burn_fails() {
+        let mut registry = AssetRegistry::new();
+        let state = State::new(full_config());
+
+        let policy = dummy_policy(1);
+        let name = asset_name_from_str("tokenA");
+        let tx = dummy_txhash(1);
+
+        let deltas = vec![(
+            tx.clone(),
+            vec![(
+                policy,
+                vec![NativeAssetDelta {
+                    name: name.clone(),
+                    amount: -50,
+                }],
+            )],
+        )];
+
+        let result = state.handle_mint_deltas(&deltas, &mut registry);
+        // Error on first tx being a burn
+        assert!(result.is_err());
     }
 
     #[test]
