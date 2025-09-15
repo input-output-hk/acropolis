@@ -328,3 +328,221 @@ impl State {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        asset_registry::{AssetId, AssetRegistry},
+        state::{AssetsStorageConfig, State},
+    };
+    use acropolis_common::{AssetName, NativeAssetDelta, PolicyId, TxHash};
+
+    fn dummy_policy(byte: u8) -> PolicyId {
+        [byte; 28]
+    }
+
+    fn asset_name_from_str(s: &str) -> AssetName {
+        AssetName::new(s.as_bytes()).unwrap()
+    }
+
+    fn dummy_txhash(byte: u8) -> TxHash {
+        [byte; 32]
+    }
+
+    fn full_config() -> AssetsStorageConfig {
+        AssetsStorageConfig {
+            store_assets: true,
+            store_info: true,
+            store_history: true,
+            store_transactions: true,
+            store_addresses: true,
+            index_by_policy: true,
+        }
+    }
+
+    #[test]
+    fn mint_creates_new_asset_and_updates_all_fields() {
+        let mut registry = AssetRegistry::new();
+        let state = State::new(full_config());
+
+        let policy = dummy_policy(1);
+        let name = asset_name_from_str("tokenA");
+        let tx = dummy_txhash(9);
+
+        let deltas = vec![(
+            tx.clone(),
+            vec![(
+                policy,
+                vec![NativeAssetDelta {
+                    name: name.clone(),
+                    amount: 100,
+                }],
+            )],
+        )];
+
+        let new_state = state.handle_mint_deltas(&deltas, &mut registry).unwrap();
+
+        // supply updated
+        let asset_id = registry.lookup_id(&policy, &name).unwrap();
+        assert_eq!(
+            new_state.supply.as_ref().unwrap().get(&asset_id),
+            Some(&100)
+        );
+
+        // info initialized
+        let info = new_state.info.as_ref().unwrap().get(&asset_id).unwrap();
+        assert_eq!(info.initial_mint_tx_hash, tx);
+        assert_eq!(info.mint_or_burn_count, 1);
+
+        // history contains mint record
+        let hist = new_state.get_asset_history(&asset_id).unwrap().unwrap();
+        assert_eq!(hist[0].amount, 100);
+        assert!(!hist[0].burn);
+
+        // policy index updated
+        let pol_assets = new_state.get_policy_assets(&policy, &registry).unwrap().unwrap();
+        assert_eq!(pol_assets[0].quantity, 100);
+    }
+
+    #[test]
+    fn second_mint_increments_supply_and_records_mint() {
+        let mut registry = AssetRegistry::new();
+        let state = State::new(full_config());
+
+        let policy = dummy_policy(1);
+        let name = asset_name_from_str("tokenA");
+        let tx1 = dummy_txhash(1);
+        let tx2 = dummy_txhash(2);
+
+        let deltas1 = vec![(
+            tx1.clone(),
+            vec![(
+                policy,
+                vec![NativeAssetDelta {
+                    name: name.clone(),
+                    amount: 50,
+                }],
+            )],
+        )];
+        let deltas2 = vec![(
+            tx2.clone(),
+            vec![(
+                policy,
+                vec![NativeAssetDelta {
+                    name: name.clone(),
+                    amount: 25,
+                }],
+            )],
+        )];
+
+        let state = state.handle_mint_deltas(&deltas1, &mut registry).unwrap();
+        let state = state.handle_mint_deltas(&deltas2, &mut registry).unwrap();
+
+        let asset_id = registry.lookup_id(&policy, &name).unwrap();
+
+        // supply updated
+        assert_eq!(state.supply.as_ref().unwrap().get(&asset_id), Some(&75));
+
+        // mint/burn count incremented
+        assert_eq!(
+            state.info.as_ref().unwrap().get(&asset_id).unwrap().mint_or_burn_count,
+            2
+        );
+
+        // history contains both mint records
+        let hist = state.get_asset_history(&asset_id).unwrap().unwrap();
+        assert_eq!(hist.len(), 2);
+    }
+
+    #[test]
+    fn burn_reduces_supply_and_records_burn() {
+        let mut registry = AssetRegistry::new();
+        let state = State::new(full_config());
+
+        let policy = dummy_policy(1);
+        let name = asset_name_from_str("tokenA");
+        let tx1 = dummy_txhash(1);
+        let tx2 = dummy_txhash(2);
+
+        let mint = vec![(
+            tx1.clone(),
+            vec![(
+                policy,
+                vec![NativeAssetDelta {
+                    name: name.clone(),
+                    amount: 100,
+                }],
+            )],
+        )];
+        let burn = vec![(
+            tx2.clone(),
+            vec![(
+                policy,
+                vec![NativeAssetDelta {
+                    name: name.clone(),
+                    amount: -40,
+                }],
+            )],
+        )];
+
+        let state = state.handle_mint_deltas(&mint, &mut registry).unwrap();
+        let state = state.handle_mint_deltas(&burn, &mut registry).unwrap();
+
+        let asset_id = registry.lookup_id(&policy, &name).unwrap();
+
+        // supply reduced by burn amount
+        assert_eq!(state.supply.as_ref().unwrap().get(&asset_id), Some(&60));
+
+        let hist = state.get_asset_history(&asset_id).unwrap().unwrap();
+
+        // history contains both mint and burn records
+        assert_eq!(hist.len(), 2);
+
+        // latest entry in history is the burn record
+        assert!(hist[1].burn);
+
+        // correct amount stored for burn record
+        assert_eq!(hist[1].amount, 40);
+    }
+
+    #[test]
+    fn burn_more_than_supply_fails() {
+        let mut registry = AssetRegistry::new();
+        let state = State::new(full_config());
+
+        let policy = dummy_policy(1);
+        let name = asset_name_from_str("tokenA");
+        let tx = dummy_txhash(1);
+
+        let deltas = vec![(
+            tx.clone(),
+            vec![(
+                policy,
+                vec![NativeAssetDelta {
+                    name: name.clone(),
+                    amount: -10,
+                }],
+            )],
+        )];
+
+        let result = state.handle_mint_deltas(&deltas, &mut registry);
+
+        // Error on negative supply
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn getters_return_error_when_disabled() {
+        let config = AssetsStorageConfig::default();
+        let state = State::new(config);
+        let fake_id = AssetId::new(0);
+
+        // Error when storage is disabled by config
+        assert!(state.get_assets_list(&AssetRegistry::new()).is_err());
+        assert!(state.get_asset_info(&fake_id).is_err());
+        assert!(state.get_asset_history(&fake_id).is_err());
+        assert!(state.get_asset_addresses(&fake_id).is_err());
+        assert!(state.get_asset_transactions(&fake_id).is_err());
+        assert!(state.get_policy_assets(&dummy_policy(1), &AssetRegistry::new()).is_err());
+    }
+}
