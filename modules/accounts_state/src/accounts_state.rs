@@ -3,7 +3,7 @@
 
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
-    queries::accounts::{PoolDelegators, PoolsLiveStakes, DEFAULT_ACCOUNTS_QUERY_TOPIC},
+    queries::accounts::{PoolDelegators, DEFAULT_ACCOUNTS_QUERY_TOPIC},
     state_history::{StateHistory, StateHistoryStore},
     BlockInfo, BlockStatus,
 };
@@ -450,9 +450,9 @@ impl AccountsState {
                     }
 
                     AccountsStateQuery::GetPoolsLiveStakes { pools_operators } => {
-                        AccountsStateQueryResponse::PoolsLiveStakes(PoolsLiveStakes {
-                            live_stakes: state.get_pools_live_stakes(pools_operators),
-                        })
+                        AccountsStateQueryResponse::PoolsLiveStakes(
+                            state.get_pools_live_stakes(pools_operators),
+                        )
                     }
 
                     AccountsStateQuery::GetPoolDelegators { pool_operator } => {
@@ -469,6 +469,29 @@ impl AccountsState {
                             "Error retrieving DRep delegations map".to_string(),
                         ),
                     },
+
+                    AccountsStateQuery::GetOptimalPoolSizing => {
+                        let optimal_pool_sizing = state.get_optimal_pool_sizing();
+                        AccountsStateQueryResponse::OptimalPoolSizing(optimal_pool_sizing)
+                    }
+
+                    AccountsStateQuery::GetAccountsUtxoValuesMap { stake_keys } => {
+                        match state.get_accounts_utxo_values_map(stake_keys) {
+                            Some(map) => AccountsStateQueryResponse::AccountsUtxoValuesMap(map),
+                            None => AccountsStateQueryResponse::Error(
+                                "One or more accounts not found".to_string(),
+                            ),
+                        }
+                    }
+
+                    AccountsStateQuery::GetAccountsUtxoValuesSum { stake_keys } => {
+                        match state.get_accounts_utxo_values_sum(stake_keys) {
+                            Some(sum) => AccountsStateQueryResponse::AccountsUtxoValuesSum(sum),
+                            None => AccountsStateQueryResponse::Error(
+                                "One or more accounts not found".to_string(),
+                            ),
+                        }
+                    }
 
                     AccountsStateQuery::GetAccountsBalancesMap { stake_keys } => {
                         match state.get_accounts_balances_map(stake_keys) {

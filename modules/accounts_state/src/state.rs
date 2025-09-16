@@ -2,6 +2,7 @@
 use crate::monetary::calculate_monetary_change;
 use crate::rewards::{RewardsResult, RewardsState};
 use crate::snapshot::Snapshot;
+use acropolis_common::queries::accounts::OptimalPoolSizing;
 use acropolis_common::{
     math::update_value_with_delta,
     messages::{
@@ -85,6 +86,26 @@ impl State {
         self.pots.clone()
     }
 
+    /// Get maximum pool size
+    /// ( total_supply - reserves) / nopt (from protocol parameters)
+    /// Return None if it is before Shelly Era
+    pub fn get_optimal_pool_sizing(&self) -> Option<OptimalPoolSizing> {
+        // Get Shelley parameters, silently return if too early in the chain so no
+        // rewards to calculate
+        let shelly_params = match &self.protocol_parameters {
+            Some(ProtocolParams {
+                shelley: Some(sp), ..
+            }) => sp,
+            _ => return None,
+        }
+        .clone();
+
+        let total_supply =
+            shelly_params.max_lovelace_supply - self.rewards_state.mark.pots.reserves;
+        let nopt = shelly_params.protocol_params.stake_pool_target_num as u64;
+        Some(OptimalPoolSizing { total_supply, nopt })
+    }
+
     /// Get Pools Live stake
     pub fn get_pools_live_stakes(&self, pool_operators: &Vec<KeyHash>) -> Vec<u64> {
         self.stake_addresses.lock().unwrap().get_pools_live_stakes(pool_operators)
@@ -93,6 +114,21 @@ impl State {
     /// Get Pool Delegators with live_stakes
     pub fn get_pool_delegators(&self, pool_operator: &KeyHash) -> Vec<(KeyHash, u64)> {
         self.stake_addresses.lock().unwrap().get_pool_delegators(pool_operator)
+    }
+
+    /// Map stake_keys to their utxo_values
+    pub fn get_accounts_utxo_values_map(
+        &self,
+        stake_keys: &[Vec<u8>],
+    ) -> Option<HashMap<Vec<u8>, u64>> {
+        let stake_addresses = self.stake_addresses.lock().ok()?; // If lock fails, return None
+        stake_addresses.get_accounts_utxo_values_map(stake_keys)
+    }
+
+    /// Sum stake_keys utxo_values
+    pub fn get_accounts_utxo_values_sum(&self, stake_keys: &[Vec<u8>]) -> Option<u64> {
+        let stake_addresses = self.stake_addresses.lock().ok()?; // If lock fails, return None
+        stake_addresses.get_accounts_utxo_values_sum(stake_keys)
     }
 
     /// Map stake_keys to their total balances (utxo + rewards)
