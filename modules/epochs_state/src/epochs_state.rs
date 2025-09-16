@@ -1,11 +1,12 @@
-//! Acropolis epoch activity counter module for Caryatid
+//! Acropolis epochs state module for Caryatid
 //! Unpacks block bodies to get transaction fees
 
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::epochs::{
-        BlocksMintedByPools, EpochInfo, EpochsStateQuery, EpochsStateQueryResponse, LatestEpoch,
-        TotalBlocksMintedByPools, DEFAULT_EPOCHS_QUERY_TOPIC,
+        BlockHashesByPool, BlocksMintedByPools, BlocksMintedInfoByPool, EpochInfo,
+        EpochsStateQuery, EpochsStateQueryResponse, LatestEpoch, TotalBlocksMintedByPools,
+        DEFAULT_EPOCHS_QUERY_TOPIC,
     },
     state_history::{StateHistory, StateHistoryStore},
     BlockInfo, BlockStatus, Era,
@@ -29,33 +30,34 @@ use crate::{
     store_config::StoreConfig,
 };
 
-const DEFAULT_SUBSCRIBE_HEADERS_TOPIC: &str = "cardano.block.header";
-const DEFAULT_SUBSCRIBE_FEES_TOPIC: &str = "cardano.block.fees";
-const DEFAULT_PUBLISH_TOPIC: &str = "cardano.epoch.activity";
-const DEFAULT_HANDLE_CURRENT_TOPIC: (&str, &str) = ("handle-topic-current-epoch", "rest.get.epoch");
-const DEFAULT_HANDLE_HISTORICAL_TOPIC: (&str, &str) =
-    ("handle-topic-historical-epoch", "rest.get.epochs.*");
+const DEFAULT_BLOCK_HEADER_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("block-header-subscribe-topic", "cardano.block.header");
+const DEFAULT_BLOCK_FEES_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("block-fees-subscribe-topic", "cardano.block.fees");
+const DEFAULT_EPOCH_ACTIVITY_PUBLISH_TOPIC: (&str, &str) =
+    ("epoch-activity-publish-topic", "cardano.epoch.activity");
 
-/// Epoch activity counter module
+/// Epochs State module
 #[module(
     message_type(Message),
-    name = "epoch-activity-counter",
-    description = "Epoch activity counter"
+    name = "epochs-state",
+    description = "Epochs state"
 )]
-pub struct EpochActivityCounter;
+pub struct EpochsState;
 
-impl EpochActivityCounter {
+impl EpochsState {
     /// Run loop
     async fn run(
         history: Arc<Mutex<StateHistory<State>>>,
         epochs_history: EpochsHistoryState,
+        store_config: &StoreConfig,
         mut headers_subscription: Box<dyn Subscription<Message>>,
         mut fees_subscription: Box<dyn Subscription<Message>>,
         mut epoch_activity_publisher: EpochActivityPublisher,
     ) -> Result<()> {
         loop {
             // Get a mutable state
-            let mut state = history.lock().await.get_or_init_with(|| State::new());
+            let mut state = history.lock().await.get_or_init_with(|| State::new(store_config));
             let mut current_block: Option<BlockInfo> = None;
 
             // Read both topics in parallel
@@ -67,7 +69,7 @@ impl EpochActivityCounter {
             match message.as_ref() {
                 Message::Cardano((block_info, CardanoMessage::BlockHeader(header_msg))) => {
                     let span = info_span!(
-                        "epoch_activity_counter.handle_block_header",
+                        "epochs_state.handle_block_header",
                         block = block_info.number
                     );
 
@@ -130,10 +132,8 @@ impl EpochActivityCounter {
             let (_, message) = fees_message_f.await?;
             match message.as_ref() {
                 Message::Cardano((block_info, CardanoMessage::BlockFees(fees_msg))) => {
-                    let span = info_span!(
-                        "epoch_activity_counter.handle_block_fees",
-                        block = block_info.number
-                    );
+                    let span =
+                        info_span!("epochs_state.handle_block_fees", block = block_info.number);
                     async {
                         Self::check_sync(&current_block, &block_info);
                         state.handle_fees(&block_info, fees_msg.total_fees);
@@ -155,31 +155,21 @@ impl EpochActivityCounter {
     /// Main init function
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // Subscription topics
-        let subscribe_headers_topic = config
-            .get_string("subscribe-headers-topic")
-            .unwrap_or(DEFAULT_SUBSCRIBE_HEADERS_TOPIC.to_string());
-        info!("Creating subscriber for headers on '{subscribe_headers_topic}'");
+        let block_headers_subscribe_topic = config
+            .get_string(DEFAULT_BLOCK_HEADER_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_BLOCK_HEADER_SUBSCRIBE_TOPIC.1.to_string());
+        info!("Creating subscriber for headers on '{block_headers_subscribe_topic}'");
 
-        let subscribe_fees_topic = config
-            .get_string("subscribe-fees-topic")
-            .unwrap_or(DEFAULT_SUBSCRIBE_FEES_TOPIC.to_string());
-        info!("Creating subscriber for fees on '{subscribe_fees_topic}'");
-
-        // REST handler topics
-        let handle_current_topic = config
-            .get_string(DEFAULT_HANDLE_CURRENT_TOPIC.0)
-            .unwrap_or(DEFAULT_HANDLE_CURRENT_TOPIC.1.to_string());
-        info!("Creating request handler on '{}'", handle_current_topic);
-
-        let handle_historical_topic = config
-            .get_string(DEFAULT_HANDLE_HISTORICAL_TOPIC.0)
-            .unwrap_or(DEFAULT_HANDLE_HISTORICAL_TOPIC.1.to_string());
-        info!("Creating request handler on '{}'", handle_historical_topic);
+        let block_fees_subscribe_topic = config
+            .get_string(DEFAULT_BLOCK_FEES_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_BLOCK_FEES_SUBSCRIBE_TOPIC.1.to_string());
+        info!("Creating subscriber for fees on '{block_fees_subscribe_topic}'");
 
         // Publish topic
-        let publish_topic =
-            config.get_string("publish-topic").unwrap_or(DEFAULT_PUBLISH_TOPIC.to_string());
-        info!("Publishing on '{publish_topic}'");
+        let epoch_activity_publish_topic = config
+            .get_string(DEFAULT_EPOCH_ACTIVITY_PUBLISH_TOPIC.0)
+            .unwrap_or(DEFAULT_EPOCH_ACTIVITY_PUBLISH_TOPIC.1.to_string());
+        info!("Publishing on '{epoch_activity_publish_topic}'");
 
         // query topic
         let epochs_query_topic = config
@@ -192,7 +182,7 @@ impl EpochActivityCounter {
 
         // state history
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
-            "epoch_activity_counter",
+            "epochs_state",
             StateHistoryStore::default_block_store(),
         )));
         let history_query = history.clone();
@@ -201,12 +191,13 @@ impl EpochActivityCounter {
         let epochs_history = EpochsHistoryState::new(&store_config);
         let epochs_history_query = epochs_history.clone();
 
-        // Publisher
-        let epoch_activity_publisher = EpochActivityPublisher::new(context.clone(), publish_topic);
-
         // Subscribe
-        let headers_subscription = context.subscribe(&subscribe_headers_topic).await?;
-        let fees_subscription = context.subscribe(&subscribe_fees_topic).await?;
+        let headers_subscription = context.subscribe(&block_headers_subscribe_topic).await?;
+        let fees_subscription = context.subscribe(&block_fees_subscribe_topic).await?;
+
+        // Publisher
+        let epoch_activity_publisher =
+            EpochActivityPublisher::new(context.clone(), epoch_activity_publish_topic);
 
         // handle epochs query
         context.handle(&epochs_query_topic, move |message| {
@@ -255,6 +246,28 @@ impl EpochActivityCounter {
                         )
                     }
 
+                    EpochsStateQuery::GetBlocksMintedInfoByPool { vrf_key_hash } => {
+                        let (total_blocks_minted, epoch_blocks_minted) =
+                            state.get_blocks_minted_data_by_pool(vrf_key_hash);
+                        EpochsStateQueryResponse::BlocksMintedInfoByPool(BlocksMintedInfoByPool {
+                            total_blocks_minted,
+                            epoch_blocks_minted,
+                        })
+                    }
+
+                    EpochsStateQuery::GetBlockHashesByPool { vrf_key_hash } => {
+                        if state.is_block_hashes_enabled() {
+                            let hashes = state.get_block_hashes(vrf_key_hash);
+                            EpochsStateQueryResponse::BlockHashesByPool(BlockHashesByPool {
+                                hashes,
+                            })
+                        } else {
+                            EpochsStateQueryResponse::Error(
+                                "Block hashes are not enabled".to_string(),
+                            )
+                        }
+                    }
+
                     _ => EpochsStateQueryResponse::Error(format!(
                         "Unimplemented query variant: {:?}",
                         query
@@ -271,6 +284,7 @@ impl EpochActivityCounter {
             Self::run(
                 history,
                 epochs_history,
+                &store_config,
                 headers_subscription,
                 fees_subscription,
                 epoch_activity_publisher,
