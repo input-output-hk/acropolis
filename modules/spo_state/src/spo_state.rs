@@ -396,7 +396,8 @@ impl SPOState {
                 let response = match query {
                     PoolsStateQuery::GetPoolsList => {
                         PoolsStateQueryResponse::PoolsList(state.list_pool_operators())
-                    },
+                    }
+
                     PoolsStateQuery::GetPoolsListWithInfo => {
                         let pools_list_with_info = PoolsListWithInfo {
                             pools: state.list_pools_with_info(),
@@ -404,12 +405,21 @@ impl SPOState {
                         PoolsStateQueryResponse::PoolsListWithInfo(pools_list_with_info)
                     }
 
-                    PoolsStateQuery::GetPoolActiveStakeInfo { pool_operator, epoch } => {
+                    PoolsStateQuery::GetPoolActiveStakeInfo {
+                        pool_operator,
+                        epoch,
+                    } => {
                         if epochs_history.is_enabled() {
                             let epoch_state = epochs_history.get_epoch_state(pool_operator, *epoch);
                             PoolsStateQueryResponse::PoolActiveStakeInfo(PoolActiveStakeInfo {
-                                active_stake: epoch_state.as_ref().and_then(|state| state.active_stake).unwrap_or(0),
-                                active_size: epoch_state.as_ref().and_then(|state| state.active_size).unwrap_or(RationalNumber::from(0)),
+                                active_stake: epoch_state
+                                    .as_ref()
+                                    .and_then(|state| state.active_stake)
+                                    .unwrap_or(0),
+                                active_size: epoch_state
+                                    .as_ref()
+                                    .and_then(|state| state.active_size)
+                                    .unwrap_or(RationalNumber::from(0)),
                             })
                         } else {
                             PoolsStateQueryResponse::Error("Epochs history is not enabled".into())
@@ -421,8 +431,11 @@ impl SPOState {
                         epoch,
                     } => {
                         if epochs_history.is_enabled() {
-                            let active_stakes = epochs_history.get_pools_active_stakes(pools_operators, *epoch);
-                            PoolsStateQueryResponse::PoolsActiveStakes(active_stakes.unwrap_or(vec![0; pools_operators.len()]))
+                            let active_stakes =
+                                epochs_history.get_pools_active_stakes(pools_operators, *epoch);
+                            PoolsStateQueryResponse::PoolsActiveStakes(
+                                active_stakes.unwrap_or(vec![0; pools_operators.len()]),
+                            )
                         } else {
                             PoolsStateQueryResponse::Error("Epochs history is not enabled".into())
                         }
@@ -496,7 +509,7 @@ impl SPOState {
                     _ => PoolsStateQueryResponse::Error(format!(
                         "Unimplemented query variant: {:?}",
                         query
-                    )),
+                    ))
                 };
 
                 Arc::new(Message::StateQueryResponse(StateQueryResponse::Pools(

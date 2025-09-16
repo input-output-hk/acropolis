@@ -670,6 +670,7 @@ pub async fn handle_pool_delegators_blockfrost(
         ));
     };
 
+    // Get Pool delegators from spo-state
     let pool_delegators_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
         PoolsStateQuery::GetPoolDelegators {
             pool_id: spo.clone(),
@@ -688,16 +689,18 @@ pub async fn handle_pool_delegators_blockfrost(
                 PoolsStateQueryResponse::NotFound,
             )) => Err(anyhow::anyhow!("Pool Delegators Not found")),
             Message::StateQueryResponse(StateQueryResponse::Pools(
-                PoolsStateQueryResponse::Error(e),
+                PoolsStateQueryResponse::Error(_e),
             )) => {
-                warn!("Error while retrieving pool delegators from spo_state: {e}; Fallback to query from accounts_state");
+                // store-stake-addresses is not enabled
+                warn!("Fallback to query from accounts_state");
                 Ok(None)
-            },
+            }
             _ => Err(anyhow::anyhow!("Unexpected message type")),
         },
     )
     .await?;
 
+    // Get pool_delegators from accounts-state as fallback
     let pool_delegators = match pool_delegators {
         Some(delegators) => delegators,
         None => {
