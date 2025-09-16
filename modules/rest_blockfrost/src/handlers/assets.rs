@@ -4,12 +4,17 @@ use acropolis_common::{
         assets::{AssetsStateQuery, AssetsStateQueryResponse},
         utils::query_state,
     },
+    AssetName, PolicyId,
 };
 use anyhow::Result;
 use caryatid_sdk::Context;
+use hex::FromHex;
 use std::sync::Arc;
 
-use crate::{handlers_config::HandlersConfig, types::AssetListEntryRest};
+use crate::{
+    handlers_config::HandlersConfig,
+    types::{AssetMintRecordRest, PolicyAssetRest},
+};
 
 pub async fn handle_assets_list_blockfrost(
     context: Arc<Context<Message>>,
@@ -19,6 +24,7 @@ pub async fn handle_assets_list_blockfrost(
     let assets_list_msg = Arc::new(Message::StateQuery(StateQuery::Assets(
         AssetsStateQuery::GetAssetsList,
     )));
+
     let response = query_state(
         &context,
         &handlers_config.assets_query_topic,
@@ -26,31 +32,246 @@ pub async fn handle_assets_list_blockfrost(
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Assets(
                 AssetsStateQueryResponse::AssetsList(assets),
-            )) => Ok(assets),
-            _ => {
-                return Err(anyhow::anyhow!(
-                    "Unexpected response while retrieving assets list"
-                ))
+            )) => {
+                let rest_assets: Vec<PolicyAssetRest> = assets.iter().map(Into::into).collect();
+                serde_json::to_string_pretty(&rest_assets)
+                    .map(|json| RESTResponse::with_json(200, &json))
+                    .map_err(|e| anyhow::anyhow!("Failed to serialize assets list: {e}"))
             }
+            Message::StateQueryResponse(StateQueryResponse::Assets(
+                AssetsStateQueryResponse::Error(_),
+            )) => Ok(RESTResponse::with_text(
+                500,
+                "Asset storage is disabled in config",
+            )),
+            _ => Ok(RESTResponse::with_text(
+                500,
+                "Unexpected response while retrieving asset list",
+            )),
         },
     )
-    .await?;
+    .await;
 
-    let rest: Vec<AssetListEntryRest> = response
-        .into_iter()
-        .flat_map(|(policy_id, asset_map)| {
-            asset_map.into_iter().map(move |(name, amount)| AssetListEntryRest {
-                asset: format!("{}{}", hex::encode(policy_id), hex::encode(name)),
-                quantity: amount.to_string(),
-            })
-        })
-        .collect();
+    match response {
+        Ok(rest) => Ok(rest),
+        Err(e) => Ok(RESTResponse::with_text(500, &format!("Query failed: {e}"))),
+    }
+}
 
-    match serde_json::to_string_pretty(&rest) {
-        Ok(json) => Ok(RESTResponse::with_json(200, &json)),
-        Err(e) => Ok(RESTResponse::with_text(
-            500,
-            &format!("Failed to serialize assets list: {e}"),
-        )),
+pub async fn handle_asset_single_blockfrost(
+    _context: Arc<Context<Message>>,
+    _params: Vec<String>,
+    _handlers_config: Arc<HandlersConfig>,
+) -> Result<RESTResponse> {
+    Ok(RESTResponse::with_text(501, "Not implemented"))
+}
+
+pub async fn handle_asset_history_blockfrost(
+    context: Arc<Context<Message>>,
+    params: Vec<String>,
+    handlers_config: Arc<HandlersConfig>,
+) -> Result<RESTResponse> {
+    let (policy, name) = match split_policy_and_asset(&params[0]) {
+        Ok(pair) => pair,
+        Err(resp) => return Ok(resp),
+    };
+
+    let asset_query_msg = Arc::new(Message::StateQuery(StateQuery::Assets(
+        AssetsStateQuery::GetAssetHistory { policy, name },
+    )));
+
+    let response = match query_state(
+        &context,
+        &handlers_config.assets_query_topic,
+        asset_query_msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Assets(
+                AssetsStateQueryResponse::AssetHistory(history),
+            )) => {
+                let rest_history: Vec<AssetMintRecordRest> =
+                    history.iter().map(Into::into).collect();
+                match serde_json::to_string_pretty(&rest_history) {
+                    Ok(json) => Ok(RESTResponse::with_json(200, &json)),
+                    Err(e) => Ok(RESTResponse::with_text(
+                        500,
+                        &format!("Failed to serialize asset history: {e}"),
+                    )),
+                }
+            }
+            Message::StateQueryResponse(StateQueryResponse::Assets(
+                AssetsStateQueryResponse::NotFound,
+            )) => Ok(RESTResponse::with_text(404, "Asset history not found")),
+            Message::StateQueryResponse(StateQueryResponse::Assets(
+                AssetsStateQueryResponse::Error(_),
+            )) => Ok(RESTResponse::with_text(
+                500,
+                "Asset history storage is disabled in config",
+            )),
+            _ => Ok(RESTResponse::with_text(
+                500,
+                "Unexpected response while retrieving asset history",
+            )),
+        },
+    )
+    .await
+    {
+        Ok(rest) => rest,
+        Err(e) => RESTResponse::with_text(500, &format!("Query failed: {e}")),
+    };
+
+    Ok(response)
+}
+
+pub async fn handle_asset_transactions_blockfrost(
+    _context: Arc<Context<Message>>,
+    _params: Vec<String>,
+    _handlers_config: Arc<HandlersConfig>,
+) -> Result<RESTResponse> {
+    Ok(RESTResponse::with_text(501, "Not implemented"))
+}
+
+pub async fn handle_asset_addresses_blockfrost(
+    _context: Arc<Context<Message>>,
+    _params: Vec<String>,
+    _handlers_config: Arc<HandlersConfig>,
+) -> Result<RESTResponse> {
+    Ok(RESTResponse::with_text(501, "Not implemented"))
+}
+
+pub async fn handle_policy_assets_blockfrost(
+    context: Arc<Context<Message>>,
+    params: Vec<String>,
+    handlers_config: Arc<HandlersConfig>,
+) -> Result<RESTResponse> {
+    let policy: PolicyId = match <[u8; 28]>::from_hex(&params[0]) {
+        Ok(bytes) => bytes,
+        Err(_) => {
+            return Ok(RESTResponse::with_text(400, "Invalid policy_id parameter"));
+        }
+    };
+
+    let asset_query_msg = Arc::new(Message::StateQuery(StateQuery::Assets(
+        AssetsStateQuery::GetPolicyIdAssets { policy },
+    )));
+
+    let response = query_state(
+        &context,
+        &handlers_config.assets_query_topic,
+        asset_query_msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Assets(
+                AssetsStateQueryResponse::PolicyIdAssets(assets),
+            )) => {
+                let rest_assets: Vec<PolicyAssetRest> = assets.iter().map(Into::into).collect();
+                serde_json::to_string_pretty(&rest_assets)
+                    .map(|json| RESTResponse::with_json(200, &json))
+                    .map_err(|e| anyhow::anyhow!("Failed to serialize assets list: {e}"))
+            }
+            Message::StateQueryResponse(StateQueryResponse::Assets(
+                AssetsStateQueryResponse::NotFound,
+            )) => Ok(RESTResponse::with_text(404, "Policy assets not found")),
+            Message::StateQueryResponse(StateQueryResponse::Assets(
+                AssetsStateQueryResponse::Error(_),
+            )) => Ok(RESTResponse::with_text(
+                500,
+                "Indexing by policy is disabled in config",
+            )),
+            _ => Ok(RESTResponse::with_text(
+                500,
+                "Unexpected response while retrieving policy assets",
+            )),
+        },
+    )
+    .await;
+
+    match response {
+        Ok(rest) => Ok(rest),
+        Err(e) => Ok(RESTResponse::with_text(500, &format!("Query failed: {e}"))),
+    }
+}
+
+fn split_policy_and_asset(hex_str: &str) -> Result<(PolicyId, AssetName), RESTResponse> {
+    let decoded = match hex::decode(hex_str) {
+        Ok(bytes) => bytes,
+        Err(_) => return Err(RESTResponse::with_text(400, "Invalid hex string")),
+    };
+
+    if decoded.len() < 28 {
+        return Err(RESTResponse::with_text(
+            400,
+            "Asset identifier must be at least 28 bytes",
+        ));
+    }
+
+    let (policy_part, asset_part) = decoded.split_at(28);
+
+    let policy_id: PolicyId = match policy_part.try_into() {
+        Ok(arr) => arr,
+        Err(_) => return Err(RESTResponse::with_text(400, "Policy id must be 28 bytes")),
+    };
+
+    let asset_name = match AssetName::new(asset_part) {
+        Some(asset_name) => asset_name,
+        None => {
+            return Err(RESTResponse::with_text(
+                400,
+                "Asset name must be less than 32 bytes",
+            ))
+        }
+    };
+
+    Ok((policy_id, asset_name))
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::handlers::assets::split_policy_and_asset;
+    use hex;
+
+    fn policy_bytes() -> [u8; 28] {
+        [0u8; 28]
+    }
+
+    #[test]
+    fn invalid_hex_string() {
+        let result = split_policy_and_asset("zzzz");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.code, 400);
+        assert_eq!(err.body, "Invalid hex string");
+    }
+
+    #[test]
+    fn too_short_input() {
+        let hex_str = hex::encode([1u8, 2, 3]);
+        let result = split_policy_and_asset(&hex_str);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.code, 400);
+        assert_eq!(err.body, "Asset identifier must be at least 28 bytes");
+    }
+
+    #[test]
+    fn invalid_asset_name_too_long() {
+        let mut bytes = policy_bytes().to_vec();
+        bytes.extend(vec![0u8; 33]);
+        let hex_str = hex::encode(bytes);
+        let result = split_policy_and_asset(&hex_str);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.code, 400);
+        assert_eq!(err.body, "Asset name must be less than 32 bytes");
+    }
+
+    #[test]
+    fn valid_policy_and_asset() {
+        let mut bytes = policy_bytes().to_vec();
+        bytes.extend_from_slice(b"MyToken");
+        let hex_str = hex::encode(bytes);
+        let result = split_policy_and_asset(&hex_str);
+        assert!(result.is_ok());
+        let (policy, name) = result.unwrap();
+        assert_eq!(policy, policy_bytes());
+        assert_eq!(name.as_slice(), b"MyToken");
     }
 }

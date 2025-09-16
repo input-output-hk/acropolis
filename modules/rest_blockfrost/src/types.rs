@@ -2,7 +2,10 @@ use crate::cost_models::{PLUTUS_V1, PLUTUS_V2, PLUTUS_V3};
 use acropolis_common::{
     messages::EpochActivityMessage,
     protocol_params::{Nonce, NonceVariant, ProtocolParams},
-    queries::governance::DRepActionUpdate,
+    queries::{
+        assets::{AssetMintRecord, PolicyAsset},
+        governance::DRepActionUpdate,
+    },
     rest_helper::ToCheckedF64,
     PoolEpochState, Relay, Vote,
 };
@@ -297,6 +300,15 @@ pub struct PoolMetadataRest {
     pub name: String,
     pub description: String,
     pub homepage: String,
+}
+
+// REST response structure for /pools/{pool_id}/delegators
+#[derive(Serialize)]
+pub struct PoolDelegatorRest {
+    // stake bech32
+    pub address: String,
+    // live stake
+    pub live_stake: String,
 }
 
 // REST response structure for /pools/{pool_id}/relays
@@ -606,8 +618,46 @@ impl ProtocolParamsRestExt for ProtocolParams {
     }
 }
 
-#[derive(Serialize)]
-pub struct AssetListEntryRest {
-    pub asset: String,
-    pub quantity: String,
+#[derive(Debug, Serialize)]
+pub struct AssetMintRecordRest {
+    tx_hash: String,
+    amount: String,
+    action: String,
+}
+
+impl From<&AssetMintRecord> for AssetMintRecordRest {
+    fn from(record: &AssetMintRecord) -> Self {
+        let action = if !record.burn {
+            "minted".to_string()
+        } else {
+            "burned".to_string()
+        };
+
+        AssetMintRecordRest {
+            tx_hash: hex::encode(record.tx_hash.as_ref()),
+            amount: record.amount.to_string(),
+            action,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct PolicyAssetRest {
+    asset: String,
+    quantity: String,
+}
+
+impl From<&PolicyAsset> for PolicyAssetRest {
+    fn from(asset: &PolicyAsset) -> Self {
+        let asset_hex = format!(
+            "{}{}",
+            hex::encode(asset.policy),
+            hex::encode(asset.name.as_slice())
+        );
+
+        PolicyAssetRest {
+            asset: asset_hex,
+            quantity: asset.quantity.to_string(),
+        }
+    }
 }
