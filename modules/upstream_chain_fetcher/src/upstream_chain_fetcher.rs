@@ -126,7 +126,7 @@ impl UpstreamChainFetcher {
         let slot = start.slot_or_default();
         info!("Synchronising to slot {slot}");
 
-        let peer = utils::peer_connect(cfg, "header fetcher").await?;
+        let peer = utils::peer_connect(cfg.clone(), "header fetcher").await?;
         let mut my_peer = match peer {
             FetchResult::NetworkError => return Ok(None),
             FetchResult::Success(p) => p
