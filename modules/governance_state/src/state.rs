@@ -256,12 +256,9 @@ impl State {
         votes
     }
 
-    /// Checks whether action is expired at the beginning of new_epoch
+    /// Checks whether `action_id` is expired at the beginning of `new_epoch`.
     fn is_expired(&self, new_epoch: u64, action_id: &GovActionId) -> Result<bool> {
-        info!(
-            "Checking whether {} is expired at new epoch {}",
-            action_id, new_epoch
-        );
+        info!("Checking whether {action_id} is expired at new epoch {new_epoch}");
         let (proposal_epoch, _proposal) = self
             .proposals
             .get(action_id)
