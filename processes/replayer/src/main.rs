@@ -14,7 +14,7 @@ use tracing_subscriber::{filter, fmt, EnvFilter, Registry};
 use acropolis_module_accounts_state::AccountsState;
 use acropolis_module_block_unpacker::BlockUnpacker;
 use acropolis_module_drep_state::DRepState;
-use acropolis_module_epoch_activity_counter::EpochActivityCounter;
+use acropolis_module_epochs_state::EpochsState;
 use acropolis_module_genesis_bootstrapper::GenesisBootstrapper;
 use acropolis_module_governance_state::GovernanceState;
 use acropolis_module_mithril_snapshot_fetcher::MithrilSnapshotFetcher;
@@ -51,7 +51,7 @@ fn setup_governance_collect(process: &mut dyn ModuleRegistry<Message>) {
     GovernanceState::register(process);
     ParametersState::register(process);
     StakeDeltaFilter::register(process);
-    EpochActivityCounter::register(process);
+    EpochsState::register(process);
     AccountsState::register(process);
 
     Recorder::register(process);
@@ -75,7 +75,7 @@ fn setup_alonzo_governance_collect(process: &mut dyn ModuleRegistry<Message>) {
         GovernanceState::register(process);
         ParametersState::register(process);
         StakeDeltaFilter::register(process);
-        EpochActivityCounter::register(process);
+        EpochsState::register(process);
         AccountsState::register(process);
     */
     RecorderAlonzoGovernance::register(process);
