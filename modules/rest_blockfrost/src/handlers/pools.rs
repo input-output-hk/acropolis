@@ -20,7 +20,7 @@ use tracing::warn;
 
 use crate::{
     handlers_config::HandlersConfig,
-    types::{PoolDelegatorRest, PoolInfoRest, PoolRelayRest},
+    types::{PoolDelegatorRest, PoolInfoRest, PoolRelayRest, PoolUpdateEventRest, PoolVoteRest},
 };
 use crate::{
     types::{PoolEpochStateRest, PoolExtendedRest, PoolMetadataRest, PoolRetirementRest},
@@ -1143,8 +1143,16 @@ pub async fn handle_pool_updates_blockfrost(
         },
     )
     .await?;
+    let pool_updates_rest = pool_updates
+        .into_iter()
+        .map(|u| PoolUpdateEventRest {
+            tx_hash: u.tx_hash,
+            cert_index: u.cert_index,
+            action: u.action,
+        })
+        .collect::<Vec<_>>();
 
-    match serde_json::to_string(&pool_updates) {
+    match serde_json::to_string(&pool_updates_rest) {
         Ok(json) => Ok(RESTResponse::with_json(200, &json)),
         Err(e) => Ok(RESTResponse::with_text(
             500,
@@ -1194,7 +1202,16 @@ pub async fn handle_pool_votes_blockfrost(
     )
     .await?;
 
-    match serde_json::to_string(&pool_votes) {
+    let pool_votes_rest = pool_votes
+        .into_iter()
+        .map(|v| PoolVoteRest {
+            tx_hash: v.tx_hash,
+            vote_index: v.vote_index,
+            vote: v.vote,
+        })
+        .collect::<Vec<_>>();
+
+    match serde_json::to_string(&pool_votes_rest) {
         Ok(json) => Ok(RESTResponse::with_json(200, &json)),
         Err(e) => Ok(RESTResponse::with_text(
             500,
