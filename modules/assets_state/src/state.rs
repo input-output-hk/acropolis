@@ -497,11 +497,17 @@ impl State {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use crate::{
         asset_registry::{AssetId, AssetRegistry},
         state::{AssetsStorageConfig, State},
     };
-    use acropolis_common::{AssetName, NativeAssetDelta, PolicyId, TxHash};
+    use acropolis_common::{
+        queries::assets::{AssetInfoRecord, AssetMetadataStandard},
+        AssetName, Datum, NativeAsset, NativeAssetDelta, PolicyId, ShelleyAddress, TxHash, TxInput,
+        TxOutput, UTXODelta, Value,
+    };
 
     fn dummy_policy(byte: u8) -> PolicyId {
         [byte; 28]
@@ -736,5 +742,359 @@ mod tests {
         assert!(state.get_asset_addresses(&fake_id).is_err());
         assert!(state.get_asset_transactions(&fake_id).is_err());
         assert!(state.get_policy_assets(&dummy_policy(1), &AssetRegistry::new()).is_err());
+    }
+
+    // CIP-25 tests
+    fn setup_state_with_asset(
+        registry: &mut AssetRegistry,
+        policy_id: PolicyId,
+        asset_name_bytes: &[u8],
+        seed_info: bool,
+    ) -> (State, AssetId, AssetName) {
+        let asset_name = AssetName::new(asset_name_bytes).unwrap();
+        let asset_id = registry.get_or_insert(policy_id, asset_name.clone());
+
+        let mut state = State::new(AssetsStorageConfig {
+            store_info: true,
+            ..Default::default()
+        });
+
+        if seed_info {
+            state
+                .info
+                .get_or_insert_with(Default::default)
+                .insert(asset_id, AssetInfoRecord::default());
+        }
+
+        (state, asset_id, asset_name)
+    }
+
+    fn build_cip25_metadata(
+        policy_id: PolicyId,
+        asset_name: &AssetName,
+        value: &str,
+        version: Option<&str>,
+    ) -> Vec<u8> {
+        let policy_hex = hex::encode(policy_id);
+        let asset_hex = hex::encode(asset_name.as_slice());
+        let metadata_value = serde_cbor::Value::Text(value.to_string());
+
+        let mut asset_map = BTreeMap::new();
+        asset_map.insert(serde_cbor::Value::Text(asset_hex), metadata_value);
+
+        let mut policy_map = BTreeMap::new();
+        policy_map.insert(
+            serde_cbor::Value::Text(policy_hex),
+            serde_cbor::Value::Map(asset_map),
+        );
+
+        if let Some(ver) = version {
+            policy_map.insert(
+                serde_cbor::Value::Text("version".to_string()),
+                serde_cbor::Value::Text(ver.to_string()),
+            );
+        }
+
+        serde_cbor::to_vec(&serde_cbor::Value::Map(policy_map)).unwrap()
+    }
+
+    #[test]
+    fn handle_cip25_metadata_updates_correct_asset() {
+        let mut registry = AssetRegistry::new();
+        let policy_id: PolicyId = [0u8; 28].into();
+
+        let (state, asset_id, asset_name) =
+            setup_state_with_asset(&mut registry, policy_id, b"TestAsset", true);
+
+        let metadata_cbor = build_cip25_metadata(policy_id, &asset_name, "hello world", None);
+
+        let new_state = state.handle_cip25_metadata(&mut registry, &[metadata_cbor]).unwrap();
+        let info = new_state.info.expect("info should be Some");
+        let record = info.get(&asset_id).unwrap();
+
+        // Onchain metadata has been set
+        assert!(record.onchain_metadata.is_some());
+        // Metadata standard defaults to v1 if not present in map
+        assert_eq!(
+            record.metadata_standard,
+            Some(AssetMetadataStandard::CIP25v1)
+        );
+    }
+
+    #[test]
+    fn handle_cip25_metadata_version_field_sets_v2() {
+        let mut registry = AssetRegistry::new();
+        let policy_id: PolicyId = [1u8; 28].into();
+
+        let (state, asset_id, asset_name) =
+            setup_state_with_asset(&mut registry, policy_id, b"VersionedAsset", true);
+
+        let metadata_cbor =
+            build_cip25_metadata(policy_id, &asset_name, "metadata for v2", Some("2.0"));
+
+        let new_state = state.handle_cip25_metadata(&mut registry, &[metadata_cbor]).unwrap();
+        let info = new_state.info.expect("info should be Some");
+        let record = info.get(&asset_id).unwrap();
+
+        // Onchain metadata has been set
+        assert!(record.onchain_metadata.is_some());
+        // Metadata standard set to v2 when present in map
+        assert_eq!(
+            record.metadata_standard,
+            Some(AssetMetadataStandard::CIP25v2)
+        );
+    }
+
+    #[test]
+    fn handle_cip25_metadata_unknown_asset_is_ignored() {
+        let mut registry = AssetRegistry::new();
+        let policy_id: PolicyId = [2u8; 28].into();
+        let (state, asset_id, _) =
+            setup_state_with_asset(&mut registry, policy_id, b"KnownAsset", true);
+
+        let other_asset_name = AssetName::new(b"UnknownAsset").unwrap();
+        let metadata_cbor =
+            build_cip25_metadata(policy_id, &other_asset_name, "ignored metadata", None);
+
+        let new_state = state.handle_cip25_metadata(&mut registry, &[metadata_cbor]).unwrap();
+        let info = new_state.info.expect("info should be Some");
+        let record = info.get(&asset_id).unwrap();
+
+        // Metadata for known asset unchanged by unknown asset
+        assert!(
+            record.onchain_metadata.is_none(),
+            "unknown asset should not update records"
+        );
+    }
+
+    #[test]
+    fn handle_cip25_metadata_invalid_cbor_is_skipped() {
+        let mut registry = AssetRegistry::new();
+        let policy_id: PolicyId = [3u8; 28].into();
+        let (state, asset_id, _) =
+            setup_state_with_asset(&mut registry, policy_id, b"BadAsset", true);
+
+        let metadata_cbor = vec![0xff, 0x00, 0x13, 0x37];
+
+        let new_state = state.handle_cip25_metadata(&mut registry, &[metadata_cbor]).unwrap();
+        let info = new_state.info.expect("info should be Some");
+        let record = info.get(&asset_id).unwrap();
+
+        // Metadata not set when CBOR is invalid
+        assert!(
+            record.onchain_metadata.is_none(),
+            "invalid CBOR should be ignored"
+        );
+        // Metadata standard not set when CBOR is invalid
+        assert!(
+            record.metadata_standard.is_none(),
+            "invalid CBOR should not set a standard"
+        );
+    }
+
+    // CIP-68 tests
+    fn dummy_address() -> acropolis_common::Address {
+        acropolis_common::Address::Shelley(
+            ShelleyAddress::from_string(
+                "addr1q9g0u0aeuyvrn8ptc6yesgj6dtfgw2gadnc9y2p9cs8pneejrkwtdvk97yp2zayhvmm3wu0v672psdg2xn0temkz83ds7qfxdt",
+            )
+            .unwrap(),
+        )
+    }
+
+    fn make_output(policy_id: PolicyId, asset_name: AssetName, datum: Option<Vec<u8>>) -> TxOutput {
+        TxOutput {
+            tx_hash: [0u8; 32].into(),
+            index: 0,
+            address: dummy_address(),
+            value: Value {
+                lovelace: 0,
+                assets: vec![(
+                    policy_id,
+                    vec![NativeAsset {
+                        name: asset_name,
+                        amount: 1,
+                    }],
+                )],
+            },
+            datum: datum.map(Datum::Inline),
+        }
+    }
+
+    #[test]
+    fn handle_cip68_metadata_updates_onchain_metadata() {
+        let mut registry = AssetRegistry::new();
+        let policy_id: PolicyId = [9u8; 28].into();
+
+        let (state, reference_id, reference_name) = setup_state_with_asset(
+            &mut registry,
+            policy_id,
+            &[0x00, 0x06, 0x43, 0xb0, 0x01],
+            true,
+        );
+
+        let datum_blob = vec![1, 2, 3, 4];
+        let output = make_output(policy_id, reference_name.clone(), Some(datum_blob.clone()));
+
+        let new_state =
+            state.handle_cip68_metadata(&[UTXODelta::Output(output)], &mut registry).unwrap();
+        let info = new_state.info.expect("info should be Some");
+        let record = info.get(&reference_id).expect("record should exist");
+
+        // Onchain metadata set when asset already exists and TxOutput with inline datum is processed
+        assert_eq!(record.onchain_metadata, Some(datum_blob));
+    }
+
+    #[test]
+    fn handle_cip68_metadata_ignores_non_reference_assets() {
+        let mut registry = AssetRegistry::new();
+        let policy_id: PolicyId = [9u8; 28].into();
+
+        let (state, normal_id, normal_name) =
+            setup_state_with_asset(&mut registry, policy_id, &[0xAA, 0xBB, 0xCC], true);
+
+        let datum_blob = vec![1, 2, 3, 4];
+        let output = make_output(policy_id, normal_name.clone(), Some(datum_blob.clone()));
+
+        let delta = UTXODelta::Output(output);
+        let new_state = state.handle_cip68_metadata(&[delta], &mut registry).unwrap();
+
+        let info = new_state.info.expect("info should be Some");
+        let record = info.get(&normal_id).expect("non reference asset should exist");
+
+        // Onchain metadata not updated for non reference asset
+        assert_eq!(record.onchain_metadata, None);
+    }
+
+    #[test]
+    fn handle_cip68_metadata_ignores_unknown_reference_assets() {
+        let mut registry = AssetRegistry::new();
+        let policy_id: PolicyId = [9u8; 28].into();
+
+        let (state, asset_id, name) = setup_state_with_asset(
+            &mut registry,
+            policy_id,
+            &[0x00, 0x06, 0x43, 0xb0, 0x02],
+            false,
+        );
+
+        let datum_blob = vec![1, 2, 3, 4];
+        let output = make_output(policy_id, name, Some(datum_blob));
+
+        let delta = UTXODelta::Output(output);
+        let new_state = state.handle_cip68_metadata(&[delta], &mut registry).unwrap();
+
+        let info = new_state.info.expect("info should be Some");
+
+        // Metadata not populated if asset does not exist
+        assert!(
+            info.get(&asset_id).is_none(),
+            "unknown reference assets should be ignored"
+        );
+    }
+
+    #[test]
+    fn handle_cip68_metadata_ignores_inputs_and_outputs_without_datum() {
+        let mut registry = AssetRegistry::new();
+        let policy_id: PolicyId = [7u8; 28].into();
+
+        let (state, asset_id, name) = setup_state_with_asset(
+            &mut registry,
+            policy_id,
+            &[0x00, 0x06, 0x43, 0xb0, 0x02],
+            true,
+        );
+
+        let input_delta = UTXODelta::Input(TxInput {
+            tx_hash: [1u8; 32].into(),
+            index: 0,
+        });
+        let output = make_output(policy_id, name, None);
+        let output_delta = UTXODelta::Output(output);
+
+        let new_state =
+            state.handle_cip68_metadata(&[input_delta, output_delta], &mut registry).unwrap();
+
+        let info = new_state.info.expect("info should be Some");
+        let record = info.get(&asset_id).unwrap();
+
+        // Metadata not populated for inputs or outputs without inline datum
+        assert!(
+            record.onchain_metadata.is_none(),
+            "inputs and outputs without datums should both be ignored"
+        );
+    }
+
+    #[test]
+    fn get_asset_info_reference_nft_strips_metadata() {
+        let mut registry = AssetRegistry::new();
+        let policy_id: PolicyId = [9u8; 28].into();
+
+        let (mut state, ref_id, _) =
+            setup_state_with_asset(&mut registry, policy_id, &[0x00, 0x06, 0x43, 0xb0], true);
+
+        let mut info = state.info.take().unwrap();
+        let rec = info.get_mut(&ref_id).unwrap();
+        rec.onchain_metadata = Some(vec![1, 2, 3]);
+        rec.metadata_standard = Some(AssetMetadataStandard::CIP68v1);
+        state.info = Some(info);
+
+        state.supply = Some(imbl::HashMap::new());
+        state.supply.as_mut().unwrap().insert(ref_id, 42);
+
+        let result = state.get_asset_info(&ref_id, &registry).unwrap().unwrap();
+        let (supply, rec) = result;
+
+        // Supply unchanged
+        assert_eq!(supply, 42);
+        // Metadata removed for reference asset
+        assert!(rec.onchain_metadata.is_none());
+        // Metadata standard removed for reference asset
+        assert!(rec.metadata_standard.is_none());
+    }
+
+    #[test]
+    fn resolve_cip68_metadata_overwrites_cip25_user_token_metadata() {
+        let mut registry = AssetRegistry::new();
+        let policy_id: PolicyId = [10u8; 28].into();
+
+        let user_name = AssetName::new(&[0x00, 0x0d, 0xe1, 0x40, 0xaa]).unwrap();
+        let user_id = registry.get_or_insert(policy_id, user_name.clone());
+
+        let mut ref_bytes = user_name.as_slice().to_vec();
+        ref_bytes[0..4].copy_from_slice(&[0x00, 0x06, 0x43, 0xb0]);
+        let ref_name = AssetName::new(&ref_bytes).unwrap();
+        let ref_id = registry.get_or_insert(policy_id, ref_name);
+
+        let mut state = State::new(AssetsStorageConfig {
+            store_info: true,
+            ..Default::default()
+        });
+        let mut info_map = imbl::HashMap::new();
+
+        let mut user_record = AssetInfoRecord::default();
+        user_record.onchain_metadata = Some(vec![1, 2, 3]);
+        user_record.metadata_standard = Some(AssetMetadataStandard::CIP25v1);
+        info_map.insert(user_id, user_record);
+
+        let mut ref_record = AssetInfoRecord::default();
+        ref_record.onchain_metadata = Some(vec![9, 9, 9]);
+        ref_record.metadata_standard = Some(AssetMetadataStandard::CIP68v2);
+        info_map.insert(ref_id, ref_record);
+
+        state.info = Some(info_map);
+
+        state.supply = Some(imbl::HashMap::new());
+        state.supply.as_mut().unwrap().insert(user_id, 100);
+
+        let result = state.get_asset_info(&user_id, &registry).unwrap().unwrap();
+        let (supply, rec) = result;
+
+        // User asset supply unchanged
+        assert_eq!(supply, 100);
+        // User asset metadata overwritten with reference token metadata
+        assert_eq!(rec.onchain_metadata, Some(vec![9, 9, 9]));
+        // User asset metadata standard overwritten with reference token metadata standard
+        assert_eq!(rec.metadata_standard, Some(AssetMetadataStandard::CIP68v2));
     }
 }
