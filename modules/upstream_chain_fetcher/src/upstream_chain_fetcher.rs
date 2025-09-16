@@ -10,18 +10,16 @@ use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{module, Context, Module, Subscription};
 use config::Config;
 use crossbeam::channel::{bounded, Sender, TrySendError};
+use pallas::network::facades::PeerClient;
+use pallas::network::miniprotocols::chainsync::{ClientError, HeaderContent};
 use pallas::{
     ledger::traverse::MultiEraHeader,
-    network::{
-        miniprotocols::{
-            chainsync::{NextResponse, Tip},
-            Point,
-        },
+    network::miniprotocols::{
+        chainsync::{NextResponse, Tip},
+        Point,
     },
 };
 use std::{sync::Arc, time::Duration};
-use pallas::network::facades::PeerClient;
-use pallas::network::miniprotocols::chainsync::{ClientError, HeaderContent};
 use tokio::{sync::Mutex, time::sleep};
 use tracing::{debug, error, info};
 
@@ -29,10 +27,10 @@ mod body_fetcher;
 mod upstream_cache;
 mod utils;
 
+use crate::utils::FetchResult;
 use body_fetcher::BodyFetcher;
 use upstream_cache::{UpstreamCache, UpstreamCacheRecord};
 use utils::{FetcherConfig, SyncPoint};
-use crate::utils::FetchResult;
 
 const MAX_BODY_FETCHER_CHANNEL_LENGTH: usize = 100;
 
@@ -49,7 +47,7 @@ impl UpstreamChainFetcher {
     async fn sync_to_point_loop(
         sender: Sender<(bool, HeaderContent)>,
         start: Point,
-        my_peer: &mut PeerClient
+        my_peer: &mut PeerClient,
     ) -> Result<()> {
         // Loop fetching messages
         let mut rolled_back = false;
@@ -60,10 +58,10 @@ impl UpstreamChainFetcher {
             let next = match my_peer.chainsync().request_or_await_next().await {
                 Err(ClientError::Plexer(e)) => {
                     error!("Connection error for chainsync: {e}, will try to restart");
-                    return Ok(())
-                },
+                    return Ok(());
+                }
                 Err(e) => bail!("Connection error for chainsync: {e}, exiting"),
-                Ok(next) => next
+                Ok(next) => next,
             };
 
             match next {
@@ -90,7 +88,7 @@ impl UpstreamChainFetcher {
                             Err(TrySendError::Disconnected(_)) => {
                                 error!("BodyFetcher disconnected, will try to restart");
                                 return Ok(());
-                            },
+                            }
                         };
                         sleep(Duration::from_millis(100)).await;
                     }
@@ -129,7 +127,7 @@ impl UpstreamChainFetcher {
         let peer = utils::peer_connect(cfg.clone(), "header fetcher").await?;
         let mut my_peer = match peer {
             FetchResult::NetworkError => return Ok(None),
-            FetchResult::Success(p) => p
+            FetchResult::Success(p) => p,
         };
 
         // TODO: check for lost connection in find_intersect; skipped now to keep code simpler
@@ -160,9 +158,8 @@ impl UpstreamChainFetcher {
         mut start: Point,
     ) -> Result<()> {
         loop {
-            let stops_at = Self::sync_to_point_impl(
-                cfg.clone(), cache.clone(), start.clone()
-            ).await?;
+            let stops_at =
+                Self::sync_to_point_impl(cfg.clone(), cache.clone(), start.clone()).await?;
 
             if let Some(blk) = stops_at {
                 start = Point::new(blk.slot, blk.hash);
@@ -220,7 +217,7 @@ impl UpstreamChainFetcher {
                 // Ask for origin but get the tip as well
                 let mut peer = match utils::peer_connect(cfg.clone(), "tip fetcher").await? {
                     FetchResult::NetworkError => bail!("Cannot get tip: network error"),
-                    FetchResult::Success(p) => p
+                    FetchResult::Success(p) => p,
                 };
 
                 let (_, Tip(point, _)) =

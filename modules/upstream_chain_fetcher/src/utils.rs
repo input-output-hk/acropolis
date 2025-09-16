@@ -4,10 +4,10 @@ use acropolis_common::messages::{CardanoMessage, Message};
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::Context;
 use config::Config;
+use pallas::network::facades;
 use pallas::network::facades::PeerClient;
 use serde::Deserialize;
 use std::sync::Arc;
-use pallas::network::facades;
 use tracing::{error, info};
 
 const DEFAULT_HEADER_TOPIC: (&str, &str) = ("header-topic", "cardano.block.header");

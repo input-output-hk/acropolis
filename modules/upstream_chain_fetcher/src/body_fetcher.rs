@@ -19,7 +19,14 @@ use tokio::{sync::Mutex, time::sleep};
 use tracing::{debug, error, info};
 
 use crate::upstream_cache::{UpstreamCache, UpstreamCacheRecord};
-use crate::{utils, utils::{FetcherConfig, FetchResult, FetchResult::{NetworkError, Success}}};
+use crate::{
+    utils,
+    utils::{
+        FetchResult,
+        FetchResult::{NetworkError, Success},
+        FetcherConfig,
+    },
+};
 
 pub struct BodyFetcher {
     cfg: Arc<FetcherConfig>,
@@ -44,7 +51,7 @@ impl BodyFetcher {
                 peer,
                 cache,
                 prev_epoch,
-            }))
+            })),
         }
     }
 
@@ -58,10 +65,8 @@ impl BodyFetcher {
             Err(blockfetch::ClientError::Plexer(e)) => {
                 error!("Can't fetch block at {point:?}: {e}, will try to restart");
                 Ok(NetworkError)
-            },
-            Err(e) => bail!(
-                "Irrecoverable error in blockfetch.fetch_single at {point:?}: {e}",
-            )
+            }
+            Err(e) => bail!("Irrecoverable error in blockfetch.fetch_single at {point:?}: {e}",),
         }
     }
 
@@ -89,9 +94,13 @@ impl BodyFetcher {
         }
     }
 
-    fn make_block_info(&self, rolled_back: bool, last_epoch: Option<u64>, era: Era, header: &MultiEraHeader)
-        -> Result<BlockInfo>
-    {
+    fn make_block_info(
+        &self,
+        rolled_back: bool,
+        last_epoch: Option<u64>,
+        era: Era,
+        header: &MultiEraHeader,
+    ) -> Result<BlockInfo> {
         let slot = header.slot();
         let number = header.number();
         let hash = header.hash().to_vec();
@@ -121,16 +130,18 @@ impl BodyFetcher {
     }
 
     /// Returns Ok(None) if block could not be retrieved due to network problems
-    async fn fetch_and_construct(&mut self, block_info: &BlockInfo, h: HeaderContent)
-        -> Result<FetchResult<UpstreamCacheRecord>>
-    {
+    async fn fetch_and_construct(
+        &mut self,
+        block_info: &BlockInfo,
+        h: HeaderContent,
+    ) -> Result<FetchResult<UpstreamCacheRecord>> {
         // Fetch the block itself - note we need to
         // reconstruct a Point from the header because the one we get
         // in the RollForward is the *tip*, not the next read point
         let fetch_point = Point::Specific(block_info.slot, block_info.hash.clone());
         let msg_body = match self.fetch_block(fetch_point).await? {
             Success(body) => body,
-            NetworkError => return Ok(NetworkError)
+            NetworkError => return Ok(NetworkError),
         };
 
         let msg_hdr = Arc::new(BlockHeaderMessage { raw: h.cbor });
@@ -144,9 +155,11 @@ impl BodyFetcher {
     }
 
     // Returns block info of the message, if it was successfully published and cached.
-    async fn fetch_and_publish(&mut self, rolled_back: bool, h: HeaderContent)
-        -> Result<FetchResult<Option<BlockInfo>>>
-    {
+    async fn fetch_and_publish(
+        &mut self,
+        rolled_back: bool,
+        h: HeaderContent,
+    ) -> Result<FetchResult<Option<BlockInfo>>> {
         // Get Byron sub-tag if any
         let hdr_tag = match h.byron_prefix {
             Some((tag, _)) => Some(tag),
@@ -158,7 +171,7 @@ impl BodyFetcher {
         let header = MultiEraHeader::decode(hdr_variant, hdr_tag, &h.cbor)?;
         let era = match Self::make_era(&header, hdr_variant)? {
             Some(era) => era,
-            None => return Ok(Success(None))
+            None => return Ok(Success(None)),
         };
 
         // Build block info
@@ -169,7 +182,10 @@ impl BodyFetcher {
         match self.fetch_and_construct(&blk, h).await? {
             Success(record) => {
                 if blk.new_epoch {
-                    info!(blk.epoch, blk.number, blk.slot, hdr_variant, hdr_tag, "New epoch");
+                    info!(
+                        blk.epoch,
+                        blk.number, blk.slot, hdr_variant, hdr_tag, "New epoch"
+                    );
                 }
 
                 if record.id.number % 100 == 0 {
@@ -198,18 +214,19 @@ impl BodyFetcher {
         let fetcher_opt = Self::new(cfg, cache, last_epoch).await?;
         let mut fetcher = match fetcher_opt {
             Success(f) => f,
-            NetworkError => return Ok(None)
+            NetworkError => return Ok(None),
         };
 
         let mut last_successful_block = None;
         loop {
             match receiver.try_recv() {
-                Ok((rolled_back, header)) =>
+                Ok((rolled_back, header)) => {
                     match fetcher.fetch_and_publish(rolled_back, header).await? {
                         Success(b @ Some(_)) => last_successful_block = b,
                         Success(None) => (),
                         NetworkError => break,
                     }
+                }
                 Err(TryRecvError::Disconnected) => break,
                 Err(TryRecvError::Empty) => sleep(Duration::from_millis(1)).await,
             }
