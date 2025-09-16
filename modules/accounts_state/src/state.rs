@@ -13,7 +13,7 @@ use acropolis_common::{
     },
     protocol_params::ProtocolParams,
     stake_addresses::{StakeAddressMap, StakeAddressState},
-    DRepChoice, DRepCredential, DelegatedStake, InstantaneousRewardSource,
+    BlockInfo, DRepChoice, DRepCredential, DelegatedStake, InstantaneousRewardSource,
     InstantaneousRewardTarget, KeyHash, Lovelace, MoveInstantaneousReward,
     PoolLiveStakeInfo, PoolRegistration, Pot,
     SPORewards, StakeAddress, StakeCredential, StakeRewardDelta, TxCertificate,
@@ -24,12 +24,17 @@ use rayon::prelude::*;
 use serde_with::{hex::Hex, serde_as};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::mem::take;
-use std::sync::{Arc, Mutex};
+use std::sync::{atomic::AtomicU64, Arc, Mutex, mpsc};
 use tokio::task::{spawn_blocking, JoinHandle};
 use tracing::{debug, error, info, warn};
 
 const DEFAULT_KEY_DEPOSIT: u64 = 2_000_000;
 const DEFAULT_POOL_DEPOSIT: u64 = 500_000_000;
+
+/// Stability window = slots into epoch at which Haskell node starts the rewards calculation
+// We need this because of a Shelley-era bug where stake deregistrations were still counted
+// up to the point of start of the calculation, rather than point of snapshot
+const STABILITY_WINDOW_SLOT: u64 = 4 * 2160 * 20;  // TODO configure from genesis?
 
 /// Global 'pot' account state
 #[derive(Debug, Default, PartialEq, Clone, serde::Serialize)]
@@ -103,11 +108,15 @@ pub struct State {
     /// MIRs to pay next epoch
     mirs: Vec<MoveInstantaneousReward>,
 
-    /// Addresses deregistered in current epoch
-    current_epoch_deregistrations: HashSet<KeyHash>,
+    /// Addresses deregistered in current epoch, or early in the following one
+    /// to replicate early Shelley bug
+    current_epoch_deregistrations: Arc<Mutex<HashSet<KeyHash>>>,
 
-    // Task for rewards calculation if necessary
+    /// Task for rewards calculation if necessary
     epoch_rewards_task: Arc<Mutex<Option<JoinHandle<Result<RewardsResult>>>>>,
+
+    /// Signaller to start the above - delayed in early Shelley to replicate bug
+    start_rewards_tx: Option<mpsc::Sender<()>>,
 }
 
 impl State {
@@ -311,13 +320,23 @@ impl State {
         );
 
         // Set up background task for rewards, capturing and emptying current deregistrations
-        // TODO delay starting calculation until 4k into epoch, to capture late deregistrations
-        // wrongly counted in early Shelley
         let performance = self.epoch_snapshots.mark.clone();
         let staking = self.epoch_snapshots.go.clone();
-        let previous_epoch_deregistrations =
-            std::mem::take(&mut self.current_epoch_deregistrations);
+
+        // TODO: After Allegra we will want to take and clear these at the start of epoch,
+        // not when the rewards calc runs
+        let previous_epoch_deregistrations = self.current_epoch_deregistrations.clone();
+        let (start_rewards_tx, start_rewards_rx) = mpsc::channel::<()>();
         self.epoch_rewards_task = Arc::new(Mutex::new(Some(spawn_blocking(move || {
+
+            // Wait for start signal - normally immediate, but can be delayed to handle
+            // early Shelley bug
+            let _ = start_rewards_rx.recv();
+
+            // Atomically get and clear the previous epoch deregistrations
+            let deregistrations =
+                std::mem::take(&mut *previous_epoch_deregistrations.lock().unwrap());
+
             // Calculate reward payouts for previous epoch
             calculate_rewards(
                 epoch-1,
@@ -325,9 +344,13 @@ impl State {
                 staking,
                 &shelley_params,
                 monetary_change.stake_rewards,
-                &previous_epoch_deregistrations,
+                &deregistrations,
             )
         }))));
+
+        // Delay starting calculation until 4k into epoch, to capture late deregistrations
+        // wrongly counted in early Shelley, and also to put them out of reach of rollbacks
+        self.start_rewards_tx = Some(start_rewards_tx);
 
         // Now retire the SPOs fully
         // TODO - wipe any delegations to retired pools
@@ -336,6 +359,20 @@ impl State {
         }
 
         Ok(reward_deltas)
+    }
+
+    /// Notify of a new block
+    pub fn notify_block(&mut self, block: &BlockInfo) {
+
+        // Is the rewards task blocked on us reaching the 4 * k block?
+        if let Some(tx) = &self.start_rewards_tx {
+            if block.epoch_slot >= STABILITY_WINDOW_SLOT {
+                info!("Starting rewards calculation at block {}, epoch slot {}",
+                      block.number, block.epoch_slot);
+                let _ = tx.send(());
+                self.start_rewards_tx = None;
+            }
+        }
     }
 
     /// Pay pool refunds
@@ -709,7 +746,7 @@ impl State {
         }
 
         // Remove from current deregistrations in case they flip it
-        self.current_epoch_deregistrations.remove(&credential.get_hash());
+        self.current_epoch_deregistrations.lock().unwrap().remove(&credential.get_hash());
     }
 
     /// Deregister a stake address, with specified refund if known
@@ -730,7 +767,7 @@ impl State {
                 }
             };
             self.pots.deposits -= deposit;
-            self.current_epoch_deregistrations.insert(credential.get_hash());
+            self.current_epoch_deregistrations.lock().unwrap().insert(credential.get_hash());
         }
     }
 

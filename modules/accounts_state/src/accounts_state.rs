@@ -132,6 +132,11 @@ impl AccountsState {
                 _ => false,
             };
 
+            // Notify the state of the block (used to schedule reward calculations)
+            if let Some(block_info) = &current_block {
+                state.notify_block(block_info);
+            }
+
             // Read from epoch-boundary messages only when it's a new epoch
             if new_epoch {
                 let dreps_message_f = drep_state_subscription.read();

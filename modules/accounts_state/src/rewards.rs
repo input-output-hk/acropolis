@@ -112,9 +112,6 @@ pub fn calculate_rewards(
         }
 
         // SPO's reward account from staking time must be registered now
-        // TODO horrors about the time of registration/deregistration - depends on whether
-        // it was deregistered before 4 * k blocks (actually 4 * k * 20 slots) into the epoch!
-        // For now, "now" = time of last ('performance') snapshot
         // We get the registration status *as it is in performance* for the reward account
         // *as it was during staking*
         let mut pay_to_pool_reward_account =
@@ -135,9 +132,10 @@ pub fn calculate_rewards(
                     // any blocks is enough here - if not we'll have to do this as a post-process
                     if performance.spos.get(other_id).map(|s| s.blocks_produced).unwrap_or(0) > 0 {
                         pay_to_pool_reward_account = false;
-                        warn!("Shelley shared reward account bug: Dropping reward to {} in favour of {}",
+                        warn!("Shelley shared reward account bug: Dropping reward to {} in favour of {} on shared account {}",
                               hex::encode(&operator_id),
-                              hex::encode(&other_id));
+                              hex::encode(&other_id),
+                              hex::encode(&spo.reward_account));
                         break;
                     }
                 }
