@@ -7,7 +7,7 @@ use acropolis_common::{
         governance::DRepActionUpdate,
     },
     rest_helper::ToCheckedF64,
-    KeyHash, PoolEpochState, Relay, TxHash, Vote,
+    KeyHash, PoolEpochState, PoolUpdateAction, Relay, TxHash, Vote,
 };
 use num_traits::ToPrimitive;
 use rust_decimal::Decimal;
@@ -368,6 +368,26 @@ impl From<Relay> for PoolRelayRest {
             },
         }
     }
+}
+
+// REST response structure for `/pools/{pool_id}/updates`
+#[serde_as]
+#[derive(Serialize)]
+pub struct PoolUpdateEventRest {
+    #[serde_as(as = "Hex")]
+    pub tx_hash: TxHash,
+    pub cert_index: u64,
+    pub action: PoolUpdateAction,
+}
+
+// REST response structure for `/pools/{pool_id}/votes`
+#[serde_as]
+#[derive(Serialize)]
+pub struct PoolVoteRest {
+    #[serde_as(as = "Hex")]
+    pub tx_hash: TxHash,
+    pub vote_index: u32,
+    pub vote: Vote,
 }
 
 // REST response structure for `/pools/{pool_id}`
