@@ -370,7 +370,7 @@ impl From<Relay> for PoolRelayRest {
     }
 }
 
-// REST response structure for `/pools/{pool_id}/updates`
+// REST response structure for /pools/{pool_id}/updates
 #[serde_as]
 #[derive(Serialize)]
 pub struct PoolUpdateEventRest {
@@ -380,7 +380,7 @@ pub struct PoolUpdateEventRest {
     pub action: PoolUpdateAction,
 }
 
-// REST response structure for `/pools/{pool_id}/votes`
+// REST response structure for /pools/{pool_id}/votes
 #[serde_as]
 #[derive(Serialize)]
 pub struct PoolVoteRest {
@@ -390,7 +390,7 @@ pub struct PoolVoteRest {
     pub vote: Vote,
 }
 
-// REST response structure for `/pools/{pool_id}`
+// REST response structure for /pools/{pool_id}
 #[serde_as]
 #[derive(Serialize)]
 pub struct PoolInfoRest {
