@@ -266,22 +266,17 @@ impl State {
             "Entering"
         );
 
-        // Pay the refunds and MIRs
-        let mut reward_deltas = Vec::<StakeRewardDelta>::new();
-        reward_deltas.extend(self.pay_pool_refunds());
-        reward_deltas.extend(self.pay_stake_refunds());
-        reward_deltas.extend(self.pay_mirs());
-
-        // Verify pots state
-        verifier.verify_pots(epoch, &self.pots);
-
         // Filter the block counts for SPOs that are registered - treating any we don't know
         // as 'OBFT' style (the legacy nodes)
         let total_non_obft_blocks = spo_block_counts.values().sum();
 
-        // Capture a new snapshot and push it to state
+        // Pay MIRs before snapshot, so reserves is correct for total_supply in rewards
+        let mut reward_deltas = Vec::<StakeRewardDelta>::new();
+        reward_deltas.extend(self.pay_mirs());
+
+        // Capture a new snapshot for the end of the previous epoch and push it to state
         let snapshot = Snapshot::new(
-            epoch,
+            epoch-1,
             &self.stake_addresses.lock().unwrap(),
             &self.spos,
             &spo_block_counts,
@@ -291,6 +286,13 @@ impl State {
             self.epoch_snapshots.set.clone(), // Will become 'go' in the next line!
         );
         self.epoch_snapshots.push(snapshot);
+
+        // Pay the refunds after snapshot, so they don't appear in active_stake
+        reward_deltas.extend(self.pay_pool_refunds());
+        reward_deltas.extend(self.pay_stake_refunds());
+
+        // Verify pots state
+        verifier.verify_pots(epoch, &self.pots);
 
         // Update the reserves and treasury (monetary.rs)
         let monetary_change = calculate_monetary_change(
@@ -316,9 +318,9 @@ impl State {
         let previous_epoch_deregistrations =
             std::mem::take(&mut self.current_epoch_deregistrations);
         self.epoch_rewards_task = Arc::new(Mutex::new(Some(spawn_blocking(move || {
-            // Calculate reward payouts
+            // Calculate reward payouts for previous epoch
             calculate_rewards(
-                epoch,
+                epoch-1,
                 performance,
                 staking,
                 &shelley_params,

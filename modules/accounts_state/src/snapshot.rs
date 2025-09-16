@@ -39,11 +39,11 @@ pub struct SnapshotSPO {
     pub pool_owners: Vec<KeyHash>,
 }
 
-/// Snapshot of stake distribution taken at the *start* of a particular epoch
+/// Snapshot of stake distribution taken at the end of an particular epoch
 #[derive(Debug, Default)]
 pub struct Snapshot {
-    /// Epoch it's for (the new one that has just started)
-    pub _epoch: u64,
+    /// Epoch it's for (the one that has just ended)
+    pub epoch: u64,
 
     /// Map of SPOs by operator ID
     pub spos: HashMap<KeyHash, SnapshotSPO>,
@@ -67,74 +67,75 @@ impl Snapshot {
         two_previous_snapshot: Arc<Snapshot>,
     ) -> Self {
         let mut snapshot = Self {
-            _epoch: epoch,
+            epoch,
             pots: pots.clone(),
             blocks,
             ..Self::default()
         };
 
+        // Add all SPOs - some may only have stake, some may only produce blocks (their
+        // stake has been removed), we need both in rewards
+        for (spo_id, spo) in spos {
+            // See how many blocks produced
+            let blocks_produced = spo_block_counts.get(spo_id).copied().unwrap_or(0);
+
+            // Check if the reward account from two epochs ago is still registered
+            // TODO should spo.reward_account be a StakeAddress to begin with?
+            let two_previous_reward_account_is_registered =
+                match two_previous_snapshot.spos.get(spo_id) {
+                    Some(old_spo) => {
+                        match StakeAddress::from_binary(&old_spo.reward_account) {
+                            Ok(spo_reward_address) => {
+                                let spo_reward_hash = spo_reward_address.get_hash();
+                                stake_addresses
+                                    .get(spo_reward_hash)
+                                    .map(|sas| sas.registered)
+                                    .unwrap_or(false)
+                            }
+                            Err(e) => {
+                                error!(
+                                    "Can't decode reward address for SPO {}: {e}",
+                                    hex::encode(&spo_id)
+                                );
+
+                                false
+                            }
+                        }
+                    }
+                    None => false,
+                };
+
+            // Add the new one
+            snapshot.spos.insert(
+                spo_id.clone(),
+                SnapshotSPO {
+                    delegators: vec![],
+                    total_stake: 0,
+                    pledge: spo.pledge,
+                    fixed_cost: spo.cost,
+                    margin: spo.margin.clone(),
+                    blocks_produced,
+                    pool_owners: spo.pool_owners.clone(),
+                    reward_account: spo.reward_account.clone(),
+                    two_previous_reward_account_is_registered,
+                },
+            );
+        }
+
         // Scan all stake addresses and post to their delegated SPO's list
-        // Note this is _active_ stake, for reward calculations, and hence doesn't include rewards
+        // Note this is 'active stake', for reward calculations, and does include rewards
         let mut total_stake: Lovelace = 0;
         for (hash, sas) in stake_addresses.iter() {
             let active_stake = sas.utxo_value + sas.rewards;
+
             if sas.registered && active_stake > 0 {
                 if let Some(spo_id) = &sas.delegated_spo {
-                    // Only clone if insertion is needed
                     if let Some(snap_spo) = snapshot.spos.get_mut(spo_id) {
                         snap_spo.delegators.push((hash.clone(), active_stake));
                         snap_spo.total_stake += active_stake;
                     } else {
-                        // Find in the SPO list
-                        let Some(spo) = spos.get(spo_id) else {
-                            // SPO has retired - this stake is simply ignored
-                            continue;
-                        };
-
-                        // See how many blocks produced
-                        let blocks_produced = spo_block_counts.get(spo_id).copied().unwrap_or(0);
-
-                        // Check if the reward account from two epochs ago is still registered
-                        // TODO should spo.reward_account be a StakeAddress to begin with?
-                        let two_previous_reward_account_is_registered =
-                            match two_previous_snapshot.spos.get(spo_id) {
-                                Some(old_spo) => {
-                                    match StakeAddress::from_binary(&old_spo.reward_account) {
-                                        Ok(spo_reward_address) => {
-                                            let spo_reward_hash = spo_reward_address.get_hash();
-                                            stake_addresses
-                                                .get(spo_reward_hash)
-                                                .map(|sas| sas.registered)
-                                                .unwrap_or(false)
-                                        }
-                                        Err(e) => {
-                                            error!(
-                                                "Can't decode reward address for SPO {}: {e}",
-                                                hex::encode(&spo_id)
-                                            );
-
-                                            false
-                                        }
-                                    }
-                                }
-                                None => false,
-                            };
-
-                        // Add the new one
-                        snapshot.spos.insert(
-                            spo_id.clone(),
-                            SnapshotSPO {
-                                delegators: vec![(hash.clone(), active_stake)],
-                                total_stake: active_stake,
-                                pledge: spo.pledge,
-                                fixed_cost: spo.cost,
-                                margin: spo.margin.clone(),
-                                blocks_produced,
-                                pool_owners: spo.pool_owners.clone(),
-                                reward_account: spo.reward_account.clone(),
-                                two_previous_reward_account_is_registered,
-                            },
-                        );
+                        // SPO has retired - this stake is simply ignored
+                        continue;
                     }
                 }
                 total_stake += active_stake;

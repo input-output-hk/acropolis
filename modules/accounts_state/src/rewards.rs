@@ -50,7 +50,7 @@ pub struct RewardsResult {
 }
 
 /// Calculate rewards for a given epoch based on current rewards state and protocol parameters
-/// The epoch is the one we are now entering - we assume the snapshot for this has already been
+/// The epoch is the one that has just ended - we assume the snapshot for this has already been
 /// taken.
 /// Note immutable - only state change allowed is to push a new snapshot
 pub fn calculate_rewards(
@@ -62,7 +62,7 @@ pub fn calculate_rewards(
     previous_epoch_deregistrations: &HashSet<KeyHash>,
 ) -> Result<RewardsResult> {
     let mut result = RewardsResult::default();
-    result.epoch = epoch - 1;
+    result.epoch = epoch;
 
     // If no blocks produced in previous epoch, don't do anything
     let total_blocks = performance.blocks;
@@ -82,7 +82,8 @@ pub fn calculate_rewards(
     let total_active_stake =
         BigDecimal::from(staking.spos.values().map(|s| s.total_stake).sum::<Lovelace>());
 
-    info!(epoch, %total_supply, %total_active_stake, %stake_rewards, total_blocks,
+    info!(epoch, go=staking.epoch, mark=performance.epoch,
+          %total_supply, %total_active_stake, %stake_rewards, total_blocks,
           "Calculating rewards:");
 
     // Relative pool saturation size (z0)
@@ -223,6 +224,11 @@ fn calculate_spo_rewards(
     // Active stake (sigma)
     let pool_stake = BigDecimal::from(spo.total_stake);
     if pool_stake.is_zero() {
+        warn!(
+            "SPO {} has no stake - skipping",
+            hex::encode(&operator_id),
+        );
+
         // No stake, no rewards or earnings
         return vec![];
     }
