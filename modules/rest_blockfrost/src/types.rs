@@ -7,7 +7,7 @@ use acropolis_common::{
         governance::DRepActionUpdate,
     },
     rest_helper::ToCheckedF64,
-    PoolEpochState, Relay, Vote,
+    KeyHash, PoolEpochState, Relay, TxHash, Vote,
 };
 use num_traits::ToPrimitive;
 use rust_decimal::Decimal;
@@ -368,6 +368,40 @@ impl From<Relay> for PoolRelayRest {
             },
         }
     }
+}
+
+// REST response structure for `/pools/{pool_id}`
+#[serde_as]
+#[derive(Serialize)]
+pub struct PoolInfoRest {
+    pub pool_id: String,
+    #[serde_as(as = "Hex")]
+    pub hex: KeyHash,
+    #[serde_as(as = "Hex")]
+    pub vrf_key: KeyHash,
+    pub blocks_minted: u64,
+    pub blocks_epoch: u64,
+    #[serde_as(as = "DisplayFromStr")]
+    pub live_stake: u64,
+    pub live_size: Decimal,
+    pub live_saturation: Decimal,
+    pub live_delegators: u64,
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub active_stake: Option<u64>,
+    pub active_size: Option<f64>,
+    #[serde_as(as = "DisplayFromStr")]
+    pub declared_pledge: u64,
+    #[serde_as(as = "DisplayFromStr")]
+    pub live_pledge: u64,
+    pub margin_cost: f32,
+    #[serde_as(as = "DisplayFromStr")]
+    pub fixed_cost: u64,
+    pub reward_account: String,
+    pub pool_owners: Vec<String>,
+    #[serde_as(as = "Option<Vec<Hex>>")]
+    pub registration: Option<Vec<TxHash>>,
+    #[serde_as(as = "Option<Vec<Hex>>")]
+    pub retirement: Option<Vec<TxHash>>,
 }
 
 // REST response structure for protocol params
