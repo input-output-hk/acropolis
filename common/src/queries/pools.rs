@@ -1,6 +1,6 @@
 use crate::{
-    rational_number::RationalNumber, KeyHash, PoolEpochState, PoolMetadata, PoolRegistration,
-    PoolRetirement, Relay,
+    queries::governance::VoteRecord, rational_number::RationalNumber, KeyHash, PoolEpochState,
+    PoolMetadata, PoolRegistration, PoolRetirement, PoolUpdateEvent, Relay,
 };
 
 pub const DEFAULT_POOLS_QUERY_TOPIC: (&str, &str) =
@@ -35,9 +35,6 @@ pub enum PoolsStateQuery {
     GetPoolDelegators {
         pool_id: Vec<u8>,
     },
-    GetPoolBlocks {
-        pool_id: Vec<u8>,
-    },
     GetPoolUpdates {
         pool_id: Vec<u8>,
     },
@@ -59,9 +56,8 @@ pub enum PoolsStateQueryResponse {
     PoolMetadata(PoolMetadata),
     PoolRelays(Vec<Relay>),
     PoolDelegators(PoolDelegators),
-    PoolBlocks(PoolBlocks),
-    PoolUpdates(PoolUpdates),
-    PoolVotes(PoolVotes),
+    PoolUpdates(Vec<PoolUpdateEvent>),
+    PoolVotes(Vec<VoteRecord>),
     NotFound,
     Error(String),
 }
@@ -84,12 +80,3 @@ pub struct PoolInfo {}
 pub struct PoolDelegators {
     pub delegators: Vec<(KeyHash, u64)>,
 }
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PoolBlocks {}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PoolUpdates {}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PoolVotes {}
