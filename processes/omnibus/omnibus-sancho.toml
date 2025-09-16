@@ -43,7 +43,7 @@ network-name = "sanchonet" # "sanchonet", "mainnet"
 cache-mode = "write" # "predefined", "read", "write", "write-if-absent"
 write-full-cache = "false"
 
-[module.epoch-activity-counter]
+[module.epochs-state]
 store-history = false
 
 [module.accounts-state]
