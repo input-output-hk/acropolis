@@ -7,7 +7,8 @@ use config::Config;
 use pallas::network::facades::PeerClient;
 use serde::Deserialize;
 use std::sync::Arc;
-use tracing::info;
+use pallas::network::facades;
+use tracing::{error, info};
 
 const DEFAULT_HEADER_TOPIC: (&str, &str) = ("header-topic", "cardano.block.header");
 const DEFAULT_BODY_TOPIC: (&str, &str) = ("body-topic", "cardano.block.body");
@@ -50,6 +51,13 @@ pub struct FetcherConfig {
     pub cache_dir: String,
 
     pub genesis_values: Option<GenesisValues>,
+}
+
+/// Custom option type --- for the purpose of code clarity.
+/// Represents outcome of network operation.
+pub enum FetchResult<T> {
+    Success(T),
+    NetworkError,
 }
 
 impl FetcherConfig {
@@ -126,7 +134,7 @@ pub async fn publish_message(cfg: Arc<FetcherConfig>, record: &UpstreamCacheReco
     cfg.context.message_bus.publish(&cfg.body_topic, body_msg).await
 }
 
-pub async fn peer_connect(cfg: Arc<FetcherConfig>, role: &str) -> Result<PeerClient> {
+pub async fn peer_connect(cfg: Arc<FetcherConfig>, role: &str) -> Result<FetchResult<PeerClient>> {
     info!(
         "Connecting {role} to {} ({}) ...",
         cfg.node_address, cfg.magic_number
@@ -135,8 +143,14 @@ pub async fn peer_connect(cfg: Arc<FetcherConfig>, role: &str) -> Result<PeerCli
     match PeerClient::connect(cfg.node_address.clone(), cfg.magic_number).await {
         Ok(peer) => {
             info!("Connected");
-            Ok(peer)
+            Ok(FetchResult::Success(peer))
         }
+
+        Err(facades::Error::ConnectFailure(e)) => {
+            error!("Network error: {e}");
+            Ok(FetchResult::NetworkError)
+        }
+
         Err(e) => bail!(
             "Cannot connect {role} to {} ({}): {e}",
             cfg.node_address,

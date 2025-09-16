@@ -9,11 +9,10 @@ use acropolis_common::{
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{module, Context, Module, Subscription};
 use config::Config;
-use crossbeam::channel::{bounded, TrySendError};
+use crossbeam::channel::{bounded, Sender, TrySendError};
 use pallas::{
     ledger::traverse::MultiEraHeader,
     network::{
-        facades::PeerClient,
         miniprotocols::{
             chainsync::{NextResponse, Tip},
             Point,
@@ -21,6 +20,8 @@ use pallas::{
     },
 };
 use std::{sync::Arc, time::Duration};
+use pallas::network::facades::PeerClient;
+use pallas::network::miniprotocols::chainsync::{ClientError, HeaderContent};
 use tokio::{sync::Mutex, time::sleep};
 use tracing::{debug, error, info};
 
@@ -31,6 +32,7 @@ mod utils;
 use body_fetcher::BodyFetcher;
 use upstream_cache::{UpstreamCache, UpstreamCacheRecord};
 use utils::{FetcherConfig, SyncPoint};
+use crate::utils::FetchResult;
 
 const MAX_BODY_FETCHER_CHANNEL_LENGTH: usize = 100;
 
@@ -44,42 +46,25 @@ const MAX_BODY_FETCHER_CHANNEL_LENGTH: usize = 100;
 pub struct UpstreamChainFetcher;
 
 impl UpstreamChainFetcher {
-    /// ChainSync client loop - fetch headers and pass it to body fetching thread
-    async fn sync_to_point(
-        cfg: Arc<FetcherConfig>,
-        peer: Arc<Mutex<PeerClient>>,
-        cache: Option<UpstreamCache>,
+    async fn sync_to_point_loop(
+        sender: Sender<(bool, HeaderContent)>,
         start: Point,
+        my_peer: &mut PeerClient
     ) -> Result<()> {
-        // Find intersect to given point
-        let slot = start.slot_or_default();
-        info!("Synchronising to slot {slot}");
-        let mut my_peer = peer.lock().await;
-        let (start, _) = my_peer.chainsync().find_intersect(vec![start]).await?;
-        let start = start.ok_or(anyhow!("Intersection for slot {slot} not found"))?;
-
         // Loop fetching messages
         let mut rolled_back = false;
         let mut response_count = 0;
 
-        let last_epoch: Option<u64> = match slot {
-            0 => None,                            // If we're starting from origin
-            _ => Some(cfg.slot_to_epoch(slot).0), // From slot of last block
-        };
-
-        let (sender, receiver) = bounded(MAX_BODY_FETCHER_CHANNEL_LENGTH);
-        //let cfg_clone = cfg.clone();
-
-        tokio::spawn(async move {
-            info!("Starting BodyFetcher...");
-            if let Err(e) = BodyFetcher::run(cfg, cache, last_epoch, receiver).await {
-                error!("Error in BodyFetcher: {e}");
-            }
-        });
-
         loop {
             response_count += 1;
-            let next = my_peer.chainsync().request_or_await_next().await?;
+            let next = match my_peer.chainsync().request_or_await_next().await {
+                Err(ClientError::Plexer(e)) => {
+                    error!("Connection error for chainsync: {e}, will try to restart");
+                    return Ok(())
+                },
+                Err(e) => bail!("Connection error for chainsync: {e}, exiting"),
+                Ok(next) => next
+            };
 
             match next {
                 NextResponse::RollForward(h, Tip(tip_point, _)) => {
@@ -102,7 +87,10 @@ impl UpstreamChainFetcher {
                         for_send = match sender.try_send(for_send) {
                             Ok(()) => break 'sender,
                             Err(TrySendError::Full(fs)) => fs,
-                            Err(e) => bail!("Cannot send message to BodyFetcher: {e}"),
+                            Err(TrySendError::Disconnected(_)) => {
+                                error!("BodyFetcher disconnected, will try to restart");
+                                return Ok(());
+                            },
                         };
                         sleep(Duration::from_millis(100)).await;
                     }
@@ -122,6 +110,62 @@ impl UpstreamChainFetcher {
                 }
 
                 _ => debug!("Ignoring message: {next:?}"),
+            }
+        }
+    }
+
+    /// ChainSync client loop - fetch headers and pass it to body fetching thread
+    /// Returns last read block, if there is a reason to restart the loop.
+    /// If the loop did not read any block, returns None.
+    async fn sync_to_point_impl(
+        cfg: Arc<FetcherConfig>,
+        cache: Option<Arc<Mutex<UpstreamCache>>>,
+        start: Point,
+    ) -> Result<Option<BlockInfo>> {
+        // Find intersect to given point
+        let slot = start.slot_or_default();
+        info!("Synchronising to slot {slot}");
+
+        let peer = utils::peer_connect(cfg, "header fetcher").await?;
+        let mut my_peer = match peer {
+            FetchResult::NetworkError => return Ok(None),
+            FetchResult::Success(p) => p
+        };
+
+        // TODO: check for lost connection in find_intersect; skipped now to keep code simpler
+        let (start, _) = my_peer.chainsync().find_intersect(vec![start]).await?;
+        let start = start.ok_or(anyhow!("Intersection for slot {slot} not found"))?;
+
+        let last_epoch: Option<u64> = match slot {
+            0 => None,                            // If we're starting from origin
+            _ => Some(cfg.slot_to_epoch(slot).0), // From slot of last block
+        };
+
+        let (sender, receiver) = bounded(MAX_BODY_FETCHER_CHANNEL_LENGTH);
+
+        let body_fetcher_handle = tokio::spawn(async move {
+            info!("Starting BodyFetcher...");
+            BodyFetcher::run(cfg, cache, last_epoch, receiver).await
+        });
+
+        Self::sync_to_point_loop(sender, start, &mut my_peer).await?;
+
+        let outcome = body_fetcher_handle.await??;
+        Ok(outcome)
+    }
+
+    async fn sync_to_point(
+        cfg: Arc<FetcherConfig>,
+        cache: Option<Arc<Mutex<UpstreamCache>>>,
+        mut start: Point,
+    ) -> Result<()> {
+        loop {
+            let stops_at = Self::sync_to_point_impl(
+                cfg.clone(), cache.clone(), start.clone()
+            ).await?;
+
+            if let Some(blk) = stops_at {
+                start = Point::new(blk.slot, blk.hash);
             }
         }
     }
@@ -171,20 +215,20 @@ impl UpstreamChainFetcher {
         cfg: Arc<FetcherConfig>,
         snapshot_complete: &mut Option<Box<dyn Subscription<Message>>>,
     ) -> Result<()> {
-        let peer = Arc::new(Mutex::new(
-            utils::peer_connect(cfg.clone(), "header fetcher").await?,
-        ));
-
         match cfg.sync_point {
             SyncPoint::Tip => {
                 // Ask for origin but get the tip as well
-                let mut my_peer = peer.lock().await;
+                let mut peer = match utils::peer_connect(cfg.clone(), "tip fetcher").await? {
+                    FetchResult::NetworkError => bail!("Cannot get tip: network error"),
+                    FetchResult::Success(p) => p
+                };
+
                 let (_, Tip(point, _)) =
-                    my_peer.chainsync().find_intersect(vec![Point::Origin]).await?;
-                Self::sync_to_point(cfg, peer.clone(), None, point).await?;
+                    peer.chainsync().find_intersect(vec![Point::Origin]).await?;
+                Self::sync_to_point(cfg, None, point).await?;
             }
             SyncPoint::Origin => {
-                Self::sync_to_point(cfg, peer.clone(), None, Point::Origin).await?;
+                Self::sync_to_point(cfg, None, Point::Origin).await?;
             }
             SyncPoint::Cache => {
                 let mut upstream_cache = UpstreamCache::new(&cfg.cache_dir);
@@ -193,7 +237,8 @@ impl UpstreamChainFetcher {
                     Some(blk) => Point::Specific(blk.slot, blk.hash),
                 };
 
-                Self::sync_to_point(cfg, peer.clone(), Some(upstream_cache), point).await?;
+                let upstream_cache_mutex = Arc::new(Mutex::new(upstream_cache));
+                Self::sync_to_point(cfg, Some(upstream_cache_mutex), point).await?;
             }
             SyncPoint::Snapshot => {
                 info!(
@@ -211,7 +256,7 @@ impl UpstreamChainFetcher {
                             block.slot, block.number
                         );
                         let point = Point::Specific(block.slot, block.hash.clone());
-                        Self::sync_to_point(cfg, peer, None, point).await?;
+                        Self::sync_to_point(cfg, None, point).await?;
                     }
                     None => info!("Completion not received. Exiting ..."),
                 }
