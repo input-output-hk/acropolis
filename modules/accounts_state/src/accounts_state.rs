@@ -471,8 +471,9 @@ impl AccountsState {
                     },
 
                     AccountsStateQuery::GetOptimalPoolSizing => {
-                        let optimal_pool_sizing = state.get_optimal_pool_sizing();
-                        AccountsStateQueryResponse::OptimalPoolSizing(optimal_pool_sizing)
+                        AccountsStateQueryResponse::OptimalPoolSizing(
+                            state.get_optimal_pool_sizing(),
+                        )
                     }
 
                     AccountsStateQuery::GetAccountsUtxoValuesMap { stake_keys } => {
