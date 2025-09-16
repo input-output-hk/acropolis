@@ -638,7 +638,7 @@ pub struct PoolRetirement {
 }
 
 /// Pool Update Action
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PoolUpdateAction {
     Registered,
     Deregistered,
@@ -668,6 +668,14 @@ impl PoolUpdateEvent {
             action: PoolUpdateAction::Deregistered,
         }
     }
+}
+
+/// Pool Live Stake Info
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PoolLiveStakeInfo {
+    pub live_stake: u64,
+    pub live_delegators: u64,
+    pub total_live_stakes: u64,
 }
 
 /// Pool Epoch History Data

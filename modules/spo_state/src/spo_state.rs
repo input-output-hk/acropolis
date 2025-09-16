@@ -451,6 +451,15 @@ impl SPOState {
                 let state = history.lock().await.get_current_state();
 
                 let response = match query {
+                    // TODO:
+                    // also consider retired pool
+                    PoolsStateQuery::GetPoolInfo { pool_id } => {
+                        match state.get(pool_id) {
+                            Some(pool) => PoolsStateQueryResponse::PoolInfo(pool.clone()),
+                            None => PoolsStateQueryResponse::NotFound,
+                        }
+                    }
+
                     PoolsStateQuery::GetPoolsList => {
                         PoolsStateQueryResponse::PoolsList(state.list_pool_operators())
                     }
@@ -580,11 +589,6 @@ impl SPOState {
                             PoolsStateQueryResponse::Error("Pool Votes are not enabled".into())
                         }
                     }
-
-                    _ => PoolsStateQueryResponse::Error(format!(
-                        "Unimplemented query variant: {:?}",
-                        query
-                    ))
                 };
 
                 Arc::new(Message::StateQueryResponse(StateQueryResponse::Pools(

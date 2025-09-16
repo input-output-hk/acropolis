@@ -51,7 +51,7 @@ pub enum PoolsStateQueryResponse {
     PoolsRetiringList(Vec<PoolRetirement>),
     PoolActiveStakeInfo(PoolActiveStakeInfo),
     PoolsActiveStakes(Vec<u64>),
-    PoolInfo(PoolInfo),
+    PoolInfo(PoolRegistration),
     PoolHistory(Vec<PoolEpochState>),
     PoolMetadata(PoolMetadata),
     PoolRelays(Vec<Relay>),
@@ -72,9 +72,6 @@ pub struct PoolActiveStakeInfo {
     pub active_stake: u64,
     pub active_size: RationalNumber,
 }
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PoolInfo {}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PoolDelegators {
