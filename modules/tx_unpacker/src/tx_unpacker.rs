@@ -22,6 +22,7 @@ use tracing::{debug, error, info, info_span, Instrument};
 mod map_parameters;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.txs";
+const CIP25_METADATA_LABEL: u64 = 721;
 
 /// Tx unpacker module
 /// Parameterised by the outer message enum used on the bus
@@ -231,10 +232,16 @@ impl TxUnpacker {
                                                 }
                                             }
 
-                                            if let Some(metadata) = tx.metadata().find(721) {
+                                            if let Some(metadata) = tx.metadata().find(CIP25_METADATA_LABEL) {
                                                 let mut metadata_raw = Vec::new();
-                                                encode(metadata, &mut metadata_raw).expect("failed to encode metadatum");
-                                                cip25_metadata_updates.push(metadata_raw);
+                                                match encode(metadata, &mut metadata_raw) {
+                                                    Ok(()) => {
+                                                        cip25_metadata_updates.push(metadata_raw);
+                                                    }
+                                                    Err(e) => {
+                                                        error!("failed to encode CIP-25 metadatum: {e:#}");
+                                                    }
+                                                }
                                             }
 
                                             if !tx_deltas.is_empty() {
