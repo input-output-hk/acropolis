@@ -166,20 +166,19 @@ impl State {
         let Some(historical_spos) = self.historical_spos.as_ref() else {
             return None;
         };
-        let stake_addresses = stake_addresses.lock().unwrap();
 
-        let delegators = historical_spos.get(pool_operator).map(|s| s.delegators.clone()).flatten();
-        let Some(delegators) = delegators.as_ref() else {
+        let stake_addresses = stake_addresses.lock().unwrap();
+        let delegators = historical_spos
+            .get(pool_operator)
+            .map(|s| s.delegators.clone())
+            .flatten()
+            .map(|s| s.into_iter().collect::<Vec<KeyHash>>());
+        let Some(delegators) = delegators else {
             return None;
         };
 
-        let mut delegators_with_live_stakes = Vec::<(KeyHash, u64)>::new();
-        for delegator in delegators {
-            let account = stake_addresses.get(delegator)?;
-            let balance = account.utxo_value + account.rewards;
-            delegators_with_live_stakes.push((delegator.clone(), balance));
-        }
-        Some(delegators_with_live_stakes)
+        let delegators_map = stake_addresses.get_accounts_utxo_values_map(&delegators);
+        delegators_map.map(|map| map.into_iter().collect())
     }
 
     /// Get pool relay

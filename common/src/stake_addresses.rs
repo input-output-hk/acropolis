@@ -142,7 +142,7 @@ impl StakeAddressMap {
             .filter_map(|(stake_key, sas)| match sas.delegated_spo.as_ref() {
                 Some(delegated_spo) => {
                     if delegated_spo.eq(pool_operator) {
-                        Some((stake_key.clone(), sas.utxo_value + sas.rewards))
+                        Some((stake_key.clone(), sas.utxo_value))
                     } else {
                         None
                     }
