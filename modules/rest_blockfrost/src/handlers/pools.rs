@@ -4,7 +4,6 @@ use acropolis_common::{
     queries::{
         accounts::{AccountsStateQuery, AccountsStateQueryResponse},
         epochs::{EpochsStateQuery, EpochsStateQueryResponse},
-        parameters::{ParametersStateQuery, ParametersStateQueryResponse},
         pools::{PoolsStateQuery, PoolsStateQueryResponse},
         utils::query_state,
     },
@@ -15,6 +14,7 @@ use anyhow::Result;
 use caryatid_sdk::Context;
 use rust_decimal::Decimal;
 use std::{sync::Arc, time::Duration};
+use tokio::join;
 use tracing::warn;
 
 use crate::{
@@ -45,8 +45,8 @@ pub async fn handle_pools_list_blockfrost(
 
     let pool_operators = match message {
         Message::StateQueryResponse(StateQueryResponse::Pools(
-            PoolsStateQueryResponse::PoolsList(pools),
-        )) => pools.pool_operators,
+            PoolsStateQueryResponse::PoolsList(pool_operators),
+        )) => pool_operators,
 
         Message::StateQueryResponse(StateQueryResponse::Pools(PoolsStateQueryResponse::Error(
             e,
@@ -121,7 +121,7 @@ async fn handle_pools_extended_blockfrost(
     let pools_list_with_info_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
         PoolsStateQuery::GetPoolsListWithInfo,
     )));
-    let pools_list_with_info = query_state(
+    let pools_list_with_info_f = query_state(
         &context,
         &handlers_config.pools_query_topic,
         pools_list_with_info_msg,
@@ -142,27 +142,13 @@ async fn handle_pools_extended_blockfrost(
                 ))
             }
         },
-    )
-    .await?;
-
-    // if pools are empty, return empty list
-    if pools_list_with_info.is_empty() {
-        return Ok(RESTResponse::with_json(200, "[]"));
-    }
-
-    // Populate pools_operators and pools_vrf_key_hashes
-    let pools_operators =
-        pools_list_with_info.iter().map(|(pool_operator, _)| pool_operator).collect::<Vec<_>>();
-    let pools_vrf_key_hashes = pools_list_with_info
-        .iter()
-        .map(|(_, pool_registration)| pool_registration.vrf_key_hash.clone())
-        .collect::<Vec<_>>();
+    );
 
     // Get Latest Epoch from epochs-state
     let latest_epoch_info_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
         EpochsStateQuery::GetLatestEpoch,
     )));
-    let latest_epoch_info = query_state(
+    let latest_epoch_info_f = query_state(
         &context,
         &handlers_config.epochs_query_topic,
         latest_epoch_info_msg,
@@ -183,9 +169,52 @@ async fn handle_pools_extended_blockfrost(
                 ))
             }
         },
-    )
-    .await?;
+    );
+
+    // Get optimal_pool_sizing from accounts_state
+    let optimal_pool_sizing_msg: Arc<Message> = Arc::new(Message::StateQuery(
+        StateQuery::Accounts(AccountsStateQuery::GetOptimalPoolSizing),
+    ));
+    let optimal_pool_sizing_f = query_state(
+        &context,
+        &handlers_config.accounts_query_topic,
+        optimal_pool_sizing_msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Accounts(
+                AccountsStateQueryResponse::OptimalPoolSizing(res),
+            )) => Ok(res),
+            _ => Err(anyhow::anyhow!("Unexpected message type")),
+        },
+    );
+
+    let (pools_list_with_info, latest_epoch_info, optimal_pool_sizing) = join!(
+        pools_list_with_info_f,
+        latest_epoch_info_f,
+        optimal_pool_sizing_f
+    );
+    let pools_list_with_info = pools_list_with_info?;
+    let latest_epoch_info = latest_epoch_info?;
     let latest_epoch = latest_epoch_info.epoch;
+    let optimal_pool_sizing = optimal_pool_sizing?;
+
+    // if pools are empty, return empty list
+    if pools_list_with_info.is_empty() {
+        return Ok(RESTResponse::with_json(200, "[]"));
+    }
+
+    // check optimal_pool_sizing is Some
+    let Some(optimal_pool_sizing) = optimal_pool_sizing else {
+        // if it is before Shelly Era
+        return Ok(RESTResponse::with_json(200, "[]"));
+    };
+
+    // Populate pools_operators and pools_vrf_key_hashes
+    let pools_operators =
+        pools_list_with_info.iter().map(|(pool_operator, _)| pool_operator).collect::<Vec<_>>();
+    let pools_vrf_key_hashes = pools_list_with_info
+        .iter()
+        .map(|(_, pool_registration)| pool_registration.vrf_key_hash.clone())
+        .collect::<Vec<_>>();
 
     // Get active stake for each pool from spo-state
     let pools_active_stakes_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
@@ -194,20 +223,19 @@ async fn handle_pools_extended_blockfrost(
             epoch: latest_epoch,
         },
     )));
-    let (pools_active_stakes, total_active_stake) = query_state(
+    let pools_active_stakes_f = query_state(
         &context,
         &handlers_config.pools_query_topic,
         pools_active_stakes_msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Pools(
-                PoolsStateQueryResponse::PoolsActiveStakes(res),
-            )) => Ok((res.active_stakes, res.total_active_stake)),
+                PoolsStateQueryResponse::PoolsActiveStakes(active_stakes),
+            )) => Ok(Some(active_stakes)),
             Message::StateQueryResponse(StateQueryResponse::Pools(
-                PoolsStateQueryResponse::Error(e),
+                PoolsStateQueryResponse::Error(_e),
             )) => {
-                return Err(anyhow::anyhow!(
-                    "Internal server error while retrieving pools active stakes: {e}"
-                ));
+                // if epoch_history is not enabled
+                Ok(None)
             }
             _ => {
                 return Err(anyhow::anyhow!(
@@ -215,8 +243,7 @@ async fn handle_pools_extended_blockfrost(
                 ))
             }
         },
-    )
-    .await?;
+    );
 
     // Get live stake for each pool from accounts-state
     let pools_live_stakes_msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
@@ -224,14 +251,14 @@ async fn handle_pools_extended_blockfrost(
             pools_operators: pools_operators.iter().map(|&op| op.clone()).collect(),
         },
     )));
-    let pools_live_stakes = query_state(
+    let pools_live_stakes_f = query_state(
         &context,
         &handlers_config.accounts_query_topic,
         pools_live_stakes_msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::PoolsLiveStakes(pools_live_stakes),
-            )) => Ok(pools_live_stakes.live_stakes),
+            )) => Ok(pools_live_stakes),
 
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
@@ -243,16 +270,15 @@ async fn handle_pools_extended_blockfrost(
 
             _ => return Err(anyhow::anyhow!("Unexpected message type")),
         },
-    )
-    .await?;
+    );
 
-    // Get total blocks minted for each pool from epoch-activity-counter
+    // Get total blocks minted for each pool from epochs-state
     let total_blocks_minted_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
         EpochsStateQuery::GetTotalBlocksMintedByPools {
             vrf_key_hashes: pools_vrf_key_hashes,
         },
     )));
-    let total_blocks_minted = query_state(
+    let total_blocks_minted_f = query_state(
         &context,
         &handlers_config.epochs_query_topic,
         total_blocks_minted_msg,
@@ -271,36 +297,16 @@ async fn handle_pools_extended_blockfrost(
 
             _ => return Err(anyhow::anyhow!("Unexpected message type")),
         },
-    )
-    .await?;
+    );
 
-    // Get latest parameters from parameters-state
-    let latest_parameters_msg = Arc::new(Message::StateQuery(StateQuery::Parameters(
-        ParametersStateQuery::GetLatestEpochParameters,
-    )));
-    let latest_parameters = query_state(
-        &context,
-        &handlers_config.parameters_query_topic,
-        latest_parameters_msg,
-        |message| match message {
-            Message::StateQueryResponse(StateQueryResponse::Parameters(
-                ParametersStateQueryResponse::LatestEpochParameters(params),
-            )) => Ok(params),
-            Message::StateQueryResponse(StateQueryResponse::Parameters(
-                ParametersStateQueryResponse::Error(e),
-            )) => Err(anyhow::anyhow!(
-                "Internal server error while retrieving latest parameters: {e}"
-            )),
-            _ => Err(anyhow::anyhow!("Unexpected message type")),
-        },
-    )
-    .await?;
-    let Some(stake_pool_target_num) =
-        latest_parameters.shelley.map(|shelly| shelly.protocol_params.stake_pool_target_num)
-    else {
-        // when shelly era is not started, return empty list
-        return Ok(RESTResponse::with_json(500, "[]"));
-    };
+    let (pools_active_stakes, pools_live_stakes, total_blocks_minted) = join!(
+        pools_active_stakes_f,
+        pools_live_stakes_f,
+        total_blocks_minted_f
+    );
+    let pools_active_stakes = pools_active_stakes?;
+    let pools_live_stakes = pools_live_stakes?;
+    let total_blocks_minted = total_blocks_minted?;
 
     let pools_extened_rest_results: Result<Vec<PoolExtendedRest>, anyhow::Error> =
         pools_list_with_info
@@ -309,19 +315,18 @@ async fn handle_pools_extended_blockfrost(
             .map(|(i, (pool_operator, pool_registration))| {
                 Ok(PoolExtendedRest {
                     pool_id: pool_operator.to_bech32_with_hrp("pool")?,
-                    hex: hex::encode(pool_operator),
-                    active_stake: pools_active_stakes[i].to_string(),
-                    live_stake: pools_live_stakes[i].to_string(),
+                    hex: pool_operator.clone(),
+                    active_stake: pools_active_stakes
+                        .as_ref()
+                        .map(|active_stakes| active_stakes[i]),
+                    live_stake: pools_live_stakes[i],
                     blocks_minted: total_blocks_minted[i],
-                    live_saturation: if total_active_stake > 0 {
-                        Decimal::from(pools_live_stakes[i]) * Decimal::from(stake_pool_target_num)
-                            / Decimal::from(total_active_stake)
-                    } else {
-                        Decimal::from(0)
-                    },
-                    declared_pledge: pool_registration.pledge.to_string(),
+                    live_saturation: Decimal::from(pools_live_stakes[i])
+                        * Decimal::from(optimal_pool_sizing.nopt)
+                        / Decimal::from(optimal_pool_sizing.total_supply),
+                    declared_pledge: pool_registration.pledge,
                     margin_cost: pool_registration.margin.to_f32(),
-                    fixed_cost: pool_registration.cost.to_string(),
+                    fixed_cost: pool_registration.cost,
                 })
             })
             .collect();
@@ -356,7 +361,7 @@ async fn handle_pools_retired_blockfrost(
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::PoolsRetiredList(retired_pools),
-            )) => Ok(retired_pools.retired_pools),
+            )) => Ok(retired_pools),
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::Error(e),
             )) => Err(anyhow::anyhow!(
@@ -402,7 +407,7 @@ async fn handle_pools_retiring_blockfrost(
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::PoolsRetiringList(retiring_pools),
-            )) => Ok(retiring_pools.retiring_pools),
+            )) => Ok(retiring_pools),
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::Error(e),
             )) => Err(anyhow::anyhow!(
@@ -479,6 +484,7 @@ pub async fn handle_pool_history_blockfrost(
     .await?;
     let latest_epoch = latest_epoch_info.epoch;
 
+    // Get pool history from spo-state
     let pool_history_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
         PoolsStateQuery::GetPoolHistory { pool_id: spo },
     )));
@@ -489,12 +495,13 @@ pub async fn handle_pool_history_blockfrost(
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::PoolHistory(pool_history),
-            )) => Ok(pool_history.history.into_iter().map(|state| state.into()).collect()),
+            )) => Ok(pool_history.into_iter().map(|state| state.into()).collect()),
             Message::StateQueryResponse(StateQueryResponse::Pools(
-                PoolsStateQueryResponse::Error(e),
-            )) => Err(anyhow::anyhow!(
-                "Internal server error while retrieving pool history: {e}"
-            )),
+                PoolsStateQueryResponse::Error(_e),
+            )) => {
+                // when pool epoch history is not enabled
+                Err(anyhow::anyhow!("Pool Epoch History is not enabled."))
+            }
             _ => Err(anyhow::anyhow!("Unexpected message type")),
         },
     )
@@ -636,8 +643,7 @@ pub async fn handle_pool_relays_blockfrost(
     )
     .await?;
 
-    let relays_in_rest =
-        pool_relays.relays.into_iter().map(|r| r.into()).collect::<Vec<PoolRelayRest>>();
+    let relays_in_rest = pool_relays.into_iter().map(|r| r.into()).collect::<Vec<PoolRelayRest>>();
 
     match serde_json::to_string(&relays_in_rest) {
         Ok(json) => Ok(RESTResponse::with_json(200, &json)),
@@ -664,6 +670,7 @@ pub async fn handle_pool_delegators_blockfrost(
         ));
     };
 
+    // Get Pool delegators from spo-state
     let pool_delegators_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
         PoolsStateQuery::GetPoolDelegators {
             pool_id: spo.clone(),
@@ -682,16 +689,18 @@ pub async fn handle_pool_delegators_blockfrost(
                 PoolsStateQueryResponse::NotFound,
             )) => Err(anyhow::anyhow!("Pool Delegators Not found")),
             Message::StateQueryResponse(StateQueryResponse::Pools(
-                PoolsStateQueryResponse::Error(e),
+                PoolsStateQueryResponse::Error(_e),
             )) => {
-                warn!("Error while retrieving pool delegators from spo_state: {e}; Fallback to query from accounts_state");
+                // store-stake-addresses is not enabled
+                warn!("Fallback to query from accounts_state");
                 Ok(None)
-            },
+            }
             _ => Err(anyhow::anyhow!("Unexpected message type")),
         },
     )
     .await?;
 
+    // Get pool_delegators from accounts-state as fallback
     let pool_delegators = match pool_delegators {
         Some(delegators) => delegators,
         None => {
