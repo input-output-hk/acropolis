@@ -1,44 +1,64 @@
-use crate::{AssetName, PolicyId};
+use crate::{AssetName, PolicyId, ShelleyAddress, TxHash};
 
 pub const DEFAULT_ASSETS_QUERY_TOPIC: (&str, &str) =
     ("assets-state-query-topic", "cardano.query.assets");
 
+pub type AssetList = Vec<PolicyAsset>;
+pub type AssetInfo = (u64, AssetInfoRecord);
+pub type AssetHistory = Vec<AssetMintRecord>;
+pub type AssetAddresses = Vec<(ShelleyAddress, u64)>;
+pub type AssetTransactions = Vec<TxHash>;
+pub type PolicyAssets = Vec<PolicyAsset>;
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum AssetsStateQuery {
     GetAssetsList,
-    GetAssetInfo { asset_key: Vec<u8> },
-    GetAssetHistory { asset_key: Vec<u8> },
-    GetAssetTransactions { asset_key: Vec<u8> },
-    GetAssetAddresses { asset_key: Vec<u8> },
-    GetPolicyIdAssets { policyid_key: Vec<u8> },
+    GetAssetInfo { policy: PolicyId, name: AssetName },
+    GetAssetHistory { policy: PolicyId, name: AssetName },
+    GetPolicyIdAssets { policy: PolicyId },
+    GetAssetAddresses { policy: PolicyId, name: AssetName },
+    GetAssetTransactions { policy: PolicyId, name: AssetName },
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum AssetsStateQueryResponse {
-    AssetsList(imbl::HashMap<PolicyId, imbl::HashMap<AssetName, u64>>),
+    AssetsList(AssetList),
     AssetInfo(AssetInfo),
     AssetHistory(AssetHistory),
-    AssetTransactions(AssetTransactions),
     AssetAddresses(AssetAddresses),
-    PolicyIdAssets(PolicyIdAssets),
+    AssetTransactions(AssetTransactions),
+    PolicyIdAssets(PolicyAssets),
     NotFound,
     Error(String),
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct AssetsList {}
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AssetInfoRecord {
+    pub initial_mint_tx_hash: TxHash,
+    pub mint_or_burn_count: u64,
+    pub onchain_metadata: Option<Vec<u8>>,
+    pub metadata_standard: Option<AssetMetadataStandard>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct AssetMintRecord {
+    pub tx_hash: TxHash,
+    pub amount: u64,
+    pub burn: bool,
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct AssetInfo {}
+pub enum AssetMetadataStandard {
+    CIP25v1,
+    CIP25v2,
+    CIP68v1,
+    CIP68v2,
+    CIP68v3,
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct AssetHistory {}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct AssetTransactions {}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct AssetAddresses {}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PolicyIdAssets {}
+pub struct PolicyAsset {
+    pub policy: PolicyId,
+    pub name: AssetName,
+    pub quantity: u64,
+}

@@ -148,10 +148,40 @@ pub struct StakeAddressDelta {
     pub delta: i64,
 }
 
+/// Stake Address Reward change
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StakeRewardDelta {
+    pub hash: KeyHash,
+    pub delta: i64,
+}
+
 pub type PolicyId = [u8; 28];
 pub type NativeAssets = Vec<(PolicyId, Vec<NativeAsset>)>;
 pub type NativeAssetsDelta = Vec<(PolicyId, Vec<NativeAssetDelta>)>;
-pub type AssetName = Vec<u8>;
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct AssetName {
+    len: u8,
+    bytes: [u8; 32],
+}
+
+impl AssetName {
+    pub fn new(data: &[u8]) -> Option<Self> {
+        if data.len() > 32 {
+            return None;
+        }
+        let mut bytes = [0u8; 32];
+        bytes[..data.len()].copy_from_slice(data);
+        Some(Self {
+            len: data.len() as u8,
+            bytes,
+        })
+    }
+
+    pub fn as_slice(&self) -> &[u8] {
+        &self.bytes[..self.len as usize]
+    }
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct NativeAsset {
@@ -706,7 +736,7 @@ pub struct Deregistration {
 }
 
 /// DRepChoice (=CDDL drep, badly named)
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum DRepChoice {
     /// Address key
     Key(KeyHash),
