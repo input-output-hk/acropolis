@@ -32,33 +32,27 @@ impl HistoricalSPOState {
 
     pub fn add_pool_registration(&mut self, reg: &PoolRegistration) -> Option<bool> {
         // update registration if enabled
-        let Some(registration) = self.registration.as_mut() else {
-            return None;
-        };
-        *registration = reg.clone();
-        Some(true)
+        self.registration.as_mut().and_then(|registration| {
+            *registration = reg.clone();
+            Some(true)
+        })
     }
 
     pub fn add_pool_updates(&mut self, update: PoolUpdateEvent) -> Option<bool> {
         // update updates if enabled
-        let Some(updates) = self.updates.as_mut() else {
-            return None;
-        };
-        updates.push(update);
-        Some(true)
+        self.updates.as_mut().and_then(|updates| {
+            updates.push(update);
+            Some(true)
+        })
     }
 
     pub fn add_delegator(&mut self, delegator: &KeyHash) -> Option<bool> {
-        let Some(delegators) = self.delegators.as_mut() else {
-            return None;
-        };
-        Some(delegators.insert(delegator.clone()).is_some())
+        self.delegators
+            .as_mut()
+            .and_then(|delegators| Some(delegators.insert(delegator.clone()).is_some()))
     }
 
     pub fn remove_delegator(&mut self, delegator: &KeyHash) -> Option<bool> {
-        let Some(delegators) = self.delegators.as_mut() else {
-            return None;
-        };
-        Some(delegators.remove(delegator).is_some())
+        self.delegators.as_mut().and_then(|delegators| Some(delegators.remove(delegator).is_some()))
     }
 }

@@ -30,6 +30,7 @@ pub enum AccountsStateQuery {
     GetPoolLiveStake { pool_operator: KeyHash },
 
     // Dreps related queries
+    GetDrepDelegators { drep: DRepChoice },
     GetAccountsDrepDelegationsMap { stake_keys: Vec<Vec<u8>> },
 }
 
@@ -58,6 +59,7 @@ pub enum AccountsStateQueryResponse {
     PoolLiveStake(PoolLiveStakeInfo),
 
     // DReps related responses
+    DrepDelegators(DrepDelegators),
     AccountsDrepDelegationsMap(HashMap<Vec<u8>, Option<DRepChoice>>),
 
     NotFound,
@@ -110,5 +112,10 @@ pub struct OptimalPoolSizing {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PoolDelegators {
+    pub delegators: Vec<(KeyHash, u64)>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DrepDelegators {
     pub delegators: Vec<(KeyHash, u64)>,
 }

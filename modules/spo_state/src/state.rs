@@ -187,7 +187,7 @@ impl State {
             return None;
         };
 
-        let delegators_map = stake_addresses.get_accounts_utxo_values_map(&delegators);
+        let delegators_map = stake_addresses.get_accounts_balances_map(&delegators);
         delegators_map.map(|map| map.into_iter().collect())
     }
 

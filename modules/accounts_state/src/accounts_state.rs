@@ -3,7 +3,7 @@
 
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
-    queries::accounts::{PoolDelegators, DEFAULT_ACCOUNTS_QUERY_TOPIC},
+    queries::accounts::{DrepDelegators, PoolDelegators, DEFAULT_ACCOUNTS_QUERY_TOPIC},
     state_history::{StateHistory, StateHistoryStore},
     BlockInfo, BlockStatus,
 };
@@ -467,6 +467,12 @@ impl AccountsState {
                         )
                     }
 
+                    AccountsStateQuery::GetDrepDelegators { drep } => {
+                        AccountsStateQueryResponse::DrepDelegators(DrepDelegators {
+                            delegators: state.get_drep_delegators(drep),
+                        })
+                    }
+
                     AccountsStateQuery::GetAccountsDrepDelegationsMap { stake_keys } => match state
                         .get_drep_delegations_map(stake_keys)
                     {
@@ -477,8 +483,9 @@ impl AccountsState {
                     },
 
                     AccountsStateQuery::GetOptimalPoolSizing => {
-                        let optimal_pool_sizing = state.get_optimal_pool_sizing();
-                        AccountsStateQueryResponse::OptimalPoolSizing(optimal_pool_sizing)
+                        AccountsStateQueryResponse::OptimalPoolSizing(
+                            state.get_optimal_pool_sizing(),
+                        )
                     }
 
                     AccountsStateQuery::GetAccountsUtxoValuesMap { stake_keys } => {

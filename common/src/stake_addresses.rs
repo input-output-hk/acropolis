@@ -167,6 +167,27 @@ impl StakeAddressMap {
             .filter_map(|(stake_key, sas)| match sas.delegated_spo.as_ref() {
                 Some(delegated_spo) => {
                     if delegated_spo.eq(pool_operator) {
+                        Some((stake_key.clone(), sas.utxo_value + sas.rewards))
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            })
+            .collect();
+
+        delegators
+    }
+
+    /// Get DRep Delegators with live_stakes
+    pub fn get_drep_delegators(&self, drep: &DRepChoice) -> Vec<(KeyHash, u64)> {
+        // Find stake addresses delegated to drep
+        let delegators: Vec<(KeyHash, u64)> = self
+            .inner
+            .iter()
+            .filter_map(|(stake_key, sas)| match sas.delegated_drep.as_ref() {
+                Some(delegated_drep) => {
+                    if delegated_drep.eq(drep) {
                         Some((stake_key.clone(), sas.utxo_value))
                     } else {
                         None

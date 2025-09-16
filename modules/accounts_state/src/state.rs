@@ -122,6 +122,11 @@ impl State {
         self.stake_addresses.lock().unwrap().get_pool_delegators(pool_operator)
     }
 
+    /// Get Drep Delegators with live_stakes
+    pub fn get_drep_delegators(&self, drep: &DRepChoice) -> Vec<(KeyHash, u64)> {
+        self.stake_addresses.lock().unwrap().get_drep_delegators(drep)
+    }
+
     /// Map stake_keys to their utxo_values
     pub fn get_accounts_utxo_values_map(
         &self,

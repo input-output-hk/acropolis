@@ -643,6 +643,10 @@ impl SPOState {
 
         // Subscriptions
         let certificates_subscription = context.subscribe(&certificates_subscribe_topic).await?;
+        let epoch_activity_subscription =
+            context.subscribe(&epoch_activity_subscribe_topic).await?;
+        let spdd_subscription = context.subscribe(&spdd_subscribe_topic).await?;
+        let clock_tick_subscription = context.subscribe(&clock_tick_subscribe_topic).await?;
         // only when stake_addresses are enabled
         let withdrawals_subscription = if store_config.store_stake_addresses {
             Some(context.subscribe(&withdrawals_subscribe_topic).await?)
@@ -655,9 +659,6 @@ impl SPOState {
         } else {
             None
         };
-        let epoch_activity_subscription =
-            context.subscribe(&epoch_activity_subscribe_topic).await?;
-        let spdd_subscription = context.subscribe(&spdd_subscribe_topic).await?;
         // when epochs_history is enabled
         let spo_rewards_subscription = if store_config.store_epochs_history {
             Some(context.subscribe(&spo_rewards_subscribe_topic).await?)
@@ -670,12 +671,12 @@ impl SPOState {
         } else {
             None
         };
+        // when state_addresses are enabled
         let stake_reward_deltas_subscription = if store_config.store_stake_addresses {
             Some(context.subscribe(&stake_reward_deltas_subscribe_topic).await?)
         } else {
             None
         };
-        let clock_tick_subscription = context.subscribe(&clock_tick_subscribe_topic).await?;
 
         // Publishers
         let spo_state_publisher = SPOStatePublisher::new(context.clone(), spo_state_publish_topic);
