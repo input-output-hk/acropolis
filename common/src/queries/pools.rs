@@ -1,4 +1,7 @@
-use crate::{rational_number::RationalNumber, KeyHash, PoolEpochState, PoolMetadata, PoolRegistration, PoolRetirement, Relay};
+use crate::{
+    rational_number::RationalNumber, KeyHash, PoolEpochState, PoolMetadata, PoolRegistration,
+    PoolRetirement, Relay,
+};
 
 pub const DEFAULT_POOLS_QUERY_TOPIC: (&str, &str) =
     ("pools-state-query-topic", "cardano.query.pools");
