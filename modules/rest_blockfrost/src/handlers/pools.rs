@@ -106,8 +106,8 @@ pub async fn handle_pools_extended_retired_retiring_single_blockfrost(
             Ok(pool_id) => {
                 return handle_pools_spo_blockfrost(
                     context.clone(),
-                    handlers_config.clone(),
                     pool_id,
+                    handlers_config.clone(),
                 )
                 .await
             }
@@ -292,8 +292,8 @@ async fn handle_pools_extended_blockfrost(
         total_blocks_minted_msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Epochs(
-                EpochsStateQueryResponse::TotalBlocksMintedByPools(res),
-            )) => Ok(res.total_blocks_minted),
+                EpochsStateQueryResponse::TotalBlocksMintedByPools(total_blocks_minted),
+            )) => Ok(total_blocks_minted),
 
             Message::StateQueryResponse(StateQueryResponse::Epochs(
                 EpochsStateQueryResponse::Error(e),
@@ -448,8 +448,8 @@ async fn handle_pools_retiring_blockfrost(
 
 async fn handle_pools_spo_blockfrost(
     context: Arc<Context<Message>>,
-    handlers_config: Arc<HandlersConfig>,
     pool_operator: Vec<u8>,
+    handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
     // Get PoolRegistration from spo state
     let pool_info_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
@@ -1028,25 +1028,177 @@ pub async fn handle_pool_delegators_blockfrost(
 }
 
 pub async fn handle_pool_blocks_blockfrost(
-    _context: Arc<Context<Message>>,
-    _params: Vec<String>,
-    _handlers_config: Arc<HandlersConfig>,
+    context: Arc<Context<Message>>,
+    params: Vec<String>,
+    handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
-    Ok(RESTResponse::with_text(501, "Not implemented"))
+    let Some(pool_id) = params.get(0) else {
+        return Ok(RESTResponse::with_text(400, "Missing pool ID parameter"));
+    };
+
+    let Ok(spo) = Vec::<u8>::from_bech32_with_hrp(pool_id, "pool") else {
+        return Ok(RESTResponse::with_text(
+            400,
+            &format!("Invalid Bech32 stake pool ID: {pool_id}"),
+        ));
+    };
+
+    // query pool registration from pool state
+    let pool_info_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
+        PoolsStateQuery::GetPoolInfo {
+            pool_id: spo.clone(),
+        },
+    )));
+
+    let pool_info = query_state(
+        &context,
+        &handlers_config.pools_query_topic,
+        pool_info_msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::PoolInfo(pool_info),
+            )) => Ok(pool_info),
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::NotFound,
+            )) => Err(anyhow::anyhow!("Pool Not found")),
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::Error(e),
+            )) => Err(anyhow::anyhow!(
+                "Internal server error while retrieving pool info: {e}"
+            )),
+            _ => Err(anyhow::anyhow!("Unexpected message type")),
+        },
+    )
+    .await?;
+    let vrf_key_hash = pool_info.vrf_key_hash;
+
+    // Get block hashes by vrf key hash from epochs-state
+    let pool_blocks_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
+        EpochsStateQuery::GetBlockHashesByPool { vrf_key_hash },
+    )));
+
+    let pool_blocks = query_state(
+        &context,
+        &handlers_config.epochs_query_topic,
+        pool_blocks_msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Epochs(
+                EpochsStateQueryResponse::BlockHashesByPool(pool_blocks),
+            )) => Ok(pool_blocks),
+            Message::StateQueryResponse(StateQueryResponse::Epochs(
+                EpochsStateQueryResponse::Error(_),
+            )) => Err(anyhow::anyhow!("Block hashes are not enabled")),
+            _ => Err(anyhow::anyhow!("Unexpected message type")),
+        },
+    )
+    .await?;
+
+    let pool_blocks_rest = pool_blocks.into_iter().map(|b| hex::encode(b)).collect::<Vec<_>>();
+    match serde_json::to_string(&pool_blocks_rest) {
+        Ok(json) => Ok(RESTResponse::with_json(200, &json)),
+        Err(e) => Ok(RESTResponse::with_text(
+            500,
+            &format!("Internal server error while retrieving pool blocks: {e}"),
+        )),
+    }
 }
 
 pub async fn handle_pool_updates_blockfrost(
-    _context: Arc<Context<Message>>,
-    _params: Vec<String>,
-    _handlers_config: Arc<HandlersConfig>,
+    context: Arc<Context<Message>>,
+    params: Vec<String>,
+    handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
-    Ok(RESTResponse::with_text(501, "Not implemented"))
+    let Some(pool_id) = params.get(0) else {
+        return Ok(RESTResponse::with_text(400, "Missing pool ID parameter"));
+    };
+
+    let Ok(spo) = Vec::<u8>::from_bech32_with_hrp(pool_id, "pool") else {
+        return Ok(RESTResponse::with_text(
+            400,
+            &format!("Invalid Bech32 stake pool ID: {pool_id}"),
+        ));
+    };
+
+    // query from spo_state
+    let pool_updates_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
+        PoolsStateQuery::GetPoolUpdates {
+            pool_id: spo.clone(),
+        },
+    )));
+    let pool_updates = query_state(
+        &context,
+        &handlers_config.pools_query_topic,
+        pool_updates_msg,
+        |message: Message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::PoolUpdates(pool_updates),
+            )) => Ok(pool_updates),
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::NotFound,
+            )) => Err(anyhow::anyhow!("Pool Not found")),
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::Error(e),
+            )) => Err(anyhow::anyhow!("Error: {e}")),
+            _ => Err(anyhow::anyhow!("Unexpected message type")),
+        },
+    )
+    .await?;
+
+    match serde_json::to_string(&pool_updates) {
+        Ok(json) => Ok(RESTResponse::with_json(200, &json)),
+        Err(e) => Ok(RESTResponse::with_text(
+            500,
+            &format!("Internal server error while retrieving pool updates: {e}"),
+        )),
+    }
 }
 
 pub async fn handle_pool_votes_blockfrost(
-    _context: Arc<Context<Message>>,
-    _params: Vec<String>,
-    _handlers_config: Arc<HandlersConfig>,
+    context: Arc<Context<Message>>,
+    params: Vec<String>,
+    handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
-    Ok(RESTResponse::with_text(501, "Not implemented"))
+    let Some(pool_id) = params.get(0) else {
+        return Ok(RESTResponse::with_text(400, "Missing pool ID parameter"));
+    };
+
+    let Ok(spo) = Vec::<u8>::from_bech32_with_hrp(pool_id, "pool") else {
+        return Ok(RESTResponse::with_text(
+            400,
+            &format!("Invalid Bech32 stake pool ID: {pool_id}"),
+        ));
+    };
+
+    // query from spo_state
+    let pool_votes_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
+        PoolsStateQuery::GetPoolVotes {
+            pool_id: spo.clone(),
+        },
+    )));
+    let pool_votes = query_state(
+        &context,
+        &handlers_config.pools_query_topic,
+        pool_votes_msg,
+        |message: Message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::PoolVotes(pool_votes),
+            )) => Ok(pool_votes),
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::NotFound,
+            )) => Err(anyhow::anyhow!("Pool Not found")),
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::Error(e),
+            )) => Err(anyhow::anyhow!("Error: {e}")),
+            _ => Err(anyhow::anyhow!("Unexpected message type")),
+        },
+    )
+    .await?;
+
+    match serde_json::to_string(&pool_votes) {
+        Ok(json) => Ok(RESTResponse::with_json(200, &json)),
+        Err(e) => Ok(RESTResponse::with_text(
+            500,
+            &format!("Internal server error while retrieving pool votes: {e}"),
+        )),
+    }
 }

@@ -4,8 +4,7 @@
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::epochs::{
-        BlockHashesByPool, BlocksMintedByPools, BlocksMintedInfoByPool, EpochInfo,
-        EpochsStateQuery, EpochsStateQueryResponse, LatestEpoch, TotalBlocksMintedByPools,
+        BlocksMintedInfoByPool, EpochInfo, EpochsStateQuery, EpochsStateQueryResponse, LatestEpoch,
         DEFAULT_EPOCHS_QUERY_TOPIC,
     },
     state_history::{StateHistory, StateHistoryStore},
@@ -232,17 +231,14 @@ impl EpochsState {
                     }
 
                     EpochsStateQuery::GetBlocksMintedByPools { vrf_key_hashes } => {
-                        EpochsStateQueryResponse::BlocksMintedByPools(BlocksMintedByPools {
-                            blocks_minted: state.get_blocks_minted_by_pools(vrf_key_hashes),
-                        })
+                        EpochsStateQueryResponse::BlocksMintedByPools(
+                            state.get_blocks_minted_by_pools(vrf_key_hashes),
+                        )
                     }
 
                     EpochsStateQuery::GetTotalBlocksMintedByPools { vrf_key_hashes } => {
                         EpochsStateQueryResponse::TotalBlocksMintedByPools(
-                            TotalBlocksMintedByPools {
-                                total_blocks_minted: state
-                                    .get_total_blocks_minted_by_pools(vrf_key_hashes),
-                            },
+                            state.get_total_blocks_minted_by_pools(vrf_key_hashes),
                         )
                     }
 
@@ -257,10 +253,9 @@ impl EpochsState {
 
                     EpochsStateQuery::GetBlockHashesByPool { vrf_key_hash } => {
                         if state.is_block_hashes_enabled() {
-                            let hashes = state.get_block_hashes(vrf_key_hash);
-                            EpochsStateQueryResponse::BlockHashesByPool(BlockHashesByPool {
-                                hashes,
-                            })
+                            EpochsStateQueryResponse::BlockHashesByPool(
+                                state.get_block_hashes(vrf_key_hash),
+                            )
                         } else {
                             EpochsStateQueryResponse::Error(
                                 "Block hashes are not enabled".to_string(),
