@@ -3,7 +3,7 @@
 
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
-    queries::accounts::{PoolDelegators, DEFAULT_ACCOUNTS_QUERY_TOPIC},
+    queries::accounts::{DrepDelegators, PoolDelegators, DEFAULT_ACCOUNTS_QUERY_TOPIC},
     state_history::{StateHistory, StateHistoryStore},
     BlockInfo, BlockStatus,
 };
@@ -458,6 +458,12 @@ impl AccountsState {
                     AccountsStateQuery::GetPoolDelegators { pool_operator } => {
                         AccountsStateQueryResponse::PoolDelegators(PoolDelegators {
                             delegators: state.get_pool_delegators(pool_operator),
+                        })
+                    }
+
+                    AccountsStateQuery::GetDrepDelegators { drep } => {
+                        AccountsStateQueryResponse::DrepDelegators(DrepDelegators {
+                            delegators: state.get_drep_delegators(drep),
                         })
                     }
 
