@@ -12,6 +12,8 @@ use anyhow::Result;
 use imbl::{HashMap, Vector};
 use tracing::{error, info};
 
+const CIP68_REFERENCE_PREFIX: [u8; 4] = [0x00, 0x06, 0x43, 0xb0];
+
 #[derive(Debug, Default, Clone, Copy)]
 pub struct AssetsStorageConfig {
     pub store_assets: bool,
@@ -422,7 +424,6 @@ impl State {
                 continue;
             };
 
-            const CIP68_REFERENCE_PREFIX: [u8; 4] = [0x00, 0x06, 0x43, 0xb0];
             for (policy_id, native_assets) in &output.value.assets {
                 for asset in native_assets {
                     let name = &asset.name;

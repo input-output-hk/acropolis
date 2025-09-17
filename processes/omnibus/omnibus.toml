@@ -8,7 +8,7 @@ genesis-key = "5b3139312c36362c3134302c3138352c3133382c31312c3233372c3230372c323
 # Download max age in hours. E.g. 8 means 8 hours (if there isn't any snapshot within this time range download from Mithril)
 download-max-age = "never"
 # Pause constraint E.g. "epoch:100", "block:1200"
-pause = "epoch:470"
+pause = "none"
 
 [module.upstream-chain-fetcher]
 sync-point = "snapshot"
@@ -73,11 +73,17 @@ store-history = false
 [module.accounts-state]
 
 [module.assets-state]
-store-assets = false
-store-info = false
+# Enables /assets endpoint
+store-assets = true
+# Enables /assets/{asset} endpoint (requires store-assets to be enabled)
+store-info = true
+# Enables /assets/{asset}/history endpoint
 store-history = false
+# Enables /assets/{asset}/transactions endpoint
 store-transactions = false
+# Enables /assets/{asset}/addresses endpoint
 store-addresses = false
+# Enables /assets/{asset} endpoint (requires store-assets to be enabled)
 index-by-policy = false
 
 [module.clock]
