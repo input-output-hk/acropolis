@@ -9,7 +9,7 @@ const DEFAULT_STORE_REGISTRATION: (&str, bool) = ("store-registration", false);
 const DEFAULT_STORE_UPDATES: (&str, bool) = ("store-updates", false);
 const DEFAULT_STORE_DELEGATORS: (&str, bool) = ("store-delegators", false);
 const DEFAULT_STORE_VOTES: (&str, bool) = ("store-votes", false);
-const DEFAULT_STORE_BLOCK_HASHS: (&str, bool) = ("store-block-hashes", false);
+const DEFAULT_STORE_BLOCK_HASHES: (&str, bool) = ("store-block-hashes", false);
 const DEFAULT_STORE_STAKE_ADDRESSES: (&str, bool) = ("store-stake-addresses", false);
 
 #[derive(Default, Debug, Clone, Serialize)]
@@ -72,8 +72,8 @@ impl From<Arc<Config>> for StoreConfig {
                 .unwrap_or(DEFAULT_STORE_DELEGATORS.1),
             store_votes: config.get_bool(DEFAULT_STORE_VOTES.0).unwrap_or(DEFAULT_STORE_VOTES.1),
             store_block_hashes: config
-                .get_bool(DEFAULT_STORE_BLOCK_HASHS.0)
-                .unwrap_or(DEFAULT_STORE_BLOCK_HASHS.1),
+                .get_bool(DEFAULT_STORE_BLOCK_HASHES.0)
+                .unwrap_or(DEFAULT_STORE_BLOCK_HASHES.1),
             store_stake_addresses: config
                 .get_bool(DEFAULT_STORE_STAKE_ADDRESSES.0)
                 .unwrap_or(DEFAULT_STORE_STAKE_ADDRESSES.1),
