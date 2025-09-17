@@ -20,6 +20,9 @@ pub enum PoolsStateQuery {
         pools_operators: Vec<KeyHash>,
         epoch: u64,
     },
+    GetPoolsTotalBlocksMinted {
+        pools_operators: Vec<KeyHash>,
+    },
     GetPoolInfo {
         pool_id: KeyHash,
     },
@@ -35,7 +38,10 @@ pub enum PoolsStateQuery {
     GetPoolDelegators {
         pool_id: KeyHash,
     },
-    GetPoolBlocks {
+    GetPoolTotalBlocksMinted {
+        pool_id: KeyHash,
+    },
+    GetPoolBlockHashes {
         pool_id: KeyHash,
     },
     GetPoolUpdates {
@@ -54,12 +60,14 @@ pub enum PoolsStateQueryResponse {
     PoolsRetiringList(Vec<PoolRetirement>),
     PoolActiveStakeInfo(PoolActiveStakeInfo),
     PoolsActiveStakes(Vec<u64>),
+    PoolsTotalBlocksMinted(Vec<u64>),
     PoolInfo(PoolRegistration),
     PoolHistory(Vec<PoolEpochState>),
     PoolMetadata(PoolMetadata),
     PoolRelays(Vec<Relay>),
     PoolDelegators(PoolDelegators),
-    PoolBlocks(Vec<BlockHash>),
+    PoolTotalBlocksMinted(u64),
+    PoolBlockHashes(Vec<BlockHash>),
     PoolUpdates(Vec<PoolUpdateEvent>),
     PoolVotes(Vec<VoteRecord>),
     NotFound,

@@ -20,10 +20,6 @@ pub struct State {
 
     // fees seen this epoch
     epoch_fees: u64,
-
-    // Total blocks minted till block number
-    // Keyed by vrf_key_hash
-    total_blocks_minted: HashMap<KeyHash, u64>,
 }
 
 impl State {
@@ -35,7 +31,6 @@ impl State {
             blocks_minted: HashMap::new(),
             epoch_blocks: 0,
             epoch_fees: 0,
-            total_blocks_minted: HashMap::new(),
         }
     }
 
@@ -46,7 +41,6 @@ impl State {
             let vrf_key_hash = keyhash(vrf_vkey);
             // Count one on this hash
             *(self.blocks_minted.entry(vrf_key_hash.clone()).or_insert(0)) += 1;
-            *(self.total_blocks_minted.entry(vrf_key_hash.clone()).or_insert(0)) += 1;
         }
     }
 
@@ -87,19 +81,8 @@ impl State {
         }
     }
 
-    /// Get epoch's total blocks minted for each vrf key hash till current block number
-    pub fn get_total_blocks_minted_by_pools(&self, vrf_key_hashes: &Vec<KeyHash>) -> Vec<u64> {
-        vrf_key_hashes
-            .iter()
-            .map(|key_hash| self.total_blocks_minted.get(key_hash).map(|v| *v as u64).unwrap_or(0))
-            .collect()
-    }
-
-    pub fn get_blocks_minted_data_by_pool(&self, vrf_key_hash: &KeyHash) -> (u64, u64) {
-        (
-            self.total_blocks_minted.get(vrf_key_hash).map(|v| *v as u64).unwrap_or(0),
-            self.blocks_minted.get(vrf_key_hash).map(|v| *v as u64).unwrap_or(0),
-        )
+    pub fn get_blocks_minted_by_pool(&self, vrf_key_hash: &KeyHash) -> u64 {
+        self.blocks_minted.get(vrf_key_hash).map(|v| *v as u64).unwrap_or(0)
     }
 }
 
@@ -166,7 +149,6 @@ mod tests {
         assert_eq!(state.epoch_blocks, 2);
         assert_eq!(state.blocks_minted.len(), 1);
         assert_eq!(state.blocks_minted.get(&keyhash(vrf)), Some(&2));
-        assert_eq!(state.total_blocks_minted.get(&keyhash(vrf)), Some(&2));
     }
 
     #[test]
@@ -190,9 +172,8 @@ mod tests {
             Some(2)
         );
 
-        let blocks_minted_data = state.get_blocks_minted_data_by_pool(&keyhash(b"vrf_2"));
-        assert_eq!(blocks_minted_data.0, 2);
-        assert_eq!(blocks_minted_data.1, 2);
+        let blocks_minted = state.get_blocks_minted_by_pool(&keyhash(b"vrf_2"));
+        assert_eq!(blocks_minted, 2);
     }
 
     #[test]
@@ -231,9 +212,8 @@ mod tests {
         assert_eq!(state.epoch_fees, 0);
         assert!(state.blocks_minted.is_empty());
 
-        let blocks_minted_data = state.get_blocks_minted_data_by_pool(&keyhash(b"vrf_1"));
-        assert_eq!(blocks_minted_data.0, 1);
-        assert_eq!(blocks_minted_data.1, 0);
+        let blocks_minted = state.get_blocks_minted_by_pool(&keyhash(b"vrf_1"));
+        assert_eq!(blocks_minted, 0);
     }
 
     #[tokio::test]
@@ -252,35 +232,15 @@ mod tests {
         block.number += 1;
         state.handle_mint(&block, Some(b"vrf_1"));
         state.handle_fees(&block, 123);
+        assert_eq!(state.get_blocks_minted_by_pool(&keyhash(b"vrf_1")), 2);
         history.lock().await.commit(block.number, state);
 
-        let mut state = history.lock().await.get_current_state();
-        block = make_block(2);
-        let _ = state.end_epoch(&block);
-        state.handle_mint(&block, Some(b"vrf_1"));
-        state.handle_fees(&block, 123);
-        history.lock().await.commit(block.number, state);
-
-        let state = history.lock().await.get_current_state();
-        assert_eq!(state.epoch_blocks, 1);
-        assert_eq!(state.epoch_fees, 123);
-        assert_eq!(
-            3,
-            state.get_total_blocks_minted_by_pools(&vec![keyhash(b"vrf_1")])[0]
-        );
-
-        // roll back of epoch 2
-        block = make_rolled_back_block(2);
+        block = make_rolled_back_block(0);
         let mut state = history.lock().await.get_rolled_back_state(block.number);
-        let _ = state.end_epoch(&block);
         state.handle_mint(&block, Some(b"vrf_2"));
         state.handle_fees(&block, 123);
+        assert_eq!(state.get_blocks_minted_by_pool(&keyhash(b"vrf_1")), 0);
+        assert_eq!(state.get_blocks_minted_by_pool(&keyhash(b"vrf_2")), 1);
         history.lock().await.commit(block.number, state);
-
-        let state = history.lock().await.get_current_state();
-        assert_eq!(
-            2,
-            state.get_total_blocks_minted_by_pools(&vec![keyhash(b"vrf_1")])[0]
-        );
     }
 }
