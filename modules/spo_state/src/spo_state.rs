@@ -13,11 +13,12 @@ use acropolis_common::{
     },
     rational_number::RationalNumber,
     state_history::{StateHistory, StateHistoryStore},
-    BlockInfo, BlockStatus,
+    BlockInfo, BlockStatus, Era,
 };
 use anyhow::Result;
 use caryatid_sdk::{module, Context, Module, Subscription};
 use config::Config;
+use pallas::ledger::traverse::MultiEraHeader;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, info_span, Instrument};
@@ -45,6 +46,8 @@ const DEFAULT_WITHDRAWALS_SUBSCRIBE_TOPIC: (&str, &str) =
     ("withdrawals-subscribe-topic", "cardano.withdrawals");
 const DEFAULT_GOVERNANCE_SUBSCRIBE_TOPIC: (&str, &str) =
     ("governance-subscribe-topic", "cardano.governance");
+const DEFAULT_BLOCK_HEADER_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("block-header-subscribe-topic", "cardano.block.header");
 const DEFAULT_EPOCH_ACTIVITY_SUBSCRIBE_TOPIC: (&str, &str) =
     ("epoch-activity-subscribe-topic", "cardano.epoch.activity");
 const DEFAULT_SPDD_SUBSCRIBE_TOPIC: (&str, &str) =
@@ -84,6 +87,7 @@ impl SPOState {
         mut certificates_subscription: Box<dyn Subscription<Message>>,
         mut withdrawals_subscription: Option<Box<dyn Subscription<Message>>>,
         mut governance_subscription: Option<Box<dyn Subscription<Message>>>,
+        mut block_headers_subscription: Option<Box<dyn Subscription<Message>>>,
         mut epoch_activity_subscription: Box<dyn Subscription<Message>>,
         mut spdd_subscription: Box<dyn Subscription<Message>>,
         mut stake_deltas_subscription: Option<Box<dyn Subscription<Message>>>,
@@ -112,18 +116,79 @@ impl SPOState {
             let certs_message_f = certificates_subscription.read();
             let withdrawals_message_f = withdrawals_subscription.as_mut().map(|s| s.read());
             let governance_message_f = governance_subscription.as_mut().map(|s| s.read());
+            let block_headers_message_f = block_headers_subscription.as_mut().map(|s| s.read());
             let stake_deltas_message_f = stake_deltas_subscription.as_mut().map(|s| s.read());
 
             // Use certs_message as the synchroniser
             let (_, certs_message) = certs_message_f.await?;
             let new_epoch = match certs_message.as_ref() {
-                Message::Cardano((block_info, CardanoMessage::TxCertificates(tx_certs_msg))) => {
+                Message::Cardano((block_info, _)) => {
                     // Handle rollbacks on this topic only
                     if block_info.status == BlockStatus::RolledBack {
                         state = history.lock().await.get_rolled_back_state(block_info.number);
                     }
                     current_block = Some(block_info.clone());
 
+                    // new_epoch?
+                    block_info.new_epoch && block_info.epoch > 0
+                }
+
+                _ => {
+                    error!("Unexpected message type: {certs_message:?}");
+                    false
+                }
+            };
+
+            // handle Block Headers (handle_mint) before handle_tx_certs
+            // in case of epoch boundary
+            if let Some(block_headers_message_f) = block_headers_message_f {
+                let (_, block_headers_message) = block_headers_message_f.await?;
+                match block_headers_message.as_ref() {
+                    Message::Cardano((block_info, CardanoMessage::BlockHeader(header_msg))) => {
+                        let span =
+                            info_span!("spo_state.handle_block_header", block = block_info.number);
+
+                        span.in_scope(|| {
+                            // Derive the variant from the era - just enough to make
+                            // MultiEraHeader::decode() work.
+                            let variant = match block_info.era {
+                                Era::Byron => 0,
+                                Era::Shelley => 1,
+                                Era::Allegra => 2,
+                                Era::Mary => 3,
+                                Era::Alonzo => 4,
+                                _ => 5,
+                            };
+
+                            // Parse the header - note we ignore the subtag because EBBs
+                            // are suppressed upstream
+                            match MultiEraHeader::decode(variant, None, &header_msg.raw) {
+                                Ok(header) => {
+                                    if let Some(vrf_vkey) = header.vrf_vkey() {
+                                        match state.handle_mint(&block_info, vrf_vkey) {
+                                            Some(false) => {
+                                                error!(
+                                                    "Pool ID for vrf_vkey {} not found",
+                                                    hex::encode(vrf_vkey)
+                                                );
+                                            }
+                                            _ => (),
+                                        }
+                                    }
+                                }
+
+                                Err(e) => error!("Can't decode header {}: {e}", block_info.slot),
+                            }
+                        });
+                    }
+
+                    _ => error!("Unexpected message type: {block_headers_message:?}"),
+                }
+            }
+
+            // handle tx certificates
+            match certs_message.as_ref() {
+                Message::Cardano((block_info, CardanoMessage::TxCertificates(tx_certs_msg))) => {
                     let span = info_span!("spo_state.handle_certs", block = block_info.number);
                     async {
                         Self::check_sync(&current_block, &block_info);
@@ -150,15 +215,9 @@ impl SPOState {
                     }
                     .instrument(span)
                     .await;
-
-                    // new_epoch?
-                    block_info.new_epoch && block_info.epoch > 0
                 }
 
-                _ => {
-                    error!("Unexpected message type: {certs_message:?}");
-                    false
-                }
+                _ => error!("Unexpected message type: {certs_message:?}"),
             };
 
             // read from epoch-boundary messages only when it's a new epoch
@@ -388,6 +447,11 @@ impl SPOState {
             .unwrap_or(DEFAULT_SPO_REWARDS_SUBSCRIBE_TOPIC.1.to_string());
         info!("Creating SPO rewards subscriber on '{spo_rewards_subscribe_topic}'");
 
+        let block_headers_subscribe_topic = config
+            .get_string(DEFAULT_BLOCK_HEADER_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_BLOCK_HEADER_SUBSCRIBE_TOPIC.1.to_string());
+        info!("Creating block headers subscriber on '{block_headers_subscribe_topic}'");
+
         let stake_reward_deltas_subscribe_topic = config
             .get_string(DEFAULT_STAKE_REWARD_DELTAS_SUBSCRIBE_TOPIC.0)
             .unwrap_or(DEFAULT_STAKE_REWARD_DELTAS_SUBSCRIBE_TOPIC.1.to_string());
@@ -451,7 +515,7 @@ impl SPOState {
                 let state = history.lock().await.get_current_state();
 
                 let response = match query {
-                    // TODO:
+                    // NOTE:
                     // also consider retired pool
                     PoolsStateQuery::GetPoolInfo { pool_id } => {
                         match state.get(pool_id) {
@@ -536,10 +600,6 @@ impl SPOState {
                     }
 
                     PoolsStateQuery::GetPoolMetadata { pool_id } => {
-                        // NOTE:
-                        // we need to check retired pools metadata
-                        // to do so, we need to save retired pool's registration
-                        //
                         let pool_metadata = state.get_pool_metadata(pool_id);
                         if let Some(pool_metadata) = pool_metadata {
                             PoolsStateQueryResponse::PoolMetadata(pool_metadata)
@@ -665,6 +725,12 @@ impl SPOState {
         } else {
             None
         };
+        // when block_hashes are enabled
+        let block_headers_subscription = if store_config.store_block_hashes {
+            Some(context.subscribe(&block_headers_subscribe_topic).await?)
+        } else {
+            None
+        };
         // when state_addresses are enabled
         let stake_deltas_subscription = if store_config.store_stake_addresses {
             Some(context.subscribe(&stake_deltas_subscribe_topic).await?)
@@ -690,6 +756,7 @@ impl SPOState {
                 certificates_subscription,
                 withdrawals_subscription,
                 governance_subscription,
+                block_headers_subscription,
                 epoch_activity_subscription,
                 spdd_subscription,
                 stake_deltas_subscription,

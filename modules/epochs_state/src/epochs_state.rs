@@ -112,9 +112,7 @@ impl EpochsState {
                         // are suppressed upstream
                         match MultiEraHeader::decode(variant, None, &header_msg.raw) {
                             Ok(header) => {
-                                if let Some(vrf_vkey) = header.vrf_vkey() {
-                                    state.handle_mint(&block_info, Some(vrf_vkey));
-                                }
+                                state.handle_mint(&block_info, header.vrf_vkey());
                             }
 
                             Err(e) => error!("Can't decode header {}: {e}", block_info.slot),
