@@ -552,7 +552,7 @@ impl State {
         Ok(())
     }
 
-    /// Handle an EpochActivityMessage giving total fees and block counts by VRF key for
+    /// Handle an EpochActivityMessage giving total fees and block counts by SPO for
     /// the just-ended epoch
     /// This also returns SPO rewards for publishing to the SPDD topic (For epoch N)
     /// and stake reward deltas for publishing to the StakeRewardDeltas topic (For epoch N)
@@ -564,19 +564,6 @@ impl State {
         let mut spo_rewards: Vec<(KeyHash, SPORewards)> = Vec::new();
         // Collect stake addresses reward deltas
         let mut reward_deltas = Vec::<StakeRewardDelta>::new();
-
-        // Reverse map of VRF key to SPO operator ID
-        let vrf_to_operator: HashMap<KeyHash, KeyHash> =
-            self.spos.iter().map(|(id, spo)| (spo.vrf_key_hash.clone(), id.clone())).collect();
-
-        // Create a map of operator ID to block count
-        let spo_block_counts: HashMap<KeyHash, usize> = ea_msg
-            .vrf_vkey_hashes
-            .iter()
-            .filter_map(|(vrf, count)| {
-                vrf_to_operator.get(vrf).map(|operator| (operator.clone(), *count))
-            })
-            .collect();
 
         // Check previous epoch work is done
         let mut task = {
@@ -627,11 +614,19 @@ impl State {
                 _ => (),
             }
         };
+
+        // Map block counts, filtering out SPOs we don't know (OBFT in early Shelley)
+        let spo_blocks: HashMap<KeyHash, usize> = ea_msg.spo_blocks
+            .iter()
+            .filter(|(hash, _)| self.spos.contains_key(hash))
+            .map(|(hash, count)| (hash.clone(), *count))
+            .collect();
+
         // Enter epoch - note the message specifies the epoch that has just *ended*
         reward_deltas.extend(self.enter_epoch(
             ea_msg.epoch + 1,
             ea_msg.total_fees,
-            spo_block_counts,
+            spo_blocks,
             verifier,
         )?);
 

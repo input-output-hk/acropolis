@@ -6,7 +6,7 @@ use acropolis_common::stake_addresses::StakeAddressMap;
 use imbl::OrdMap;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 /// SPO data for stake snapshot
 #[derive(Debug, Default)]
@@ -135,6 +135,9 @@ impl Snapshot {
                         snap_spo.total_stake += active_stake;
                     } else {
                         // SPO has retired - this stake is simply ignored
+                        debug!(epoch, "SPO {} for hash {} retired?  Ignored",
+                               hex::encode(spo_id),
+                               hex::encode(hash));
                         continue;
                     }
                 }

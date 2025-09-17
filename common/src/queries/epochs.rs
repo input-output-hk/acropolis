@@ -13,7 +13,7 @@ pub enum EpochsStateQuery {
     GetEpochStakeDistributionByPool { epoch_number: u64 },
     GetEpochBlockDistribution { epoch_number: u64 },
     GetEpochBlockDistributionByPool { epoch_number: u64 },
-    GetLatestEpochBlocksMintedByPool { vrf_key_hash: KeyHash },
+    GetLatestEpochBlocksMintedByPool { spo_id: KeyHash },
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

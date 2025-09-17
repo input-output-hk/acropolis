@@ -93,7 +93,7 @@ mod tests {
                 epoch: 199,
                 total_blocks: 1,
                 total_fees: 50,
-                vrf_vkey_hashes: vec![],
+                spo_blocks: vec![],
                 nonce: None,
             },
         );

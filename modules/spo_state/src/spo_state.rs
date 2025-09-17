@@ -2,7 +2,7 @@
 //! Accepts certificate events and derives the SPO state in memory
 
 use acropolis_common::{
-    ledger_state::SPOState as LedgerSPOState,
+    ledger_state::SPOState as LedgerSPOState, KeyHash,
     messages::{
         CardanoMessage, Message, SPOStateMessage, SnapshotDumpMessage, SnapshotMessage,
         SnapshotStateMessage, StateQuery, StateQueryResponse,
@@ -286,9 +286,10 @@ impl SPOState {
                     span.in_scope(|| {
                         Self::check_sync(&current_block, &block_info);
                         // update epochs_history
-                        // epochs_history is keyed by spo not vrf_key_hash
-                        let spos = state
-                            .get_blocks_minted_by_spos(&epoch_activity_message.vrf_vkey_hashes);
+                        let spos: Vec<(KeyHash, usize)> = epoch_activity_message.spo_blocks
+                            .iter()
+                            .map(|(hash, count)| (hash.clone(), *count))
+                            .collect();
                         epochs_history.handle_epoch_activity(
                             block_info,
                             epoch_activity_message,
