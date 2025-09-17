@@ -1,7 +1,6 @@
 mod stores;
 
 use acropolis_common::{
-    BlockHash,
     crypto::keyhash,
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::blocks::{
@@ -9,7 +8,7 @@ use acropolis_common::{
         BlocksStateQuery, BlocksStateQueryResponse, NextBlocks, PreviousBlocks,
         DEFAULT_BLOCKS_QUERY_TOPIC,
     },
-    TxHash,
+    BlockHash, TxHash,
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Module};
@@ -198,7 +197,7 @@ impl ChainStore {
 
     fn get_block_by_key(store: &Arc<dyn Store>, block_key: &BlockKey) -> Result<Option<Block>> {
         match block_key {
-            BlockKey::Hash(hash) => store.get_block_by_hash(hash),
+            BlockKey::Hash(hash) => store.get_block_by_hash(hash.as_ref()),
             BlockKey::Number(number) => store.get_block_by_number(*number),
         }
     }

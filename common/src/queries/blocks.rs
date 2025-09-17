@@ -1,5 +1,5 @@
+use crate::{serialization::Bech32WithHrp, BlockHash, KeyHash, TxHash};
 use cryptoxide::hashing::blake2b::Blake2b;
-use crate::{BlockHash, KeyHash, TxHash, serialization::Bech32WithHrp};
 use serde::ser::{Serialize, SerializeStruct, Serializer};
 
 pub const DEFAULT_BLOCKS_QUERY_TOPIC: (&str, &str) =
@@ -43,7 +43,7 @@ pub enum BlocksStateQuery {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum BlockKey {
-    Hash(Vec<u8>),
+    Hash(BlockHash),
     Number(u64),
 }
 
@@ -72,11 +72,13 @@ pub struct BlockInfo {
     pub slot: u64,
     pub epoch: u64,
     pub epoch_slot: u64,
-    pub issuer_vkey: Option<KeyHash>,
+    // TODO: make a proper type for these pub keys
+    pub issuer_vkey: Option<Vec<u8>>,
     pub size: u64,
     pub tx_count: u64,
     pub output: Option<u64>,
     pub fees: Option<u64>,
+    // TODO: make a proper type for these pub keys
     pub block_vrf: Option<Vec<u8>>,
     pub op_cert: Option<KeyHash>,
     pub op_cert_counter: Option<u64>,
@@ -88,25 +90,35 @@ pub struct BlockInfo {
 impl Serialize for BlockInfo {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
-        S: Serializer
+        S: Serializer,
     {
         let mut state = serializer.serialize_struct("BlockInfo", 17)?;
         state.serialize_field("time", &self.timestamp)?;
         state.serialize_field("height", &self.number)?;
+        state.serialize_field("hash", &self.hash)?;
         state.serialize_field("slot", &self.slot)?;
         state.serialize_field("epoch", &self.epoch)?;
         state.serialize_field("epoch_slot", &self.epoch_slot)?;
-        state.serialize_field("slot_issuer", &self.issuer_vkey.clone().map(|vkey| -> String {
-            let mut context = Blake2b::<224>::new();
-            context.update_mut(&vkey);
-            let digest = context.finalize().as_slice().to_owned();
-            digest.to_bech32_with_hrp("pool").unwrap_or(String::new())
-        }))?;
+        // TODO: handle non-SPO keys
+        state.serialize_field(
+            "slot_issuer",
+            &self.issuer_vkey.clone().map(|vkey| -> String {
+                let mut context = Blake2b::<224>::new();
+                context.update_mut(&vkey);
+                let digest = context.finalize().as_slice().to_owned();
+                digest.to_bech32_with_hrp("pool").unwrap_or(String::new())
+            }),
+        )?;
         state.serialize_field("size", &self.size)?;
         state.serialize_field("tx_count", &self.tx_count)?;
         state.serialize_field("output", &self.output)?;
         state.serialize_field("fees", &self.fees)?;
-        state.serialize_field("block_vrf", &self.block_vrf.clone().map(|v| hex::encode(v)))?;
+        state.serialize_field(
+            "block_vrf",
+            &self.block_vrf.clone().map(|vkey| -> String {
+                vkey.to_bech32_with_hrp("vrf_vk").unwrap_or(String::new())
+            }),
+        )?;
         state.serialize_field("op_cert", &self.op_cert.clone().map(|v| hex::encode(v)))?;
         state.serialize_field("op_cert_counter", &self.op_cert_counter)?;
         state.serialize_field("previous_block", &self.previous_block)?;

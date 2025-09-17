@@ -85,10 +85,22 @@ pub enum BlockStatus {
 /// Block hash
 #[serde_as]
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct BlockHash(
-    #[serde_as(as = "Hex")]
-    pub [u8; 32],
-);
+pub struct BlockHash(#[serde_as(as = "Hex")] pub [u8; 32]);
+
+impl From<Vec<u8>> for BlockHash {
+    fn from(v: Vec<u8>) -> Self {
+        match v.first_chunk::<32>() {
+            Some(&bytes) => BlockHash(bytes),
+            _ => BlockHash([0u8; 32]),
+        }
+    }
+}
+
+impl AsRef<[u8]> for BlockHash {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
 
 /// Block info, shared across multiple messages
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

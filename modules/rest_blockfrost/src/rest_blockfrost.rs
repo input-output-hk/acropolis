@@ -18,7 +18,8 @@ mod utils;
 use handlers::{
     accounts::handle_single_account_blockfrost,
     blocks::{
-        handle_blocks_latest_blockfrost,
+        handle_blocks_epoch_slot_blockfrost, handle_blocks_latest_hash_number_blockfrost,
+        handle_blocks_slot_blockfrost,
     },
     epochs::{
         handle_epoch_info_blockfrost, handle_epoch_next_blockfrost, handle_epoch_params_blockfrost,
@@ -50,8 +51,12 @@ const DEFAULT_HANDLE_SINGLE_ACCOUNT_TOPIC: (&str, &str) =
     ("handle-topic-account-single", "rest.get.accounts.*");
 
 // Blocks topics
-const DEFAULT_HANDLE_BLOCKS_LATEST_TOPIC: (&str, &str) =
-    ("handle-blocks-latest", "rest.get.blocks.latest");
+const DEFAULT_HANDLE_BLOCKS_LATEST_HASH_NUMBER_TOPIC: (&str, &str) =
+    ("handle-blocks-latest-hash-number", "rest.get.blocks.*");
+const DEFAULT_HANDLE_BLOCKS_SLOT_TOPIC: (&str, &str) =
+    ("handle-blocks-slot", "rest.get.blocks.slot.*");
+const DEFAULT_HANDLE_BLOCKS_EPOCH_SLOT_TOPIC: (&str, &str) =
+    ("handle-blocks-epoch-slot", "rest.get.blocks.epoch.*.slot.*");
 
 // Governance topics
 const DEFAULT_HANDLE_DREPS_LIST_TOPIC: (&str, &str) =
@@ -172,12 +177,28 @@ impl BlockfrostREST {
             handle_single_account_blockfrost,
         );
 
-        // Handler for /blocks/latest
+        // Handler for /blocks/latest, /blocks/{hash_or_number}
         register_handler(
             context.clone(),
-            DEFAULT_HANDLE_BLOCKS_LATEST_TOPIC,
+            DEFAULT_HANDLE_BLOCKS_LATEST_HASH_NUMBER_TOPIC,
             handlers_config.clone(),
-            handle_blocks_latest_blockfrost,
+            handle_blocks_latest_hash_number_blockfrost,
+        );
+
+        // Handler for /blocks/slot/{slot_number}
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_BLOCKS_SLOT_TOPIC,
+            handlers_config.clone(),
+            handle_blocks_slot_blockfrost,
+        );
+
+        // Handler for /blocks/epoch/{epoch_number}/slot/{slot_number}
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_BLOCKS_EPOCH_SLOT_TOPIC,
+            handlers_config.clone(),
+            handle_blocks_epoch_slot_blockfrost,
         );
 
         // Handler for /governance/dreps
