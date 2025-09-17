@@ -115,7 +115,6 @@ impl AssetsState {
                         CardanoMessage::UTXODeltas(utxo_deltas_msg),
                     )) => {
                         Self::check_sync(&current_block, block_info, "utxo");
-
                         let mut reg = registry.lock().await;
                         state =
                             match state.handle_cip68_metadata(&utxo_deltas_msg.deltas, &mut *reg) {
