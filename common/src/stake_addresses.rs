@@ -120,7 +120,10 @@ impl StakeAddressMap {
         self.inner.par_iter().for_each(|(_, sas)| {
             total_live_stakes.fetch_add(sas.utxo_value, std::sync::atomic::Ordering::Relaxed);
             if sas.delegated_spo.as_ref().map(|d_spo| d_spo.eq(spo)).unwrap_or(false) {
-                live_stake.fetch_add(sas.utxo_value, std::sync::atomic::Ordering::Relaxed);
+                live_stake.fetch_add(
+                    sas.utxo_value + sas.rewards,
+                    std::sync::atomic::Ordering::Relaxed,
+                );
                 live_delegators.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             }
         });
