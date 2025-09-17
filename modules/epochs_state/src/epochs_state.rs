@@ -49,14 +49,13 @@ impl EpochsState {
     async fn run(
         history: Arc<Mutex<StateHistory<State>>>,
         epochs_history: EpochsHistoryState,
-        store_config: &StoreConfig,
         mut headers_subscription: Box<dyn Subscription<Message>>,
         mut fees_subscription: Box<dyn Subscription<Message>>,
         mut epoch_activity_publisher: EpochActivityPublisher,
     ) -> Result<()> {
         loop {
             // Get a mutable state
-            let mut state = history.lock().await.get_or_init_with(|| State::new(store_config));
+            let mut state = history.lock().await.get_or_init_with(|| State::new());
             let mut current_block: Option<BlockInfo> = None;
 
             // Read both topics in parallel
@@ -243,18 +242,6 @@ impl EpochsState {
                         })
                     }
 
-                    EpochsStateQuery::GetBlockHashesByPool { vrf_key_hash } => {
-                        if state.is_block_hashes_enabled() {
-                            EpochsStateQueryResponse::BlockHashesByPool(
-                                state.get_block_hashes(vrf_key_hash),
-                            )
-                        } else {
-                            EpochsStateQueryResponse::Error(
-                                "Block hashes are not enabled".to_string(),
-                            )
-                        }
-                    }
-
                     _ => EpochsStateQueryResponse::Error(format!(
                         "Unimplemented query variant: {:?}",
                         query
@@ -271,7 +258,6 @@ impl EpochsState {
             Self::run(
                 history,
                 epochs_history,
-                &store_config,
                 headers_subscription,
                 fees_subscription,
                 epoch_activity_publisher,

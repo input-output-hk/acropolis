@@ -1,4 +1,4 @@
-use crate::{messages::EpochActivityMessage, protocol_params::ProtocolParams, BlockHash, KeyHash};
+use crate::{messages::EpochActivityMessage, protocol_params::ProtocolParams, KeyHash};
 
 pub const DEFAULT_EPOCHS_QUERY_TOPIC: (&str, &str) =
     ("epochs-state-query-topic", "cardano.query.epochs");
@@ -17,7 +17,6 @@ pub enum EpochsStateQuery {
     // Pools related queries
     GetTotalBlocksMintedByPools { vrf_key_hashes: Vec<KeyHash> },
     GetBlocksMintedInfoByPool { vrf_key_hash: KeyHash },
-    GetBlockHashesByPool { vrf_key_hash: KeyHash },
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -34,7 +33,6 @@ pub enum EpochsStateQueryResponse {
     // Pools related responses
     TotalBlocksMintedByPools(Vec<u64>),
     BlocksMintedInfoByPool(BlocksMintedInfoByPool),
-    BlockHashesByPool(Vec<BlockHash>),
 
     NotFound,
     Error(String),
