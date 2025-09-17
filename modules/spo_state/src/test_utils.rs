@@ -46,19 +46,6 @@ pub fn save_retired_pools_store_config() -> StoreConfig {
     }
 }
 
-pub fn save_stake_addresses_store_config() -> StoreConfig {
-    StoreConfig {
-        store_epochs_history: false,
-        store_retired_pools: false,
-        store_registration: false,
-        store_updates: false,
-        store_delegators: true,
-        store_votes: false,
-        store_block_hashes: false,
-        store_stake_addresses: true,
-    }
-}
-
 pub fn save_block_hashes_store_config() -> StoreConfig {
     StoreConfig {
         store_epochs_history: false,

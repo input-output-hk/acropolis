@@ -73,19 +73,19 @@ mod tests {
 
     #[test]
     fn epochs_history_is_none_when_store_history_is_false() {
-        let epochs_history = EpochsHistoryState::new(&StoreConfig::new(false, false));
+        let epochs_history = EpochsHistoryState::new(&StoreConfig::new(false));
         assert!(epochs_history.epochs_history.is_none());
     }
 
     #[test]
     fn epochs_history_is_some_when_store_history_is_true() {
-        let epochs_history = EpochsHistoryState::new(&StoreConfig::new(true, false));
+        let epochs_history = EpochsHistoryState::new(&StoreConfig::new(true));
         assert!(epochs_history.epochs_history.is_some());
     }
 
     #[test]
     fn handle_epoch_activity_saves_history() {
-        let epochs_history = EpochsHistoryState::new(&StoreConfig::new(true, false));
+        let epochs_history = EpochsHistoryState::new(&StoreConfig::new(true));
         let block = make_block(200);
         epochs_history.handle_epoch_activity(
             &block,
