@@ -506,7 +506,9 @@ impl SPOState {
 
                 let response = match query {
                     // NOTE:
-                    // also consider retired pool
+                    // For now, we only store active pools
+                    // But we need to store retired pool's information also 
+                    // for BF's compatibility
                     PoolsStateQuery::GetPoolInfo { pool_id } => {
                         match state.get(pool_id) {
                             Some(pool) => PoolsStateQueryResponse::PoolInfo(pool.clone()),
