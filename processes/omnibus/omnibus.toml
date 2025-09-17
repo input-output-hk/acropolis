@@ -79,8 +79,6 @@ write-full-cache = "false"
 [module.epochs-state]
 # Enables /epochs/{number} endpoint (for historical epochs)
 store-history = false
-# Enables /pools/{pool_id}/blocks endpoint
-store-block-hashes = false
 
 [module.accounts-state]
 
