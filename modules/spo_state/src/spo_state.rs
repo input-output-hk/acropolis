@@ -164,15 +164,7 @@ impl SPOState {
                         match MultiEraHeader::decode(variant, None, &header_msg.raw) {
                             Ok(header) => {
                                 if let Some(vrf_vkey) = header.vrf_vkey() {
-                                    match state.handle_mint(&block_info, vrf_vkey) {
-                                        Some(false) => {
-                                            error!(
-                                                "Pool ID for vrf_vkey {} not found",
-                                                hex::encode(vrf_vkey)
-                                            );
-                                        }
-                                        _ => (),
-                                    }
+                                    state.handle_mint(&block_info, vrf_vkey);
                                 }
                             }
 
