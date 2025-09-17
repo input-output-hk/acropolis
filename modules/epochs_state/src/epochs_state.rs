@@ -230,12 +230,6 @@ impl EpochsState {
                         }
                     }
 
-                    EpochsStateQuery::GetBlocksMintedByPools { vrf_key_hashes } => {
-                        EpochsStateQueryResponse::BlocksMintedByPools(
-                            state.get_blocks_minted_by_pools(vrf_key_hashes),
-                        )
-                    }
-
                     EpochsStateQuery::GetTotalBlocksMintedByPools { vrf_key_hashes } => {
                         EpochsStateQueryResponse::TotalBlocksMintedByPools(
                             state.get_total_blocks_minted_by_pools(vrf_key_hashes),
