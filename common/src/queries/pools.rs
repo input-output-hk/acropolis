@@ -1,6 +1,6 @@
 use crate::{
-    queries::governance::VoteRecord, rational_number::RationalNumber, KeyHash, PoolEpochState,
-    PoolMetadata, PoolRegistration, PoolRetirement, PoolUpdateEvent, Relay,
+    queries::governance::VoteRecord, rational_number::RationalNumber, BlockHash, KeyHash,
+    PoolEpochState, PoolMetadata, PoolRegistration, PoolRetirement, PoolUpdateEvent, Relay,
 };
 
 pub const DEFAULT_POOLS_QUERY_TOPIC: (&str, &str) =
@@ -21,25 +21,28 @@ pub enum PoolsStateQuery {
         epoch: u64,
     },
     GetPoolInfo {
-        pool_id: Vec<u8>,
+        pool_id: KeyHash,
     },
     GetPoolHistory {
-        pool_id: Vec<u8>,
+        pool_id: KeyHash,
     },
     GetPoolMetadata {
-        pool_id: Vec<u8>,
+        pool_id: KeyHash,
     },
     GetPoolRelays {
-        pool_id: Vec<u8>,
+        pool_id: KeyHash,
     },
     GetPoolDelegators {
-        pool_id: Vec<u8>,
+        pool_id: KeyHash,
+    },
+    GetPoolBlocks {
+        pool_id: KeyHash,
     },
     GetPoolUpdates {
-        pool_id: Vec<u8>,
+        pool_id: KeyHash,
     },
     GetPoolVotes {
-        pool_id: Vec<u8>,
+        pool_id: KeyHash,
     },
 }
 
@@ -56,6 +59,7 @@ pub enum PoolsStateQueryResponse {
     PoolMetadata(PoolMetadata),
     PoolRelays(Vec<Relay>),
     PoolDelegators(PoolDelegators),
+    PoolBlocks(Vec<BlockHash>),
     PoolUpdates(Vec<PoolUpdateEvent>),
     PoolVotes(Vec<VoteRecord>),
     NotFound,

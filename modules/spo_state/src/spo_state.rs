@@ -632,21 +632,42 @@ impl SPOState {
                         }
                     }
 
+                    PoolsStateQuery::GetPoolBlocks { pool_id } => {
+                        if state.is_block_hashes_enabled() {
+                            let pool_blocks = state.get_pool_blocks(pool_id);
+                            if let Some(pool_blocks) = pool_blocks {
+                                PoolsStateQueryResponse::PoolBlocks(pool_blocks)
+                            } else {
+                                PoolsStateQueryResponse::NotFound
+                            }
+                        } else {
+                            PoolsStateQueryResponse::Error("Block hashes are not enabled".into())
+                        }
+                    }
+
                     PoolsStateQuery::GetPoolUpdates { pool_id } => {
-                        let pool_updates = state.get_pool_updates(pool_id);
-                        if let Some(pool_updates) = pool_updates {
-                            PoolsStateQueryResponse::PoolUpdates(pool_updates)
+                        if state.is_historical_updates_enabled() {
+                            let pool_updates = state.get_pool_updates(pool_id);
+                            if let Some(pool_updates) = pool_updates {
+                                PoolsStateQueryResponse::PoolUpdates(pool_updates)
+                            } else {
+                                PoolsStateQueryResponse::NotFound
+                            }
                         } else {
                             PoolsStateQueryResponse::Error("Pool updates are not enabled".into())
                         }
                     }
 
                     PoolsStateQuery::GetPoolVotes { pool_id } => {
-                        let pool_votes = state.get_pool_votes(pool_id);
+                        if state.is_historical_votes_enabled() {
+                            let pool_votes = state.get_pool_votes(pool_id);
                         if let Some(pool_votes) = pool_votes {
                             PoolsStateQueryResponse::PoolVotes(pool_votes)
                         } else {
-                            PoolsStateQueryResponse::Error("Pool Votes are not enabled".into())
+                                PoolsStateQueryResponse::NotFound
+                            }
+                        } else {
+                            PoolsStateQueryResponse::Error("Pool votes are not enabled".into())
                         }
                     }
                 };

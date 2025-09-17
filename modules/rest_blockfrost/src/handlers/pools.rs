@@ -1043,50 +1043,26 @@ pub async fn handle_pool_blocks_blockfrost(
         ));
     };
 
-    // query pool registration from pool state
-    let pool_info_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
-        PoolsStateQuery::GetPoolInfo {
+    // Get block hashes by pool_id from spo_state
+    let pool_blocks_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
+        PoolsStateQuery::GetPoolBlocks {
             pool_id: spo.clone(),
         },
     )));
 
-    let pool_info = query_state(
-        &context,
-        &handlers_config.pools_query_topic,
-        pool_info_msg,
-        |message| match message {
-            Message::StateQueryResponse(StateQueryResponse::Pools(
-                PoolsStateQueryResponse::PoolInfo(pool_info),
-            )) => Ok(pool_info),
-            Message::StateQueryResponse(StateQueryResponse::Pools(
-                PoolsStateQueryResponse::NotFound,
-            )) => Err(anyhow::anyhow!("Pool Not found")),
-            Message::StateQueryResponse(StateQueryResponse::Pools(
-                PoolsStateQueryResponse::Error(e),
-            )) => Err(anyhow::anyhow!(
-                "Internal server error while retrieving pool info: {e}"
-            )),
-            _ => Err(anyhow::anyhow!("Unexpected message type")),
-        },
-    )
-    .await?;
-    let vrf_key_hash = pool_info.vrf_key_hash;
-
-    // Get block hashes by vrf key hash from epochs-state
-    let pool_blocks_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
-        EpochsStateQuery::GetBlockHashesByPool { vrf_key_hash },
-    )));
-
     let pool_blocks = query_state(
         &context,
-        &handlers_config.epochs_query_topic,
+        &handlers_config.pools_query_topic,
         pool_blocks_msg,
         |message| match message {
-            Message::StateQueryResponse(StateQueryResponse::Epochs(
-                EpochsStateQueryResponse::BlockHashesByPool(pool_blocks),
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::PoolBlocks(pool_blocks),
             )) => Ok(pool_blocks),
-            Message::StateQueryResponse(StateQueryResponse::Epochs(
-                EpochsStateQueryResponse::Error(_),
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::NotFound,
+            )) => Err(anyhow::anyhow!("Pool not found")),
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::Error(_),
             )) => Err(anyhow::anyhow!("Block hashes are not enabled")),
             _ => Err(anyhow::anyhow!("Unexpected message type")),
         },
@@ -1135,10 +1111,12 @@ pub async fn handle_pool_updates_blockfrost(
             )) => Ok(pool_updates),
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::NotFound,
-            )) => Err(anyhow::anyhow!("Pool Not found")),
+            )) => Err(anyhow::anyhow!("Pool not found")),
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::Error(e),
-            )) => Err(anyhow::anyhow!("Error: {e}")),
+            )) => Err(anyhow::anyhow!(
+                "Internal server error while retrieving pool updates: {e}"
+            )),
             _ => Err(anyhow::anyhow!("Unexpected message type")),
         },
     )
@@ -1196,7 +1174,9 @@ pub async fn handle_pool_votes_blockfrost(
             )) => Err(anyhow::anyhow!("Pool Not found")),
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::Error(e),
-            )) => Err(anyhow::anyhow!("Error: {e}")),
+            )) => Err(anyhow::anyhow!(
+                "Internal server error while retrieving pool votes: {e}"
+            )),
             _ => Err(anyhow::anyhow!("Unexpected message type")),
         },
     )

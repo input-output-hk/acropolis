@@ -200,6 +200,11 @@ impl State {
         delegators_map.map(|map| map.into_iter().collect())
     }
 
+    /// Get Pool Blocks
+    pub fn get_pool_blocks(&self, pool_id: &KeyHash) -> Option<Vec<BlockHash>> {
+        self.block_hashes.as_ref()?.get(pool_id).map(|blocks| blocks.clone().into_iter().collect())
+    }
+
     /// Get Pool Updates
     pub fn get_pool_updates(&self, pool_id: &KeyHash) -> Option<Vec<PoolUpdateEvent>> {
         self.historical_spos.as_ref()?.get(pool_id).and_then(|s| s.updates.clone())
