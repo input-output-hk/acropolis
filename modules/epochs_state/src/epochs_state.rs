@@ -227,9 +227,9 @@ impl EpochsState {
                         }
                     }
 
-                    EpochsStateQuery::GetBlocksMintedByPool { vrf_key_hash } => {
-                        EpochsStateQueryResponse::BlocksMintedByPool(
-                            state.get_blocks_minted_by_pool(vrf_key_hash),
+                    EpochsStateQuery::GetLatestEpochBlocksMintedByPool { vrf_key_hash } => {
+                        EpochsStateQueryResponse::LatestEpochBlocksMintedByPool(
+                            state.get_latest_epoch_blocks_minted_by_pool(vrf_key_hash),
                         )
                     }
 

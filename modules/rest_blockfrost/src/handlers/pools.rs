@@ -622,7 +622,7 @@ async fn handle_pools_spo_blockfrost(
 
     // Query blocks_minted from epochs_state
     let epoch_blocks_minted_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
-        EpochsStateQuery::GetBlocksMintedByPool {
+        EpochsStateQuery::GetLatestEpochBlocksMintedByPool {
             vrf_key_hash: pool_info.vrf_key_hash.clone(),
         },
     )));
@@ -632,7 +632,7 @@ async fn handle_pools_spo_blockfrost(
         epoch_blocks_minted_msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Epochs(
-                EpochsStateQueryResponse::BlocksMintedByPool(blocks_minted),
+                EpochsStateQueryResponse::LatestEpochBlocksMintedByPool(blocks_minted),
             )) => Ok(blocks_minted),
             _ => Err(anyhow::anyhow!("Unexpected message type")),
         },
