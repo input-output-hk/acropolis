@@ -18,12 +18,12 @@ pub struct EpochActivityRest {
     pub epoch: u64,
     pub total_blocks: usize,
     pub total_fees: u64,
-    pub vrf_vkey_hashes: Vec<VRFKeyCount>,
+    pub spo_blocks: Vec<SPOBlockCount>,
 }
 
 #[derive(Serialize)]
-pub struct VRFKeyCount {
-    pub vrf_key_hash: String,
+pub struct SPOBlockCount {
+    pub spo_id: String,
     pub block_count: usize,
 }
 
@@ -33,11 +33,11 @@ impl From<EpochActivityMessage> for EpochActivityRest {
             epoch: ea_message.epoch,
             total_blocks: ea_message.total_blocks,
             total_fees: ea_message.total_fees,
-            vrf_vkey_hashes: ea_message
-                .vrf_vkey_hashes
+            spo_blocks: ea_message
+                .spo_blocks
                 .iter()
-                .map(|(key, count)| VRFKeyCount {
-                    vrf_key_hash: hex::encode(key),
+                .map(|(key, count)| SPOBlockCount {
+                    spo_id: hex::encode(key),
                     block_count: *count,
                 })
                 .collect(),

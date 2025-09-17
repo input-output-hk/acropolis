@@ -51,10 +51,6 @@ pub struct State {
     #[serde_as(as = "SerializeMapAs<_, Vec<Hex>>")]
     pending_deregistrations: HashMap<u64, Vec<Vec<u8>>>,
 
-    /// vrf_key_hash -> pool_id mapping
-    #[serde_as(as = "SerializeMapAs<Hex, Hex>")]
-    vrf_key_to_pool_id_map: HashMap<Vec<u8>, Vec<u8>>,
-
     /// historical spo state
     /// keyed by pool operator id
     historical_spos: Option<HashMap<KeyHash, HistoricalSPOState>>,
@@ -71,7 +67,6 @@ impl State {
             spos: HashMap::new(),
             pending_updates: HashMap::new(),
             pending_deregistrations: HashMap::new(),
-            vrf_key_to_pool_id_map: HashMap::new(),
             historical_spos: if config.store_historical_state() {
                 Some(HashMap::new())
             } else {
@@ -89,8 +84,6 @@ impl State {
 impl From<SPOState> for State {
     fn from(value: SPOState) -> Self {
         let spos: HashMap<KeyHash, PoolRegistration> = value.pools.into();
-        let vrf_key_to_pool_id_map =
-            spos.iter().map(|(k, v)| (v.vrf_key_hash.clone(), k.clone())).collect();
         let pending_deregistrations =
             value.retiring.into_iter().fold(HashMap::new(), |mut acc, (key_hash, epoch)| {
                 acc.entry(epoch).or_insert_with(Vec::new).push(key_hash);
@@ -102,7 +95,6 @@ impl From<SPOState> for State {
             spos,
             pending_updates: value.updates.into(),
             pending_deregistrations,
-            vrf_key_to_pool_id_map,
             historical_spos: None,
             stake_addresses: None,
         }
@@ -137,24 +129,6 @@ impl State {
     #[allow(dead_code)]
     pub fn get(&self, pool_id: &KeyHash) -> Option<&PoolRegistration> {
         self.spos.get(pool_id)
-    }
-
-    /// Get SPO from vrf_key_hash
-    pub fn get_pool_id_from_vrf_key_hash(&self, vrf_key_hash: &KeyHash) -> Option<KeyHash> {
-        self.vrf_key_to_pool_id_map.get(vrf_key_hash).cloned()
-    }
-
-    /// Get vrf_key_to_pool_id_map
-    pub fn get_blocks_minted_by_spos(
-        &self,
-        vrf_key_hashes: &Vec<(KeyHash, usize)>,
-    ) -> Vec<(KeyHash, usize)> {
-        vrf_key_hashes
-            .iter()
-            .filter_map(|(vrf_key_hash, amount)| {
-                self.vrf_key_to_pool_id_map.get(vrf_key_hash).map(|spo| (spo.clone(), *amount))
-            })
-            .collect()
     }
 
     /// Get all Stake Pool operators' operator hashes
@@ -230,9 +204,8 @@ impl State {
                         "Retirement requested for unregistered SPO {}",
                         hex::encode(&dr),
                     ),
-                    Some(de_reg) => {
+                    Some(_de_reg) => {
                         retired_spos.push(dr.clone());
-                        self.vrf_key_to_pool_id_map.remove(&de_reg.vrf_key_hash);
                     }
                 };
             }
@@ -266,7 +239,6 @@ impl State {
                 reg
             );
             self.spos.insert(reg.operator.clone(), reg.clone());
-            self.vrf_key_to_pool_id_map.insert(reg.vrf_key_hash.clone(), reg.operator.clone());
         }
 
         // Remove any existing queued deregistrations
@@ -373,12 +345,6 @@ mod tests {
     fn get_returns_none_on_empty_state() {
         let state = State::default();
         assert!(state.get(&vec![0]).is_none());
-    }
-
-    #[test]
-    fn vrf_key_to_pool_id_map_is_none_on_empty_state() {
-        let state = State::default();
-        assert!(state.vrf_key_to_pool_id_map.is_empty());
     }
 
     #[test]

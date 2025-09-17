@@ -111,8 +111,8 @@ impl EpochActivityCounter {
                         // are suppressed upstream
                         match MultiEraHeader::decode(variant, None, &header_msg.raw) {
                             Ok(header) => {
-                                if let Some(vrf_vkey) = header.vrf_vkey() {
-                                    state.handle_mint(&block_info, Some(vrf_vkey));
+                                if let Some(issuer_vkey) = header.issuer_vkey() {
+                                    state.handle_mint(&block_info, &issuer_vkey);
                                 }
                             }
 
@@ -240,17 +240,17 @@ impl EpochActivityCounter {
                         }
                     }
 
-                    EpochsStateQuery::GetBlocksMintedByPools { vrf_key_hashes } => {
+                    EpochsStateQuery::GetBlocksMintedByPools { spo_ids } => {
                         EpochsStateQueryResponse::BlocksMintedByPools(BlocksMintedByPools {
-                            blocks_minted: state.get_blocks_minted_by_pools(vrf_key_hashes),
+                            blocks_minted: state.get_blocks_minted_by_pools(spo_ids),
                         })
                     }
 
-                    EpochsStateQuery::GetTotalBlocksMintedByPools { vrf_key_hashes } => {
+                    EpochsStateQuery::GetTotalBlocksMintedByPools { spo_ids } => {
                         EpochsStateQueryResponse::TotalBlocksMintedByPools(
                             TotalBlocksMintedByPools {
                                 total_blocks_minted: state
-                                    .get_total_blocks_minted_by_pools(vrf_key_hashes),
+                                    .get_total_blocks_minted_by_pools(spo_ids),
                             },
                         )
                     }

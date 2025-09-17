@@ -329,10 +329,7 @@ impl Address {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use blake2::{
-        digest::{Update, VariableOutput},
-        Blake2bVar,
-    };
+    use crate::crypto::keyhash_224;
 
     #[test]
     fn byron_address() {
@@ -351,10 +348,7 @@ mod tests {
         let (_, pubkey) = bech32::decode(payment_key).expect("Invalid Bech32 string");
 
         // pubkey is the raw key - we need the Blake2B hash
-        let mut hasher = Blake2bVar::new(28).unwrap();
-        hasher.update(&pubkey);
-        let mut hash = vec![0u8; 28];
-        hasher.finalize_variable(&mut hash).unwrap();
+        let hash = keyhash_224(&pubkey);
         assert_eq!(28, hash.len());
         hash
     }
@@ -364,10 +358,7 @@ mod tests {
         let (_, pubkey) = bech32::decode(stake_key).expect("Invalid Bech32 string");
 
         // pubkey is the raw key - we need the Blake2B hash
-        let mut hasher = Blake2bVar::new(28).unwrap();
-        hasher.update(&pubkey);
-        let mut hash = vec![0u8; 28];
-        hasher.finalize_variable(&mut hash).unwrap();
+        let hash = keyhash_224(&pubkey);
         assert_eq!(28, hash.len());
         hash
     }

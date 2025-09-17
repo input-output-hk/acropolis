@@ -1,6 +1,6 @@
 //! Acropolis epoch activity counter: state storage
 
-use acropolis_common::{crypto::keyhash, messages::EpochActivityMessage, BlockInfo, KeyHash};
+use acropolis_common::{crypto::keyhash_224, messages::EpochActivityMessage, BlockInfo, KeyHash};
 use imbl::HashMap;
 use tracing::info;
 
@@ -12,7 +12,7 @@ pub struct State {
     // epoch number N
     epoch: u64,
 
-    // Map of counts by VRF key hashes
+    // Map of counts by SPO ID
     blocks_minted: HashMap<KeyHash, usize>,
 
     // blocks seen this epoch
@@ -39,15 +39,14 @@ impl State {
         }
     }
 
-    // Handle a block minting, taking the SPO's VRF vkey
-    pub fn handle_mint(&mut self, _block: &BlockInfo, vrf_vkey: Option<&[u8]>) {
+    // Handle a block minting, taking the SPO's issuer vkey
+    pub fn handle_mint(&mut self, _block: &BlockInfo, issuer_vkey: &[u8]) {
         self.epoch_blocks += 1;
-        if let Some(vrf_vkey) = vrf_vkey {
-            let vrf_key_hash = keyhash(vrf_vkey);
-            // Count one on this hash
-            *(self.blocks_minted.entry(vrf_key_hash.clone()).or_insert(0)) += 1;
-            *(self.total_blocks_minted.entry(vrf_key_hash.clone()).or_insert(0)) += 1;
-        }
+
+        let spo_id = keyhash_224(issuer_vkey);
+        // Count one on this hash
+        *(self.blocks_minted.entry(spo_id.clone()).or_insert(0)) += 1;
+        *(self.total_blocks_minted.entry(spo_id.clone()).or_insert(0)) += 1;
     }
 
     // Handle block fees
@@ -61,7 +60,7 @@ impl State {
         info!(
             epoch = block_info.epoch - 1,
             blocks = self.epoch_blocks,
-            unique_vrf_keys = self.blocks_minted.len(),
+            unique_spos = self.blocks_minted.len(),
             fees = self.epoch_fees,
             "End of epoch"
         );
@@ -83,21 +82,21 @@ impl State {
             epoch: self.epoch,
             total_blocks: self.epoch_blocks,
             total_fees: self.epoch_fees,
-            vrf_vkey_hashes: self.blocks_minted.iter().map(|(k, v)| (k.clone(), *v)).collect(),
+            spo_blocks: self.blocks_minted.iter().map(|(k, v)| (k.clone(), *v)).collect(),
         }
     }
 
-    /// Get current epoch's blocks minted for each vrf key hash
-    pub fn get_blocks_minted_by_pools(&self, vrf_key_hashes: &Vec<KeyHash>) -> Vec<u64> {
-        vrf_key_hashes
+    /// Get current epoch's blocks minted for each SPO
+    pub fn get_blocks_minted_by_pools(&self, spo_ids: &Vec<KeyHash>) -> Vec<u64> {
+        spo_ids
             .iter()
             .map(|key_hash| self.blocks_minted.get(key_hash).map(|v| *v as u64).unwrap_or(0))
             .collect()
     }
 
-    /// Get epoch's total blocks minted for each vrf key hash till current block number
-    pub fn get_total_blocks_minted_by_pools(&self, vrf_key_hashes: &Vec<KeyHash>) -> Vec<u64> {
-        vrf_key_hashes
+    /// Get epoch's total blocks minted for each SPO till current block number
+    pub fn get_total_blocks_minted_by_pools(&self, spo_ids: &Vec<KeyHash>) -> Vec<u64> {
+        spo_ids
             .iter()
             .map(|key_hash| self.total_blocks_minted.get(key_hash).map(|v| *v as u64).unwrap_or(0))
             .collect()
@@ -110,7 +109,7 @@ mod tests {
 
     use super::*;
     use acropolis_common::{
-        crypto::keyhash,
+        crypto::keyhash_224,
         state_history::{StateHistory, StateHistoryStore},
         BlockInfo, BlockStatus, Era,
     };
@@ -153,41 +152,41 @@ mod tests {
     }
 
     #[test]
-    fn handle_mint_single_vrf_records_counts() {
+    fn handle_mint_single_issuer_records_counts() {
         let mut state = State::new();
-        let vrf = b"vrf_key";
+        let issuer = b"issuer_key";
         let mut block = make_block(100);
-        state.handle_mint(&block, Some(vrf));
+        state.handle_mint(&block, issuer);
         state.handle_fees(&block, 100);
 
         block.number += 1;
-        state.handle_mint(&block, Some(vrf));
+        state.handle_mint(&block, issuer);
         state.handle_fees(&block, 200);
 
         assert_eq!(state.epoch_blocks, 2);
         assert_eq!(state.blocks_minted.len(), 1);
-        assert_eq!(state.blocks_minted.get(&keyhash(vrf)), Some(&2));
-        assert_eq!(state.total_blocks_minted.get(&keyhash(vrf)), Some(&2));
+        assert_eq!(state.blocks_minted.get(&keyhash_224(issuer)), Some(&2));
+        assert_eq!(state.total_blocks_minted.get(&keyhash_224(issuer)), Some(&2));
     }
 
     #[test]
-    fn handle_mint_multiple_vrf_records_counts() {
+    fn handle_mint_multiple_issuer_records_counts() {
         let mut state = State::new();
         let mut block = make_block(100);
-        state.handle_mint(&block, Some(b"vrf_1"));
+        state.handle_mint(&block, b"issuer_1");
         block.number += 1;
-        state.handle_mint(&block, Some(b"vrf_2"));
+        state.handle_mint(&block, b"issuer_2");
         block.number += 1;
-        state.handle_mint(&block, Some(b"vrf_2"));
+        state.handle_mint(&block, b"issuer_2");
 
         assert_eq!(state.epoch_blocks, 3);
         assert_eq!(state.blocks_minted.len(), 2);
         assert_eq!(
-            state.blocks_minted.iter().find(|(k, _)| *k == &keyhash(b"vrf_1")).map(|(_, v)| *v),
+            state.blocks_minted.iter().find(|(k, _)| *k == &keyhash_224(b"issuer_1")).map(|(_, v)| *v),
             Some(1)
         );
         assert_eq!(
-            state.blocks_minted.iter().find(|(k, _)| *k == &keyhash(b"vrf_2")).map(|(_, v)| *v),
+            state.blocks_minted.iter().find(|(k, _)| *k == &keyhash_224(b"issuer_2")).map(|(_, v)| *v),
             Some(2)
         );
     }
@@ -208,7 +207,7 @@ mod tests {
     fn end_epoch_resets_and_returns_message() {
         let mut state = State::new();
         let block = make_block(1);
-        state.handle_mint(&block, Some(b"vrf_1"));
+        state.handle_mint(&block, b"issuer_1");
         state.handle_fees(&block, 123);
 
         // Check the message returned
@@ -216,9 +215,9 @@ mod tests {
         assert_eq!(ea.epoch, 0);
         assert_eq!(ea.total_blocks, 1);
         assert_eq!(ea.total_fees, 123);
-        assert_eq!(ea.vrf_vkey_hashes.len(), 1);
+        assert_eq!(ea.spo_blocks.len(), 1);
         assert_eq!(
-            ea.vrf_vkey_hashes.iter().find(|(k, _)| k == &keyhash(b"vrf_1")).map(|(_, v)| *v),
+            ea.spo_blocks.iter().find(|(k, _)| k == &keyhash_224(b"issuer_1")).map(|(_, v)| *v),
             Some(1)
         );
 
@@ -237,20 +236,20 @@ mod tests {
         )));
         let mut state = history.lock().await.get_current_state();
         let mut block = make_block(1);
-        state.handle_mint(&block, Some(b"vrf_1"));
+        state.handle_mint(&block, b"issuer_1");
         state.handle_fees(&block, 123);
         history.lock().await.commit(block.number, state);
 
         let mut state = history.lock().await.get_current_state();
         block.number += 1;
-        state.handle_mint(&block, Some(b"vrf_1"));
+        state.handle_mint(&block, b"issuer_1");
         state.handle_fees(&block, 123);
         history.lock().await.commit(block.number, state);
 
         let mut state = history.lock().await.get_current_state();
         block = make_block(2);
         let _ = state.end_epoch(&block);
-        state.handle_mint(&block, Some(b"vrf_1"));
+        state.handle_mint(&block, b"issuer_1");
         state.handle_fees(&block, 123);
         history.lock().await.commit(block.number, state);
 
@@ -259,25 +258,25 @@ mod tests {
         assert_eq!(state.epoch_fees, 123);
         assert_eq!(
             1,
-            state.get_blocks_minted_by_pools(&vec![keyhash(b"vrf_1")])[0]
+            state.get_blocks_minted_by_pools(&vec![keyhash_224(b"issuer_1")])[0]
         );
         assert_eq!(
             3,
-            state.get_total_blocks_minted_by_pools(&vec![keyhash(b"vrf_1")])[0]
+            state.get_total_blocks_minted_by_pools(&vec![keyhash_224(b"issuer_1")])[0]
         );
 
         // roll back of epoch 2
         block = make_rolled_back_block(2);
         let mut state = history.lock().await.get_rolled_back_state(block.number);
         let _ = state.end_epoch(&block);
-        state.handle_mint(&block, Some(b"vrf_2"));
+        state.handle_mint(&block, b"issuer_2");
         state.handle_fees(&block, 123);
         history.lock().await.commit(block.number, state);
 
         let state = history.lock().await.get_current_state();
         assert_eq!(
             2,
-            state.get_total_blocks_minted_by_pools(&vec![keyhash(b"vrf_1")])[0]
+            state.get_total_blocks_minted_by_pools(&vec![keyhash_224(b"issuer_1")])[0]
         );
     }
 }

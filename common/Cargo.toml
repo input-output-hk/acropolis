@@ -14,7 +14,6 @@ async-trait = "0.1"
 bech32 = "0.11"
 bigdecimal = "0.4.8"
 bitmask-enum = "2.2"
-blake2 = "0.10"
 bs58 = "0.5"
 caryatid_sdk = "0.12"
 caryatid_module_clock = "0.12"
@@ -34,6 +33,7 @@ futures = "0.3.31"
 minicbor = { version = "0.26.0", features = ["std", "half", "derive"] }
 num-traits = "0.2"
 imbl = { version = "5.0.0", features = ["serde"] }
+cryptoxide = "0.5.1"
 
 [lib]
 crate-type = ["rlib"]

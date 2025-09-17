@@ -15,8 +15,8 @@ pub enum EpochsStateQuery {
     GetEpochBlockDistributionByPool { epoch_number: u64 },
 
     // Pools related queries
-    GetBlocksMintedByPools { vrf_key_hashes: Vec<KeyHash> },
-    GetTotalBlocksMintedByPools { vrf_key_hashes: Vec<KeyHash> },
+    GetBlocksMintedByPools { spo_ids: Vec<KeyHash> },
+    GetTotalBlocksMintedByPools { spo_ids: Vec<KeyHash> },
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

@@ -146,13 +146,10 @@ async fn handle_pools_extended_blockfrost(
         return Ok(RESTResponse::with_json(200, "[]"));
     }
 
-    // Populate pools_operators and pools_vrf_key_hashes
+    // Populate pools_operators
     let pools_operators =
-        pools_list_with_info.iter().map(|(pool_operator, _)| pool_operator).collect::<Vec<_>>();
-    let pools_vrf_key_hashes = pools_list_with_info
-        .iter()
-        .map(|(_, pool_registration)| pool_registration.vrf_key_hash.clone())
-        .collect::<Vec<_>>();
+        pools_list_with_info.iter().map(|(pool_operator, _)|
+                                        pool_operator.clone()).collect::<Vec<_>>();
 
     // Get Latest Epoch from epochs-state
     let latest_epoch_info_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
@@ -186,7 +183,7 @@ async fn handle_pools_extended_blockfrost(
     // Get active stake for each pool from spo-state
     let pools_active_stakes_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
         PoolsStateQuery::GetPoolsActiveStakes {
-            pools_operators: pools_operators.iter().map(|&op| op.clone()).collect(),
+            pools_operators: pools_operators.clone(),
             epoch: latest_epoch,
         },
     )));
@@ -217,7 +214,7 @@ async fn handle_pools_extended_blockfrost(
     // Get live stake for each pool from accounts-state
     let pools_live_stakes_msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
         AccountsStateQuery::GetPoolsLiveStakes {
-            pools_operators: pools_operators.iter().map(|&op| op.clone()).collect(),
+            pools_operators: pools_operators.clone(),
         },
     )));
     let pools_live_stakes = query_state(
@@ -245,7 +242,7 @@ async fn handle_pools_extended_blockfrost(
     // Get total blocks minted for each pool from epoch-activity-counter
     let total_blocks_minted_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
         EpochsStateQuery::GetTotalBlocksMintedByPools {
-            vrf_key_hashes: pools_vrf_key_hashes,
+            spo_ids: pools_operators,
         },
     )));
     let total_blocks_minted = query_state(
