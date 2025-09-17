@@ -1,6 +1,7 @@
 //! Acropolis SPOState: State storage
 
 use acropolis_common::{
+    crypto::keyhash,
     ledger_state::SPOState,
     messages::{
         CardanoMessage, Message, SPOStateMessage, StakeAddressDeltasMessage,
@@ -9,12 +10,12 @@ use acropolis_common::{
     params::TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH,
     queries::governance::VoteRecord,
     stake_addresses::StakeAddressMap,
-    BlockInfo, KeyHash, PoolMetadata, PoolRegistration, PoolRegistrationWithPos, PoolRetirement,
-    PoolRetirementWithPos, PoolUpdateEvent, Relay, StakeCredential, TxCertificate, TxHash, Voter,
-    VotingProcedures,
+    BlockHash, BlockInfo, KeyHash, PoolMetadata, PoolRegistration, PoolRegistrationWithPos,
+    PoolRetirement, PoolRetirementWithPos, PoolUpdateEvent, Relay, StakeCredential, TxCertificate,
+    TxHash, Voter, VotingProcedures,
 };
 use anyhow::Result;
-use imbl::HashMap;
+use imbl::{HashMap, Vector};
 use std::sync::{Arc, Mutex};
 use tracing::{debug, error, info};
 
@@ -36,6 +37,9 @@ pub struct State {
     /// vrf_key_hash -> pool_id mapping
     vrf_key_to_pool_id_map: HashMap<Vec<u8>, Vec<u8>>,
 
+    /// block hashes keyed pool id
+    block_hashes: Option<HashMap<KeyHash, Vector<BlockHash>>>,
+
     /// historical spo state
     /// keyed by pool operator id
     historical_spos: Option<HashMap<KeyHash, HistoricalSPOState>>,
@@ -54,6 +58,11 @@ impl State {
             pending_deregistrations: HashMap::new(),
             vrf_key_to_pool_id_map: HashMap::new(),
             historical_spos: if config.store_historical_state() {
+                Some(HashMap::new())
+            } else {
+                None
+            },
+            block_hashes: if config.store_block_hashes {
                 Some(HashMap::new())
             } else {
                 None
@@ -82,6 +91,10 @@ impl State {
         self.store_config.store_votes
     }
 
+    pub fn is_block_hashes_enabled(&self) -> bool {
+        self.store_config.store_block_hashes
+    }
+
     pub fn is_stake_address_enabled(&self) -> bool {
         self.store_config.store_stake_addresses
     }
@@ -105,6 +118,7 @@ impl From<SPOState> for State {
             pending_deregistrations,
             vrf_key_to_pool_id_map,
             historical_spos: None,
+            block_hashes: None,
             stake_addresses: None,
         }
     }
@@ -135,12 +149,7 @@ impl State {
         self.spos.get(pool_id)
     }
 
-    /// Get SPO from vrf_key_hash
-    pub fn get_pool_id_from_vrf_key_hash(&self, vrf_key_hash: &KeyHash) -> Option<KeyHash> {
-        self.vrf_key_to_pool_id_map.get(vrf_key_hash).cloned()
-    }
-
-    /// Get vrf_key_to_pool_id_map
+    /// Get (SPO, u64) from (VRF, u64) Map
     pub fn get_blocks_minted_by_spos(
         &self,
         vrf_key_hashes: &Vec<(KeyHash, usize)>,
@@ -232,6 +241,21 @@ impl State {
     pub fn tick(&self) -> Result<()> {
         self.log_stats();
         Ok(())
+    }
+
+    // Handle block's minting.
+    // Returns None if block_hashes is not enabled
+    // Return Some(false) if pool_id for vrf_vkey is not found
+    pub fn handle_mint(&mut self, block_info: &BlockInfo, vrf_vkey: &[u8]) -> Option<bool> {
+        let Some(block_hashes) = self.block_hashes.as_mut() else {
+            return None;
+        };
+        let vrf_key_hash = keyhash(vrf_vkey);
+        let Some(pool_id) = self.vrf_key_to_pool_id_map.get(&vrf_key_hash).cloned() else {
+            return Some(false);
+        };
+        block_hashes.entry(pool_id).or_insert_with(Vector::new).push_back(block_info.hash);
+        Some(true)
     }
 
     fn handle_new_epoch(&mut self, block: &BlockInfo) -> Arc<Message> {
