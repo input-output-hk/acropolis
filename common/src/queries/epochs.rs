@@ -15,7 +15,6 @@ pub enum EpochsStateQuery {
     GetEpochBlockDistributionByPool { epoch_number: u64 },
 
     // Pools related queries
-    GetBlocksMintedByPools { vrf_key_hashes: Vec<KeyHash> },
     GetTotalBlocksMintedByPools { vrf_key_hashes: Vec<KeyHash> },
     GetBlocksMintedInfoByPool { vrf_key_hash: KeyHash },
     GetBlockHashesByPool { vrf_key_hash: KeyHash },
@@ -33,7 +32,6 @@ pub enum EpochsStateQueryResponse {
     EpochBlockDistributionByPool(EpochBlockDistributionByPool),
 
     // Pools related responses
-    BlocksMintedByPools(Vec<u64>),
     TotalBlocksMintedByPools(Vec<u64>),
     BlocksMintedInfoByPool(BlocksMintedInfoByPool),
     BlockHashesByPool(Vec<BlockHash>),

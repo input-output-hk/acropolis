@@ -113,14 +113,6 @@ impl State {
         }
     }
 
-    /// Get current epoch's blocks minted for each vrf key hash
-    pub fn get_blocks_minted_by_pools(&self, vrf_key_hashes: &Vec<KeyHash>) -> Vec<u64> {
-        vrf_key_hashes
-            .iter()
-            .map(|key_hash| self.blocks_minted.get(key_hash).map(|v| *v as u64).unwrap_or(0))
-            .collect()
-    }
-
     /// Get epoch's total blocks minted for each vrf key hash till current block number
     pub fn get_total_blocks_minted_by_pools(&self, vrf_key_hashes: &Vec<KeyHash>) -> Vec<u64> {
         vrf_key_hashes
@@ -330,10 +322,6 @@ mod tests {
         let state = history.lock().await.get_current_state();
         assert_eq!(state.epoch_blocks, 1);
         assert_eq!(state.epoch_fees, 123);
-        assert_eq!(
-            1,
-            state.get_blocks_minted_by_pools(&vec![keyhash(b"vrf_1")])[0]
-        );
         assert_eq!(
             3,
             state.get_total_blocks_minted_by_pools(&vec![keyhash(b"vrf_1")])[0]
