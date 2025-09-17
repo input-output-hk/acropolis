@@ -1,6 +1,6 @@
 //! Acropolis AccountsState: snapshot for rewards calculations
 
-use crate::state::{Pots, StakeAddressState};
+use crate::state::{Pots, StakeAddressState, RegistrationChange};
 use acropolis_common::{KeyHash, Lovelace, PoolRegistration, Ratio, RewardAccount, StakeAddress};
 use imbl::OrdMap;
 use std::collections::HashMap;
@@ -52,6 +52,9 @@ pub struct Snapshot {
 
     /// Total SPO (non-OBFT) blocks produced
     pub blocks: usize,
+
+    /// Ordered registration changes
+    pub registration_changes: Vec<RegistrationChange>,
 }
 
 impl Snapshot {
@@ -63,12 +66,14 @@ impl Snapshot {
         spo_block_counts: &HashMap<KeyHash, usize>,
         pots: &Pots,
         blocks: usize,
+        registration_changes: Vec<RegistrationChange>,
         two_previous_snapshot: Arc<Snapshot>,
     ) -> Self {
         let mut snapshot = Self {
             epoch,
             pots: pots.clone(),
             blocks,
+            registration_changes,
             ..Self::default()
         };
 
@@ -261,6 +266,7 @@ mod tests {
             &spo_block_counts,
             &Pots::default(),
             0,
+            Vec::new(),
             Arc::new(Snapshot::default()),
         );
 

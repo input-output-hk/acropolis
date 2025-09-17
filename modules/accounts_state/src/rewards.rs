@@ -216,7 +216,7 @@ fn calculate_spo_rewards(
     params: &ShelleyParams,
     staking: Arc<Snapshot>,
     pay_to_pool_reward_account: bool,
-    previous_epoch_deregistrations: &HashSet<KeyHash>,
+    deregistrations: &HashSet<KeyHash>,
 ) -> Vec<RewardDetail> {
 
     // Active stake (sigma)
@@ -350,8 +350,8 @@ fn calculate_spo_rewards(
                     continue;
                 }
 
-                // Check if it was deregistered during previous epoch
-                if previous_epoch_deregistrations.contains(hash) {
+                // Check if it was deregistered between staking and now
+                if deregistrations.contains(hash) {
                     info!(
                         "Recently deregistered member account {}, losing {to_pay}",
                         hex::encode(hash)
