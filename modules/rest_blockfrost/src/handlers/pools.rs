@@ -1059,9 +1059,6 @@ pub async fn handle_pool_blocks_blockfrost(
                 PoolsStateQueryResponse::PoolBlocks(pool_blocks),
             )) => Ok(pool_blocks),
             Message::StateQueryResponse(StateQueryResponse::Pools(
-                PoolsStateQueryResponse::NotFound,
-            )) => Err(anyhow::anyhow!("Pool not found")),
-            Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::Error(_),
             )) => Err(anyhow::anyhow!("Block hashes are not enabled")),
             _ => Err(anyhow::anyhow!("Unexpected message type")),
@@ -1169,9 +1166,6 @@ pub async fn handle_pool_votes_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::PoolVotes(pool_votes),
             )) => Ok(pool_votes),
-            Message::StateQueryResponse(StateQueryResponse::Pools(
-                PoolsStateQueryResponse::NotFound,
-            )) => Err(anyhow::anyhow!("Pool Not found")),
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::Error(e),
             )) => Err(anyhow::anyhow!(

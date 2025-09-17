@@ -634,12 +634,7 @@ impl SPOState {
 
                     PoolsStateQuery::GetPoolBlocks { pool_id } => {
                         if state.is_block_hashes_enabled() {
-                            let pool_blocks = state.get_pool_blocks(pool_id);
-                            if let Some(pool_blocks) = pool_blocks {
-                                PoolsStateQueryResponse::PoolBlocks(pool_blocks)
-                            } else {
-                                PoolsStateQueryResponse::NotFound
-                            }
+                            PoolsStateQueryResponse::PoolBlocks(state.get_pool_blocks(pool_id).unwrap_or_default())
                         } else {
                             PoolsStateQueryResponse::Error("Block hashes are not enabled".into())
                         }
@@ -660,12 +655,7 @@ impl SPOState {
 
                     PoolsStateQuery::GetPoolVotes { pool_id } => {
                         if state.is_historical_votes_enabled() {
-                            let pool_votes = state.get_pool_votes(pool_id);
-                        if let Some(pool_votes) = pool_votes {
-                            PoolsStateQueryResponse::PoolVotes(pool_votes)
-                        } else {
-                                PoolsStateQueryResponse::NotFound
-                            }
+                            PoolsStateQueryResponse::PoolVotes(state.get_pool_votes(pool_id).unwrap_or_default())
                         } else {
                             PoolsStateQueryResponse::Error("Pool votes are not enabled".into())
                         }
