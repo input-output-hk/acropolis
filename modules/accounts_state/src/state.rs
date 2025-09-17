@@ -71,6 +71,23 @@ impl EpochSnapshots {
     }
 }
 
+/// Registration change kind
+#[derive(Debug, Clone)]
+pub enum RegistrationChangeKind {
+    Registered,
+    Deregistered,
+}
+
+/// Registration change on a stake address
+#[derive(Debug, Clone)]
+pub struct RegistrationChange {
+    /// Stake address hash
+    address: KeyHash,
+
+    /// Change type
+    kind: RegistrationChangeKind,
+}
+
 /// Overall state - stored per block
 #[derive(Debug, Default, Clone)]
 pub struct State {
@@ -108,9 +125,8 @@ pub struct State {
     /// MIRs to pay next epoch
     mirs: Vec<MoveInstantaneousReward>,
 
-    /// Addresses deregistered in current epoch, or early in the following one
-    /// to replicate early Shelley bug
-    current_epoch_deregistrations: Arc<Mutex<HashSet<KeyHash>>>,
+    /// Addresses registration changes in current epoch
+    current_epoch_registration_changes: Arc<Mutex<Vec<RegistrationChange>>>,
 
     /// Task for rewards calculation if necessary
     epoch_rewards_task: Arc<Mutex<Option<JoinHandle<Result<RewardsResult>>>>>,
@@ -291,6 +307,10 @@ impl State {
             &spo_block_counts,
             &self.pots,
             total_non_obft_blocks,
+
+            // Take and clear registration changes
+            std::mem::take(&mut *self.current_epoch_registration_changes.lock().unwrap()),
+
             // Pass in two-previous epoch snapshot for capture of SPO reward accounts
             self.epoch_snapshots.set.clone(), // Will become 'go' in the next line!
         );
@@ -323,19 +343,25 @@ impl State {
         let performance = self.epoch_snapshots.mark.clone();
         let staking = self.epoch_snapshots.go.clone();
 
-        // TODO: After Allegra we will want to take and clear these at the start of epoch,
-        // not when the rewards calc runs
-        let previous_epoch_deregistrations = self.current_epoch_deregistrations.clone();
+        // Calculate the set of deregistrations which happened between staking and now
+        let mut deregistrations: HashSet<KeyHash> = HashSet::new();
+        Self::apply_registration_changes(&self.epoch_snapshots.set.registration_changes,
+                                         &mut deregistrations);
+        Self::apply_registration_changes(&self.epoch_snapshots.mark.registration_changes,
+                                         &mut deregistrations);
+
         let (start_rewards_tx, start_rewards_rx) = mpsc::channel::<()>();
+        let current_epoch_registration_changes = self.current_epoch_registration_changes.clone();
         self.epoch_rewards_task = Arc::new(Mutex::new(Some(spawn_blocking(move || {
 
-            // Wait for start signal - normally immediate, but can be delayed to handle
-            // early Shelley bug
+            // Wait for start signal
             let _ = start_rewards_rx.recv();
 
-            // Atomically get and clear the previous epoch deregistrations
-            let deregistrations =
-                std::mem::take(&mut *previous_epoch_deregistrations.lock().unwrap());
+            // Additional deregistrations from current epoch - early Shelley bug
+            // TODO - make optional, turn off after Allegra
+            Self::apply_registration_changes(
+                &current_epoch_registration_changes.lock().unwrap(),
+                &mut deregistrations);
 
             // Calculate reward payouts for previous epoch
             calculate_rewards(
@@ -359,6 +385,20 @@ impl State {
         }
 
         Ok(reward_deltas)
+    }
+
+    /// Apply a registration change set to a deregistrations list
+    /// deregistrations gets all deregistrations still in effect at the end of the changes
+    fn apply_registration_changes(changes: &Vec<RegistrationChange>,
+                                  deregistrations: &mut HashSet<KeyHash>) {
+        for change in changes {
+            match change.kind {
+                RegistrationChangeKind::Registered =>
+                    deregistrations.remove(&change.address),
+                RegistrationChangeKind::Deregistered =>
+                    deregistrations.insert(change.address.clone()),
+            };
+        }
     }
 
     /// Notify of a new block
@@ -740,8 +780,12 @@ impl State {
             self.pots.deposits += deposit;
         }
 
-        // Remove from current deregistrations in case they flip it
-        self.current_epoch_deregistrations.lock().unwrap().remove(&credential.get_hash());
+        // Add to registration changes
+        self.current_epoch_registration_changes.lock().unwrap().push(
+            RegistrationChange {
+                address: credential.get_hash(),
+                kind: RegistrationChangeKind::Registered,
+            });
     }
 
     /// Deregister a stake address, with specified refund if known
@@ -762,7 +806,13 @@ impl State {
                 }
             };
             self.pots.deposits -= deposit;
-            self.current_epoch_deregistrations.lock().unwrap().insert(credential.get_hash());
+
+            // Add to registration changes
+            self.current_epoch_registration_changes.lock().unwrap().push(
+                RegistrationChange {
+                    address: credential.get_hash(),
+                    kind: RegistrationChangeKind::Deregistered,
+                });
         }
     }
 
