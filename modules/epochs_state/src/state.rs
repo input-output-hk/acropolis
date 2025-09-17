@@ -81,7 +81,7 @@ impl State {
         }
     }
 
-    pub fn get_blocks_minted_by_pool(&self, vrf_key_hash: &KeyHash) -> u64 {
+    pub fn get_latest_epoch_blocks_minted_by_pool(&self, vrf_key_hash: &KeyHash) -> u64 {
         self.blocks_minted.get(vrf_key_hash).map(|v| *v as u64).unwrap_or(0)
     }
 }
@@ -172,7 +172,7 @@ mod tests {
             Some(2)
         );
 
-        let blocks_minted = state.get_blocks_minted_by_pool(&keyhash(b"vrf_2"));
+        let blocks_minted = state.get_latest_epoch_blocks_minted_by_pool(&keyhash(b"vrf_2"));
         assert_eq!(blocks_minted, 2);
     }
 
@@ -212,7 +212,7 @@ mod tests {
         assert_eq!(state.epoch_fees, 0);
         assert!(state.blocks_minted.is_empty());
 
-        let blocks_minted = state.get_blocks_minted_by_pool(&keyhash(b"vrf_1"));
+        let blocks_minted = state.get_latest_epoch_blocks_minted_by_pool(&keyhash(b"vrf_1"));
         assert_eq!(blocks_minted, 0);
     }
 
@@ -232,15 +232,24 @@ mod tests {
         block.number += 1;
         state.handle_mint(&block, Some(b"vrf_1"));
         state.handle_fees(&block, 123);
-        assert_eq!(state.get_blocks_minted_by_pool(&keyhash(b"vrf_1")), 2);
+        assert_eq!(
+            state.get_latest_epoch_blocks_minted_by_pool(&keyhash(b"vrf_1")),
+            2
+        );
         history.lock().await.commit(block.number, state);
 
         block = make_rolled_back_block(0);
         let mut state = history.lock().await.get_rolled_back_state(block.number);
         state.handle_mint(&block, Some(b"vrf_2"));
         state.handle_fees(&block, 123);
-        assert_eq!(state.get_blocks_minted_by_pool(&keyhash(b"vrf_1")), 0);
-        assert_eq!(state.get_blocks_minted_by_pool(&keyhash(b"vrf_2")), 1);
+        assert_eq!(
+            state.get_latest_epoch_blocks_minted_by_pool(&keyhash(b"vrf_1")),
+            0
+        );
+        assert_eq!(
+            state.get_latest_epoch_blocks_minted_by_pool(&keyhash(b"vrf_2")),
+            1
+        );
         history.lock().await.commit(block.number, state);
     }
 }
