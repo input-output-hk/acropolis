@@ -55,14 +55,14 @@ impl EpochsHistoryState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acropolis_common::{BlockStatus, Era};
+    use acropolis_common::{BlockHash, BlockStatus, Era};
 
     fn make_block(epoch: u64) -> BlockInfo {
         BlockInfo {
             status: BlockStatus::Immutable,
             slot: 99,
             number: 42,
-            hash: Vec::new(),
+            hash: BlockHash::default(),
             epoch,
             epoch_slot: 99,
             new_epoch: false,
