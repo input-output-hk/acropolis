@@ -30,6 +30,20 @@ store = "memory" # "memory", "dashmap", "fjall", "fjall-async", "sled", "sled-as
 address-delta-topic = "cardano.address.delta"
 
 [module.spo-state]
+# Enables /pools/{pool_id}/history endpoint, enables to query active_stakes
+store-epochs-history = false
+# Enable /pools/retired
+store-retired-pools = false
+# Enables /pools/{pool_id} endpoint
+store-registration = false
+# # Enables /pools/{pool_id}/updates endpoint
+store-updates = false
+# Enables /pools/{pool_id}/delegators endpoint (Requires store-stake-addresses to be enabled)
+store-delegators = false
+# Enables /pools/{pool_id}/votes endpoint
+store-votes = false
+# Store stake_addresses
+store-stake-addresses = false
 
 [module.drep-state]
 
@@ -43,8 +57,12 @@ network-name = "sanchonet" # "sanchonet", "mainnet"
 cache-mode = "write" # "predefined", "read", "write", "write-if-absent"
 write-full-cache = "false"
 
-[module.epoch-activity-counter]
+[module.epochs-state]
+# Enables /epochs/{number} endpoint (for historical epochs)
 store-history = false
+# Enables /pools/{pool_id}/blocks endpoint
+store-block-hashes = false
+
 
 [module.accounts-state]
 

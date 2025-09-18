@@ -1,4 +1,4 @@
-# Epoch activity counter module
+# Epochs state module
 
 The epoch activity counter module accepts fee messages from the
 [TxUnpacker](../tx_unpacker) and totals up the fees on every
@@ -14,7 +14,7 @@ The following is the default configuration - if the defaults are OK,
 everything except the section header can be left out.
 
 ```toml
-[module.epoch-activity-counter]
+[module.epochs-state]
 
 # Message topics
 subscribe-headers-topic = "cardano.block.headers"
@@ -25,7 +25,7 @@ publish-topic = "cardano.epoch.activity"
 
 ## Messages
 
-The epoch activity counter subscribes for BlockHeaderMessages on
+The epochs state subscribes for BlockHeaderMessages on
 `cardano.block.header` (see the [Upstream Chain
 Fetcher](../upstream_chain_fetcher) module for details).
 
