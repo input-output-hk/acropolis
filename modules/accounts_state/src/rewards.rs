@@ -59,7 +59,8 @@ pub fn calculate_rewards(
     staking: Arc<Snapshot>,
     params: &ShelleyParams,
     stake_rewards: Lovelace,
-    previous_epoch_deregistrations: &HashSet<KeyHash>,
+    registrations: &HashSet<KeyHash>,
+    deregistrations: &HashSet<KeyHash>,
 ) -> Result<RewardsResult> {
     let mut result = RewardsResult::default();
     result.epoch = epoch;
@@ -103,19 +104,32 @@ pub fn calculate_rewards(
     let mut total_paid_to_delegators: Lovelace = 0;
     let mut num_pools_paid: usize = 0;
     let mut num_delegators_paid: usize = 0;
-    for (operator_id, spo) in staking.spos.iter() {
+    for (operator_id, staking_spo) in staking.spos.iter() {
         // Actual blocks produced for epoch i, no rewards if none
         let performance_spo = performance.spos.get(operator_id);
         let blocks_produced = performance_spo.map(|s| s.blocks_produced).unwrap_or(0);
         if blocks_produced == 0 {
             continue;
         }
+        let performance_spo = performance_spo.unwrap();
 
         // SPO's reward account from staking time must be registered now
         // We get the registration status *as it is in performance* for the reward account
         // *as it was during staking*
         let mut pay_to_pool_reward_account =
-            performance_spo.map(|s| s.two_previous_reward_account_is_registered).unwrap_or(false);
+            performance_spo.two_previous_reward_account_is_registered;
+
+        info!("SPO {} reward account registered two epochs ago: {}", hex::encode(operator_id),
+             pay_to_pool_reward_account);
+
+        // Also, to handle the early Shelley timing bug, we allow it if it was registered
+        // during the current epoch
+        if !pay_to_pool_reward_account {
+            info!("Checking old reward account {}", hex::encode(&staking_spo.reward_account));
+
+            // Note we use the staking reward account - it could have changed
+            pay_to_pool_reward_account = registrations.contains(&staking_spo.reward_account)
+        }
 
         // There was a bug in the original node from Shelley until Allegra where if multiple SPOs
         // shared a reward account, only one of them would get paid.
@@ -124,7 +138,7 @@ pub fn calculate_rewards(
         if pay_to_pool_reward_account {
             // Check all SPOs to see if they match this reward account
             for (other_id, other_spo) in staking.spos.iter() {
-                if other_spo.reward_account == spo.reward_account
+                if other_spo.reward_account == staking_spo.reward_account
                     && other_id.cmp(&operator_id) == Ordering::Less
                 // Lower ID (hash) wins
                 {
@@ -135,7 +149,7 @@ pub fn calculate_rewards(
                         warn!("Shelley shared reward account bug: Dropping reward to {} in favour of {} on shared account {}",
                               hex::encode(&operator_id),
                               hex::encode(&other_id),
-                              hex::encode(&spo.reward_account));
+                              hex::encode(&staking_spo.reward_account));
                         break;
                     }
                 }
@@ -150,7 +164,7 @@ pub fn calculate_rewards(
         // Calculate rewards for this SPO
         let rewards = calculate_spo_rewards(
             operator_id,
-            spo,
+            staking_spo,
             blocks_produced as u64,
             total_blocks,
             &stake_rewards,
@@ -161,7 +175,7 @@ pub fn calculate_rewards(
             params,
             staking.clone(),
             pay_to_pool_reward_account,
-            previous_epoch_deregistrations,
+            deregistrations,
         );
 
         if !rewards.is_empty() {
