@@ -343,11 +343,21 @@ impl State {
         let performance = self.epoch_snapshots.mark.clone();
         let staking = self.epoch_snapshots.go.clone();
 
-        // Calculate the set of deregistrations which happened between staking and now
+        // Calculate the sets of net registrations and deregistrations which happened between
+        // staking and now
+        // Note: We do this to save memory - although the 'mark' snapshot contains the
+        // current registration status of each address, it is segmented by SPO and there's
+        // no way to search by address (they may move SPO in between), so this saves another
+        // huge map.  If the snapshot was ever changed to store addresses in a way where an
+        // individual could be looked up, this could be simplified - but you still need to
+        // handle the Shelley bug part!
+        let mut registrations: HashSet<KeyHash> = HashSet::new();
         let mut deregistrations: HashSet<KeyHash> = HashSet::new();
         Self::apply_registration_changes(&self.epoch_snapshots.set.registration_changes,
+                                         &mut registrations,
                                          &mut deregistrations);
         Self::apply_registration_changes(&self.epoch_snapshots.mark.registration_changes,
+                                         &mut registrations,
                                          &mut deregistrations);
 
         let (start_rewards_tx, start_rewards_rx) = mpsc::channel::<()>();
@@ -361,8 +371,12 @@ impl State {
             // TODO - make optional, turn off after Allegra
             Self::apply_registration_changes(
                 &current_epoch_registration_changes.lock().unwrap(),
+                &mut registrations,
                 &mut deregistrations);
 
+         registrations.iter().for_each(|k| info!("Registration {}", hex::encode(k)));
+         deregistrations.iter().for_each(|k| info!("Deregistration {}", hex::encode(k)));
+ 
             // Calculate reward payouts for previous epoch
             calculate_rewards(
                 epoch-1,
@@ -370,6 +384,7 @@ impl State {
                 staking,
                 &shelley_params,
                 monetary_change.stake_rewards,
+                &registrations,
                 &deregistrations,
             )
         }))));
@@ -388,15 +403,21 @@ impl State {
     }
 
     /// Apply a registration change set to a deregistrations list
-    /// deregistrations gets all deregistrations still in effect at the end of the changes
+    /// registrations gets all registrations still in effect at the end of the changes
+    /// deregistrations likewise for net deregistrations
     fn apply_registration_changes(changes: &Vec<RegistrationChange>,
+                                  registrations: &mut HashSet<KeyHash>,
                                   deregistrations: &mut HashSet<KeyHash>) {
         for change in changes {
             match change.kind {
-                RegistrationChangeKind::Registered =>
-                    deregistrations.remove(&change.address),
-                RegistrationChangeKind::Deregistered =>
-                    deregistrations.insert(change.address.clone()),
+                RegistrationChangeKind::Registered => {
+                    registrations.insert(change.address.clone());
+                    deregistrations.remove(&change.address);
+                }
+                RegistrationChangeKind::Deregistered => {
+                    registrations.remove(&change.address);
+                    deregistrations.insert(change.address.clone());
+                }
             };
         }
     }
