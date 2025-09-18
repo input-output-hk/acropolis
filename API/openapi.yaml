@@ -20,7 +20,7 @@ tags:
   - name: UTxOs
     description: Endpoints related to UTxO state.
   - name: Epochs
-    description: Endpoints related to epoch activity state.
+    description: Endpoints related to Epochs state.
 
 paths:
   /accounts/{stake_address}:

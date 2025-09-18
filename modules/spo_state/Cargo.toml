@@ -22,6 +22,7 @@ hex = "0.4.3"
 imbl = { version = "5.0.0", features = ["serde"] }
 dashmap = "6.1.0"
 rayon = "1.11.0"
+pallas = "0.33.0"
 
 [lib]
 path = "src/spo_state.rs"

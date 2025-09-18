@@ -234,32 +234,42 @@ pub fn map_certificate(
                 pool_owners,
                 relays,
                 pool_metadata,
-            } => Ok(TxCertificate::PoolRegistration(PoolRegistration {
-                operator: operator.to_vec(),
-                vrf_key_hash: vrf_keyhash.to_vec(),
-                pledge: *pledge,
-                cost: *cost,
-                margin: Ratio {
-                    numerator: margin.numerator,
-                    denominator: margin.denominator,
+            } => Ok(TxCertificate::PoolRegistrationWithPos(
+                PoolRegistrationWithPos {
+                    reg: PoolRegistration {
+                        operator: operator.to_vec(),
+                        vrf_key_hash: vrf_keyhash.to_vec(),
+                        pledge: *pledge,
+                        cost: *cost,
+                        margin: Ratio {
+                            numerator: margin.numerator,
+                            denominator: margin.denominator,
+                        },
+                        reward_account: reward_account.to_vec(),
+                        pool_owners: pool_owners.into_iter().map(|v| v.to_vec()).collect(),
+                        relays: relays.into_iter().map(|relay| map_relay(relay)).collect(),
+                        pool_metadata: match pool_metadata {
+                            Nullable::Some(md) => Some(PoolMetadata {
+                                url: md.url.clone(),
+                                hash: md.hash.to_vec(),
+                            }),
+                            _ => None,
+                        },
+                    },
+                    tx_hash,
+                    cert_index: cert_index as u64,
                 },
-                reward_account: reward_account.to_vec(),
-                pool_owners: pool_owners.into_iter().map(|v| v.to_vec()).collect(),
-                relays: relays.into_iter().map(|relay| map_relay(relay)).collect(),
-                pool_metadata: match pool_metadata {
-                    Nullable::Some(md) => Some(PoolMetadata {
-                        url: md.url.clone(),
-                        hash: md.hash.to_vec(),
-                    }),
-                    _ => None,
-                },
-            })),
-            alonzo::Certificate::PoolRetirement(pool_key_hash, epoch) => {
-                Ok(TxCertificate::PoolRetirement(PoolRetirement {
-                    operator: pool_key_hash.to_vec(),
-                    epoch: *epoch,
-                }))
-            }
+            )),
+            alonzo::Certificate::PoolRetirement(pool_key_hash, epoch) => Ok(
+                TxCertificate::PoolRetirementWithPos(PoolRetirementWithPos {
+                    ret: PoolRetirement {
+                        operator: pool_key_hash.to_vec(),
+                        epoch: *epoch,
+                    },
+                    tx_hash,
+                    cert_index: cert_index as u64,
+                }),
+            ),
             alonzo::Certificate::GenesisKeyDelegation(
                 genesis_hash,
                 genesis_delegate_hash,
@@ -326,32 +336,42 @@ pub fn map_certificate(
                     pool_owners,
                     relays,
                     pool_metadata,
-                } => Ok(TxCertificate::PoolRegistration(PoolRegistration {
-                    operator: operator.to_vec(),
-                    vrf_key_hash: vrf_keyhash.to_vec(),
-                    pledge: *pledge,
-                    cost: *cost,
-                    margin: Ratio {
-                        numerator: margin.numerator,
-                        denominator: margin.denominator,
+                } => Ok(TxCertificate::PoolRegistrationWithPos(
+                    PoolRegistrationWithPos {
+                        reg: PoolRegistration {
+                            operator: operator.to_vec(),
+                            vrf_key_hash: vrf_keyhash.to_vec(),
+                            pledge: *pledge,
+                            cost: *cost,
+                            margin: Ratio {
+                                numerator: margin.numerator,
+                                denominator: margin.denominator,
+                            },
+                            reward_account: reward_account.to_vec(),
+                            pool_owners: pool_owners.into_iter().map(|v| v.to_vec()).collect(),
+                            relays: relays.into_iter().map(|relay| map_relay(relay)).collect(),
+                            pool_metadata: match pool_metadata {
+                                Nullable::Some(md) => Some(PoolMetadata {
+                                    url: md.url.clone(),
+                                    hash: md.hash.to_vec(),
+                                }),
+                                _ => None,
+                            },
+                        },
+                        tx_hash,
+                        cert_index: cert_index as u64,
                     },
-                    reward_account: reward_account.to_vec(),
-                    pool_owners: pool_owners.into_iter().map(|v| v.to_vec()).collect(),
-                    relays: relays.into_iter().map(|relay| map_relay(relay)).collect(),
-                    pool_metadata: match pool_metadata {
-                        Nullable::Some(md) => Some(PoolMetadata {
-                            url: md.url.clone(),
-                            hash: md.hash.to_vec(),
-                        }),
-                        _ => None,
-                    },
-                })),
-                conway::Certificate::PoolRetirement(pool_key_hash, epoch) => {
-                    Ok(TxCertificate::PoolRetirement(PoolRetirement {
-                        operator: pool_key_hash.to_vec(),
-                        epoch: *epoch,
-                    }))
-                }
+                )),
+                conway::Certificate::PoolRetirement(pool_key_hash, epoch) => Ok(
+                    TxCertificate::PoolRetirementWithPos(PoolRetirementWithPos {
+                        ret: PoolRetirement {
+                            operator: pool_key_hash.to_vec(),
+                            epoch: *epoch,
+                        },
+                        tx_hash,
+                        cert_index: cert_index as u64,
+                    }),
+                ),
 
                 conway::Certificate::Reg(cred, coin) => {
                     Ok(TxCertificate::Registration(Registration {

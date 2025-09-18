@@ -264,7 +264,7 @@ impl AssetsState {
                                 Err(e) => AssetsStateQueryResponse::Error(e.to_string()),
                             },
                             None => {
-                                if state.config.store_info {
+                                if state.config.store_info && state.config.store_assets {
                                     AssetsStateQueryResponse::NotFound
                                 } else {
                                     AssetsStateQueryResponse::Error(
