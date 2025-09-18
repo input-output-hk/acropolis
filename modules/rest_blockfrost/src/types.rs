@@ -4,8 +4,8 @@ use acropolis_common::{
     protocol_params::{Nonce, NonceVariant, ProtocolParams},
     queries::governance::DRepActionUpdate,
     rest_helper::ToCheckedF64,
-    AssetMetadataStandard, AssetMintRecord, KeyHash, PolicyAsset, PoolEpochState, PoolUpdateAction,
-    Relay, TxHash, Vote,
+    AssetAddressEntry, AssetMetadataStandard, AssetMintRecord, KeyHash, PolicyAsset,
+    PoolEpochState, PoolUpdateAction, Relay, TxHash, Vote,
 };
 use num_traits::ToPrimitive;
 use rust_decimal::Decimal;
@@ -757,4 +757,21 @@ pub struct AssetTransactionRest {
     pub tx_index: String, // Change to u64 when transactions state is implemented
     pub block_height: String, // ^^^
     pub block_time: String, // ^^^
+}
+
+#[derive(Debug, Serialize)]
+pub struct AssetAddressRest {
+    pub address: String,
+    pub quantity: String,
+}
+
+impl TryFrom<&AssetAddressEntry> for AssetAddressRest {
+    type Error = anyhow::Error;
+
+    fn try_from(entry: &AssetAddressEntry) -> Result<Self, Self::Error> {
+        Ok(AssetAddressRest {
+            address: entry.address.to_string()?,
+            quantity: entry.quantity.to_string(),
+        })
+    }
 }

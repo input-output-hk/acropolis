@@ -6,6 +6,7 @@ use crate::{
     address::{Address, StakeAddress},
     protocol_params,
     rational_number::RationalNumber,
+    ShelleyAddress,
 };
 use anyhow::{anyhow, bail, Error, Result};
 use bech32::{Bech32, Hrp};
@@ -1639,6 +1640,12 @@ pub enum AssetMetadataStandard {
 pub struct PolicyAsset {
     pub policy: PolicyId,
     pub name: AssetName,
+    pub quantity: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AssetAddressEntry {
+    pub address: ShelleyAddress,
     pub quantity: u64,
 }
 

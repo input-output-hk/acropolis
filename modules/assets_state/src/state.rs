@@ -3,8 +3,9 @@
 use crate::asset_registry::{AssetId, AssetRegistry};
 use acropolis_common::{
     queries::assets::{AssetHistory, PolicyAssets},
-    AssetInfoRecord, AssetMetadataStandard, AssetMintRecord, AssetName, Datum, Lovelace,
-    NativeAssetDelta, PolicyAsset, PolicyId, ShelleyAddress, TxHash, UTXODelta,
+    Address, AddressDelta, AssetAddressEntry, AssetInfoRecord, AssetMetadataStandard,
+    AssetMintRecord, AssetName, Datum, Lovelace, NativeAssetDelta, PolicyAsset, PolicyId,
+    ShelleyAddress, TxHash, UTXODelta,
 };
 use anyhow::Result;
 use imbl::{HashMap, Vector};
@@ -55,7 +56,7 @@ pub struct State {
     pub info: Option<HashMap<AssetId, AssetInfoRecord>>,
 
     /// Assets mapped to addresses
-    pub addresses: Option<HashMap<AssetId, Vector<(ShelleyAddress, Lovelace)>>>,
+    pub addresses: Option<HashMap<AssetId, std::collections::HashMap<ShelleyAddress, u64>>>,
 
     /// Assets mapped to transactions
     pub transactions: Option<HashMap<AssetId, Vector<TxHash>>>,
@@ -170,18 +171,24 @@ impl State {
     pub fn get_asset_addresses(
         &self,
         asset_id: &AssetId,
-    ) -> Result<Option<Vec<(ShelleyAddress, u64)>>> {
+    ) -> Result<Option<Vec<AssetAddressEntry>>> {
         if !self.config.store_addresses {
             return Err(anyhow::anyhow!(
                 "asset addresses storage disabled in config"
             ));
         }
 
-        Ok(self
-            .addresses
-            .as_ref()
-            .and_then(|addr_map| addr_map.get(asset_id))
-            .map(|v| v.iter().cloned().collect()))
+        Ok(
+            self.addresses.as_ref().and_then(|addr_map| addr_map.get(asset_id)).map(|inner_map| {
+                inner_map
+                    .iter()
+                    .map(|(addr, qty)| AssetAddressEntry {
+                        address: addr.clone(),
+                        quantity: *qty,
+                    })
+                    .collect()
+            }),
+        )
     }
 
     pub fn get_asset_transactions(&self, asset_id: &AssetId) -> Result<Option<Vec<TxHash>>> {
@@ -324,7 +331,7 @@ impl State {
                         }
                     }
                     if let Some(addr_map) = new_addresses.as_mut() {
-                        addr_map.entry(asset_id).or_insert_with(Vector::new);
+                        addr_map.entry(asset_id).or_insert_with(std::collections::HashMap::new);
                     }
                     if let Some(tx_map) = new_transactions.as_mut() {
                         tx_map.entry(asset_id).or_insert_with(Vector::new);
@@ -401,6 +408,62 @@ impl State {
             addresses: self.addresses.clone(),
             transactions: new_txs,
             policy_index: self.policy_index.clone(),
+        })
+    }
+
+    pub fn handle_address_deltas(
+        &self,
+        deltas: &[AddressDelta],
+        registry: &AssetRegistry,
+    ) -> Result<Self> {
+        let mut new_addresses = self.addresses.clone();
+
+        let Some(addr_map) = new_addresses.as_mut() else {
+            return Ok(Self {
+                addresses: new_addresses,
+                ..self.clone()
+            });
+        };
+
+        // Step 1: batch updates by asset_id + address
+        let mut batches: std::collections::HashMap<
+            AssetId,
+            std::collections::HashMap<ShelleyAddress, i64>,
+        > = std::collections::HashMap::new();
+
+        for address_delta in deltas {
+            if let Address::Shelley(shelley_addr) = &address_delta.address {
+                for (policy_id, asset_deltas) in &address_delta.delta.assets {
+                    for asset_delta in asset_deltas {
+                        if let Some(asset_id) = registry.lookup_id(policy_id, &asset_delta.name) {
+                            *batches
+                                .entry(asset_id)
+                                .or_default()
+                                .entry(shelley_addr.clone())
+                                .or_default() += asset_delta.amount;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Step 2: apply batches to addr_map (touch each HAMT bucket only once)
+        for (asset_id, holder_updates) in batches {
+            if let Some(holders) = addr_map.get_mut(&asset_id) {
+                for (addr, delta) in holder_updates {
+                    let current = holders.entry(addr.clone()).or_insert(0);
+                    *current = current.saturating_add_signed(delta);
+
+                    if *current == 0 {
+                        holders.remove(&addr);
+                    }
+                }
+            }
+        }
+
+        Ok(Self {
+            addresses: new_addresses,
+            ..self.clone()
         })
     }
 
