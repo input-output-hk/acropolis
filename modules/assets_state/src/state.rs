@@ -2,11 +2,9 @@
 
 use crate::asset_registry::{AssetId, AssetRegistry};
 use acropolis_common::{
-    queries::assets::{
-        AssetHistory, AssetInfoRecord, AssetMetadataStandard, AssetMintRecord, PolicyAsset,
-        PolicyAssets,
-    },
-    AssetName, Datum, NativeAssetDelta, PolicyId, ShelleyAddress, TxHash, UTXODelta,
+    queries::assets::{AssetHistory, PolicyAssets},
+    AssetInfoRecord, AssetMetadataStandard, AssetMintRecord, AssetName, Datum, NativeAssetDelta,
+    PolicyAsset, PolicyId, ShelleyAddress, TxHash, UTXODelta,
 };
 use anyhow::Result;
 use imbl::{HashMap, Vector};
@@ -503,9 +501,8 @@ mod tests {
         state::{AssetsStorageConfig, State},
     };
     use acropolis_common::{
-        queries::assets::{AssetInfoRecord, AssetMetadataStandard},
-        AssetName, Datum, NativeAsset, NativeAssetDelta, PolicyId, ShelleyAddress, TxHash, TxInput,
-        TxOutput, UTXODelta, Value,
+        AssetInfoRecord, AssetMetadataStandard, AssetName, Datum, NativeAsset, NativeAssetDelta,
+        PolicyId, ShelleyAddress, TxHash, TxInput, TxOutput, UTXODelta, Value,
     };
 
     fn dummy_policy(byte: u8) -> PolicyId {

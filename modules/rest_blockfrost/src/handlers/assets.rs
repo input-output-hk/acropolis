@@ -5,11 +5,11 @@ use crate::{
 use acropolis_common::{
     messages::{Message, RESTResponse, StateQuery, StateQueryResponse},
     queries::{
-        assets::{AssetMetadataStandard, AssetsStateQuery, AssetsStateQueryResponse},
+        assets::{AssetsStateQuery, AssetsStateQueryResponse},
         utils::query_state,
     },
     serialization::Bech32WithHrp,
-    AssetName, PolicyId,
+    AssetMetadataStandard, AssetName, PolicyId,
 };
 use anyhow::Result;
 use blake2::{digest::consts::U20, Blake2b, Digest};
