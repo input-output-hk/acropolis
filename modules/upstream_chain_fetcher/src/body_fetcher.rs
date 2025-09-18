@@ -65,7 +65,7 @@ impl BodyFetcher {
         let header = MultiEraHeader::decode(h.variant, tag, &h.cbor)?;
         let slot = header.slot();
         let number = header.number();
-        let hash = header.hash().to_vec();
+        let hash = *header.hash();
 
         let (epoch, epoch_slot) = self.cfg.slot_to_epoch(slot);
         let new_epoch = match self.last_epoch {
@@ -110,7 +110,7 @@ impl BodyFetcher {
         // Fetch and publish the block itself - note we need to
         // reconstruct a Point from the header because the one we get
         // in the RollForward is the *tip*, not the next read point
-        let fetch_point = Point::Specific(slot, hash.clone());
+        let fetch_point = Point::Specific(slot, hash.to_vec());
         let msg_body = self.fetch_block(fetch_point).await?;
 
         // Construct message

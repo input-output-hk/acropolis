@@ -7,11 +7,11 @@ use crate::{
 use acropolis_common::{
     messages::{Message, RESTResponse, StateQuery, StateQueryResponse},
     queries::{
-        assets::{AssetMetadataStandard, AssetsStateQuery, AssetsStateQueryResponse},
+        assets::{AssetsStateQuery, AssetsStateQueryResponse},
         utils::query_state,
     },
     serialization::Bech32WithHrp,
-    AssetName, PolicyId,
+    AssetMetadataStandard, AssetName, PolicyId,
 };
 use anyhow::Result;
 use blake2::{digest::consts::U20, Blake2b, Digest};
@@ -91,7 +91,8 @@ pub async fn handle_asset_single_blockfrost(
             "Failed to encode asset fingerprint",
         ));
     };
-    let off_chain_metadata = fetch_asset_metadata(&asset).await;
+    let off_chain_metadata =
+        fetch_asset_metadata(&asset, &handlers_config.offchain_token_registry_url).await;
 
     let policy_id = policy_str.to_string();
     let asset_name = name_str.to_string();
@@ -362,11 +363,11 @@ fn split_policy_and_asset(hex_str: &str) -> Result<(PolicyId, AssetName), RESTRe
     Ok((policy_id, asset_name))
 }
 
-pub async fn fetch_asset_metadata(asset: &str) -> Option<AssetMetadata> {
-    let url = format!(
-        "https://raw.githubusercontent.com/cardano-foundation/cardano-token-registry/master/mappings/{}.json",
-        asset
-    );
+pub async fn fetch_asset_metadata(
+    asset: &str,
+    offchain_registry_url: &str,
+) -> Option<AssetMetadata> {
+    let url = format!("{}{}.json", offchain_registry_url, asset);
 
     let client = Client::new();
     let res = client.get(&url).send().await.ok()?;
@@ -469,7 +470,8 @@ pub fn normalize_onchain_metadata(
     }
 }
 
-// TODO: Order fields deterministically to align with blockfrost
+// NOTE: Blockfrost preserves the on-chain field order for `onchain_metadata`.
+//       This REST handler serializes with `serde`, which produces fields in lexicographical order.
 fn cbor_to_json(val: CborValue) -> Value {
     match val {
         CborValue::Text(s) => Value::String(s),

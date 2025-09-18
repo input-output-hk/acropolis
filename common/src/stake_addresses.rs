@@ -10,8 +10,8 @@ use std::{
 
 use crate::{
     math::update_value_with_delta, messages::DRepDelegationDistribution, DRepChoice,
-    DRepCredential, DelegatedStake, KeyHash, Lovelace, StakeAddressDelta, StakeCredential,
-    Withdrawal,
+    DRepCredential, DelegatedStake, KeyHash, Lovelace, PoolLiveStakeInfo, StakeAddressDelta,
+    StakeCredential, Withdrawal,
 };
 use anyhow::Result;
 use dashmap::DashMap;
@@ -110,6 +110,34 @@ impl StakeAddressMap {
         self.get(stake_key).map(|sas| sas.registered).unwrap_or(false)
     }
 
+    /// Get Pool's Live Stake Info
+    pub fn get_pool_live_stake_info(&self, spo: &KeyHash) -> PoolLiveStakeInfo {
+        let total_live_stakes = AtomicU64::new(0);
+        let live_stake = AtomicU64::new(0);
+        let live_delegators = AtomicU64::new(0);
+
+        // Par Iter stake addresses values
+        self.inner.par_iter().for_each(|(_, sas)| {
+            total_live_stakes.fetch_add(sas.utxo_value, std::sync::atomic::Ordering::Relaxed);
+            if sas.delegated_spo.as_ref().map(|d_spo| d_spo.eq(spo)).unwrap_or(false) {
+                live_stake.fetch_add(
+                    sas.utxo_value + sas.rewards,
+                    std::sync::atomic::Ordering::Relaxed,
+                );
+                live_delegators.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+        });
+
+        let total_live_stakes = total_live_stakes.load(std::sync::atomic::Ordering::Relaxed);
+        let live_stake = live_stake.load(std::sync::atomic::Ordering::Relaxed);
+        let live_delegators = live_delegators.load(std::sync::atomic::Ordering::Relaxed);
+        PoolLiveStakeInfo {
+            live_stake,
+            live_delegators,
+            total_live_stakes,
+        }
+    }
+
     /// Get Pool's Live Stake (same order as spos)
     pub fn get_pools_live_stakes(&self, spos: &Vec<KeyHash>) -> Vec<u64> {
         let mut live_stakes_map = HashMap::<KeyHash, u64>::new();
@@ -154,6 +182,44 @@ impl StakeAddressMap {
         delegators
     }
 
+    /// Get DRep Delegators with live_stakes
+    pub fn get_drep_delegators(&self, drep: &DRepChoice) -> Vec<(KeyHash, u64)> {
+        // Find stake addresses delegated to drep
+        let delegators: Vec<(KeyHash, u64)> = self
+            .inner
+            .iter()
+            .filter_map(|(stake_key, sas)| match sas.delegated_drep.as_ref() {
+                Some(delegated_drep) => {
+                    if delegated_drep.eq(drep) {
+                        Some((stake_key.clone(), sas.utxo_value))
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            })
+            .collect();
+
+        delegators
+    }
+
+    /// Map stake_keys to their utxo_value
+    /// Return None if any of the stake_keys are not found
+    pub fn get_accounts_utxo_values_map(
+        &self,
+        stake_keys: &[Vec<u8>],
+    ) -> Option<HashMap<Vec<u8>, u64>> {
+        let mut map = HashMap::new();
+
+        for key in stake_keys {
+            let account = self.get(key)?;
+            let utxo_value = account.utxo_value;
+            map.insert(key.clone(), utxo_value);
+        }
+
+        Some(map)
+    }
+
     /// Map stake_keys to their total balances (utxo + rewards)
     /// Return None if any of the stake_keys are not found
     pub fn get_accounts_balances_map(
@@ -186,6 +252,17 @@ impl StakeAddressMap {
         }
 
         Some(map)
+    }
+
+    /// Sum stake_keys utxo_values
+    /// Return None if any of the stake_keys are not found
+    pub fn get_accounts_utxo_values_sum(&self, stake_keys: &[Vec<u8>]) -> Option<u64> {
+        let mut total = 0;
+        for key in stake_keys {
+            let account = self.get(key)?;
+            total += account.utxo_value;
+        }
+        Some(total)
     }
 
     /// Sum stake_keys balances (utxo + rewards)
