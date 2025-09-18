@@ -752,6 +752,7 @@ mod tests {
 
         let mut state = State::new(AssetsStorageConfig {
             store_info: true,
+            store_assets: true,
             ..Default::default()
         });
 
@@ -1064,6 +1065,7 @@ mod tests {
 
         let mut state = State::new(AssetsStorageConfig {
             store_info: true,
+            store_assets: true,
             ..Default::default()
         });
         let mut info_map = imbl::HashMap::new();
