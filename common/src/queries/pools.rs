@@ -1,6 +1,6 @@
 use crate::{
-    queries::governance::VoteRecord, rational_number::RationalNumber, KeyHash, PoolEpochState,
-    PoolMetadata, PoolRegistration, PoolRetirement, PoolUpdateEvent, Relay,
+    queries::governance::VoteRecord, rational_number::RationalNumber, BlockHash, KeyHash,
+    PoolEpochState, PoolMetadata, PoolRegistration, PoolRetirement, PoolUpdateEvent, Relay,
 };
 
 pub const DEFAULT_POOLS_QUERY_TOPIC: (&str, &str) =
@@ -20,26 +20,35 @@ pub enum PoolsStateQuery {
         pools_operators: Vec<KeyHash>,
         epoch: u64,
     },
+    GetPoolsTotalBlocksMinted {
+        pools_operators: Vec<KeyHash>,
+    },
     GetPoolInfo {
-        pool_id: Vec<u8>,
+        pool_id: KeyHash,
     },
     GetPoolHistory {
-        pool_id: Vec<u8>,
+        pool_id: KeyHash,
     },
     GetPoolMetadata {
-        pool_id: Vec<u8>,
+        pool_id: KeyHash,
     },
     GetPoolRelays {
-        pool_id: Vec<u8>,
+        pool_id: KeyHash,
     },
     GetPoolDelegators {
-        pool_id: Vec<u8>,
+        pool_id: KeyHash,
+    },
+    GetPoolTotalBlocksMinted {
+        pool_id: KeyHash,
+    },
+    GetPoolBlockHashes {
+        pool_id: KeyHash,
     },
     GetPoolUpdates {
-        pool_id: Vec<u8>,
+        pool_id: KeyHash,
     },
     GetPoolVotes {
-        pool_id: Vec<u8>,
+        pool_id: KeyHash,
     },
 }
 
@@ -51,11 +60,14 @@ pub enum PoolsStateQueryResponse {
     PoolsRetiringList(Vec<PoolRetirement>),
     PoolActiveStakeInfo(PoolActiveStakeInfo),
     PoolsActiveStakes(Vec<u64>),
-    PoolInfo(PoolInfo),
+    PoolsTotalBlocksMinted(Vec<u64>),
+    PoolInfo(PoolRegistration),
     PoolHistory(Vec<PoolEpochState>),
     PoolMetadata(PoolMetadata),
     PoolRelays(Vec<Relay>),
     PoolDelegators(PoolDelegators),
+    PoolTotalBlocksMinted(u64),
+    PoolBlockHashes(Vec<BlockHash>),
     PoolUpdates(Vec<PoolUpdateEvent>),
     PoolVotes(Vec<VoteRecord>),
     NotFound,
@@ -72,9 +84,6 @@ pub struct PoolActiveStakeInfo {
     pub active_stake: u64,
     pub active_size: RationalNumber,
 }
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PoolInfo {}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PoolDelegators {

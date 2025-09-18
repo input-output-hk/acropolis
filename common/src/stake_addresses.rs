@@ -10,8 +10,8 @@ use std::{
 
 use crate::{
     math::update_value_with_delta, messages::DRepDelegationDistribution, DRepChoice,
-    DRepCredential, DelegatedStake, KeyHash, Lovelace, StakeAddressDelta, StakeCredential,
-    Withdrawal,
+    DRepCredential, DelegatedStake, KeyHash, Lovelace, PoolLiveStakeInfo, StakeAddressDelta,
+    StakeCredential, Withdrawal,
 };
 use anyhow::Result;
 use dashmap::DashMap;
@@ -108,6 +108,34 @@ impl StakeAddressMap {
     #[inline]
     pub fn is_registered(&self, stake_key: &KeyHash) -> bool {
         self.get(stake_key).map(|sas| sas.registered).unwrap_or(false)
+    }
+
+    /// Get Pool's Live Stake Info
+    pub fn get_pool_live_stake_info(&self, spo: &KeyHash) -> PoolLiveStakeInfo {
+        let total_live_stakes = AtomicU64::new(0);
+        let live_stake = AtomicU64::new(0);
+        let live_delegators = AtomicU64::new(0);
+
+        // Par Iter stake addresses values
+        self.inner.par_iter().for_each(|(_, sas)| {
+            total_live_stakes.fetch_add(sas.utxo_value, std::sync::atomic::Ordering::Relaxed);
+            if sas.delegated_spo.as_ref().map(|d_spo| d_spo.eq(spo)).unwrap_or(false) {
+                live_stake.fetch_add(
+                    sas.utxo_value + sas.rewards,
+                    std::sync::atomic::Ordering::Relaxed,
+                );
+                live_delegators.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+        });
+
+        let total_live_stakes = total_live_stakes.load(std::sync::atomic::Ordering::Relaxed);
+        let live_stake = live_stake.load(std::sync::atomic::Ordering::Relaxed);
+        let live_delegators = live_delegators.load(std::sync::atomic::Ordering::Relaxed);
+        PoolLiveStakeInfo {
+            live_stake,
+            live_delegators,
+            total_live_stakes,
+        }
     }
 
     /// Get Pool's Live Stake (same order as spos)

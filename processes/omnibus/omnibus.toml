@@ -44,6 +44,8 @@ store-updates = false
 store-delegators = false
 # Enables /pools/{pool_id}/votes endpoint
 store-votes = false
+# Store block hashes, enables /pools/{pool_id}/blocks endpoints
+store-block-hashes = false
 # Store stake_addresses
 store-stake-addresses = false
 
@@ -77,8 +79,6 @@ write-full-cache = "false"
 [module.epochs-state]
 # Enables /epochs/{number} endpoint (for historical epochs)
 store-history = false
-# Enables /pools/{pool_id}/blocks endpoint
-store-block-hashes = false
 
 [module.accounts-state]
 

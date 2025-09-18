@@ -4,8 +4,7 @@
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::epochs::{
-        BlockHashesByPool, BlocksMintedByPools, BlocksMintedInfoByPool, EpochInfo,
-        EpochsStateQuery, EpochsStateQueryResponse, LatestEpoch, TotalBlocksMintedByPools,
+        EpochInfo, EpochsStateQuery, EpochsStateQueryResponse, LatestEpoch,
         DEFAULT_EPOCHS_QUERY_TOPIC,
     },
     state_history::{StateHistory, StateHistoryStore},
@@ -50,14 +49,13 @@ impl EpochsState {
     async fn run(
         history: Arc<Mutex<StateHistory<State>>>,
         epochs_history: EpochsHistoryState,
-        store_config: &StoreConfig,
         mut headers_subscription: Box<dyn Subscription<Message>>,
         mut fees_subscription: Box<dyn Subscription<Message>>,
         mut epoch_activity_publisher: EpochActivityPublisher,
     ) -> Result<()> {
         loop {
             // Get a mutable state
-            let mut state = history.lock().await.get_or_init_with(|| State::new(store_config));
+            let mut state = history.lock().await.get_or_init_with(|| State::new());
             let mut current_block: Option<BlockInfo> = None;
 
             // Read both topics in parallel
@@ -113,9 +111,7 @@ impl EpochsState {
                         // are suppressed upstream
                         match MultiEraHeader::decode(variant, None, &header_msg.raw) {
                             Ok(header) => {
-                                if let Some(vrf_vkey) = header.vrf_vkey() {
-                                    state.handle_mint(&block_info, Some(vrf_vkey));
-                                }
+                                state.handle_mint(&block_info, header.vrf_vkey());
                             }
 
                             Err(e) => error!("Can't decode header {}: {e}", block_info.slot),
@@ -231,41 +227,10 @@ impl EpochsState {
                         }
                     }
 
-                    EpochsStateQuery::GetBlocksMintedByPools { vrf_key_hashes } => {
-                        EpochsStateQueryResponse::BlocksMintedByPools(BlocksMintedByPools {
-                            blocks_minted: state.get_blocks_minted_by_pools(vrf_key_hashes),
-                        })
-                    }
-
-                    EpochsStateQuery::GetTotalBlocksMintedByPools { vrf_key_hashes } => {
-                        EpochsStateQueryResponse::TotalBlocksMintedByPools(
-                            TotalBlocksMintedByPools {
-                                total_blocks_minted: state
-                                    .get_total_blocks_minted_by_pools(vrf_key_hashes),
-                            },
+                    EpochsStateQuery::GetLatestEpochBlocksMintedByPool { vrf_key_hash } => {
+                        EpochsStateQueryResponse::LatestEpochBlocksMintedByPool(
+                            state.get_latest_epoch_blocks_minted_by_pool(vrf_key_hash),
                         )
-                    }
-
-                    EpochsStateQuery::GetBlocksMintedInfoByPool { vrf_key_hash } => {
-                        let (total_blocks_minted, epoch_blocks_minted) =
-                            state.get_blocks_minted_data_by_pool(vrf_key_hash);
-                        EpochsStateQueryResponse::BlocksMintedInfoByPool(BlocksMintedInfoByPool {
-                            total_blocks_minted,
-                            epoch_blocks_minted,
-                        })
-                    }
-
-                    EpochsStateQuery::GetBlockHashesByPool { vrf_key_hash } => {
-                        if state.is_block_hashes_enabled() {
-                            let hashes = state.get_block_hashes(vrf_key_hash);
-                            EpochsStateQueryResponse::BlockHashesByPool(BlockHashesByPool {
-                                hashes,
-                            })
-                        } else {
-                            EpochsStateQueryResponse::Error(
-                                "Block hashes are not enabled".to_string(),
-                            )
-                        }
                     }
 
                     _ => EpochsStateQueryResponse::Error(format!(
@@ -284,7 +249,6 @@ impl EpochsState {
             Self::run(
                 history,
                 epochs_history,
-                &store_config,
                 headers_subscription,
                 fees_subscription,
                 epoch_activity_publisher,
