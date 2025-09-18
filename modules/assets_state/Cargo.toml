@@ -16,6 +16,8 @@ tokio = { version = "1", features = ["full"] }
 tracing = "0.1.40"
 anyhow = "1.0"
 imbl = { version = "5.0.0", features = ["serde"] }
+hex = "0.4.3"
+serde_cbor = "0.11"
 
 [lib]
 path = "src/assets_state.rs"

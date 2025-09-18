@@ -14,6 +14,7 @@ use std::{clone::Clone, fmt::Debug, sync::Arc};
 use anyhow::Result;
 use config::Config;
 use futures::future::join_all;
+use pallas::codec::minicbor::encode;
 use pallas::ledger::primitives::KeyValuePairs;
 use pallas::ledger::{primitives, traverse, traverse::MultiEraTx};
 use tracing::{debug, error, info, info_span, Instrument};
@@ -21,6 +22,7 @@ use tracing::{debug, error, info, info_span, Instrument};
 mod map_parameters;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.txs";
+const CIP25_METADATA_LABEL: u64 = 721;
 
 /// Tx unpacker module
 /// Parameterised by the outer message enum used on the bus
@@ -108,6 +110,7 @@ impl TxUnpacker {
 
                             let mut utxo_deltas = Vec::new();
                             let mut asset_deltas = Vec::new();
+                            let mut cip25_metadata_updates = Vec::new();
                             let mut withdrawals = Vec::new();
                             let mut certificates = Vec::new();
                             let mut voting_procedures = Vec::new();
@@ -199,8 +202,8 @@ impl TxUnpacker {
                                                                     tx_hash: *tx.hash(),
                                                                     index: index as u64,
                                                                     address: address,
-                                                                    value: map_parameters::map_value(&output.value())
-                                                                    // !!! datum
+                                                                    value: map_parameters::map_value(&output.value()),
+                                                                    datum: map_parameters::map_datum(&output.datum())
                                                                 };
 
                                                                 utxo_deltas.push(UTXODelta::Output(tx_output));
@@ -222,9 +225,22 @@ impl TxUnpacker {
 
                                             let mut tx_deltas: Vec<(PolicyId, Vec<NativeAssetDelta>)> = Vec::new();
 
+                                            // Mint deltas
                                             for policy_group in tx.mints().iter() {
                                                 if let Some((policy_id, deltas)) = map_parameters::map_mint_burn(policy_group) {
                                                     tx_deltas.push((policy_id, deltas));
+                                                }
+                                            }
+
+                                            if let Some(metadata) = tx.metadata().find(CIP25_METADATA_LABEL) {
+                                                let mut metadata_raw = Vec::new();
+                                                match encode(metadata, &mut metadata_raw) {
+                                                    Ok(()) => {
+                                                        cip25_metadata_updates.push(metadata_raw);
+                                                    }
+                                                    Err(e) => {
+                                                        error!("failed to encode CIP-25 metadatum: {e:#}");
+                                                    }
                                                 }
                                             }
 
@@ -315,6 +331,7 @@ impl TxUnpacker {
                                     block.clone(),
                                     CardanoMessage::AssetDeltas(AssetDeltasMessage {
                                         deltas: asset_deltas,
+                                        cip25_metadata_updates
                                     })
                                 ));
 

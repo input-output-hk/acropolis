@@ -178,6 +178,10 @@ impl AssetName {
         })
     }
 
+    pub fn len(&self) -> usize {
+        self.len as usize
+    }
+
     pub fn as_slice(&self) -> &[u8] {
         &self.bytes[..self.len as usize]
     }
@@ -193,6 +197,13 @@ pub struct NativeAsset {
 pub struct NativeAssetDelta {
     pub name: AssetName,
     pub amount: i64,
+}
+
+/// Datum (inline or hash)
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum Datum {
+    Hash(Vec<u8>),
+    Inline(Vec<u8>),
 }
 
 /// Value (lovelace + multiasset)
@@ -274,8 +285,9 @@ pub struct TxOutput {
 
     /// Output value (Lovelace)
     pub value: Value,
-    // todo: Implement datum    /// Datum (raw)
-    // !!!    pub datum: Vec<u8>,
+
+    /// Datum (Inline or Hash)
+    pub datum: Option<Datum>,
 }
 
 /// Transaction input (UTXO reference)
@@ -1597,6 +1609,37 @@ pub enum TxCertificate {
 
     /// DRep update
     DRepUpdate(DRepUpdateWithPos),
+}
+
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AssetInfoRecord {
+    pub initial_mint_tx_hash: TxHash,
+    pub mint_or_burn_count: u64,
+    pub onchain_metadata: Option<Vec<u8>>,
+    pub metadata_standard: Option<AssetMetadataStandard>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct AssetMintRecord {
+    pub tx_hash: TxHash,
+    pub amount: u64,
+    pub burn: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum AssetMetadataStandard {
+    CIP25v1,
+    CIP25v2,
+    CIP68v1,
+    CIP68v2,
+    CIP68v3,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PolicyAsset {
+    pub policy: PolicyId,
+    pub name: AssetName,
+    pub quantity: u64,
 }
 
 #[cfg(test)]

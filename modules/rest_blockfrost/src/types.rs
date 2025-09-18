@@ -2,12 +2,10 @@ use crate::cost_models::{PLUTUS_V1, PLUTUS_V2, PLUTUS_V3};
 use acropolis_common::{
     messages::EpochActivityMessage,
     protocol_params::{Nonce, NonceVariant, ProtocolParams},
-    queries::{
-        assets::{AssetMintRecord, PolicyAsset},
-        governance::DRepActionUpdate,
-    },
+    queries::governance::DRepActionUpdate,
     rest_helper::ToCheckedF64,
-    KeyHash, PoolEpochState, PoolUpdateAction, Relay, TxHash, Vote,
+    AssetMetadataStandard, AssetMintRecord, KeyHash, PolicyAsset, PoolEpochState, PoolUpdateAction,
+    Relay, TxHash, Vote,
 };
 use num_traits::ToPrimitive;
 use rust_decimal::Decimal;
@@ -682,6 +680,31 @@ impl ProtocolParamsRestExt for ProtocolParams {
 
         Value::Object(map)
     }
+}
+
+#[derive(Serialize)]
+pub struct AssetInfoRest {
+    pub asset: String,
+    pub policy_id: String,
+    pub asset_name: String,
+    pub fingerprint: String,
+    pub quantity: String,
+    pub initial_mint_tx_hash: String,
+    pub mint_or_burn_count: u64,
+    pub onchain_metadata: Option<Value>,
+    pub onchain_metadata_standard: Option<AssetMetadataStandard>,
+    pub onchain_metadata_extra: Option<String>,
+    pub metadata: Option<AssetMetadata>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct AssetMetadata {
+    pub name: String,
+    pub description: String,
+    pub ticker: Option<String>,
+    pub url: Option<String>,
+    pub logo: Option<String>,
+    pub decimals: Option<u8>,
 }
 
 #[derive(Debug, Serialize)]

@@ -1,7 +1,14 @@
-use crate::{AssetName, PolicyId, ShelleyAddress, TxHash};
+use crate::{
+    AssetInfoRecord, AssetMintRecord, AssetName, PolicyAsset, PolicyId, ShelleyAddress, TxHash,
+};
 
 pub const DEFAULT_ASSETS_QUERY_TOPIC: (&str, &str) =
     ("assets-state-query-topic", "cardano.query.assets");
+
+pub const DEFAULT_OFFCHAIN_TOKEN_REGISTRY_URL: (&str, &str) = (
+    "offchain-token-registry-url",
+    "https://raw.githubusercontent.com/cardano-foundation/cardano-token-registry/master/mappings/",
+);
 
 pub type AssetList = Vec<PolicyAsset>;
 pub type AssetInfo = (u64, AssetInfoRecord);
@@ -30,35 +37,4 @@ pub enum AssetsStateQueryResponse {
     PolicyIdAssets(PolicyAssets),
     NotFound,
     Error(String),
-}
-
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
-pub struct AssetInfoRecord {
-    pub initial_mint_tx_hash: TxHash,
-    pub mint_or_burn_count: u64,
-    pub onchain_metadata: Option<Vec<u8>>,
-    pub metadata_standard: Option<AssetMetadataStandard>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct AssetMintRecord {
-    pub tx_hash: TxHash,
-    pub amount: u64,
-    pub burn: bool,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub enum AssetMetadataStandard {
-    CIP25v1,
-    CIP25v2,
-    CIP68v1,
-    CIP68v2,
-    CIP68v3,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PolicyAsset {
-    pub policy: PolicyId,
-    pub name: AssetName,
-    pub quantity: u64,
 }
