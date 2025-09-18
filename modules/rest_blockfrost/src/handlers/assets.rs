@@ -1,6 +1,8 @@
 use crate::{
     handlers_config::HandlersConfig,
-    types::{AssetInfoRest, AssetMetadata, AssetMintRecordRest, PolicyAssetRest},
+    types::{
+        AssetInfoRest, AssetMetadata, AssetMintRecordRest, AssetTransactionRest, PolicyAssetRest,
+    },
 };
 use acropolis_common::{
     messages::{Message, RESTResponse, StateQuery, StateQueryResponse},
@@ -208,11 +210,63 @@ pub async fn handle_asset_history_blockfrost(
 }
 
 pub async fn handle_asset_transactions_blockfrost(
-    _context: Arc<Context<Message>>,
-    _params: Vec<String>,
-    _handlers_config: Arc<HandlersConfig>,
+    context: Arc<Context<Message>>,
+    params: Vec<String>,
+    handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
-    Ok(RESTResponse::with_text(501, "Not implemented"))
+    let (policy, name) = match split_policy_and_asset(&params[0]) {
+        Ok(pair) => pair,
+        Err(resp) => return Ok(resp),
+    };
+
+    let asset_query_msg = Arc::new(Message::StateQuery(StateQuery::Assets(
+        AssetsStateQuery::GetAssetTransactions { policy, name },
+    )));
+
+    let response = query_state(
+        &context,
+        &handlers_config.assets_query_topic,
+        asset_query_msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Assets(
+                AssetsStateQueryResponse::AssetTransactions(txs),
+            )) => {
+                // TODO: Query transaction_state once implemented to fetch tx_index, block_height, and block_time
+                let rest_txs: Vec<AssetTransactionRest> = txs
+                    .iter()
+                    .map(|hash| AssetTransactionRest {
+                        tx_hash: hex::encode(hash),
+                        tx_index: "transaction_state not yet implemented".to_string(),
+                        block_height: "transaction_state not yet implemented".to_string(),
+                        block_time: "transaction_state not yet implemented".to_string(),
+                    })
+                    .collect();
+
+                serde_json::to_string_pretty(&rest_txs)
+                    .map(|json| RESTResponse::with_json(200, &json))
+                    .map_err(|e| anyhow::anyhow!("Failed to serialize asset transactions: {e}"))
+            }
+            Message::StateQueryResponse(StateQueryResponse::Assets(
+                AssetsStateQueryResponse::NotFound,
+            )) => Ok(RESTResponse::with_text(404, "Asset not found")),
+            Message::StateQueryResponse(StateQueryResponse::Assets(
+                AssetsStateQueryResponse::Error(_),
+            )) => Ok(RESTResponse::with_text(
+                501,
+                "Asset transactions storage is disabled in config",
+            )),
+            _ => Ok(RESTResponse::with_text(
+                500,
+                "Unexpected response while retrieving asset transactions",
+            )),
+        },
+    )
+    .await;
+
+    match response {
+        Ok(rest) => Ok(rest),
+        Err(e) => Ok(RESTResponse::with_text(500, &format!("Query failed: {e}"))),
+    }
 }
 
 pub async fn handle_asset_addresses_blockfrost(

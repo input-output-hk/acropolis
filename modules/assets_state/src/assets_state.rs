@@ -4,7 +4,7 @@
 
 use crate::{
     asset_registry::AssetRegistry,
-    state::{AssetsStorageConfig, State},
+    state::{AssetsStorageConfig, State, StoreTransactions},
 };
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
@@ -31,7 +31,7 @@ const DEFAULT_UTXO_DELTAS_SUBSCRIBE_TOPIC: (&str, &str) =
 const DEFAULT_STORE_ASSETS: (&str, bool) = ("store-assets", false);
 const DEFAULT_STORE_INFO: (&str, bool) = ("store-info", false);
 const DEFAULT_STORE_HISTORY: (&str, bool) = ("store-history", false);
-const DEFAULT_STORE_TRANSACTIONS: (&str, bool) = ("store-transactions", false);
+const DEFAULT_STORE_TRANSACTIONS: (&str, &str) = ("store-transactions", "none");
 const DEFAULT_STORE_ADDRESSES: (&str, bool) = ("store-addresses", false);
 const DEFAULT_INDEX_BY_POLICY: (&str, bool) = ("index-by-policy", false);
 
@@ -115,15 +115,30 @@ impl AssetsState {
                         CardanoMessage::UTXODeltas(utxo_deltas_msg),
                     )) => {
                         Self::check_sync(&current_block, block_info, "utxo");
-                        let mut reg = registry.lock().await;
-                        state =
-                            match state.handle_cip68_metadata(&utxo_deltas_msg.deltas, &mut *reg) {
+
+                        if storage_config.store_info {
+                            let reg = registry.lock().await;
+                            state =
+                                match state.handle_cip68_metadata(&utxo_deltas_msg.deltas, &*reg) {
+                                    Ok(new_state) => new_state,
+                                    Err(e) => {
+                                        error!("CIP-68 metadata handling error: {e:#}");
+                                        state
+                                    }
+                                };
+                        }
+
+                        if storage_config.store_transactions.is_enabled() {
+                            let reg = registry.lock().await;
+                            state = match state.handle_transactions(&utxo_deltas_msg.deltas, &*reg)
+                            {
                                 Ok(new_state) => new_state,
                                 Err(e) => {
-                                    error!("CIP-68 metadata handling error: {e:#}");
+                                    error!("Transactions handling error: {e:#}");
                                     state
                                 }
                             };
+                        }
                     }
                     other => error!("Unexpected message on utxo-deltas subscription: {other:?}"),
                 }
@@ -165,12 +180,27 @@ impl AssetsState {
             config.get_string(key.0).unwrap_or_else(|_| key.1.to_string())
         }
 
+        fn get_transactions_flag(config: &Config, key: (&str, &str)) -> StoreTransactions {
+            let val = get_string_flag(config, key);
+            match val.as_str() {
+                "none" => StoreTransactions::None,
+                "all" => StoreTransactions::All,
+                s => {
+                    if let Ok(n) = s.parse::<u64>() {
+                        StoreTransactions::Last(n)
+                    } else {
+                        StoreTransactions::None // fallback
+                    }
+                }
+            }
+        }
+
         // Get configuration flags and topis
         let storage_config = AssetsStorageConfig {
             store_assets: get_bool_flag(&config, DEFAULT_STORE_ASSETS),
             store_info: get_bool_flag(&config, DEFAULT_STORE_INFO),
             store_history: get_bool_flag(&config, DEFAULT_STORE_HISTORY),
-            store_transactions: get_bool_flag(&config, DEFAULT_STORE_TRANSACTIONS),
+            store_transactions: get_transactions_flag(&config, DEFAULT_STORE_TRANSACTIONS),
             store_addresses: get_bool_flag(&config, DEFAULT_STORE_ADDRESSES),
             index_by_policy: get_bool_flag(&config, DEFAULT_INDEX_BY_POLICY),
         };
@@ -180,7 +210,7 @@ impl AssetsState {
         info!("Creating subscriber on '{asset_deltas_subscribe_topic}'");
 
         let utxo_deltas_subscribe_topic: Option<String> =
-            if storage_config.store_info || storage_config.store_transactions {
+            if storage_config.store_info || storage_config.store_transactions.is_enabled() {
                 let topic = get_string_flag(&config, DEFAULT_UTXO_DELTAS_SUBSCRIBE_TOPIC);
                 info!("Creating subscriber on '{topic}'");
                 Some(topic)
@@ -295,7 +325,7 @@ impl AssetsState {
                                 Err(e) => AssetsStateQueryResponse::Error(e.to_string()),
                             },
                             None => {
-                                if state.config.store_transactions {
+                                if state.config.store_transactions.is_enabled() {
                                     AssetsStateQueryResponse::NotFound
                                 } else {
                                     AssetsStateQueryResponse::Error(
