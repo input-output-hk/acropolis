@@ -4,12 +4,14 @@ use acropolis_common::{
     protocol_params::{Nonce, NonceVariant, ProtocolParams},
     queries::governance::DRepActionUpdate,
     rest_helper::ToCheckedF64,
-    AssetMetadataStandard, AssetMintRecord, PolicyAsset, PoolEpochState, Relay, Vote,
+    AssetMetadataStandard, AssetMintRecord, KeyHash, PolicyAsset, PoolEpochState, PoolUpdateAction,
+    Relay, TxHash, Vote,
 };
 use num_traits::ToPrimitive;
 use rust_decimal::Decimal;
 use serde::Serialize;
 use serde_json::{json, Value};
+use serde_with::{hex::Hex, serde_as, DisplayFromStr};
 use std::collections::HashMap;
 
 // REST response structure for /epoch
@@ -240,17 +242,23 @@ pub struct ProposalMetadataREST {
 }
 
 // RET response structure for /pools/extended
+#[serde_as]
 #[derive(Serialize)]
 pub struct PoolExtendedRest {
     pub pool_id: String,
-    pub hex: String,
-    pub active_stake: String, // u64 in string
-    pub live_stake: String,   // u64 in string
+    #[serde_as(as = "Hex")]
+    pub hex: Vec<u8>,
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub active_stake: Option<u64>,
+    #[serde_as(as = "DisplayFromStr")]
+    pub live_stake: u64,
     pub blocks_minted: u64,
     pub live_saturation: Decimal,
-    pub declared_pledge: String, // u64 in string
+    #[serde_as(as = "DisplayFromStr")]
+    pub declared_pledge: u64,
     pub margin_cost: f32,
-    pub fixed_cost: String, // u64 in string
+    #[serde_as(as = "DisplayFromStr")]
+    pub fixed_cost: u64,
 }
 
 // REST response structure for /pools/retired and /pools/retiring
@@ -261,15 +269,20 @@ pub struct PoolRetirementRest {
 }
 
 // REST response structure for /pools/{pool_id}/history
+#[serde_as]
 #[derive(Serialize)]
 pub struct PoolEpochStateRest {
     pub epoch: u64,
     pub blocks: u64,
-    pub active_stake: String, // u64 in string
+    #[serde_as(as = "DisplayFromStr")]
+    pub active_stake: u64,
     pub active_size: f64,
+    #[serde_as(as = "DisplayFromStr")]
     pub delegators_count: u64,
-    pub rewards: String, // u64 in string
-    pub fees: String,    // u64 in string
+    #[serde_as(as = "DisplayFromStr")]
+    pub rewards: u64,
+    #[serde_as(as = "DisplayFromStr")]
+    pub fees: u64,
 }
 
 impl From<PoolEpochState> for PoolEpochStateRest {
@@ -277,11 +290,11 @@ impl From<PoolEpochState> for PoolEpochStateRest {
         Self {
             epoch: state.epoch,
             blocks: state.blocks_minted,
-            active_stake: state.active_stake.to_string(),
+            active_stake: state.active_stake,
             active_size: state.active_size.to_checked_f64("active_size").unwrap_or(0.0),
             delegators_count: state.delegators_count,
-            rewards: state.pool_reward.to_string(),
-            fees: state.spo_reward.to_string(),
+            rewards: state.pool_reward,
+            fees: state.spo_reward,
         }
     }
 }
@@ -353,6 +366,60 @@ impl From<Relay> for PoolRelayRest {
             },
         }
     }
+}
+
+// REST response structure for /pools/{pool_id}/updates
+#[serde_as]
+#[derive(Serialize)]
+pub struct PoolUpdateEventRest {
+    #[serde_as(as = "Hex")]
+    pub tx_hash: TxHash,
+    pub cert_index: u64,
+    pub action: PoolUpdateAction,
+}
+
+// REST response structure for /pools/{pool_id}/votes
+#[serde_as]
+#[derive(Serialize)]
+pub struct PoolVoteRest {
+    #[serde_as(as = "Hex")]
+    pub tx_hash: TxHash,
+    pub vote_index: u32,
+    pub vote: Vote,
+}
+
+// REST response structure for /pools/{pool_id}
+#[serde_as]
+#[derive(Serialize)]
+pub struct PoolInfoRest {
+    pub pool_id: String,
+    #[serde_as(as = "Hex")]
+    pub hex: KeyHash,
+    #[serde_as(as = "Hex")]
+    pub vrf_key: KeyHash,
+    pub blocks_minted: u64,
+    pub blocks_epoch: u64,
+    #[serde_as(as = "DisplayFromStr")]
+    pub live_stake: u64,
+    pub live_size: Decimal,
+    pub live_saturation: Decimal,
+    pub live_delegators: u64,
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub active_stake: Option<u64>,
+    pub active_size: Option<f64>,
+    #[serde_as(as = "DisplayFromStr")]
+    pub declared_pledge: u64,
+    #[serde_as(as = "DisplayFromStr")]
+    pub live_pledge: u64,
+    pub margin_cost: f32,
+    #[serde_as(as = "DisplayFromStr")]
+    pub fixed_cost: u64,
+    pub reward_account: String,
+    pub pool_owners: Vec<String>,
+    #[serde_as(as = "Option<Vec<Hex>>")]
+    pub registration: Option<Vec<TxHash>>,
+    #[serde_as(as = "Option<Vec<Hex>>")]
+    pub retirement: Option<Vec<TxHash>>,
 }
 
 // REST response structure for protocol params

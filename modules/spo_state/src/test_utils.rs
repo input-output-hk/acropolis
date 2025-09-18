@@ -2,7 +2,7 @@ use acropolis_common::{
     messages::{
         EpochActivityMessage, SPORewardsMessage, SPOStakeDistributionMessage, TxCertificatesMessage,
     },
-    BlockInfo, BlockStatus, Era, TxCertificate,
+    BlockHash, BlockInfo, BlockStatus, Era, TxCertificate,
 };
 
 use crate::store_config::StoreConfig;
@@ -15,6 +15,7 @@ pub fn default_store_config() -> StoreConfig {
         store_updates: false,
         store_delegators: false,
         store_votes: false,
+        store_block_hashes: false,
         store_stake_addresses: false,
     }
 }
@@ -27,6 +28,7 @@ pub fn save_history_store_config() -> StoreConfig {
         store_updates: false,
         store_delegators: false,
         store_votes: false,
+        store_block_hashes: false,
         store_stake_addresses: false,
     }
 }
@@ -39,6 +41,20 @@ pub fn save_retired_pools_store_config() -> StoreConfig {
         store_updates: false,
         store_delegators: false,
         store_votes: false,
+        store_block_hashes: false,
+        store_stake_addresses: false,
+    }
+}
+
+pub fn save_block_hashes_store_config() -> StoreConfig {
+    StoreConfig {
+        store_epochs_history: false,
+        store_retired_pools: false,
+        store_registration: false,
+        store_updates: false,
+        store_delegators: false,
+        store_votes: false,
+        store_block_hashes: true,
         store_stake_addresses: false,
     }
 }
@@ -48,7 +64,7 @@ pub fn new_block(epoch: u64) -> BlockInfo {
         status: BlockStatus::Immutable,
         slot: 0,
         number: 10 * epoch,
-        hash: Vec::<u8>::new(),
+        hash: BlockHash::default(),
         epoch,
         epoch_slot: 0,
         new_epoch: true,

@@ -217,7 +217,7 @@ pub async fn handle_drep_delegators_blockfrost(
             }
 
             let msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
-                AccountsStateQuery::GetAccountsBalancesMap { stake_keys },
+                AccountsStateQuery::GetAccountsUtxoValuesMap { stake_keys },
             )));
 
             let raw_msg =
@@ -226,7 +226,7 @@ pub async fn handle_drep_delegators_blockfrost(
 
             match message {
                 Message::StateQueryResponse(StateQueryResponse::Accounts(
-                    AccountsStateQueryResponse::AccountsBalancesMap(map),
+                    AccountsStateQueryResponse::AccountsUtxoValuesMap(map),
                 )) => {
                     let mut response = Vec::new();
 

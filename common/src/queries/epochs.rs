@@ -13,10 +13,7 @@ pub enum EpochsStateQuery {
     GetEpochStakeDistributionByPool { epoch_number: u64 },
     GetEpochBlockDistribution { epoch_number: u64 },
     GetEpochBlockDistributionByPool { epoch_number: u64 },
-
-    // Pools related queries
-    GetBlocksMintedByPools { vrf_key_hashes: Vec<KeyHash> },
-    GetTotalBlocksMintedByPools { vrf_key_hashes: Vec<KeyHash> },
+    GetLatestEpochBlocksMintedByPool { vrf_key_hash: KeyHash },
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -29,10 +26,7 @@ pub enum EpochsStateQueryResponse {
     EpochStakeDistributionByPool(EpochStakeDistributionByPool),
     EpochBlockDistribution(EpochBlockDistribution),
     EpochBlockDistributionByPool(EpochBlockDistributionByPool),
-
-    // Pools related responses
-    BlocksMintedByPools(BlocksMintedByPools),
-    TotalBlocksMintedByPools(TotalBlocksMintedByPools),
+    LatestEpochBlocksMintedByPool(u64),
 
     NotFound,
     Error(String),
@@ -70,15 +64,3 @@ pub struct EpochBlockDistribution {}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EpochBlockDistributionByPool {}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct BlocksMintedByPools {
-    // this is in same order of vrf_key_hashes from EpochsStateQuery::BlocksMintedByPools
-    pub blocks_minted: Vec<u64>,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct TotalBlocksMintedByPools {
-    // this is in same order of vrf_key_hashes from EpochsStateQuery::TotalBlocksMinted
-    pub total_blocks_minted: Vec<u64>,
-}

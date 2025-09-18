@@ -4,7 +4,7 @@ use config::Config;
 
 const DEFAULT_STORE_HISTORY: (&str, bool) = ("store-history", false);
 
-#[derive(Debug, Clone)]
+#[derive(Default, Debug, Clone)]
 pub struct StoreConfig {
     pub store_history: bool,
 }
