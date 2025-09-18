@@ -42,24 +42,24 @@ graph TB
 This project is in an experimental phase at the moment, and the module
 structure is highly subject to change:
 
-* [Upstream Chain Fetcher](modules/upstream_chain_fetcher) -
+- [Upstream Chain Fetcher](modules/upstream_chain_fetcher) -
   implementation of the Node-to-Node (N2N) client-side (initiator)
   protocol, allowing chain synchronisation and block fetching
-* [Mithril Snapshot Fetcher](modules/mithril_snapshot_fetcher) -
+- [Mithril Snapshot Fetcher](modules/mithril_snapshot_fetcher) -
   Fetches a chain snapshot from Mithril and replays all the blocks in it
-* [Genesis Bootstrapper](modules/genesis_bootstrapper) - reads the Genesis
+- [Genesis Bootstrapper](modules/genesis_bootstrapper) - reads the Genesis
   file for a chain and generates initial UTXOs
-* [Block Unpacker](modules/block_unpacker) - unpacks received blocks
+- [Block Unpacker](modules/block_unpacker) - unpacks received blocks
   into individual transactions
-* [Tx Unpacker](modules/tx_unpacker) - parses transactions and generates UTXO
+- [Tx Unpacker](modules/tx_unpacker) - parses transactions and generates UTXO
   changes
-* [UTXO State](modules/utxo_state) - watches UTXO changes and maintains a basic in-memory UTXO state
-* [SPO State](modules/spo_state) - matches SPO registrations and retirements
-* [DRep State](modules/drep_state) - tracks DRep registrations
-* [Governance State](modules/governance_state) - tracks Governance Actions and voting
-* [Stake Delta Filter](modules/stake_delta_filter) - filters out stake address changes and handles stake pointer references
-* [Epoch Activity Counter](modules/epoch_activity_counter) - counts fees and block production for rewards
-* [Accounts State](modules/accounts_state) - stake and reward accounts tracker
+- [UTXO State](modules/utxo_state) - watches UTXO changes and maintains a basic in-memory UTXO state
+- [SPO State](modules/spo_state) - matches SPO registrations and retirements
+- [DRep State](modules/drep_state) - tracks DRep registrations
+- [Governance State](modules/governance_state) - tracks Governance Actions and voting
+- [Stake Delta Filter](modules/stake_delta_filter) - filters out stake address changes and handles stake pointer references
+- [Epochs State](modules/epochs_state) - track fees blocks minted and epochs history
+- [Accounts State](modules/accounts_state) - stake and reward accounts tracker
 
 ```mermaid
 graph LR
@@ -74,7 +74,7 @@ graph LR
    DRepState(DRep State)
    GovernanceState(Governance State)
    StakeDeltaFilter(Stake Delta Filter)
-   EpochActivityCounter(Epoch Activity Counter)
+   EpochsState(EpochsState)
    AccountsState(Accounts State)
 
    UpstreamChainFetcher --> BlockUnpacker
@@ -82,16 +82,16 @@ graph LR
    BlockUnpacker --> TxUnpacker
    GenesisBootstrapper --> UTXOState
    TxUnpacker --> UTXOState
-   TxUnpacker --> EpochActivityCounter
+   TxUnpacker --> EpochsState
    TxUnpacker --> AccountsState
    TxUnpacker --> SPOState
    TxUnpacker --> DRepState
    TxUnpacker --> GovernanceState
    UTXOState --> StakeDeltaFilter
    StakeDeltaFilter --> AccountsState
-   UpstreamChainFetcher --> EpochActivityCounter
-   MithrilSnapshotFetcher --> EpochActivityCounter
-   EpochActivityCounter --> AccountsState
+   UpstreamChainFetcher --> EpochsState
+   MithrilSnapshotFetcher --> EpochsState
+   EpochsState --> AccountsState
    SPOState --> AccountsState
    DRepState --> GovernanceState
    GovernanceState --> AccountsState
@@ -106,6 +106,5 @@ the [Messages](messages) crate.
 
 There is currently only one process, for testing:
 
-* [Omnibus](processes/omnibus) - includes all the above modules for
+- [Omnibus](processes/omnibus) - includes all the above modules for
   testing, by default using the internal message bus only
-

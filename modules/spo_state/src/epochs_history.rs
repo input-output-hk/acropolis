@@ -19,19 +19,19 @@ use crate::store_config::StoreConfig;
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EpochState {
     /// epoch number N
-    epoch: u64,
+    pub epoch: u64,
     /// blocks minted during the epoch
-    blocks_minted: Option<u64>,
+    pub blocks_minted: Option<u64>,
     /// active stake of the epoch N (taken boundary from epoch N-2 to N-1)
-    active_stake: Option<u64>,
+    pub active_stake: Option<u64>,
     /// active size = active_stake / total_active_stake
-    active_size: Option<RationalNumber>,
+    pub active_size: Option<RationalNumber>,
     /// delegators count by the end of the epoch
-    delegators_count: Option<u64>,
+    pub delegators_count: Option<u64>,
     /// Total rewards pool has received during epoch
-    pool_reward: Option<u64>,
+    pub pool_reward: Option<u64>,
     /// pool's operator's reward
-    spo_reward: Option<u64>,
+    pub spo_reward: Option<u64>,
 }
 
 impl EpochState {
@@ -94,6 +94,26 @@ impl EpochsHistoryState {
             .as_ref()
             .and_then(|epochs| epochs.get(spo))
             .map(|epochs| epochs.values().map(|state| state.to_pool_epoch_state()).collect())
+    }
+
+    /// Get Pools Active stakes
+    /// Return None if any of pool operators active stake is None
+    pub fn get_pools_active_stakes(
+        &self,
+        pool_operators: &Vec<KeyHash>,
+        epoch: u64,
+    ) -> Option<Vec<u64>> {
+        let Some(epochs_history) = self.epochs_history.as_ref() else {
+            return None;
+        };
+
+        let mut active_stakes = Vec::<u64>::new();
+        for pool_operator in pool_operators {
+            let epochs = epochs_history.get(pool_operator)?;
+            let epoch_state = epochs.get(&epoch)?;
+            active_stakes.push(epoch_state.active_stake?);
+        }
+        Some(active_stakes)
     }
 
     /// Handle SPO Stake Distribution

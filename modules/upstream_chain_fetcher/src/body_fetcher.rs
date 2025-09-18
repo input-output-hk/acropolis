@@ -103,7 +103,7 @@ impl BodyFetcher {
     ) -> Result<BlockInfo> {
         let slot = header.slot();
         let number = header.number();
-        let hash = header.hash().to_vec();
+        let hash = *header.hash();
 
         let (epoch, epoch_slot) = self.cfg.slot_to_epoch(slot);
         let new_epoch = match last_epoch {
@@ -138,7 +138,7 @@ impl BodyFetcher {
         // Fetch the block itself - note we need to
         // reconstruct a Point from the header because the one we get
         // in the RollForward is the *tip*, not the next read point
-        let fetch_point = Point::Specific(block_info.slot, block_info.hash.clone());
+        let fetch_point = Point::Specific(block_info.slot, block_info.hash.to_vec());
         let msg_body = match self.fetch_block(fetch_point).await? {
             Success(body) => body,
             NetworkError => return Ok(NetworkError),
