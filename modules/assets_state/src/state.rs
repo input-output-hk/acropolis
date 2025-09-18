@@ -328,7 +328,6 @@ impl State {
         })
     }
 
-    // TODO: Potentially store metadata for assets that have not been minted yet (pre-mint metadata)
     pub fn handle_cip25_metadata(
         &self,
         registry: &mut AssetRegistry,
@@ -408,7 +407,6 @@ impl State {
         })
     }
 
-    // TODO: Potentially store metadata for user tokens that have not been minted yet (pre-mint metadata)
     pub fn handle_cip68_metadata(
         &self,
         deltas: &[UTXODelta],
