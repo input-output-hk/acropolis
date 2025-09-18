@@ -3,6 +3,7 @@ use crate::monetary::calculate_monetary_change;
 use crate::rewards::{RewardsResult, RewardsState};
 use crate::snapshot::Snapshot;
 use acropolis_common::queries::accounts::OptimalPoolSizing;
+use acropolis_common::PoolLiveStakeInfo;
 use acropolis_common::{
     math::update_value_with_delta,
     messages::{
@@ -104,6 +105,11 @@ impl State {
             shelly_params.max_lovelace_supply - self.rewards_state.mark.pots.reserves;
         let nopt = shelly_params.protocol_params.stake_pool_target_num as u64;
         Some(OptimalPoolSizing { total_supply, nopt })
+    }
+
+    /// Get Pool Live Stake Info
+    pub fn get_pool_live_stake_info(&self, pool_operator: &KeyHash) -> PoolLiveStakeInfo {
+        self.stake_addresses.lock().unwrap().get_pool_live_stake_info(pool_operator)
     }
 
     /// Get Pools Live stake
