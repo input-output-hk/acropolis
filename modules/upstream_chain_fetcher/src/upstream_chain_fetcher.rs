@@ -162,7 +162,7 @@ impl UpstreamChainFetcher {
                 Self::sync_to_point_impl(cfg.clone(), cache.clone(), start.clone()).await?;
 
             if let Some(blk) = stops_at {
-                start = Point::new(blk.slot, blk.hash);
+                start = Point::new(blk.slot, blk.hash.to_vec());
             }
         }
     }
