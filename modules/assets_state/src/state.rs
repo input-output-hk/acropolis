@@ -114,7 +114,7 @@ impl State {
         asset_id: &AssetId,
         registry: &AssetRegistry,
     ) -> Result<Option<(u64, AssetInfoRecord)>> {
-        if !self.config.store_info {
+        if !self.config.store_info || !self.config.store_assets {
             return Err(anyhow::anyhow!("asset info storage disabled in config"));
         }
 
