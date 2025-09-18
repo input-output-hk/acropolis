@@ -74,9 +74,9 @@ store-history = false
 
 [module.assets-state]
 # Enables /assets endpoint
-store-assets = true
+store-assets = false
 # Enables /assets/{asset} endpoint (requires store-assets to be enabled)
-store-info = true
+store-info = false
 # Enables /assets/{asset}/history endpoint
 store-history = false
 # Enables /assets/{asset}/transactions endpoint
