@@ -5,6 +5,11 @@ use crate::{
 pub const DEFAULT_ASSETS_QUERY_TOPIC: (&str, &str) =
     ("assets-state-query-topic", "cardano.query.assets");
 
+pub const DEFAULT_OFFCHAIN_TOKEN_REGISTRY_URL: (&str, &str) = (
+    "offchain-token-registry-url",
+    "https://raw.githubusercontent.com/cardano-foundation/cardano-token-registry/master/mappings/",
+);
+
 pub type AssetList = Vec<PolicyAsset>;
 pub type AssetInfo = (u64, AssetInfoRecord);
 pub type AssetHistory = Vec<AssetMintRecord>;
