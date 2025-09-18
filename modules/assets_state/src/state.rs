@@ -348,8 +348,10 @@ impl State {
             let Ok(decoded) = serde_cbor::from_slice::<serde_cbor::Value>(bytes) else {
                 continue;
             };
-            let serde_cbor::Value::Map(mut policy_map) = decoded else {
-                continue;
+
+            let policy_map = match decoded {
+                serde_cbor::Value::Map(m) => m,
+                _ => continue,
             };
 
             // Retrieve CIP25 version from map and default to v1 if missing
@@ -359,33 +361,45 @@ impl State {
                 if ver == "2.0" {
                     standard = AssetMetadataStandard::CIP25v2;
                 }
-                policy_map.remove(&version_key);
             }
 
             for (policy_key, assets_val) in policy_map {
-                let (serde_cbor::Value::Text(policy_hex), serde_cbor::Value::Map(asset_map)) =
-                    (policy_key, assets_val)
-                else {
-                    continue;
+                let asset_map = match assets_val {
+                    serde_cbor::Value::Map(m) => m,
+                    _ => continue,
                 };
 
-                let Some(policy_id) = hex::decode(policy_hex).ok().and_then(|b| b.try_into().ok())
-                else {
+                let policy_id: Option<PolicyId> = match policy_key {
+                    serde_cbor::Value::Text(hex_str) => {
+                        hex::decode(&hex_str).ok().and_then(|b| b.try_into().ok())
+                    }
+                    serde_cbor::Value::Bytes(bytes) => bytes.try_into().ok(),
+                    _ => None,
+                };
+
+                let Some(policy_id) = policy_id else {
                     continue;
                 };
 
                 for (asset_key, metadata_val) in asset_map {
-                    if let serde_cbor::Value::Text(asset_hex) = asset_key {
-                        if let Ok(asset_bytes) = hex::decode(&asset_hex) {
-                            if let Some(asset_name) = AssetName::new(&asset_bytes) {
-                                if let Some(asset_id) = registry.lookup_id(&policy_id, &asset_name)
-                                {
-                                    if let Ok(metadata_raw) = serde_cbor::to_vec(&metadata_val) {
-                                        if let Some(record) = info_map.get_mut(&asset_id) {
-                                            record.onchain_metadata = Some(metadata_raw);
-                                            record.metadata_standard = Some(standard);
-                                        }
-                                    }
+                    let asset_bytes: Option<Vec<u8>> = match asset_key {
+                        serde_cbor::Value::Text(hex_str) => {
+                            hex::decode(&hex_str).ok().or_else(|| Some(hex_str.into_bytes()))
+                        }
+                        serde_cbor::Value::Bytes(bytes) => Some(bytes),
+                        _ => None,
+                    };
+
+                    let Some(asset_bytes) = asset_bytes else {
+                        continue;
+                    };
+
+                    if let Some(asset_name) = AssetName::new(&asset_bytes) {
+                        if let Some(asset_id) = registry.lookup_id(&policy_id, &asset_name) {
+                            if let Ok(metadata_raw) = serde_cbor::to_vec(&metadata_val) {
+                                if let Some(record) = info_map.get_mut(&asset_id) {
+                                    record.onchain_metadata = Some(metadata_raw);
+                                    record.metadata_standard = Some(standard);
                                 }
                             }
                         }
