@@ -1,5 +1,5 @@
 use crate::{
-    AssetInfoRecord, AssetMintRecord, AssetName, PolicyAsset, PolicyId, ShelleyAddress, TxHash,
+    AssetAddressEntry, AssetInfoRecord, AssetMintRecord, AssetName, PolicyAsset, PolicyId, TxHash,
 };
 
 pub const DEFAULT_ASSETS_QUERY_TOPIC: (&str, &str) =
@@ -13,7 +13,7 @@ pub const DEFAULT_OFFCHAIN_TOKEN_REGISTRY_URL: (&str, &str) = (
 pub type AssetList = Vec<PolicyAsset>;
 pub type AssetInfo = (u64, AssetInfoRecord);
 pub type AssetHistory = Vec<AssetMintRecord>;
-pub type AssetAddresses = Vec<(ShelleyAddress, u64)>;
+pub type AssetAddresses = Vec<AssetAddressEntry>;
 pub type AssetTransactions = Vec<TxHash>;
 pub type PolicyAssets = Vec<PolicyAsset>;
 

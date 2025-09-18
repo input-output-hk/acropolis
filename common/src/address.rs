@@ -14,7 +14,7 @@ pub struct ByronAddress {
 }
 
 /// Address network identifier
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum AddressNetwork {
     /// Mainnet
     Main,
@@ -30,7 +30,7 @@ impl Default for AddressNetwork {
 }
 
 /// A Shelley-era address - payment part
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum ShelleyAddressPaymentPart {
     /// Payment to a key
     PaymentKeyHash(KeyHash),
@@ -59,7 +59,7 @@ pub struct ShelleyAddressPointer {
 }
 
 /// A Shelley-era address - delegation part
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum ShelleyAddressDelegationPart {
     /// No delegation (enterprise addresses)
     None,
@@ -81,7 +81,7 @@ impl Default for ShelleyAddressDelegationPart {
 }
 
 /// A Shelley-era address
-#[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ShelleyAddress {
     /// Network id
     pub network: AddressNetwork,
