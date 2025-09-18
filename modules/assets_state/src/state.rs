@@ -6,7 +6,7 @@ use acropolis_common::{
         AssetHistory, AssetInfoRecord, AssetMetadataStandard, AssetMintRecord, PolicyAsset,
         PolicyAssets,
     },
-    AssetName, Datum, NativeAssetDelta, PolicyId, ShelleyAddress, TxHash, UTXODelta,
+    AssetName, Datum, Lovelace, NativeAssetDelta, PolicyId, ShelleyAddress, TxHash, UTXODelta,
 };
 use anyhow::Result;
 use imbl::{HashMap, Vector};
@@ -19,9 +19,28 @@ pub struct AssetsStorageConfig {
     pub store_assets: bool,
     pub store_info: bool,
     pub store_history: bool,
-    pub store_transactions: bool,
+    pub store_transactions: StoreTransactions,
     pub store_addresses: bool,
     pub index_by_policy: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum StoreTransactions {
+    None,
+    All,
+    Last(u64),
+}
+
+impl Default for StoreTransactions {
+    fn default() -> Self {
+        StoreTransactions::None
+    }
+}
+
+impl StoreTransactions {
+    pub fn is_enabled(&self) -> bool {
+        !matches!(self, StoreTransactions::None)
+    }
 }
 
 #[derive(Debug, Default, Clone)]
@@ -29,7 +48,7 @@ pub struct State {
     pub config: AssetsStorageConfig,
 
     /// Assets mapped to supply
-    pub supply: Option<HashMap<AssetId, u64>>,
+    pub supply: Option<HashMap<AssetId, Lovelace>>,
 
     /// Assets mapped to mint/burn history
     pub history: Option<HashMap<AssetId, Vector<AssetMintRecord>>>,
@@ -38,7 +57,7 @@ pub struct State {
     pub info: Option<HashMap<AssetId, AssetInfoRecord>>,
 
     /// Assets mapped to addresses
-    pub addresses: Option<HashMap<AssetId, Vector<(ShelleyAddress, u64)>>>,
+    pub addresses: Option<HashMap<AssetId, Vector<(ShelleyAddress, Lovelace)>>>,
 
     /// Assets mapped to transactions
     pub transactions: Option<HashMap<AssetId, Vector<TxHash>>>,
@@ -78,10 +97,9 @@ impl State {
             } else {
                 None
             },
-            transactions: if store_transactions {
-                Some(HashMap::new())
-            } else {
-                None
+            transactions: match store_transactions {
+                StoreTransactions::None => None,
+                StoreTransactions::All | StoreTransactions::Last(_) => Some(HashMap::new()),
             },
             policy_index: if index_by_policy {
                 Some(HashMap::new())
@@ -169,7 +187,7 @@ impl State {
     }
 
     pub fn get_asset_transactions(&self, asset_id: &AssetId) -> Result<Option<Vec<TxHash>>> {
-        if !self.config.store_transactions {
+        if !self.config.store_transactions.is_enabled() {
             return Err(anyhow::anyhow!(
                 "asset transactions storage disabled in config"
             ));
@@ -328,7 +346,66 @@ impl State {
         })
     }
 
-    // TODO: Potentially store metadata for assets that have not been minted yet (pre-mint metadata)
+    pub fn handle_transactions(
+        &self,
+        deltas: &[UTXODelta],
+        registry: &AssetRegistry,
+    ) -> Result<Self> {
+        let mut new_txs = self.transactions.clone();
+
+        let Some(txs_map) = new_txs.as_mut() else {
+            return Ok(Self {
+                config: self.config,
+                supply: self.supply.clone(),
+                history: self.history.clone(),
+                info: self.info.clone(),
+                addresses: self.addresses.clone(),
+                transactions: new_txs,
+                policy_index: self.policy_index.clone(),
+            });
+        };
+
+        let store_cfg = self.config.store_transactions;
+
+        for delta in deltas {
+            let UTXODelta::Output(output) = delta else {
+                continue;
+            };
+
+            let tx_hash = output.tx_hash.clone();
+
+            for (policy_id, assets) in &output.value.assets {
+                for asset in assets {
+                    if let Some(asset_id) = registry.lookup_id(policy_id, &asset.name) {
+                        let entry = txs_map.entry(asset_id).or_default();
+
+                        let should_push = entry.back().map_or(true, |last| last != &tx_hash);
+
+                        if should_push {
+                            entry.push_back(tx_hash.clone());
+
+                            if let StoreTransactions::Last(max) = store_cfg {
+                                if entry.len() as u64 > max {
+                                    entry.pop_front();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(Self {
+            config: self.config,
+            supply: self.supply.clone(),
+            history: self.history.clone(),
+            info: self.info.clone(),
+            addresses: self.addresses.clone(),
+            transactions: new_txs,
+            policy_index: self.policy_index.clone(),
+        })
+    }
+
     pub fn handle_cip25_metadata(
         &self,
         registry: &mut AssetRegistry,
@@ -408,11 +485,10 @@ impl State {
         })
     }
 
-    // TODO: Potentially store metadata for user tokens that have not been minted yet (pre-mint metadata)
     pub fn handle_cip68_metadata(
         &self,
         deltas: &[UTXODelta],
-        registry: &mut AssetRegistry,
+        registry: &AssetRegistry,
     ) -> Result<Self> {
         let mut new_info = self.info.clone();
 
@@ -502,7 +578,7 @@ mod tests {
 
     use crate::{
         asset_registry::{AssetId, AssetRegistry},
-        state::{AssetsStorageConfig, State},
+        state::{AssetsStorageConfig, State, StoreTransactions},
     };
     use acropolis_common::{
         queries::assets::{AssetInfoRecord, AssetMetadataStandard},
@@ -527,7 +603,7 @@ mod tests {
             store_assets: true,
             store_info: true,
             store_history: true,
-            store_transactions: true,
+            store_transactions: StoreTransactions::All,
             store_addresses: true,
             index_by_policy: true,
         }

@@ -686,3 +686,11 @@ impl From<&PolicyAsset> for PolicyAssetRest {
         }
     }
 }
+
+#[derive(Debug, Serialize)]
+pub struct AssetTransactionRest {
+    pub tx_hash: String,
+    pub tx_index: String, // Change to u64 when transactions state is implemented
+    pub block_height: String, // ^^^
+    pub block_time: String, // ^^^
+}
