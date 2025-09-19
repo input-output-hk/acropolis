@@ -1,5 +1,6 @@
 use crate::{
-    AssetAddressEntry, AssetInfoRecord, AssetMintRecord, AssetName, PolicyAsset, PolicyId, TxHash,
+    AssetAddressEntry, AssetInfoRecord, AssetMintRecord, AssetName, PolicyAsset, PolicyId,
+    TxIdentifier,
 };
 
 pub const DEFAULT_ASSETS_QUERY_TOPIC: (&str, &str) =
@@ -14,7 +15,7 @@ pub type AssetList = Vec<PolicyAsset>;
 pub type AssetInfo = (u64, AssetInfoRecord);
 pub type AssetHistory = Vec<AssetMintRecord>;
 pub type AssetAddresses = Vec<AssetAddressEntry>;
-pub type AssetTransactions = Vec<TxHash>;
+pub type AssetTransactions = Vec<TxIdentifier>;
 pub type PolicyAssets = Vec<PolicyAsset>;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

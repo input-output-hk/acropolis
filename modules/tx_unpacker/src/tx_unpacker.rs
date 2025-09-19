@@ -119,6 +119,8 @@ impl TxUnpacker {
                             let mut total_fees: u64 = 0;
 
                             for (tx_index, raw_tx) in txs_msg.txs.iter().enumerate() {
+                                let tx_identifier = TxIdentifier::new(block.number as u32, tx_index as u16);
+                                    
                                 if publish_governance_procedures_topic.is_some() {
                                     //Self::decode_legacy_updates(&mut legacy_update_proposals, &block, &raw_tx);
                                     if block.era >= Era::Shelley && block.era < Era::Babbage {
@@ -200,6 +202,7 @@ impl TxUnpacker {
                                                             Ok(address) => {
                                                                 let tx_output = TxOutput {
                                                                     tx_hash: *tx.hash(),
+                                                                    tx_identifier,
                                                                     index: index as u64,
                                                                     address: address,
                                                                     value: map_parameters::map_value(&output.value()),
@@ -221,8 +224,6 @@ impl TxUnpacker {
                                         }
 
                                         if publish_asset_deltas_topic.is_some() {
-                                            let tx_hash: TxHash = tx.hash().to_vec().try_into().expect("invalid tx hash length");
-
                                             let mut tx_deltas: Vec<(PolicyId, Vec<NativeAssetDelta>)> = Vec::new();
 
                                             // Mint deltas
@@ -245,7 +246,7 @@ impl TxUnpacker {
                                             }
 
                                             if !tx_deltas.is_empty() {
-                                                asset_deltas.push((tx_hash, tx_deltas));
+                                                asset_deltas.push((tx_identifier, tx_deltas));
                                             }
                                         }
 

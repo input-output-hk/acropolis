@@ -2,16 +2,20 @@
 
 use crate::asset_registry::{AssetId, AssetRegistry};
 use acropolis_common::{
+    math::update_value_with_delta,
     queries::assets::{AssetHistory, PolicyAssets},
     Address, AddressDelta, AssetAddressEntry, AssetInfoRecord, AssetMetadataStandard,
     AssetMintRecord, AssetName, Datum, Lovelace, NativeAssetDelta, PolicyAsset, PolicyId,
-    ShelleyAddress, TxHash, UTXODelta,
+    ShelleyAddress, TxIdentifier, UTXODelta,
 };
 use anyhow::Result;
 use imbl::{HashMap, Vector};
 use tracing::{error, info};
 
-const CIP68_REFERENCE_PREFIX: [u8; 4] = [0x00, 0x06, 0x43, 0xb0];
+const CIP67_LABEL_222: [u8; 4] = [0x00, 0x0d, 0xe1, 0x40];
+const CIP67_LABEL_333: [u8; 4] = [0x00, 0x14, 0xdf, 0x10];
+const CIP67_LABEL_444: [u8; 4] = [0x00, 0x1b, 0x4e, 0x20];
+const CIP68_LABEL_100: [u8; 4] = [0x00, 0x06, 0x43, 0xb0];
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct AssetsStorageConfig {
@@ -59,7 +63,7 @@ pub struct State {
     pub addresses: Option<HashMap<AssetId, std::collections::HashMap<ShelleyAddress, u64>>>,
 
     /// Assets mapped to transactions
-    pub transactions: Option<HashMap<AssetId, Vector<TxHash>>>,
+    pub transactions: Option<HashMap<AssetId, Vector<TxIdentifier>>>,
 
     // PolicyId mapped associated AssetIds
     pub policy_index: Option<HashMap<PolicyId, Vector<AssetId>>>,
@@ -119,7 +123,7 @@ impl State {
             if let Some(key) = registry.lookup(*id) {
                 out.push(PolicyAsset {
                     policy: *key.policy,
-                    name: (*key.name).clone(),
+                    name: key.name.as_ref().clone(),
                     quantity: *amount,
                 });
             }
@@ -191,7 +195,7 @@ impl State {
         )
     }
 
-    pub fn get_asset_transactions(&self, asset_id: &AssetId) -> Result<Option<Vec<TxHash>>> {
+    pub fn get_asset_transactions(&self, asset_id: &AssetId) -> Result<Option<Vec<TxIdentifier>>> {
         if !self.config.store_transactions.is_enabled() {
             return Err(anyhow::anyhow!(
                 "asset transactions storage disabled in config"
@@ -269,7 +273,7 @@ impl State {
 
     pub fn handle_mint_deltas(
         &self,
-        deltas: &[(TxHash, Vec<(PolicyId, Vec<NativeAssetDelta>)>)],
+        deltas: &[(TxIdentifier, Vec<(PolicyId, Vec<NativeAssetDelta>)>)],
         registry: &mut AssetRegistry,
     ) -> Result<Self> {
         let mut new_supply = self.supply.clone();
@@ -279,7 +283,7 @@ impl State {
         let mut new_addresses = self.addresses.clone();
         let mut new_transactions = self.transactions.clone();
 
-        for (tx_hash, tx_deltas) in deltas {
+        for (tx_identifier, tx_deltas) in deltas {
             for (policy_id, asset_deltas) in tx_deltas {
                 for delta in asset_deltas {
                     let asset_id = registry.get_or_insert(*policy_id, delta.name.clone());
@@ -310,7 +314,7 @@ impl State {
                             .entry(asset_id)
                             .and_modify(|rec| rec.mint_or_burn_count += 1)
                             .or_insert(AssetInfoRecord {
-                                initial_mint_tx_hash: tx_hash.clone(),
+                                initial_mint_tx: tx_identifier.clone(),
                                 mint_or_burn_count: 1,
                                 onchain_metadata: None,
                                 metadata_standard: None,
@@ -320,7 +324,7 @@ impl State {
                     if let Some(hist_map) = new_history.as_mut() {
                         hist_map.entry(asset_id).or_insert_with(Vector::new).push_back(
                             AssetMintRecord {
-                                tx_hash: tx_hash.clone(),
+                                tx: *tx_identifier,
                                 amount: delta.amount.unsigned_abs(),
                                 burn: delta.amount < 0,
                             },
@@ -363,13 +367,8 @@ impl State {
 
         let Some(txs_map) = new_txs.as_mut() else {
             return Ok(Self {
-                config: self.config,
-                supply: self.supply.clone(),
-                history: self.history.clone(),
-                info: self.info.clone(),
-                addresses: self.addresses.clone(),
                 transactions: new_txs,
-                policy_index: self.policy_index.clone(),
+                ..self.clone()
             });
         };
 
@@ -380,17 +379,17 @@ impl State {
                 continue;
             };
 
-            let tx_hash = output.tx_hash.clone();
+            let tx_identifier = output.tx_identifier.clone();
 
             for (policy_id, assets) in &output.value.assets {
                 for asset in assets {
                     if let Some(asset_id) = registry.lookup_id(policy_id, &asset.name) {
                         let entry = txs_map.entry(asset_id).or_default();
 
-                        let should_push = entry.back().map_or(true, |last| last != &tx_hash);
+                        let should_push = entry.back().map_or(true, |last| last != &tx_identifier);
 
                         if should_push {
-                            entry.push_back(tx_hash.clone());
+                            entry.push_back(tx_identifier);
 
                             if let StoreTransactions::Last(max) = store_cfg {
                                 if entry.len() as u64 > max {
@@ -404,13 +403,8 @@ impl State {
         }
 
         Ok(Self {
-            config: self.config,
-            supply: self.supply.clone(),
-            history: self.history.clone(),
-            info: self.info.clone(),
-            addresses: self.addresses.clone(),
             transactions: new_txs,
-            policy_index: self.policy_index.clone(),
+            ..self.clone()
         })
     }
 
@@ -428,37 +422,34 @@ impl State {
             });
         };
 
-        // Step 1: batch updates by asset_id + address
-        let mut batches: std::collections::HashMap<
-            AssetId,
-            std::collections::HashMap<ShelleyAddress, i64>,
-        > = std::collections::HashMap::new();
-
         for address_delta in deltas {
             if let Address::Shelley(shelley_addr) = &address_delta.address {
                 for (policy_id, asset_deltas) in &address_delta.delta.assets {
                     for asset_delta in asset_deltas {
                         if let Some(asset_id) = registry.lookup_id(policy_id, &asset_delta.name) {
-                            *batches
-                                .entry(asset_id)
-                                .or_default()
-                                .entry(shelley_addr.clone())
-                                .or_default() += asset_delta.amount;
+                            if let Some(holders) = addr_map.get_mut(&asset_id) {
+                                let new_balance = {
+                                    let current = holders.entry(shelley_addr.clone()).or_insert(0);
+                                    if let Err(e) =
+                                        update_value_with_delta(current, asset_delta.amount)
+                                    {
+                                        error!(
+                                            "Address balance update error for {:?}: {e}",
+                                            address_delta.address
+                                        );
+                                        0
+                                    } else {
+                                        *current
+                                    }
+                                };
+
+                                if new_balance == 0 {
+                                    holders.remove(shelley_addr);
+                                }
+                            } else {
+                                error!("Address delta for unknown asset_id: {:?}", asset_id);
+                            }
                         }
-                    }
-                }
-            }
-        }
-
-        // Step 2: apply batches to addr_map (touch each HAMT bucket only once)
-        for (asset_id, holder_updates) in batches {
-            if let Some(holders) = addr_map.get_mut(&asset_id) {
-                for (addr, delta) in holder_updates {
-                    let current = holders.entry(addr.clone()).or_insert(0);
-                    *current = current.saturating_add_signed(delta);
-
-                    if *current == 0 {
-                        holders.remove(&addr);
                     }
                 }
             }
@@ -478,13 +469,8 @@ impl State {
         let mut new_info = self.info.clone();
         let Some(info_map) = new_info.as_mut() else {
             return Ok(Self {
-                config: self.config,
-                supply: self.supply.clone(),
-                history: self.history.clone(),
                 info: new_info,
-                addresses: self.addresses.clone(),
-                transactions: self.transactions.clone(),
-                policy_index: self.policy_index.clone(),
+                ..self.clone()
             });
         };
 
@@ -553,13 +539,8 @@ impl State {
         }
 
         Ok(Self {
-            config: self.config.clone(),
-            supply: self.supply.clone(),
-            history: self.history.clone(),
             info: new_info,
-            addresses: self.addresses.clone(),
-            transactions: self.transactions.clone(),
-            policy_index: self.policy_index.clone(),
+            ..self.clone()
         })
     }
 
@@ -582,7 +563,7 @@ impl State {
                 for asset in native_assets {
                     let name = &asset.name;
 
-                    if !name.as_slice().starts_with(&CIP68_REFERENCE_PREFIX) {
+                    if !name.as_slice().starts_with(&CIP68_LABEL_100) {
                         continue;
                     }
 
@@ -608,13 +589,8 @@ impl State {
         }
 
         Ok(Self {
-            config: self.config,
-            supply: self.supply.clone(),
-            history: self.history.clone(),
             info: new_info,
-            addresses: self.addresses.clone(),
-            transactions: self.transactions.clone(),
-            policy_index: self.policy_index.clone(),
+            ..self.clone()
         })
     }
 
@@ -625,19 +601,22 @@ impl State {
     ) -> Option<AssetInfoRecord> {
         let key = registry.lookup(*asset_id)?;
         let name_bytes = key.name.as_slice();
-        let label = u32::from_be_bytes(name_bytes.get(0..4)?.try_into().ok()?);
+        if name_bytes.len() < 4 {
+            return None;
+        }
+
+        let mut label = [0u8; 4];
+        label.copy_from_slice(&name_bytes[0..4]);
 
         match label {
-            // Reference NFT (100) label
-            0x000643b0 => self.info.as_ref()?.get(asset_id).cloned().map(|mut rec| {
+            CIP68_LABEL_100 => self.info.as_ref()?.get(asset_id).cloned().map(|mut rec| {
                 // Hide metadata on the reference itself (Per Blockfrost spec)
                 rec.onchain_metadata = None;
                 rec.metadata_standard = None;
                 rec
             }),
 
-            // CIP-67 prefixes for user token labels (222, 333, 444)
-            0x000de140 | 0x0014df10 | 0x001b4e20 => {
+            CIP67_LABEL_222 | CIP67_LABEL_333 | CIP67_LABEL_444 => {
                 let mut ref_bytes = name_bytes.to_vec();
                 ref_bytes[0..4].copy_from_slice(&[0x00, 0x06, 0x43, 0xb0]);
                 let ref_name = AssetName::new(&ref_bytes)?;
@@ -660,7 +639,7 @@ mod tests {
     };
     use acropolis_common::{
         Address, AddressDelta, AssetInfoRecord, AssetMetadataStandard, AssetName, Datum,
-        NativeAsset, NativeAssetDelta, PolicyId, ShelleyAddress, TxHash, TxInput, TxOutput,
+        NativeAsset, NativeAssetDelta, PolicyId, ShelleyAddress, TxIdentifier, TxInput, TxOutput,
         UTXODelta, Value, ValueDelta,
     };
 
@@ -672,8 +651,8 @@ mod tests {
         AssetName::new(s.as_bytes()).unwrap()
     }
 
-    fn dummy_txhash(byte: u8) -> TxHash {
-        [byte; 32]
+    fn dummy_tx_identifier(byte: u8) -> TxIdentifier {
+        TxIdentifier::new(byte as u32, byte as u16)
     }
 
     fn full_config() -> AssetsStorageConfig {
@@ -783,6 +762,7 @@ mod tests {
     fn make_output(policy_id: PolicyId, asset_name: AssetName, datum: Option<Vec<u8>>) -> TxOutput {
         TxOutput {
             tx_hash: [0u8; 32].into(),
+            tx_identifier: TxIdentifier::new(0, 0),
             index: 0,
             address: dummy_address(),
             value: Value {
@@ -806,7 +786,7 @@ mod tests {
 
         let policy = dummy_policy(1);
         let name = asset_name_from_str("tokenA");
-        let tx = dummy_txhash(9);
+        let tx = dummy_tx_identifier(9);
 
         let deltas = vec![(
             tx.clone(),
@@ -830,7 +810,7 @@ mod tests {
 
         // info initialized
         let info = new_state.info.as_ref().unwrap().get(&asset_id).unwrap();
-        assert_eq!(info.initial_mint_tx_hash, tx);
+        assert_eq!(info.initial_mint_tx, tx);
         assert_eq!(info.mint_or_burn_count, 1);
 
         // history contains mint record
@@ -850,8 +830,8 @@ mod tests {
 
         let policy = dummy_policy(1);
         let name = asset_name_from_str("tokenA");
-        let tx1 = dummy_txhash(1);
-        let tx2 = dummy_txhash(2);
+        let tx1 = dummy_tx_identifier(1);
+        let tx2 = dummy_tx_identifier(2);
 
         let deltas1 = vec![(
             tx1.clone(),
@@ -900,8 +880,8 @@ mod tests {
 
         let policy = dummy_policy(1);
         let name = asset_name_from_str("tokenA");
-        let tx1 = dummy_txhash(1);
-        let tx2 = dummy_txhash(2);
+        let tx1 = dummy_tx_identifier(1);
+        let tx2 = dummy_tx_identifier(2);
 
         let mint = vec![(
             tx1.clone(),
@@ -951,7 +931,7 @@ mod tests {
 
         let policy = dummy_policy(1);
         let name = asset_name_from_str("tokenA");
-        let tx = dummy_txhash(1);
+        let tx = dummy_tx_identifier(1);
 
         let deltas = vec![(
             tx.clone(),
@@ -976,7 +956,7 @@ mod tests {
 
         let policy = dummy_policy(1);
         let name = asset_name_from_str("tokenA");
-        let tx = dummy_txhash(1);
+        let tx = dummy_tx_identifier(1);
 
         let deltas = vec![(
             tx.clone(),
@@ -1341,15 +1321,14 @@ mod tests {
             StoreTransactions::All,
         );
 
-        let tx_hash: TxHash = [5u8; 32].into();
         let output = make_output(policy_id, asset_name.clone(), None);
 
         let delta1 = UTXODelta::Output(acropolis_common::TxOutput {
-            tx_hash: tx_hash.clone(),
+            tx_identifier: dummy_tx_identifier(5),
             ..output.clone()
         });
         let delta2 = UTXODelta::Output(acropolis_common::TxOutput {
-            tx_hash: tx_hash.clone(),
+            tx_identifier: dummy_tx_identifier(5),
             ..output
         });
 
@@ -1375,18 +1354,18 @@ mod tests {
             StoreTransactions::All,
         );
 
-        let tx1: TxHash = [9u8; 32].into();
-        let tx2: TxHash = [8u8; 32].into();
+        let tx1 = dummy_tx_identifier(9);
+        let tx2 = dummy_tx_identifier(8);
 
         let out1 = make_output(policy_id, asset_name.clone(), None);
         let out2 = make_output(policy_id, asset_name.clone(), None);
 
         let delta1 = UTXODelta::Output(acropolis_common::TxOutput {
-            tx_hash: tx1.clone(),
+            tx_identifier: tx1,
             ..out1
         });
         let delta2 = UTXODelta::Output(acropolis_common::TxOutput {
-            tx_hash: tx2.clone(),
+            tx_identifier: tx2,
             ..out2
         });
 
@@ -1415,21 +1394,21 @@ mod tests {
             StoreTransactions::Last(2),
         );
 
-        let tx1: TxHash = [9u8; 32].into();
-        let tx2: TxHash = [8u8; 32].into();
-        let tx3: TxHash = [7u8; 32].into();
+        let tx1 = dummy_tx_identifier(9);
+        let tx2 = dummy_tx_identifier(8);
+        let tx3 = dummy_tx_identifier(7);
 
         let base_output = make_output(policy_id, asset_name.clone(), None);
         let delta1 = UTXODelta::Output(acropolis_common::TxOutput {
-            tx_hash: tx1.clone(),
+            tx_identifier: tx1.clone(),
             ..base_output.clone()
         });
         let delta2 = UTXODelta::Output(acropolis_common::TxOutput {
-            tx_hash: tx2.clone(),
+            tx_identifier: tx2.clone(),
             ..base_output.clone()
         });
         let delta3 = UTXODelta::Output(acropolis_common::TxOutput {
-            tx_hash: tx3.clone(),
+            tx_identifier: tx3.clone(),
             ..base_output
         });
 

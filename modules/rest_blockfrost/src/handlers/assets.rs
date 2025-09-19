@@ -114,13 +114,14 @@ pub async fn handle_asset_single_blockfrost(
 
                 let onchain_metadata_standard = cip68_version.or(info.metadata_standard);
 
+                // TODO: Query transaction_state once implemented to fetch inital_mint_tx_hash based on TxIdentifier
                 let response = AssetInfoRest {
                     asset,
                     policy_id,
                     asset_name,
                     fingerprint,
                     quantity: quantity.to_string(),
-                    initial_mint_tx_hash: hex::encode(info.initial_mint_tx_hash),
+                    initial_mint_tx_hash: "transaction_state not yet implemented".to_string(),
                     mint_or_burn_count: info.mint_or_burn_count,
                     onchain_metadata: onchain_metadata_json,
                     onchain_metadata_standard,
@@ -233,13 +234,13 @@ pub async fn handle_asset_transactions_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Assets(
                 AssetsStateQueryResponse::AssetTransactions(txs),
             )) => {
-                // TODO: Query transaction_state once implemented to fetch tx_index, block_height, and block_time
+                // TODO: Query transaction_state once implemented to fetch tx_hash and block_time using TxIdentifier
                 let rest_txs: Vec<AssetTransactionRest> = txs
                     .iter()
-                    .map(|hash| AssetTransactionRest {
-                        tx_hash: hex::encode(hash),
-                        tx_index: "transaction_state not yet implemented".to_string(),
-                        block_height: "transaction_state not yet implemented".to_string(),
+                    .map(|identifier| AssetTransactionRest {
+                        tx_hash: "transaction_state not yet implemented".to_string(),
+                        tx_index: identifier.tx_index(),
+                        block_height: identifier.block_number(),
                         block_time: "transaction_state not yet implemented".to_string(),
                     })
                     .collect();
