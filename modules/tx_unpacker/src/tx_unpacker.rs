@@ -120,7 +120,7 @@ impl TxUnpacker {
 
                             for (tx_index, raw_tx) in txs_msg.txs.iter().enumerate() {
                                 let tx_identifier = TxIdentifier::new(block.number as u32, tx_index as u16);
-                                    
+
                                 if publish_governance_procedures_topic.is_some() {
                                     //Self::decode_legacy_updates(&mut legacy_update_proposals, &block, &raw_tx);
                                     if block.era >= Era::Shelley && block.era < Era::Babbage {
