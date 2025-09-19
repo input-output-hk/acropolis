@@ -4,7 +4,7 @@
 
 use crate::{
     asset_registry::AssetRegistry,
-    state::{AssetsStorageConfig, State},
+    state::{AssetsStorageConfig, State, StoreTransactions},
 };
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
@@ -26,12 +26,14 @@ const DEFAULT_ASSET_DELTAS_SUBSCRIBE_TOPIC: (&str, &str) =
     ("asset-deltas-subscribe-topic", "cardano.asset.deltas");
 const DEFAULT_UTXO_DELTAS_SUBSCRIBE_TOPIC: (&str, &str) =
     ("utxo-deltas-subscribe-topic", "cardano.utxo.deltas");
+const DEFAULT_ADDRESS_DELTAS_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("address-deltas-subscribe-topic", "cardano.address.delta");
 
 // Configuration defaults
 const DEFAULT_STORE_ASSETS: (&str, bool) = ("store-assets", false);
 const DEFAULT_STORE_INFO: (&str, bool) = ("store-info", false);
 const DEFAULT_STORE_HISTORY: (&str, bool) = ("store-history", false);
-const DEFAULT_STORE_TRANSACTIONS: (&str, bool) = ("store-transactions", false);
+const DEFAULT_STORE_TRANSACTIONS: (&str, &str) = ("store-transactions", "none");
 const DEFAULT_STORE_ADDRESSES: (&str, bool) = ("store-addresses", false);
 const DEFAULT_INDEX_BY_POLICY: (&str, bool) = ("index-by-policy", false);
 
@@ -48,12 +50,17 @@ impl AssetsState {
         history: Arc<Mutex<StateHistory<State>>>,
         mut asset_deltas_subscription: Box<dyn Subscription<Message>>,
         mut utxo_deltas_subscription: Option<Box<dyn Subscription<Message>>>,
+        mut address_deltas_subscription: Option<Box<dyn Subscription<Message>>>,
         storage_config: AssetsStorageConfig,
         registry: Arc<Mutex<AssetRegistry>>,
     ) -> Result<()> {
         if let Some(sub) = utxo_deltas_subscription.as_mut() {
             let _ = sub.read().await?;
             info!("Consumed initial message from utxo_deltas_subscription");
+        }
+        if let Some(sub) = address_deltas_subscription.as_mut() {
+            let _ = sub.read().await?;
+            info!("Consumed initial message from address_deltas_subscription");
         }
         // Main loop of synchronised messages
         loop {
@@ -115,17 +122,55 @@ impl AssetsState {
                         CardanoMessage::UTXODeltas(utxo_deltas_msg),
                     )) => {
                         Self::check_sync(&current_block, block_info, "utxo");
-                        let mut reg = registry.lock().await;
-                        state =
-                            match state.handle_cip68_metadata(&utxo_deltas_msg.deltas, &mut *reg) {
+
+                        if storage_config.store_info {
+                            let reg = registry.lock().await;
+                            state =
+                                match state.handle_cip68_metadata(&utxo_deltas_msg.deltas, &*reg) {
+                                    Ok(new_state) => new_state,
+                                    Err(e) => {
+                                        error!("CIP-68 metadata handling error: {e:#}");
+                                        state
+                                    }
+                                };
+                        }
+
+                        if storage_config.store_transactions.is_enabled() {
+                            let reg = registry.lock().await;
+                            state = match state.handle_transactions(&utxo_deltas_msg.deltas, &*reg)
+                            {
                                 Ok(new_state) => new_state,
                                 Err(e) => {
-                                    error!("CIP-68 metadata handling error: {e:#}");
+                                    error!("Transactions handling error: {e:#}");
                                     state
                                 }
                             };
+                        }
                     }
                     other => error!("Unexpected message on utxo-deltas subscription: {other:?}"),
+                }
+            }
+
+            if let Some(sub) = address_deltas_subscription.as_mut() {
+                let (_, address_msg) = sub.read().await?;
+                match address_msg.as_ref() {
+                    Message::Cardano((
+                        ref block_info,
+                        CardanoMessage::AddressDeltas(address_deltas_msg),
+                    )) => {
+                        Self::check_sync(&current_block, block_info, "address");
+
+                        let reg = registry.lock().await;
+                        state = match state.handle_address_deltas(&address_deltas_msg.deltas, &*reg)
+                        {
+                            Ok(new_state) => new_state,
+                            Err(e) => {
+                                error!("Address deltas handling error: {e:#}");
+                                state
+                            }
+                        };
+                    }
+                    other => error!("Unexpected message on address-deltas subscription: {other:?}"),
                 }
             }
 
@@ -165,12 +210,27 @@ impl AssetsState {
             config.get_string(key.0).unwrap_or_else(|_| key.1.to_string())
         }
 
+        fn get_transactions_flag(config: &Config, key: (&str, &str)) -> StoreTransactions {
+            let val = get_string_flag(config, key);
+            match val.as_str() {
+                "none" => StoreTransactions::None,
+                "all" => StoreTransactions::All,
+                s => {
+                    if let Ok(n) = s.parse::<u64>() {
+                        StoreTransactions::Last(n)
+                    } else {
+                        StoreTransactions::None
+                    }
+                }
+            }
+        }
+
         // Get configuration flags and topis
         let storage_config = AssetsStorageConfig {
             store_assets: get_bool_flag(&config, DEFAULT_STORE_ASSETS),
             store_info: get_bool_flag(&config, DEFAULT_STORE_INFO),
             store_history: get_bool_flag(&config, DEFAULT_STORE_HISTORY),
-            store_transactions: get_bool_flag(&config, DEFAULT_STORE_TRANSACTIONS),
+            store_transactions: get_transactions_flag(&config, DEFAULT_STORE_TRANSACTIONS),
             store_addresses: get_bool_flag(&config, DEFAULT_STORE_ADDRESSES),
             index_by_policy: get_bool_flag(&config, DEFAULT_INDEX_BY_POLICY),
         };
@@ -180,13 +240,22 @@ impl AssetsState {
         info!("Creating subscriber on '{asset_deltas_subscribe_topic}'");
 
         let utxo_deltas_subscribe_topic: Option<String> =
-            if storage_config.store_info || storage_config.store_transactions {
+            if storage_config.store_info || storage_config.store_transactions.is_enabled() {
                 let topic = get_string_flag(&config, DEFAULT_UTXO_DELTAS_SUBSCRIBE_TOPIC);
                 info!("Creating subscriber on '{topic}'");
                 Some(topic)
             } else {
                 None
             };
+
+        let address_deltas_subscribe_topic: Option<String> = if storage_config.store_addresses {
+            let topic = get_string_flag(&config, DEFAULT_ADDRESS_DELTAS_SUBSCRIBE_TOPIC);
+            info!("Creating subscriber on '{topic}'");
+            Some(topic)
+        } else {
+            None
+        };
+
         let assets_query_topic = get_string_flag(&config, DEFAULT_ASSETS_QUERY_TOPIC);
         info!("Creating asset query handler on '{assets_query_topic}'");
 
@@ -215,7 +284,10 @@ impl AssetsState {
                     )));
                 };
 
-                let state = history.lock().await.get_current_state();
+                let state = {
+                    let h = history.lock().await;
+                    h.get_current_state()
+                };
 
                 let response = match query {
                     AssetsStateQuery::GetAssetsList => {
@@ -295,7 +367,7 @@ impl AssetsState {
                                 Err(e) => AssetsStateQueryResponse::Error(e.to_string()),
                             },
                             None => {
-                                if state.config.store_transactions {
+                                if state.config.store_transactions.is_enabled() {
                                     AssetsStateQueryResponse::NotFound
                                 } else {
                                     AssetsStateQueryResponse::Error(
@@ -354,6 +426,11 @@ impl AssetsState {
         } else {
             None
         };
+        let address_deltas_sub = if let Some(topic) = &address_deltas_subscribe_topic {
+            Some(context.subscribe(topic).await?)
+        } else {
+            None
+        };
 
         // Start run task
         context.run(async move {
@@ -361,6 +438,7 @@ impl AssetsState {
                 history_run,
                 asset_deltas_sub,
                 utxo_deltas_sub,
+                address_deltas_sub,
                 storage_config,
                 registry_run,
             )

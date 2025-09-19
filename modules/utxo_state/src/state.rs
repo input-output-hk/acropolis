@@ -409,7 +409,9 @@ impl State {
 mod tests {
     use super::*;
     use crate::InMemoryImmutableUTXOStore;
-    use acropolis_common::{AssetName, BlockHash, ByronAddress, Era, NativeAsset, Value};
+    use acropolis_common::{
+        AssetName, BlockHash, ByronAddress, Era, NativeAsset, TxIdentifier, Value,
+    };
     use config::Config;
     use tokio::sync::Mutex;
 
@@ -454,6 +456,7 @@ mod tests {
         let mut state = new_state();
         let output = TxOutput {
             tx_hash: TxHash::default(),
+            tx_identifier: TxIdentifier::default(),
             index: 0,
             address: create_address(99),
             value: Value::new(
@@ -511,6 +514,7 @@ mod tests {
         let mut state = new_state();
         let output = TxOutput {
             tx_hash: TxHash::default(),
+            tx_identifier: TxIdentifier::default(),
             index: 0,
             address: create_address(99),
             value: Value::new(
@@ -553,6 +557,7 @@ mod tests {
         let mut state = new_state();
         let output = TxOutput {
             tx_hash: TxHash::default(),
+            tx_identifier: TxIdentifier::default(),
             index: 0,
             address: create_address(99),
             value: Value::new(
@@ -594,6 +599,7 @@ mod tests {
         // Create the UTXO in block 10
         let output = TxOutput {
             tx_hash: TxHash::default(),
+            tx_identifier: TxIdentifier::default(),
             index: 0,
             address: create_address(99),
             value: Value::new(
@@ -647,6 +653,7 @@ mod tests {
         let mut state = new_state();
         let output = TxOutput {
             tx_hash: TxHash::default(),
+            tx_identifier: TxIdentifier::default(),
             index: 0,
             address: create_address(99),
             value: Value::new(
@@ -695,6 +702,7 @@ mod tests {
         let mut state = new_state();
         let output = TxOutput {
             tx_hash: TxHash::default(),
+            tx_identifier: TxIdentifier::default(),
             index: 0,
             address: create_address(99),
             value: Value::new(
@@ -801,6 +809,7 @@ mod tests {
 
         let output = TxOutput {
             tx_hash: TxHash::default(),
+            tx_identifier: TxIdentifier::default(),
             index: 0,
             address: create_address(99),
             value: Value::new(
@@ -857,6 +866,7 @@ mod tests {
 
         let output = TxOutput {
             tx_hash: TxHash::default(),
+            tx_identifier: TxIdentifier::default(),
             index: 0,
             address: create_address(99),
             value: Value::new(
@@ -912,6 +922,7 @@ mod tests {
         // Create the UTXO in block 10
         let output = TxOutput {
             tx_hash: TxHash::default(),
+            tx_identifier: TxIdentifier::default(),
             index: 0,
             address: create_address(99),
             value: Value::new(
