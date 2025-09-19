@@ -18,8 +18,8 @@ mod utils;
 use handlers::{
     accounts::handle_single_account_blockfrost,
     blocks::{
-        handle_blocks_epoch_slot_blockfrost, handle_blocks_hash_or_number_next_blockfrost,
-        handle_blocks_hash_or_number_previous_blockfrost,
+        handle_blocks_epoch_slot_blockfrost, handle_blocks_hash_number_addresses_blockfrost,
+        handle_blocks_hash_number_next_blockfrost, handle_blocks_hash_number_previous_blockfrost,
         handle_blocks_latest_hash_number_blockfrost,
         handle_blocks_latest_hash_number_transactions_blockfrost,
         handle_blocks_latest_hash_number_transactions_cbor_blockfrost,
@@ -75,6 +75,10 @@ const DEFAULT_HANDLE_BLOCKS_SLOT_TOPIC: (&str, &str) =
     ("handle-blocks-slot", "rest.get.blocks.slot.*");
 const DEFAULT_HANDLE_BLOCKS_EPOCH_SLOT_TOPIC: (&str, &str) =
     ("handle-blocks-epoch-slot", "rest.get.blocks.epoch.*.slot.*");
+const DEFAULT_HANDLE_BLOCKS_HASH_NUMBER_ADDRESSES_TOPIC: (&str, &str) = (
+    "handle-blocks-hash-number-addresses",
+    "rest.get.blocks.*.addresses",
+);
 
 // Governance topics
 const DEFAULT_HANDLE_DREPS_LIST_TOPIC: (&str, &str) =
@@ -224,7 +228,7 @@ impl BlockfrostREST {
             context.clone(),
             DEFAULT_HANDLE_BLOCKS_HASH_NUMBER_NEXT_TOPIC,
             handlers_config.clone(),
-            handle_blocks_hash_or_number_next_blockfrost,
+            handle_blocks_hash_number_next_blockfrost,
         );
 
         // Handler for /blocks/{hash_or_number}/previous
@@ -232,7 +236,7 @@ impl BlockfrostREST {
             context.clone(),
             DEFAULT_HANDLE_BLOCKS_HASH_NUMBER_PREVIOUS_TOPIC,
             handlers_config.clone(),
-            handle_blocks_hash_or_number_previous_blockfrost,
+            handle_blocks_hash_number_previous_blockfrost,
         );
 
         // Handler for /blocks/slot/{slot_number}
@@ -249,6 +253,14 @@ impl BlockfrostREST {
             DEFAULT_HANDLE_BLOCKS_EPOCH_SLOT_TOPIC,
             handlers_config.clone(),
             handle_blocks_epoch_slot_blockfrost,
+        );
+
+        // Handler for /blocks/{hash_or_number}/addresses
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_BLOCKS_HASH_NUMBER_ADDRESSES_TOPIC,
+            handlers_config.clone(),
+            handle_blocks_hash_number_addresses_blockfrost,
         );
 
         // Handler for /governance/dreps

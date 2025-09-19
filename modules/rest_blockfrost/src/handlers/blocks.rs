@@ -43,7 +43,7 @@ pub async fn handle_blocks_latest_hash_number_blockfrost(
 
     match param.as_str() {
         "latest" => handle_blocks_latest_blockfrost(context, handlers_config).await,
-        _ => handle_blocks_hash_or_number_blockfrost(context, param, handlers_config).await,
+        _ => handle_blocks_hash_number_blockfrost(context, param, handlers_config).await,
     }
 }
 
@@ -89,7 +89,7 @@ async fn handle_blocks_latest_blockfrost(
 }
 
 /// Handle `/blocks/{hash_or_number}`
-async fn handle_blocks_hash_or_number_blockfrost(
+async fn handle_blocks_hash_number_blockfrost(
     context: Arc<Context<Message>>,
     hash_or_number: &str,
     handlers_config: Arc<HandlersConfig>,
@@ -155,8 +155,7 @@ pub async fn handle_blocks_latest_hash_number_transactions_blockfrost(
     match param.as_str() {
         "latest" => handle_blocks_latest_transactions_blockfrost(context, handlers_config).await,
         _ => {
-            handle_blocks_hash_or_number_transactions_blockfrost(context, param, handlers_config)
-                .await
+            handle_blocks_hash_number_transactions_blockfrost(context, param, handlers_config).await
         }
     }
 }
@@ -203,7 +202,7 @@ async fn handle_blocks_latest_transactions_blockfrost(
 }
 
 /// Handle `/blocks/{hash_or_number}/txs`
-async fn handle_blocks_hash_or_number_transactions_blockfrost(
+async fn handle_blocks_hash_number_transactions_blockfrost(
     context: Arc<Context<Message>>,
     hash_or_number: &str,
     handlers_config: Arc<HandlersConfig>,
@@ -271,12 +270,8 @@ pub async fn handle_blocks_latest_hash_number_transactions_cbor_blockfrost(
             handle_blocks_latest_transactions_cbor_blockfrost(context, handlers_config).await
         }
         _ => {
-            handle_blocks_hash_or_number_transactions_cbor_blockfrost(
-                context,
-                param,
-                handlers_config,
-            )
-            .await
+            handle_blocks_hash_number_transactions_cbor_blockfrost(context, param, handlers_config)
+                .await
         }
     }
 }
@@ -323,7 +318,7 @@ async fn handle_blocks_latest_transactions_cbor_blockfrost(
 }
 
 /// Handle `/blocks/{hash_or_number}/txs/cbor`
-async fn handle_blocks_hash_or_number_transactions_cbor_blockfrost(
+async fn handle_blocks_hash_number_transactions_cbor_blockfrost(
     context: Arc<Context<Message>>,
     hash_or_number: &str,
     handlers_config: Arc<HandlersConfig>,
@@ -376,7 +371,7 @@ async fn handle_blocks_hash_or_number_transactions_cbor_blockfrost(
 }
 
 /// Handle `/blocks/{hash_or_number}/next`
-pub async fn handle_blocks_hash_or_number_next_blockfrost(
+pub async fn handle_blocks_hash_number_next_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
@@ -439,7 +434,7 @@ pub async fn handle_blocks_hash_or_number_next_blockfrost(
 }
 
 /// Handle `/blocks/{hash_or_number}/previous`
-pub async fn handle_blocks_hash_or_number_previous_blockfrost(
+pub async fn handle_blocks_hash_number_previous_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
@@ -620,4 +615,13 @@ pub async fn handle_blocks_epoch_slot_blockfrost(
         },
         None => Ok(RESTResponse::with_text(404, "Not found")),
     }
+}
+
+/// Handle `/blocks/{hash_or_number}/addresses`
+pub async fn handle_blocks_hash_number_addresses_blockfrost(
+    _context: Arc<Context<Message>>,
+    _params: Vec<String>,
+    _handlers_config: Arc<HandlersConfig>,
+) -> Result<RESTResponse> {
+    Ok(RESTResponse::with_text(501, "Not implemented"))
 }
