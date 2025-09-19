@@ -219,7 +219,7 @@ impl AssetsState {
                     if let Ok(n) = s.parse::<u64>() {
                         StoreTransactions::Last(n)
                     } else {
-                        StoreTransactions::None // fallback
+                        StoreTransactions::None
                     }
                 }
             }
@@ -284,7 +284,10 @@ impl AssetsState {
                     )));
                 };
 
-                let state = history.lock().await.get_current_state();
+                let state = {
+                    let h = history.lock().await;
+                    h.get_current_state()
+                };
 
                 let response = match query {
                     AssetsStateQuery::GetAssetsList => {
