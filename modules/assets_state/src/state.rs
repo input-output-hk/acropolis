@@ -240,28 +240,31 @@ impl State {
         Ok(Some(result))
     }
 
-    // TODO: Allow tick to log based on any enabled field instead of only supply
     pub fn tick(&self) -> Result<()> {
-        match (&self.supply, &self.policy_index) {
-            (Some(supply), Some(policy_index)) => {
-                let asset_count = supply.len();
-                let policy_count = policy_index.len();
-                info!(
-                    asset_count,
-                    policy_count,
-                    "Tracking {policy_count} policy ids containing {asset_count} assets"
-                );
-            }
-            (Some(supply), None) => {
-                let asset_count = supply.len();
-                info!("Tracking {asset_count} assets");
-            }
-            _ => {
-                info!("asset_state storage disabled in config");
-            }
+        if let Some(supply) = &self.supply {
+            self.log_assets(supply.len());
+        } else if let Some(history) = &self.history {
+            self.log_assets(history.len());
+        } else if let Some(info_map) = &self.info {
+            self.log_assets(info_map.len());
+        } else if let Some(addresses) = &self.addresses {
+            self.log_assets(addresses.len());
+        } else if let Some(transactions) = &self.transactions {
+            self.log_assets(transactions.len());
+        } else {
+            info!("asset_state storage disabled in config");
         }
 
         Ok(())
+    }
+
+    fn log_assets(&self, asset_count: usize) {
+        if let Some(policy_index) = &self.policy_index {
+            let policy_count = policy_index.len();
+            info!("Tracking {asset_count} assets across {policy_count} policies");
+        } else {
+            info!("Tracking {asset_count} assets");
+        }
     }
 
     pub fn handle_mint_deltas(
@@ -656,8 +659,9 @@ mod tests {
         state::{AssetsStorageConfig, State, StoreTransactions},
     };
     use acropolis_common::{
-        AssetInfoRecord, AssetMetadataStandard, AssetName, Datum, NativeAsset, NativeAssetDelta,
-        PolicyId, ShelleyAddress, TxHash, TxInput, TxOutput, UTXODelta, Value,
+        Address, AddressDelta, AssetInfoRecord, AssetMetadataStandard, AssetName, Datum,
+        NativeAsset, NativeAssetDelta, PolicyId, ShelleyAddress, TxHash, TxInput, TxOutput,
+        UTXODelta, Value, ValueDelta,
     };
 
     fn dummy_policy(byte: u8) -> PolicyId {
@@ -680,6 +684,118 @@ mod tests {
             store_transactions: StoreTransactions::All,
             store_addresses: true,
             index_by_policy: true,
+        }
+    }
+
+    fn setup_state_with_asset(
+        registry: &mut AssetRegistry,
+        policy_id: PolicyId,
+        asset_name_bytes: &[u8],
+        seed_info: bool,
+        seed_addresses: bool,
+        seed_transactions: StoreTransactions,
+    ) -> (State, AssetId, AssetName) {
+        let asset_name = AssetName::new(asset_name_bytes).unwrap();
+        let asset_id = registry.get_or_insert(policy_id, asset_name.clone());
+
+        let mut state = State::new(AssetsStorageConfig {
+            store_info: true,
+            store_assets: true,
+            store_transactions: seed_transactions,
+            store_addresses: true,
+            ..Default::default()
+        });
+
+        if seed_info {
+            state
+                .info
+                .get_or_insert_with(Default::default)
+                .insert(asset_id, AssetInfoRecord::default());
+        }
+
+        if seed_addresses {
+            state
+                .addresses
+                .get_or_insert_with(Default::default)
+                .insert(asset_id, std::collections::HashMap::new());
+        }
+
+        if seed_transactions.is_enabled() {
+            state
+                .transactions
+                .get_or_insert_with(Default::default)
+                .insert(asset_id, imbl::Vector::new());
+        }
+
+        (state, asset_id, asset_name)
+    }
+
+    fn build_cip25_metadata(
+        policy_id: PolicyId,
+        asset_name: &AssetName,
+        value: &str,
+        version: Option<&str>,
+    ) -> Vec<u8> {
+        let policy_hex = hex::encode(policy_id);
+        let asset_hex = hex::encode(asset_name.as_slice());
+        let metadata_value = serde_cbor::Value::Text(value.to_string());
+
+        let mut asset_map = BTreeMap::new();
+        asset_map.insert(serde_cbor::Value::Text(asset_hex), metadata_value);
+
+        let mut policy_map = BTreeMap::new();
+        policy_map.insert(
+            serde_cbor::Value::Text(policy_hex),
+            serde_cbor::Value::Map(asset_map),
+        );
+
+        if let Some(ver) = version {
+            policy_map.insert(
+                serde_cbor::Value::Text("version".to_string()),
+                serde_cbor::Value::Text(ver.to_string()),
+            );
+        }
+
+        serde_cbor::to_vec(&serde_cbor::Value::Map(policy_map)).unwrap()
+    }
+
+    fn make_address_delta(policy_id: PolicyId, name: AssetName, amount: i64) -> AddressDelta {
+        AddressDelta {
+            address: dummy_address(),
+            delta: ValueDelta {
+                lovelace: 0,
+                assets: vec![(policy_id, vec![NativeAssetDelta { name, amount }])]
+                    .into_iter()
+                    .collect(),
+            },
+        }
+    }
+
+    fn dummy_address() -> acropolis_common::Address {
+        acropolis_common::Address::Shelley(
+            ShelleyAddress::from_string(
+                "addr1q9g0u0aeuyvrn8ptc6yesgj6dtfgw2gadnc9y2p9cs8pneejrkwtdvk97yp2zayhvmm3wu0v672psdg2xn0temkz83ds7qfxdt",
+            )
+            .unwrap(),
+        )
+    }
+
+    fn make_output(policy_id: PolicyId, asset_name: AssetName, datum: Option<Vec<u8>>) -> TxOutput {
+        TxOutput {
+            tx_hash: [0u8; 32].into(),
+            index: 0,
+            address: dummy_address(),
+            value: Value {
+                lovelace: 0,
+                assets: vec![(
+                    policy_id,
+                    vec![NativeAsset {
+                        name: asset_name,
+                        amount: 1,
+                    }],
+                )],
+            },
+            datum: datum.map(Datum::Inline),
         }
     }
 
@@ -896,67 +1012,19 @@ mod tests {
     }
 
     // CIP-25 tests
-    fn setup_state_with_asset(
-        registry: &mut AssetRegistry,
-        policy_id: PolicyId,
-        asset_name_bytes: &[u8],
-        seed_info: bool,
-    ) -> (State, AssetId, AssetName) {
-        let asset_name = AssetName::new(asset_name_bytes).unwrap();
-        let asset_id = registry.get_or_insert(policy_id, asset_name.clone());
-
-        let mut state = State::new(AssetsStorageConfig {
-            store_info: true,
-            store_assets: true,
-            ..Default::default()
-        });
-
-        if seed_info {
-            state
-                .info
-                .get_or_insert_with(Default::default)
-                .insert(asset_id, AssetInfoRecord::default());
-        }
-
-        (state, asset_id, asset_name)
-    }
-
-    fn build_cip25_metadata(
-        policy_id: PolicyId,
-        asset_name: &AssetName,
-        value: &str,
-        version: Option<&str>,
-    ) -> Vec<u8> {
-        let policy_hex = hex::encode(policy_id);
-        let asset_hex = hex::encode(asset_name.as_slice());
-        let metadata_value = serde_cbor::Value::Text(value.to_string());
-
-        let mut asset_map = BTreeMap::new();
-        asset_map.insert(serde_cbor::Value::Text(asset_hex), metadata_value);
-
-        let mut policy_map = BTreeMap::new();
-        policy_map.insert(
-            serde_cbor::Value::Text(policy_hex),
-            serde_cbor::Value::Map(asset_map),
-        );
-
-        if let Some(ver) = version {
-            policy_map.insert(
-                serde_cbor::Value::Text("version".to_string()),
-                serde_cbor::Value::Text(ver.to_string()),
-            );
-        }
-
-        serde_cbor::to_vec(&serde_cbor::Value::Map(policy_map)).unwrap()
-    }
-
     #[test]
     fn handle_cip25_metadata_updates_correct_asset() {
         let mut registry = AssetRegistry::new();
         let policy_id: PolicyId = [0u8; 28].into();
 
-        let (state, asset_id, asset_name) =
-            setup_state_with_asset(&mut registry, policy_id, b"TestAsset", true);
+        let (state, asset_id, asset_name) = setup_state_with_asset(
+            &mut registry,
+            policy_id,
+            b"TestAsset",
+            true,
+            false,
+            StoreTransactions::None,
+        );
 
         let metadata_cbor = build_cip25_metadata(policy_id, &asset_name, "hello world", None);
 
@@ -978,8 +1046,14 @@ mod tests {
         let mut registry = AssetRegistry::new();
         let policy_id: PolicyId = [1u8; 28].into();
 
-        let (state, asset_id, asset_name) =
-            setup_state_with_asset(&mut registry, policy_id, b"VersionedAsset", true);
+        let (state, asset_id, asset_name) = setup_state_with_asset(
+            &mut registry,
+            policy_id,
+            b"VersionedAsset",
+            true,
+            false,
+            StoreTransactions::None,
+        );
 
         let metadata_cbor =
             build_cip25_metadata(policy_id, &asset_name, "metadata for v2", Some("2.0"));
@@ -1001,8 +1075,14 @@ mod tests {
     fn handle_cip25_metadata_unknown_asset_is_ignored() {
         let mut registry = AssetRegistry::new();
         let policy_id: PolicyId = [2u8; 28].into();
-        let (state, asset_id, _) =
-            setup_state_with_asset(&mut registry, policy_id, b"KnownAsset", true);
+        let (state, asset_id, _) = setup_state_with_asset(
+            &mut registry,
+            policy_id,
+            b"KnownAsset",
+            true,
+            false,
+            StoreTransactions::None,
+        );
 
         let other_asset_name = AssetName::new(b"UnknownAsset").unwrap();
         let metadata_cbor =
@@ -1023,8 +1103,14 @@ mod tests {
     fn handle_cip25_metadata_invalid_cbor_is_skipped() {
         let mut registry = AssetRegistry::new();
         let policy_id: PolicyId = [3u8; 28].into();
-        let (state, asset_id, _) =
-            setup_state_with_asset(&mut registry, policy_id, b"BadAsset", true);
+        let (state, asset_id, _) = setup_state_with_asset(
+            &mut registry,
+            policy_id,
+            b"BadAsset",
+            true,
+            false,
+            StoreTransactions::None,
+        );
 
         let metadata_cbor = vec![0xff, 0x00, 0x13, 0x37];
 
@@ -1045,34 +1131,6 @@ mod tests {
     }
 
     // CIP-68 tests
-    fn dummy_address() -> acropolis_common::Address {
-        acropolis_common::Address::Shelley(
-            ShelleyAddress::from_string(
-                "addr1q9g0u0aeuyvrn8ptc6yesgj6dtfgw2gadnc9y2p9cs8pneejrkwtdvk97yp2zayhvmm3wu0v672psdg2xn0temkz83ds7qfxdt",
-            )
-            .unwrap(),
-        )
-    }
-
-    fn make_output(policy_id: PolicyId, asset_name: AssetName, datum: Option<Vec<u8>>) -> TxOutput {
-        TxOutput {
-            tx_hash: [0u8; 32].into(),
-            index: 0,
-            address: dummy_address(),
-            value: Value {
-                lovelace: 0,
-                assets: vec![(
-                    policy_id,
-                    vec![NativeAsset {
-                        name: asset_name,
-                        amount: 1,
-                    }],
-                )],
-            },
-            datum: datum.map(Datum::Inline),
-        }
-    }
-
     #[test]
     fn handle_cip68_metadata_updates_onchain_metadata() {
         let mut registry = AssetRegistry::new();
@@ -1083,6 +1141,8 @@ mod tests {
             policy_id,
             &[0x00, 0x06, 0x43, 0xb0, 0x01],
             true,
+            false,
+            StoreTransactions::None,
         );
 
         let datum_blob = vec![1, 2, 3, 4];
@@ -1102,8 +1162,14 @@ mod tests {
         let mut registry = AssetRegistry::new();
         let policy_id: PolicyId = [9u8; 28].into();
 
-        let (state, normal_id, normal_name) =
-            setup_state_with_asset(&mut registry, policy_id, &[0xAA, 0xBB, 0xCC], true);
+        let (state, normal_id, normal_name) = setup_state_with_asset(
+            &mut registry,
+            policy_id,
+            &[0xAA, 0xBB, 0xCC],
+            true,
+            false,
+            StoreTransactions::None,
+        );
 
         let datum_blob = vec![1, 2, 3, 4];
         let output = make_output(policy_id, normal_name.clone(), Some(datum_blob.clone()));
@@ -1128,6 +1194,8 @@ mod tests {
             policy_id,
             &[0x00, 0x06, 0x43, 0xb0, 0x02],
             false,
+            false,
+            StoreTransactions::None,
         );
 
         let datum_blob = vec![1, 2, 3, 4];
@@ -1155,6 +1223,8 @@ mod tests {
             policy_id,
             &[0x00, 0x06, 0x43, 0xb0, 0x02],
             true,
+            false,
+            StoreTransactions::None,
         );
 
         let input_delta = UTXODelta::Input(TxInput {
@@ -1182,8 +1252,14 @@ mod tests {
         let mut registry = AssetRegistry::new();
         let policy_id: PolicyId = [9u8; 28].into();
 
-        let (mut state, ref_id, _) =
-            setup_state_with_asset(&mut registry, policy_id, &[0x00, 0x06, 0x43, 0xb0], true);
+        let (mut state, ref_id, _) = setup_state_with_asset(
+            &mut registry,
+            policy_id,
+            &[0x00, 0x06, 0x43, 0xb0],
+            true,
+            false,
+            StoreTransactions::None,
+        );
 
         let mut info = state.info.take().unwrap();
         let rec = info.get_mut(&ref_id).unwrap();
@@ -1249,5 +1325,197 @@ mod tests {
         assert_eq!(rec.onchain_metadata, Some(vec![9, 9, 9]));
         // User asset metadata standard overwritten with reference token metadata standard
         assert_eq!(rec.metadata_standard, Some(AssetMetadataStandard::CIP68v2));
+    }
+
+    #[test]
+    fn handle_transactions_duplicate_tx_ignored() {
+        let mut registry = AssetRegistry::new();
+        let policy_id: PolicyId = [1u8; 28].into();
+
+        let (state, asset_id, asset_name) = setup_state_with_asset(
+            &mut registry,
+            policy_id,
+            b"TKN",
+            false,
+            false,
+            StoreTransactions::All,
+        );
+
+        let tx_hash: TxHash = [5u8; 32].into();
+        let output = make_output(policy_id, asset_name.clone(), None);
+
+        let delta1 = UTXODelta::Output(acropolis_common::TxOutput {
+            tx_hash: tx_hash.clone(),
+            ..output.clone()
+        });
+        let delta2 = UTXODelta::Output(acropolis_common::TxOutput {
+            tx_hash: tx_hash.clone(),
+            ..output
+        });
+
+        let new_state = state.handle_transactions(&[delta1, delta2], &registry).unwrap();
+        let txs = new_state.transactions.expect("transactions should exist");
+        let entry = txs.get(&asset_id).expect("asset_id should be present");
+
+        // Only one entry is added for a duplicate tx_hash
+        assert_eq!(entry.len(), 1, "duplicate tx_hash should be ignored");
+    }
+
+    #[test]
+    fn handle_transactions_updates_asset_transactions() {
+        let mut registry = AssetRegistry::new();
+        let policy_id: PolicyId = [2u8; 28].into();
+
+        let (state, asset_id, asset_name) = setup_state_with_asset(
+            &mut registry,
+            policy_id,
+            b"TKN",
+            false,
+            false,
+            StoreTransactions::All,
+        );
+
+        let tx1: TxHash = [9u8; 32].into();
+        let tx2: TxHash = [8u8; 32].into();
+
+        let out1 = make_output(policy_id, asset_name.clone(), None);
+        let out2 = make_output(policy_id, asset_name.clone(), None);
+
+        let delta1 = UTXODelta::Output(acropolis_common::TxOutput {
+            tx_hash: tx1.clone(),
+            ..out1
+        });
+        let delta2 = UTXODelta::Output(acropolis_common::TxOutput {
+            tx_hash: tx2.clone(),
+            ..out2
+        });
+
+        let new_state = state.handle_transactions(&[delta1, delta2], &registry).unwrap();
+        let txs = new_state.transactions.expect("transactions should exist");
+        let entry = txs.get(&asset_id).expect("asset_id should be present");
+
+        // Both transactions were added to the Vec
+        assert_eq!(entry.len(), 2);
+        // Transactions are in order oldest to newest
+        assert_eq!(entry[0], tx1);
+        assert_eq!(entry[1], tx2);
+    }
+
+    #[test]
+    fn handle_transactions_prunes_on_store_transactions_config() {
+        let mut registry = AssetRegistry::new();
+        let policy_id: PolicyId = [3u8; 28].into();
+
+        let (state, asset_id, asset_name) = setup_state_with_asset(
+            &mut registry,
+            policy_id,
+            b"TKN",
+            false,
+            false,
+            StoreTransactions::Last(2),
+        );
+
+        let tx1: TxHash = [9u8; 32].into();
+        let tx2: TxHash = [8u8; 32].into();
+        let tx3: TxHash = [7u8; 32].into();
+
+        let base_output = make_output(policy_id, asset_name.clone(), None);
+        let delta1 = UTXODelta::Output(acropolis_common::TxOutput {
+            tx_hash: tx1.clone(),
+            ..base_output.clone()
+        });
+        let delta2 = UTXODelta::Output(acropolis_common::TxOutput {
+            tx_hash: tx2.clone(),
+            ..base_output.clone()
+        });
+        let delta3 = UTXODelta::Output(acropolis_common::TxOutput {
+            tx_hash: tx3.clone(),
+            ..base_output
+        });
+
+        let new_state = state.handle_transactions(&[delta1, delta2, delta3], &registry).unwrap();
+        let txs = new_state.transactions.expect("transactions should exist");
+        let entry = txs.get(&asset_id).expect("asset_id should be present");
+
+        // Transactions are pruned at the prune config
+        assert_eq!(entry.len(), 2);
+        // Transactions are in order with newest last
+        assert_eq!(entry[0], tx2);
+        assert_eq!(entry[1], tx3);
+    }
+
+    #[test]
+    fn handle_address_deltas_accumulates_address_balance() {
+        let mut registry = AssetRegistry::new();
+        let policy_id: PolicyId = [4u8; 28].into();
+        let (state, asset_id, asset_name) = setup_state_with_asset(
+            &mut registry,
+            policy_id,
+            b"TKN",
+            false,
+            true,
+            StoreTransactions::None,
+        );
+
+        let delta1 = make_address_delta(policy_id, asset_name.clone(), 10);
+        let delta2 = make_address_delta(policy_id, asset_name.clone(), 15);
+
+        let new_state = state.handle_address_deltas(&[delta1, delta2], &registry).unwrap();
+        let addr_map = new_state.addresses.unwrap();
+        let holders = addr_map.get(&asset_id).unwrap();
+
+        // Sum of both deltas applied to address balance
+        assert_eq!(
+            *holders
+                .get(match &dummy_address() {
+                    Address::Shelley(s) => s,
+                    _ => panic!(),
+                })
+                .unwrap(),
+            25
+        );
+    }
+
+    #[test]
+    fn handle_address_deltas_removes_zero_balance_addresses() {
+        let mut registry = AssetRegistry::new();
+        let policy_id: PolicyId = [5u8; 28].into();
+
+        let (state, asset_id, asset_name) = setup_state_with_asset(
+            &mut registry,
+            policy_id,
+            b"TKN",
+            false,
+            true,
+            StoreTransactions::None,
+        );
+
+        let add_delta = make_address_delta(policy_id, asset_name.clone(), 10);
+        let state_after_add = state.handle_address_deltas(&[add_delta], &registry).unwrap();
+        let addr_map = state_after_add.addresses.as_ref().unwrap();
+        let holders = addr_map.get(&asset_id).unwrap();
+
+        // Address added to asset map with correct balance
+        assert_eq!(
+            *holders
+                .get(match &dummy_address() {
+                    Address::Shelley(s) => s,
+                    _ => panic!(),
+                })
+                .unwrap(),
+            10
+        );
+
+        let remove_delta = make_address_delta(policy_id, asset_name.clone(), -10);
+        let state_after_remove =
+            state_after_add.handle_address_deltas(&[remove_delta], &registry).unwrap();
+        let addr_map = state_after_remove.addresses.as_ref().unwrap();
+        let holders = addr_map.get(&asset_id).unwrap();
+
+        // Address removed from asset map after balance zeroed
+        assert!(!holders.contains_key(match &dummy_address() {
+            Address::Shelley(s) => s,
+            _ => panic!(),
+        }));
     }
 }
