@@ -18,7 +18,9 @@ mod utils;
 use handlers::{
     accounts::handle_single_account_blockfrost,
     blocks::{
-        handle_blocks_epoch_slot_blockfrost, handle_blocks_latest_hash_number_blockfrost,
+        handle_blocks_epoch_slot_blockfrost, handle_blocks_hash_or_number_next_blockfrost,
+        handle_blocks_hash_or_number_previous_blockfrost,
+        handle_blocks_latest_hash_number_blockfrost,
         handle_blocks_latest_hash_number_transactions_blockfrost,
         handle_blocks_latest_hash_number_transactions_cbor_blockfrost,
         handle_blocks_slot_blockfrost,
@@ -62,6 +64,12 @@ const DEFAULT_HANDLE_BLOCKS_LATEST_HASH_NUMBER_TRANSACTIONS_TOPIC: (&str, &str) 
 const DEFAULT_HANDLE_BLOCKS_LATEST_HASH_NUMBER_TRANSACTIONS_CBOR_TOPIC: (&str, &str) = (
     "handle-blocks-latest-hash-number-transactions-cbor",
     "rest.get.blocks.*.txs.cbor",
+);
+const DEFAULT_HANDLE_BLOCKS_HASH_NUMBER_NEXT_TOPIC: (&str, &str) =
+    ("handle-blocks-hash-number-next", "rest.get.blocks.*.next");
+const DEFAULT_HANDLE_BLOCKS_HASH_NUMBER_PREVIOUS_TOPIC: (&str, &str) = (
+    "handle-blocks-hash-number-previous",
+    "rest.get.blocks.*.previous",
 );
 const DEFAULT_HANDLE_BLOCKS_SLOT_TOPIC: (&str, &str) =
     ("handle-blocks-slot", "rest.get.blocks.slot.*");
@@ -209,6 +217,22 @@ impl BlockfrostREST {
             DEFAULT_HANDLE_BLOCKS_LATEST_HASH_NUMBER_TRANSACTIONS_CBOR_TOPIC,
             handlers_config.clone(),
             handle_blocks_latest_hash_number_transactions_cbor_blockfrost,
+        );
+
+        // Handler for /blocks/{hash_or_number}/next
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_BLOCKS_HASH_NUMBER_NEXT_TOPIC,
+            handlers_config.clone(),
+            handle_blocks_hash_or_number_next_blockfrost,
+        );
+
+        // Handler for /blocks/{hash_or_number}/previous
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_BLOCKS_HASH_NUMBER_PREVIOUS_TOPIC,
+            handlers_config.clone(),
+            handle_blocks_hash_or_number_previous_blockfrost,
         );
 
         // Handler for /blocks/slot/{slot_number}

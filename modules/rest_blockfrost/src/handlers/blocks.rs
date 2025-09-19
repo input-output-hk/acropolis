@@ -375,6 +375,132 @@ async fn handle_blocks_hash_or_number_transactions_cbor_blockfrost(
     }
 }
 
+/// Handle `/blocks/{hash_or_number}/next`
+pub async fn handle_blocks_hash_or_number_next_blockfrost(
+    context: Arc<Context<Message>>,
+    params: Vec<String>,
+    handlers_config: Arc<HandlersConfig>,
+) -> Result<RESTResponse> {
+    let param = match params.as_slice() {
+        [param] => param,
+        _ => return Ok(RESTResponse::with_text(400, "Invalid parameters")),
+    };
+
+    let block_key = match parse_block_key(param) {
+        Ok(block_key) => block_key,
+        Err(error) => return Err(error),
+    };
+
+    let blocks_next_msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
+        BlocksStateQuery::GetNextBlocks {
+            block_key,
+            // TODO: Get paging values from query params
+            limit: 100,
+            skip: 0,
+        },
+    )));
+    let blocks_next = query_state(
+        &context,
+        &handlers_config.blocks_query_topic,
+        blocks_next_msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Blocks(
+                BlocksStateQueryResponse::NextBlocks(blocks_next),
+            )) => Ok(Some(blocks_next)),
+            Message::StateQueryResponse(StateQueryResponse::Blocks(
+                BlocksStateQueryResponse::NotFound,
+            )) => Ok(None),
+            Message::StateQueryResponse(StateQueryResponse::Blocks(
+                BlocksStateQueryResponse::Error(e),
+            )) => {
+                return Err(anyhow::anyhow!(
+                    "Internal server error while retrieving next blocks by hash or number: {e}"
+                ));
+            }
+            _ => {
+                return Err(anyhow::anyhow!(
+                    "Unexpected message type while retrieving next blocks by hash or number"
+                ))
+            }
+        },
+    )
+    .await?;
+
+    match blocks_next {
+        Some(blocks_next) => match serde_json::to_string(&blocks_next) {
+            Ok(json) => Ok(RESTResponse::with_json(200, &json)),
+            Err(e) => Ok(RESTResponse::with_text(
+                500,
+                &format!("Internal server error while retrieving next blocks: {e}"),
+            )),
+        },
+        None => Ok(RESTResponse::with_text(404, "Not found")),
+    }
+}
+
+/// Handle `/blocks/{hash_or_number}/previous`
+pub async fn handle_blocks_hash_or_number_previous_blockfrost(
+    context: Arc<Context<Message>>,
+    params: Vec<String>,
+    handlers_config: Arc<HandlersConfig>,
+) -> Result<RESTResponse> {
+    let param = match params.as_slice() {
+        [param] => param,
+        _ => return Ok(RESTResponse::with_text(400, "Invalid parameters")),
+    };
+
+    let block_key = match parse_block_key(param) {
+        Ok(block_key) => block_key,
+        Err(error) => return Err(error),
+    };
+
+    let blocks_previous_msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
+        BlocksStateQuery::GetPreviousBlocks {
+            block_key,
+            // TODO: Get paging values from query params
+            limit: 100,
+            skip: 0,
+        },
+    )));
+    let blocks_previous = query_state(
+        &context,
+        &handlers_config.blocks_query_topic,
+        blocks_previous_msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Blocks(
+                BlocksStateQueryResponse::PreviousBlocks(blocks_previous),
+            )) => Ok(Some(blocks_previous)),
+            Message::StateQueryResponse(StateQueryResponse::Blocks(
+                BlocksStateQueryResponse::NotFound,
+            )) => Ok(None),
+            Message::StateQueryResponse(StateQueryResponse::Blocks(
+                BlocksStateQueryResponse::Error(e),
+            )) => {
+                return Err(anyhow::anyhow!(
+                    "Internal server error while retrieving previous blocks by hash or number: {e}"
+                ));
+            }
+            _ => {
+                return Err(anyhow::anyhow!(
+                    "Unexpected message type while retrieving previous blocks by hash or number"
+                ))
+            }
+        },
+    )
+    .await?;
+
+    match blocks_previous {
+        Some(blocks_previous) => match serde_json::to_string(&blocks_previous) {
+            Ok(json) => Ok(RESTResponse::with_json(200, &json)),
+            Err(e) => Ok(RESTResponse::with_text(
+                500,
+                &format!("Internal server error while retrieving previous blocks: {e}"),
+            )),
+        },
+        None => Ok(RESTResponse::with_text(404, "Not found")),
+    }
+}
+
 /// Handle `/blocks/slot/{slot_number}`
 pub async fn handle_blocks_slot_blockfrost(
     context: Arc<Context<Message>>,

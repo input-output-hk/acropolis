@@ -9,7 +9,9 @@ pub const DEFAULT_BLOCKS_QUERY_TOPIC: (&str, &str) =
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum BlocksStateQuery {
     GetLatestBlock,
+    // TODO: add paging
     GetLatestBlockTransactions,
+    // TODO: add paging
     GetLatestBlockTransactionsCBOR,
     GetBlockInfo {
         block_key: BlockKey,
@@ -34,9 +36,11 @@ pub enum BlocksStateQuery {
     GetBlockTransactions {
         block_key: BlockKey,
     },
+    // TODO: add paging
     GetBlockTransactionsCBOR {
         block_key: BlockKey,
     },
+    // TODO: add paging
     GetBlockInvolvedAddresses {
         block_key: BlockKey,
     },
