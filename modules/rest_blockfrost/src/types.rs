@@ -723,7 +723,7 @@ impl From<&AssetMintRecord> for AssetMintRecordRest {
         };
 
         AssetMintRecordRest {
-            tx_hash: hex::encode(record.tx_hash.as_ref()),
+            tx_hash: "transaction_state not yet implemented".to_string(),
             amount: record.amount.to_string(),
             action,
         }
@@ -753,10 +753,10 @@ impl From<&PolicyAsset> for PolicyAssetRest {
 
 #[derive(Debug, Serialize)]
 pub struct AssetTransactionRest {
-    pub tx_hash: String,
-    pub tx_index: String, // Change to u64 when transactions state is implemented
-    pub block_height: String, // ^^^
-    pub block_time: String, // ^^^
+    pub tx_hash: String, // Requires a query to transactions state which is not yet implemented
+    pub tx_index: u16,
+    pub block_height: u32,
+    pub block_time: String, // Change to u64 when transactions state is implemented
 }
 
 #[derive(Debug, Serialize)]
