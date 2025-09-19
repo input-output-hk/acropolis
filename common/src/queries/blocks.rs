@@ -1,6 +1,7 @@
 use crate::{serialization::Bech32WithHrp, BlockHash, KeyHash, TxHash};
 use cryptoxide::hashing::blake2b::Blake2b;
 use serde::ser::{Serialize, SerializeStruct, Serializer};
+use serde_with::{hex::Hex, serde_as};
 
 pub const DEFAULT_BLOCKS_QUERY_TOPIC: (&str, &str) =
     ("blocks-state-query-topic", "cardano.query.blocks");
@@ -148,9 +149,11 @@ pub struct BlockTransactionsCBOR {
     pub txs: Vec<BlockTransaction>,
 }
 
+#[serde_as]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BlockTransaction {
     pub hash: TxHash,
+    #[serde_as(as = "Hex")]
     pub cbor: Vec<u8>,
 }
 

@@ -145,7 +145,7 @@ pub fn map_gov_action_id(pallas_action_id: &conway::GovActionId) -> Result<GovAc
     };
 
     Ok(GovActionId {
-        transaction_id: *pallas_action_id.transaction_id,
+        transaction_id: TxHash(*pallas_action_id.transaction_id),
         action_index: act_idx_u8,
     })
 }

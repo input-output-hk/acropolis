@@ -19,6 +19,8 @@ use handlers::{
     accounts::handle_single_account_blockfrost,
     blocks::{
         handle_blocks_epoch_slot_blockfrost, handle_blocks_latest_hash_number_blockfrost,
+        handle_blocks_latest_hash_number_transactions_blockfrost,
+        handle_blocks_latest_hash_number_transactions_cbor_blockfrost,
         handle_blocks_slot_blockfrost,
     },
     epochs::{
@@ -53,6 +55,14 @@ const DEFAULT_HANDLE_SINGLE_ACCOUNT_TOPIC: (&str, &str) =
 // Blocks topics
 const DEFAULT_HANDLE_BLOCKS_LATEST_HASH_NUMBER_TOPIC: (&str, &str) =
     ("handle-blocks-latest-hash-number", "rest.get.blocks.*");
+const DEFAULT_HANDLE_BLOCKS_LATEST_HASH_NUMBER_TRANSACTIONS_TOPIC: (&str, &str) = (
+    "handle-blocks-latest-hash-number-transactions",
+    "rest.get.blocks.*.txs",
+);
+const DEFAULT_HANDLE_BLOCKS_LATEST_HASH_NUMBER_TRANSACTIONS_CBOR_TOPIC: (&str, &str) = (
+    "handle-blocks-latest-hash-number-transactions-cbor",
+    "rest.get.blocks.*.txs.cbor",
+);
 const DEFAULT_HANDLE_BLOCKS_SLOT_TOPIC: (&str, &str) =
     ("handle-blocks-slot", "rest.get.blocks.slot.*");
 const DEFAULT_HANDLE_BLOCKS_EPOCH_SLOT_TOPIC: (&str, &str) =
@@ -183,6 +193,22 @@ impl BlockfrostREST {
             DEFAULT_HANDLE_BLOCKS_LATEST_HASH_NUMBER_TOPIC,
             handlers_config.clone(),
             handle_blocks_latest_hash_number_blockfrost,
+        );
+
+        // Handler for /blocks/latest/txs, /blocks/{hash_or_number}/txs
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_BLOCKS_LATEST_HASH_NUMBER_TRANSACTIONS_TOPIC,
+            handlers_config.clone(),
+            handle_blocks_latest_hash_number_transactions_blockfrost,
+        );
+
+        // Handler for /blocks/latest/txs/cbor, /blocks/{hash_or_number}/txs/cbor
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_BLOCKS_LATEST_HASH_NUMBER_TRANSACTIONS_CBOR_TOPIC,
+            handlers_config.clone(),
+            handle_blocks_latest_hash_number_transactions_cbor_blockfrost,
         );
 
         // Handler for /blocks/slot/{slot_number}

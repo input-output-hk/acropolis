@@ -25,6 +25,7 @@ impl UTXOKey {
         let mut hash = [0u8; 32]; // Initialize with zeros
         let len = hash_slice.len().min(32); // Cap at 32 bytes
         hash[..len].copy_from_slice(&hash_slice[..len]); // Copy input hash
+        let hash = TxHash(hash);
         Self { hash, index }
     }
 

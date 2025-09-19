@@ -311,7 +311,7 @@ impl ChainStore {
 
     fn to_block_transactions(block: Block) -> Result<BlockTransactions> {
         let decoded = pallas_traverse::MultiEraBlock::decode(&block.bytes)?;
-        let hashes = decoded.txs().iter().map(|tx| TxHash::from(*tx.hash())).collect();
+        let hashes = decoded.txs().iter().map(|tx| TxHash(*tx.hash())).collect();
         Ok(BlockTransactions { hashes })
     }
 
@@ -321,7 +321,7 @@ impl ChainStore {
             .txs()
             .iter()
             .map(|tx| {
-                let hash = TxHash::from(*tx.hash());
+                let hash = TxHash(*tx.hash());
                 let cbor = tx.encode();
                 BlockTransaction { hash, cbor }
             })

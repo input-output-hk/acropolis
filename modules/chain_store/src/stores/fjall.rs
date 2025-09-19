@@ -217,7 +217,7 @@ impl FjallTXStore {
 
     fn insert_tx(&self, batch: &mut Batch, hash: TxHash, tx: StoredTransaction) {
         let bytes = minicbor::to_vec(tx).expect("infallible");
-        batch.insert(&self.txs, hash, bytes);
+        batch.insert(&self.txs, hash.as_ref(), bytes);
     }
 }
 
