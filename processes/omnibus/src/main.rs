@@ -38,8 +38,10 @@ use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{filter, fmt, EnvFilter, Registry};
 
+#[cfg(feature = "jemalloc")]
 #[cfg(not(target_env = "msvc"))]
 use tikv_jemallocator::Jemalloc;
+#[cfg(feature = "jemalloc")]
 #[cfg(not(target_env = "msvc"))]
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
