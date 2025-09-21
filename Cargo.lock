@@ -22,7 +22,7 @@ dependencies = [
  "futures",
  "gcd",
  "hex",
- "imbl 5.0.0",
+ "imbl",
  "lf-queue",
  "minicbor 0.26.5",
  "num-rational",
@@ -46,7 +46,7 @@ dependencies = [
  "chrono",
  "config",
  "hex",
- "imbl 5.0.0",
+ "imbl",
  "serde",
  "serde_json",
  "serde_with 3.14.0",
@@ -62,7 +62,7 @@ dependencies = [
  "anyhow",
  "caryatid_sdk",
  "config",
- "imbl 5.0.0",
+ "imbl",
  "tokio",
  "tracing",
 ]
@@ -89,7 +89,7 @@ dependencies = [
  "caryatid_sdk",
  "config",
  "hex",
- "imbl 5.0.0",
+ "imbl",
  "serde",
  "serde_json",
  "tokio",
@@ -122,7 +122,7 @@ dependencies = [
  "config",
  "dashmap",
  "hex",
- "imbl 6.0.0",
+ "imbl",
  "pallas",
  "serde",
  "serde_json",
@@ -249,7 +249,7 @@ dependencies = [
  "caryatid_sdk",
  "config",
  "hex",
- "imbl 5.0.0",
+ "imbl",
  "serde_json",
  "tokio",
  "tracing",
@@ -265,7 +265,7 @@ dependencies = [
  "config",
  "dashmap",
  "hex",
- "imbl 5.0.0",
+ "imbl",
  "rayon",
  "serde",
  "serde_json",
@@ -285,8 +285,7 @@ dependencies = [
  "caryatid_sdk",
  "config",
  "hex",
- "pallas-addresses",
- "pallas-crypto",
+ "pallas",
  "serde",
  "serde_json",
  "serde_json_any_key",
@@ -385,7 +384,6 @@ dependencies = [
  "opentelemetry_sdk",
  "serde",
  "serde_json",
- "tikv-jemallocator",
  "tokio",
  "tracing",
  "tracing-opentelemetry",
@@ -453,7 +451,6 @@ dependencies = [
  "chrono",
  "config",
  "hex",
- "minicbor 0.26.5",
  "serde",
  "serde_json",
  "tokio",
@@ -2812,20 +2809,6 @@ dependencies = [
  "rand_core 0.9.3",
  "rand_xoshiro",
  "serde",
- "version_check",
-]
-
-[[package]]
-name = "imbl"
-version = "6.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "33afdc5d333c1a43f1f640bfc6ad3788729e5b2f18472e5d33a9187315257f8e"
-dependencies = [
- "archery",
- "bitmaps",
- "imbl-sized-chunks",
- "rand_core 0.9.3",
- "rand_xoshiro",
  "version_check",
 ]
 
@@ -5625,26 +5608,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d050e60b33d41c19108b32cea32164033a9013fe3b46cbd4457559bfbf77afaa"
 dependencies = [
  "num_cpus",
-]
-
-[[package]]
-name = "tikv-jemalloc-sys"
-version = "0.6.0+5.3.0-1-ge13ca993e8ccb9ba9847cc330696e02839f328f7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cd3c60906412afa9c2b5b5a48ca6a5abe5736aec9eb48ad05037a677e52e4e2d"
-dependencies = [
- "cc",
- "libc",
-]
-
-[[package]]
-name = "tikv-jemallocator"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4cec5ff18518d81584f477e9bfdf957f5bb0979b0bac3af4ca30b5b3ae2d2865"
-dependencies = [
- "libc",
- "tikv-jemalloc-sys",
 ]
 
 [[package]]
