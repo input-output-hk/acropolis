@@ -234,32 +234,42 @@ pub fn map_certificate(
                 pool_owners,
                 relays,
                 pool_metadata,
-            } => Ok(TxCertificate::PoolRegistration(PoolRegistration {
-                operator: operator.to_vec(),
-                vrf_key_hash: vrf_keyhash.to_vec(),
-                pledge: *pledge,
-                cost: *cost,
-                margin: Ratio {
-                    numerator: margin.numerator,
-                    denominator: margin.denominator,
+            } => Ok(TxCertificate::PoolRegistrationWithPos(
+                PoolRegistrationWithPos {
+                    reg: PoolRegistration {
+                        operator: operator.to_vec(),
+                        vrf_key_hash: vrf_keyhash.to_vec(),
+                        pledge: *pledge,
+                        cost: *cost,
+                        margin: Ratio {
+                            numerator: margin.numerator,
+                            denominator: margin.denominator,
+                        },
+                        reward_account: reward_account.to_vec(),
+                        pool_owners: pool_owners.into_iter().map(|v| v.to_vec()).collect(),
+                        relays: relays.into_iter().map(|relay| map_relay(relay)).collect(),
+                        pool_metadata: match pool_metadata {
+                            Nullable::Some(md) => Some(PoolMetadata {
+                                url: md.url.clone(),
+                                hash: md.hash.to_vec(),
+                            }),
+                            _ => None,
+                        },
+                    },
+                    tx_hash,
+                    cert_index: cert_index as u64,
                 },
-                reward_account: reward_account.to_vec(),
-                pool_owners: pool_owners.into_iter().map(|v| v.to_vec()).collect(),
-                relays: relays.into_iter().map(|relay| map_relay(relay)).collect(),
-                pool_metadata: match pool_metadata {
-                    Nullable::Some(md) => Some(PoolMetadata {
-                        url: md.url.clone(),
-                        hash: md.hash.to_vec(),
-                    }),
-                    _ => None,
-                },
-            })),
-            alonzo::Certificate::PoolRetirement(pool_key_hash, epoch) => {
-                Ok(TxCertificate::PoolRetirement(PoolRetirement {
-                    operator: pool_key_hash.to_vec(),
-                    epoch: *epoch,
-                }))
-            }
+            )),
+            alonzo::Certificate::PoolRetirement(pool_key_hash, epoch) => Ok(
+                TxCertificate::PoolRetirementWithPos(PoolRetirementWithPos {
+                    ret: PoolRetirement {
+                        operator: pool_key_hash.to_vec(),
+                        epoch: *epoch,
+                    },
+                    tx_hash,
+                    cert_index: cert_index as u64,
+                }),
+            ),
             alonzo::Certificate::GenesisKeyDelegation(
                 genesis_hash,
                 genesis_delegate_hash,
@@ -326,32 +336,42 @@ pub fn map_certificate(
                     pool_owners,
                     relays,
                     pool_metadata,
-                } => Ok(TxCertificate::PoolRegistration(PoolRegistration {
-                    operator: operator.to_vec(),
-                    vrf_key_hash: vrf_keyhash.to_vec(),
-                    pledge: *pledge,
-                    cost: *cost,
-                    margin: Ratio {
-                        numerator: margin.numerator,
-                        denominator: margin.denominator,
+                } => Ok(TxCertificate::PoolRegistrationWithPos(
+                    PoolRegistrationWithPos {
+                        reg: PoolRegistration {
+                            operator: operator.to_vec(),
+                            vrf_key_hash: vrf_keyhash.to_vec(),
+                            pledge: *pledge,
+                            cost: *cost,
+                            margin: Ratio {
+                                numerator: margin.numerator,
+                                denominator: margin.denominator,
+                            },
+                            reward_account: reward_account.to_vec(),
+                            pool_owners: pool_owners.into_iter().map(|v| v.to_vec()).collect(),
+                            relays: relays.into_iter().map(|relay| map_relay(relay)).collect(),
+                            pool_metadata: match pool_metadata {
+                                Nullable::Some(md) => Some(PoolMetadata {
+                                    url: md.url.clone(),
+                                    hash: md.hash.to_vec(),
+                                }),
+                                _ => None,
+                            },
+                        },
+                        tx_hash,
+                        cert_index: cert_index as u64,
                     },
-                    reward_account: reward_account.to_vec(),
-                    pool_owners: pool_owners.into_iter().map(|v| v.to_vec()).collect(),
-                    relays: relays.into_iter().map(|relay| map_relay(relay)).collect(),
-                    pool_metadata: match pool_metadata {
-                        Nullable::Some(md) => Some(PoolMetadata {
-                            url: md.url.clone(),
-                            hash: md.hash.to_vec(),
-                        }),
-                        _ => None,
-                    },
-                })),
-                conway::Certificate::PoolRetirement(pool_key_hash, epoch) => {
-                    Ok(TxCertificate::PoolRetirement(PoolRetirement {
-                        operator: pool_key_hash.to_vec(),
-                        epoch: *epoch,
-                    }))
-                }
+                )),
+                conway::Certificate::PoolRetirement(pool_key_hash, epoch) => Ok(
+                    TxCertificate::PoolRetirementWithPos(PoolRetirementWithPos {
+                        ret: PoolRetirement {
+                            operator: pool_key_hash.to_vec(),
+                            epoch: *epoch,
+                        },
+                        tx_hash,
+                        cert_index: cert_index as u64,
+                    }),
+                ),
 
                 conway::Certificate::Reg(cred, coin) => {
                     Ok(TxCertificate::Registration(Registration {
@@ -869,11 +889,13 @@ pub fn map_value(pallas_value: &MultiEraValue) -> Value {
                     Ok(policy_id) => {
                         let native_assets = kvps
                             .iter()
-                            .map(|(name, amt)| NativeAsset {
-                                name: name.to_vec(),
-                                amount: *amt,
+                            .filter_map(|(name, amt)| {
+                                AssetName::new(name).map(|asset_name| NativeAsset {
+                                    name: asset_name,
+                                    amount: *amt,
+                                })
                             })
-                            .collect();
+                            .collect::<Vec<_>>();
 
                         assets.push((policy_id, native_assets));
                     }
@@ -890,9 +912,11 @@ pub fn map_value(pallas_value: &MultiEraValue) -> Value {
                 Ok(policy_id) => {
                     let native_assets = kvps
                         .iter()
-                        .map(|(name, amt)| NativeAsset {
-                            name: name.to_vec(),
-                            amount: u64::from(*amt),
+                        .filter_map(|(name, amt)| {
+                            AssetName::new(name).map(|asset_name| NativeAsset {
+                                name: asset_name,
+                                amount: u64::from(*amt),
+                            })
                         })
                         .collect();
 
@@ -917,35 +941,66 @@ pub fn map_mint_burn(
 ) -> Option<(PolicyId, Vec<NativeAssetDelta>)> {
     match policy_group {
         MultiEraPolicyAssets::AlonzoCompatibleMint(policy, kvps) => {
-            let policy_id: [u8; 28] =
-                policy.as_ref().try_into().expect("Policy id must be 28 bytes");
+            let policy_id: PolicyId = match policy.as_ref().try_into() {
+                Ok(id) => id,
+                Err(_) => {
+                    tracing::error!(
+                        "Invalid policy id length: expected 28 bytes, got {}",
+                        policy.len()
+                    );
+                    return None;
+                }
+            };
 
             let deltas = kvps
                 .iter()
-                .map(|(name, amt)| NativeAssetDelta {
-                    name: name.to_vec(),
-                    amount: *amt,
+                .filter_map(|(name, amt)| {
+                    AssetName::new(name).map(|asset_name| NativeAssetDelta {
+                        name: asset_name,
+                        amount: *amt,
+                    })
                 })
-                .collect();
+                .collect::<Vec<_>>();
 
             Some((policy_id, deltas))
         }
 
         MultiEraPolicyAssets::ConwayMint(policy, kvps) => {
-            let policy_id: [u8; 28] =
-                policy.as_ref().try_into().expect("Policy id must be 28 bytes");
+            let policy_id: PolicyId = match policy.as_ref().try_into() {
+                Ok(id) => id,
+                Err(_) => {
+                    tracing::error!(
+                        "Invalid policy id length: expected 28 bytes, got {}",
+                        policy.len()
+                    );
+                    return None;
+                }
+            };
 
             let deltas = kvps
                 .iter()
-                .map(|(name, amt)| NativeAssetDelta {
-                    name: name.to_vec(),
-                    amount: i64::from(*amt),
+                .filter_map(|(name, amt)| {
+                    AssetName::new(name).map(|asset_name| NativeAssetDelta {
+                        name: asset_name,
+                        amount: i64::from(*amt),
+                    })
                 })
-                .collect();
-
+                .collect::<Vec<_>>();
             Some((policy_id, deltas))
         }
 
         _ => None,
+    }
+}
+
+pub fn map_datum(datum: &Option<conway::MintedDatumOption>) -> Option<Datum> {
+    match datum {
+        Some(pallas::ledger::primitives::conway::MintedDatumOption::Hash(h)) => {
+            Some(Datum::Hash(h.to_vec()))
+        }
+        Some(pallas::ledger::primitives::conway::MintedDatumOption::Data(d)) => {
+            Some(Datum::Inline(d.raw_cbor().to_vec()))
+        }
+        None => None,
     }
 }

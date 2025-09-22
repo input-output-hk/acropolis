@@ -400,7 +400,7 @@ pub fn process_message(
 mod test {
     use crate::*;
     use acropolis_common::{
-        messages::AddressDeltasMessage, Address, AddressDelta, BlockInfo, BlockStatus,
+        messages::AddressDeltasMessage, Address, AddressDelta, BlockHash, BlockInfo, BlockStatus,
         ByronAddress, Era, ShelleyAddress, ShelleyAddressDelegationPart, ShelleyAddressPaymentPart,
         ShelleyAddressPointer, StakeAddress, StakeAddressPayload, ValueDelta,
     };
@@ -539,7 +539,7 @@ mod test {
             status: BlockStatus::Immutable,
             slot: 2498243,
             number: 1,
-            hash: vec![],
+            hash: BlockHash::default(),
             epoch: 1,
             epoch_slot: 14243,
             new_epoch: true,

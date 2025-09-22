@@ -1,12 +1,10 @@
-use acropolis_common::messages::{
-    CardanoMessage, DRepDelegationDistribution, DRepStakeDistributionMessage, Message,
-};
-use acropolis_common::BlockInfo;
+use acropolis_common::messages::{CardanoMessage, Message, StakeRewardDeltasMessage};
+use acropolis_common::{BlockInfo, StakeRewardDelta};
 use caryatid_sdk::Context;
 use std::sync::Arc;
 
-/// Message publisher for DRep Delegation Distribution (DRDD)
-pub struct DRepDistributionPublisher {
+/// Message publisher for Stake Reward Deltas
+pub struct StakeRewardDeltasPublisher {
     /// Module context
     context: Arc<Context<Message>>,
 
@@ -14,17 +12,17 @@ pub struct DRepDistributionPublisher {
     topic: String,
 }
 
-impl DRepDistributionPublisher {
+impl StakeRewardDeltasPublisher {
     /// Construct with context and topic to publish on
     pub fn new(context: Arc<Context<Message>>, topic: String) -> Self {
         Self { context, topic }
     }
 
-    /// Publish the DRep Delegation Distribution
-    pub async fn publish_drdd(
+    /// Publish the Stake Diffs
+    pub async fn publish_stake_reward_deltas(
         &mut self,
         block: &BlockInfo,
-        drdd: DRepDelegationDistribution,
+        stake_reward_deltas: Vec<StakeRewardDelta>,
     ) -> anyhow::Result<()> {
         self.context
             .message_bus
@@ -32,9 +30,8 @@ impl DRepDistributionPublisher {
                 &self.topic,
                 Arc::new(Message::Cardano((
                     block.clone(),
-                    CardanoMessage::DRepStakeDistribution(DRepStakeDistributionMessage {
-                        epoch: block.epoch,
-                        drdd,
+                    CardanoMessage::StakeRewardDeltas(StakeRewardDeltasMessage {
+                        deltas: stake_reward_deltas,
                     }),
                 ))),
             )

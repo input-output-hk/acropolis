@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use config::Config;
+use serde::Serialize;
 
 const DEFAULT_STORE_EPOCHS_HISTORY: (&str, bool) = ("store-epochs-history", false);
 const DEFAULT_STORE_RETIRED_POOLS: (&str, bool) = ("store-retired-pools", false);
@@ -8,9 +9,10 @@ const DEFAULT_STORE_REGISTRATION: (&str, bool) = ("store-registration", false);
 const DEFAULT_STORE_UPDATES: (&str, bool) = ("store-updates", false);
 const DEFAULT_STORE_DELEGATORS: (&str, bool) = ("store-delegators", false);
 const DEFAULT_STORE_VOTES: (&str, bool) = ("store-votes", false);
+const DEFAULT_STORE_BLOCK_HASHES: (&str, bool) = ("store-block-hashes", false);
 const DEFAULT_STORE_STAKE_ADDRESSES: (&str, bool) = ("store-stake-addresses", false);
 
-#[derive(Debug, Clone)]
+#[derive(Default, Debug, Clone, Serialize)]
 pub struct StoreConfig {
     pub store_epochs_history: bool,
     pub store_retired_pools: bool,
@@ -18,6 +20,7 @@ pub struct StoreConfig {
     pub store_updates: bool,
     pub store_delegators: bool,
     pub store_votes: bool,
+    pub store_block_hashes: bool,
     pub store_stake_addresses: bool,
 }
 
@@ -29,6 +32,7 @@ impl StoreConfig {
         store_updates: bool,
         store_delegators: bool,
         store_votes: bool,
+        store_block_hashes: bool,
         store_stake_addresses: bool,
     ) -> Self {
         Self {
@@ -38,6 +42,7 @@ impl StoreConfig {
             store_updates,
             store_delegators,
             store_votes,
+            store_block_hashes,
             store_stake_addresses,
         }
     }
@@ -66,6 +71,9 @@ impl From<Arc<Config>> for StoreConfig {
                 .get_bool(DEFAULT_STORE_DELEGATORS.0)
                 .unwrap_or(DEFAULT_STORE_DELEGATORS.1),
             store_votes: config.get_bool(DEFAULT_STORE_VOTES.0).unwrap_or(DEFAULT_STORE_VOTES.1),
+            store_block_hashes: config
+                .get_bool(DEFAULT_STORE_BLOCK_HASHES.0)
+                .unwrap_or(DEFAULT_STORE_BLOCK_HASHES.1),
             store_stake_addresses: config
                 .get_bool(DEFAULT_STORE_STAKE_ADDRESSES.0)
                 .unwrap_or(DEFAULT_STORE_STAKE_ADDRESSES.1),

@@ -96,7 +96,7 @@ pub struct BlockInfo {
     pub number: u64,
 
     /// Block hash
-    pub hash: Vec<u8>,
+    pub hash: BlockHash,
 
     /// Epoch number
     pub epoch: u64,
@@ -148,10 +148,44 @@ pub struct StakeAddressDelta {
     pub delta: i64,
 }
 
+/// Stake Address Reward change
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StakeRewardDelta {
+    pub hash: KeyHash,
+    pub delta: i64,
+}
+
 pub type PolicyId = [u8; 28];
 pub type NativeAssets = Vec<(PolicyId, Vec<NativeAsset>)>;
 pub type NativeAssetsDelta = Vec<(PolicyId, Vec<NativeAssetDelta>)>;
-pub type AssetName = Vec<u8>;
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct AssetName {
+    len: u8,
+    bytes: [u8; 32],
+}
+
+impl AssetName {
+    pub fn new(data: &[u8]) -> Option<Self> {
+        if data.len() > 32 {
+            return None;
+        }
+        let mut bytes = [0u8; 32];
+        bytes[..data.len()].copy_from_slice(data);
+        Some(Self {
+            len: data.len() as u8,
+            bytes,
+        })
+    }
+
+    pub fn len(&self) -> usize {
+        self.len as usize
+    }
+
+    pub fn as_slice(&self) -> &[u8] {
+        &self.bytes[..self.len as usize]
+    }
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct NativeAsset {
@@ -163,6 +197,13 @@ pub struct NativeAsset {
 pub struct NativeAssetDelta {
     pub name: AssetName,
     pub amount: i64,
+}
+
+/// Datum (inline or hash)
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum Datum {
+    Hash(Vec<u8>),
+    Inline(Vec<u8>),
 }
 
 /// Value (lovelace + multiasset)
@@ -244,8 +285,9 @@ pub struct TxOutput {
 
     /// Output value (Lovelace)
     pub value: Value,
-    // todo: Implement datum    /// Datum (raw)
-    // !!!    pub datum: Vec<u8>,
+
+    /// Datum (Inline or Hash)
+    pub datum: Option<Datum>,
 }
 
 /// Transaction input (UTXO reference)
@@ -288,6 +330,9 @@ pub type DataHash = Vec<u8>;
 
 /// Transaction hash
 pub type TxHash = [u8; 32];
+
+/// Block Hash
+pub type BlockHash = [u8; 32];
 
 /// Amount of Ada, in Lovelace
 pub type Lovelace = u64;
@@ -523,6 +568,14 @@ pub struct PoolMetadata {
 
 pub type RewardAccount = Vec<u8>;
 
+/// Pool registration with position
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PoolRegistrationWithPos {
+    pub reg: PoolRegistration,
+    pub tx_hash: TxHash,
+    pub cert_index: u64,
+}
+
 /// Pool registration data
 #[serde_as]
 #[derive(
@@ -578,6 +631,14 @@ pub struct PoolRegistration {
     pub pool_metadata: Option<PoolMetadata>,
 }
 
+// Pool Retirment with position
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PoolRetirementWithPos {
+    pub ret: PoolRetirement,
+    pub tx_hash: TxHash,
+    pub cert_index: u64,
+}
+
 /// Pool retirement data
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PoolRetirement {
@@ -589,7 +650,7 @@ pub struct PoolRetirement {
 }
 
 /// Pool Update Action
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PoolUpdateAction {
     Registered,
     Deregistered,
@@ -601,6 +662,32 @@ pub struct PoolUpdateEvent {
     pub tx_hash: TxHash,
     pub cert_index: u64,
     pub action: PoolUpdateAction,
+}
+
+impl PoolUpdateEvent {
+    pub fn register_event(tx_hash: TxHash, cert_index: u64) -> Self {
+        Self {
+            tx_hash,
+            cert_index,
+            action: PoolUpdateAction::Registered,
+        }
+    }
+
+    pub fn retire_event(tx_hash: TxHash, cert_index: u64) -> Self {
+        Self {
+            tx_hash,
+            cert_index,
+            action: PoolUpdateAction::Deregistered,
+        }
+    }
+}
+
+/// Pool Live Stake Info
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PoolLiveStakeInfo {
+    pub live_stake: u64,
+    pub live_delegators: u64,
+    pub total_live_stakes: u64,
 }
 
 /// Pool Epoch History Data
@@ -706,7 +793,7 @@ pub struct Deregistration {
 }
 
 /// DRepChoice (=CDDL drep, badly named)
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum DRepChoice {
     /// Address key
     Key(KeyHash),
@@ -1476,10 +1563,10 @@ pub enum TxCertificate {
     StakeDelegation(StakeDelegation),
 
     /// Pool registration
-    PoolRegistration(PoolRegistration),
+    PoolRegistrationWithPos(PoolRegistrationWithPos),
 
     /// Pool retirement
-    PoolRetirement(PoolRetirement),
+    PoolRetirementWithPos(PoolRetirementWithPos),
 
     /// Genesis key delegation
     GenesisKeyDelegation(GenesisKeyDelegation),
@@ -1522,6 +1609,37 @@ pub enum TxCertificate {
 
     /// DRep update
     DRepUpdate(DRepUpdateWithPos),
+}
+
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AssetInfoRecord {
+    pub initial_mint_tx_hash: TxHash,
+    pub mint_or_burn_count: u64,
+    pub onchain_metadata: Option<Vec<u8>>,
+    pub metadata_standard: Option<AssetMetadataStandard>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct AssetMintRecord {
+    pub tx_hash: TxHash,
+    pub amount: u64,
+    pub burn: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum AssetMetadataStandard {
+    CIP25v1,
+    CIP25v2,
+    CIP68v1,
+    CIP68v2,
+    CIP68v3,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PolicyAsset {
+    pub policy: PolicyId,
+    pub name: AssetName,
+    pub quantity: u64,
 }
 
 #[cfg(test)]
