@@ -26,10 +26,8 @@ mod address_registry;
 mod state;
 
 // Subscription topics
-const DEFAULT_UTXO_DELTAS_SUBSCRIBE_TOPIC: (&str, &str) =
-    ("utxo-deltas-subscribe-topic", "cardano.utxo.deltas");
-const DEFAULT_ADDRESS_DELTAS_SUBSCRIBE_TOPIC: (&str, &str) =
-    ("address-deltas-subscribe-topic", "cardano.address.delta");
+const DEFAULT_ASSET_DELTAS_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("address-deltas-subscribe-topic", "cardano.asset.deltas");
 
 // Configuration defaults
 const DEFAULT_ENABLE_REGISTRY: (&str, bool) = ("enable-registry", false);
@@ -118,8 +116,8 @@ impl AddressState {
             index_utxos_by_asset: get_bool_flag(&config, DEFAULT_INDEX_UTXOS_BY_ASSET),
         };
 
-        let address_deltas_subscribe_topic: Option<String> = if storage_config.any_enabled() {
-            let topic = get_string_flag(&config, DEFAULT_ADDRESS_DELTAS_SUBSCRIBE_TOPIC);
+        let asset_deltas_subscribe_topic: Option<String> = if storage_config.any_enabled() {
+            let topic = get_string_flag(&config, DEFAULT_ASSET_DELTAS_SUBSCRIBE_TOPIC);
             info!("Creating subscriber on '{topic}'");
             Some(topic)
         } else {
@@ -277,7 +275,7 @@ impl AddressState {
         });
 
         // Subscribe to enabled topics
-        let address_deltas_sub = if let Some(topic) = &address_deltas_subscribe_topic {
+        let asset_deltas_sub = if let Some(topic) = &asset_deltas_subscribe_topic {
             Some(context.subscribe(topic).await?)
         } else {
             None
@@ -285,14 +283,9 @@ impl AddressState {
 
         // Start run task
         context.run(async move {
-            Self::run(
-                history_run,
-                address_deltas_sub,
-                storage_config,
-                registry_run,
-            )
-            .await
-            .unwrap_or_else(|e| error!("Failed: {e}"));
+            Self::run(history_run, asset_deltas_sub, storage_config, registry_run)
+                .await
+                .unwrap_or_else(|e| error!("Failed: {e}"));
         });
 
         Ok(())

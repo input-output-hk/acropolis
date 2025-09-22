@@ -1,4 +1,4 @@
-use acropolis_common::{AddressDelta, AddressTotalsEntry, TxHash, UTXODelta, UTxOIdentifier};
+use acropolis_common::{AddressDelta, AddressTotalsEntry, TxHash, UTxOIdentifier};
 use anyhow::Result;
 use imbl::{HashMap, Vector};
 
@@ -150,19 +150,9 @@ impl State {
     pub fn handle_address_deltas(
         &self,
         deltas: &[AddressDelta],
-        registry: &mut AddressRegistry,
+        _registry: &mut AddressRegistry,
     ) -> Result<Self> {
-        let mut new_totals = self.totals.clone();
-        for delta in deltas {
-            let address_id = registry.get_or_insert(delta.address);
-
-            if let Some(ref mut totals_map) = new_totals {
-                totals_map
-                    .entry(address_id)
-                    .and_modify(|v| *v += delta.delta.clone())
-                    .or_insert(delta.delta.clone());
-            }
-        }
+        for _delta in deltas {}
         Ok(self.clone())
     }
 }

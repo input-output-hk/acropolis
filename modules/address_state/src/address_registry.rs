@@ -1,6 +1,6 @@
 use acropolis_common::Address;
 use std::collections::HashMap;
-use std::sync::Arc; // whatever your Address type is
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct AddressId(pub usize);

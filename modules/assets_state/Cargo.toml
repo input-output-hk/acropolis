@@ -1,4 +1,4 @@
-# Acropolis reward state module
+# Acropolis asset state module
 
 [package]
 name = "acropolis_module_assets_state"
