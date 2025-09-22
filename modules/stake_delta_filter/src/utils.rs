@@ -434,39 +434,35 @@ mod test {
                 payload: byron_address.payload.to_vec(),
             })),
 
-            addresses::Address::Shelley(shelley_address) => {
-                Ok(Address::Shelley(ShelleyAddress {
-                    network: map_network(shelley_address.network())?,
+            addresses::Address::Shelley(shelley_address) => Ok(Address::Shelley(ShelleyAddress {
+                network: map_network(shelley_address.network())?,
 
-                    payment: match shelley_address.payment() {
-                        addresses::ShelleyPaymentPart::Key(hash) => {
-                            ShelleyAddressPaymentPart::PaymentKeyHash(hash.to_vec())
-                        }
-                        addresses::ShelleyPaymentPart::Script(hash) => {
-                            ShelleyAddressPaymentPart::ScriptHash(hash.to_vec())
-                        }
-                    },
+                payment: match shelley_address.payment() {
+                    addresses::ShelleyPaymentPart::Key(hash) => {
+                        ShelleyAddressPaymentPart::PaymentKeyHash(hash.to_vec())
+                    }
+                    addresses::ShelleyPaymentPart::Script(hash) => {
+                        ShelleyAddressPaymentPart::ScriptHash(hash.to_vec())
+                    }
+                },
 
-                    delegation: match shelley_address.delegation() {
-                        addresses::ShelleyDelegationPart::Null => {
-                            ShelleyAddressDelegationPart::None
-                        }
-                        addresses::ShelleyDelegationPart::Key(hash) => {
-                            ShelleyAddressDelegationPart::StakeKeyHash(hash.to_vec())
-                        }
-                        addresses::ShelleyDelegationPart::Script(hash) => {
-                            ShelleyAddressDelegationPart::ScriptHash(hash.to_vec())
-                        }
-                        addresses::ShelleyDelegationPart::Pointer(pointer) => {
-                            ShelleyAddressDelegationPart::Pointer(ShelleyAddressPointer {
-                                slot: pointer.slot(),
-                                tx_index: pointer.tx_idx(),
-                                cert_index: pointer.cert_idx(),
-                            })
-                        }
-                    },
-                }))
-            }
+                delegation: match shelley_address.delegation() {
+                    addresses::ShelleyDelegationPart::Null => ShelleyAddressDelegationPart::None,
+                    addresses::ShelleyDelegationPart::Key(hash) => {
+                        ShelleyAddressDelegationPart::StakeKeyHash(hash.to_vec())
+                    }
+                    addresses::ShelleyDelegationPart::Script(hash) => {
+                        ShelleyAddressDelegationPart::ScriptHash(hash.to_vec())
+                    }
+                    addresses::ShelleyDelegationPart::Pointer(pointer) => {
+                        ShelleyAddressDelegationPart::Pointer(ShelleyAddressPointer {
+                            slot: pointer.slot(),
+                            tx_index: pointer.tx_idx(),
+                            cert_index: pointer.cert_idx(),
+                        })
+                    }
+                },
+            })),
 
             addresses::Address::Stake(stake_address) => Ok(Address::Stake(StakeAddress {
                 network: map_network(stake_address.network())?,
