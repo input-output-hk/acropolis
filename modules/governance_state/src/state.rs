@@ -16,7 +16,7 @@ use acropolis_common::{
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::Context;
 use hex::ToHex;
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::{HashMap, HashSet}, sync::Arc};
 use tracing::{debug, error, info};
 
 pub struct State {
@@ -328,7 +328,7 @@ impl State {
         let actions = self.proposals.keys().map(|a| a.clone()).collect::<Vec<_>>();
 
         for action_id in actions.iter() {
-            info!("Epoch {}: processing action {}", new_block.epoch, action_id);
+            info!("Epoch {} started: processing action {}", new_block.epoch, action_id);
             match self.process_one_proposal(new_block.epoch, &voting_state, &action_id) {
                 Err(e) => error!("Error processing governance {action_id}: {e}"),
                 Ok(None) => (),
@@ -394,25 +394,42 @@ impl State {
                 new_block.era,
                 outcome.len()
             );
+
+            self.log_voting_stats();
+            info!("Conway voting: new epoch {}, outcomes: {outcome:?}", new_block.epoch);
             output.conway_outcomes = outcome;
         }
         return Ok(output);
     }
 
-    async fn log_stats(&self) {
+    fn log_stats(&self) {
         info!("props: {}, props_with_id: {}, votes: {}, stored proposal procedures: {}, drep stake msgs (size): {} ({})",
             self.proposal_count, self.action_proposal_count, self.votes_count, self.proposals.len(),
             self.drep_stake_messages_count, self.drep_stake.len(),
         );
+    }
 
-        for (action_id, procedure) in self.votes.iter() {
+    fn log_voting_stats(&self) {
+        info!("*** Current voting stats: ***");
+        let mut proposal_procedures = self.proposals.keys().cloned().collect::<HashSet<GovActionId>>();
+        for (action_id, voting_procedure) in self.votes.iter() {
+            let proposal = match self.proposals.get(action_id) {
+                None => " (absent) ".to_string(),
+                Some(p) => {
+                    proposal_procedures.remove(action_id);
+                    format!(" {p:?} ")
+                }
+            };
             info!(
-                "{}{} => {}",
-                action_id,
-                [" (absent)", ""][self.proposals.contains_key(action_id) as usize],
-                procedure.len()
+                "{action_id}: {proposal} => {voting_procedure:?}",
             )
         }
+
+        if !proposal_procedures.is_empty() {
+            let pp = proposal_procedures.into_iter().map(|x| format!("{x},")).collect::<String>();
+            info!("Proposal procedures without 'votes' records: [{}]", pp);
+        }
+        info!("*** End of voting stats ***");
     }
 
     pub async fn send(&self, block: &BlockInfo, message: GovernanceOutcomesMessage) -> Result<()> {
@@ -458,7 +475,7 @@ impl State {
     }
 
     pub async fn tick(&self) -> Result<()> {
-        self.log_stats().await;
+        self.log_stats();
         Ok(())
     }
 }
