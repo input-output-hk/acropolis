@@ -1,17 +1,11 @@
 //! Acropolis epoch activity counter: state storage
 
-use acropolis_common::{
-    crypto::keyhash, messages::EpochActivityMessage, BlockHash, BlockInfo, KeyHash,
-};
-use imbl::{HashMap, Vector};
+use acropolis_common::{crypto::keyhash, messages::EpochActivityMessage, BlockInfo, KeyHash};
+use imbl::HashMap;
 use tracing::info;
-
-use crate::store_config::StoreConfig;
 
 #[derive(Default, Debug, Clone)]
 pub struct State {
-    store_config: StoreConfig,
-
     // block number
     block: u64,
 
@@ -26,53 +20,27 @@ pub struct State {
 
     // fees seen this epoch
     epoch_fees: u64,
-
-    // Total blocks minted till block number
-    // Keyed by vrf_key_hash
-    total_blocks_minted: HashMap<KeyHash, u64>,
-
-    // block hashes by vrf_key_hash
-    block_hashes: Option<HashMap<KeyHash, Vector<BlockHash>>>,
 }
 
 impl State {
     // Constructor
-    pub fn new(store_config: &StoreConfig) -> Self {
+    pub fn new() -> Self {
         Self {
-            store_config: store_config.clone(),
             block: 0,
             epoch: 0,
             blocks_minted: HashMap::new(),
             epoch_blocks: 0,
             epoch_fees: 0,
-            total_blocks_minted: HashMap::new(),
-            block_hashes: if store_config.store_block_hashes {
-                Some(HashMap::new())
-            } else {
-                None
-            },
         }
     }
 
-    pub fn is_block_hashes_enabled(&self) -> bool {
-        self.store_config.store_block_hashes
-    }
-
     // Handle a block minting, taking the SPO's VRF vkey
-    pub fn handle_mint(&mut self, block: &BlockInfo, vrf_vkey: Option<&[u8]>) {
+    pub fn handle_mint(&mut self, _block: &BlockInfo, vrf_vkey: Option<&[u8]>) {
         self.epoch_blocks += 1;
         if let Some(vrf_vkey) = vrf_vkey {
             let vrf_key_hash = keyhash(vrf_vkey);
             // Count one on this hash
             *(self.blocks_minted.entry(vrf_key_hash.clone()).or_insert(0)) += 1;
-            *(self.total_blocks_minted.entry(vrf_key_hash.clone()).or_insert(0)) += 1;
-
-            if let Some(block_hashes) = self.block_hashes.as_mut() {
-                block_hashes
-                    .entry(vrf_key_hash.clone())
-                    .or_insert_with(Vector::new)
-                    .push_back(block.hash);
-            }
         }
     }
 
@@ -113,39 +81,8 @@ impl State {
         }
     }
 
-    /// Get current epoch's blocks minted for each vrf key hash
-    pub fn get_blocks_minted_by_pools(&self, vrf_key_hashes: &Vec<KeyHash>) -> Vec<u64> {
-        vrf_key_hashes
-            .iter()
-            .map(|key_hash| self.blocks_minted.get(key_hash).map(|v| *v as u64).unwrap_or(0))
-            .collect()
-    }
-
-    /// Get epoch's total blocks minted for each vrf key hash till current block number
-    pub fn get_total_blocks_minted_by_pools(&self, vrf_key_hashes: &Vec<KeyHash>) -> Vec<u64> {
-        vrf_key_hashes
-            .iter()
-            .map(|key_hash| self.total_blocks_minted.get(key_hash).map(|v| *v as u64).unwrap_or(0))
-            .collect()
-    }
-
-    pub fn get_blocks_minted_data_by_pool(&self, vrf_key_hash: &KeyHash) -> (u64, u64) {
-        (
-            self.total_blocks_minted.get(vrf_key_hash).map(|v| *v as u64).unwrap_or(0),
-            self.blocks_minted.get(vrf_key_hash).map(|v| *v as u64).unwrap_or(0),
-        )
-    }
-
-    /// Get Block Hashes by Vrf Key Hash
-    pub fn get_block_hashes(&self, vrf_key_hash: &KeyHash) -> Vec<BlockHash> {
-        let Some(block_hashes) = self.block_hashes.as_ref() else {
-            return vec![];
-        };
-
-        block_hashes
-            .get(vrf_key_hash)
-            .map(|hashes| hashes.into_iter().cloned().collect())
-            .unwrap_or_default()
+    pub fn get_latest_epoch_blocks_minted_by_pool(&self, vrf_key_hash: &KeyHash) -> u64 {
+        self.blocks_minted.get(vrf_key_hash).map(|v| *v as u64).unwrap_or(0)
     }
 }
 
@@ -191,16 +128,15 @@ mod tests {
 
     #[test]
     fn initial_state_is_zeroed() {
-        let state = State::new(&StoreConfig::default());
+        let state = State::new();
         assert_eq!(state.epoch_blocks, 0);
         assert_eq!(state.epoch_fees, 0);
         assert!(state.blocks_minted.is_empty());
-        assert!(state.block_hashes.is_none());
     }
 
     #[test]
     fn handle_mint_single_vrf_records_counts() {
-        let mut state = State::new(&StoreConfig::default());
+        let mut state = State::new();
         let vrf = b"vrf_key";
         let mut block = make_block(100);
         state.handle_mint(&block, Some(vrf));
@@ -213,12 +149,11 @@ mod tests {
         assert_eq!(state.epoch_blocks, 2);
         assert_eq!(state.blocks_minted.len(), 1);
         assert_eq!(state.blocks_minted.get(&keyhash(vrf)), Some(&2));
-        assert_eq!(state.total_blocks_minted.get(&keyhash(vrf)), Some(&2));
     }
 
     #[test]
     fn handle_mint_multiple_vrf_records_counts() {
-        let mut state = State::new(&StoreConfig::default());
+        let mut state = State::new();
         let mut block = make_block(100);
         state.handle_mint(&block, Some(b"vrf_1"));
         block.number += 1;
@@ -237,33 +172,13 @@ mod tests {
             Some(2)
         );
 
-        let blocks_minted_data = state.get_blocks_minted_data_by_pool(&keyhash(b"vrf_2"));
-        assert_eq!(blocks_minted_data.0, 2);
-        assert_eq!(blocks_minted_data.1, 2);
-    }
-
-    #[test]
-    fn store_block_hashes_after_handle_mint() {
-        let mut state = State::new(&StoreConfig::new(false, true));
-        let mut block = make_block(100);
-        state.handle_mint(&block, Some(b"vrf_1"));
-        block.number += 1;
-        state.handle_mint(&block, Some(b"vrf_2"));
-        block.number += 1;
-        state.handle_mint(&block, Some(b"vrf_2"));
-
-        let block_hashes_1 = state.get_block_hashes(&keyhash(b"vrf_1"));
-        assert_eq!(block_hashes_1.len(), 1);
-        assert_eq!(block_hashes_1[0], block.hash);
-        let block_hashes_2 = state.get_block_hashes(&keyhash(b"vrf_2"));
-        assert_eq!(block_hashes_2.len(), 2);
-        assert_eq!(block_hashes_2[0], block.hash);
-        assert_eq!(block_hashes_2[1], block.hash);
+        let blocks_minted = state.get_latest_epoch_blocks_minted_by_pool(&keyhash(b"vrf_2"));
+        assert_eq!(blocks_minted, 2);
     }
 
     #[test]
     fn handle_fees_counts_fees() {
-        let mut state = State::new(&StoreConfig::default());
+        let mut state = State::new();
         let mut block = make_block(100);
 
         state.handle_fees(&block, 100);
@@ -275,7 +190,7 @@ mod tests {
 
     #[test]
     fn end_epoch_resets_and_returns_message() {
-        let mut state = State::new(&StoreConfig::default());
+        let mut state = State::new();
         let block = make_block(1);
         state.handle_mint(&block, Some(b"vrf_1"));
         state.handle_fees(&block, 123);
@@ -297,9 +212,8 @@ mod tests {
         assert_eq!(state.epoch_fees, 0);
         assert!(state.blocks_minted.is_empty());
 
-        let blocks_minted_data = state.get_blocks_minted_data_by_pool(&keyhash(b"vrf_1"));
-        assert_eq!(blocks_minted_data.0, 1);
-        assert_eq!(blocks_minted_data.1, 0);
+        let blocks_minted = state.get_latest_epoch_blocks_minted_by_pool(&keyhash(b"vrf_1"));
+        assert_eq!(blocks_minted, 0);
     }
 
     #[tokio::test]
@@ -318,39 +232,24 @@ mod tests {
         block.number += 1;
         state.handle_mint(&block, Some(b"vrf_1"));
         state.handle_fees(&block, 123);
+        assert_eq!(
+            state.get_latest_epoch_blocks_minted_by_pool(&keyhash(b"vrf_1")),
+            2
+        );
         history.lock().await.commit(block.number, state);
 
-        let mut state = history.lock().await.get_current_state();
-        block = make_block(2);
-        let _ = state.end_epoch(&block);
-        state.handle_mint(&block, Some(b"vrf_1"));
-        state.handle_fees(&block, 123);
-        history.lock().await.commit(block.number, state);
-
-        let state = history.lock().await.get_current_state();
-        assert_eq!(state.epoch_blocks, 1);
-        assert_eq!(state.epoch_fees, 123);
-        assert_eq!(
-            1,
-            state.get_blocks_minted_by_pools(&vec![keyhash(b"vrf_1")])[0]
-        );
-        assert_eq!(
-            3,
-            state.get_total_blocks_minted_by_pools(&vec![keyhash(b"vrf_1")])[0]
-        );
-
-        // roll back of epoch 2
-        block = make_rolled_back_block(2);
+        block = make_rolled_back_block(0);
         let mut state = history.lock().await.get_rolled_back_state(block.number);
-        let _ = state.end_epoch(&block);
         state.handle_mint(&block, Some(b"vrf_2"));
         state.handle_fees(&block, 123);
-        history.lock().await.commit(block.number, state);
-
-        let state = history.lock().await.get_current_state();
         assert_eq!(
-            2,
-            state.get_total_blocks_minted_by_pools(&vec![keyhash(b"vrf_1")])[0]
+            state.get_latest_epoch_blocks_minted_by_pool(&keyhash(b"vrf_1")),
+            0
         );
+        assert_eq!(
+            state.get_latest_epoch_blocks_minted_by_pool(&keyhash(b"vrf_2")),
+            1
+        );
+        history.lock().await.commit(block.number, state);
     }
 }

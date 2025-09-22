@@ -1,6 +1,6 @@
 //! Acropolis Asset State module for Caryatid
-//! Accepts native asset mint and burn events
-//! and derives the Asset State in memory
+//! Accepts native asset mint and burn events for supply and mint history tracking
+//! as well as utxo delta events for CIP68 metadata and asset transactions tracking
 
 use crate::{
     asset_registry::AssetRegistry,
@@ -24,6 +24,8 @@ mod state;
 // Subscription topics
 const DEFAULT_ASSET_DELTAS_SUBSCRIBE_TOPIC: (&str, &str) =
     ("asset-deltas-subscribe-topic", "cardano.asset.deltas");
+const DEFAULT_UTXO_DELTAS_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("utxo-deltas-subscribe-topic", "cardano.utxo.deltas");
 
 // Configuration defaults
 const DEFAULT_STORE_ASSETS: (&str, bool) = ("store-assets", false);
@@ -45,9 +47,14 @@ impl AssetsState {
     async fn run(
         history: Arc<Mutex<StateHistory<State>>>,
         mut asset_deltas_subscription: Box<dyn Subscription<Message>>,
+        mut utxo_deltas_subscription: Option<Box<dyn Subscription<Message>>>,
         storage_config: AssetsStorageConfig,
         registry: Arc<Mutex<AssetRegistry>>,
     ) -> Result<()> {
+        if let Some(sub) = utxo_deltas_subscription.as_mut() {
+            let _ = sub.read().await?;
+            info!("Consumed initial message from utxo_deltas_subscription");
+        }
         // Main loop of synchronised messages
         loop {
             // Get current state snapshot
@@ -78,10 +85,47 @@ impl AssetsState {
                             }
                         };
                     }
+
+                    // Process CIP25 metadata updates
+                    if storage_config.store_info {
+                        let mut reg = registry.lock().await;
+                        state = match state
+                            .handle_cip25_metadata(&mut *reg, &deltas_msg.cip25_metadata_updates)
+                        {
+                            Ok(new_state) => new_state,
+                            Err(e) => {
+                                error!("CIP-25 metadata handling error: {e:#}");
+                                state
+                            }
+                        };
+                    }
                 }
                 other => {
                     error!("Unexpected message on asset-deltas subscription: {other:?}");
                     continue;
+                }
+            }
+
+            // Handle UTxO deltas if subscription is registered (store-info or store-transactions enabled)
+            if let Some(sub) = utxo_deltas_subscription.as_mut() {
+                let (_, utxo_msg) = sub.read().await?;
+                match utxo_msg.as_ref() {
+                    Message::Cardano((
+                        ref block_info,
+                        CardanoMessage::UTXODeltas(utxo_deltas_msg),
+                    )) => {
+                        Self::check_sync(&current_block, block_info, "utxo");
+                        let mut reg = registry.lock().await;
+                        state =
+                            match state.handle_cip68_metadata(&utxo_deltas_msg.deltas, &mut *reg) {
+                                Ok(new_state) => new_state,
+                                Err(e) => {
+                                    error!("CIP-68 metadata handling error: {e:#}");
+                                    state
+                                }
+                            };
+                    }
+                    other => error!("Unexpected message on utxo-deltas subscription: {other:?}"),
                 }
             }
 
@@ -90,6 +134,25 @@ impl AssetsState {
                 let mut h = history.lock().await;
                 h.commit(current_block.number, state);
             }
+        }
+    }
+
+    /// Check for synchronisation
+    fn check_sync(expected: &BlockInfo, actual: &BlockInfo, source: &str) {
+        if expected.number != actual.number {
+            error!(
+                expected = expected.number,
+                actual = actual.number,
+                source = source,
+                "Messages out of sync (expected block {}, got {} from {})",
+                expected.number,
+                actual.number,
+                source,
+            );
+            panic!(
+                "Message streams diverged: {} at {} vs {} from {}",
+                source, expected.number, actual.number, source,
+            );
         }
     }
 
@@ -116,6 +179,14 @@ impl AssetsState {
             get_string_flag(&config, DEFAULT_ASSET_DELTAS_SUBSCRIBE_TOPIC);
         info!("Creating subscriber on '{asset_deltas_subscribe_topic}'");
 
+        let utxo_deltas_subscribe_topic: Option<String> =
+            if storage_config.store_info || storage_config.store_transactions {
+                let topic = get_string_flag(&config, DEFAULT_UTXO_DELTAS_SUBSCRIBE_TOPIC);
+                info!("Creating subscriber on '{topic}'");
+                Some(topic)
+            } else {
+                None
+            };
         let assets_query_topic = get_string_flag(&config, DEFAULT_ASSETS_QUERY_TOPIC);
         info!("Creating asset query handler on '{assets_query_topic}'");
 
@@ -145,22 +216,25 @@ impl AssetsState {
                 };
 
                 let state = history.lock().await.get_current_state();
-                let reg = registry.lock().await;
 
                 let response = match query {
-                    AssetsStateQuery::GetAssetsList => match state.get_assets_list(&reg) {
-                        Ok(list) => AssetsStateQueryResponse::AssetsList(list),
-                        Err(e) => AssetsStateQueryResponse::Error(e.to_string()),
-                    },
+                    AssetsStateQuery::GetAssetsList => {
+                        let reg = registry.lock().await;
+                        match state.get_assets_list(&reg) {
+                            Ok(list) => AssetsStateQueryResponse::AssetsList(list),
+                            Err(e) => AssetsStateQueryResponse::Error(e.to_string()),
+                        }
+                    }
                     AssetsStateQuery::GetAssetInfo { policy, name } => {
+                        let reg = registry.lock().await;
                         match reg.lookup_id(&policy, &name) {
-                            Some(asset_id) => match state.get_asset_info(&asset_id) {
+                            Some(asset_id) => match state.get_asset_info(&asset_id, &reg) {
                                 Ok(Some(info)) => AssetsStateQueryResponse::AssetInfo(info),
                                 Ok(None) => AssetsStateQueryResponse::NotFound,
                                 Err(e) => AssetsStateQueryResponse::Error(e.to_string()),
                             },
                             None => {
-                                if state.config.store_info {
+                                if state.config.store_info && state.config.store_assets {
                                     AssetsStateQueryResponse::NotFound
                                 } else {
                                     AssetsStateQueryResponse::Error(
@@ -171,6 +245,7 @@ impl AssetsState {
                         }
                     }
                     AssetsStateQuery::GetAssetHistory { policy, name } => {
+                        let reg = registry.lock().await;
                         match reg.lookup_id(&policy, &name) {
                             Some(asset_id) => match state.get_asset_history(&asset_id) {
                                 Ok(Some(history)) => {
@@ -191,6 +266,7 @@ impl AssetsState {
                         }
                     }
                     AssetsStateQuery::GetAssetAddresses { policy, name } => {
+                        let reg = registry.lock().await;
                         match reg.lookup_id(&policy, &name) {
                             Some(asset_id) => match state.get_asset_addresses(&asset_id) {
                                 Ok(Some(addresses)) => {
@@ -211,6 +287,7 @@ impl AssetsState {
                         }
                     }
                     AssetsStateQuery::GetAssetTransactions { policy, name } => {
+                        let reg = registry.lock().await;
                         match reg.lookup_id(&policy, &name) {
                             Some(asset_id) => match state.get_asset_transactions(&asset_id) {
                                 Ok(Some(txs)) => AssetsStateQueryResponse::AssetTransactions(txs),
@@ -229,6 +306,7 @@ impl AssetsState {
                         }
                     }
                     AssetsStateQuery::GetPolicyIdAssets { policy } => {
+                        let reg = registry.lock().await;
                         match state.get_policy_assets(&policy, &reg) {
                             Ok(Some(assets)) => AssetsStateQueryResponse::PolicyIdAssets(assets),
                             Ok(None) => AssetsStateQueryResponse::NotFound,
@@ -270,13 +348,24 @@ impl AssetsState {
         });
 
         // Subscribe to enabled topics
-        let deltas_sub = context.subscribe(&asset_deltas_subscribe_topic).await?;
+        let asset_deltas_sub = context.subscribe(&asset_deltas_subscribe_topic).await?;
+        let utxo_deltas_sub = if let Some(topic) = &utxo_deltas_subscribe_topic {
+            Some(context.subscribe(topic).await?)
+        } else {
+            None
+        };
 
         // Start run task
         context.run(async move {
-            Self::run(history_run, deltas_sub, storage_config, registry_run)
-                .await
-                .unwrap_or_else(|e| error!("Failed: {e}"));
+            Self::run(
+                history_run,
+                asset_deltas_sub,
+                utxo_deltas_sub,
+                storage_config,
+                registry_run,
+            )
+            .await
+            .unwrap_or_else(|e| error!("Failed: {e}"));
         });
 
         Ok(())

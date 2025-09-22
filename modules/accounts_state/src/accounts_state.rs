@@ -461,6 +461,12 @@ impl AccountsState {
                         })
                     }
 
+                    AccountsStateQuery::GetPoolLiveStake { pool_operator } => {
+                        AccountsStateQueryResponse::PoolLiveStake(
+                            state.get_pool_live_stake_info(pool_operator),
+                        )
+                    }
+
                     AccountsStateQuery::GetDrepDelegators { drep } => {
                         AccountsStateQueryResponse::DrepDelegators(DrepDelegators {
                             delegators: state.get_drep_delegators(drep),

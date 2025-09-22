@@ -2,12 +2,10 @@ use crate::cost_models::{PLUTUS_V1, PLUTUS_V2, PLUTUS_V3};
 use acropolis_common::{
     messages::EpochActivityMessage,
     protocol_params::{Nonce, NonceVariant, ProtocolParams},
-    queries::{
-        assets::{AssetMintRecord, PolicyAsset},
-        governance::DRepActionUpdate,
-    },
+    queries::governance::DRepActionUpdate,
     rest_helper::ToCheckedF64,
-    PoolEpochState, Relay, Vote,
+    AssetMetadataStandard, AssetMintRecord, KeyHash, PolicyAsset, PoolEpochState, PoolUpdateAction,
+    Relay, TxHash, Vote,
 };
 use num_traits::ToPrimitive;
 use rust_decimal::Decimal;
@@ -370,6 +368,60 @@ impl From<Relay> for PoolRelayRest {
     }
 }
 
+// REST response structure for /pools/{pool_id}/updates
+#[serde_as]
+#[derive(Serialize)]
+pub struct PoolUpdateEventRest {
+    #[serde_as(as = "Hex")]
+    pub tx_hash: TxHash,
+    pub cert_index: u64,
+    pub action: PoolUpdateAction,
+}
+
+// REST response structure for /pools/{pool_id}/votes
+#[serde_as]
+#[derive(Serialize)]
+pub struct PoolVoteRest {
+    #[serde_as(as = "Hex")]
+    pub tx_hash: TxHash,
+    pub vote_index: u32,
+    pub vote: Vote,
+}
+
+// REST response structure for /pools/{pool_id}
+#[serde_as]
+#[derive(Serialize)]
+pub struct PoolInfoRest {
+    pub pool_id: String,
+    #[serde_as(as = "Hex")]
+    pub hex: KeyHash,
+    #[serde_as(as = "Hex")]
+    pub vrf_key: KeyHash,
+    pub blocks_minted: u64,
+    pub blocks_epoch: u64,
+    #[serde_as(as = "DisplayFromStr")]
+    pub live_stake: u64,
+    pub live_size: Decimal,
+    pub live_saturation: Decimal,
+    pub live_delegators: u64,
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub active_stake: Option<u64>,
+    pub active_size: Option<f64>,
+    #[serde_as(as = "DisplayFromStr")]
+    pub declared_pledge: u64,
+    #[serde_as(as = "DisplayFromStr")]
+    pub live_pledge: u64,
+    pub margin_cost: f32,
+    #[serde_as(as = "DisplayFromStr")]
+    pub fixed_cost: u64,
+    pub reward_account: String,
+    pub pool_owners: Vec<String>,
+    #[serde_as(as = "Option<Vec<Hex>>")]
+    pub registration: Option<Vec<TxHash>>,
+    #[serde_as(as = "Option<Vec<Hex>>")]
+    pub retirement: Option<Vec<TxHash>>,
+}
+
 // REST response structure for protocol params
 #[derive(Serialize)]
 pub struct ProtocolParamsRest {
@@ -628,6 +680,31 @@ impl ProtocolParamsRestExt for ProtocolParams {
 
         Value::Object(map)
     }
+}
+
+#[derive(Serialize)]
+pub struct AssetInfoRest {
+    pub asset: String,
+    pub policy_id: String,
+    pub asset_name: String,
+    pub fingerprint: String,
+    pub quantity: String,
+    pub initial_mint_tx_hash: String,
+    pub mint_or_burn_count: u64,
+    pub onchain_metadata: Option<Value>,
+    pub onchain_metadata_standard: Option<AssetMetadataStandard>,
+    pub onchain_metadata_extra: Option<String>,
+    pub metadata: Option<AssetMetadata>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct AssetMetadata {
+    pub name: String,
+    pub description: String,
+    pub ticker: Option<String>,
+    pub url: Option<String>,
+    pub logo: Option<String>,
+    pub decimals: Option<u8>,
 }
 
 #[derive(Debug, Serialize)]
