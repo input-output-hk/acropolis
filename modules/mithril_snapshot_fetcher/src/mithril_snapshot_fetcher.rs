@@ -463,6 +463,7 @@ async fn prompt_pause(description: String, next_description: String) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mithril_common::test::double::Dummy;
 
     #[test]
     fn can_save_and_load_snapshot_metadata() {
