@@ -32,8 +32,6 @@ mod fake_immutable_utxo_store;
 use fake_immutable_utxo_store::FakeImmutableUTXOStore;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.utxo.deltas";
-const DEFAULT_SINGLE_UTXO_TOPIC: (&str, &str) = ("handle-topic-single-utxo", "rest.get.utxos.*");
-
 const DEFAULT_STORE: &str = "memory";
 
 /// UTXO state module
@@ -51,11 +49,6 @@ impl UTXOState {
         let subscribe_topic =
             config.get_string("subscribe-topic").unwrap_or(DEFAULT_SUBSCRIBE_TOPIC.to_string());
         info!("Creating subscriber on '{subscribe_topic}'");
-
-        let single_utxo_topic = config
-            .get_string(DEFAULT_SINGLE_UTXO_TOPIC.0)
-            .unwrap_or(DEFAULT_SINGLE_UTXO_TOPIC.1.to_string());
-        info!("Creating REST handler on '{single_utxo_topic}'");
 
         // Create store
         let store_type = config.get_string("store").unwrap_or(DEFAULT_STORE.to_string());

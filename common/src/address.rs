@@ -7,14 +7,14 @@ use anyhow::{anyhow, bail, Result};
 use serde_with::{hex::Hex, serde_as};
 
 /// a Byron-era address
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ByronAddress {
     /// Raw payload
     pub payload: Vec<u8>,
 }
 
 /// Address network identifier
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum AddressNetwork {
     /// Mainnet
     Main,
@@ -30,7 +30,7 @@ impl Default for AddressNetwork {
 }
 
 /// A Shelley-era address - payment part
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum ShelleyAddressPaymentPart {
     /// Payment to a key
     PaymentKeyHash(KeyHash),
@@ -59,7 +59,7 @@ pub struct ShelleyAddressPointer {
 }
 
 /// A Shelley-era address - delegation part
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum ShelleyAddressDelegationPart {
     /// No delegation (enterprise addresses)
     None,
@@ -81,7 +81,7 @@ impl Default for ShelleyAddressDelegationPart {
 }
 
 /// A Shelley-era address
-#[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ShelleyAddress {
     /// Network id
     pub network: AddressNetwork,
@@ -174,7 +174,7 @@ impl ShelleyAddress {
 
 /// Payload of a stake address
 #[serde_as]
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum StakeAddressPayload {
     /// Stake key
     StakeKeyHash(#[serde_as(as = "Hex")] Vec<u8>),
@@ -196,7 +196,7 @@ impl StakeAddressPayload {
 }
 
 /// A stake address
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct StakeAddress {
     /// Network id
     pub network: AddressNetwork,
@@ -274,7 +274,7 @@ impl StakeAddress {
 }
 
 /// A Cardano address
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum Address {
     None,
     Byron(ByronAddress),

@@ -1642,6 +1642,19 @@ pub struct PolicyAsset {
     pub quantity: u64,
 }
 
+#[derive(Default, Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AddressTotalsEntry {
+    pub sent: NativeAssets,
+    pub received: NativeAssets,
+    pub tx_count: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct UTxOIdentifier {
+    pub tx_identifier: u64,
+    pub tx_index: u64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

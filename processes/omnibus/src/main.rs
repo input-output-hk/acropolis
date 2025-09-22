@@ -100,6 +100,7 @@ pub async fn main() -> Result<()> {
     EpochsState::register(&mut process);
     AccountsState::register(&mut process);
     AssetsState::register(&mut process);
+    TransactionState::register(&mut process);
     BlockfrostREST::register(&mut process);
     SPDDState::register(&mut process);
     DRDDState::register(&mut process);

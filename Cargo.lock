@@ -55,6 +55,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "acropolis_module_address_state"
+version = "0.1.0"
+dependencies = [
+ "acropolis_common",
+ "anyhow",
+ "caryatid_sdk",
+ "config",
+ "hex",
+ "imbl 5.0.0",
+ "serde_cbor",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "acropolis_module_assets_state"
 version = "0.1.0"
 dependencies = [
@@ -359,6 +374,7 @@ version = "0.1.0"
 dependencies = [
  "acropolis_common",
  "acropolis_module_accounts_state",
+ "acropolis_module_address_state",
  "acropolis_module_assets_state",
  "acropolis_module_block_unpacker",
  "acropolis_module_drdd_state",

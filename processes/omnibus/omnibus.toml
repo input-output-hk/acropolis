@@ -96,6 +96,19 @@ store-addresses = false
 # Enables /assets/{asset} endpoint (requires store-assets to be enabled)
 index-by-policy = false
 
+[module.address-state]
+# Enables address registry for query lookups
+enable-registry = false
+# Enables /addresses/{address}, /addresses/{address}/extended,
+# and /addresses/{address}/utxos endpoints
+store-info = false
+# Enables /addresses/{address}/totals endpoint
+store-totals = false
+# Enables /addresses/{address}/transactions endpoint
+store-transactions = false
+# Enables /addresses/{address}/utxos/{asset} endpoint
+index-utxos-by-asset = false
+
 [module.clock]
 
 [module.rest-server]
