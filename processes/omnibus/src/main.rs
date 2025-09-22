@@ -38,11 +38,11 @@ use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{filter, fmt, EnvFilter, Registry};
 
-// #[cfg(not(target_env = "msvc"))]
-// use tikv_jemallocator::Jemalloc;
-// #[cfg(not(target_env = "msvc"))]
-// #[global_allocator]
-// static GLOBAL: Jemalloc = Jemalloc;
+#[cfg(not(target_env = "msvc"))]
+use tikv_jemallocator::Jemalloc;
+#[cfg(not(target_env = "msvc"))]
+#[global_allocator]
+static GLOBAL: Jemalloc = Jemalloc;
 
 /// Standard main
 #[tokio::main]
