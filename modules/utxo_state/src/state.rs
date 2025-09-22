@@ -472,6 +472,7 @@ mod tests {
                     ],
                 )],
             ),
+            datum: None,
         };
 
         let block = create_block(BlockStatus::Immutable, 1, 1);
@@ -528,6 +529,7 @@ mod tests {
                     ],
                 )],
             ),
+            datum: None,
         };
 
         let block1 = create_block(BlockStatus::Immutable, 1, 1);
@@ -569,6 +571,7 @@ mod tests {
                     ],
                 )],
             ),
+            datum: None,
         };
 
         let block10 = create_block(BlockStatus::Volatile, 10, 10);
@@ -609,6 +612,7 @@ mod tests {
                     ],
                 )],
             ),
+            datum: None,
         };
 
         let block10 = create_block(BlockStatus::Volatile, 10, 10);
@@ -661,6 +665,7 @@ mod tests {
                     ],
                 )],
             ),
+            datum: None,
         };
 
         let block1 = create_block(BlockStatus::Volatile, 1, 1);
@@ -708,6 +713,7 @@ mod tests {
                     ],
                 )],
             ),
+            datum: None,
         };
 
         let block1 = create_block(BlockStatus::Volatile, 1, 1);
@@ -813,6 +819,7 @@ mod tests {
                     ],
                 )],
             ),
+            datum: None,
         };
 
         let block1 = create_block(BlockStatus::Immutable, 1, 1);
@@ -868,6 +875,7 @@ mod tests {
                     ],
                 )],
             ),
+            datum: None,
         };
 
         let block10 = create_block(BlockStatus::Volatile, 10, 10);
@@ -922,6 +930,7 @@ mod tests {
                     ],
                 )],
             ),
+            datum: None,
         };
 
         let block10 = create_block(BlockStatus::Volatile, 10, 10);

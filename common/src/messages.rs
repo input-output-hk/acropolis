@@ -74,7 +74,10 @@ pub struct UTXODeltasMessage {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AssetDeltasMessage {
     /// Ordered set of deltas
-    pub deltas: Vec<(TxHash, Vec<(PolicyId, Vec<NativeAssetDelta>)>)>,
+    pub deltas: Vec<(TxHash, NativeAssetsDelta)>,
+
+    /// CIP 25 metadata blobs (Using 721 label)
+    pub cip25_metadata_updates: Vec<Vec<u8>>,
 }
 
 /// Message encapsulating multiple transaction certificates, in order
