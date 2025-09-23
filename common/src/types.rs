@@ -18,6 +18,13 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 use std::ops::Neg;
 
+#[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NetworkId {
+    Testnet,
+    #[default]
+    Mainnet,
+}
+
 /// Protocol era
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,

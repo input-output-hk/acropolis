@@ -25,6 +25,7 @@ const DEFAULT_CACHE_DIR: (&str, &str) = ("cache-dir", "upstream-cache");
 const BYRON_TIMESTAMP: &str = "byron-timestamp";
 const SHELLEY_EPOCH: &str = "shelley-epoch";
 const SHELLEY_EPOCH_LEN: &str = "shelley-epoch-len";
+const SHELLEY_GENESIS_HASH: &str = "shelley-genesis-hash";
 
 #[derive(Clone, Debug, serde::Deserialize, PartialEq)]
 pub enum SyncPoint {
@@ -78,10 +79,12 @@ impl FetcherConfig {
         let byron_timestamp = config.get(BYRON_TIMESTAMP).ok()?;
         let shelley_epoch = config.get(SHELLEY_EPOCH).ok()?;
         let shelley_epoch_len = config.get(SHELLEY_EPOCH_LEN).ok()?;
+        let shelley_genesis_hash = config.get::<String>(SHELLEY_GENESIS_HASH).ok()?.as_bytes().try_into().unwrap();
         Some(GenesisValues {
             byron_timestamp,
             shelley_epoch,
             shelley_epoch_len,
+            shelley_genesis_hash,
         })
     }
 
