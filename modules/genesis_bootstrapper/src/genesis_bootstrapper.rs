@@ -7,7 +7,7 @@ use acropolis_common::{
         CardanoMessage, GenesisCompleteMessage, Message, PotDeltasMessage, UTXODeltasMessage,
     },
     Address, BlockHash, BlockInfo, BlockStatus, ByronAddress, Era, Lovelace, LovelaceDelta, Pot,
-    PotDelta, TxOutput, UTXODelta, Value,
+    PotDelta, TxOutput, UTXODelta, UTxOIdentifier, Value,
 };
 use anyhow::Result;
 use caryatid_sdk::{module, Context, Module};
@@ -119,10 +119,9 @@ impl GenesisBootstrapper {
                 // Convert the AVVM distributions into pseudo-UTXOs
                 let gen_utxos = genesis_utxos(&byron_genesis);
                 let mut total_allocated: u64 = 0;
-                for (hash, address, amount) in gen_utxos.iter() {
+                for (output_index, (_hash, address, amount)) in gen_utxos.iter().enumerate() {
                     let tx_output = TxOutput {
-                        tx_hash: **hash,
-                        index: 0,
+                        utxo_identifier: UTxOIdentifier::new(0, 0, output_index as u16),
                         address: Address::Byron(ByronAddress {
                             payload: address.payload.to_vec(),
                         }),

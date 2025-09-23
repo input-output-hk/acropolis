@@ -20,6 +20,8 @@ use pallas::ledger::{primitives, traverse, traverse::MultiEraTx};
 use tracing::{debug, error, info, info_span, Instrument};
 
 mod map_parameters;
+mod tx_registry;
+use crate::tx_registry::TxRegistry;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.txs";
 const CIP25_METADATA_LABEL: u64 = 721;
@@ -94,6 +96,8 @@ impl TxUnpacker {
             info!("Publishing block fees on '{topic}'");
         }
 
+        let tx_registry = Arc::new(TxRegistry::new(None)?);
+
         let mut subscription = context.subscribe(&subscribe_topic).await?;
         context.clone().run(async move {
             loop {
@@ -154,6 +158,11 @@ impl TxUnpacker {
                                 // Parse the tx
                                 match MultiEraTx::decode(&raw_tx) {
                                     Ok(tx) => {
+                                        let tx_hash: TxHash = tx.hash().to_vec().try_into().expect("invalid tx hash length");
+                                        if let Err(e) = tx_registry.insert(block.number as u32, tx_index as u16, tx_hash) {
+                                                error!("Failed to insert tx into registry: {e}");
+                                            }
+
                                         let inputs = tx.consumes();
                                         let outputs = tx.produces();
                                         let certs = tx.certs();
@@ -180,14 +189,22 @@ impl TxUnpacker {
                                             // Add all the inputs
                                             for input in inputs {  // MultiEraInput
                                                 let oref = input.output_ref();
+                                                let index = oref.index() as u16;
 
-                                                // Construct message
-                                                let tx_input = TxInput {
-                                                    tx_hash: **oref.hash(),
-                                                    index: oref.index(),
-                                                };
+                                                match tx_registry.lookup_by_hash(oref.hash()) {
+                                                    Ok(Some(tx_identifier)) => {
+                                                        // Construct message
+                                                        let tx_input = TxInput {
+                                                            tx_identifier,
+                                                            output_index: index
+                                                        };
 
-                                                utxo_deltas.push(UTXODelta::Input(tx_input));
+                                                        utxo_deltas.push(UTXODelta::Input(tx_input));
+                                                    }
+                                                    Ok(None) => {}
+                                                    Err(e) =>
+                                                                error!("Output {index} in tx ignored: {e}")
+                                                }
                                             }
 
                                             // Add all the outputs
@@ -199,8 +216,7 @@ impl TxUnpacker {
                                                         match map_parameters::map_address(&pallas_address) {
                                                             Ok(address) => {
                                                                 let tx_output = TxOutput {
-                                                                    tx_hash: *tx.hash(),
-                                                                    index: index as u64,
+                                                                    utxo_identifier: UTxOIdentifier::new(block.number as u32, tx_index as u16, index as u16),
                                                                     address: address,
                                                                     value: map_parameters::map_value(&output.value()),
                                                                     datum: map_parameters::map_datum(&output.datum())
@@ -221,8 +237,6 @@ impl TxUnpacker {
                                         }
 
                                         if publish_asset_deltas_topic.is_some() {
-                                            let tx_hash: TxHash = tx.hash().to_vec().try_into().expect("invalid tx hash length");
-
                                             let mut tx_deltas: Vec<(PolicyId, Vec<NativeAssetDelta>)> = Vec::new();
 
                                             // Mint deltas

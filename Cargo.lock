@@ -308,6 +308,7 @@ dependencies = [
  "async-trait",
  "caryatid_sdk",
  "config",
+ "fjall",
  "futures",
  "hex",
  "pallas 0.32.1",
