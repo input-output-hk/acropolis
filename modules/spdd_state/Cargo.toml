@@ -9,15 +9,17 @@ description = "Stake Pool Delegation Distribution State Tracker"
 license = "Apache-2.0"
 
 [dependencies]
-caryatid_sdk = "0.12"
-config = "0.15.11"
-anyhow = "1.0"
 acropolis_common = { path = "../../common" }
-tracing = "0.1.40"
-tokio = { version = "1", features = ["full"] }
-serde_json = "1.0.132"
-hex = "0.4.3"
-imbl = { version = "5.0.0", features = ["serde"] }
+
+caryatid_sdk = { workspace = true }
+
+anyhow = { workspace = true }
+config = { workspace = true }
+hex = { workspace = true }
+imbl = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+serde_json = { workspace = true }
 
 [lib]
 path = "src/spdd_state.rs"

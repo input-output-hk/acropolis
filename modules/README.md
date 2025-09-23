@@ -69,10 +69,10 @@ license = "Apache-2.0"
 [dependencies]
 caryatid_sdk = "0.4.0"
 acropolis_common = { path = "../../common" }
-anyhow = "1.0"
+anyhow = { workspace = true }
 async-trait = "0.1"
-tokio = { version = "1", features = ["full"] }
-config = "0.15.11"
+tokio = { workspace = true }
+config = { workspace = true }
 tracing = "0.1.40"
 
 [lib]
