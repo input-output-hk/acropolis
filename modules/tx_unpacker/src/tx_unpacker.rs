@@ -195,8 +195,7 @@ impl TxUnpacker {
                                                     Ok(Some(tx_identifier)) => {
                                                         // Construct message
                                                         let tx_input = TxInput {
-                                                            tx_identifier,
-                                                            output_index: index
+                                                            utxo_identifier: UTxOIdentifier::new(tx_identifier.block_number(), tx_identifier.tx_index(), index),
                                                         };
 
                                                         utxo_deltas.push(UTXODelta::Input(tx_input));

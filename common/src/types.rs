@@ -290,11 +290,8 @@ pub struct TxOutput {
 /// Transaction input (UTXO reference)
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TxInput {
-    /// Block number where the referenced UTxO was created
-    pub tx_identifier: TxIdentifier,
-
-    /// Output index in the transaction
-    pub output_index: u16,
+    /// Identifer of the referenced UTxO
+    pub utxo_identifier: UTxOIdentifier,
 }
 
 /// Compact transaction identifier (block_number + tx_index).

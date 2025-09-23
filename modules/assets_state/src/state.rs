@@ -516,8 +516,7 @@ mod tests {
     };
     use acropolis_common::{
         AssetInfoRecord, AssetMetadataStandard, AssetName, Datum, NativeAsset, NativeAssetDelta,
-        PolicyId, ShelleyAddress, TxHash, TxIdentifier, TxInput, TxOutput, UTXODelta,
-        UTxOIdentifier, Value,
+        PolicyId, ShelleyAddress, TxHash, TxInput, TxOutput, UTXODelta, UTxOIdentifier, Value,
     };
 
     fn dummy_policy(byte: u8) -> PolicyId {
@@ -1017,8 +1016,7 @@ mod tests {
         );
 
         let input_delta = UTXODelta::Input(TxInput {
-            tx_identifier: TxIdentifier::new(0, 0),
-            output_index: 0,
+            utxo_identifier: UTxOIdentifier::new(0, 0, 0),
         });
         let output = make_output(policy_id, name, None);
         let output_delta = UTXODelta::Output(output);

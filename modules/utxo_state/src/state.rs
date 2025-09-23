@@ -173,11 +173,7 @@ impl State {
 
     /// Observe an input UTXO spend
     pub async fn observe_input(&mut self, input: &TxInput, block: &BlockInfo) -> Result<()> {
-        let key = UTxOIdentifier::new(
-            input.tx_identifier.block_number(),
-            input.tx_identifier.tx_index(),
-            input.output_index,
-        );
+        let key = input.utxo_identifier;
 
         if tracing::enabled!(tracing::Level::DEBUG) {
             debug!(
@@ -383,9 +379,7 @@ impl State {
 mod tests {
     use super::*;
     use crate::InMemoryImmutableUTXOStore;
-    use acropolis_common::{
-        AssetName, BlockHash, ByronAddress, Era, NativeAsset, TxIdentifier, Value,
-    };
+    use acropolis_common::{AssetName, BlockHash, ByronAddress, Era, NativeAsset, Value};
     use config::Config;
     use tokio::sync::Mutex;
 
@@ -512,11 +506,11 @@ mod tests {
         assert_eq!(1, state.count_valid_utxos().await);
 
         let input = TxInput {
-            tx_identifier: TxIdentifier::new(
+            utxo_identifier: UTxOIdentifier::new(
                 output.utxo_identifier.block_number(),
                 output.utxo_identifier.tx_index(),
+                output.utxo_identifier.output_index(),
             ),
-            output_index: output.utxo_identifier.output_index(),
         };
 
         let block2 = create_block(BlockStatus::Immutable, 2, 2);
@@ -598,11 +592,11 @@ mod tests {
 
         // Spend it in block 11
         let input = TxInput {
-            tx_identifier: TxIdentifier::new(
+            utxo_identifier: UTxOIdentifier::new(
                 output.utxo_identifier.block_number(),
                 output.utxo_identifier.tx_index(),
+                output.utxo_identifier.output_index(),
             ),
-            output_index: output.utxo_identifier.output_index(),
         };
 
         let block11 = create_block(BlockStatus::Volatile, 11, 11);
@@ -699,11 +693,11 @@ mod tests {
         assert_eq!(1, state.count_valid_utxos().await);
 
         let input = TxInput {
-            tx_identifier: TxIdentifier::new(
+            utxo_identifier: UTxOIdentifier::new(
                 output.utxo_identifier.block_number(),
                 output.utxo_identifier.tx_index(),
+                output.utxo_identifier.output_index(),
             ),
-            output_index: output.utxo_identifier.output_index(),
         };
 
         let block2 = create_block(BlockStatus::Volatile, 2, 2);
@@ -807,11 +801,11 @@ mod tests {
         assert_eq!(42, *observer.balance.lock().await);
 
         let input = TxInput {
-            tx_identifier: TxIdentifier::new(
+            utxo_identifier: UTxOIdentifier::new(
                 output.utxo_identifier.block_number(),
                 output.utxo_identifier.tx_index(),
+                output.utxo_identifier.output_index(),
             ),
-            output_index: output.utxo_identifier.output_index(),
         };
 
         let block2 = create_block(BlockStatus::Immutable, 2, 2);
@@ -921,11 +915,11 @@ mod tests {
 
         // Spend it in block 11
         let input = TxInput {
-            tx_identifier: TxIdentifier::new(
+            utxo_identifier: UTxOIdentifier::new(
                 output.utxo_identifier.block_number(),
                 output.utxo_identifier.tx_index(),
+                output.utxo_identifier.output_index(),
             ),
-            output_index: output.utxo_identifier.output_index(),
         };
 
         let block11 = create_block(BlockStatus::Volatile, 11, 11);

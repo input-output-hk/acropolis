@@ -67,6 +67,7 @@ impl TxRegistry {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn lookup_by_index(&self, block_number: u32, tx_index: u16) -> Result<Option<TxHash>> {
         let id = TxIdentifier::new(block_number, tx_index);
         Ok(self.fwd.get(id.as_bytes())?.map(|ivec| ivec.as_ref().try_into().unwrap()))
