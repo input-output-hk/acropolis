@@ -55,11 +55,38 @@ impl TxRegistry {
 
     pub fn insert(&self, block_number: u32, tx_index: u16, tx_hash: TxHash) -> Result<()> {
         let id = TxIdentifier::new(block_number, tx_index);
+        let id_bytes = id.as_bytes();
+
+        if let Some(existing) = self.fwd.get(id_bytes)? {
+            let old_hash: TxHash = existing.as_ref().try_into().unwrap();
+            if old_hash == tx_hash {
+                return Ok(());
+            } else {
+                return Err(anyhow::anyhow!(
+                    "conflicting mapping for id={:?}: old={:?}, new={:?}",
+                    id,
+                    old_hash,
+                    tx_hash
+                ));
+            }
+        }
+
+        if let Some(existing) = self.rev.get(tx_hash)? {
+            if existing.as_ref() == id_bytes {
+                return Ok(());
+            } else {
+                return Err(anyhow::anyhow!(
+                    "conflicting mapping for hash={:?}: old={:?}, new={:?}",
+                    tx_hash,
+                    existing.as_ref(),
+                    id_bytes
+                ));
+            }
+        }
+
         let should_flush = self.should_flush();
-
-        self.fwd.insert(id.as_bytes(), tx_hash)?;
-        self.rev.insert(tx_hash, id.as_bytes())?;
-
+        self.fwd.insert(id_bytes, tx_hash)?;
+        self.rev.insert(tx_hash, id_bytes)?;
         if should_flush {
             self.keyspace.persist(PersistMode::Buffer)?;
         }
