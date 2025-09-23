@@ -190,6 +190,7 @@ dependencies = [
  "acropolis_common",
  "anyhow",
  "async-trait",
+ "blake2 0.10.6",
  "caryatid_sdk",
  "config",
  "hex",

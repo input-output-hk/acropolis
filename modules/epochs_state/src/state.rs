@@ -1,7 +1,15 @@
 //! Acropolis epoch activity counter: state storage
 
-use acropolis_common::{crypto::keyhash, messages::EpochActivityMessage, BlockInfo, KeyHash};
+use acropolis_common::{
+    crypto::keyhash,
+    genesis_values::GenesisValues,
+    messages::{EpochActivityMessage, ProtocolParamsMessage},
+    protocol_params::{Nonces, PraosParams},
+    BlockHash, BlockInfo, KeyHash,
+};
+use anyhow::Result;
 use imbl::HashMap;
+use pallas::ledger::traverse::MultiEraHeader;
 use tracing::info;
 
 #[derive(Default, Debug, Clone)]
@@ -20,6 +28,12 @@ pub struct State {
 
     // fees seen this epoch
     epoch_fees: u64,
+
+    // nonces will be set starting from Shelly Era
+    nonces: Option<Nonces>,
+
+    // protocol parameter for Praos and TPraos
+    praos_params: Option<PraosParams>,
 }
 
 impl State {
@@ -31,10 +45,115 @@ impl State {
             blocks_minted: HashMap::new(),
             epoch_blocks: 0,
             epoch_fees: 0,
+            nonces: None,
+            praos_params: None,
         }
     }
 
-    // Handle a block minting, taking the SPO's VRF vkey
+    /// Handle protocol parameters updates
+    pub fn handle_protocol_parameters(&mut self, msg: &ProtocolParamsMessage) {
+        if let Some(shelly_params) = msg.params.shelley.as_ref() {
+            self.praos_params = Some(shelly_params.into());
+        }
+    }
+
+    // Handle a block header
+    pub fn handle_block_header(
+        &mut self,
+        genesis: &GenesisValues,
+        block_info: &BlockInfo,
+        header: &MultiEraHeader,
+    ) -> Result<()> {
+        let new_epoch = block_info.new_epoch;
+
+        // update nonces starting from Shelley Era
+        if block_info.epoch >= genesis.shelley_epoch {
+            let Some(praos_params) = self.praos_params.as_ref() else {
+                return Err(anyhow::anyhow!("Praos Param is not set"));
+            };
+
+            // if Shelley Era's first epoch
+            if new_epoch && block_info.epoch == genesis.shelley_epoch {
+                self.nonces = Some(Nonces::shelley_genesis_nonces(genesis));
+                return Ok(());
+            }
+
+            // otherwise update Nonces
+
+            // current nonces must be set
+            let Some(current_nonces) = self.nonces.as_ref() else {
+                return Err(anyhow::anyhow!(
+                    "Current Nonces are not set after Shelley Era"
+                ));
+            };
+
+            // check for stability window
+            let is_within_stability_window = Nonces::randomness_stability_window(
+                block_info.era,
+                block_info.slot,
+                genesis,
+                praos_params,
+            );
+
+            // extract header's nonce vrf output
+            let Some(nonce_vrf_output) = header.nonce_vrf_output().ok() else {
+                return Err(anyhow::anyhow!("Header Nonce VRF output error"));
+            };
+
+            // Compute the new evolving nonce by combining it with the current one and the header's VRF
+            // output.
+            let evolving = Nonces::evolve(&current_nonces.evolving, &nonce_vrf_output)?;
+
+            // there must be parent hash
+            let Some(parent_hash) = header.previous_hash().map(|h| *h as BlockHash) else {
+                return Err(anyhow::anyhow!("Header Parent hash error"));
+            };
+
+            let new_nonces = Nonces {
+                epoch: block_info.epoch,
+                evolving: evolving.clone(),
+                // On epoch changes, compute the new active nonce by combining:
+                //   1. the (now stable) candidate; and
+                //   2. the previous epoch's last block's parent header hash.
+                //
+                // If the epoch hasn't changed, then our active nonce is unchanged.
+                active: if new_epoch {
+                    Nonces::from_candidate(&current_nonces.candidate, &current_nonces.prev_lab)?
+                } else {
+                    current_nonces.active.clone()
+                },
+                // Unless we are within the randomness stability window, we also update the candidate. This
+                // means that outside of the stability window, we always have:
+                //
+                //   evolving == candidate
+                //
+                // They only diverge for the last blocks of each epoch; The candidate remains stable while
+                // the rolling nonce keeps evolving in preparation of the next epoch. Another way to look
+                // at it is to think that there's always an entire epoch length contributing to the nonce
+                // randomness, but it spans over two epochs.
+                candidate: if is_within_stability_window {
+                    evolving.clone()
+                } else {
+                    current_nonces.candidate.clone()
+                },
+                // Last Applied Block is the Header's Prev hash.
+                lab: parent_hash.into(),
+                // Previous LAB stay same during epoch
+                // only Epoch's Boundary, will be last block's Previous Epoch's LAB
+                prev_lab: if new_epoch {
+                    current_nonces.lab.clone()
+                } else {
+                    current_nonces.prev_lab.clone()
+                },
+            };
+
+            self.nonces = Some(new_nonces);
+        };
+
+        Ok(())
+    }
+
+    // Handle mint
     pub fn handle_mint(&mut self, _block: &BlockInfo, vrf_vkey: Option<&[u8]>) {
         self.epoch_blocks += 1;
         if let Some(vrf_vkey) = vrf_vkey {
@@ -78,6 +197,7 @@ impl State {
             total_blocks: self.epoch_blocks,
             total_fees: self.epoch_fees,
             vrf_vkey_hashes: self.blocks_minted.iter().map(|(k, v)| (k.clone(), *v)).collect(),
+            nonce: self.nonces.clone().map(|n| n.active.clone()),
         }
     }
 
