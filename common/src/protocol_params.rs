@@ -148,6 +148,23 @@ pub struct PraosParams {
     pub randomness_stabilization_window: u64,
 }
 
+impl PraosParams {
+    pub fn mainnet() -> Self {
+        PraosParams {
+            security_param: 2160,
+            active_slots_coeff: RationalNumber::new(1, 20),
+            epoch_length: 432000,
+            max_kes_evolutions: 62,
+            max_lovelace_supply: 45_000_000_000_000_000,
+            network_id: NetworkId::Mainnet,
+            slot_length: 1,
+            slots_per_kes_period: 129600,
+            stability_window: 129600,
+            randomness_stabilization_window: 172800,
+        }
+    }
+}
+
 impl From<&ShelleyParams> for PraosParams {
     fn from(params: &ShelleyParams) -> Self {
         let active_slots_coeff = params.active_slots_coeff;
