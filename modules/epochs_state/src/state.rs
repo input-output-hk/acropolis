@@ -197,7 +197,7 @@ impl State {
             total_blocks: self.epoch_blocks,
             total_fees: self.epoch_fees,
             vrf_vkey_hashes: self.blocks_minted.iter().map(|(k, v)| (k.clone(), *v)).collect(),
-            nonce: self.nonces.clone().map(|n| n.active.clone()),
+            nonce: self.nonces.as_ref().map(|n| n.active.hash.clone()).flatten(),
         }
     }
 
