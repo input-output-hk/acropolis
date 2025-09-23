@@ -79,7 +79,8 @@ impl FetcherConfig {
         let byron_timestamp = config.get(BYRON_TIMESTAMP).ok()?;
         let shelley_epoch = config.get(SHELLEY_EPOCH).ok()?;
         let shelley_epoch_len = config.get(SHELLEY_EPOCH_LEN).ok()?;
-        let shelley_genesis_hash = config.get::<String>(SHELLEY_GENESIS_HASH).ok()?.as_bytes().try_into().unwrap();
+        let shelley_genesis_hash =
+            config.get::<String>(SHELLEY_GENESIS_HASH).ok()?.as_bytes().try_into().unwrap();
         Some(GenesisValues {
             byron_timestamp,
             shelley_epoch,
