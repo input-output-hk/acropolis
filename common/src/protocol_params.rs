@@ -302,7 +302,7 @@ impl Nonces {
     /// Specifically, we combine it with `η` (a.k.a eta), which is a blake2b-256 hash of the
     /// tagged leader VRF output after a range extension. The range extension is, yet another
     /// blake2b-256 hash.
-    pub fn evolve(current: &Nonce, nonce_vrf_output: &Vec<u8>,) -> Result<Nonce> {
+    pub fn evolve(current: &Nonce, nonce_vrf_output: &Vec<u8>) -> Result<Nonce> {
         // first hash nonce_vrf_output
         let mut hasher = Blake2b::<U32>::new();
         hasher.update(nonce_vrf_output.as_slice());
