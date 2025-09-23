@@ -11,18 +11,20 @@ build = "build.rs"
 
 [dependencies]
 acropolis_common = { path = "../../common" }
-anyhow = "1.0"
+
+caryatid_sdk = { workspace = true }
+
+anyhow = { workspace = true }
 async-trait = "0.1"
-caryatid_sdk = "0.12"
-config = "0.15.11"
-hex = "0.4.3"
+config = { workspace = true }
+hex = { workspace = true }
 num-rational = "0.4.2"
-pallas = "0.32.1"
-serde = { version = "1.0.214", features = ["derive"] }
-serde_json = "1.0"
-serde_with = { version = "3.12.0", features = ["hex"] }
-tokio = { version = "1", features = ["full"] }
-tracing = "0.1.40"
+pallas = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_with = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
 
 [build-dependencies]
 reqwest = { version = "0.11", features = ["blocking"] }

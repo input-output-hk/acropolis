@@ -8,4 +8,4 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 cbor_event = "2.4.0"
-hex = "0.4.3"
+hex = { workspace = true }
