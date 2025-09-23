@@ -19,7 +19,10 @@ impl GenesisValues {
             byron_timestamp: 1506203091,
             shelley_epoch: 208,
             shelley_epoch_len: 432000,
-            shelley_genesis_hash: MAINNET_SHELLEY_GENESIS_HASH.as_bytes().try_into().unwrap(),
+            shelley_genesis_hash: hex::decode(MAINNET_SHELLEY_GENESIS_HASH)
+                .unwrap()
+                .try_into()
+                .unwrap(),
         }
     }
 

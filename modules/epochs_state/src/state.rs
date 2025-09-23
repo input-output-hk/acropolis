@@ -90,7 +90,7 @@ impl State {
             // check for stability window
             let is_within_stability_window = Nonces::randomness_stability_window(
                 block_info.era,
-                block_info.slot,
+                header.slot(),
                 genesis,
                 praos_params,
             );
@@ -208,7 +208,7 @@ impl State {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::{fs, sync::Arc};
 
     use super::*;
     use acropolis_common::{
@@ -228,7 +228,21 @@ mod tests {
             epoch_slot: 99,
             new_epoch: false,
             timestamp: 99999,
-            era: Era::Conway,
+            era: Era::Shelley,
+        }
+    }
+
+    fn make_new_epoch_block(epoch: u64) -> BlockInfo {
+        BlockInfo {
+            status: BlockStatus::Immutable,
+            slot: 0,
+            number: epoch * 10,
+            hash: BlockHash::default(),
+            epoch,
+            epoch_slot: 99,
+            new_epoch: true,
+            timestamp: 99999,
+            era: Era::Shelley,
         }
     }
 
@@ -372,4 +386,58 @@ mod tests {
         );
         history.lock().await.commit(block.number, state);
     }
+
+    // #[test]
+    // fn test_epoch_nonce() {
+    //     let mut state = State::new();
+    //     state.praos_params = Some(PraosParams::mainnet());
+    //     let genesis_value = GenesisValues::mainnet();
+
+    //     let mut count = 0;
+    //     let init_height = 4490511;
+    //     for index in 0..21556 {
+    //         let path = format!("dumps/{}.cbor", init_height + index);
+    //         let block = if index == 0 {
+    //             make_new_epoch_block(208)
+    //         } else {
+    //             make_block(208)
+    //         };
+    //         let raw = hex::decode(fs::read_to_string(path).unwrap()).unwrap();
+    //         let block_header = MultiEraHeader::decode(1, None, &raw).unwrap();
+    //         assert!(state.handle_block_header(&genesis_value, &block, &block_header).is_ok());
+    //         count += 1;
+    //     }
+
+    //     // Convert nonces to beautiful JSON with hex hashes
+    //     let nonces_json = if let Some(nonces) = &state.nonces {
+    //         serde_json::json!({
+    //             "epoch": nonces.epoch,
+    //             "active": {
+    //                 "tag": format!("{:?}", nonces.active.tag),
+    //                 "hash": nonces.active.hash.as_ref().map(|h| hex::encode(h)).unwrap_or_else(|| "None".to_string())
+    //             },
+    //             "evolving": {
+    //                 "tag": format!("{:?}", nonces.evolving.tag),
+    //                 "hash": nonces.evolving.hash.as_ref().map(|h| hex::encode(h)).unwrap_or_else(|| "None".to_string())
+    //             },
+    //             "candidate": {
+    //                 "tag": format!("{:?}", nonces.candidate.tag),
+    //                 "hash": nonces.candidate.hash.as_ref().map(|h| hex::encode(h)).unwrap_or_else(|| "None".to_string())
+    //             },
+    //             "lab": {
+    //                 "tag": format!("{:?}", nonces.lab.tag),
+    //                 "hash": nonces.lab.hash.as_ref().map(|h| hex::encode(h)).unwrap_or_else(|| "None".to_string())
+    //             },
+    //             "prev_lab": {
+    //                 "tag": format!("{:?}", nonces.prev_lab.tag),
+    //                 "hash": nonces.prev_lab.hash.as_ref().map(|h| hex::encode(h)).unwrap_or_else(|| "None".to_string())
+    //             }
+    //         })
+    //     } else {
+    //         serde_json::json!("None")
+    //     };
+
+    //     println!("{}", serde_json::to_string_pretty(&nonces_json).unwrap());
+    //     println!("Count: {count}");
+    // }
 }
