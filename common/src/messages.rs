@@ -5,7 +5,7 @@
 
 use crate::genesis_values::GenesisValues;
 use crate::ledger_state::SPOState;
-use crate::protocol_params::{Nonce, ProtocolParams};
+use crate::protocol_params::{NonceHash, ProtocolParams};
 use crate::queries::parameters::{ParametersStateQuery, ParametersStateQueryResponse};
 use crate::queries::{
     accounts::{AccountsStateQuery, AccountsStateQueryResponse},
@@ -145,7 +145,7 @@ pub struct EpochActivityMessage {
     pub vrf_vkey_hashes: Vec<(KeyHash, usize)>,
 
     /// Nonce
-    pub nonce: Option<Nonce>,
+    pub nonce: Option<NonceHash>,
 }
 
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]

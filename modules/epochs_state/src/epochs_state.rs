@@ -128,19 +128,6 @@ impl EpochsState {
                         };
                     });
 
-                    let span = info_span!(
-                        "epochs_state.handle_block_header",
-                        block = block_info.number
-                    );
-                    span.in_scope(|| {
-                        if let Some(header) = header.as_ref() {
-                            match state.handle_block_header(&genesis, &block_info, &header) {
-                                Ok(()) => {}
-                                Err(e) => error!("Error handling block header: {e}"),
-                            }
-                        }
-                    });
-
                     if is_new_epoch {
                         let ea = state.end_epoch(&block_info);
                         // update epochs history
@@ -154,6 +141,19 @@ impl EpochsState {
                             .await
                             .unwrap_or_else(|e| error!("Failed to publish: {e}"));
                     }
+
+                    let span = info_span!(
+                        "epochs_state.handle_block_header",
+                        block = block_info.number
+                    );
+                    span.in_scope(|| {
+                        if let Some(header) = header.as_ref() {
+                            match state.handle_block_header(&genesis, &block_info, &header) {
+                                Ok(()) => {}
+                                Err(e) => error!("Error handling block header: {e}"),
+                            }
+                        }
+                    });
 
                     let span = info_span!("epochs_state.handle_mint", block = block_info.number);
                     span.in_scope(|| {
