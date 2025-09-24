@@ -347,8 +347,7 @@ impl Nonces {
 
         // For Praos in Babbage (just as in all TPraos eras) we use the
         // smaller (3k/f vs 4k/f slots) stability window here for
-        // backwards-compatibility. See erratum 17.3 in the Shelley ledger
-        // specs for context
+        // backwards-compatibility.
         let window = match era {
             Era::Conway => params.randomness_stabilization_window,
             _ => params.stability_window,

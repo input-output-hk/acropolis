@@ -75,10 +75,7 @@ impl State {
             // if Shelley Era's first epoch
             if new_epoch && block_info.epoch == genesis.shelley_epoch {
                 self.nonces = Some(Nonces::shelley_genesis_nonces(genesis));
-                return Ok(());
             }
-
-            // otherwise update Nonces
 
             // current nonces must be set
             let Some(current_nonces) = self.nonces.as_ref() else {
@@ -208,11 +205,12 @@ impl State {
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, sync::Arc};
+    use std::sync::Arc;
 
     use super::*;
     use acropolis_common::{
         crypto::keyhash,
+        protocol_params::{Nonce, NonceHash},
         state_history::{StateHistory, StateHistoryStore},
         BlockHash, BlockInfo, BlockStatus, Era,
     };
@@ -387,57 +385,196 @@ mod tests {
         history.lock().await.commit(block.number, state);
     }
 
-    // #[test]
-    // fn test_epoch_nonce() {
-    //     let mut state = State::new();
-    //     state.praos_params = Some(PraosParams::mainnet());
-    //     let genesis_value = GenesisValues::mainnet();
+    #[test]
+    fn test_epoch_208_nonce() {
+        let mut state = State::new();
+        state.praos_params = Some(PraosParams::mainnet());
+        let genesis_value = GenesisValues::mainnet();
 
-    //     let mut count = 0;
-    //     let init_height = 4490511;
-    //     for index in 0..21556 {
-    //         let path = format!("dumps/{}.cbor", init_height + index);
-    //         let block = if index == 0 {
-    //             make_new_epoch_block(208)
-    //         } else {
-    //             make_block(208)
-    //         };
-    //         let raw = hex::decode(fs::read_to_string(path).unwrap()).unwrap();
-    //         let block_header = MultiEraHeader::decode(1, None, &raw).unwrap();
-    //         assert!(state.handle_block_header(&genesis_value, &block, &block_header).is_ok());
-    //         count += 1;
-    //     }
+        let e_208_first_block_header_cbor =
+            hex::decode(include_str!("../data/4490511.cbor")).unwrap();
+        let block = make_new_epoch_block(208);
+        let block_header = MultiEraHeader::decode(1, None, &e_208_first_block_header_cbor).unwrap();
+        assert!(state.handle_block_header(&genesis_value, &block, &block_header).is_ok());
 
-    //     // Convert nonces to beautiful JSON with hex hashes
-    //     let nonces_json = if let Some(nonces) = &state.nonces {
-    //         serde_json::json!({
-    //             "epoch": nonces.epoch,
-    //             "active": {
-    //                 "tag": format!("{:?}", nonces.active.tag),
-    //                 "hash": nonces.active.hash.as_ref().map(|h| hex::encode(h)).unwrap_or_else(|| "None".to_string())
-    //             },
-    //             "evolving": {
-    //                 "tag": format!("{:?}", nonces.evolving.tag),
-    //                 "hash": nonces.evolving.hash.as_ref().map(|h| hex::encode(h)).unwrap_or_else(|| "None".to_string())
-    //             },
-    //             "candidate": {
-    //                 "tag": format!("{:?}", nonces.candidate.tag),
-    //                 "hash": nonces.candidate.hash.as_ref().map(|h| hex::encode(h)).unwrap_or_else(|| "None".to_string())
-    //             },
-    //             "lab": {
-    //                 "tag": format!("{:?}", nonces.lab.tag),
-    //                 "hash": nonces.lab.hash.as_ref().map(|h| hex::encode(h)).unwrap_or_else(|| "None".to_string())
-    //             },
-    //             "prev_lab": {
-    //                 "tag": format!("{:?}", nonces.prev_lab.tag),
-    //                 "hash": nonces.prev_lab.hash.as_ref().map(|h| hex::encode(h)).unwrap_or_else(|| "None".to_string())
-    //             }
-    //         })
-    //     } else {
-    //         serde_json::json!("None")
-    //     };
+        let nonces = state.nonces.unwrap();
+        assert!(nonces.active.eq(&Nonce::from(genesis_value.shelley_genesis_hash)));
+        assert!(nonces.candidate.eq(&Nonce::from(genesis_value.shelley_genesis_hash)));
+        assert!(nonces.evolving.eq(&Nonce::from(genesis_value.shelley_genesis_hash)));
+        assert!(nonces.lab.eq(&Nonce::from(*block_header.previous_hash().unwrap())));
+        assert!(nonces.prev_lab.eq(&Nonce::default()));
+    }
 
-    //     println!("{}", serde_json::to_string_pretty(&nonces_json).unwrap());
-    //     println!("Count: {count}");
-    // }
+    #[test]
+    fn test_nonce_evolving() {
+        let mut state = State::new();
+        state.praos_params = Some(PraosParams::mainnet());
+        let genesis_value = GenesisValues::mainnet();
+
+        let e_208_first_block_header_cbor =
+            hex::decode(include_str!("../data/4490511.cbor")).unwrap();
+        let e_208_second_block_header_cbor =
+            hex::decode(include_str!("../data/4490512.cbor")).unwrap();
+        let block = make_new_epoch_block(208);
+        let block_header = MultiEraHeader::decode(1, None, &e_208_first_block_header_cbor).unwrap();
+        assert!(state.handle_block_header(&genesis_value, &block, &block_header).is_ok());
+
+        let block = make_block(208);
+        let block_header =
+            MultiEraHeader::decode(1, None, &e_208_second_block_header_cbor).unwrap();
+        assert!(state.handle_block_header(&genesis_value, &block, &block_header).is_ok());
+
+        let evolved = Nonce::from(
+            NonceHash::try_from(
+                hex::decode("a815ff978369b57df09b0072485c26920dc0ec8e924a852a42f0715981cf0042")
+                    .unwrap()
+                    .as_slice(),
+            )
+            .unwrap(),
+        );
+        let nonces = state.nonces.unwrap();
+        assert!(nonces.active.eq(&Nonce::from(genesis_value.shelley_genesis_hash)));
+        assert!(nonces.evolving.eq(&evolved));
+        assert!(nonces.candidate.eq(&evolved));
+        assert!(nonces.lab.eq(&Nonce::from(*block_header.previous_hash().unwrap())));
+        assert!(nonces.prev_lab.eq(&Nonce::default()));
+    }
+
+    #[test]
+    fn test_epoch_209_nonce() {
+        let mut state = State::new();
+        state.praos_params = Some(PraosParams::mainnet());
+        let genesis_value = GenesisValues::mainnet();
+        let e_208_candidate = Nonce::from(
+            NonceHash::try_from(
+                hex::decode("ea98cb2dac7208296ac89030f24cdc0dc6fbfebc4bf1f5b7a8331ec47e3bb311")
+                    .unwrap()
+                    .as_slice(),
+            )
+            .unwrap(),
+        );
+        let e_208_lab = Nonce::from(
+            NonceHash::try_from(
+                hex::decode("dfc1d6e6dbce685b5cf85899c6e3c89539b081c62222265910423ced4096390a")
+                    .unwrap()
+                    .as_slice(),
+            )
+            .unwrap(),
+        );
+        state.nonces = Some(Nonces {
+            epoch: 208,
+            active: Nonce::from(genesis_value.shelley_genesis_hash),
+            candidate: e_208_candidate.clone(),
+            evolving: Nonce::from(
+                NonceHash::try_from(
+                    hex::decode("bd331d2334012dfd828a0cbdeb552368052af48b39f171b2b9343330924db6b1")
+                        .unwrap()
+                        .as_slice(),
+                )
+                .unwrap(),
+            ),
+            lab: e_208_lab.clone(),
+            prev_lab: Nonce::default(),
+        });
+
+        let e_209_first_block_header_cbor =
+            hex::decode(include_str!("../data/4512067.cbor")).unwrap();
+        let block = make_new_epoch_block(209);
+        let block_header = MultiEraHeader::decode(1, None, &e_209_first_block_header_cbor).unwrap();
+        assert!(state.handle_block_header(&genesis_value, &block, &block_header).is_ok());
+
+        let nonces = state.nonces.unwrap();
+        let e_209_evolving = Nonce::from(
+            NonceHash::try_from(
+                hex::decode("5221b5541f5fc2a7eebd4316ff2f430b54709eeb1fe9ad7c30272d716656e601")
+                    .unwrap()
+                    .as_slice(),
+            )
+            .unwrap(),
+        );
+        assert!(nonces.active.eq(&e_208_candidate));
+        assert!(nonces.evolving.eq(&e_209_evolving));
+        assert!(nonces.candidate.eq(&e_209_evolving));
+        assert!(nonces.lab.eq(&Nonce::from(*block_header.previous_hash().unwrap())));
+        assert!(nonces.prev_lab.eq(&e_208_lab));
+    }
+
+    #[test]
+    fn test_epoch_210_nonce() {
+        let mut state = State::new();
+        state.praos_params = Some(PraosParams::mainnet());
+        let genesis_value = GenesisValues::mainnet();
+        let e_209_lab = Nonce::from(
+            NonceHash::try_from(
+                hex::decode("e5e914ba8c727baf3c3465ae6a62508186772eb20649aa7a99a637328f62803e")
+                    .unwrap()
+                    .as_slice(),
+            )
+            .unwrap(),
+        );
+        state.nonces = Some(Nonces {
+            epoch: 209,
+            active: Nonce::from(
+                NonceHash::try_from(
+                    hex::decode("ea98cb2dac7208296ac89030f24cdc0dc6fbfebc4bf1f5b7a8331ec47e3bb311")
+                        .unwrap()
+                        .as_slice(),
+                )
+                .unwrap(),
+            ),
+            candidate: Nonce::from(
+                NonceHash::try_from(
+                    hex::decode("a9543bc3820138abfaaad606d19c50df70c896336a88ab01da0eb34c1129bf31")
+                        .unwrap()
+                        .as_slice(),
+                )
+                .unwrap(),
+            ),
+            evolving: Nonce::from(
+                NonceHash::try_from(
+                    hex::decode("6a21c46c01aa5a9d840beec28dd201a0bc9fc144d3a48b485ed0a3790b276520")
+                        .unwrap()
+                        .as_slice(),
+                )
+                .unwrap(),
+            ),
+            lab: e_209_lab.clone(),
+            prev_lab: Nonce::from(
+                NonceHash::try_from(
+                    hex::decode("dfc1d6e6dbce685b5cf85899c6e3c89539b081c62222265910423ced4096390a")
+                        .unwrap()
+                        .as_slice(),
+                )
+                .unwrap(),
+            ),
+        });
+
+        let e_210_first_block_header_cbor =
+            hex::decode(include_str!("../data/4533637.cbor")).unwrap();
+        let block = make_new_epoch_block(209);
+        let block_header = MultiEraHeader::decode(1, None, &e_210_first_block_header_cbor).unwrap();
+        assert!(state.handle_block_header(&genesis_value, &block, &block_header).is_ok());
+
+        let nonces = state.nonces.unwrap();
+        let e_210_evolving = Nonce::from(
+            NonceHash::try_from(
+                hex::decode("2bc39f25e92a59b3e8044783560eac6dd8aba2e55b2b1aba132db58d5a1e7155")
+                    .unwrap()
+                    .as_slice(),
+            )
+            .unwrap(),
+        );
+        assert!(nonces.active.eq(&Nonce::from(
+            NonceHash::try_from(
+                hex::decode("ddf346732e6a47323b32e1e3eeb7a45fad678b7f533ef1f2c425e13c704ba7e3")
+                    .unwrap()
+                    .as_slice(),
+            )
+            .unwrap(),
+        )));
+        assert!(nonces.evolving.eq(&e_210_evolving));
+        assert!(nonces.candidate.eq(&e_210_evolving));
+        assert!(nonces.lab.eq(&Nonce::from(*block_header.previous_hash().unwrap())));
+        assert!(nonces.prev_lab.eq(&e_209_lab));
+    }
 }
