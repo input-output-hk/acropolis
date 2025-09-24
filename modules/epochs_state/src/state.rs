@@ -398,9 +398,17 @@ mod tests {
         assert!(state.handle_block_header(&genesis_value, &block, &block_header).is_ok());
 
         let nonces = state.nonces.unwrap();
+        let evolved = Nonce::from(
+            NonceHash::try_from(
+                hex::decode("2af15f57076a8ff225746624882a77c8d2736fe41d3db70154a22b50af851246")
+                    .unwrap()
+                    .as_slice(),
+            )
+            .unwrap(),
+        );
         assert!(nonces.active.eq(&Nonce::from(genesis_value.shelley_genesis_hash)));
-        assert!(nonces.candidate.eq(&Nonce::from(genesis_value.shelley_genesis_hash)));
-        assert!(nonces.evolving.eq(&Nonce::from(genesis_value.shelley_genesis_hash)));
+        assert!(nonces.candidate.eq(&evolved));
+        assert!(nonces.evolving.eq(&evolved));
         assert!(nonces.lab.eq(&Nonce::from(*block_header.previous_hash().unwrap())));
         assert!(nonces.prev_lab.eq(&Nonce::default()));
     }
@@ -484,7 +492,7 @@ mod tests {
         assert!(state.handle_block_header(&genesis_value, &block, &block_header).is_ok());
 
         let nonces = state.nonces.unwrap();
-        let e_209_evolving = Nonce::from(
+        let evolved = Nonce::from(
             NonceHash::try_from(
                 hex::decode("5221b5541f5fc2a7eebd4316ff2f430b54709eeb1fe9ad7c30272d716656e601")
                     .unwrap()
@@ -493,8 +501,8 @@ mod tests {
             .unwrap(),
         );
         assert!(nonces.active.eq(&e_208_candidate));
-        assert!(nonces.evolving.eq(&e_209_evolving));
-        assert!(nonces.candidate.eq(&e_209_evolving));
+        assert!(nonces.evolving.eq(&evolved));
+        assert!(nonces.candidate.eq(&evolved));
         assert!(nonces.lab.eq(&Nonce::from(*block_header.previous_hash().unwrap())));
         assert!(nonces.prev_lab.eq(&e_208_lab));
     }
@@ -556,7 +564,7 @@ mod tests {
         assert!(state.handle_block_header(&genesis_value, &block, &block_header).is_ok());
 
         let nonces = state.nonces.unwrap();
-        let e_210_evolving = Nonce::from(
+        let evolved = Nonce::from(
             NonceHash::try_from(
                 hex::decode("2bc39f25e92a59b3e8044783560eac6dd8aba2e55b2b1aba132db58d5a1e7155")
                     .unwrap()
@@ -572,8 +580,8 @@ mod tests {
             )
             .unwrap(),
         )));
-        assert!(nonces.evolving.eq(&e_210_evolving));
-        assert!(nonces.candidate.eq(&e_210_evolving));
+        assert!(nonces.evolving.eq(&evolved));
+        assert!(nonces.candidate.eq(&evolved));
         assert!(nonces.lab.eq(&Nonce::from(*block_header.previous_hash().unwrap())));
         assert!(nonces.prev_lab.eq(&e_209_lab));
     }
