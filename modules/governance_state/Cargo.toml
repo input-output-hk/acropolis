@@ -9,17 +9,19 @@ description = "Governance State Tracker"
 license = "Apache-2.0"
 
 [dependencies]
-caryatid_sdk = "0.12"
 acropolis_common = { path = "../../common" }
-anyhow = "1.0"
+
+caryatid_sdk = { workspace = true }
+
+anyhow = { workspace = true }
 async-trait = "0.1"
-tokio = { version = "1", features = ["full"] }
-config = "0.15.11"
-tracing = "0.1.40"
-serde = { version = "1.0.214", features = ["derive"] }
-serde_json = "1.0"
-serde_with = { version = "3.12.0", features = ["hex","base64"] }
-hex = "0.4.3"
+config = { workspace = true }
+hex = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_with = { workspace = true, features = ["base64"] }
+tokio = { workspace = true }
+tracing = { workspace = true }
 
 [lib]
 path = "src/governance_state.rs"
