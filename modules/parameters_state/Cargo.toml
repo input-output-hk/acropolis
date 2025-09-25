@@ -16,6 +16,7 @@ caryatid_sdk = { workspace = true }
 
 anyhow = { workspace = true }
 async-trait = "0.1"
+blake2 = "0.10.6"
 config = { workspace = true }
 hex = { workspace = true }
 num-rational = "0.4.2"

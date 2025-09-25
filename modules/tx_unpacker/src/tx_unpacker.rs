@@ -189,7 +189,8 @@ impl TxUnpacker {
                                 match MultiEraTx::decode(&raw_tx) {
                                     Ok(tx) => {
                                         let tx_hash: TxHash = tx.hash().to_vec().try_into().expect("invalid tx hash length");
-                        
+                                        let tx_identifier = TxIdentifier::new(block_number, tx_index);
+
                                         let inputs = tx.consumes();
                                         let outputs = tx.produces();
                                         let certs = tx.certs();
@@ -306,7 +307,7 @@ impl TxUnpacker {
                                             }
 
                                             if !tx_deltas.is_empty() {
-                                                asset_deltas.push((tx_hash, tx_deltas));
+                                                asset_deltas.push((tx_identifier, tx_deltas));
                                             }
                                         }
 

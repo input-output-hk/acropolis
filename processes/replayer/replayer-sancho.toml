@@ -29,6 +29,7 @@ node-address = "sancho-testnet.able-pool.io:6002"
 magic-number = 4
 shelley-epoch = 0
 shelley-epoch-len = 86400
+shelley-genesis-hash = f94457ec45a0c6773057a529533cf7ccf746cb44dabd56ae970e1dbfb55bfdb2
 
 [module.block-unpacker]
 

@@ -3,7 +3,7 @@
 #![allow(dead_code)]
 
 use crate::{
-    address::{Address, StakeAddress},
+    address::{Address, ShelleyAddress, StakeAddress},
     protocol_params,
     rational_number::RationalNumber,
 };
@@ -17,6 +17,13 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 use std::ops::Neg;
+
+#[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NetworkId {
+    Testnet,
+    #[default]
+    Mainnet,
+}
 
 /// Protocol era
 #[derive(
@@ -295,7 +302,9 @@ pub struct TxInput {
 }
 
 /// Compact transaction identifier (block_number + tx_index).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Default, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub struct TxIdentifier([u8; 6]);
 
 impl TxIdentifier {
@@ -1636,7 +1645,7 @@ pub enum TxCertificate {
 
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AssetInfoRecord {
-    pub initial_mint_tx_hash: TxHash,
+    pub initial_mint_tx: TxIdentifier,
     pub mint_or_burn_count: u64,
     pub onchain_metadata: Option<Vec<u8>>,
     pub metadata_standard: Option<AssetMetadataStandard>,
@@ -1644,7 +1653,7 @@ pub struct AssetInfoRecord {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct AssetMintRecord {
-    pub tx_hash: TxHash,
+    pub tx: TxIdentifier,
     pub amount: u64,
     pub burn: bool,
 }
@@ -1665,6 +1674,11 @@ pub struct PolicyAsset {
     pub quantity: u64,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AssetAddressEntry {
+    pub address: ShelleyAddress,
+    pub quantity: u64,
+}
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct UTxOIdentifier([u8; 8]);
 
