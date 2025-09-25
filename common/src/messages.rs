@@ -7,6 +7,7 @@ use crate::genesis_values::GenesisValues;
 use crate::ledger_state::SPOState;
 use crate::protocol_params::{NonceHash, ProtocolParams};
 use crate::queries::parameters::{ParametersStateQuery, ParametersStateQueryResponse};
+use crate::queries::spdd::{SPDDStateQuery, SPDDStateQueryResponse};
 use crate::queries::{
     accounts::{AccountsStateQuery, AccountsStateQueryResponse},
     addresses::{AddressStateQuery, AddressStateQueryResponse},
@@ -383,6 +384,7 @@ pub enum StateQuery {
     Scripts(ScriptsStateQuery),
     Transactions(TransactionsStateQuery),
     Parameters(ParametersStateQuery),
+    SPDD(SPDDStateQuery),
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -401,4 +403,5 @@ pub enum StateQueryResponse {
     Scripts(ScriptsStateQueryResponse),
     Transactions(TransactionsStateQueryResponse),
     Parameters(ParametersStateQueryResponse),
+    SPDD(SPDDStateQueryResponse),
 }

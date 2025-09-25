@@ -43,12 +43,18 @@ impl State {
         self.spdd_history.commit(epoch, next);
     }
 
+    #[allow(dead_code)]
     pub fn get_latest(&self) -> Option<&OrdMap<KeyHash, DelegatedStake>> {
         self.spdd_history.current()
     }
 
+    #[allow(dead_code)]
     pub fn get_epoch(&self, epoch: u64) -> Option<&OrdMap<KeyHash, DelegatedStake>> {
         self.spdd_history.get_by_index(epoch)
+    }
+
+    pub fn get_epoch_total_active_stakes(&self, epoch: u64) -> Option<u64> {
+        self.spdd_history.get_by_index(epoch).map(|state| state.values().map(|v| v.active).sum())
     }
 
     pub async fn tick(&self) -> anyhow::Result<()> {

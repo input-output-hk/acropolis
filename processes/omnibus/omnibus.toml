@@ -50,6 +50,7 @@ store-block-hashes = false
 store-stake-addresses = false
 
 [module.spdd-state]
+# Enables active_stakes in /epochs/latest | {number} endpoints
 store-spdd = false
 
 [module.drep-state]
