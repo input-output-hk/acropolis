@@ -63,6 +63,12 @@ pub struct GenesisCompleteMessage {
     pub values: GenesisValues,
 }
 
+// Genesis tx hashes used to seed TxRegistry
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct GenesisTxsMessage {
+    pub txs: Vec<(TxOutRef, TxIdentifier)>,
+}
+
 /// Message encapsulating multiple UTXO deltas, in order
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct UTXODeltasMessage {
@@ -243,16 +249,17 @@ pub enum CardanoMessage {
     SnapshotComplete,                        // Mithril snapshot loaded
     ReceivedTxs(RawTxsMessage),              // Transaction available
     GenesisComplete(GenesisCompleteMessage), // Genesis UTXOs done + genesis params
-    UTXODeltas(UTXODeltasMessage),           // UTXO deltas received
-    AssetDeltas(AssetDeltasMessage),         // Asset mint and burn deltas
-    TxCertificates(TxCertificatesMessage),   // Transaction certificates received
-    AddressDeltas(AddressDeltasMessage),     // Address deltas received
-    Withdrawals(WithdrawalsMessage),         // Withdrawals from reward accounts
-    PotDeltas(PotDeltasMessage),             // Changes to pot balances
-    BlockFees(BlockFeesMessage),             // Total fees in a block
-    EpochActivity(EpochActivityMessage),     // Total fees and VRF keys for an epoch
-    DRepState(DRepStateMessage),             // Active DReps at epoch end
-    SPOState(SPOStateMessage),               // Active SPOs at epoch end
+    GenesisTxs(GenesisTxsMessage),
+    UTXODeltas(UTXODeltasMessage),         // UTXO deltas received
+    AssetDeltas(AssetDeltasMessage),       // Asset mint and burn deltas
+    TxCertificates(TxCertificatesMessage), // Transaction certificates received
+    AddressDeltas(AddressDeltasMessage),   // Address deltas received
+    Withdrawals(WithdrawalsMessage),       // Withdrawals from reward accounts
+    PotDeltas(PotDeltasMessage),           // Changes to pot balances
+    BlockFees(BlockFeesMessage),           // Total fees in a block
+    EpochActivity(EpochActivityMessage),   // Total fees and VRF keys for an epoch
+    DRepState(DRepStateMessage),           // Active DReps at epoch end
+    SPOState(SPOStateMessage),             // Active SPOs at epoch end
     GovernanceProcedures(GovernanceProceduresMessage), // Governance procedures received
 
     // Protocol Parameters

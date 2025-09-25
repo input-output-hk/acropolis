@@ -42,6 +42,7 @@ dashmap = "6.1.0"
 hex = "0.4"
 imbl = { version = "5.0.0", features = ["serde"] }
 pallas = "0.32.1"
+pallas-configs = { path = "../pallas/pallas-configs" }
 pallas-addresses = "0.32.0"
 pallas-crypto = "0.32.0"
 serde = { version = "1.0.214", features = ["derive"] }
