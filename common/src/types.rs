@@ -1694,6 +1694,18 @@ impl UTxOIdentifier {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct TxOutRef {
+    pub hash: TxHash,
+    pub index: u16,
+}
+
+impl TxOutRef {
+    pub fn new(hash: TxHash, index: u16) -> Self {
+        TxOutRef { hash, index }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

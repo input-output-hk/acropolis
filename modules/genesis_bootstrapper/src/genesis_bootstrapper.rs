@@ -4,21 +4,24 @@
 use acropolis_common::{
     genesis_values::GenesisValues,
     messages::{
-        CardanoMessage, GenesisCompleteMessage, Message, PotDeltasMessage, UTXODeltasMessage,
+        CardanoMessage, GenesisCompleteMessage, GenesisTxsMessage, Message, PotDeltasMessage,
+        UTXODeltasMessage,
     },
     Address, BlockHash, BlockInfo, BlockStatus, ByronAddress, Era, Lovelace, LovelaceDelta, Pot,
-    PotDelta, TxOutput, UTXODelta, UTxOIdentifier, Value,
+    PotDelta, TxIdentifier, TxOutRef, TxOutput, UTXODelta, UTxOIdentifier, Value,
 };
 use anyhow::Result;
 use caryatid_sdk::{module, Context, Module};
 use config::Config;
-use pallas::ledger::configs::{byron::genesis_utxos, *};
+use pallas::ledger::configs::*;
+use pallas_configs::byron::{genesis_utxos, GenesisFile};
 use std::sync::Arc;
 use tracing::{error, info, info_span, Instrument};
 
 const DEFAULT_STARTUP_TOPIC: &str = "cardano.sequence.start";
 const DEFAULT_PUBLISH_UTXO_DELTAS_TOPIC: &str = "cardano.utxo.deltas";
 const DEFAULT_PUBLISH_POT_DELTAS_TOPIC: &str = "cardano.pot.deltas";
+const DEFAULT_PUBLISH_GENESIS_TRANSACTIONS_TOPIC: &str = "cardano.genesis.txs";
 const DEFAULT_COMPLETION_TOPIC: &str = "cardano.sequence.bootstrapped";
 const DEFAULT_NETWORK_NAME: &str = "mainnet";
 
@@ -68,6 +71,11 @@ impl GenesisBootstrapper {
                     .unwrap_or(DEFAULT_PUBLISH_POT_DELTAS_TOPIC.to_string());
                 info!("Publishing pot deltas on '{publish_pot_deltas_topic}'");
 
+                let publish_genesis_transactions_topic = config
+                    .get_string("publish-genesis-transactions-topic")
+                    .unwrap_or(DEFAULT_PUBLISH_GENESIS_TRANSACTIONS_TOPIC.to_string());
+                info!("Publishing genesis transactions on '{publish_genesis_transactions_topic}'");
+
                 let completion_topic = config
                     .get_string("completion-topic")
                     .unwrap_or(DEFAULT_COMPLETION_TOPIC.to_string());
@@ -96,7 +104,7 @@ impl GenesisBootstrapper {
                 info!("Reading genesis for '{network_name}'");
 
                 // Read genesis data
-                let byron_genesis: byron::GenesisFile = serde_json::from_slice(byron_genesis)
+                let byron_genesis: GenesisFile = serde_json::from_slice(byron_genesis)
                     .expect("Invalid JSON in BYRON_GENESIS file");
                 let shelley_genesis: shelley::GenesisFile = serde_json::from_slice(shelley_genesis)
                     .expect("Invalid JSON in SHELLEY_GENESIS file");
@@ -118,10 +126,16 @@ impl GenesisBootstrapper {
 
                 // Convert the AVVM distributions into pseudo-UTXOs
                 let gen_utxos = genesis_utxos(&byron_genesis);
+                let mut gen_txs = Vec::new();
                 let mut total_allocated: u64 = 0;
-                for (output_index, (_hash, address, amount)) in gen_utxos.iter().enumerate() {
+                for (tx_index, (hash, address, amount)) in gen_utxos.iter().enumerate() {
+                    let tx_identifier = TxIdentifier::new(0, tx_index as u16);
+                    let tx_ref = TxOutRef::new(**hash, 0);
+
+                    gen_txs.push((tx_ref, tx_identifier));
+
                     let tx_output = TxOutput {
-                        utxo_identifier: UTxOIdentifier::new(0, 0, output_index as u16),
+                        utxo_identifier: UTxOIdentifier::new(0, tx_index as u16, 0),
                         address: Address::Byron(ByronAddress {
                             payload: address.payload.to_vec(),
                         }),
@@ -161,6 +175,18 @@ impl GenesisBootstrapper {
                 ));
                 context
                     .publish(&publish_pot_deltas_topic, Arc::new(message_enum))
+                    .await
+                    .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+
+                let gen_txs_message = Message::Cardano((
+                    block_info.clone(),
+                    CardanoMessage::GenesisTxs(GenesisTxsMessage { txs: gen_txs }),
+                ));
+                context
+                    .publish(
+                        &publish_genesis_transactions_topic,
+                        Arc::new(gen_txs_message),
+                    )
                     .await
                     .unwrap_or_else(|e| error!("Failed to publish: {e}"));
 

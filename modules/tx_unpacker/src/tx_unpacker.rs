@@ -23,7 +23,10 @@ mod map_parameters;
 mod tx_registry;
 use crate::tx_registry::TxRegistry;
 
-const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.txs";
+const DEFAULT_TRANSACTIONS_SUBSCRIBE_TOPIC: &str = "cardano.txs";
+const DEFAULT_CLOCK_SUBSCRIBE_TOPIC: &str = "clock.tick";
+const DEFAULT_GENESIS_SUBSCRIBE_TOPIC: &str = "cardano.genesis.txs";
+
 const CIP25_METADATA_LABEL: u64 = 721;
 
 /// Tx unpacker module
@@ -61,9 +64,15 @@ impl TxUnpacker {
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // Subscribe for tx messages
         // Get configuration
-        let subscribe_topic =
-            config.get_string("subscribe-topic").unwrap_or(DEFAULT_SUBSCRIBE_TOPIC.to_string());
-        info!("Creating subscriber on '{subscribe_topic}'");
+        let transactions_subscribe_topic =
+            config.get_string("subscribe-topic").unwrap_or(DEFAULT_TRANSACTIONS_SUBSCRIBE_TOPIC.to_string());
+        info!("Creating subscriber on '{transactions_subscribe_topic}'");
+
+        let clock_subscribe_topic = config.get_string("clock-topic").unwrap_or(DEFAULT_CLOCK_SUBSCRIBE_TOPIC.to_string());
+        info!("Creating subscriber on '{clock_subscribe_topic}'");
+
+        let genesis_transactions_subscribe_topic = config.get_string("genesis-transactions-subscribe-topic").unwrap_or(DEFAULT_GENESIS_SUBSCRIBE_TOPIC.to_string());
+        info!("Creating subscriber on '{transactions_subscribe_topic}'");
 
         let publish_utxo_deltas_topic = config.get_string("publish-utxo-deltas-topic").ok();
         if let Some(ref topic) = publish_utxo_deltas_topic {
@@ -96,20 +105,39 @@ impl TxUnpacker {
             info!("Publishing block fees on '{topic}'");
         }
 
-        let tx_registry = Arc::new(TxRegistry::new(None)?);
+        let tx_registry = Arc::new(TxRegistry::default());
+        let registry_tick = tx_registry.clone();
 
-        let mut subscription = context.subscribe(&subscribe_topic).await?;
+        let mut genesis_sub = context.subscribe(&genesis_transactions_subscribe_topic).await?;
+
+        let run_context = context.clone();
+
+        let mut txs_sub = context.subscribe(&transactions_subscribe_topic).await?;
         context.clone().run(async move {
+            let (_, message) = genesis_sub.read().await
+                .expect("failed to read genesis txs");
+            match message.as_ref() {
+                Message::Cardano((_block, CardanoMessage::GenesisTxs(genesis_msg))) => {
+                    tx_registry.bootstrap_from_genesis_utxos(&genesis_msg.txs);
+                    info!("Seeded registry with {} genesis txs", genesis_msg.txs.len());
+                }
+                other => panic!("expected GenesisTxs, got {:?}", other),
+            }
             loop {
-                let Ok((_, message)) = subscription.read().await else { return; };
+                let Ok((_, message)) = txs_sub.read().await else { return; };
                 match message.as_ref() {
                     Message::Cardano((block, CardanoMessage::ReceivedTxs(txs_msg))) => {
-                        let span = info_span!("utxo_state.handle", block = block.number);
+                        let span = info_span!("tx_unpacker.run", block = block.number);
 
                         async {
                             if tracing::enabled!(tracing::Level::DEBUG) {
                                 debug!("Received {} txs for slot {}",
                                     txs_msg.txs.len(), block.slot);
+                            }
+
+                            let block_number = block.number as u32;
+                            if block.status == BlockStatus::RolledBack {
+                                tx_registry.rollback_to(block_number);
                             }
 
                             let mut utxo_deltas = Vec::new();
@@ -122,7 +150,9 @@ impl TxUnpacker {
                             let mut alonzo_babbage_update_proposals = Vec::new();
                             let mut total_fees: u64 = 0;
 
-                            for (tx_index, raw_tx) in txs_msg.txs.iter().enumerate() {
+                            for (tx_index , raw_tx) in txs_msg.txs.iter().enumerate() {
+                                let tx_index = tx_index as u16;
+
                                 if publish_governance_procedures_topic.is_some() {
                                     //Self::decode_legacy_updates(&mut legacy_update_proposals, &block, &raw_tx);
                                     if block.era >= Era::Shelley && block.era < Era::Babbage {
@@ -159,10 +189,7 @@ impl TxUnpacker {
                                 match MultiEraTx::decode(&raw_tx) {
                                     Ok(tx) => {
                                         let tx_hash: TxHash = tx.hash().to_vec().try_into().expect("invalid tx hash length");
-                                        if let Err(e) = tx_registry.insert(block.number as u32, tx_index as u16, tx_hash) {
-                                                error!("Failed to insert tx into registry: {e}");
-                                            }
-
+                        
                                         let inputs = tx.consumes();
                                         let outputs = tx.produces();
                                         let certs = tx.certs();
@@ -187,35 +214,56 @@ impl TxUnpacker {
 
                                         if publish_utxo_deltas_topic.is_some() {
                                             // Add all the inputs
-                                            for input in inputs {  // MultiEraInput
+                                            for input in inputs {
                                                 let oref = input.output_ref();
-                                                let index = oref.index() as u16;
+                                                let tx_ref = TxOutRef::new(**oref.hash(), oref.index() as u16);
 
-                                                match tx_registry.lookup_by_hash(oref.hash()) {
-                                                    Ok(Some(tx_identifier)) => {
-                                                        // Construct message
+                                                match tx_registry.lookup_by_hash(tx_ref) {
+                                                    Ok(tx_identifier) => {
                                                         let tx_input = TxInput {
-                                                            utxo_identifier: UTxOIdentifier::new(tx_identifier.block_number(), tx_identifier.tx_index(), index),
+                                                            utxo_identifier: UTxOIdentifier::new(
+                                                                tx_identifier.block_number(),
+                                                                tx_identifier.tx_index(),
+                                                                tx_ref.index,
+                                                            ),
                                                         };
-
                                                         utxo_deltas.push(UTXODelta::Input(tx_input));
+
+                                                        tx_registry.spend(block_number, &tx_ref);
                                                     }
-                                                    Ok(None) => {}
-                                                    Err(e) =>
-                                                                error!("Output {index} in tx ignored: {e}")
+                                                    Err(e) => {
+                                                        error!("Output {} in tx ignored: {e}", tx_ref.index);
+                                                    }
+                                                    
                                                 }
                                             }
 
                                             // Add all the outputs
                                             for (index, output) in outputs {  // MultiEraOutput
+                                                let tx_ref = TxOutRef {
+                                                    hash: tx_hash,
+                                                    index: index as u16,
+                                                };
 
+                                                match tx_registry.add(block_number, tx_index, tx_ref) {
+                                                    Ok(()) => {
+                                                        tracing::info!(
+                                                            "TxRegistry insert: hash={} -> {:?}",
+                                                            hex::encode(tx_hash),
+                                                            TxIdentifier::new(block_number, tx_index)
+                                                        );
+                                                    }
+                                                    Err(e) => {
+                                                        error!("Failed to insert tx into registry: {e}");
+                                                    }
+                                                }
                                                 match output.address() {
                                                     Ok(pallas_address) =>
                                                     {
                                                         match map_parameters::map_address(&pallas_address) {
                                                             Ok(address) => {
                                                                 let tx_output = TxOutput {
-                                                                    utxo_identifier: UTxOIdentifier::new(block.number as u32, tx_index as u16, index as u16),
+                                                                    utxo_identifier: UTxOIdentifier::new(block_number, tx_index, index as u16),
                                                                     address: address,
                                                                     value: map_parameters::map_value(&output.value()),
                                                                     datum: map_parameters::map_datum(&output.datum())
@@ -336,7 +384,7 @@ impl TxUnpacker {
                                     })
                                 ));
 
-                                futures.push(context.message_bus.publish(&topic, Arc::new(msg)));
+                                futures.push(run_context.message_bus.publish(&topic, Arc::new(msg)));
                             }
 
                             if let Some(ref topic) = publish_asset_deltas_topic {
@@ -348,7 +396,7 @@ impl TxUnpacker {
                                     })
                                 ));
 
-                                futures.push(context.message_bus.publish(&topic, Arc::new(msg)));
+                                futures.push(run_context.message_bus.publish(&topic, Arc::new(msg)));
                             }
 
                             if let Some(ref topic) = publish_withdrawals_topic {
@@ -359,7 +407,7 @@ impl TxUnpacker {
                                     })
                                 ));
 
-                                futures.push(context.message_bus.publish(&topic, Arc::new(msg)));
+                                futures.push(run_context.message_bus.publish(&topic, Arc::new(msg)));
                             }
 
                             if let Some(ref topic) = publish_certificates_topic {
@@ -370,7 +418,7 @@ impl TxUnpacker {
                                     })
                                 ));
 
-                                futures.push(context.message_bus.publish(&topic, Arc::new(msg)));
+                                futures.push(run_context.message_bus.publish(&topic, Arc::new(msg)));
                             }
 
                             if let Some(ref topic) = publish_governance_procedures_topic {
@@ -384,7 +432,7 @@ impl TxUnpacker {
                                         })
                                 )));
 
-                                futures.push(context.message_bus.publish(&topic,
+                                futures.push(run_context.message_bus.publish(&topic,
                                                                          governance_msg.clone()));
                             }
 
@@ -396,7 +444,7 @@ impl TxUnpacker {
                                     })
                                 ));
 
-                                futures.push(context.message_bus.publish(&topic, Arc::new(msg)));
+                                futures.push(run_context.message_bus.publish(&topic, Arc::new(msg)));
                             }
 
                             join_all(futures)
@@ -408,6 +456,26 @@ impl TxUnpacker {
                     }
 
                     _ => error!("Unexpected message type: {message:?}")
+                }
+            }
+        });
+
+        let mut clock_sub = context.subscribe(&clock_subscribe_topic).await?;
+        context.run(async move {
+            loop {
+                let Ok((_, message)) = clock_sub.read().await else {
+                    return;
+                };
+                if let Message::Clock(message) = message.as_ref() {
+                    if (message.number % 60) == 0 {
+                        let span = info_span!("tx_unpacker.tick", number = message.number);
+                        async {
+                            registry_tick
+                                .tick();
+                        }
+                        .instrument(span)
+                        .await;
+                    }
                 }
             }
         });
