@@ -6,6 +6,7 @@ use crate::{
     address::{Address, StakeAddress},
     protocol_params,
     rational_number::RationalNumber,
+    ShelleyAddress,
 };
 use anyhow::{anyhow, bail, Error, Result};
 use bech32::{Bech32, Hrp};
@@ -284,6 +285,9 @@ pub struct TxOutput {
     /// Tx hash
     pub tx_hash: TxHash,
 
+    /// Tx identifier for compact storage
+    pub tx_identifier: TxIdentifier,
+
     /// Output index in tx
     pub index: u64,
 
@@ -337,6 +341,31 @@ pub type DataHash = Vec<u8>;
 
 /// Transaction hash
 pub type TxHash = [u8; 32];
+
+/// Compact transaction identifier for index states
+#[derive(
+    Clone, Default, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+)]
+pub struct TxIdentifier([u8; 6]);
+
+impl TxIdentifier {
+    pub fn new(block_number: u32, tx_index: u16) -> Self {
+        let mut buf = [0u8; 6];
+        buf[..4].copy_from_slice(&block_number.to_be_bytes());
+        buf[4..].copy_from_slice(&tx_index.to_be_bytes());
+        Self(buf)
+    }
+
+    /// Retrieve block number from TxIdentifier
+    pub fn block_number(&self) -> u32 {
+        u32::from_be_bytes(self.0[..4].try_into().unwrap())
+    }
+
+    /// Retrieve transaction index from TxIdentifier
+    pub fn tx_index(&self) -> u16 {
+        u16::from_be_bytes(self.0[4..6].try_into().unwrap())
+    }
+}
 
 /// Block Hash
 pub type BlockHash = [u8; 32];
@@ -1620,7 +1649,7 @@ pub enum TxCertificate {
 
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AssetInfoRecord {
-    pub initial_mint_tx_hash: TxHash,
+    pub initial_mint_tx: TxIdentifier,
     pub mint_or_burn_count: u64,
     pub onchain_metadata: Option<Vec<u8>>,
     pub metadata_standard: Option<AssetMetadataStandard>,
@@ -1628,7 +1657,7 @@ pub struct AssetInfoRecord {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct AssetMintRecord {
-    pub tx_hash: TxHash,
+    pub tx: TxIdentifier,
     pub amount: u64,
     pub burn: bool,
 }
@@ -1646,6 +1675,12 @@ pub enum AssetMetadataStandard {
 pub struct PolicyAsset {
     pub policy: PolicyId,
     pub name: AssetName,
+    pub quantity: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AssetAddressEntry {
+    pub address: ShelleyAddress,
     pub quantity: u64,
 }
 
