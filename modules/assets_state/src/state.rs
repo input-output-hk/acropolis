@@ -102,7 +102,7 @@ impl State {
             },
             transactions: match store_transactions {
                 StoreTransactions::None => None,
-                StoreTransactions::All | StoreTransactions::Last(_) => Some(HashMap::new()),
+                _ => Some(HashMap::new()),
             },
             policy_index: if index_by_policy {
                 Some(HashMap::new())
