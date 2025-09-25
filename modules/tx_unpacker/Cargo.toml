@@ -16,7 +16,6 @@ caryatid_sdk = { workspace = true }
 anyhow = { workspace = true }
 async-trait = "0.1"
 config = { workspace = true }
-fjall = "2.7.0"
 futures = "0.3.31"
 hex = { workspace = true }
 pallas = { workspace = true }

@@ -301,37 +301,6 @@ pub struct TxInput {
     pub utxo_identifier: UTxOIdentifier,
 }
 
-/// Compact transaction identifier (block_number + tx_index).
-#[derive(
-    Debug, Default, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
-)]
-pub struct TxIdentifier([u8; 6]);
-
-impl TxIdentifier {
-    pub fn new(block_number: u32, tx_index: u16) -> Self {
-        let mut buf = [0u8; 6];
-        buf[..4].copy_from_slice(&block_number.to_be_bytes());
-        buf[4..6].copy_from_slice(&tx_index.to_be_bytes());
-        Self(buf)
-    }
-
-    pub fn block_number(&self) -> u32 {
-        u32::from_be_bytes(self.0[..4].try_into().unwrap())
-    }
-
-    pub fn tx_index(&self) -> u16 {
-        u16::from_be_bytes(self.0[4..6].try_into().unwrap())
-    }
-
-    pub fn from_bytes(bytes: [u8; 6]) -> Self {
-        Self(bytes)
-    }
-
-    pub fn as_bytes(&self) -> &[u8; 6] {
-        &self.0
-    }
-}
-
 /// Option of either TxOutput or TxInput
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum UTXODelta {
@@ -362,6 +331,87 @@ pub type DataHash = Vec<u8>;
 
 /// Transaction hash
 pub type TxHash = [u8; 32];
+
+/// Compact transaction identifier (block_number, tx_index).
+#[derive(
+    Debug, Default, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+)]
+pub struct TxIdentifier([u8; 6]);
+
+impl TxIdentifier {
+    pub fn new(block_number: u32, tx_index: u16) -> Self {
+        let mut buf = [0u8; 6];
+        buf[..4].copy_from_slice(&block_number.to_be_bytes());
+        buf[4..6].copy_from_slice(&tx_index.to_be_bytes());
+        Self(buf)
+    }
+
+    pub fn block_number(&self) -> u32 {
+        u32::from_be_bytes(self.0[..4].try_into().unwrap())
+    }
+
+    pub fn tx_index(&self) -> u16 {
+        u16::from_be_bytes(self.0[4..6].try_into().unwrap())
+    }
+
+    pub fn from_bytes(bytes: [u8; 6]) -> Self {
+        Self(bytes)
+    }
+
+    pub fn as_bytes(&self) -> &[u8; 6] {
+        &self.0
+    }
+}
+
+// Compact UTxO identifier (block_number, tx_index, output_index)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct UTxOIdentifier([u8; 8]);
+
+impl UTxOIdentifier {
+    pub fn new(block_number: u32, tx_index: u16, output_index: u16) -> Self {
+        let mut buf = [0u8; 8];
+        buf[..4].copy_from_slice(&block_number.to_be_bytes());
+        buf[4..6].copy_from_slice(&tx_index.to_be_bytes());
+        buf[6..].copy_from_slice(&output_index.to_be_bytes());
+        Self(buf)
+    }
+
+    pub fn block_number(&self) -> u32 {
+        u32::from_be_bytes(self.0[..4].try_into().unwrap())
+    }
+
+    pub fn tx_index(&self) -> u16 {
+        u16::from_be_bytes(self.0[4..6].try_into().unwrap())
+    }
+
+    pub fn output_index(&self) -> u16 {
+        u16::from_be_bytes(self.0[6..8].try_into().unwrap())
+    }
+
+    pub fn to_bytes(&self) -> [u8; 8] {
+        self.0
+    }
+
+    pub fn to_tx_identifier(&self) -> TxIdentifier {
+        TxIdentifier::new(self.block_number(), self.tx_index())
+    }
+}
+
+// Full TxOutRef stored in UTxORegistry for UTxOIdentifier lookups
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct TxOutRef {
+    pub tx_hash: TxHash,
+    pub output_index: u16,
+}
+
+impl TxOutRef {
+    pub fn new(tx_hash: TxHash, output_index: u16) -> Self {
+        TxOutRef {
+            tx_hash,
+            output_index,
+        }
+    }
+}
 
 /// Block Hash
 pub type BlockHash = [u8; 32];
@@ -1678,49 +1728,6 @@ pub struct PolicyAsset {
 pub struct AssetAddressEntry {
     pub address: ShelleyAddress,
     pub quantity: u64,
-}
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct UTxOIdentifier([u8; 8]);
-
-impl UTxOIdentifier {
-    pub fn new(block_number: u32, tx_index: u16, output_index: u16) -> Self {
-        let mut buf = [0u8; 8];
-        buf[..4].copy_from_slice(&block_number.to_be_bytes());
-        buf[4..6].copy_from_slice(&tx_index.to_be_bytes());
-        buf[6..].copy_from_slice(&output_index.to_be_bytes());
-        Self(buf)
-    }
-
-    pub fn block_number(&self) -> u32 {
-        u32::from_be_bytes(self.0[..4].try_into().unwrap())
-    }
-
-    pub fn tx_index(&self) -> u16 {
-        u16::from_be_bytes(self.0[4..6].try_into().unwrap())
-    }
-
-    pub fn output_index(&self) -> u16 {
-        u16::from_be_bytes(self.0[6..8].try_into().unwrap())
-    }
-
-    pub fn to_bytes(&self) -> [u8; 8] {
-        self.0
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct TxOutRef {
-    pub tx_hash: TxHash,
-    pub output_index: u16,
-}
-
-impl TxOutRef {
-    pub fn new(tx_hash: TxHash, output_index: u16) -> Self {
-        TxOutRef {
-            tx_hash,
-            output_index,
-        }
-    }
 }
 
 #[cfg(test)]

@@ -23,7 +23,7 @@ use tracing::{error, info, info_span, Instrument};
 const DEFAULT_STARTUP_TOPIC: &str = "cardano.sequence.start";
 const DEFAULT_PUBLISH_UTXO_DELTAS_TOPIC: &str = "cardano.utxo.deltas";
 const DEFAULT_PUBLISH_POT_DELTAS_TOPIC: &str = "cardano.pot.deltas";
-const DEFAULT_PUBLISH_GENESIS_TRANSACTIONS_TOPIC: &str = "cardano.genesis.txs";
+const DEFAULT_PUBLISH_GENESIS_UTXO_REGISTRY_TOPIC: &str = "cardano.genesis.utxos";
 const DEFAULT_COMPLETION_TOPIC: &str = "cardano.sequence.bootstrapped";
 const DEFAULT_NETWORK_NAME: &str = "mainnet";
 
@@ -77,10 +77,10 @@ impl GenesisBootstrapper {
                     .unwrap_or(DEFAULT_PUBLISH_POT_DELTAS_TOPIC.to_string());
                 info!("Publishing pot deltas on '{publish_pot_deltas_topic}'");
 
-                let publish_genesis_transactions_topic = config
-                    .get_string("publish-genesis-transactions-topic")
-                    .unwrap_or(DEFAULT_PUBLISH_GENESIS_TRANSACTIONS_TOPIC.to_string());
-                info!("Publishing genesis transactions on '{publish_genesis_transactions_topic}'");
+                let publish_genesis_utxos_topic = config
+                    .get_string("publish-genesis-utxos-topic")
+                    .unwrap_or(DEFAULT_PUBLISH_GENESIS_UTXO_REGISTRY_TOPIC.to_string());
+                info!("Publishing genesis transactions on '{publish_genesis_utxos_topic}'");
 
                 let completion_topic = config
                     .get_string("completion-topic")
@@ -186,17 +186,14 @@ impl GenesisBootstrapper {
                     .await
                     .unwrap_or_else(|e| error!("Failed to publish: {e}"));
 
-                let gen_txs_message = Message::Cardano((
+                let gen_utxos_message = Message::Cardano((
                     block_info.clone(),
                     CardanoMessage::GenesisUTxOs(GenesisUTxOsMessage {
                         utxos: gen_utxo_identifiers,
                     }),
                 ));
                 context
-                    .publish(
-                        &publish_genesis_transactions_topic,
-                        Arc::new(gen_txs_message),
-                    )
+                    .publish(&publish_genesis_utxos_topic, Arc::new(gen_utxos_message))
                     .await
                     .unwrap_or_else(|e| error!("Failed to publish: {e}"));
 

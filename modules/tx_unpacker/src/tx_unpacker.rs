@@ -24,7 +24,7 @@ mod utxo_registry;
 use crate::utxo_registry::UTxORegistry;
 
 const DEFAULT_TRANSACTIONS_SUBSCRIBE_TOPIC: &str = "cardano.txs";
-const DEFAULT_GENESIS_SUBSCRIBE_TOPIC: &str = "cardano.genesis.txs";
+const DEFAULT_GENESIS_SUBSCRIBE_TOPIC: &str = "cardano.genesis.utxos";
 
 const CIP25_METADATA_LABEL: u64 = 721;
 
@@ -67,10 +67,10 @@ impl TxUnpacker {
             .unwrap_or(DEFAULT_TRANSACTIONS_SUBSCRIBE_TOPIC.to_string());
         info!("Creating subscriber on '{transactions_subscribe_topic}'");
 
-        let genesis_transactions_subscribe_topic = config
-            .get_string("genesis-transactions-subscribe-topic")
+        let genesis_utxos_subscribe_topic = config
+            .get_string("genesis-utxos-subscribe-topic")
             .unwrap_or(DEFAULT_GENESIS_SUBSCRIBE_TOPIC.to_string());
-        info!("Creating subscriber on '{transactions_subscribe_topic}'");
+        info!("Creating subscriber on '{genesis_utxos_subscribe_topic}'");
 
         let publish_utxo_deltas_topic = config.get_string("publish-utxo-deltas-topic").ok();
         if let Some(ref topic) = publish_utxo_deltas_topic {
@@ -103,23 +103,23 @@ impl TxUnpacker {
             info!("Publishing block fees on '{topic}'");
         }
 
-        // Initalize UTxORegistry
+        // Initialize UTxORegistry
         let mut utxo_registry = UTxORegistry::default();
 
         // Subscribe to genesis and txs topics
-        let mut genesis_sub = context.subscribe(&genesis_transactions_subscribe_topic).await?;
+        let mut genesis_sub = context.subscribe(&genesis_utxos_subscribe_topic).await?;
         let mut txs_sub = context.subscribe(&transactions_subscribe_topic).await?;
 
         context.clone().run(async move {
-            // Initalize TxRegistry with genesis txs
+            // Initialize TxRegistry with genesis utxos
             let (_, message) = genesis_sub.read().await
-                .expect("failed to read genesis txs");
+                .expect("failed to read genesis utxos");
             match message.as_ref() {
                 Message::Cardano((_block, CardanoMessage::GenesisUTxOs(genesis_msg))) => {
                     utxo_registry.bootstrap_from_genesis_utxos(&genesis_msg.utxos);
                     info!("Seeded registry with {} genesis utxos", genesis_msg.utxos.len());
                 }
-                other => panic!("expected GenesisTxs, got {:?}", other),
+                other => panic!("expected GenesisUTxOs, got {:?}", other),
             }
             loop {
                 let Ok((_, message)) = txs_sub.read().await else { return; };
@@ -174,7 +174,7 @@ impl TxUnpacker {
 
                                         if publish_utxo_deltas_topic.is_some() {
                                             // Add all the inputs
-                                            for input in inputs {
+                                            for input in inputs {  // MultiEraInput
                                                 // Lookup and remove UTxOIdentifier from registry 
                                                 let oref = input.output_ref();
                                                 let tx_ref = TxOutRef::new(**oref.hash(), oref.index() as u16);
