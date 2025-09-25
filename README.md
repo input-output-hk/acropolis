@@ -60,6 +60,7 @@ structure is highly subject to change:
 - [Stake Delta Filter](modules/stake_delta_filter) - filters out stake address changes and handles stake pointer references
 - [Epochs State](modules/epochs_state) - track fees blocks minted and epochs history
 - [Accounts State](modules/accounts_state) - stake and reward accounts tracker
+- [Assets State](modules/assets_state) - tracks native asset supply, metadata, transactions, and addresses
 
 ```mermaid
 graph LR
@@ -74,19 +75,24 @@ graph LR
    DRepState(DRep State)
    GovernanceState(Governance State)
    StakeDeltaFilter(Stake Delta Filter)
-   EpochsState(EpochsState)
+   EpochsState(Epochs State)
    AccountsState(Accounts State)
+   AssetsState(Assets State)
+   ParametersState(Parameters State)
 
    UpstreamChainFetcher --> BlockUnpacker
    MithrilSnapshotFetcher --> BlockUnpacker
    BlockUnpacker --> TxUnpacker
    GenesisBootstrapper --> UTXOState
    TxUnpacker --> UTXOState
+   TxUnpacker --> AssetsState
    TxUnpacker --> EpochsState
    TxUnpacker --> AccountsState
-   TxUnpacker --> SPOState
    TxUnpacker --> DRepState
+   TxUnpacker --> SPOState
    TxUnpacker --> GovernanceState
+   GovernanceState --> ParametersState
+   TxUnpacker --> ParametersState
    UTXOState --> StakeDeltaFilter
    StakeDeltaFilter --> AccountsState
    UpstreamChainFetcher --> EpochsState
@@ -95,6 +101,7 @@ graph LR
    SPOState --> AccountsState
    DRepState --> GovernanceState
    GovernanceState --> AccountsState
+   ParametersState --> AccountsState
 ```
 
 ## Messages
