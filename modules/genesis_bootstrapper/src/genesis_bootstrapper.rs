@@ -4,7 +4,7 @@
 use acropolis_common::{
     genesis_values::GenesisValues,
     messages::{
-        CardanoMessage, GenesisCompleteMessage, GenesisTxsMessage, Message, PotDeltasMessage,
+        CardanoMessage, GenesisCompleteMessage, GenesisUTxOsMessage, Message, PotDeltasMessage,
         UTXODeltasMessage,
     },
     Address, BlockHash, BlockInfo, BlockStatus, ByronAddress, Era, Lovelace, LovelaceDelta, Pot,
@@ -134,13 +134,13 @@ impl GenesisBootstrapper {
 
                 // Convert the AVVM distributions into pseudo-UTXOs
                 let gen_utxos = genesis_utxos(&byron_genesis);
-                let mut gen_txs = Vec::new();
+                let mut gen_utxo_identifiers = Vec::new();
                 let mut total_allocated: u64 = 0;
                 for (tx_index, (hash, address, amount)) in gen_utxos.iter().enumerate() {
                     let tx_identifier = TxIdentifier::new(0, tx_index as u16);
                     let tx_ref = TxOutRef::new(**hash, 0);
 
-                    gen_txs.push((tx_ref, tx_identifier));
+                    gen_utxo_identifiers.push((tx_ref, tx_identifier));
 
                     let tx_output = TxOutput {
                         utxo_identifier: UTxOIdentifier::new(0, tx_index as u16, 0),
@@ -188,7 +188,9 @@ impl GenesisBootstrapper {
 
                 let gen_txs_message = Message::Cardano((
                     block_info.clone(),
-                    CardanoMessage::GenesisTxs(GenesisTxsMessage { txs: gen_txs }),
+                    CardanoMessage::GenesisUTxOs(GenesisUTxOsMessage {
+                        utxos: gen_utxo_identifiers,
+                    }),
                 ));
                 context
                     .publish(
