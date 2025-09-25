@@ -19,11 +19,19 @@ use std::collections::HashMap;
 #[derive(Serialize)]
 pub struct EpochActivityRest {
     pub epoch: u64,
+    pub start_time: u64,
+    pub end_time: u64,
+    pub first_block_time: u64,
+    pub last_block_time: u64,
     pub total_blocks: usize,
+    pub total_txs: u64,
+    pub total_outputs: u128,
     pub total_fees: u64,
     pub vrf_vkey_hashes: Vec<VRFKeyCount>,
     #[serde_as(as = "Option<Hex>")]
     pub nonce: Option<NonceHash>,
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub active_stake: Option<u64>,
 }
 
 #[derive(Serialize)]
@@ -36,7 +44,13 @@ impl From<EpochActivityMessage> for EpochActivityRest {
     fn from(ea_message: EpochActivityMessage) -> Self {
         Self {
             epoch: ea_message.epoch,
+            start_time: ea_message.epoch_start_time,
+            end_time: ea_message.epoch_end_time,
+            first_block_time: ea_message.first_block_time,
+            last_block_time: ea_message.last_block_time,
             total_blocks: ea_message.total_blocks,
+            total_txs: ea_message.total_txs,
+            total_outputs: ea_message.total_outputs,
             total_fees: ea_message.total_fees,
             vrf_vkey_hashes: ea_message
                 .vrf_vkey_hashes
@@ -46,6 +60,7 @@ impl From<EpochActivityMessage> for EpochActivityRest {
                     block_count: *count,
                 })
                 .collect(),
+            active_stake: None,
             nonce: ea_message.nonce.clone(),
         }
     }
