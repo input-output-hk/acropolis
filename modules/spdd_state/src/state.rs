@@ -53,8 +53,16 @@ impl State {
         self.spdd_history.get_by_index(epoch)
     }
 
+    // Since this is active stakes
+    // we plus 2 to epoch number
     pub fn get_epoch_total_active_stakes(&self, epoch: u64) -> Option<u64> {
-        self.spdd_history.get_by_index(epoch).map(|state| state.values().map(|v| v.active).sum())
+        if epoch <= 2 {
+            return None;
+        } else {
+            self.spdd_history
+                .get_by_index(epoch - 2)
+                .map(|state| state.values().map(|v| v.live).sum())
+        }
     }
 
     pub async fn tick(&self) -> anyhow::Result<()> {
