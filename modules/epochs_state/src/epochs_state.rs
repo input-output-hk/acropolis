@@ -29,10 +29,18 @@ use crate::{
     store_config::StoreConfig,
 };
 
+const DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC: (&str, &str) = (
+    "bootstrapped-subscribe-topic",
+    "cardano.sequence.bootstrapped",
+);
 const DEFAULT_BLOCK_HEADER_SUBSCRIBE_TOPIC: (&str, &str) =
     ("block-header-subscribe-topic", "cardano.block.header");
 const DEFAULT_BLOCK_FEES_SUBSCRIBE_TOPIC: (&str, &str) =
     ("block-fees-subscribe-topic", "cardano.block.fees");
+const DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC: (&str, &str) = (
+    "protocol-parameters-subscribe-topic",
+    "cardano.protocol.parameters",
+);
 const DEFAULT_EPOCH_ACTIVITY_PUBLISH_TOPIC: (&str, &str) =
     ("epoch-activity-publish-topic", "cardano.epoch.activity");
 
@@ -49,10 +57,23 @@ impl EpochsState {
     async fn run(
         history: Arc<Mutex<StateHistory<State>>>,
         epochs_history: EpochsHistoryState,
+        mut bootstrapped_subscription: Box<dyn Subscription<Message>>,
         mut headers_subscription: Box<dyn Subscription<Message>>,
         mut fees_subscription: Box<dyn Subscription<Message>>,
+        mut protocol_parameters_subscription: Box<dyn Subscription<Message>>,
         mut epoch_activity_publisher: EpochActivityPublisher,
     ) -> Result<()> {
+        let (_, bootstrapped_message) = bootstrapped_subscription.read().await?;
+        let genesis = match bootstrapped_message.as_ref() {
+            Message::Cardano((_, CardanoMessage::GenesisComplete(complete))) => {
+                complete.values.clone()
+            }
+            _ => panic!("Unexpected message in genesis completion topic: {bootstrapped_message:?}"),
+        };
+
+        // Consume initial protocol parameters
+        let _ = protocol_parameters_subscription.read().await?;
+
         loop {
             // Get a mutable state
             let mut state = history.lock().await.get_or_init_with(|| State::new());
@@ -66,11 +87,6 @@ impl EpochsState {
             let (_, message) = headers_message_f.await?;
             match message.as_ref() {
                 Message::Cardano((block_info, CardanoMessage::BlockHeader(header_msg))) => {
-                    let span = info_span!(
-                        "epochs_state.handle_block_header",
-                        block = block_info.number
-                    );
-
                     // handle rollback here
                     if block_info.status == BlockStatus::RolledBack {
                         state = history.lock().await.get_rolled_back_state(block_info.number);
@@ -78,47 +94,73 @@ impl EpochsState {
                     current_block = Some(block_info.clone());
                     let is_new_epoch = block_info.new_epoch && block_info.epoch > 0;
 
-                    async {
-                        // End of epoch?
-                        if is_new_epoch {
-                            let ea = state.end_epoch(&block_info);
-
-                            // update epochs history
-                            epochs_history.handle_epoch_activity(&block_info, &ea);
-
-                            // publish epoch activity message
-                            epoch_activity_publisher
-                                .publish(Arc::new(Message::Cardano((
-                                    block_info.clone(),
-                                    CardanoMessage::EpochActivity(ea),
-                                ))))
-                                .await
-                                .unwrap_or_else(|e| error!("Failed to publish: {e}"));
-                        }
-
-                        // Derive the variant from the era - just enough to make
-                        // MultiEraHeader::decode() work.
-                        let variant = match block_info.era {
-                            Era::Byron => 0,
-                            Era::Shelley => 1,
-                            Era::Allegra => 2,
-                            Era::Mary => 3,
-                            Era::Alonzo => 4,
-                            _ => 5,
-                        };
-
-                        // Parse the header - note we ignore the subtag because EBBs
-                        // are suppressed upstream
-                        match MultiEraHeader::decode(variant, None, &header_msg.raw) {
-                            Ok(header) => {
-                                state.handle_mint(&block_info, header.vrf_vkey());
-                            }
-
-                            Err(e) => error!("Can't decode header {}: {e}", block_info.slot),
+                    // read protocol parameters if new epoch
+                    if is_new_epoch {
+                        let (_, protocol_parameters_msg) =
+                            protocol_parameters_subscription.read().await?;
+                        if let Message::Cardano((_, CardanoMessage::ProtocolParams(params))) =
+                            protocol_parameters_msg.as_ref()
+                        {
+                            state.handle_protocol_parameters(params);
                         }
                     }
-                    .instrument(span)
-                    .await;
+
+                    // decode header
+                    // Derive the variant from the era - just enough to make
+                    // MultiEraHeader::decode() work.
+                    let variant = match block_info.era {
+                        Era::Byron => 0,
+                        Era::Shelley => 1,
+                        Era::Allegra => 2,
+                        Era::Mary => 3,
+                        Era::Alonzo => 4,
+                        _ => 5,
+                    };
+                    let span = info_span!("epochs_state.decode_header", block = block_info.number);
+                    let mut header = None;
+                    span.in_scope(|| {
+                        header = match MultiEraHeader::decode(variant, None, &header_msg.raw) {
+                            Ok(header) => Some(header),
+                            Err(e) => {
+                                error!("Can't decode header {}: {e}", block_info.slot);
+                                None
+                            }
+                        };
+                    });
+
+                    if is_new_epoch {
+                        let ea = state.end_epoch(&block_info);
+                        // update epochs history
+                        epochs_history.handle_epoch_activity(&block_info, &ea);
+                        // publish epoch activity message
+                        epoch_activity_publisher
+                            .publish(Arc::new(Message::Cardano((
+                                block_info.clone(),
+                                CardanoMessage::EpochActivity(ea),
+                            ))))
+                            .await
+                            .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+                    }
+
+                    let span = info_span!(
+                        "epochs_state.handle_block_header",
+                        block = block_info.number
+                    );
+                    span.in_scope(|| {
+                        if let Some(header) = header.as_ref() {
+                            match state.handle_block_header(&genesis, &block_info, &header) {
+                                Ok(()) => {}
+                                Err(e) => error!("Error handling block header: {e}"),
+                            }
+                        }
+                    });
+
+                    let span = info_span!("epochs_state.handle_mint", block = block_info.number);
+                    span.in_scope(|| {
+                        if let Some(header) = header.as_ref() {
+                            state.handle_mint(&block_info, header.vrf_vkey());
+                        }
+                    });
                 }
 
                 _ => error!("Unexpected message type: {message:?}"),
@@ -151,6 +193,11 @@ impl EpochsState {
     /// Main init function
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // Subscription topics
+        let bootstrapped_subscribe_topic = config
+            .get_string(DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC.1.to_string());
+        info!("Creating subscriber for bootstrapped on '{bootstrapped_subscribe_topic}'");
+
         let block_headers_subscribe_topic = config
             .get_string(DEFAULT_BLOCK_HEADER_SUBSCRIBE_TOPIC.0)
             .unwrap_or(DEFAULT_BLOCK_HEADER_SUBSCRIBE_TOPIC.1.to_string());
@@ -160,6 +207,11 @@ impl EpochsState {
             .get_string(DEFAULT_BLOCK_FEES_SUBSCRIBE_TOPIC.0)
             .unwrap_or(DEFAULT_BLOCK_FEES_SUBSCRIBE_TOPIC.1.to_string());
         info!("Creating subscriber for fees on '{block_fees_subscribe_topic}'");
+
+        let protocol_parameters_subscribe_topic = config
+            .get_string(DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC.1.to_string());
+        info!("Creating subscriber for protocol parameters on '{protocol_parameters_subscribe_topic}'");
 
         // Publish topic
         let epoch_activity_publish_topic = config
@@ -188,8 +240,11 @@ impl EpochsState {
         let epochs_history_query = epochs_history.clone();
 
         // Subscribe
+        let bootstrapped_subscription = context.subscribe(&bootstrapped_subscribe_topic).await?;
         let headers_subscription = context.subscribe(&block_headers_subscribe_topic).await?;
         let fees_subscription = context.subscribe(&block_fees_subscribe_topic).await?;
+        let protocol_parameters_subscription =
+            context.subscribe(&protocol_parameters_subscribe_topic).await?;
 
         // Publisher
         let epoch_activity_publisher =
@@ -249,8 +304,10 @@ impl EpochsState {
             Self::run(
                 history,
                 epochs_history,
+                bootstrapped_subscription,
                 headers_subscription,
                 fees_subscription,
+                protocol_parameters_subscription,
                 epoch_activity_publisher,
             )
             .await

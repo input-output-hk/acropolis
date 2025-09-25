@@ -94,6 +94,7 @@ mod tests {
                 total_blocks: 1,
                 total_fees: 50,
                 vrf_vkey_hashes: vec![],
+                nonce: None,
             },
         );
 
