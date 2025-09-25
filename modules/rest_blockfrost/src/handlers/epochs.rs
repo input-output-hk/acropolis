@@ -3,6 +3,7 @@ use acropolis_common::{
     queries::{
         epochs::{EpochsStateQuery, EpochsStateQueryResponse},
         parameters::{ParametersStateQuery, ParametersStateQueryResponse},
+        spdd::{SPDDStateQuery, SPDDStateQueryResponse},
         utils::query_state,
     },
 };
@@ -75,8 +76,34 @@ pub async fn handle_epoch_info_blockfrost(
             "Unexpected message type while retrieving epoch info"
         )),
     }?;
+    let epoch_number = ea_message.epoch;
 
-    let response = EpochActivityRest::from(ea_message);
+    // query total_active_stakes from spdd_state
+    let total_active_stakes_msg = Arc::new(Message::StateQuery(StateQuery::SPDD(
+        SPDDStateQuery::GetEpochTotalActiveStakes {
+            epoch: epoch_number,
+        },
+    )));
+    let total_active_stakes = query_state(
+        &context,
+        &handlers_config.spdd_query_topic,
+        total_active_stakes_msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::SPDD(
+                SPDDStateQueryResponse::EpochTotalActiveStakes(total_active_stakes),
+            )) => Ok(Some(total_active_stakes)),
+            Message::StateQueryResponse(StateQueryResponse::SPDD(
+                SPDDStateQueryResponse::Error(_e),
+            )) => Ok(None),
+            _ => Err(anyhow::anyhow!(
+                "Unexpected message type while retrieving total active stakes"
+            )),
+        },
+    )
+    .await?;
+
+    let mut response = EpochActivityRest::from(ea_message);
+    response.active_stake = total_active_stakes;
     let json = match serde_json::to_string(&response) {
         Ok(j) => j,
         Err(e) => {
