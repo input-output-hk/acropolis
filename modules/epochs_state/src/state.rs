@@ -3,7 +3,8 @@
 use acropolis_common::{
     crypto::keyhash,
     genesis_values::GenesisValues,
-    messages::{EpochActivityMessage, ProtocolParamsMessage},
+    messages::{BlockTxsMessage, EpochActivityMessage, ProtocolParamsMessage},
+    params::EPOCH_LENGTH,
     protocol_params::{Nonces, PraosParams},
     BlockHash, BlockInfo, KeyHash,
 };
@@ -20,11 +21,29 @@ pub struct State {
     // epoch number N
     epoch: u64,
 
+    // epoch start time
+    // UNIX timestamp
+    epoch_start_time: u64,
+
+    // first block time
+    // UNIX timestamp
+    first_block_time: u64,
+
+    // last block time
+    // UNIX timestamp
+    last_block_time: u64,
+
     // Map of counts by VRF key hashes
     blocks_minted: HashMap<KeyHash, usize>,
 
     // blocks seen this epoch
     epoch_blocks: usize,
+
+    // transactions seen this epoch
+    epoch_txs: u64,
+
+    // total outputs of all tx seen in this epoch
+    epoch_outputs: u128,
 
     // fees seen this epoch
     epoch_fees: u64,
@@ -38,12 +57,17 @@ pub struct State {
 
 impl State {
     // Constructor
-    pub fn new() -> Self {
+    pub fn new(genesis: &GenesisValues) -> Self {
         Self {
             block: 0,
             epoch: 0,
+            epoch_start_time: genesis.byron_timestamp,
+            first_block_time: genesis.byron_timestamp,
+            last_block_time: 0,
             blocks_minted: HashMap::new(),
             epoch_blocks: 0,
+            epoch_txs: 0,
+            epoch_outputs: 0,
             epoch_fees: 0,
             nonces: None,
             praos_params: None,
@@ -151,8 +175,11 @@ impl State {
     }
 
     // Handle mint
-    pub fn handle_mint(&mut self, _block: &BlockInfo, vrf_vkey: Option<&[u8]>) {
+    // This will update last block time
+    pub fn handle_mint(&mut self, block_info: &BlockInfo, vrf_vkey: Option<&[u8]>) {
+        self.last_block_time = block_info.timestamp;
         self.epoch_blocks += 1;
+
         if let Some(vrf_vkey) = vrf_vkey {
             let vrf_key_hash = keyhash(vrf_vkey);
             // Count one on this hash
@@ -160,9 +187,11 @@ impl State {
         }
     }
 
-    // Handle block fees
-    pub fn handle_fees(&mut self, _block: &BlockInfo, block_fee: u64) {
-        self.epoch_fees += block_fee;
+    // Handle Block Txs
+    pub fn handle_block_txs(&mut self, _block_info: &BlockInfo, msg: &BlockTxsMessage) {
+        self.epoch_fees += msg.total_fees;
+        self.epoch_txs += msg.total_txs;
+        self.epoch_outputs += msg.total_output;
     }
 
     // Handle end of epoch, returns message to be published
@@ -173,16 +202,24 @@ impl State {
             blocks = self.epoch_blocks,
             unique_vrf_keys = self.blocks_minted.len(),
             fees = self.epoch_fees,
+            outputs = self.epoch_outputs,
+            txs = self.epoch_txs,
             "End of epoch"
         );
 
+        // set epoch end time
         let epoch_activity = self.get_epoch_info();
 
-        // clear epoch state
+        // clear epoch state for new epoch
         self.block = block_info.number;
         self.epoch = block_info.epoch;
+        self.epoch_start_time = block_info.timestamp;
+        self.first_block_time = block_info.timestamp;
+        self.last_block_time = block_info.timestamp;
         self.blocks_minted.clear();
         self.epoch_blocks = 0;
+        self.epoch_txs = 0;
+        self.epoch_outputs = 0;
         self.epoch_fees = 0;
 
         epoch_activity
@@ -191,7 +228,15 @@ impl State {
     pub fn get_epoch_info(&self) -> EpochActivityMessage {
         EpochActivityMessage {
             epoch: self.epoch,
-            total_blocks: self.epoch_blocks,
+            epoch_start_time: self.epoch_start_time,
+            epoch_end_time: self.epoch_start_time + EPOCH_LENGTH,
+            first_block_time: self.first_block_time,
+            last_block_time: self.last_block_time,
+            // NOTE:
+            // This is only because we now ignore EBBs
+            total_blocks: self.epoch_blocks + 1,
+            total_txs: self.epoch_txs,
+            total_outputs: self.epoch_outputs,
             total_fees: self.epoch_fees,
             vrf_vkey_hashes: self.blocks_minted.iter().map(|(k, v)| (k.clone(), *v)).collect(),
             nonce: self.nonces.as_ref().map(|n| n.active.hash.clone()).flatten(),
@@ -260,23 +305,22 @@ mod tests {
 
     #[test]
     fn initial_state_is_zeroed() {
-        let state = State::new();
+        let state = State::new(&GenesisValues::mainnet());
         assert_eq!(state.epoch_blocks, 0);
+        assert_eq!(state.epoch_txs, 0);
+        assert_eq!(state.epoch_outputs, 0);
         assert_eq!(state.epoch_fees, 0);
         assert!(state.blocks_minted.is_empty());
     }
 
     #[test]
     fn handle_mint_single_vrf_records_counts() {
-        let mut state = State::new();
+        let mut state = State::new(&GenesisValues::mainnet());
         let vrf = b"vrf_key";
         let mut block = make_block(100);
         state.handle_mint(&block, Some(vrf));
-        state.handle_fees(&block, 100);
-
         block.number += 1;
         state.handle_mint(&block, Some(vrf));
-        state.handle_fees(&block, 200);
 
         assert_eq!(state.epoch_blocks, 2);
         assert_eq!(state.blocks_minted.len(), 1);
@@ -285,7 +329,7 @@ mod tests {
 
     #[test]
     fn handle_mint_multiple_vrf_records_counts() {
-        let mut state = State::new();
+        let mut state = State::new(&GenesisValues::mainnet());
         let mut block = make_block(100);
         state.handle_mint(&block, Some(b"vrf_1"));
         block.number += 1;
@@ -309,40 +353,75 @@ mod tests {
     }
 
     #[test]
-    fn handle_fees_counts_fees() {
-        let mut state = State::new();
+    fn handle_block_txs_correctly() {
+        let mut state = State::new(&GenesisValues::mainnet());
         let mut block = make_block(100);
 
-        state.handle_fees(&block, 100);
+        state.handle_block_txs(
+            &block,
+            &BlockTxsMessage {
+                total_txs: 1,
+                total_output: 100,
+                total_fees: 100,
+            },
+        );
         block.number += 1;
-        state.handle_fees(&block, 250);
+        state.handle_block_txs(
+            &block,
+            &BlockTxsMessage {
+                total_txs: 2,
+                total_output: 250,
+                total_fees: 250,
+            },
+        );
 
+        assert_eq!(state.epoch_txs, 3);
+        assert_eq!(state.epoch_outputs, 350);
         assert_eq!(state.epoch_fees, 350);
     }
 
     #[test]
     fn end_epoch_resets_and_returns_message() {
-        let mut state = State::new();
+        let genesis = GenesisValues::mainnet();
+        let mut state = State::new(&genesis);
         let block = make_block(1);
         state.handle_mint(&block, Some(b"vrf_1"));
-        state.handle_fees(&block, 123);
+        state.handle_block_txs(
+            &block,
+            &BlockTxsMessage {
+                total_txs: 1,
+                total_output: 123,
+                total_fees: 123,
+            },
+        );
 
         // Check the message returned
         let ea = state.end_epoch(&block);
         assert_eq!(ea.epoch, 0);
         assert_eq!(ea.total_blocks, 1);
+        assert_eq!(ea.total_txs, 1);
+        assert_eq!(ea.total_outputs, 123);
         assert_eq!(ea.total_fees, 123);
         assert_eq!(ea.vrf_vkey_hashes.len(), 1);
         assert_eq!(
             ea.vrf_vkey_hashes.iter().find(|(k, _)| k == &keyhash(b"vrf_1")).map(|(_, v)| *v),
             Some(1)
         );
+        assert_eq!(ea.epoch_start_time, genesis.byron_timestamp);
+        assert_eq!(ea.epoch_end_time, genesis.byron_timestamp + EPOCH_LENGTH);
+        assert_eq!(ea.first_block_time, genesis.byron_timestamp);
+        assert_eq!(ea.last_block_time, block.timestamp);
 
         // State must be reset
         assert_eq!(state.epoch, 1);
         assert_eq!(state.epoch_blocks, 0);
+        assert_eq!(state.epoch_txs, 0);
+        assert_eq!(state.epoch_outputs, 0);
         assert_eq!(state.epoch_fees, 0);
         assert!(state.blocks_minted.is_empty());
+        assert_eq!(state.epoch_start_time, block.timestamp);
+        assert_eq!(state.first_block_time, block.timestamp);
+        assert_eq!(state.last_block_time, block.timestamp);
 
         let blocks_minted = state.get_latest_epoch_blocks_minted_by_pool(&keyhash(b"vrf_1"));
         assert_eq!(blocks_minted, 0);
@@ -357,13 +436,27 @@ mod tests {
         let mut state = history.lock().await.get_current_state();
         let mut block = make_block(1);
         state.handle_mint(&block, Some(b"vrf_1"));
-        state.handle_fees(&block, 123);
+        state.handle_block_txs(
+            &block,
+            &BlockTxsMessage {
+                total_txs: 1,
+                total_output: 123,
+                total_fees: 123,
+            },
+        );
         history.lock().await.commit(block.number, state);
 
         let mut state = history.lock().await.get_current_state();
         block.number += 1;
         state.handle_mint(&block, Some(b"vrf_1"));
-        state.handle_fees(&block, 123);
+        state.handle_block_txs(
+            &block,
+            &BlockTxsMessage {
+                total_txs: 1,
+                total_output: 123,
+                total_fees: 123,
+            },
+        );
         assert_eq!(
             state.get_latest_epoch_blocks_minted_by_pool(&keyhash(b"vrf_1")),
             2
@@ -373,7 +466,14 @@ mod tests {
         block = make_rolled_back_block(0);
         let mut state = history.lock().await.get_rolled_back_state(block.number);
         state.handle_mint(&block, Some(b"vrf_2"));
-        state.handle_fees(&block, 123);
+        state.handle_block_txs(
+            &block,
+            &BlockTxsMessage {
+                total_txs: 1,
+                total_output: 123,
+                total_fees: 123,
+            },
+        );
         assert_eq!(
             state.get_latest_epoch_blocks_minted_by_pool(&keyhash(b"vrf_1")),
             0
@@ -387,7 +487,7 @@ mod tests {
 
     #[test]
     fn test_epoch_208_nonce() {
-        let mut state = State::new();
+        let mut state = State::new(&GenesisValues::mainnet());
         state.praos_params = Some(PraosParams::mainnet());
         let genesis_value = GenesisValues::mainnet();
 
@@ -415,7 +515,7 @@ mod tests {
 
     #[test]
     fn test_nonce_evolving() {
-        let mut state = State::new();
+        let mut state = State::new(&GenesisValues::mainnet());
         state.praos_params = Some(PraosParams::mainnet());
         let genesis_value = GenesisValues::mainnet();
 
@@ -450,7 +550,7 @@ mod tests {
 
     #[test]
     fn test_epoch_209_nonce() {
-        let mut state = State::new();
+        let mut state = State::new(&GenesisValues::mainnet());
         state.praos_params = Some(PraosParams::mainnet());
         let genesis_value = GenesisValues::mainnet();
         let e_208_candidate = Nonce::from(
@@ -509,7 +609,7 @@ mod tests {
 
     #[test]
     fn test_epoch_210_nonce() {
-        let mut state = State::new();
+        let mut state = State::new(&GenesisValues::mainnet());
         state.praos_params = Some(PraosParams::mainnet());
         let genesis_value = GenesisValues::mainnet();
         let e_209_lab = Nonce::from(
