@@ -233,8 +233,9 @@ impl State {
             first_block_time: self.first_block_time,
             last_block_time: self.last_block_time,
             // NOTE:
+            // total_blocks will be missing one 
             // This is only because we now ignore EBBs
-            total_blocks: self.epoch_blocks + 1,
+            total_blocks: self.epoch_blocks,
             total_txs: self.epoch_txs,
             total_outputs: self.epoch_outputs,
             total_fees: self.epoch_fees,
