@@ -379,11 +379,7 @@ impl State {
                 continue;
             };
 
-            let tx_identifier = TxIdentifier::new(
-                output.utxo_identifier.block_number(),
-                output.utxo_identifier.tx_index(),
-            );
-
+            let tx_identifier = output.utxo_identifier.to_tx_identifier();
             for (policy_id, assets) in &output.value.assets {
                 for asset in assets {
                     if let Some(asset_id) = registry.lookup_id(policy_id, &asset.name) {
