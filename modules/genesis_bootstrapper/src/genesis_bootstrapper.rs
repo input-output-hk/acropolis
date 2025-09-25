@@ -13,8 +13,10 @@ use acropolis_common::{
 use anyhow::Result;
 use caryatid_sdk::{module, Context, Module};
 use config::Config;
-use pallas::ledger::configs::*;
-use pallas_configs::byron::{genesis_utxos, GenesisFile};
+use pallas::ledger::configs::{
+    byron::{genesis_utxos, GenesisFile as ByronGenesisFile},
+    shelley::GenesisFile as ShelleyGenesisFile,
+};
 use std::sync::Arc;
 use tracing::{error, info, info_span, Instrument};
 
@@ -110,9 +112,9 @@ impl GenesisBootstrapper {
                 info!("Reading genesis for '{network_name}'");
 
                 // Read genesis data
-                let byron_genesis: GenesisFile = serde_json::from_slice(byron_genesis)
+                let byron_genesis: ByronGenesisFile = serde_json::from_slice(byron_genesis)
                     .expect("Invalid JSON in BYRON_GENESIS file");
-                let shelley_genesis: shelley::GenesisFile = serde_json::from_slice(shelley_genesis)
+                let shelley_genesis: ShelleyGenesisFile = serde_json::from_slice(shelley_genesis)
                     .expect("Invalid JSON in SHELLEY_GENESIS file");
 
                 // Construct messages

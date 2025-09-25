@@ -24,7 +24,6 @@ mod tx_registry;
 use crate::tx_registry::TxRegistry;
 
 const DEFAULT_TRANSACTIONS_SUBSCRIBE_TOPIC: &str = "cardano.txs";
-const DEFAULT_CLOCK_SUBSCRIBE_TOPIC: &str = "clock.tick";
 const DEFAULT_GENESIS_SUBSCRIBE_TOPIC: &str = "cardano.genesis.txs";
 
 const CIP25_METADATA_LABEL: u64 = 721;
@@ -68,9 +67,6 @@ impl TxUnpacker {
             config.get_string("subscribe-topic").unwrap_or(DEFAULT_TRANSACTIONS_SUBSCRIBE_TOPIC.to_string());
         info!("Creating subscriber on '{transactions_subscribe_topic}'");
 
-        let clock_subscribe_topic = config.get_string("clock-topic").unwrap_or(DEFAULT_CLOCK_SUBSCRIBE_TOPIC.to_string());
-        info!("Creating subscriber on '{clock_subscribe_topic}'");
-
         let genesis_transactions_subscribe_topic = config.get_string("genesis-transactions-subscribe-topic").unwrap_or(DEFAULT_GENESIS_SUBSCRIBE_TOPIC.to_string());
         info!("Creating subscriber on '{transactions_subscribe_topic}'");
 
@@ -106,14 +102,11 @@ impl TxUnpacker {
         }
 
         let tx_registry = Arc::new(TxRegistry::default());
-        let registry_tick = tx_registry.clone();
 
         let mut genesis_sub = context.subscribe(&genesis_transactions_subscribe_topic).await?;
-
-        let run_context = context.clone();
-
         let mut txs_sub = context.subscribe(&transactions_subscribe_topic).await?;
         context.clone().run(async move {
+            // Initalize TxRegistry with genesis txs
             let (_, message) = genesis_sub.read().await
                 .expect("failed to read genesis txs");
             match message.as_ref() {
@@ -385,7 +378,7 @@ impl TxUnpacker {
                                     })
                                 ));
 
-                                futures.push(run_context.message_bus.publish(&topic, Arc::new(msg)));
+                                futures.push(context.message_bus.publish(&topic, Arc::new(msg)));
                             }
 
                             if let Some(ref topic) = publish_asset_deltas_topic {
@@ -397,7 +390,7 @@ impl TxUnpacker {
                                     })
                                 ));
 
-                                futures.push(run_context.message_bus.publish(&topic, Arc::new(msg)));
+                                futures.push(context.message_bus.publish(&topic, Arc::new(msg)));
                             }
 
                             if let Some(ref topic) = publish_withdrawals_topic {
@@ -408,7 +401,7 @@ impl TxUnpacker {
                                     })
                                 ));
 
-                                futures.push(run_context.message_bus.publish(&topic, Arc::new(msg)));
+                                futures.push(context.message_bus.publish(&topic, Arc::new(msg)));
                             }
 
                             if let Some(ref topic) = publish_certificates_topic {
@@ -419,7 +412,7 @@ impl TxUnpacker {
                                     })
                                 ));
 
-                                futures.push(run_context.message_bus.publish(&topic, Arc::new(msg)));
+                                futures.push(context.message_bus.publish(&topic, Arc::new(msg)));
                             }
 
                             if let Some(ref topic) = publish_governance_procedures_topic {
@@ -433,7 +426,7 @@ impl TxUnpacker {
                                         })
                                 )));
 
-                                futures.push(run_context.message_bus.publish(&topic,
+                                futures.push(context.message_bus.publish(&topic,
                                                                          governance_msg.clone()));
                             }
 
@@ -445,7 +438,7 @@ impl TxUnpacker {
                                     })
                                 ));
 
-                                futures.push(run_context.message_bus.publish(&topic, Arc::new(msg)));
+                                futures.push(context.message_bus.publish(&topic, Arc::new(msg)));
                             }
 
                             join_all(futures)
@@ -457,26 +450,6 @@ impl TxUnpacker {
                     }
 
                     _ => error!("Unexpected message type: {message:?}")
-                }
-            }
-        });
-
-        let mut clock_sub = context.subscribe(&clock_subscribe_topic).await?;
-        context.run(async move {
-            loop {
-                let Ok((_, message)) = clock_sub.read().await else {
-                    return;
-                };
-                if let Message::Clock(message) = message.as_ref() {
-                    if (message.number % 60) == 0 {
-                        let span = info_span!("tx_unpacker.tick", number = message.number);
-                        async {
-                            registry_tick
-                                .tick();
-                        }
-                        .instrument(span)
-                        .await;
-                    }
                 }
             }
         });

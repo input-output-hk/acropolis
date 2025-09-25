@@ -1,52 +1,63 @@
 use acropolis_common::TxOutRef;
 use acropolis_common::{params::SECURITY_PARAMETER_K, TxIdentifier};
 use anyhow::Result;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, RwLock};
-use tracing::info;
 
-/// Minimal volatile index: block_number -> set of keys
+/// Volatile registry for entries within rollback window
 pub struct VolatileIndex<K> {
-    by_block: HashMap<u32, HashSet<K>>,
+    window: VecDeque<HashSet<K>>,
+    start_block: u32,
+    capacity: usize,
 }
 
-impl<K> Default for VolatileIndex<K> {
-    fn default() -> Self {
-        Self {
-            by_block: HashMap::new(),
+impl<K: Eq + std::hash::Hash> VolatileIndex<K> {
+    pub fn new(k: u32) -> Self {
+        let capacity = (k + 1) as usize;
+        VolatileIndex {
+            window: VecDeque::with_capacity(capacity),
+            capacity,
+            start_block: 0,
         }
     }
-}
 
-impl<K: Eq + std::hash::Hash + Clone> VolatileIndex<K> {
-    fn add(&mut self, block: u32, key: K) {
-        self.by_block.entry(block).or_default().insert(key);
+    pub fn add(&mut self, block: u32, key: K) {
+        let idx = block.wrapping_sub(self.start_block) as usize;
+
+        if idx < self.window.len() {
+            self.window[idx].insert(key);
+        } else if idx == self.window.len() {
+            if self.window.len() == self.capacity {
+                self.window.pop_front();
+                self.start_block += 1;
+            }
+            self.window.push_back(HashSet::new());
+            self.window.back_mut().unwrap().insert(key);
+        } else {
+            panic!(
+                "unexpected block number: got {}, expected {} or {}",
+                block,
+                self.start_block,
+                self.start_block + self.window.len() as u32
+            );
+        }
     }
 
-    fn prune_on_or_after(&mut self, block: u32) -> Vec<K> {
-        let doomed: Vec<u32> = self.by_block.keys().cloned().filter(|b| *b >= block).collect();
+    pub fn prune_on_or_after(&mut self, block: u32) -> Vec<K> {
         let mut out = Vec::new();
-        for b in doomed {
-            if let Some(keys) = self.by_block.remove(&b) {
-                out.extend(keys);
+        while let Some(last_block) = self.start_block.checked_add(self.window.len() as u32 - 1) {
+            if last_block < block {
+                break;
+            }
+            if let Some(set) = self.window.pop_back() {
+                out.extend(set);
             }
         }
         out
     }
-
-    fn prune_before(&mut self, boundary: u32) -> Vec<K> {
-        let doomed: Vec<u32> = self.by_block.keys().cloned().filter(|b| *b < boundary).collect();
-        let mut out = Vec::new();
-        for b in doomed {
-            if let Some(keys) = self.by_block.remove(&b) {
-                out.extend(keys);
-            }
-        }
-        out
-    }
 }
 
-/// Registry of live + recently spent txs, rollback-safe like UTxOState
+/// Registry of live TxHash set and created/spent txs within rollback window
 #[derive(Clone)]
 pub struct TxRegistry {
     map: Arc<RwLock<HashMap<TxOutRef, TxIdentifier>>>,
@@ -57,16 +68,20 @@ pub struct TxRegistry {
 
 impl Default for TxRegistry {
     fn default() -> Self {
-        Self {
-            map: Arc::new(RwLock::new(HashMap::new())),
-            created: Arc::new(RwLock::new(VolatileIndex::default())),
-            spent: Arc::new(RwLock::new(VolatileIndex::default())),
-            last_number: Arc::new(RwLock::new(0)),
-        }
+        Self::new(SECURITY_PARAMETER_K as u32)
     }
 }
 
 impl TxRegistry {
+    pub fn new(k: u32) -> Self {
+        Self {
+            map: Arc::new(RwLock::new(HashMap::new())),
+            created: Arc::new(RwLock::new(VolatileIndex::new(k))),
+            spent: Arc::new(RwLock::new(VolatileIndex::new(k))),
+            last_number: Arc::new(RwLock::new(0)),
+        }
+    }
+
     pub fn bootstrap_from_genesis_utxos(&self, pairs: &Vec<(TxOutRef, TxIdentifier)>) {
         for (utxo_ref, id) in pairs {
             self.map.write().unwrap().insert(*utxo_ref, *id);
@@ -75,7 +90,7 @@ impl TxRegistry {
         *self.last_number.write().unwrap() = 0;
     }
 
-    /// Add a new tx output (unspent)
+    /// Add a new tx output
     pub fn add(&self, block_number: u32, tx_index: u16, tx_ref: TxOutRef) -> Result<()> {
         let id = TxIdentifier::new(block_number, tx_index);
         {
@@ -99,7 +114,7 @@ impl TxRegistry {
         Ok(())
     }
 
-    /// Spend an output (remove from map, but track in `spent` so rollbacks can restore it)
+    /// Spend an existing tx output
     pub fn spend(&self, block_number: u32, tx_ref: &TxOutRef) {
         if let Some(id) = self.map.write().unwrap().remove(tx_ref) {
             self.spent.write().unwrap().add(block_number, (tx_ref.clone(), id));
@@ -107,7 +122,7 @@ impl TxRegistry {
         *self.last_number.write().unwrap() = block_number;
     }
 
-    /// Lookup only returns unspent entries
+    /// Lookup unspent tx output
     pub fn lookup_by_hash(&self, tx_ref: TxOutRef) -> Result<TxIdentifier> {
         self.map.read().unwrap().get(&tx_ref).copied().ok_or_else(|| {
             anyhow::anyhow!(
@@ -117,50 +132,23 @@ impl TxRegistry {
         })
     }
 
-    /// Rollback to safe_block
-    pub fn rollback_to(&self, safe_block: u32) {
+    /// Rollback to specified block
+    pub fn rollback_to(&self, block: u32) {
         let mut map = self.map.write().unwrap();
         let mut created = self.created.write().unwrap();
         let mut spent = self.spent.write().unwrap();
 
-        // Remove creations >= safe_block
-        for h in created.prune_on_or_after(safe_block) {
+        // Remove tx ouputs created at or after rollback block
+        for h in created.prune_on_or_after(block) {
             map.remove(&h);
         }
 
-        // Undo spends >= safe_block (restore them to live)
-        for (h, id) in spent.prune_on_or_after(safe_block) {
+        // Reinsert tx outputs removed at or after rollback block
+        for (h, id) in spent.prune_on_or_after(block) {
             map.insert(h, id);
         }
 
-        *self.last_number.write().unwrap() = safe_block;
-    }
-
-    /// Periodic prune: drop history older than k
-    pub fn tick(&self) {
-        let n = *self.last_number.read().unwrap();
-        let boundary = if n >= SECURITY_PARAMETER_K as u32 {
-            n - SECURITY_PARAMETER_K as u32
-        } else {
-            0
-        };
-
-        let mut map = self.map.write().unwrap();
-        let mut created = self.created.write().unwrap();
-        let mut spent = self.spent.write().unwrap();
-
-        // Remove permanently spent txs before boundary
-        for (h, _) in spent.prune_before(boundary) {
-            map.remove(&h);
-        }
-
-        // Clean created index for entries older than boundary
-        created.prune_before(boundary);
-
-        // Free up unused memory
-        map.shrink_to_fit();
-
-        info!("TxRegistry prune complete at boundary {}", boundary);
+        *self.last_number.write().unwrap() = block;
     }
 }
 
@@ -176,7 +164,7 @@ mod tests {
 
     #[test]
     fn add_and_lookup() {
-        let registry = TxRegistry::default();
+        let registry = TxRegistry::new(SECURITY_PARAMETER_K as u32);
         let tx_ref = TxOutRef {
             hash: make_hash(1),
             index: 0,
@@ -191,7 +179,7 @@ mod tests {
 
     #[test]
     fn spend_and_fail_lookup() {
-        let registry = TxRegistry::default();
+        let registry = TxRegistry::new(SECURITY_PARAMETER_K as u32);
         let tx_ref = TxOutRef {
             hash: make_hash(2),
             index: 0,
@@ -205,7 +193,7 @@ mod tests {
 
     #[test]
     fn rollback_restores_spent() {
-        let registry = TxRegistry::default();
+        let registry = TxRegistry::new(SECURITY_PARAMETER_K as u32);
         let tx_ref = TxOutRef {
             hash: make_hash(3),
             index: 0,
@@ -231,7 +219,7 @@ mod tests {
 
     #[test]
     fn rollback_discards_created() {
-        let registry = TxRegistry::default();
+        let registry = TxRegistry::new(SECURITY_PARAMETER_K as u32);
         let tx_ref = TxOutRef {
             hash: make_hash(4),
             index: 0,
