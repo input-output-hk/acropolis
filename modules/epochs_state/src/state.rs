@@ -1,7 +1,15 @@
 //! Acropolis epoch activity counter: state storage
 
-use acropolis_common::{crypto::keyhash, messages::EpochActivityMessage, BlockInfo, KeyHash};
+use acropolis_common::{
+    crypto::keyhash,
+    genesis_values::GenesisValues,
+    messages::{EpochActivityMessage, ProtocolParamsMessage},
+    protocol_params::{Nonces, PraosParams},
+    BlockHash, BlockInfo, KeyHash,
+};
+use anyhow::Result;
 use imbl::HashMap;
+use pallas::ledger::traverse::MultiEraHeader;
 use tracing::info;
 
 #[derive(Default, Debug, Clone)]
@@ -20,6 +28,12 @@ pub struct State {
 
     // fees seen this epoch
     epoch_fees: u64,
+
+    // nonces will be set starting from Shelly Era
+    nonces: Option<Nonces>,
+
+    // protocol parameter for Praos and TPraos
+    praos_params: Option<PraosParams>,
 }
 
 impl State {
@@ -31,10 +45,112 @@ impl State {
             blocks_minted: HashMap::new(),
             epoch_blocks: 0,
             epoch_fees: 0,
+            nonces: None,
+            praos_params: None,
         }
     }
 
-    // Handle a block minting, taking the SPO's VRF vkey
+    /// Handle protocol parameters updates
+    pub fn handle_protocol_parameters(&mut self, msg: &ProtocolParamsMessage) {
+        if let Some(shelly_params) = msg.params.shelley.as_ref() {
+            self.praos_params = Some(shelly_params.into());
+        }
+    }
+
+    // Handle a block header
+    pub fn handle_block_header(
+        &mut self,
+        genesis: &GenesisValues,
+        block_info: &BlockInfo,
+        header: &MultiEraHeader,
+    ) -> Result<()> {
+        let new_epoch = block_info.new_epoch;
+
+        // update nonces starting from Shelley Era
+        if block_info.epoch >= genesis.shelley_epoch {
+            let Some(praos_params) = self.praos_params.as_ref() else {
+                return Err(anyhow::anyhow!("Praos Param is not set"));
+            };
+
+            // if Shelley Era's first epoch
+            if new_epoch && block_info.epoch == genesis.shelley_epoch {
+                self.nonces = Some(Nonces::shelley_genesis_nonces(genesis));
+            }
+
+            // current nonces must be set
+            let Some(current_nonces) = self.nonces.as_ref() else {
+                return Err(anyhow::anyhow!(
+                    "Current Nonces are not set after Shelley Era"
+                ));
+            };
+
+            // check for stability window
+            let is_within_stability_window = Nonces::randomness_stability_window(
+                block_info.era,
+                header.slot(),
+                genesis,
+                praos_params,
+            );
+
+            // extract header's nonce vrf output
+            let Some(nonce_vrf_output) = header.nonce_vrf_output().ok() else {
+                return Err(anyhow::anyhow!("Header Nonce VRF output error"));
+            };
+
+            // Compute the new evolving nonce by combining it with the current one and the header's VRF
+            // output.
+            let evolving = Nonces::evolve(&current_nonces.evolving, &nonce_vrf_output)?;
+
+            // there must be parent hash
+            let Some(parent_hash) = header.previous_hash().map(|h| *h as BlockHash) else {
+                return Err(anyhow::anyhow!("Header Parent hash error"));
+            };
+
+            let new_nonces = Nonces {
+                epoch: block_info.epoch,
+                evolving: evolving.clone(),
+                // On epoch changes, compute the new active nonce by combining:
+                //   1. the (now stable) candidate; and
+                //   2. the previous epoch's last block's parent header hash.
+                //
+                // If the epoch hasn't changed, then our active nonce is unchanged.
+                active: if new_epoch {
+                    Nonces::from_candidate(&current_nonces.candidate, &current_nonces.prev_lab)?
+                } else {
+                    current_nonces.active.clone()
+                },
+                // Unless we are within the randomness stability window, we also update the candidate. This
+                // means that outside of the stability window, we always have:
+                //
+                //   evolving == candidate
+                //
+                // They only diverge for the last blocks of each epoch; The candidate remains stable while
+                // the rolling nonce keeps evolving in preparation of the next epoch. Another way to look
+                // at it is to think that there's always an entire epoch length contributing to the nonce
+                // randomness, but it spans over two epochs.
+                candidate: if is_within_stability_window {
+                    evolving.clone()
+                } else {
+                    current_nonces.candidate.clone()
+                },
+                // Last Applied Block is the Header's Prev hash.
+                lab: parent_hash.into(),
+                // Previous LAB stay same during epoch
+                // only Epoch's Boundary, will be last block's Previous Epoch's LAB
+                prev_lab: if new_epoch {
+                    current_nonces.lab.clone()
+                } else {
+                    current_nonces.prev_lab.clone()
+                },
+            };
+
+            self.nonces = Some(new_nonces);
+        };
+
+        Ok(())
+    }
+
+    // Handle mint
     pub fn handle_mint(&mut self, _block: &BlockInfo, vrf_vkey: Option<&[u8]>) {
         self.epoch_blocks += 1;
         if let Some(vrf_vkey) = vrf_vkey {
@@ -78,6 +194,7 @@ impl State {
             total_blocks: self.epoch_blocks,
             total_fees: self.epoch_fees,
             vrf_vkey_hashes: self.blocks_minted.iter().map(|(k, v)| (k.clone(), *v)).collect(),
+            nonce: self.nonces.as_ref().map(|n| n.active.hash.clone()).flatten(),
         }
     }
 
@@ -93,6 +210,7 @@ mod tests {
     use super::*;
     use acropolis_common::{
         crypto::keyhash,
+        protocol_params::{Nonce, NonceHash},
         state_history::{StateHistory, StateHistoryStore},
         BlockHash, BlockInfo, BlockStatus, Era,
     };
@@ -108,7 +226,21 @@ mod tests {
             epoch_slot: 99,
             new_epoch: false,
             timestamp: 99999,
-            era: Era::Conway,
+            era: Era::Shelley,
+        }
+    }
+
+    fn make_new_epoch_block(epoch: u64) -> BlockInfo {
+        BlockInfo {
+            status: BlockStatus::Immutable,
+            slot: 0,
+            number: epoch * 10,
+            hash: BlockHash::default(),
+            epoch,
+            epoch_slot: 99,
+            new_epoch: true,
+            timestamp: 99999,
+            era: Era::Shelley,
         }
     }
 
@@ -251,5 +383,206 @@ mod tests {
             1
         );
         history.lock().await.commit(block.number, state);
+    }
+
+    #[test]
+    fn test_epoch_208_nonce() {
+        let mut state = State::new();
+        state.praos_params = Some(PraosParams::mainnet());
+        let genesis_value = GenesisValues::mainnet();
+
+        let e_208_first_block_header_cbor =
+            hex::decode(include_str!("../data/4490511.cbor")).unwrap();
+        let block = make_new_epoch_block(208);
+        let block_header = MultiEraHeader::decode(1, None, &e_208_first_block_header_cbor).unwrap();
+        assert!(state.handle_block_header(&genesis_value, &block, &block_header).is_ok());
+
+        let nonces = state.nonces.unwrap();
+        let evolved = Nonce::from(
+            NonceHash::try_from(
+                hex::decode("2af15f57076a8ff225746624882a77c8d2736fe41d3db70154a22b50af851246")
+                    .unwrap()
+                    .as_slice(),
+            )
+            .unwrap(),
+        );
+        assert!(nonces.active.eq(&Nonce::from(genesis_value.shelley_genesis_hash)));
+        assert!(nonces.candidate.eq(&evolved));
+        assert!(nonces.evolving.eq(&evolved));
+        assert!(nonces.lab.eq(&Nonce::from(*block_header.previous_hash().unwrap())));
+        assert!(nonces.prev_lab.eq(&Nonce::default()));
+    }
+
+    #[test]
+    fn test_nonce_evolving() {
+        let mut state = State::new();
+        state.praos_params = Some(PraosParams::mainnet());
+        let genesis_value = GenesisValues::mainnet();
+
+        let e_208_first_block_header_cbor =
+            hex::decode(include_str!("../data/4490511.cbor")).unwrap();
+        let e_208_second_block_header_cbor =
+            hex::decode(include_str!("../data/4490512.cbor")).unwrap();
+        let block = make_new_epoch_block(208);
+        let block_header = MultiEraHeader::decode(1, None, &e_208_first_block_header_cbor).unwrap();
+        assert!(state.handle_block_header(&genesis_value, &block, &block_header).is_ok());
+
+        let block = make_block(208);
+        let block_header =
+            MultiEraHeader::decode(1, None, &e_208_second_block_header_cbor).unwrap();
+        assert!(state.handle_block_header(&genesis_value, &block, &block_header).is_ok());
+
+        let evolved = Nonce::from(
+            NonceHash::try_from(
+                hex::decode("a815ff978369b57df09b0072485c26920dc0ec8e924a852a42f0715981cf0042")
+                    .unwrap()
+                    .as_slice(),
+            )
+            .unwrap(),
+        );
+        let nonces = state.nonces.unwrap();
+        assert!(nonces.active.eq(&Nonce::from(genesis_value.shelley_genesis_hash)));
+        assert!(nonces.evolving.eq(&evolved));
+        assert!(nonces.candidate.eq(&evolved));
+        assert!(nonces.lab.eq(&Nonce::from(*block_header.previous_hash().unwrap())));
+        assert!(nonces.prev_lab.eq(&Nonce::default()));
+    }
+
+    #[test]
+    fn test_epoch_209_nonce() {
+        let mut state = State::new();
+        state.praos_params = Some(PraosParams::mainnet());
+        let genesis_value = GenesisValues::mainnet();
+        let e_208_candidate = Nonce::from(
+            NonceHash::try_from(
+                hex::decode("ea98cb2dac7208296ac89030f24cdc0dc6fbfebc4bf1f5b7a8331ec47e3bb311")
+                    .unwrap()
+                    .as_slice(),
+            )
+            .unwrap(),
+        );
+        let e_208_lab = Nonce::from(
+            NonceHash::try_from(
+                hex::decode("dfc1d6e6dbce685b5cf85899c6e3c89539b081c62222265910423ced4096390a")
+                    .unwrap()
+                    .as_slice(),
+            )
+            .unwrap(),
+        );
+        state.nonces = Some(Nonces {
+            epoch: 208,
+            active: Nonce::from(genesis_value.shelley_genesis_hash),
+            candidate: e_208_candidate.clone(),
+            evolving: Nonce::from(
+                NonceHash::try_from(
+                    hex::decode("bd331d2334012dfd828a0cbdeb552368052af48b39f171b2b9343330924db6b1")
+                        .unwrap()
+                        .as_slice(),
+                )
+                .unwrap(),
+            ),
+            lab: e_208_lab.clone(),
+            prev_lab: Nonce::default(),
+        });
+
+        let e_209_first_block_header_cbor =
+            hex::decode(include_str!("../data/4512067.cbor")).unwrap();
+        let block = make_new_epoch_block(209);
+        let block_header = MultiEraHeader::decode(1, None, &e_209_first_block_header_cbor).unwrap();
+        assert!(state.handle_block_header(&genesis_value, &block, &block_header).is_ok());
+
+        let nonces = state.nonces.unwrap();
+        let evolved = Nonce::from(
+            NonceHash::try_from(
+                hex::decode("5221b5541f5fc2a7eebd4316ff2f430b54709eeb1fe9ad7c30272d716656e601")
+                    .unwrap()
+                    .as_slice(),
+            )
+            .unwrap(),
+        );
+        assert!(nonces.active.eq(&e_208_candidate));
+        assert!(nonces.evolving.eq(&evolved));
+        assert!(nonces.candidate.eq(&evolved));
+        assert!(nonces.lab.eq(&Nonce::from(*block_header.previous_hash().unwrap())));
+        assert!(nonces.prev_lab.eq(&e_208_lab));
+    }
+
+    #[test]
+    fn test_epoch_210_nonce() {
+        let mut state = State::new();
+        state.praos_params = Some(PraosParams::mainnet());
+        let genesis_value = GenesisValues::mainnet();
+        let e_209_lab = Nonce::from(
+            NonceHash::try_from(
+                hex::decode("e5e914ba8c727baf3c3465ae6a62508186772eb20649aa7a99a637328f62803e")
+                    .unwrap()
+                    .as_slice(),
+            )
+            .unwrap(),
+        );
+        state.nonces = Some(Nonces {
+            epoch: 209,
+            active: Nonce::from(
+                NonceHash::try_from(
+                    hex::decode("ea98cb2dac7208296ac89030f24cdc0dc6fbfebc4bf1f5b7a8331ec47e3bb311")
+                        .unwrap()
+                        .as_slice(),
+                )
+                .unwrap(),
+            ),
+            candidate: Nonce::from(
+                NonceHash::try_from(
+                    hex::decode("a9543bc3820138abfaaad606d19c50df70c896336a88ab01da0eb34c1129bf31")
+                        .unwrap()
+                        .as_slice(),
+                )
+                .unwrap(),
+            ),
+            evolving: Nonce::from(
+                NonceHash::try_from(
+                    hex::decode("6a21c46c01aa5a9d840beec28dd201a0bc9fc144d3a48b485ed0a3790b276520")
+                        .unwrap()
+                        .as_slice(),
+                )
+                .unwrap(),
+            ),
+            lab: e_209_lab.clone(),
+            prev_lab: Nonce::from(
+                NonceHash::try_from(
+                    hex::decode("dfc1d6e6dbce685b5cf85899c6e3c89539b081c62222265910423ced4096390a")
+                        .unwrap()
+                        .as_slice(),
+                )
+                .unwrap(),
+            ),
+        });
+
+        let e_210_first_block_header_cbor =
+            hex::decode(include_str!("../data/4533637.cbor")).unwrap();
+        let block = make_new_epoch_block(209);
+        let block_header = MultiEraHeader::decode(1, None, &e_210_first_block_header_cbor).unwrap();
+        assert!(state.handle_block_header(&genesis_value, &block, &block_header).is_ok());
+
+        let nonces = state.nonces.unwrap();
+        let evolved = Nonce::from(
+            NonceHash::try_from(
+                hex::decode("2bc39f25e92a59b3e8044783560eac6dd8aba2e55b2b1aba132db58d5a1e7155")
+                    .unwrap()
+                    .as_slice(),
+            )
+            .unwrap(),
+        );
+        assert!(nonces.active.eq(&Nonce::from(
+            NonceHash::try_from(
+                hex::decode("ddf346732e6a47323b32e1e3eeb7a45fad678b7f533ef1f2c425e13c704ba7e3")
+                    .unwrap()
+                    .as_slice(),
+            )
+            .unwrap(),
+        )));
+        assert!(nonces.evolving.eq(&evolved));
+        assert!(nonces.candidate.eq(&evolved));
+        assert!(nonces.lab.eq(&Nonce::from(*block_header.previous_hash().unwrap())));
+        assert!(nonces.prev_lab.eq(&e_209_lab));
     }
 }
