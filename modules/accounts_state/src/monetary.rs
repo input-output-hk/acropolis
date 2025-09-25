@@ -107,9 +107,10 @@ fn calculate_monetary_expansion(
 mod tests {
     use super::*;
     use acropolis_common::protocol_params::{
-        NetworkId, Nonce, NonceVariant, ProtocolVersion, ShelleyProtocolParams,
+        Nonce, NonceVariant, ProtocolVersion, ShelleyProtocolParams,
     };
     use acropolis_common::rational_number::rational_number_from_f32;
+    use acropolis_common::NetworkId;
     use chrono::{DateTime, Utc};
 
     // Known values at start of Shelley - from Java reference and DBSync

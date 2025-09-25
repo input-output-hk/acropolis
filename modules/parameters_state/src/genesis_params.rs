@@ -235,9 +235,10 @@ pub fn read_conway_genesis(network: &str) -> Result<ConwayParams> {
 
 #[cfg(test)]
 mod test {
-    use crate::genesis_params;
-    use acropolis_common::{protocol_params::ShelleyParams, rational_number::RationalNumber};
+    use crate::genesis_params::{self, PREDEFINED_GENESIS};
+    use acropolis_common::{protocol_params::ShelleyParams, rational_number::RationalNumber, Era};
     use anyhow::Result;
+    use blake2::{digest::consts::U32, Blake2b, Digest};
     use std::collections::HashSet;
 
     fn get_networks() -> HashSet<&'static str> {
@@ -252,6 +253,21 @@ mod test {
             println!("{:?}", genesis_params::read_alonzo_genesis(net)?);
             println!("{:?}", genesis_params::read_conway_genesis(net)?);
         }
+        Ok(())
+    }
+
+    #[test]
+    fn test_shelley_genesis_hash() -> Result<()> {
+        let (_net, _era, genesis) = PREDEFINED_GENESIS
+            .iter()
+            .find(|(n, e, _g)| *n == "mainnet" && *e == Era::Shelley)
+            .unwrap();
+
+        // blake2b-256
+        let mut hasher = Blake2b::<U32>::new();
+        hasher.update(&[&genesis[..]].concat());
+        let hash: [u8; 32] = hasher.finalize().into();
+        println!("{:?}", hex::encode(hash));
         Ok(())
     }
 

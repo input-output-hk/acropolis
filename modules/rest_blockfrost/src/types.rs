@@ -1,7 +1,7 @@
 use crate::cost_models::{PLUTUS_V1, PLUTUS_V2, PLUTUS_V3};
 use acropolis_common::{
     messages::EpochActivityMessage,
-    protocol_params::{Nonce, NonceVariant, ProtocolParams},
+    protocol_params::{Nonce, NonceHash, NonceVariant, ProtocolParams},
     queries::governance::DRepActionUpdate,
     rest_helper::ToCheckedF64,
     AssetMetadataStandard, AssetMintRecord, KeyHash, PolicyAsset, PoolEpochState, PoolUpdateAction,
@@ -15,12 +15,15 @@ use serde_with::{hex::Hex, serde_as, DisplayFromStr};
 use std::collections::HashMap;
 
 // REST response structure for /epoch
+#[serde_as]
 #[derive(Serialize)]
 pub struct EpochActivityRest {
     pub epoch: u64,
     pub total_blocks: usize,
     pub total_fees: u64,
     pub vrf_vkey_hashes: Vec<VRFKeyCount>,
+    #[serde_as(as = "Option<Hex>")]
+    pub nonce: Option<NonceHash>,
 }
 
 #[derive(Serialize)]
@@ -43,6 +46,7 @@ impl From<EpochActivityMessage> for EpochActivityRest {
                     block_count: *count,
                 })
                 .collect(),
+            nonce: ea_message.nonce.clone(),
         }
     }
 }
