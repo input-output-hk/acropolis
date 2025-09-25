@@ -25,7 +25,7 @@ publish-asset-deltas-topic = "cardano.asset.deltas"
 publish-withdrawals-topic = "cardano.withdrawals"
 publish-certificates-topic = "cardano.certificates"
 publish-governance-topic = "cardano.governance"
-publish-fees-topic = "cardano.block.fees"
+publish-block-txs-topic = "cardano.block.txs"
 
 [module.utxo-state]
 store = "memory" # "memory", "dashmap", "fjall", "fjall-async", "sled", "sled-async", "fake"
@@ -50,6 +50,7 @@ store-block-hashes = false
 store-stake-addresses = false
 
 [module.spdd-state]
+# Enables active_stakes in /epochs/latest | {number} endpoints
 store-spdd = false
 
 [module.drep-state]
