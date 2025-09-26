@@ -1,6 +1,6 @@
 use std::{path::Path, sync::Arc};
 
-use acropolis_common::{BlockInfo, TxHash};
+use acropolis_common::{BlockHash, BlockInfo, TxHash};
 use anyhow::Result;
 use config::Config;
 use fjall::{Batch, Keyspace, Partition};
@@ -52,7 +52,7 @@ impl super::Store for FjallStore {
         self.blocks.insert(&mut batch, info, &raw);
         for (index, hash) in tx_hashes.iter().enumerate() {
             let tx_ref = StoredTransaction::BlockReference {
-                block_hash: info.hash.clone(),
+                block_hash: info.hash.to_vec(),
                 index,
             };
             self.txs.insert_tx(&mut batch, *hash, tx_ref);
@@ -125,21 +125,21 @@ impl FjallBlockStore {
             minicbor::encode(raw, &mut bytes).expect("infallible");
             bytes
         };
-        batch.insert(&self.blocks, &info.hash, encoded);
+        batch.insert(&self.blocks, &*info.hash, encoded);
         batch.insert(
             &self.block_hashes_by_slot,
             info.slot.to_be_bytes(),
-            &info.hash,
+            &*info.hash,
         );
         batch.insert(
             &self.block_hashes_by_number,
             info.number.to_be_bytes(),
-            &info.hash,
+            &*info.hash,
         );
         batch.insert(
             &self.block_hashes_by_epoch_slot,
             epoch_slot_key(info.epoch, info.epoch_slot),
-            &info.hash,
+            &*info.hash,
         );
     }
 
@@ -256,7 +256,7 @@ mod tests {
             status: acropolis_common::BlockStatus::Immutable,
             slot: block.slot(),
             number: block.number(),
-            hash: block.hash().to_vec(),
+            hash: BlockHash(*block.hash()),
             epoch,
             epoch_slot,
             new_epoch: false,
@@ -305,7 +305,7 @@ mod tests {
 
         state.store.insert_block(&info, &bytes).unwrap();
 
-        let new_block = state.store.get_block_by_hash(&info.hash).unwrap();
+        let new_block = state.store.get_block_by_hash(&info.hash.as_ref()).unwrap();
         assert_eq!(block, new_block.unwrap());
     }
 

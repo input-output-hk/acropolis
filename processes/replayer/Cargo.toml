@@ -8,16 +8,7 @@ description = "Acropolis replayer process, allowing to debug any module"
 license = "Apache-2.0"
 
 [dependencies]
-caryatid_process = "0.12"
-caryatid_sdk = "0.12"
-caryatid_module_clock = "0.12"
-caryatid_module_rest_server = "0.14"
-caryatid_module_spy = "0.12"
-
-# Core message definition
 acropolis_common = { path = "../../common" }
-
-# Modules we use
 acropolis_module_genesis_bootstrapper = { path = "../../modules/genesis_bootstrapper" }
 acropolis_module_mithril_snapshot_fetcher = { path = "../../modules/mithril_snapshot_fetcher" }
 acropolis_module_upstream_chain_fetcher = { path = "../../modules/upstream_chain_fetcher" }
@@ -29,15 +20,21 @@ acropolis_module_drep_state = { path = "../../modules/drep_state" }
 acropolis_module_governance_state = { path = "../../modules/governance_state" }
 acropolis_module_parameters_state = { path = "../../modules/parameters_state" }
 acropolis_module_stake_delta_filter = { path = "../../modules/stake_delta_filter" }
-acropolis_module_epoch_activity_counter = { path = "../../modules/epoch_activity_counter" }
+acropolis_module_epochs_state = { path = "../../modules/epochs_state" }
 acropolis_module_accounts_state = { path = "../../modules/accounts_state" }
 
-anyhow = "1.0"
-config = "0.15.11"
-tracing = "0.1.40"
-tracing-subscriber = { version = "0.3.18", features = ["registry", "env-filter"] }
-tokio = { version = "1", features = ["full"] }
-serde = { version = "1.0.214", features = ["derive"] }
-serde_json = "1.0.132"
-serde_with = { version = "3.12.0", features = ["hex", "base64"] }
-chrono = "0.4.38"
+caryatid_process = { workspace = true }
+caryatid_sdk = { workspace = true }
+caryatid_module_clock = { workspace = true }
+caryatid_module_rest_server = { workspace = true }
+caryatid_module_spy = { workspace = true }
+
+anyhow = { workspace = true }
+config = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3.20", features = ["registry", "env-filter"] }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_with = { workspace = true, features = ["base64"] }
+chrono = { workspace = true }

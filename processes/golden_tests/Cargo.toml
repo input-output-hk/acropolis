@@ -8,13 +8,6 @@ description = "Acropolis testing process to run end to end tests"
 license = "Apache-2.0"
 
 [dependencies]
-caryatid_process = "0.12"
-caryatid_sdk = "0.12"
-caryatid_module_clock = "0.12"
-caryatid_module_rest_server = "0.14"
-caryatid_module_spy = "0.12"
-
-
 acropolis_common = { path = "../../common" }
 acropolis_module_snapshot_bootstrapper = { path = "../../modules/snapshot_bootstrapper" }
 acropolis_module_mithril_snapshot_fetcher = { path = "../../modules/mithril_snapshot_fetcher" }
@@ -27,16 +20,21 @@ acropolis_module_drep_state = { path = "../../modules/drep_state" }
 acropolis_module_governance_state = { path = "../../modules/governance_state" }
 acropolis_module_parameters_state = { path = "../../modules/parameters_state" }
 acropolis_module_stake_delta_filter = { path = "../../modules/stake_delta_filter" }
-acropolis_module_epoch_activity_counter = { path = "../../modules/epoch_activity_counter" }
+acropolis_module_epochs_state = { path = "../../modules/epochs_state" }
 acropolis_module_accounts_state = { path = "../../modules/accounts_state" }
 
-anyhow = "1.0"
-config = "0.15.11"
-tracing = "0.1.40"
-tracing-subscriber = "0.3.18"
-tokio = { version = "1", features = ["full"] }
-serde = { version = "1.0.214", features = ["derive"] }
-serde_json = "1.0.132"
-chrono = "0.4.38"
-minicbor = { version = "0.26.0", features = ["std", "half", "derive"] }
-hex = "0.4"
+caryatid_process = { workspace = true }
+caryatid_sdk = { workspace = true }
+caryatid_module_clock = { workspace = true }
+caryatid_module_rest_server = { workspace = true }
+caryatid_module_spy = { workspace = true }
+
+anyhow = { workspace = true }
+config = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = "0.3.20"
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+hex = { workspace = true }

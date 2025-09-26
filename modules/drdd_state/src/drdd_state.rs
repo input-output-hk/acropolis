@@ -61,9 +61,9 @@ impl DRDDState {
 
                                 guard.apply_drdd_snapshot(
                                     msg.epoch,
-                                    msg.dreps.iter().map(|(k, v)| (k.clone(), *v)),
-                                    msg.abstain,
-                                    msg.no_confidence,
+                                    msg.drdd.dreps.iter().map(|(k, v)| (k.clone(), *v)),
+                                    msg.drdd.abstain,
+                                    msg.drdd.no_confidence,
                                 );
                             }
                             .instrument(span)

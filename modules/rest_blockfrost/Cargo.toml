@@ -10,21 +10,25 @@ license = "Apache-2.0"
 
 [dependencies]
 acropolis_common = { path = "../../common" }
-anyhow = "1.0"
+
+caryatid_sdk = { workspace = true }
+caryatid_module_rest_server = { workspace = true }
+
+anyhow = { workspace = true }
 async-trait = "0.1"
 bech32 = "0.11"
-caryatid_sdk = "0.12"
-caryatid_module_rest_server = "0.14"
-config = "0.15.11"
-hex = "0.4.3"
-serde = { version = "1.0.214", features = ["derive"] }
-serde_json = "1.0"
-serde_with = { version = "3.12.0", features = ["hex"] }
-tokio = { version = "1", features = ["full"] }
-tracing = "0.1.40"
-rust_decimal = "1.37.2"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+blake2 = "0.10.6"
+config = { workspace = true }
+hex = { workspace = true }
 num-traits = "0.2"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+rust_decimal = "1.37.2"
+serde = { workspace = true }
+serde_cbor = "0.11"
+serde_json = { workspace = true }
+serde_with = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
 
 [lib]
 path = "src/rest_blockfrost.rs"

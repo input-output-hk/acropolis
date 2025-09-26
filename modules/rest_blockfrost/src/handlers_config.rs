@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use acropolis_common::queries::{
     accounts::DEFAULT_ACCOUNTS_QUERY_TOPIC,
+    assets::{DEFAULT_ASSETS_QUERY_TOPIC, DEFAULT_OFFCHAIN_TOKEN_REGISTRY_URL},
     blocks::DEFAULT_BLOCKS_QUERY_TOPIC,
     epochs::DEFAULT_EPOCHS_QUERY_TOPIC,
     governance::{DEFAULT_DREPS_QUERY_TOPIC, DEFAULT_GOVERNANCE_QUERY_TOPIC},
@@ -15,6 +16,7 @@ const DEFAULT_EXTERNAL_API_TIMEOUT: (&str, i64) = ("external_api_timeout", 3); /
 #[derive(Clone)]
 pub struct HandlersConfig {
     pub accounts_query_topic: String,
+    pub assets_query_topic: String,
     pub blocks_query_topic: String,
     pub pools_query_topic: String,
     pub dreps_query_topic: String,
@@ -22,6 +24,7 @@ pub struct HandlersConfig {
     pub epochs_query_topic: String,
     pub parameters_query_topic: String,
     pub external_api_timeout: u64,
+    pub offchain_token_registry_url: String,
 }
 
 impl From<Arc<Config>> for HandlersConfig {
@@ -29,6 +32,10 @@ impl From<Arc<Config>> for HandlersConfig {
         let accounts_query_topic = config
             .get_string(DEFAULT_ACCOUNTS_QUERY_TOPIC.0)
             .unwrap_or(DEFAULT_ACCOUNTS_QUERY_TOPIC.1.to_string());
+
+        let assets_query_topic = config
+            .get_string(DEFAULT_ASSETS_QUERY_TOPIC.0)
+            .unwrap_or(DEFAULT_ASSETS_QUERY_TOPIC.1.to_string());
 
         let blocks_query_topic = config
             .get_string(DEFAULT_BLOCKS_QUERY_TOPIC.0)
@@ -58,8 +65,13 @@ impl From<Arc<Config>> for HandlersConfig {
             .get_int(DEFAULT_EXTERNAL_API_TIMEOUT.0)
             .unwrap_or(DEFAULT_EXTERNAL_API_TIMEOUT.1) as u64;
 
+        let offchain_token_registry_url = config
+            .get_string(DEFAULT_OFFCHAIN_TOKEN_REGISTRY_URL.0)
+            .unwrap_or(DEFAULT_OFFCHAIN_TOKEN_REGISTRY_URL.1.to_string());
+
         Self {
             accounts_query_topic,
+            assets_query_topic,
             blocks_query_topic,
             pools_query_topic,
             dreps_query_topic,
@@ -67,6 +79,7 @@ impl From<Arc<Config>> for HandlersConfig {
             epochs_query_topic,
             parameters_query_topic,
             external_api_timeout,
+            offchain_token_registry_url,
         }
     }
 }

@@ -21,6 +21,7 @@ magic-number = 764824073
 
 [module.tx-unpacker]
 publish-utxo-deltas-topic = "cardano.utxo.deltas"
+publish-asset-deltas-topic = "cardano.asset.deltas"
 publish-withdrawals-topic = "cardano.withdrawals"
 publish-certificates-topic = "cardano.certificates"
 publish-governance-topic = "cardano.governance"
@@ -31,12 +32,21 @@ store = "memory" # "memory", "dashmap", "fjall", "fjall-async", "sled", "sled-as
 address-delta-topic = "cardano.address.delta"
 
 [module.spo-state]
+# Enables /pools/{pool_id}/history endpoint, enables to query active_stakes
 store-epochs-history = false
+# Enable /pools/retired
 store-retired-pools = false
+# Enables /pools/{pool_id} endpoint
 store-registration = false
+# # Enables /pools/{pool_id}/updates endpoint
 store-updates = false
+# Enables /pools/{pool_id}/delegators endpoint (Requires store-stake-addresses to be enabled)
 store-delegators = false
+# Enables /pools/{pool_id}/votes endpoint
 store-votes = false
+# Store block hashes, enables /pools/{pool_id}/blocks endpoints
+store-block-hashes = false
+# Store stake_addresses
 store-stake-addresses = false
 
 [module.spdd-state]
@@ -66,10 +76,26 @@ store-history = false
 cache-mode = "predefined" # "predefined", "read", "write", "write-if-absent"
 write-full-cache = "false"
 
-[module.epoch-activity-counter]
+[module.epochs-state]
+# Enables /epochs/{number} endpoint (for historical epochs)
 store-history = false
 
 [module.accounts-state]
+
+[module.assets-state]
+# Enables /assets endpoint
+store-assets = false
+# Enables /assets/{asset} endpoint (requires store-assets to be enabled)
+store-info = false
+# Enables /assets/{asset}/history endpoint
+store-history = false
+# Enables /assets/{asset}/transactions endpoint
+#   Usage: "none", "all", or most recent: "1", "20", etc.
+store-transactions = "none"
+# Enables /assets/{asset}/addresses endpoint
+store-addresses = false
+# Enables /assets/{asset} endpoint (requires store-assets to be enabled)
+index-by-policy = false
 
 [module.chain-store]
 

@@ -1,39 +1,41 @@
+use crate::{
+    AssetAddressEntry, AssetInfoRecord, AssetMintRecord, AssetName, PolicyAsset, PolicyId,
+    TxIdentifier,
+};
+
+pub const DEFAULT_ASSETS_QUERY_TOPIC: (&str, &str) =
+    ("assets-state-query-topic", "cardano.query.assets");
+
+pub const DEFAULT_OFFCHAIN_TOKEN_REGISTRY_URL: (&str, &str) = (
+    "offchain-token-registry-url",
+    "https://raw.githubusercontent.com/cardano-foundation/cardano-token-registry/master/mappings/",
+);
+
+pub type AssetList = Vec<PolicyAsset>;
+pub type AssetInfo = (u64, AssetInfoRecord);
+pub type AssetHistory = Vec<AssetMintRecord>;
+pub type AssetAddresses = Vec<AssetAddressEntry>;
+pub type AssetTransactions = Vec<TxIdentifier>;
+pub type PolicyAssets = Vec<PolicyAsset>;
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum AssetsStateQuery {
     GetAssetsList,
-    GetAssetInfo { asset_key: Vec<u8> },
-    GetAssetHistory { asset_key: Vec<u8> },
-    GetAssetTransactions { asset_key: Vec<u8> },
-    GetAssetAddresses { asset_key: Vec<u8> },
-    GetPolicyIdAssets { policyid_key: Vec<u8> },
+    GetAssetInfo { policy: PolicyId, name: AssetName },
+    GetAssetHistory { policy: PolicyId, name: AssetName },
+    GetPolicyIdAssets { policy: PolicyId },
+    GetAssetAddresses { policy: PolicyId, name: AssetName },
+    GetAssetTransactions { policy: PolicyId, name: AssetName },
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum AssetsStateQueryResponse {
-    AssetsList(AssetsList),
+    AssetsList(AssetList),
     AssetInfo(AssetInfo),
     AssetHistory(AssetHistory),
-    AssetTransactions(AssetTransactions),
     AssetAddresses(AssetAddresses),
-    PolicyIdAssets(PolicyIdAssets),
+    AssetTransactions(AssetTransactions),
+    PolicyIdAssets(PolicyAssets),
     NotFound,
     Error(String),
 }
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct AssetsList {}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct AssetInfo {}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct AssetHistory {}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct AssetTransactions {}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct AssetAddresses {}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PolicyIdAssets {}

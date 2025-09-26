@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{DRepChoice, KeyHash};
+use crate::{DRepChoice, KeyHash, PoolLiveStakeInfo};
 
 pub const DEFAULT_ACCOUNTS_QUERY_TOPIC: (&str, &str) =
     ("accounts-state-query-topic", "cardano.query.accounts");
@@ -18,13 +18,19 @@ pub enum AccountsStateQuery {
     GetAccountAssets { stake_key: Vec<u8> },
     GetAccountAssetsTotals { stake_key: Vec<u8> },
     GetAccountUTxOs { stake_key: Vec<u8> },
+    GetAccountsUtxoValuesMap { stake_keys: Vec<Vec<u8>> },
+    GetAccountsUtxoValuesSum { stake_keys: Vec<Vec<u8>> },
     GetAccountsBalancesMap { stake_keys: Vec<Vec<u8>> },
     GetAccountsBalancesSum { stake_keys: Vec<Vec<u8>> },
 
     // Pools related queries
+    GetOptimalPoolSizing,
     GetPoolsLiveStakes { pools_operators: Vec<Vec<u8>> },
+    GetPoolDelegators { pool_operator: KeyHash },
+    GetPoolLiveStake { pool_operator: KeyHash },
 
     // Dreps related queries
+    GetDrepDelegators { drep: DRepChoice },
     GetAccountsDrepDelegationsMap { stake_keys: Vec<Vec<u8>> },
 }
 
@@ -41,13 +47,19 @@ pub enum AccountsStateQueryResponse {
     AccountAssets(AccountAssets),
     AccountAssetsTotals(AccountAssetsTotals),
     AccountUTxOs(AccountUTxOs),
+    AccountsUtxoValuesMap(HashMap<Vec<u8>, u64>),
+    AccountsUtxoValuesSum(u64),
     AccountsBalancesMap(HashMap<Vec<u8>, u64>),
     AccountsBalancesSum(u64),
 
     // Pools related responses
-    PoolsLiveStakes(PoolsLiveStakes),
+    OptimalPoolSizing(Option<OptimalPoolSizing>),
+    PoolsLiveStakes(Vec<u64>),
+    PoolDelegators(PoolDelegators),
+    PoolLiveStake(PoolLiveStakeInfo),
 
     // DReps related responses
+    DrepDelegators(DrepDelegators),
     AccountsDrepDelegationsMap(HashMap<Vec<u8>, Option<DRepChoice>>),
 
     NotFound,
@@ -93,7 +105,17 @@ pub struct AccountAssetsTotals {}
 pub struct AccountUTxOs {}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PoolsLiveStakes {
-    // this is in same order of pools_operator from AccountsStateQuery::GetPoolsLiveStakes
-    pub live_stakes: Vec<u64>,
+pub struct OptimalPoolSizing {
+    pub total_supply: u64, // total_supply - reserves
+    pub nopt: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PoolDelegators {
+    pub delegators: Vec<(KeyHash, u64)>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DrepDelegators {
+    pub delegators: Vec<(KeyHash, u64)>,
 }

@@ -17,6 +17,10 @@ mod types;
 mod utils;
 use handlers::{
     accounts::handle_single_account_blockfrost,
+    assets::{
+        handle_asset_addresses_blockfrost, handle_asset_history_blockfrost,
+        handle_asset_transactions_blockfrost, handle_assets_list_blockfrost,
+    },
     blocks::{
         handle_blocks_epoch_slot_blockfrost, handle_blocks_hash_number_addresses_blockfrost,
         handle_blocks_hash_number_next_blockfrost, handle_blocks_hash_number_previous_blockfrost,
@@ -48,7 +52,10 @@ use handlers::{
     },
 };
 
-use crate::handlers_config::HandlersConfig;
+use crate::{
+    handlers::assets::{handle_asset_single_blockfrost, handle_policy_assets_blockfrost},
+    handlers_config::HandlersConfig,
+};
 
 // Accounts topics
 const DEFAULT_HANDLE_SINGLE_ACCOUNT_TOPIC: (&str, &str) =
@@ -151,7 +158,7 @@ const DEFAULT_HANDLE_POOL_VOTES_TOPIC: (&str, &str) =
 
 // Epochs topics
 const DEFAULT_HANDLE_EPOCH_INFO_TOPIC: (&str, &str) =
-    ("handle-topic-epoch-info", "rest.get.epoch.*"); // Both latest and specific
+    ("handle-topic-epoch-info", "rest.get.epochs.*"); // Both latest and specific
 const DEFAULT_HANDLE_EPOCH_PARAMS_TOPIC: (&str, &str) = (
     "handle-topic-epoch-parameters",
     "rest.get.epochs.*.parameters",
@@ -177,6 +184,26 @@ const DEFAULT_HANDLE_EPOCH_POOL_BLOCKS_TOPIC: (&str, &str) = (
     "rest.get.epochs.*.blocks.*",
 );
 
+// Assets topics
+const DEFAULT_HANDLE_ASSETS_LIST_TOPIC: (&str, &str) =
+    ("handle-topic-assets-list", "rest.get.assets");
+const DEFAULT_HANDLE_ASSET_SINGLE_TOPIC: (&str, &str) = (
+    "handle-topic-policy-assets-asset-single",
+    "rest.get.assets.*",
+);
+const DEFAULT_HANDLE_ASSET_HISTORY_TOPIC: (&str, &str) =
+    ("handle-topic-asset-history", "rest.get.assets.*.history");
+const DEFAULT_HANDLE_ASSET_TRANSACTIONS_TOPIC: (&str, &str) = (
+    "handle-topic-asset-transactions",
+    "rest.get.assets.*.transactions",
+);
+const DEFAULT_HANDLE_ASSET_ADDRESSES_TOPIC: (&str, &str) = (
+    "handle-topic-asset-addresses",
+    "rest.get.assets.*.addresses",
+);
+const DEFAULT_HANDLE_POLICY_ASSETS_TOPIC: (&str, &str) =
+    ("handle-topic-policy-assets", "rest.get.assets.policy.*");
+
 #[module(
     message_type(Message),
     name = "rest-blockfrost",
@@ -191,6 +218,7 @@ impl BlockfrostREST {
         let handlers_config = Arc::new(HandlersConfig::from(config));
 
         info!("Blockfrost REST enabled");
+
         // Handler for /accounts/{stake_address}
         register_handler(
             context.clone(),
@@ -493,6 +521,54 @@ impl BlockfrostREST {
             DEFAULT_HANDLE_EPOCH_POOL_BLOCKS_TOPIC,
             handlers_config.clone(),
             handle_epoch_pool_blocks_blockfrost,
+        );
+
+        // Handler for /assets
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_ASSETS_LIST_TOPIC,
+            handlers_config.clone(),
+            handle_assets_list_blockfrost,
+        );
+
+        // Handler for /assets/{asset}
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_ASSET_SINGLE_TOPIC,
+            handlers_config.clone(),
+            handle_asset_single_blockfrost,
+        );
+
+        // Handler for /assets/{asset}/history
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_ASSET_HISTORY_TOPIC,
+            handlers_config.clone(),
+            handle_asset_history_blockfrost,
+        );
+
+        // Handler for /assets/{asset}/transactions
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_ASSET_TRANSACTIONS_TOPIC,
+            handlers_config.clone(),
+            handle_asset_transactions_blockfrost,
+        );
+
+        // Handler for /assets/{asset}/addresses
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_ASSET_ADDRESSES_TOPIC,
+            handlers_config.clone(),
+            handle_asset_addresses_blockfrost,
+        );
+
+        // Handler for /assets/policy/{policy_id}
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_POLICY_ASSETS_TOPIC,
+            handlers_config.clone(),
+            handle_policy_assets_blockfrost,
         );
 
         Ok(())

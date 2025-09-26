@@ -3,7 +3,7 @@
 
 use acropolis_common::{
     messages::{
-        BlockFeesMessage, CardanoMessage, GovernanceProceduresMessage, Message,
+        AssetDeltasMessage, BlockFeesMessage, CardanoMessage, GovernanceProceduresMessage, Message,
         TxCertificatesMessage, UTXODeltasMessage, WithdrawalsMessage,
     },
     *,
@@ -14,6 +14,7 @@ use std::{clone::Clone, fmt::Debug, sync::Arc};
 use anyhow::Result;
 use config::Config;
 use futures::future::join_all;
+use pallas::codec::minicbor::encode;
 use pallas::ledger::primitives::KeyValuePairs;
 use pallas::ledger::{primitives, traverse, traverse::MultiEraTx};
 use tracing::{debug, error, info, info_span, Instrument};
@@ -21,6 +22,7 @@ use tracing::{debug, error, info, info_span, Instrument};
 mod map_parameters;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.txs";
+const CIP25_METADATA_LABEL: u64 = 721;
 
 /// Tx unpacker module
 /// Parameterised by the outer message enum used on the bus
@@ -66,6 +68,11 @@ impl TxUnpacker {
             info!("Publishing UTXO deltas on '{topic}'");
         }
 
+        let publish_asset_deltas_topic = config.get_string("publish-asset-deltas-topic").ok();
+        if let Some(ref topic) = publish_asset_deltas_topic {
+            info!("Publishing native asset deltas on '{topic}'");
+        }
+
         let publish_withdrawals_topic = config.get_string("publish-withdrawals-topic").ok();
         if let Some(ref topic) = publish_withdrawals_topic {
             info!("Publishing withdrawals on '{topic}'");
@@ -101,7 +108,9 @@ impl TxUnpacker {
                                     txs_msg.txs.len(), block.slot);
                             }
 
-                            let mut deltas = Vec::new();
+                            let mut utxo_deltas = Vec::new();
+                            let mut asset_deltas = Vec::new();
+                            let mut cip25_metadata_updates = Vec::new();
                             let mut withdrawals = Vec::new();
                             let mut certificates = Vec::new();
                             let mut voting_procedures = Vec::new();
@@ -110,6 +119,8 @@ impl TxUnpacker {
                             let mut total_fees: u64 = 0;
 
                             for (tx_index, raw_tx) in txs_msg.txs.iter().enumerate() {
+                                let tx_identifier = TxIdentifier::new(block.number as u32, tx_index as u16);
+
                                 if publish_governance_procedures_topic.is_some() {
                                     //Self::decode_legacy_updates(&mut legacy_update_proposals, &block, &raw_tx);
                                     if block.era >= Era::Shelley && block.era < Era::Babbage {
@@ -178,7 +189,7 @@ impl TxUnpacker {
                                                     index: oref.index(),
                                                 };
 
-                                                deltas.push(UTXODelta::Input(tx_input));
+                                                utxo_deltas.push(UTXODelta::Input(tx_input));
                                             }
 
                                             // Add all the outputs
@@ -191,13 +202,14 @@ impl TxUnpacker {
                                                             Ok(address) => {
                                                                 let tx_output = TxOutput {
                                                                     tx_hash: TxHash(*tx.hash()),
+                                                                    tx_identifier,
                                                                     index: index as u64,
                                                                     address: address,
-                                                                    value: output.value().coin(),
-                                                                    // !!! datum
+                                                                    value: map_parameters::map_value(&output.value()),
+                                                                    datum: map_parameters::map_datum(&output.datum())
                                                                 };
 
-                                                                deltas.push(UTXODelta::Output(tx_output));
+                                                                utxo_deltas.push(UTXODelta::Output(tx_output));
                                                             }
 
                                                             Err(e) =>
@@ -208,6 +220,33 @@ impl TxUnpacker {
                                                     Err(e) =>
                                                         error!("Can't parse output {index} in tx: {e}")
                                                 }
+                                            }
+                                        }
+
+                                        if publish_asset_deltas_topic.is_some() {
+                                            let mut tx_deltas: Vec<(PolicyId, Vec<NativeAssetDelta>)> = Vec::new();
+
+                                            // Mint deltas
+                                            for policy_group in tx.mints().iter() {
+                                                if let Some((policy_id, deltas)) = map_parameters::map_mint_burn(policy_group) {
+                                                    tx_deltas.push((policy_id, deltas));
+                                                }
+                                            }
+
+                                            if let Some(metadata) = tx.metadata().find(CIP25_METADATA_LABEL) {
+                                                let mut metadata_raw = Vec::new();
+                                                match encode(metadata, &mut metadata_raw) {
+                                                    Ok(()) => {
+                                                        cip25_metadata_updates.push(metadata_raw);
+                                                    }
+                                                    Err(e) => {
+                                                        error!("failed to encode CIP-25 metadatum: {e:#}");
+                                                    }
+                                                }
+                                            }
+
+                                            if !tx_deltas.is_empty() {
+                                                asset_deltas.push((tx_identifier, tx_deltas));
                                             }
                                         }
 
@@ -281,7 +320,19 @@ impl TxUnpacker {
                                 let msg = Message::Cardano((
                                     block.clone(),
                                     CardanoMessage::UTXODeltas(UTXODeltasMessage {
-                                        deltas,
+                                        deltas: utxo_deltas,
+                                    })
+                                ));
+
+                                futures.push(context.message_bus.publish(&topic, Arc::new(msg)));
+                            }
+
+                            if let Some(ref topic) = publish_asset_deltas_topic {
+                                let msg = Message::Cardano((
+                                    block.clone(),
+                                    CardanoMessage::AssetDeltas(AssetDeltasMessage {
+                                        deltas: asset_deltas,
+                                        cip25_metadata_updates
                                     })
                                 ));
 

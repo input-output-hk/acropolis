@@ -79,8 +79,10 @@ messages with this epoch in its beginning. Need to sort out.
 Speicified in separate field of Alonzo-compatible transactions.
 Votes are not divided into propositions and voting.
 Votes are cast by genesis key holders.
-The proposal needs 5 votes: that is, 5 genesis key holders must
+The proposal needs `update_quorum` votes.
+* This is five for mainnet: five genesis key holders must
 cast identical proposals.
+* This is three for SanchoNet.
 
 ### Votes counting and expiration
 
@@ -94,6 +96,50 @@ That is, previous votes for the key expire immediately.
 * Votes activation is delayed for 6/10 of epoch length. That is, if a vote is
 cast at slot with number greater than 4/10 of the epoch length, it'll be counted 
 to the next epoch.
+
+### Known issues, unfinished work in current implementation (TODO)
+
+* Check, whether cast votes are really genesis keys. Currently we believe to the
+user.
+
+All Alonzo votes in Mainnet were successful, so there is no immediate need to fix
+this. The main purpose of voting support is to support proper timing of parameter
+updates. However, this may change.
+
+### Voting timing/epochs
+
+Each Alonzo/Babbage update proposal has a parameter (`enactment_epoch`), 
+specifying moment of the enactment. The proposal (if approved) becomes effective after 
+the specified epoch ends. Let's give some comprehensive example for that.
+
+Example: parameter d=9/10 in Mainnet is proposed at epoch 210 and voted at epoch 210,
+so it should be enacted (and used) in epoch 211.
+This proposal is serialized (in .json test) as follows:
+
+```
+[5357060,210,1,0,[[210,[
+    ["Fi+UVUrIwiU4OiJIwkVlntqHDqqC0O8l/H3Ngg==",{"decentralisation_constant":[9,10]}],
+    ...
+]]]]
+```
+
+Expected behaviour:
+
+```
+17:16:14.357308 acropolis_module_mithril_snapshot_fetcher: New epoch 211 ...
+17:16:14.358807 acropolis_module_epochs_state::state: End of epoch 210 ...
+17:16:14.380193 acropolis_module_accounts_state::state: New parameter set: ProtocolParams { 
+   byron: ..., 
+   alonzo: None, 
+   shelley: Some(ShelleyParams { ..., decentralisation_param: Ratio { numer: 9, denom: 10 }, ... }), 
+   babbage: None, 
+   conway: None 
+}
+```
+
+Since there is no special 'end of epoch' block, then we use the first block as the 
+signal for the previous epoch end. The governance module discovers end of the epoch,
+publishes update, then parameter state module catches it and publishes new parameters.
 
 ### Testing
 

@@ -10,11 +10,12 @@ use tracing_subscriber;
 
 // External modules
 use acropolis_module_accounts_state::AccountsState;
+use acropolis_module_assets_state::AssetsState;
 use acropolis_module_block_unpacker::BlockUnpacker;
 use acropolis_module_chain_store::ChainStore;
 use acropolis_module_drdd_state::DRDDState;
 use acropolis_module_drep_state::DRepState;
-use acropolis_module_epoch_activity_counter::EpochActivityCounter;
+use acropolis_module_epochs_state::EpochsState;
 use acropolis_module_genesis_bootstrapper::GenesisBootstrapper;
 use acropolis_module_governance_state::GovernanceState;
 use acropolis_module_mithril_snapshot_fetcher::MithrilSnapshotFetcher;
@@ -97,8 +98,9 @@ pub async fn main() -> Result<()> {
     GovernanceState::register(&mut process);
     ParametersState::register(&mut process);
     StakeDeltaFilter::register(&mut process);
-    EpochActivityCounter::register(&mut process);
+    EpochsState::register(&mut process);
     AccountsState::register(&mut process);
+    AssetsState::register(&mut process);
     BlockfrostREST::register(&mut process);
     SPDDState::register(&mut process);
     DRDDState::register(&mut process);

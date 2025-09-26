@@ -4,9 +4,9 @@
 use acropolis_common::{
     genesis_values::GenesisValues,
     messages::{BlockBodyMessage, BlockHeaderMessage, CardanoMessage, Message},
-    BlockInfo, BlockStatus, Era,
+    BlockHash, BlockInfo, BlockStatus, Era,
 };
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{module, Context, Module};
 use chrono::{Duration, Utc};
 use config::Config;
@@ -314,14 +314,17 @@ impl MithrilSnapshotFetcher {
                             PallasEra::Mary => Era::Mary,
                             PallasEra::Alonzo => Era::Alonzo,
                             PallasEra::Babbage => Era::Babbage,
-                            _ => Era::Conway,
+                            PallasEra::Conway => Era::Conway,
+                            x => bail!(
+                                "Block slot {slot}, number {number} has impossible era: {x:?}"
+                            ),
                         };
 
                         let block_info = BlockInfo {
                             status: BlockStatus::Immutable,
                             slot,
                             number,
-                            hash: block.hash().to_vec(),
+                            hash: BlockHash(*block.hash()),
                             epoch,
                             epoch_slot,
                             new_epoch,
@@ -460,6 +463,7 @@ async fn prompt_pause(description: String, next_description: String) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mithril_common::test::double::Dummy;
 
     #[test]
     fn can_save_and_load_snapshot_metadata() {

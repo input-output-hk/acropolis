@@ -1,17 +1,56 @@
+use crate::cost_models::{PLUTUS_V1, PLUTUS_V2, PLUTUS_V3};
 use acropolis_common::{
-    protocol_params::{Nonce, NonceVariant, ProtocolParams},
+    messages::EpochActivityMessage,
+    protocol_params::{Nonce, NonceHash, NonceVariant, ProtocolParams},
     queries::blocks::BlockInfo,
     queries::governance::DRepActionUpdate,
     rest_helper::ToCheckedF64,
-    PoolEpochState, Relay, Vote,
+    AssetAddressEntry, AssetMetadataStandard, AssetMintRecord, KeyHash, PolicyAsset,
+    PoolEpochState, PoolUpdateAction, Relay, TxHash, Vote,
 };
 use num_traits::ToPrimitive;
 use rust_decimal::Decimal;
 use serde::Serialize;
 use serde_json::{json, Value};
+use serde_with::{hex::Hex, serde_as, DisplayFromStr};
 use std::collections::HashMap;
 
-use crate::cost_models::{PLUTUS_V1, PLUTUS_V2, PLUTUS_V3};
+// REST response structure for /epoch
+#[serde_as]
+#[derive(Serialize)]
+pub struct EpochActivityRest {
+    pub epoch: u64,
+    pub total_blocks: usize,
+    pub total_fees: u64,
+    pub vrf_vkey_hashes: Vec<VRFKeyCount>,
+    #[serde_as(as = "Option<Hex>")]
+    pub nonce: Option<NonceHash>,
+}
+
+#[derive(Serialize)]
+pub struct VRFKeyCount {
+    pub vrf_key_hash: String,
+    pub block_count: usize,
+}
+
+impl From<EpochActivityMessage> for EpochActivityRest {
+    fn from(ea_message: EpochActivityMessage) -> Self {
+        Self {
+            epoch: ea_message.epoch,
+            total_blocks: ea_message.total_blocks,
+            total_fees: ea_message.total_fees,
+            vrf_vkey_hashes: ea_message
+                .vrf_vkey_hashes
+                .iter()
+                .map(|(key, count)| VRFKeyCount {
+                    vrf_key_hash: hex::encode(key),
+                    block_count: *count,
+                })
+                .collect(),
+            nonce: ea_message.nonce.clone(),
+        }
+    }
+}
 
 // REST response structure for /blocks/latest
 #[derive(Serialize)]
@@ -211,34 +250,48 @@ pub struct ProposalMetadataREST {
     pub bytes: String,
 }
 
+// RET response structure for /pools/extended
+#[serde_as]
 #[derive(Serialize)]
 pub struct PoolExtendedRest {
     pub pool_id: String,
-    pub hex: String,
-    pub active_stake: String, // u64 in string
-    pub live_stake: String,   // u64 in string
+    #[serde_as(as = "Hex")]
+    pub hex: Vec<u8>,
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub active_stake: Option<u64>,
+    #[serde_as(as = "DisplayFromStr")]
+    pub live_stake: u64,
     pub blocks_minted: u64,
     pub live_saturation: Decimal,
-    pub declared_pledge: String, // u64 in string
+    #[serde_as(as = "DisplayFromStr")]
+    pub declared_pledge: u64,
     pub margin_cost: f32,
-    pub fixed_cost: String, // u64 in string
+    #[serde_as(as = "DisplayFromStr")]
+    pub fixed_cost: u64,
 }
 
+// REST response structure for /pools/retired and /pools/retiring
 #[derive(Serialize)]
 pub struct PoolRetirementRest {
     pub pool_id: String,
     pub epoch: u64,
 }
 
+// REST response structure for /pools/{pool_id}/history
+#[serde_as]
 #[derive(Serialize)]
 pub struct PoolEpochStateRest {
     pub epoch: u64,
     pub blocks: u64,
-    pub active_stake: String, // u64 in string
+    #[serde_as(as = "DisplayFromStr")]
+    pub active_stake: u64,
     pub active_size: f64,
+    #[serde_as(as = "DisplayFromStr")]
     pub delegators_count: u64,
-    pub rewards: String, // u64 in string
-    pub fees: String,    // u64 in string
+    #[serde_as(as = "DisplayFromStr")]
+    pub rewards: u64,
+    #[serde_as(as = "DisplayFromStr")]
+    pub fees: u64,
 }
 
 impl From<PoolEpochState> for PoolEpochStateRest {
@@ -246,15 +299,16 @@ impl From<PoolEpochState> for PoolEpochStateRest {
         Self {
             epoch: state.epoch,
             blocks: state.blocks_minted,
-            active_stake: state.active_stake.to_string(),
+            active_stake: state.active_stake,
             active_size: state.active_size.to_checked_f64("active_size").unwrap_or(0.0),
             delegators_count: state.delegators_count,
-            rewards: state.pool_reward.to_string(),
-            fees: state.spo_reward.to_string(),
+            rewards: state.pool_reward,
+            fees: state.spo_reward,
         }
     }
 }
 
+// REST response structure for /pools/{pool_id}/metadata
 #[derive(Serialize)]
 pub struct PoolMetadataRest {
     pub pool_id: String,
@@ -267,6 +321,16 @@ pub struct PoolMetadataRest {
     pub homepage: String,
 }
 
+// REST response structure for /pools/{pool_id}/delegators
+#[derive(Serialize)]
+pub struct PoolDelegatorRest {
+    // stake bech32
+    pub address: String,
+    // live stake
+    pub live_stake: String,
+}
+
+// REST response structure for /pools/{pool_id}/relays
 #[derive(Serialize)]
 pub struct PoolRelayRest {
     pub ipv4: Option<String>,
@@ -311,6 +375,60 @@ impl From<Relay> for PoolRelayRest {
             },
         }
     }
+}
+
+// REST response structure for /pools/{pool_id}/updates
+#[serde_as]
+#[derive(Serialize)]
+pub struct PoolUpdateEventRest {
+    #[serde_as(as = "Hex")]
+    pub tx_hash: TxHash,
+    pub cert_index: u64,
+    pub action: PoolUpdateAction,
+}
+
+// REST response structure for /pools/{pool_id}/votes
+#[serde_as]
+#[derive(Serialize)]
+pub struct PoolVoteRest {
+    #[serde_as(as = "Hex")]
+    pub tx_hash: TxHash,
+    pub vote_index: u32,
+    pub vote: Vote,
+}
+
+// REST response structure for /pools/{pool_id}
+#[serde_as]
+#[derive(Serialize)]
+pub struct PoolInfoRest {
+    pub pool_id: String,
+    #[serde_as(as = "Hex")]
+    pub hex: KeyHash,
+    #[serde_as(as = "Hex")]
+    pub vrf_key: KeyHash,
+    pub blocks_minted: u64,
+    pub blocks_epoch: u64,
+    #[serde_as(as = "DisplayFromStr")]
+    pub live_stake: u64,
+    pub live_size: Decimal,
+    pub live_saturation: Decimal,
+    pub live_delegators: u64,
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub active_stake: Option<u64>,
+    pub active_size: Option<f64>,
+    #[serde_as(as = "DisplayFromStr")]
+    pub declared_pledge: u64,
+    #[serde_as(as = "DisplayFromStr")]
+    pub live_pledge: u64,
+    pub margin_cost: f32,
+    #[serde_as(as = "DisplayFromStr")]
+    pub fixed_cost: u64,
+    pub reward_account: String,
+    pub pool_owners: Vec<String>,
+    #[serde_as(as = "Option<Vec<Hex>>")]
+    pub registration: Option<Vec<TxHash>>,
+    #[serde_as(as = "Option<Vec<Hex>>")]
+    pub retirement: Option<Vec<TxHash>>,
 }
 
 // REST response structure for protocol params
@@ -570,5 +688,99 @@ impl ProtocolParamsRestExt for ProtocolParams {
         }
 
         Value::Object(map)
+    }
+}
+
+#[derive(Serialize)]
+pub struct AssetInfoRest {
+    pub asset: String,
+    pub policy_id: String,
+    pub asset_name: String,
+    pub fingerprint: String,
+    pub quantity: String,
+    pub initial_mint_tx_hash: String,
+    pub mint_or_burn_count: u64,
+    pub onchain_metadata: Option<Value>,
+    pub onchain_metadata_standard: Option<AssetMetadataStandard>,
+    pub onchain_metadata_extra: Option<String>,
+    pub metadata: Option<AssetMetadata>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct AssetMetadata {
+    pub name: String,
+    pub description: String,
+    pub ticker: Option<String>,
+    pub url: Option<String>,
+    pub logo: Option<String>,
+    pub decimals: Option<u8>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AssetMintRecordRest {
+    tx_hash: String,
+    amount: String,
+    action: String,
+}
+
+impl From<&AssetMintRecord> for AssetMintRecordRest {
+    fn from(record: &AssetMintRecord) -> Self {
+        let action = if !record.burn {
+            "minted".to_string()
+        } else {
+            "burned".to_string()
+        };
+
+        AssetMintRecordRest {
+            tx_hash: "transaction_state not yet implemented".to_string(),
+            amount: record.amount.to_string(),
+            action,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct PolicyAssetRest {
+    asset: String,
+    quantity: String,
+}
+
+impl From<&PolicyAsset> for PolicyAssetRest {
+    fn from(asset: &PolicyAsset) -> Self {
+        let asset_hex = format!(
+            "{}{}",
+            hex::encode(asset.policy),
+            hex::encode(asset.name.as_slice())
+        );
+
+        PolicyAssetRest {
+            asset: asset_hex,
+            quantity: asset.quantity.to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct AssetTransactionRest {
+    pub tx_hash: String, // Requires a query to transactions state which is not yet implemented
+    pub tx_index: u16,
+    pub block_height: u32,
+    pub block_time: String, // Change to u64 when transactions state is implemented
+}
+
+#[derive(Debug, Serialize)]
+pub struct AssetAddressRest {
+    pub address: String,
+    pub quantity: String,
+}
+
+impl TryFrom<&AssetAddressEntry> for AssetAddressRest {
+    type Error = anyhow::Error;
+
+    fn try_from(entry: &AssetAddressEntry) -> Result<Self, Self::Error> {
+        Ok(AssetAddressRest {
+            address: entry.address.to_string()?,
+            quantity: entry.quantity.to_string(),
+        })
     }
 }

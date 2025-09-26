@@ -9,20 +9,22 @@ description = "UTXO state Caryatid module for Acropolis"
 license = "Apache-2.0"
 
 [dependencies]
-caryatid_sdk = "0.12"
 acropolis_common = { path = "../../common" }
-anyhow = "1.0"
+
+caryatid_sdk = { workspace = true }
+
+anyhow = { workspace = true }
 async-trait = "0.1"
-tokio = { version = "1", features = ["full"] }
-config = "0.15.11"
-tracing = "0.1.40"
-hex = "0.4.3"
-dashmap = "6.1.0"
-sled = "0.34.7"
-serde = { version = "1.0.214", features = ["derive"] }
-serde_json = "1.0.132"
-serde_cbor = "0.11.2"
+config = { workspace = true }
+dashmap = { workspace = true }
 fjall = "2.7.0"
+hex = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_cbor = "0.11.2"
+sled = "0.34.7"
+tokio = { workspace = true }
+tracing = { workspace = true }
 
 [lib]
 path = "src/utxo_state.rs"

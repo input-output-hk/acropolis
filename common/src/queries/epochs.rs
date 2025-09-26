@@ -1,4 +1,4 @@
-use crate::{messages::EpochActivityMessage, KeyHash};
+use crate::{messages::EpochActivityMessage, protocol_params::ProtocolParams, KeyHash};
 
 pub const DEFAULT_EPOCHS_QUERY_TOPIC: (&str, &str) =
     ("epochs-state-query-topic", "cardano.query.epochs");
@@ -13,9 +13,7 @@ pub enum EpochsStateQuery {
     GetEpochStakeDistributionByPool { epoch_number: u64 },
     GetEpochBlockDistribution { epoch_number: u64 },
     GetEpochBlockDistributionByPool { epoch_number: u64 },
-
-    // Pools related queries
-    GetBlocksMintedByPools { vrf_key_hashes: Vec<KeyHash> },
+    GetLatestEpochBlocksMintedByPool { vrf_key_hash: KeyHash },
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -28,9 +26,7 @@ pub enum EpochsStateQueryResponse {
     EpochStakeDistributionByPool(EpochStakeDistributionByPool),
     EpochBlockDistribution(EpochBlockDistribution),
     EpochBlockDistributionByPool(EpochBlockDistributionByPool),
-
-    // Pools related responses
-    BlocksMintedByPools(BlocksMintedByPools),
+    LatestEpochBlocksMintedByPool(u64),
 
     NotFound,
     Error(String),
@@ -42,7 +38,14 @@ pub struct LatestEpoch {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct EpochInfo {}
+pub struct LatestEpochParameters {
+    pub parameters: ProtocolParams,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct EpochInfo {
+    pub epoch: EpochActivityMessage,
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct NextEpochs {}
@@ -61,9 +64,3 @@ pub struct EpochBlockDistribution {}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EpochBlockDistributionByPool {}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct BlocksMintedByPools {
-    // this is in same order of vrf_key_hashes from EpochsStateQuery::BlocksMintedByPools
-    pub blocks_minted: Vec<u64>,
-}

@@ -3,8 +3,7 @@
 
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
-    queries::accounts::{PoolsLiveStakes, DEFAULT_ACCOUNTS_QUERY_TOPIC},
-    rest_helper::handle_rest,
+    queries::accounts::{DrepDelegators, PoolDelegators, DEFAULT_ACCOUNTS_QUERY_TOPIC},
     state_history::{StateHistory, StateHistoryStore},
     BlockInfo, BlockStatus,
 };
@@ -12,7 +11,7 @@ use anyhow::Result;
 use caryatid_sdk::{message_bus::Subscription, module, Context, Module};
 use config::Config;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::{join, sync::Mutex};
 use tracing::{error, info, info_span, Instrument};
 
 mod drep_distribution_publisher;
@@ -21,16 +20,16 @@ mod spo_distribution_publisher;
 use spo_distribution_publisher::SPODistributionPublisher;
 mod spo_rewards_publisher;
 use spo_rewards_publisher::SPORewardsPublisher;
+mod stake_reward_deltas_publisher;
 mod state;
+use stake_reward_deltas_publisher::StakeRewardDeltasPublisher;
 use state::State;
 mod monetary;
-mod rest;
 mod rewards;
 mod snapshot;
 use acropolis_common::queries::accounts::{
     AccountInfo, AccountsStateQuery, AccountsStateQueryResponse,
 };
-use rest::handle_pots;
 
 const DEFAULT_SPO_STATE_TOPIC: &str = "cardano.spo.state";
 const DEFAULT_EPOCH_ACTIVITY_TOPIC: &str = "cardano.epoch.activity";
@@ -43,8 +42,7 @@ const DEFAULT_DREP_DISTRIBUTION_TOPIC: &str = "cardano.drep.distribution";
 const DEFAULT_SPO_DISTRIBUTION_TOPIC: &str = "cardano.spo.distribution";
 const DEFAULT_SPO_REWARDS_TOPIC: &str = "cardano.spo.rewards";
 const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: &str = "cardano.protocol.parameters";
-
-const DEFAULT_HANDLE_POTS_TOPIC: (&str, &str) = ("handle-topic-pots", "rest.get.pots");
+const DEFAULT_STAKE_REWARD_DELTAS_TOPIC: &str = "cardano.stake.reward.deltas";
 
 /// Accounts State module
 #[module(
@@ -61,6 +59,7 @@ impl AccountsState {
         mut drep_publisher: DRepDistributionPublisher,
         mut spo_publisher: SPODistributionPublisher,
         mut spo_rewards_publisher: SPORewardsPublisher,
+        mut stake_reward_deltas_publisher: StakeRewardDeltasPublisher,
         mut spos_subscription: Box<dyn Subscription<Message>>,
         mut ea_subscription: Box<dyn Subscription<Message>>,
         mut certs_subscription: Box<dyn Subscription<Message>>,
@@ -196,19 +195,28 @@ impl AccountsState {
                         );
                         async {
                             Self::check_sync(&current_block, &block_info);
-                            let spo_rewards = state
+                            let after_epoch_result = state
                                 .handle_epoch_activity(ea_msg)
                                 .await
                                 .inspect_err(|e| error!("EpochActivity handling error: {e:#}"))
                                 .ok();
-                            // SPO rewards is for previous epoch
-                            if let Some(spo_rewards) = spo_rewards {
-                                if let Err(e) = spo_rewards_publisher
-                                    .publish_spo_rewards(block_info, spo_rewards)
-                                    .await
-                                {
+                            if let Some((spo_rewards, stake_reward_deltas)) = after_epoch_result {
+                                // SPO Rewards Future
+                                let spo_rewards_future = spo_rewards_publisher
+                                    .publish_spo_rewards(block_info, spo_rewards);
+                                // Stake Reward Deltas Future
+                                let stake_reward_deltas_future = stake_reward_deltas_publisher
+                                    .publish_stake_reward_deltas(block_info, stake_reward_deltas);
+
+                                // publish in parallel
+                                let (spo_rewards_result, stake_reward_deltas_result) =
+                                    join!(spo_rewards_future, stake_reward_deltas_future);
+                                spo_rewards_result.unwrap_or_else(|e| {
                                     error!("Error publishing SPO rewards: {e:#}")
-                                }
+                                });
+                                stake_reward_deltas_result.unwrap_or_else(|e| {
+                                    error!("Error publishing stake reward deltas: {e:#}")
+                                });
                             }
                         }
                         .instrument(span)
@@ -387,11 +395,10 @@ impl AccountsState {
             .get_string("publish-spo-rewards-topic")
             .unwrap_or(DEFAULT_SPO_REWARDS_TOPIC.to_string());
 
-        // REST handler topics
-        let handle_pots_topic = config
-            .get_string(DEFAULT_HANDLE_POTS_TOPIC.0)
-            .unwrap_or(DEFAULT_HANDLE_POTS_TOPIC.1.to_string());
-        info!("Creating request handler on '{}'", handle_pots_topic);
+        let stake_reward_deltas_topic = config
+            .get_string("publish-stake-reward-deltas-topic")
+            .unwrap_or(DEFAULT_STAKE_REWARD_DELTAS_TOPIC.to_string());
+        info!("Creating stake reward deltas subscriber on '{stake_reward_deltas_topic}'");
 
         // Query topics
         let accounts_query_topic = config
@@ -405,7 +412,6 @@ impl AccountsState {
             StateHistoryStore::default_block_store(),
         )));
         let history_account_state = history.clone();
-        let history_pots = history.clone();
         let history_tick = history.clone();
 
         context.handle(&accounts_query_topic, move |message| {
@@ -444,8 +450,26 @@ impl AccountsState {
                     }
 
                     AccountsStateQuery::GetPoolsLiveStakes { pools_operators } => {
-                        AccountsStateQueryResponse::PoolsLiveStakes(PoolsLiveStakes {
-                            live_stakes: state.get_pools_live_stakes(pools_operators),
+                        AccountsStateQueryResponse::PoolsLiveStakes(
+                            state.get_pools_live_stakes(pools_operators),
+                        )
+                    }
+
+                    AccountsStateQuery::GetPoolDelegators { pool_operator } => {
+                        AccountsStateQueryResponse::PoolDelegators(PoolDelegators {
+                            delegators: state.get_pool_delegators(pool_operator),
+                        })
+                    }
+
+                    AccountsStateQuery::GetPoolLiveStake { pool_operator } => {
+                        AccountsStateQueryResponse::PoolLiveStake(
+                            state.get_pool_live_stake_info(pool_operator),
+                        )
+                    }
+
+                    AccountsStateQuery::GetDrepDelegators { drep } => {
+                        AccountsStateQueryResponse::DrepDelegators(DrepDelegators {
+                            delegators: state.get_drep_delegators(drep),
                         })
                     }
 
@@ -457,6 +481,30 @@ impl AccountsState {
                             "Error retrieving DRep delegations map".to_string(),
                         ),
                     },
+
+                    AccountsStateQuery::GetOptimalPoolSizing => {
+                        AccountsStateQueryResponse::OptimalPoolSizing(
+                            state.get_optimal_pool_sizing(),
+                        )
+                    }
+
+                    AccountsStateQuery::GetAccountsUtxoValuesMap { stake_keys } => {
+                        match state.get_accounts_utxo_values_map(stake_keys) {
+                            Some(map) => AccountsStateQueryResponse::AccountsUtxoValuesMap(map),
+                            None => AccountsStateQueryResponse::Error(
+                                "One or more accounts not found".to_string(),
+                            ),
+                        }
+                    }
+
+                    AccountsStateQuery::GetAccountsUtxoValuesSum { stake_keys } => {
+                        match state.get_accounts_utxo_values_sum(stake_keys) {
+                            Some(sum) => AccountsStateQueryResponse::AccountsUtxoValuesSum(sum),
+                            None => AccountsStateQueryResponse::Error(
+                                "One or more accounts not found".to_string(),
+                            ),
+                        }
+                    }
 
                     AccountsStateQuery::GetAccountsBalancesMap { stake_keys } => {
                         match state.get_accounts_balances_map(stake_keys) {
@@ -488,10 +536,6 @@ impl AccountsState {
             }
         });
 
-        handle_rest(context.clone(), &handle_pots_topic, move || {
-            handle_pots(history_pots.clone())
-        });
-
         // Ticker to log stats
         let mut tick_subscription = context.subscribe("clock.tick").await?;
         context.clone().run(async move {
@@ -519,6 +563,8 @@ impl AccountsState {
             DRepDistributionPublisher::new(context.clone(), drep_distribution_topic);
         let spo_publisher = SPODistributionPublisher::new(context.clone(), spo_distribution_topic);
         let spo_rewards_publisher = SPORewardsPublisher::new(context.clone(), spo_rewards_topic);
+        let stake_reward_deltas_publisher =
+            StakeRewardDeltasPublisher::new(context.clone(), stake_reward_deltas_topic);
 
         // Subscribe
         let spos_subscription = context.subscribe(&spo_state_topic).await?;
@@ -537,6 +583,7 @@ impl AccountsState {
                 drep_publisher,
                 spo_publisher,
                 spo_rewards_publisher,
+                stake_reward_deltas_publisher,
                 spos_subscription,
                 ea_subscription,
                 certs_subscription,

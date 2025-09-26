@@ -5,7 +5,7 @@
 
 use crate::genesis_values::GenesisValues;
 use crate::ledger_state::SPOState;
-use crate::protocol_params::ProtocolParams;
+use crate::protocol_params::{NonceHash, ProtocolParams};
 use crate::queries::parameters::{ParametersStateQuery, ParametersStateQueryResponse};
 use crate::queries::{
     accounts::{AccountsStateQuery, AccountsStateQueryResponse},
@@ -70,6 +70,16 @@ pub struct UTXODeltasMessage {
     pub deltas: Vec<UTXODelta>,
 }
 
+/// Message encapsulating multiple asset deltas
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AssetDeltasMessage {
+    /// Mint and burn deltas per tx
+    pub deltas: Vec<(TxIdentifier, NativeAssetsDelta)>,
+
+    /// CIP 25 metadata blobs (Using 721 label)
+    pub cip25_metadata_updates: Vec<Vec<u8>>,
+}
+
 /// Message encapsulating multiple transaction certificates, in order
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TxCertificatesMessage {
@@ -105,6 +115,13 @@ pub struct StakeAddressDeltasMessage {
     pub deltas: Vec<StakeAddressDelta>,
 }
 
+/// Stake reward deltas message
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StakeRewardDeltasMessage {
+    /// Stake Reward Deltas
+    pub deltas: Vec<StakeRewardDelta>,
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BlockFeesMessage {
     /// Total fees
@@ -126,6 +143,9 @@ pub struct EpochActivityMessage {
     /// List of all VRF vkey hashes used on blocks (SPO indicator) and
     /// number of blocks produced
     pub vrf_vkey_hashes: Vec<(KeyHash, usize)>,
+
+    /// Nonce
+    pub nonce: Option<NonceHash>,
 }
 
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
@@ -149,11 +169,8 @@ pub struct DRepStateMessage {
     pub dreps: Vec<(DRepCredential, Lovelace)>,
 }
 
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
-pub struct DRepStakeDistributionMessage {
-    /// Epoch which has ended
-    pub epoch: u64,
-
+#[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct DRepDelegationDistribution {
     /// DRep stake assigned to the special "abstain" DRep.
     pub abstain: Lovelace,
 
@@ -162,6 +179,15 @@ pub struct DRepStakeDistributionMessage {
 
     /// DRep stake distribution by ID
     pub dreps: Vec<(DRepCredential, Lovelace)>,
+}
+
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DRepStakeDistributionMessage {
+    /// Epoch which has ended
+    pub epoch: u64,
+
+    /// DRep delegation distribution
+    pub drdd: DRepDelegationDistribution,
 }
 
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
@@ -221,6 +247,7 @@ pub enum CardanoMessage {
     ReceivedTxs(RawTxsMessage),              // Transaction available
     GenesisComplete(GenesisCompleteMessage), // Genesis UTXOs done + genesis params
     UTXODeltas(UTXODeltasMessage),           // UTXO deltas received
+    AssetDeltas(AssetDeltasMessage),         // Asset mint and burn deltas
     TxCertificates(TxCertificatesMessage),   // Transaction certificates received
     AddressDeltas(AddressDeltasMessage),     // Address deltas received
     Withdrawals(WithdrawalsMessage),         // Withdrawals from reward accounts
@@ -240,6 +267,7 @@ pub enum CardanoMessage {
     SPOStakeDistribution(SPOStakeDistributionMessage),   // SPO delegation distribution (SPDD)
     SPORewards(SPORewardsMessage),                       // SPO rewards distribution (SPRD)
     StakeAddressDeltas(StakeAddressDeltasMessage),       // Stake part of address deltas
+    StakeRewardDeltas(StakeRewardDeltasMessage),         // Stake Reward Deltas
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

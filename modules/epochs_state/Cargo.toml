@@ -1,0 +1,28 @@
+# Acropolis epochs state module
+
+[package]
+name = "acropolis_module_epochs_state"
+version = "0.1.0"
+edition = "2021"
+authors = ["Paul Clark <paul.clark@iohk.io>"]
+description = "Epochs state Caryatid module for Acropolis"
+license = "Apache-2.0"
+
+[dependencies]
+acropolis_common = { path = "../../common" }
+
+caryatid_sdk = { workspace = true }
+
+anyhow = { workspace = true }
+config = { workspace = true }
+dashmap = { workspace = true }
+hex = { workspace = true }
+imbl = { workspace = true }
+pallas = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+[lib]
+path = "src/epochs_state.rs"

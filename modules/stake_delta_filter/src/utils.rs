@@ -277,13 +277,13 @@ impl Tracker {
                     .map(|a| a.to_string())
                     .unwrap_or(Ok("(none)".to_owned()))
                     .unwrap_or("(???)".to_owned());
-                delta += event.address_delta.delta;
+                delta += event.address_delta.delta.lovelace;
 
                 chunk.push(format!(
                     "   blk {}, {}: {} ({:?}) => {} ({:?})",
                     event.block.number,
                     src_addr,
-                    event.address_delta.delta,
+                    event.address_delta.delta.lovelace,
                     event.address_delta.address,
                     dst_addr,
                     event.stake_address
@@ -388,7 +388,7 @@ pub fn process_message(
 
         let stake_delta = StakeAddressDelta {
             address: stake_address,
-            delta: d.delta,
+            delta: d.delta.lovelace,
         };
         result.deltas.push(stake_delta);
     }
@@ -400,25 +400,26 @@ pub fn process_message(
 mod test {
     use crate::*;
     use acropolis_common::{
-        messages::AddressDeltasMessage, Address, AddressDelta, BlockInfo, BlockStatus,
+        messages::AddressDeltasMessage, Address, AddressDelta, BlockHash, BlockInfo, BlockStatus,
         ByronAddress, Era, ShelleyAddress, ShelleyAddressDelegationPart, ShelleyAddressPaymentPart,
-        ShelleyAddressPointer, StakeAddress, StakeAddressPayload,
+        ShelleyAddressPointer, StakeAddress, StakeAddressPayload, ValueDelta,
     };
     use bech32::{Bech32, Hrp};
 
     fn parse_addr(s: &str) -> Result<AddressDelta> {
-        let a = pallas_addresses::Address::from_bech32(s)?;
+        let a = pallas::ledger::addresses::Address::from_bech32(s)?;
         Ok(AddressDelta {
             address: map_address(&a)?,
-            delta: 1,
+            delta: ValueDelta::new(1, Vec::new()),
         })
     }
 
     /// Map Pallas Network to our AddressNetwork
-    fn map_network(network: pallas_addresses::Network) -> Result<AddressNetwork> {
+    fn map_network(network: pallas::ledger::addresses::Network) -> Result<AddressNetwork> {
+        use pallas::ledger::addresses::Network;
         match network {
-            pallas_addresses::Network::Mainnet => Ok(AddressNetwork::Main),
-            pallas_addresses::Network::Testnet => Ok(AddressNetwork::Test),
+            Network::Mainnet => Ok(AddressNetwork::Main),
+            Network::Testnet => Ok(AddressNetwork::Test),
             _ => return Err(anyhow!("Unknown network in address")),
         }
     }
@@ -426,53 +427,50 @@ mod test {
     /// Derive our Address from a Pallas address
     // This is essentially a 1:1 mapping but makes the Message definitions independent
     // of Pallas
-    fn map_address(address: &pallas_addresses::Address) -> Result<Address> {
+    fn map_address(address: &pallas::ledger::addresses::Address) -> Result<Address> {
+        use pallas::ledger::addresses;
         match address {
-            pallas_addresses::Address::Byron(byron_address) => Ok(Address::Byron(ByronAddress {
+            addresses::Address::Byron(byron_address) => Ok(Address::Byron(ByronAddress {
                 payload: byron_address.payload.to_vec(),
             })),
 
-            pallas_addresses::Address::Shelley(shelley_address) => {
-                Ok(Address::Shelley(ShelleyAddress {
-                    network: map_network(shelley_address.network())?,
+            addresses::Address::Shelley(shelley_address) => Ok(Address::Shelley(ShelleyAddress {
+                network: map_network(shelley_address.network())?,
 
-                    payment: match shelley_address.payment() {
-                        pallas_addresses::ShelleyPaymentPart::Key(hash) => {
-                            ShelleyAddressPaymentPart::PaymentKeyHash(hash.to_vec())
-                        }
-                        pallas_addresses::ShelleyPaymentPart::Script(hash) => {
-                            ShelleyAddressPaymentPart::ScriptHash(hash.to_vec())
-                        }
-                    },
+                payment: match shelley_address.payment() {
+                    addresses::ShelleyPaymentPart::Key(hash) => {
+                        ShelleyAddressPaymentPart::PaymentKeyHash(hash.to_vec())
+                    }
+                    addresses::ShelleyPaymentPart::Script(hash) => {
+                        ShelleyAddressPaymentPart::ScriptHash(hash.to_vec())
+                    }
+                },
 
-                    delegation: match shelley_address.delegation() {
-                        pallas_addresses::ShelleyDelegationPart::Null => {
-                            ShelleyAddressDelegationPart::None
-                        }
-                        pallas_addresses::ShelleyDelegationPart::Key(hash) => {
-                            ShelleyAddressDelegationPart::StakeKeyHash(hash.to_vec())
-                        }
-                        pallas_addresses::ShelleyDelegationPart::Script(hash) => {
-                            ShelleyAddressDelegationPart::ScriptHash(hash.to_vec())
-                        }
-                        pallas_addresses::ShelleyDelegationPart::Pointer(pointer) => {
-                            ShelleyAddressDelegationPart::Pointer(ShelleyAddressPointer {
-                                slot: pointer.slot(),
-                                tx_index: pointer.tx_idx(),
-                                cert_index: pointer.cert_idx(),
-                            })
-                        }
-                    },
-                }))
-            }
+                delegation: match shelley_address.delegation() {
+                    addresses::ShelleyDelegationPart::Null => ShelleyAddressDelegationPart::None,
+                    addresses::ShelleyDelegationPart::Key(hash) => {
+                        ShelleyAddressDelegationPart::StakeKeyHash(hash.to_vec())
+                    }
+                    addresses::ShelleyDelegationPart::Script(hash) => {
+                        ShelleyAddressDelegationPart::ScriptHash(hash.to_vec())
+                    }
+                    addresses::ShelleyDelegationPart::Pointer(pointer) => {
+                        ShelleyAddressDelegationPart::Pointer(ShelleyAddressPointer {
+                            slot: pointer.slot(),
+                            tx_index: pointer.tx_idx(),
+                            cert_index: pointer.cert_idx(),
+                        })
+                    }
+                },
+            })),
 
-            pallas_addresses::Address::Stake(stake_address) => Ok(Address::Stake(StakeAddress {
+            addresses::Address::Stake(stake_address) => Ok(Address::Stake(StakeAddress {
                 network: map_network(stake_address.network())?,
                 payload: match stake_address.payload() {
-                    pallas_addresses::StakePayload::Stake(hash) => {
+                    addresses::StakePayload::Stake(hash) => {
                         StakeAddressPayload::StakeKeyHash(hash.to_vec())
                     }
-                    pallas_addresses::StakePayload::Script(hash) => {
+                    addresses::StakePayload::Script(hash) => {
                         StakeAddressPayload::ScriptHash(hash.to_vec())
                     }
                 },
@@ -482,7 +480,7 @@ mod test {
 
     fn key_to_keyhash(prefix: &str, key: &str) -> String {
         let (_hrp, key_vec) = bech32::decode(key).unwrap();
-        let hash_vec = pallas_crypto::hash::Hasher::<224>::hash(&key_vec);
+        let hash_vec = pallas::crypto::hash::Hasher::<224>::hash(&key_vec);
         let prefix_hrp: Hrp = Hrp::parse(prefix).unwrap();
         bech32::encode::<Bech32>(prefix_hrp, &hash_vec.to_vec()).unwrap()
     }
@@ -539,7 +537,7 @@ mod test {
             status: BlockStatus::Immutable,
             slot: 2498243,
             number: 1,
-            hash: vec![],
+            hash: BlockHash::default(),
             epoch: 1,
             epoch_slot: 14243,
             new_epoch: true,

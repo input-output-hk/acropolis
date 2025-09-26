@@ -6,6 +6,7 @@ use crate::{
     address::{Address, StakeAddress},
     protocol_params,
     rational_number::RationalNumber,
+    ShelleyAddress,
 };
 use anyhow::{anyhow, bail, Error, Result};
 use bech32::{Bech32, Hrp};
@@ -17,6 +18,14 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 use std::ops::Deref;
+use std::ops::Neg;
+
+#[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NetworkId {
+    Testnet,
+    #[default]
+    Mainnet,
+}
 
 /// Protocol era
 #[derive(
@@ -113,7 +122,7 @@ impl AsRef<[u8]> for BlockHash {
 }
 
 impl Deref for BlockHash {
-    type Target = [u8];
+    type Target = [u8; 32];
     fn deref(&self) -> &Self::Target {
         &self.0
     }
@@ -139,6 +148,12 @@ impl TryFrom<&[u8]> for TxHash {
 
     fn try_from(arr: &[u8]) -> Result<Self, Self::Error> {
         Ok(TxHash(arr.try_into()?))
+    }
+}
+
+impl From<[u8; 32]> for TxHash {
+    fn from(arr: [u8; 32]) -> Self {
+        TxHash(arr)
     }
 }
 
@@ -168,18 +183,20 @@ pub struct BlockInfo {
     pub number: u64,
 
     /// Block hash
-    pub hash: Vec<u8>,
+    pub hash: BlockHash,
 
     /// Epoch number
     pub epoch: u64,
 
     /// Epoch slot number
+    #[serde(default)]
     pub epoch_slot: u64,
 
     /// Does this block start a new epoch?
     pub new_epoch: bool,
 
     /// UNIX timestamp
+    #[serde(default)]
     pub timestamp: u64,
 
     /// Protocol era
@@ -205,7 +222,7 @@ pub struct AddressDelta {
     pub address: Address,
 
     /// Balance change
-    pub delta: i64,
+    pub delta: ValueDelta,
 }
 
 /// Stake balance change
@@ -218,11 +235,137 @@ pub struct StakeAddressDelta {
     pub delta: i64,
 }
 
+/// Stake Address Reward change
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StakeRewardDelta {
+    pub hash: KeyHash,
+    pub delta: i64,
+}
+
+pub type PolicyId = [u8; 28];
+pub type NativeAssets = Vec<(PolicyId, Vec<NativeAsset>)>;
+pub type NativeAssetsDelta = Vec<(PolicyId, Vec<NativeAssetDelta>)>;
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct AssetName {
+    len: u8,
+    bytes: [u8; 32],
+}
+
+impl AssetName {
+    pub fn new(data: &[u8]) -> Option<Self> {
+        if data.len() > 32 {
+            return None;
+        }
+        let mut bytes = [0u8; 32];
+        bytes[..data.len()].copy_from_slice(data);
+        Some(Self {
+            len: data.len() as u8,
+            bytes,
+        })
+    }
+
+    pub fn len(&self) -> usize {
+        self.len as usize
+    }
+
+    pub fn as_slice(&self) -> &[u8] {
+        &self.bytes[..self.len as usize]
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct NativeAsset {
+    pub name: AssetName,
+    pub amount: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct NativeAssetDelta {
+    pub name: AssetName,
+    pub amount: i64,
+}
+
+/// Datum (inline or hash)
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum Datum {
+    Hash(Vec<u8>),
+    Inline(Vec<u8>),
+}
+
+/// Value (lovelace + multiasset)
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Value {
+    pub lovelace: u64,
+    pub assets: NativeAssets,
+}
+
+impl Value {
+    pub fn new(lovelace: u64, assets: NativeAssets) -> Self {
+        Self { lovelace, assets }
+    }
+
+    pub fn coin(&self) -> u64 {
+        self.lovelace
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ValueDelta {
+    pub lovelace: i64,
+    pub assets: NativeAssetsDelta,
+}
+
+impl ValueDelta {
+    pub fn new(lovelace: i64, assets: NativeAssetsDelta) -> Self {
+        Self { lovelace, assets }
+    }
+}
+
+impl From<&Value> for ValueDelta {
+    fn from(v: &Value) -> Self {
+        ValueDelta {
+            lovelace: v.lovelace as i64,
+            assets: v
+                .assets
+                .iter()
+                .map(|(pid, nas)| {
+                    let nas_delta = nas
+                        .iter()
+                        .map(|na| NativeAssetDelta {
+                            name: na.name.clone(),
+                            amount: na.amount as i64,
+                        })
+                        .collect();
+                    (*pid, nas_delta)
+                })
+                .collect(),
+        }
+    }
+}
+
+impl Neg for ValueDelta {
+    type Output = Self;
+
+    fn neg(mut self) -> Self::Output {
+        self.lovelace = -self.lovelace;
+        for (_, nas) in &mut self.assets {
+            for na in nas {
+                na.amount = -na.amount;
+            }
+        }
+        self
+    }
+}
+
 /// Transaction output (UTXO)
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TxOutput {
     /// Tx hash
     pub tx_hash: TxHash,
+
+    /// Tx identifier for compact storage
+    pub tx_identifier: TxIdentifier,
 
     /// Output index in tx
     pub index: u64,
@@ -231,9 +374,10 @@ pub struct TxOutput {
     pub address: Address,
 
     /// Output value (Lovelace)
-    pub value: u64,
-    // todo: Implement datum    /// Datum (raw)
-    // !!!    pub datum: Vec<u8>,
+    pub value: Value,
+
+    /// Datum (Inline or Hash)
+    pub datum: Option<Datum>,
 }
 
 /// Transaction input (UTXO reference)
@@ -273,6 +417,31 @@ pub type GenesisKeyhash = Vec<u8>;
 
 /// Data hash used for metadata, anchors (SHA256)
 pub type DataHash = Vec<u8>;
+
+/// Compact transaction identifier for index states
+#[derive(
+    Clone, Default, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+)]
+pub struct TxIdentifier([u8; 6]);
+
+impl TxIdentifier {
+    pub fn new(block_number: u32, tx_index: u16) -> Self {
+        let mut buf = [0u8; 6];
+        buf[..4].copy_from_slice(&block_number.to_be_bytes());
+        buf[4..].copy_from_slice(&tx_index.to_be_bytes());
+        Self(buf)
+    }
+
+    /// Retrieve block number from TxIdentifier
+    pub fn block_number(&self) -> u32 {
+        u32::from_be_bytes(self.0[..4].try_into().unwrap())
+    }
+
+    /// Retrieve transaction index from TxIdentifier
+    pub fn tx_index(&self) -> u16 {
+        u16::from_be_bytes(self.0[4..6].try_into().unwrap())
+    }
+}
 
 /// Amount of Ada, in Lovelace
 pub type Lovelace = u64;
@@ -508,6 +677,14 @@ pub struct PoolMetadata {
 
 pub type RewardAccount = Vec<u8>;
 
+/// Pool registration with position
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PoolRegistrationWithPos {
+    pub reg: PoolRegistration,
+    pub tx_hash: TxHash,
+    pub cert_index: u64,
+}
+
 /// Pool registration data
 #[serde_as]
 #[derive(
@@ -563,6 +740,14 @@ pub struct PoolRegistration {
     pub pool_metadata: Option<PoolMetadata>,
 }
 
+// Pool Retirment with position
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PoolRetirementWithPos {
+    pub ret: PoolRetirement,
+    pub tx_hash: TxHash,
+    pub cert_index: u64,
+}
+
 /// Pool retirement data
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PoolRetirement {
@@ -574,7 +759,7 @@ pub struct PoolRetirement {
 }
 
 /// Pool Update Action
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PoolUpdateAction {
     Registered,
     Deregistered,
@@ -586,6 +771,32 @@ pub struct PoolUpdateEvent {
     pub tx_hash: TxHash,
     pub cert_index: u64,
     pub action: PoolUpdateAction,
+}
+
+impl PoolUpdateEvent {
+    pub fn register_event(tx_hash: TxHash, cert_index: u64) -> Self {
+        Self {
+            tx_hash,
+            cert_index,
+            action: PoolUpdateAction::Registered,
+        }
+    }
+
+    pub fn retire_event(tx_hash: TxHash, cert_index: u64) -> Self {
+        Self {
+            tx_hash,
+            cert_index,
+            action: PoolUpdateAction::Deregistered,
+        }
+    }
+}
+
+/// Pool Live Stake Info
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PoolLiveStakeInfo {
+    pub live_stake: u64,
+    pub live_delegators: u64,
+    pub total_live_stakes: u64,
 }
 
 /// Pool Epoch History Data
@@ -691,7 +902,7 @@ pub struct Deregistration {
 }
 
 /// DRepChoice (=CDDL drep, badly named)
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum DRepChoice {
     /// Address key
     Key(KeyHash),
@@ -1420,7 +1631,7 @@ pub enum GovernanceOutcomeVariant {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AlonzoBabbageVotingOutcome {
     pub voting: Vec<GenesisKeyhash>,
-    pub votes_threshold: u64,
+    pub votes_threshold: u32,
     pub accepted: bool,
     pub parameter_update: Box<ProtocolParamUpdate>,
 }
@@ -1461,10 +1672,10 @@ pub enum TxCertificate {
     StakeDelegation(StakeDelegation),
 
     /// Pool registration
-    PoolRegistration(PoolRegistration),
+    PoolRegistrationWithPos(PoolRegistrationWithPos),
 
     /// Pool retirement
-    PoolRetirement(PoolRetirement),
+    PoolRetirementWithPos(PoolRetirementWithPos),
 
     /// Genesis key delegation
     GenesisKeyDelegation(GenesisKeyDelegation),
@@ -1507,6 +1718,43 @@ pub enum TxCertificate {
 
     /// DRep update
     DRepUpdate(DRepUpdateWithPos),
+}
+
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AssetInfoRecord {
+    pub initial_mint_tx: TxIdentifier,
+    pub mint_or_burn_count: u64,
+    pub onchain_metadata: Option<Vec<u8>>,
+    pub metadata_standard: Option<AssetMetadataStandard>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct AssetMintRecord {
+    pub tx: TxIdentifier,
+    pub amount: u64,
+    pub burn: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum AssetMetadataStandard {
+    CIP25v1,
+    CIP25v2,
+    CIP68v1,
+    CIP68v2,
+    CIP68v3,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PolicyAsset {
+    pub policy: PolicyId,
+    pub name: AssetName,
+    pub quantity: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AssetAddressEntry {
+    pub address: ShelleyAddress,
+    pub quantity: u64,
 }
 
 #[cfg(test)]
