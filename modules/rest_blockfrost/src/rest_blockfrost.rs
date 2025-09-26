@@ -260,7 +260,7 @@ impl BlockfrostREST {
         );
 
         // Handler for /blocks/{hash_or_number}/previous
-        register_handler(
+        register_handler_with_query(
             context.clone(),
             DEFAULT_HANDLE_BLOCKS_HASH_NUMBER_PREVIOUS_TOPIC,
             handlers_config.clone(),

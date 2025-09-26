@@ -446,6 +446,7 @@ pub async fn handle_blocks_hash_number_next_blockfrost(
 pub async fn handle_blocks_hash_number_previous_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
+    query_params: HashMap<String, String>,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
     let param = match params.as_slice() {
