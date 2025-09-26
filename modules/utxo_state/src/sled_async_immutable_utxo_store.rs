@@ -1,6 +1,7 @@
 //! On-disk store using Sled for immutable UTXOs
 
-use crate::state::{ImmutableUTXOStore, UTXOKey, UTXOValue};
+use crate::state::{ImmutableUTXOStore, UTXOValue};
+use acropolis_common::UTxOIdentifier;
 use anyhow::Result;
 use async_trait::async_trait;
 use config::Config;
@@ -38,7 +39,7 @@ impl SledAsyncImmutableUTXOStore {
 #[async_trait]
 impl ImmutableUTXOStore for SledAsyncImmutableUTXOStore {
     /// Add a UTXO
-    async fn add_utxo(&self, key: UTXOKey, value: UTXOValue) -> Result<()> {
+    async fn add_utxo(&self, key: UTxOIdentifier, value: UTXOValue) -> Result<()> {
         let db = self.db.clone();
 
         // We spawn blocking here to avoid blocking the main executor
@@ -52,7 +53,7 @@ impl ImmutableUTXOStore for SledAsyncImmutableUTXOStore {
     }
 
     /// Delete a UTXO
-    async fn delete_utxo(&self, key: &UTXOKey) -> Result<()> {
+    async fn delete_utxo(&self, key: &UTxOIdentifier) -> Result<()> {
         let db = self.db.clone();
         let key_bytes = key.to_bytes();
         task::spawn_blocking(move || {
@@ -63,7 +64,7 @@ impl ImmutableUTXOStore for SledAsyncImmutableUTXOStore {
     }
 
     /// Lookup a UTXO
-    async fn lookup_utxo(&self, key: &UTXOKey) -> Result<Option<UTXOValue>> {
+    async fn lookup_utxo(&self, key: &UTxOIdentifier) -> Result<Option<UTXOValue>> {
         let db = self.db.clone();
         let key_bytes = key.to_bytes();
         task::spawn_blocking(move || {

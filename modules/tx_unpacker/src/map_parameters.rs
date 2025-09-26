@@ -201,7 +201,7 @@ fn map_relay(relay: &PallasRelay) -> Relay {
 pub fn map_certificate(
     cert: &MultiEraCert,
     tx_hash: TxHash,
-    tx_index: usize,
+    tx_index: u16,
     cert_index: usize,
 ) -> Result<TxCertificate> {
     match cert {
