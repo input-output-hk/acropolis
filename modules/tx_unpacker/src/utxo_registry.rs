@@ -138,8 +138,8 @@ impl UTxORegistry {
         }
     }
 
-    /// Rollback to specified block
-    pub fn rollback_to(&mut self, block: u32) {
+    /// Rollback to block N-1
+    pub fn rollback_before(&mut self, block: u32) {
         // Remove tx ouputs created at or after rollback block
         for h in self.created.prune_on_or_after(block) {
             self.live_map.remove(&h);
@@ -242,7 +242,7 @@ mod tests {
         // Entry was removed from the registry
         assert!(registry.lookup_by_hash(tx_ref).is_err());
 
-        registry.rollback_to(10);
+        registry.rollback_before(10);
         let id = registry.lookup_by_hash(tx_ref).unwrap();
 
         // Entry was restored on rollback
@@ -267,7 +267,7 @@ mod tests {
         // Entry was added to the registry
         assert!(registry.lookup_by_hash(tx_ref).is_ok());
 
-        registry.rollback_to(14);
+        registry.rollback_before(14);
 
         // Entry was removed on rollback
         assert!(registry.lookup_by_hash(tx_ref).is_err());

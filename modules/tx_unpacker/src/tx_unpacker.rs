@@ -146,7 +146,7 @@ impl TxUnpacker {
                             // handle rollback or advance registry to the next block
                             let block_number = block.number as u32;
                             if block.status == BlockStatus::RolledBack {
-                                utxo_registry.rollback_to(block_number);
+                                utxo_registry.rollback_before(block_number);
                             } else {
                                 utxo_registry.next_block();
                             }
