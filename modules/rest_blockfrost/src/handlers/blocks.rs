@@ -1,5 +1,6 @@
 //! REST handlers for Acropolis Blockfrost /blocks endpoints
 use acropolis_common::{
+    extract_strict_query_params,
     messages::{Message, RESTResponse, StateQuery, StateQueryResponse},
     queries::{
         blocks::{BlockKey, BlocksStateQuery, BlocksStateQueryResponse},
@@ -9,6 +10,7 @@ use acropolis_common::{
 };
 use anyhow::Result;
 use caryatid_sdk::Context;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::handlers_config::HandlersConfig;
@@ -374,6 +376,7 @@ async fn handle_blocks_hash_number_transactions_cbor_blockfrost(
 pub async fn handle_blocks_hash_number_next_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
+    query_params: HashMap<String, String>,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
     let param = match params.as_slice() {
@@ -386,12 +389,18 @@ pub async fn handle_blocks_hash_number_next_blockfrost(
         Err(error) => return Err(error),
     };
 
+    extract_strict_query_params!(query_params, {
+        "count" => limit: Option<u64>,
+        "page" => page: Option<u64>,
+    });
+    let limit = limit.unwrap_or(100);
+    let skip = (page.unwrap_or(1) - 1) * limit;
+
     let blocks_next_msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
         BlocksStateQuery::GetNextBlocks {
             block_key,
-            // TODO: Get paging values from query params
-            limit: 100,
-            skip: 0,
+            limit,
+            skip,
         },
     )));
     let blocks_next = query_state(
@@ -449,12 +458,18 @@ pub async fn handle_blocks_hash_number_previous_blockfrost(
         Err(error) => return Err(error),
     };
 
+    extract_strict_query_params!(query_params, {
+        "count" => limit: Option<u64>,
+        "page" => page: Option<u64>,
+    });
+    let limit = limit.unwrap_or(100);
+    let skip = (page.unwrap_or(1) - 1) * limit;
+
     let blocks_previous_msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
         BlocksStateQuery::GetPreviousBlocks {
             block_key,
-            // TODO: Get paging values from query params
-            limit: 100,
-            skip: 0,
+            limit,
+            skip,
         },
     )));
     let blocks_previous = query_state(

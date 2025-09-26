@@ -1,10 +1,10 @@
 //! Acropolis Blockfrost-Compatible REST Module
 
-use std::{future::Future, sync::Arc};
+use std::{collections::HashMap, future::Future, sync::Arc};
 
 use acropolis_common::{
     messages::{Message, RESTResponse},
-    rest_helper::handle_rest_with_path_parameter,
+    rest_helper::{handle_rest_with_path_and_query_parameters, handle_rest_with_path_parameter},
 };
 use anyhow::Result;
 use caryatid_sdk::{module, Context, Module};
@@ -252,7 +252,7 @@ impl BlockfrostREST {
         );
 
         // Handler for /blocks/{hash_or_number}/next
-        register_handler(
+        register_handler_with_query(
             context.clone(),
             DEFAULT_HANDLE_BLOCKS_HASH_NUMBER_NEXT_TOPIC,
             handlers_config.clone(),
@@ -600,4 +600,35 @@ fn register_handler<F, Fut>(
 
         async move { handler_fn(context, params, handlers_config).await }
     });
+}
+
+fn register_handler_with_query<F, Fut>(
+    context: Arc<Context<Message>>,
+    topic: (&str, &str),
+    handlers_config: Arc<HandlersConfig>,
+    handler_fn: F,
+) where
+    F: Fn(Arc<Context<Message>>, Vec<String>, HashMap<String, String>, Arc<HandlersConfig>) -> Fut
+        + Send
+        + Sync
+        + Clone
+        + 'static,
+    Fut: Future<Output = Result<RESTResponse>> + Send + 'static,
+{
+    let topic_name = context.config.get_string(topic.0).unwrap_or_else(|_| topic.1.to_string());
+
+    tracing::info!("Creating request handler on '{}'", topic_name);
+
+    handle_rest_with_path_and_query_parameters(
+        context.clone(),
+        &topic_name,
+        move |params, query_params| {
+            let context = context.clone();
+            let handler_fn = handler_fn.clone();
+            let params: Vec<String> = params.iter().map(|s| s.to_string()).collect();
+            let handlers_config = handlers_config.clone();
+
+            async move { handler_fn(context, params, query_params, handlers_config).await }
+        },
+    );
 }
