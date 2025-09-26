@@ -1,13 +1,14 @@
 use crate::{
     genesis_values::GenesisValues,
     rational_number::{ChameleonFraction, RationalNumber},
-    BlockVersionData, Committee, Constitution, CostModel, DRepVotingThresholds, Era, ExUnitPrices,
-    ExUnits, NetworkId, PoolVotingThresholds, ProtocolConsts,
+    BlockHash, BlockVersionData, Committee, Constitution, CostModel, DRepVotingThresholds, Era,
+    ExUnitPrices, ExUnits, NetworkId, PoolVotingThresholds, ProtocolConsts,
 };
 use anyhow::Result;
 use blake2::{digest::consts::U32, Blake2b, Digest};
 use chrono::{DateTime, Utc};
 use serde_with::serde_as;
+use std::ops::Deref;
 
 #[derive(Debug, Default, PartialEq, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtocolParams {
@@ -260,6 +261,15 @@ impl From<NonceHash> for Nonce {
         Self {
             tag: NonceVariant::Nonce,
             hash: Some(hash),
+        }
+    }
+}
+
+impl From<BlockHash> for Nonce {
+    fn from(hash: BlockHash) -> Self {
+        Self {
+            tag: NonceVariant::Nonce,
+            hash: Some(*hash.deref()),
         }
     }
 }

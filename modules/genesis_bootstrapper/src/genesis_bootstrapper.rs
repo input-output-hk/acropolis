@@ -7,7 +7,7 @@ use acropolis_common::{
         CardanoMessage, GenesisCompleteMessage, Message, PotDeltasMessage, UTXODeltasMessage,
     },
     Address, BlockHash, BlockInfo, BlockStatus, ByronAddress, Era, Lovelace, LovelaceDelta, Pot,
-    PotDelta, TxIdentifier, TxOutput, UTXODelta, Value,
+    PotDelta, TxHash, TxIdentifier, TxOutput, UTXODelta, Value,
 };
 use anyhow::Result;
 use caryatid_sdk::{module, Context, Module};
@@ -128,7 +128,7 @@ impl GenesisBootstrapper {
 
                 for (i, (tx_hash, address, amount)) in gen_utxos.iter().enumerate() {
                     let tx_output = TxOutput {
-                        tx_hash: **tx_hash,
+                        tx_hash: TxHash(**tx_hash),
                         tx_identifier: TxIdentifier::new(0, i as u16),
                         index: 0,
                         address: Address::Byron(ByronAddress {

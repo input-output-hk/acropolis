@@ -17,6 +17,7 @@ use serde_with::{hex::Hex, serde_as};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
+use std::ops::Deref;
 use std::ops::Neg;
 
 #[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -89,6 +90,84 @@ pub enum BlockStatus {
     Immutable,  // Now immutable (more than 'k' blocks ago)
     Volatile,   // Volatile, in sequence
     RolledBack, // Volatile, restarted after rollback
+}
+
+/// Block hash
+#[serde_as]
+#[derive(
+    Default, Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+)]
+pub struct BlockHash(#[serde_as(as = "Hex")] pub [u8; 32]);
+
+impl TryFrom<Vec<u8>> for BlockHash {
+    type Error = Vec<u8>;
+
+    fn try_from(vec: Vec<u8>) -> Result<Self, Self::Error> {
+        Ok(BlockHash(vec.try_into()?))
+    }
+}
+
+impl TryFrom<&[u8]> for BlockHash {
+    type Error = std::array::TryFromSliceError;
+
+    fn try_from(arr: &[u8]) -> Result<Self, Self::Error> {
+        Ok(BlockHash(arr.try_into()?))
+    }
+}
+
+impl AsRef<[u8]> for BlockHash {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl Deref for BlockHash {
+    type Target = [u8; 32];
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// Transaction hash
+#[serde_as]
+#[derive(
+    Default, Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+)]
+pub struct TxHash(#[serde_as(as = "Hex")] pub [u8; 32]);
+
+impl TryFrom<Vec<u8>> for TxHash {
+    type Error = Vec<u8>;
+
+    fn try_from(vec: Vec<u8>) -> Result<Self, Self::Error> {
+        Ok(TxHash(vec.try_into()?))
+    }
+}
+
+impl TryFrom<&[u8]> for TxHash {
+    type Error = std::array::TryFromSliceError;
+
+    fn try_from(arr: &[u8]) -> Result<Self, Self::Error> {
+        Ok(TxHash(arr.try_into()?))
+    }
+}
+
+impl From<[u8; 32]> for TxHash {
+    fn from(arr: [u8; 32]) -> Self {
+        TxHash(arr)
+    }
+}
+
+impl AsRef<[u8]> for TxHash {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl Deref for TxHash {
+    type Target = [u8];
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 
 /// Block info, shared across multiple messages
@@ -339,9 +418,6 @@ pub type GenesisKeyhash = Vec<u8>;
 /// Data hash used for metadata, anchors (SHA256)
 pub type DataHash = Vec<u8>;
 
-/// Transaction hash
-pub type TxHash = [u8; 32];
-
 /// Compact transaction identifier for index states
 #[derive(
     Clone, Default, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
@@ -366,9 +442,6 @@ impl TxIdentifier {
         u16::from_be_bytes(self.0[4..6].try_into().unwrap())
     }
 }
-
-/// Block Hash
-pub type BlockHash = [u8; 32];
 
 /// Amount of Ada, in Lovelace
 pub type Lovelace = u64;

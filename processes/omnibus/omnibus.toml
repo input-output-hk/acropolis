@@ -97,6 +97,8 @@ store-addresses = false
 # Enables /assets/{asset} endpoint (requires store-assets to be enabled)
 index-by-policy = false
 
+[module.chain-store]
+
 [module.clock]
 
 [module.rest-server]

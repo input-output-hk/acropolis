@@ -2,6 +2,7 @@ use crate::cost_models::{PLUTUS_V1, PLUTUS_V2, PLUTUS_V3};
 use acropolis_common::{
     messages::EpochActivityMessage,
     protocol_params::{Nonce, NonceHash, NonceVariant, ProtocolParams},
+    queries::blocks::BlockInfo,
     queries::governance::DRepActionUpdate,
     rest_helper::ToCheckedF64,
     AssetAddressEntry, AssetMetadataStandard, AssetMintRecord, KeyHash, PolicyAsset,
@@ -50,6 +51,10 @@ impl From<EpochActivityMessage> for EpochActivityRest {
         }
     }
 }
+
+// REST response structure for /blocks/latest
+#[derive(Serialize)]
+pub struct BlockInfoREST<'a>(pub &'a BlockInfo);
 
 // REST response structure for /governance/dreps
 #[derive(Serialize)]
