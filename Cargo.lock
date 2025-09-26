@@ -13,10 +13,13 @@ dependencies = [
  "bitmask-enum",
  "blake2 0.10.6",
  "bs58",
+ "bytes",
  "caryatid_module_clock",
  "caryatid_module_rest_server",
+ "caryatid_process",
  "caryatid_sdk",
  "chrono",
+ "config",
  "dashmap",
  "fraction",
  "futures",
@@ -24,6 +27,7 @@ dependencies = [
  "hex",
  "imbl",
  "lf-queue",
+ "memmap2",
  "minicbor 0.26.5",
  "num-rational",
  "num-traits",
@@ -31,6 +35,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with 3.14.1",
+ "tempfile",
  "tokio",
  "tracing",
 ]
@@ -1206,6 +1211,9 @@ name = "bytes"
 version = "1.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d71b6127be86fdcfddb610f7182ac57211d4b18a3e9c82eb2d17662f2227ad6a"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "byteview"
@@ -3229,6 +3237,15 @@ name = "memchr"
 version = "2.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32a282da65faaf38286cf3be983213fcf1d2e2a58700e808f83f4ea9a4804bc0"
+
+[[package]]
+name = "memmap2"
+version = "0.9.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "843a98750cd611cc2965a8213b53b43e715f13c37a9e096c6408e69990961db7"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "mime"

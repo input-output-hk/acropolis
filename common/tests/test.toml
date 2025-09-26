@@ -1,0 +1,20 @@
+# Top-level configuration for Caryatid process using typed messages
+
+[module.subscriber]
+topic = "acropolis.loc.test"
+
+[module.publisher]
+topic = "acropolis.loc.test"
+
+[message-bus.external]
+class = "rabbit-mq"
+url = "amqp://127.0.0.1:5672/%2f"
+exchange = "caryatid"
+
+[message-bus.internal]
+class = "in-memory"
+workers = 10
+
+[[message-router.route]]  # Everything goes to both
+pattern = "#"
+bus = [ "internal", "external" ]

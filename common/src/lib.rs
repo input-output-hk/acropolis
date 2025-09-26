@@ -17,6 +17,7 @@ pub mod serialization;
 pub mod stake_addresses;
 pub mod state_history;
 pub mod types;
+pub mod resolver;
 
 // Flattened re-exports
 pub use self::address::*;
