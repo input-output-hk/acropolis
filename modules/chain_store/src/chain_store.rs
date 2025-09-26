@@ -93,14 +93,24 @@ impl ChainStore {
                 let info = Self::to_block_info(block, store, true)?;
                 Ok(BlocksStateQueryResponse::LatestBlock(info))
             }
-            BlocksStateQuery::GetLatestBlockTransactions => {
+            BlocksStateQuery::GetLatestBlockTransactions {
+                // TODO: apply these parameters
+                limit: _,
+                skip: _,
+                order: _,
+            } => {
                 let Some(block) = store.get_latest_block()? else {
                     return Ok(BlocksStateQueryResponse::NotFound);
                 };
                 let txs = Self::to_block_transactions(block)?;
                 Ok(BlocksStateQueryResponse::LatestBlockTransactions(txs))
             }
-            BlocksStateQuery::GetLatestBlockTransactionsCBOR => {
+            BlocksStateQuery::GetLatestBlockTransactionsCBOR {
+                // TODO: apply these parameters
+                limit: _,
+                skip: _,
+                order: _,
+            } => {
                 let Some(block) = store.get_latest_block()? else {
                     return Ok(BlocksStateQueryResponse::NotFound);
                 };
@@ -176,14 +186,26 @@ impl ChainStore {
                     blocks: info,
                 }))
             }
-            BlocksStateQuery::GetBlockTransactions { block_key } => {
+            BlocksStateQuery::GetBlockTransactions {
+                block_key,
+                // TODO: apply these parameters
+                limit: _,
+                skip: _,
+                order: _,
+            } => {
                 let Some(block) = Self::get_block_by_key(store, block_key)? else {
                     return Ok(BlocksStateQueryResponse::NotFound);
                 };
                 let txs = Self::to_block_transactions(block)?;
                 Ok(BlocksStateQueryResponse::BlockTransactions(txs))
             }
-            BlocksStateQuery::GetBlockTransactionsCBOR { block_key } => {
+            BlocksStateQuery::GetBlockTransactionsCBOR {
+                block_key,
+                // TODO: apply these parameters
+                limit: _,
+                skip: _,
+                order: _,
+            } => {
                 let Some(block) = Self::get_block_by_key(store, block_key)? else {
                     return Ok(BlocksStateQueryResponse::NotFound);
                 };

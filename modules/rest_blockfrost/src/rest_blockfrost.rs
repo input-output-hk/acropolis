@@ -236,7 +236,7 @@ impl BlockfrostREST {
         );
 
         // Handler for /blocks/latest/txs, /blocks/{hash_or_number}/txs
-        register_handler(
+        register_handler_with_query(
             context.clone(),
             DEFAULT_HANDLE_BLOCKS_LATEST_HASH_NUMBER_TRANSACTIONS_TOPIC,
             handlers_config.clone(),
@@ -244,7 +244,7 @@ impl BlockfrostREST {
         );
 
         // Handler for /blocks/latest/txs/cbor, /blocks/{hash_or_number}/txs/cbor
-        register_handler(
+        register_handler_with_query(
             context.clone(),
             DEFAULT_HANDLE_BLOCKS_LATEST_HASH_NUMBER_TRANSACTIONS_CBOR_TOPIC,
             handlers_config.clone(),

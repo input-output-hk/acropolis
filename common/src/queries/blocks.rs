@@ -1,4 +1,4 @@
-use crate::{serialization::Bech32WithHrp, BlockHash, KeyHash, TxHash};
+use crate::{queries::misc::Order, serialization::Bech32WithHrp, BlockHash, KeyHash, TxHash};
 use cryptoxide::hashing::blake2b::Blake2b;
 use serde::ser::{Serialize, SerializeStruct, Serializer};
 use serde_with::{hex::Hex, serde_as};
@@ -9,10 +9,16 @@ pub const DEFAULT_BLOCKS_QUERY_TOPIC: (&str, &str) =
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum BlocksStateQuery {
     GetLatestBlock,
-    // TODO: add paging
-    GetLatestBlockTransactions,
-    // TODO: add paging
-    GetLatestBlockTransactionsCBOR,
+    GetLatestBlockTransactions {
+        limit: u64,
+        skip: u64,
+        order: Order,
+    },
+    GetLatestBlockTransactionsCBOR {
+        limit: u64,
+        skip: u64,
+        order: Order,
+    },
     GetBlockInfo {
         block_key: BlockKey,
     },
@@ -35,12 +41,16 @@ pub enum BlocksStateQuery {
     },
     GetBlockTransactions {
         block_key: BlockKey,
+        limit: u64,
+        skip: u64,
+        order: Order,
     },
-    // TODO: add paging
     GetBlockTransactionsCBOR {
         block_key: BlockKey,
+        limit: u64,
+        skip: u64,
+        order: Order,
     },
-    // TODO: add paging
     GetBlockInvolvedAddresses {
         block_key: BlockKey,
     },

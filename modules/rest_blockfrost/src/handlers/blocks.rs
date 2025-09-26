@@ -4,6 +4,7 @@ use acropolis_common::{
     messages::{Message, RESTResponse, StateQuery, StateQueryResponse},
     queries::{
         blocks::{BlockKey, BlocksStateQuery, BlocksStateQueryResponse},
+        misc::Order,
         utils::query_state,
     },
     BlockHash,
@@ -147,6 +148,7 @@ async fn handle_blocks_hash_number_blockfrost(
 pub async fn handle_blocks_latest_hash_number_transactions_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
+    query_params: HashMap<String, String>,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
     let param = match params.as_slice() {
@@ -154,10 +156,36 @@ pub async fn handle_blocks_latest_hash_number_transactions_blockfrost(
         _ => return Ok(RESTResponse::with_text(400, "Invalid parameters")),
     };
 
+    extract_strict_query_params!(query_params, {
+        "count" => limit: Option<u64>,
+        "page" => page: Option<u64>,
+        "order" => order: Option<Order>,
+    });
+    let limit = limit.unwrap_or(100);
+    let skip = (page.unwrap_or(1) - 1) * limit;
+    let order = order.unwrap_or(Order::Asc);
+
     match param.as_str() {
-        "latest" => handle_blocks_latest_transactions_blockfrost(context, handlers_config).await,
+        "latest" => {
+            handle_blocks_latest_transactions_blockfrost(
+                context,
+                limit,
+                skip,
+                order,
+                handlers_config,
+            )
+            .await
+        }
         _ => {
-            handle_blocks_hash_number_transactions_blockfrost(context, param, handlers_config).await
+            handle_blocks_hash_number_transactions_blockfrost(
+                context,
+                param,
+                limit,
+                skip,
+                order,
+                handlers_config,
+            )
+            .await
         }
     }
 }
@@ -165,10 +193,13 @@ pub async fn handle_blocks_latest_hash_number_transactions_blockfrost(
 /// Handle `/blocks/latest/txs`
 async fn handle_blocks_latest_transactions_blockfrost(
     context: Arc<Context<Message>>,
+    limit: u64,
+    skip: u64,
+    order: Order,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
     let blocks_latest_txs_msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
-        BlocksStateQuery::GetLatestBlockTransactions,
+        BlocksStateQuery::GetLatestBlockTransactions { limit, skip, order },
     )));
     let block_txs = query_state(
         &context,
@@ -207,6 +238,9 @@ async fn handle_blocks_latest_transactions_blockfrost(
 async fn handle_blocks_hash_number_transactions_blockfrost(
     context: Arc<Context<Message>>,
     hash_or_number: &str,
+    limit: u64,
+    skip: u64,
+    order: Order,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
     let block_key = match parse_block_key(hash_or_number) {
@@ -215,7 +249,12 @@ async fn handle_blocks_hash_number_transactions_blockfrost(
     };
 
     let block_txs_msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
-        BlocksStateQuery::GetBlockTransactions { block_key },
+        BlocksStateQuery::GetBlockTransactions {
+            block_key,
+            limit,
+            skip,
+            order,
+        },
     )));
     let block_txs = query_state(
         &context,
@@ -260,6 +299,7 @@ async fn handle_blocks_hash_number_transactions_blockfrost(
 pub async fn handle_blocks_latest_hash_number_transactions_cbor_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
+    query_params: HashMap<String, String>,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
     let param = match params.as_slice() {
@@ -267,13 +307,36 @@ pub async fn handle_blocks_latest_hash_number_transactions_cbor_blockfrost(
         _ => return Ok(RESTResponse::with_text(400, "Invalid parameters")),
     };
 
+    extract_strict_query_params!(query_params, {
+        "count" => limit: Option<u64>,
+        "page" => page: Option<u64>,
+        "order" => order: Option<Order>,
+    });
+    let limit = limit.unwrap_or(100);
+    let skip = (page.unwrap_or(1) - 1) * limit;
+    let order = order.unwrap_or(Order::Asc);
+
     match param.as_str() {
         "latest" => {
-            handle_blocks_latest_transactions_cbor_blockfrost(context, handlers_config).await
+            handle_blocks_latest_transactions_cbor_blockfrost(
+                context,
+                limit,
+                skip,
+                order,
+                handlers_config,
+            )
+            .await
         }
         _ => {
-            handle_blocks_hash_number_transactions_cbor_blockfrost(context, param, handlers_config)
-                .await
+            handle_blocks_hash_number_transactions_cbor_blockfrost(
+                context,
+                param,
+                limit,
+                skip,
+                order,
+                handlers_config,
+            )
+            .await
         }
     }
 }
@@ -281,10 +344,13 @@ pub async fn handle_blocks_latest_hash_number_transactions_cbor_blockfrost(
 /// Handle `/blocks/latest/txs/cbor`
 async fn handle_blocks_latest_transactions_cbor_blockfrost(
     context: Arc<Context<Message>>,
+    limit: u64,
+    skip: u64,
+    order: Order,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
     let blocks_latest_txs_msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
-        BlocksStateQuery::GetLatestBlockTransactionsCBOR,
+        BlocksStateQuery::GetLatestBlockTransactionsCBOR { limit, skip, order },
     )));
     let block_txs_cbor = query_state(
         &context,
@@ -323,6 +389,9 @@ async fn handle_blocks_latest_transactions_cbor_blockfrost(
 async fn handle_blocks_hash_number_transactions_cbor_blockfrost(
     context: Arc<Context<Message>>,
     hash_or_number: &str,
+    limit: u64,
+    skip: u64,
+    order: Order,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
     let block_key = match parse_block_key(hash_or_number) {
@@ -331,7 +400,12 @@ async fn handle_blocks_hash_number_transactions_cbor_blockfrost(
     };
 
     let block_txs_cbor_msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
-        BlocksStateQuery::GetBlockTransactionsCBOR { block_key },
+        BlocksStateQuery::GetBlockTransactionsCBOR {
+            block_key,
+            limit,
+            skip,
+            order,
+        },
     )));
     let block_txs_cbor = query_state(
         &context,

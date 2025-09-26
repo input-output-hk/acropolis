@@ -11,6 +11,7 @@ pub mod governance;
 pub mod ledger;
 pub mod mempool;
 pub mod metadata;
+pub mod misc;
 pub mod network;
 pub mod parameters;
 pub mod pools;
