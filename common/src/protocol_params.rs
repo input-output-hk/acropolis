@@ -1,9 +1,8 @@
 use crate::{
     genesis_values::GenesisValues,
     rational_number::{ChameleonFraction, RationalNumber},
-    BlockHash, BlockVersionData, Committee, Constitution, CostModel,
-    DRepVotingThresholds, Era, ExUnitPrices, ExUnits, NetworkId,
-    PoolVotingThresholds, ProtocolConsts,
+    BlockHash, BlockVersionData, Committee, Constitution, CostModel, DRepVotingThresholds, Era,
+    ExUnitPrices, ExUnits, NetworkId, PoolVotingThresholds, ProtocolConsts,
 };
 use anyhow::Result;
 use blake2::{digest::consts::U32, Blake2b, Digest};
