@@ -1,6 +1,6 @@
 use std::{path::Path, sync::Arc};
 
-use acropolis_common::{BlockHash, BlockInfo, TxHash};
+use acropolis_common::{BlockInfo, TxHash};
 use anyhow::Result;
 use config::Config;
 use fjall::{Batch, Keyspace, Partition};
@@ -242,6 +242,7 @@ mod tests {
     use crate::stores::Store;
 
     use super::*;
+    use acropolis_common::BlockHash;
     use pallas_traverse::{wellknown::GenesisValues, MultiEraBlock};
     use tempfile::TempDir;
 
