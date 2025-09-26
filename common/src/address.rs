@@ -4,6 +4,8 @@
 use crate::cip19::{VarIntDecoder, VarIntEncoder};
 use crate::types::{KeyHash, ScriptHash};
 use anyhow::{anyhow, bail, Result};
+use crc::{Crc, CRC_32_ISO_HDLC};
+use minicbor::data::IanaTag;
 use serde_with::{hex::Hex, serde_as};
 
 /// a Byron-era address
@@ -11,6 +13,55 @@ use serde_with::{hex::Hex, serde_as};
 pub struct ByronAddress {
     /// Raw payload
     pub payload: Vec<u8>,
+}
+
+impl ByronAddress {
+    fn compute_crc32(&self) -> u32 {
+        const CRC32: Crc<u32> = Crc::<u32>::new(&CRC_32_ISO_HDLC);
+        CRC32.checksum(&self.payload)
+    }
+
+    pub fn to_string(&self) -> Result<String> {
+        let crc = self.compute_crc32();
+
+        let mut buf = Vec::new();
+        {
+            let mut enc = minicbor::Encoder::new(&mut buf);
+            enc.array(2)?;
+            enc.tag(IanaTag::Cbor)?;
+            enc.bytes(&self.payload)?;
+            enc.u32(crc)?;
+        }
+
+        Ok(bs58::encode(buf).into_string())
+    }
+
+    pub fn from_string(s: &str) -> Result<Self> {
+        let bytes = bs58::decode(s).into_vec()?;
+        let mut dec = minicbor::Decoder::new(&bytes);
+
+        let len = dec.array()?.unwrap_or(0);
+        if len != 2 {
+            anyhow::bail!("Invalid Byron address CBOR array length");
+        }
+
+        let tag = dec.tag()?;
+        if tag != IanaTag::Cbor.into() {
+            anyhow::bail!("Invalid Byron address CBOR tag, expected 24");
+        }
+
+        let payload = dec.bytes()?.to_vec();
+        let crc = dec.u32()?;
+
+        let address = ByronAddress { payload };
+        let computed = address.compute_crc32();
+
+        if crc != computed {
+            anyhow::bail!("Byron address CRC mismatch");
+        }
+
+        Ok(address)
+    }
 }
 
 /// Address network identifier
@@ -306,10 +357,9 @@ impl Address {
         } else if text.starts_with("stake1") || text.starts_with("stake_test1") {
             Ok(Self::Stake(StakeAddress::from_string(text)?))
         } else {
-            if let Ok(bytes) = bs58::decode(text).into_vec() {
-                Ok(Self::Byron(ByronAddress { payload: bytes }))
-            } else {
-                Ok(Self::None)
+            match ByronAddress::from_string(text) {
+                Ok(byron) => Ok(Self::Byron(byron)),
+                Err(_) => Ok(Self::None),
             }
         }
     }
@@ -318,7 +368,7 @@ impl Address {
     pub fn to_string(&self) -> Result<String> {
         match self {
             Self::None => Err(anyhow!("No address")),
-            Self::Byron(byron) => Ok(bs58::encode(&byron.payload).into_string()),
+            Self::Byron(byron) => byron.to_string(),
             Self::Shelley(shelley) => shelley.to_string(),
             Self::Stake(stake) => stake.to_string(),
         }

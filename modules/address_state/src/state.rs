@@ -1,70 +1,39 @@
-use acropolis_common::{AddressDelta, AddressTotalsEntry, TxHash, UTxOIdentifier};
+use acropolis_common::{Address, AddressDelta, AddressTotalsEntry, TxIdentifier, UTxOIdentifier};
 use anyhow::Result;
 use imbl::{HashMap, Vector};
 
-use crate::address_registry::{AddressId, AddressRegistry};
-
 #[derive(Debug, Default, Clone, Copy)]
 pub struct AddressStorageConfig {
-    pub enable_registry: bool,
     pub store_info: bool,
     pub store_totals: bool,
     pub store_transactions: bool,
-    pub index_utxos_by_asset: bool,
 }
 
 impl AddressStorageConfig {
     pub fn any_enabled(&self) -> bool {
-        self.enable_registry
-            || self.store_info
-            || self.store_totals
-            || self.store_transactions
-            || self.index_utxos_by_asset
+        self.store_info || self.store_totals || self.store_transactions
     }
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct AddressEntry {
+    pub utxos: Option<HashMap<UTxOIdentifier, ()>>,
+    pub transactions: Option<Vector<TxIdentifier>>,
+    pub totals: Option<AddressTotalsEntry>,
 }
 
 #[derive(Debug, Default, Clone)]
 pub struct State {
     pub config: AddressStorageConfig,
 
-    /// Addresses mapped to utxos
-    pub utxos: Option<HashMap<AddressId, Vector<UTxOIdentifier>>>,
-
-    /// Addresses mapped to sent / receieved totals
-    pub totals: Option<HashMap<AddressId, AddressTotalsEntry>>,
-
-    /// Index of UTxOs by (address, asset)
-    pub asset_index: Option<HashMap<(AddressId, u64), Vector<UTxOIdentifier>>>,
-
-    /// Addresses mapped to transactions
-    pub transactions: Option<HashMap<AddressId, Vector<TxHash>>>,
+    pub addresses: Option<HashMap<Address, AddressEntry>>,
 }
 
 impl State {
     pub fn new(config: AddressStorageConfig) -> Self {
-        let store_info = config.store_info;
-        let store_totals = config.store_totals;
-        let store_transactions = config.store_transactions;
-        let index_utxos_by_asset = config.index_utxos_by_asset;
-
         Self {
             config,
-            utxos: if store_info {
-                Some(HashMap::new())
-            } else {
-                None
-            },
-            totals: if store_totals {
-                Some(HashMap::new())
-            } else {
-                None
-            },
-            asset_index: if index_utxos_by_asset {
-                Some(HashMap::new())
-            } else {
-                None
-            },
-            transactions: if store_transactions {
+            addresses: if config.any_enabled() {
                 Some(HashMap::new())
             } else {
                 None
@@ -72,87 +41,85 @@ impl State {
         }
     }
 
-    pub fn get_address_utxos(&self, address_id: &AddressId) -> Result<Option<Vec<UTxOIdentifier>>> {
+    pub fn get_address_utxos(&self, address: &Address) -> Result<Option<Vec<UTxOIdentifier>>> {
         if !self.config.store_info {
-            return Err(anyhow::anyhow!("address info storage disabled in config"));
+            anyhow::bail!("address info storage disabled in config");
         }
-        Ok(
-            self.utxos
-                .as_ref()
-                .and_then(|m| m.get(address_id))
-                .map(|v| v.iter().cloned().collect()),
-        )
+
+        Ok(self
+            .addresses
+            .as_ref()
+            .and_then(|map| map.get(address))
+            .and_then(|entry| entry.utxos.as_ref())
+            .map(|m| m.keys().cloned().collect()))
     }
 
-    pub fn get_address_totals(&self, id: &AddressId) -> Result<AddressTotalsEntry> {
+    pub fn get_address_totals(&self, address: &Address) -> Result<AddressTotalsEntry> {
         if !self.config.store_totals {
-            return Err(anyhow::anyhow!("address totals storage disabled in config"));
+            anyhow::bail!("address totals storage disabled in config");
         }
 
-        self.totals
+        self.addresses
             .as_ref()
-            .and_then(|m| m.get(id).cloned())
+            .and_then(|map| map.get(address))
+            .and_then(|entry| entry.totals.clone())
             .ok_or_else(|| anyhow::anyhow!("address not initialized in totals map"))
     }
 
-    pub fn get_address_asset_utxos(
-        &self,
-        address_id: &AddressId,
-        asset_id: u64,
-    ) -> Result<Option<Vec<UTxOIdentifier>>> {
-        if !self.config.index_utxos_by_asset {
-            return Err(anyhow::anyhow!("asset index storage disabled in config"));
-        }
-
-        Ok(self
-            .asset_index
-            .as_ref()
-            .and_then(|m| m.get(&(*address_id, asset_id)))
-            .map(|v| v.iter().cloned().collect()))
-    }
-
-    pub fn get_address_transactions(&self, address_id: &AddressId) -> Result<Option<Vec<TxHash>>> {
+    pub fn get_address_transactions(&self, address: &Address) -> Result<Option<Vec<TxIdentifier>>> {
         if !self.config.store_transactions {
-            return Err(anyhow::anyhow!(
-                "address transactions storage disabled in config"
-            ));
+            anyhow::bail!("address transactions storage disabled in config");
         }
 
         Ok(self
-            .transactions
+            .addresses
             .as_ref()
-            .and_then(|m| m.get(address_id))
+            .and_then(|map| map.get(address))
+            .and_then(|entry| entry.transactions.as_ref())
             .map(|v| v.iter().cloned().collect()))
     }
 
     pub fn tick(&self) -> Result<()> {
-        let count = if let Some(m) = &self.utxos {
-            m.len()
-        } else if let Some(m) = &self.totals {
-            m.len()
-        } else if let Some(m) = &self.transactions {
-            m.len()
-        } else if let Some(m) = &self.asset_index {
-            let unique: std::collections::HashSet<_> = m.keys().map(|(addr, _)| *addr).collect();
-            unique.len()
-        } else {
-            0
-        };
+        let count = self.addresses.as_ref().map(|m| m.len()).unwrap_or(0);
 
         if count != 0 {
             tracing::info!("Tracking {} addresses", count);
         } else {
             tracing::info!("address_state storage disabled in config");
         }
+
         Ok(())
     }
 
-    pub fn handle_address_deltas(
-        &self,
-        deltas: &[AddressDelta],
-        _registry: &mut AddressRegistry,
-    ) -> Result<Self> {
-        for _delta in deltas {}
-        Ok(self.clone())
+    pub fn handle_address_deltas(&self, deltas: &[AddressDelta]) -> Result<Self> {
+        let mut new_state = self.clone();
+
+        let Some(addresses) = new_state.addresses.as_mut() else {
+            return Ok(new_state);
+        };
+
+        for delta in deltas {
+            let entry = addresses.entry(delta.address.clone()).or_default();
+
+            if self.config.store_info {
+                let utxos = entry.utxos.get_or_insert_with(HashMap::new);
+                if delta.value.lovelace > 0 {
+                    utxos.insert(delta.utxo, ());
+                } else {
+                    utxos.remove(&delta.utxo);
+                }
+            }
+
+            if self.config.store_transactions {
+                let transactions = entry.transactions.get_or_insert_with(Vector::new);
+
+                let tx_id = delta.utxo.to_tx_identifier();
+
+                if transactions.last() != Some(&tx_id) {
+                    transactions.push_back(tx_id);
+                }
+            }
+        }
+        Ok(new_state)
     }
 }

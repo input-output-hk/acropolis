@@ -1,7 +1,7 @@
 //! Address delta publisher for the UTXO state Acropolis module
 use acropolis_common::{
     messages::{AddressDeltasMessage, CardanoMessage, Message},
-    Address, AddressDelta, BlockInfo, ValueDelta,
+    AddressDelta, BlockInfo,
 };
 use async_trait::async_trait;
 use caryatid_sdk::Context;
@@ -44,12 +44,9 @@ impl AddressDeltaObserver for AddressDeltaPublisher {
     }
 
     /// Observe an address delta and publish messages
-    async fn observe_delta(&self, address: &Address, delta: ValueDelta) {
+    async fn observe_delta(&self, delta: &AddressDelta) {
         // Accumulate the delta
-        self.deltas.lock().await.push(AddressDelta {
-            address: address.clone(),
-            delta,
-        });
+        self.deltas.lock().await.push(delta.clone());
     }
 
     async fn finalise_block(&self, block: &BlockInfo) {

@@ -4,7 +4,7 @@ use acropolis_common::{
     messages::UTXODeltasMessage, params::SECURITY_PARAMETER_K, Address, BlockInfo, BlockStatus,
     TxInput, TxOutput, UTXODelta,
 };
-use acropolis_common::{UTxOIdentifier, Value, ValueDelta};
+use acropolis_common::{AddressDelta, UTxOIdentifier, Value, ValueDelta};
 use anyhow::Result;
 use async_trait::async_trait;
 use std::collections::HashMap;
@@ -30,7 +30,7 @@ pub trait AddressDeltaObserver: Send + Sync {
     async fn start_block(&self, block: &BlockInfo);
 
     /// Observe a delta
-    async fn observe_delta(&self, address: &Address, delta: ValueDelta);
+    async fn observe_delta(&self, address: &AddressDelta);
 
     /// Finalise a block
     async fn finalise_block(&self, block: &BlockInfo);
@@ -128,7 +128,11 @@ impl State {
                         // Tell the observer to debit it
                         if let Some(observer) = self.address_delta_observer.as_ref() {
                             observer
-                                .observe_delta(&utxo.address, -ValueDelta::from(&utxo.value))
+                                .observe_delta(&AddressDelta {
+                                    address: utxo.address.clone(),
+                                    utxo: key.clone(),
+                                    value: ValueDelta::from(&utxo.value),
+                                })
                                 .await;
                         }
                     }
@@ -142,7 +146,11 @@ impl State {
                         // Tell the observer to recredit it
                         if let Some(observer) = self.address_delta_observer.as_ref() {
                             observer
-                                .observe_delta(&utxo.address, ValueDelta::from(&utxo.value))
+                                .observe_delta(&AddressDelta {
+                                    address: utxo.address.clone(),
+                                    utxo: key.clone(),
+                                    value: ValueDelta::from(&utxo.value),
+                                })
                                 .await;
                         }
                     }
@@ -196,8 +204,13 @@ impl State {
                 }
 
                 // Tell the observer it's spent
-                if let Some(observer) = self.address_delta_observer.as_ref() {
-                    observer.observe_delta(&utxo.address, -ValueDelta::from(&utxo.value)).await;
+                if let Some(obs) = &self.address_delta_observer {
+                    obs.observe_delta(&AddressDelta {
+                        address: utxo.address.clone(),
+                        utxo: key.clone(),
+                        value: ValueDelta::from(&utxo.value),
+                    })
+                    .await;
                 }
 
                 match block.status {
@@ -270,8 +283,13 @@ impl State {
         };
 
         // Tell the observer
-        if let Some(observer) = self.address_delta_observer.as_ref() {
-            observer.observe_delta(&output.address, ValueDelta::from(&output.value)).await;
+        if let Some(obs) = &self.address_delta_observer {
+            obs.observe_delta(&AddressDelta {
+                address: output.address.clone(),
+                utxo: output.utxo_identifier.clone(),
+                value: ValueDelta::from(&output.value),
+            })
+            .await;
         }
 
         Ok(())
@@ -737,18 +755,18 @@ mod tests {
     #[async_trait]
     impl AddressDeltaObserver for TestDeltaObserver {
         async fn start_block(&self, _block: &BlockInfo) {}
-        async fn observe_delta(&self, address: &Address, delta: ValueDelta) {
+        async fn observe_delta(&self, delta: &AddressDelta) {
             assert!(matches!(
-                &address,
+                &delta.address,
                 Address::Byron(ByronAddress { payload }) if payload[0] == 99
             ));
-            assert!(delta.lovelace == 42 || delta.lovelace == -42);
+            assert!(delta.value.lovelace == 42 || delta.value.lovelace == -42);
 
             let mut balance = self.balance.lock().await;
-            *balance += delta.lovelace;
+            *balance += delta.value.lovelace;
 
             let mut asset_balances = self.asset_balances.lock().await;
-            for (policy, assets) in &delta.assets {
+            for (policy, assets) in &delta.value.assets {
                 assert_eq!([1u8; 28], *policy);
                 for asset in assets {
                     assert!(

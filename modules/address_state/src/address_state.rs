@@ -18,23 +18,17 @@ use config::Config;
 use tokio::sync::Mutex;
 use tracing::{error, info, info_span, Instrument};
 
-use crate::{
-    address_registry::AddressRegistry,
-    state::{AddressStorageConfig, State},
-};
-mod address_registry;
+use crate::state::{AddressStorageConfig, State};
 mod state;
 
 // Subscription topics
-const DEFAULT_ASSET_DELTAS_SUBSCRIBE_TOPIC: (&str, &str) =
-    ("address-deltas-subscribe-topic", "cardano.asset.deltas");
+const DEFAULT_ADDRESS_DELTAS_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("address-deltas-subscribe-topic", "cardano.address.delta");
 
 // Configuration defaults
-const DEFAULT_ENABLE_REGISTRY: (&str, bool) = ("enable-registry", false);
 const DEFAULT_STORE_INFO: (&str, bool) = ("store-info", false);
 const DEFAULT_STORE_TOTALS: (&str, bool) = ("store-totals", false);
 const DEFAULT_STORE_TRANSACTIONS: (&str, bool) = ("store-transactions", false);
-const DEFAULT_INDEX_UTXOS_BY_ASSET: (&str, bool) = ("index-utxos-by-asset", false);
 
 /// Address State module
 #[module(
@@ -47,14 +41,9 @@ pub struct AddressState;
 impl AddressState {
     async fn run(
         history: Arc<Mutex<StateHistory<State>>>,
-        mut utxo_deltas_subscription: Option<Box<dyn Subscription<Message>>>,
+        mut address_deltas_subscription: Option<Box<dyn Subscription<Message>>>,
         storage_config: AddressStorageConfig,
-        registry: Arc<Mutex<AddressRegistry>>,
     ) -> Result<()> {
-        if let Some(sub) = utxo_deltas_subscription.as_mut() {
-            let _ = sub.read().await?;
-            info!("Consumed initial message from utxo_deltas_subscription");
-        }
         // Main loop of synchronised messages
         loop {
             // Get current state snapshot
@@ -64,9 +53,9 @@ impl AddressState {
             };
 
             // Handle UTxO deltas if subscription is registered (store-info or store-transactions enabled)
-            if let Some(sub) = utxo_deltas_subscription.as_mut() {
-                let (_, utxo_msg) = sub.read().await?;
-                match utxo_msg.as_ref() {
+            if let Some(sub) = address_deltas_subscription.as_mut() {
+                let (_, deltas_msg) = sub.read().await?;
+                match deltas_msg.as_ref() {
                     Message::Cardano((
                         ref block_info,
                         CardanoMessage::AddressDeltas(address_deltas_msg),
@@ -75,13 +64,10 @@ impl AddressState {
                             state = history.lock().await.get_rolled_back_state(block_info.number);
                         }
 
-                        let mut reg = registry.lock().await;
-                        state = match state
-                            .handle_address_deltas(&address_deltas_msg.deltas, &mut *reg)
-                        {
+                        state = match state.handle_address_deltas(&address_deltas_msg.deltas) {
                             Ok(new_state) => new_state,
                             Err(e) => {
-                                error!("CIP-68 metadata handling error: {e:#}");
+                                error!("address deltas handling error: {e:#}");
                                 state
                             }
                         };
@@ -109,15 +95,13 @@ impl AddressState {
 
         // Get configuration flags and topis
         let storage_config = AddressStorageConfig {
-            enable_registry: get_bool_flag(&config, DEFAULT_ENABLE_REGISTRY),
             store_info: get_bool_flag(&config, DEFAULT_STORE_INFO),
             store_totals: get_bool_flag(&config, DEFAULT_STORE_TOTALS),
             store_transactions: get_bool_flag(&config, DEFAULT_STORE_TRANSACTIONS),
-            index_utxos_by_asset: get_bool_flag(&config, DEFAULT_INDEX_UTXOS_BY_ASSET),
         };
 
-        let asset_deltas_subscribe_topic: Option<String> = if storage_config.any_enabled() {
-            let topic = get_string_flag(&config, DEFAULT_ASSET_DELTAS_SUBSCRIBE_TOPIC);
+        let address_deltas_subscribe_topic: Option<String> = if storage_config.any_enabled() {
+            let topic = get_string_flag(&config, DEFAULT_ADDRESS_DELTAS_SUBSCRIBE_TOPIC);
             info!("Creating subscriber on '{topic}'");
             Some(topic)
         } else {
@@ -136,15 +120,9 @@ impl AddressState {
         let query_history = history.clone();
         let tick_history = history.clone();
 
-        // Initialize asset registry
-        let registry = Arc::new(Mutex::new(address_registry::AddressRegistry::new()));
-        let registry_run = registry.clone();
-        let query_registry = registry.clone();
-
         // Query handler
         context.handle(&address_query_topic, move |message| {
             let history = query_history.clone();
-            let registry = query_registry.clone();
             async move {
                 let Message::StateQuery(StateQuery::Addresses(query)) = message.as_ref() else {
                     return Arc::new(Message::StateQueryResponse(StateQueryResponse::Addresses(
@@ -155,89 +133,25 @@ impl AddressState {
                 let state = history.lock().await.get_current_state();
 
                 let response = match query {
-                    AddressStateQuery::GetAddressUTxOs { address_key } => {
-                        let reg = registry.lock().await;
-                        match reg.lookup_id(&address_key) {
-                            Some(address_id) => match state.get_address_utxos(&address_id) {
-                                Ok(Some(utxos)) => AddressStateQueryResponse::AddressUTxOs(utxos),
-                                Ok(None) => AddressStateQueryResponse::NotFound,
-                                Err(e) => AddressStateQueryResponse::Error(e.to_string()),
-                            },
-                            None => {
-                                if state.config.store_info {
-                                    AddressStateQueryResponse::NotFound
-                                } else {
-                                    AddressStateQueryResponse::Error(
-                                        "address info storage disabled in config".to_string(),
-                                    )
-                                }
-                            }
+                    AddressStateQuery::GetAddressUTxOs { address } => {
+                        match state.get_address_utxos(&address) {
+                            Ok(Some(utxos)) => AddressStateQueryResponse::AddressUTxOs(utxos),
+                            Ok(None) => AddressStateQueryResponse::NotFound,
+                            Err(e) => AddressStateQueryResponse::Error(e.to_string()),
                         }
                     }
-                    AddressStateQuery::GetAddressTotals { address_key } => {
-                        let reg = registry.lock().await;
-                        match reg.lookup_id(&address_key) {
-                            Some(address_id) => match state.get_address_totals(&address_id) {
-                                Ok(totals) => AddressStateQueryResponse::AddressTotals(totals),
-                                Err(e) => AddressStateQueryResponse::Error(e.to_string()),
-                            },
-                            None => {
-                                if state.config.store_totals {
-                                    AddressStateQueryResponse::NotFound
-                                } else {
-                                    AddressStateQueryResponse::Error(
-                                        "address totals storage disabled in config".to_string(),
-                                    )
-                                }
-                            }
+
+                    AddressStateQuery::GetAddressTotals { address } => {
+                        match state.get_address_totals(&address) {
+                            Ok(totals) => AddressStateQueryResponse::AddressTotals(totals),
+                            Err(e) => AddressStateQueryResponse::Error(e.to_string()),
                         }
                     }
-                    AddressStateQuery::GetAddressAssetUTxOs {
-                        address_key,
-                        asset_id,
-                    } => {
-                        let reg = registry.lock().await;
-                        match reg.lookup_id(&address_key) {
-                            Some(address_id) => {
-                                match state.get_address_asset_utxos(&address_id, *asset_id) {
-                                    Ok(Some(utxos)) => {
-                                        AddressStateQueryResponse::AddressAssetUTxOs(utxos)
-                                    }
-                                    Ok(None) => AddressStateQueryResponse::NotFound,
-                                    Err(e) => AddressStateQueryResponse::Error(e.to_string()),
-                                }
-                            }
-                            None => {
-                                if state.config.index_utxos_by_asset {
-                                    AddressStateQueryResponse::NotFound
-                                } else {
-                                    AddressStateQueryResponse::Error(
-                                        "indexing utxos by asset disabled in config".to_string(),
-                                    )
-                                }
-                            }
-                        }
-                    }
-                    AddressStateQuery::GetAddressTransactions { address_key } => {
-                        let reg = registry.lock().await;
-                        match reg.lookup_id(&address_key) {
-                            Some(address_id) => match state.get_address_transactions(&address_id) {
-                                Ok(Some(txs)) => {
-                                    AddressStateQueryResponse::AddressTransactions(txs)
-                                }
-                                Ok(None) => AddressStateQueryResponse::NotFound,
-                                Err(e) => AddressStateQueryResponse::Error(e.to_string()),
-                            },
-                            None => {
-                                if state.config.store_transactions {
-                                    AddressStateQueryResponse::NotFound
-                                } else {
-                                    AddressStateQueryResponse::Error(
-                                        "address transactions storage disabled in config"
-                                            .to_string(),
-                                    )
-                                }
-                            }
+                    AddressStateQuery::GetAddressTransactions { address } => {
+                        match state.get_address_transactions(&address) {
+                            Ok(Some(txs)) => AddressStateQueryResponse::AddressTransactions(txs),
+                            Ok(None) => AddressStateQueryResponse::NotFound,
+                            Err(e) => AddressStateQueryResponse::Error(e.to_string()),
                         }
                     }
                 };
@@ -275,7 +189,7 @@ impl AddressState {
         });
 
         // Subscribe to enabled topics
-        let asset_deltas_sub = if let Some(topic) = &asset_deltas_subscribe_topic {
+        let address_deltas_sub = if let Some(topic) = &address_deltas_subscribe_topic {
             Some(context.subscribe(topic).await?)
         } else {
             None
@@ -283,7 +197,7 @@ impl AddressState {
 
         // Start run task
         context.run(async move {
-            Self::run(history_run, asset_deltas_sub, storage_config, registry_run)
+            Self::run(history_run, address_deltas_sub, storage_config)
                 .await
                 .unwrap_or_else(|e| error!("Failed: {e}"));
         });

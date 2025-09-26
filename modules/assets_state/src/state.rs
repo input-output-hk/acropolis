@@ -423,7 +423,7 @@ impl State {
 
         for address_delta in deltas {
             if let Address::Shelley(shelley_addr) = &address_delta.address {
-                for (policy_id, asset_deltas) in &address_delta.delta.assets {
+                for (policy_id, asset_deltas) in &address_delta.value.assets {
                     for asset_delta in asset_deltas {
                         if let Some(asset_id) = registry.lookup_id(policy_id, &asset_delta.name) {
                             if let Some(holders) = addr_map.get_mut(&asset_id) {
@@ -740,7 +740,8 @@ mod tests {
     fn make_address_delta(policy_id: PolicyId, name: AssetName, amount: i64) -> AddressDelta {
         AddressDelta {
             address: dummy_address(),
-            delta: ValueDelta {
+            utxo: UTxOIdentifier::new(0, 0, 0),
+            value: ValueDelta {
                 lovelace: 0,
                 assets: vec![(policy_id, vec![NativeAssetDelta { name, amount }])]
                     .into_iter()

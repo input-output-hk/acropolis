@@ -98,8 +98,6 @@ store-addresses = false
 index-by-policy = false
 
 [module.address-state]
-# Enables address registry for query lookups
-enable-registry = false
 # Enables /addresses/{address}, /addresses/{address}/extended,
 # and /addresses/{address}/utxos endpoints
 store-info = false

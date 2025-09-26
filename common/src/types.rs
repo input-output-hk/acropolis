@@ -141,8 +141,11 @@ pub struct AddressDelta {
     /// Address
     pub address: Address,
 
+    /// UTxO causing address delta
+    pub utxo: UTxOIdentifier,
+
     /// Balance change
-    pub delta: ValueDelta,
+    pub value: ValueDelta,
 }
 
 /// Stake balance change
