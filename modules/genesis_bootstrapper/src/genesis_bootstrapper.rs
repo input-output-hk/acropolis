@@ -4,31 +4,40 @@
 use acropolis_common::{
     genesis_values::GenesisValues,
     messages::{
-        CardanoMessage, GenesisCompleteMessage, Message, PotDeltasMessage, UTXODeltasMessage,
+        CardanoMessage, GenesisCompleteMessage, GenesisUTxOsMessage, Message, PotDeltasMessage,
+        UTXODeltasMessage,
     },
     Address, BlockHash, BlockInfo, BlockStatus, ByronAddress, Era, Lovelace, LovelaceDelta, Pot,
-    PotDelta, TxOutput, UTXODelta, Value,
+    PotDelta, TxIdentifier, TxOutRef, TxOutput, UTXODelta, UTxOIdentifier, Value,
 };
 use anyhow::Result;
 use caryatid_sdk::{module, Context, Module};
 use config::Config;
-use pallas::ledger::configs::{byron::genesis_utxos, *};
+use pallas::ledger::configs::{
+    byron::{genesis_utxos, GenesisFile as ByronGenesisFile},
+    shelley::GenesisFile as ShelleyGenesisFile,
+};
 use std::sync::Arc;
 use tracing::{error, info, info_span, Instrument};
 
 const DEFAULT_STARTUP_TOPIC: &str = "cardano.sequence.start";
 const DEFAULT_PUBLISH_UTXO_DELTAS_TOPIC: &str = "cardano.utxo.deltas";
 const DEFAULT_PUBLISH_POT_DELTAS_TOPIC: &str = "cardano.pot.deltas";
+const DEFAULT_PUBLISH_GENESIS_UTXO_REGISTRY_TOPIC: &str = "cardano.genesis.utxos";
 const DEFAULT_COMPLETION_TOPIC: &str = "cardano.sequence.bootstrapped";
 const DEFAULT_NETWORK_NAME: &str = "mainnet";
 
 // Include genesis data (downloaded by build.rs)
 const MAINNET_BYRON_GENESIS: &[u8] = include_bytes!("../downloads/mainnet-byron-genesis.json");
 const MAINNET_SHELLEY_GENESIS: &[u8] = include_bytes!("../downloads/mainnet-shelley-genesis.json");
+const MAINNET_SHELLEY_GENESIS_HASH: &str =
+    "1a3be38bcbb7911969283716ad7aa550250226b76a61fc51cc9a9a35d9276d81";
 const MAINNET_SHELLEY_START_EPOCH: u64 = 208;
 const SANCHONET_BYRON_GENESIS: &[u8] = include_bytes!("../downloads/sanchonet-byron-genesis.json");
 const SANCHONET_SHELLEY_GENESIS: &[u8] =
     include_bytes!("../downloads/sanchonet-shelley-genesis.json");
+const SANCHONET_SHELLEY_GENESIS_HASH: &str =
+    "f94457ec45a0c6773057a529533cf7ccf746cb44dabd56ae970e1dbfb55bfdb2";
 const SANCHONET_SHELLEY_START_EPOCH: u64 = 0;
 
 // Initial reserves (=maximum ever Lovelace supply)
@@ -68,6 +77,11 @@ impl GenesisBootstrapper {
                     .unwrap_or(DEFAULT_PUBLISH_POT_DELTAS_TOPIC.to_string());
                 info!("Publishing pot deltas on '{publish_pot_deltas_topic}'");
 
+                let publish_genesis_utxos_topic = config
+                    .get_string("publish-genesis-utxos-topic")
+                    .unwrap_or(DEFAULT_PUBLISH_GENESIS_UTXO_REGISTRY_TOPIC.to_string());
+                info!("Publishing genesis transactions on '{publish_genesis_utxos_topic}'");
+
                 let completion_topic = config
                     .get_string("completion-topic")
                     .unwrap_or(DEFAULT_COMPLETION_TOPIC.to_string());
@@ -76,16 +90,18 @@ impl GenesisBootstrapper {
                 let network_name =
                     config.get_string("network-name").unwrap_or(DEFAULT_NETWORK_NAME.to_string());
 
-                let (byron_genesis, shelley_genesis, shelley_start_epoch) =
+                let (byron_genesis, shelley_genesis, shelley_genesis_hash, shelley_start_epoch) =
                     match network_name.as_ref() {
                         "mainnet" => (
                             MAINNET_BYRON_GENESIS,
                             MAINNET_SHELLEY_GENESIS,
+                            MAINNET_SHELLEY_GENESIS_HASH,
                             MAINNET_SHELLEY_START_EPOCH,
                         ),
                         "sanchonet" => (
                             SANCHONET_BYRON_GENESIS,
                             SANCHONET_SHELLEY_GENESIS,
+                            SANCHONET_SHELLEY_GENESIS_HASH,
                             SANCHONET_SHELLEY_START_EPOCH,
                         ),
                         _ => {
@@ -96,9 +112,9 @@ impl GenesisBootstrapper {
                 info!("Reading genesis for '{network_name}'");
 
                 // Read genesis data
-                let byron_genesis: byron::GenesisFile = serde_json::from_slice(byron_genesis)
+                let byron_genesis: ByronGenesisFile = serde_json::from_slice(byron_genesis)
                     .expect("Invalid JSON in BYRON_GENESIS file");
-                let shelley_genesis: shelley::GenesisFile = serde_json::from_slice(shelley_genesis)
+                let shelley_genesis: ShelleyGenesisFile = serde_json::from_slice(shelley_genesis)
                     .expect("Invalid JSON in SHELLEY_GENESIS file");
 
                 // Construct messages
@@ -118,11 +134,16 @@ impl GenesisBootstrapper {
 
                 // Convert the AVVM distributions into pseudo-UTXOs
                 let gen_utxos = genesis_utxos(&byron_genesis);
+                let mut gen_utxo_identifiers = Vec::new();
                 let mut total_allocated: u64 = 0;
-                for (hash, address, amount) in gen_utxos.iter() {
+                for (tx_index, (hash, address, amount)) in gen_utxos.iter().enumerate() {
+                    let tx_identifier = TxIdentifier::new(0, tx_index as u16);
+                    let tx_ref = TxOutRef::new(**hash, 0);
+
+                    gen_utxo_identifiers.push((tx_ref, tx_identifier));
+
                     let tx_output = TxOutput {
-                        tx_hash: **hash,
-                        index: 0,
+                        utxo_identifier: UTxOIdentifier::new(0, tx_index as u16, 0),
                         address: Address::Byron(ByronAddress {
                             payload: address.payload.to_vec(),
                         }),
@@ -165,10 +186,25 @@ impl GenesisBootstrapper {
                     .await
                     .unwrap_or_else(|e| error!("Failed to publish: {e}"));
 
+                let gen_utxos_message = Message::Cardano((
+                    block_info.clone(),
+                    CardanoMessage::GenesisUTxOs(GenesisUTxOsMessage {
+                        utxos: gen_utxo_identifiers,
+                    }),
+                ));
+                context
+                    .publish(&publish_genesis_utxos_topic, Arc::new(gen_utxos_message))
+                    .await
+                    .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+
                 let values = GenesisValues {
                     byron_timestamp: byron_genesis.start_time,
                     shelley_epoch: shelley_start_epoch,
                     shelley_epoch_len: shelley_genesis.epoch_length.unwrap() as u64,
+                    shelley_genesis_hash: hex::decode(shelley_genesis_hash)
+                        .unwrap()
+                        .try_into()
+                        .unwrap(),
                 };
 
                 // Send completion message

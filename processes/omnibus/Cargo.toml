@@ -8,16 +8,7 @@ description = "Acropolis omnibus process containing every module"
 license = "Apache-2.0"
 
 [dependencies]
-caryatid_process = "0.12"
-caryatid_sdk = "0.12"
-caryatid_module_clock = "0.12"
-caryatid_module_rest_server = "0.14"
-caryatid_module_spy = "0.12"
-
-# Core message definition
 acropolis_common = { path = "../../common" }
-
-# Modules we use
 acropolis_module_genesis_bootstrapper = { path = "../../modules/genesis_bootstrapper" }
 acropolis_module_mithril_snapshot_fetcher = { path = "../../modules/mithril_snapshot_fetcher" }
 acropolis_module_upstream_chain_fetcher = { path = "../../modules/upstream_chain_fetcher" }
@@ -37,14 +28,20 @@ acropolis_module_drdd_state = { path = "../../modules/drdd_state" }
 acropolis_module_assets_state = { path = "../../modules/assets_state" }
 acropolis_module_address_state = { path = "../../modules/address_state" }
 
-anyhow = "1.0"
-config = "0.15.11"
-tracing = "0.1.40"
+caryatid_process = { workspace = true }
+caryatid_sdk = { workspace = true }
+caryatid_module_clock = { workspace = true }
+caryatid_module_rest_server = { workspace = true }
+caryatid_module_spy = { workspace = true }
+
+anyhow = { workspace = true }
+config = { workspace = true }
+tracing = { workspace = true }
 tracing-subscriber = { version = "0.3.20", features = ["registry", "env-filter"] }
-tokio = { version = "1", features = ["full"] }
-serde = { version = "1.0.214", features = ["derive"] }
-serde_json = "1.0.132"
-chrono = "0.4.38"
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
 tracing-opentelemetry = "0.31.0"
 opentelemetry = { version = "0.30.0", features = ["trace"] }
 opentelemetry_sdk = { version = "0.30.0", features = ["rt-tokio"] }
