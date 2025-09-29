@@ -1427,6 +1427,20 @@ pub enum GovernanceAction {
     Information,
 }
 
+impl GovernanceAction {
+    pub fn get_previous_action_id(&self) -> Option<GovActionId> {
+        match &self {
+            Self::ParameterChange(ParameterChangeAction {previous_action_id: prev, ..}) => prev.clone(),
+            Self::HardForkInitiation(HardForkInitiationAction {previous_action_id: prev, ..}) => prev.clone(),
+            Self::TreasuryWithdrawals(_) => None,
+            Self::NoConfidence(prev) => prev.clone(),
+            Self::UpdateCommittee(UpdateCommitteeAction {previous_action_id: prev, ..}) => prev.clone(),
+            Self::NewConstitution(NewConstitutionAction {previous_action_id: prev, ..}) => prev.clone(),
+            Self::Information => None
+        }
+    }
+}
+
 #[derive(
     serde::Serialize, serde::Deserialize, Debug, PartialEq, PartialOrd, Eq, Ord, Clone, Hash,
 )]

@@ -34,6 +34,8 @@ const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: (&str, &str) =
     ("protocol-parameters-topic", "cardano.protocol.parameters");
 const DEFAULT_ENACT_STATE_TOPIC: (&str, &str) = ("enact-state-topic", "cardano.enact.state");
 
+const VERIFICATION_OUTPUT_FILE: &str = "verification-output-file";
+
 /// Governance State module
 #[module(
     message_type(Message),
@@ -49,6 +51,7 @@ pub struct GovernanceStateConfig {
     protocol_parameters_topic: String,
     enact_state_topic: String,
     governance_query_topic: String,
+    verification_output_file: Option<String>,
 }
 
 impl GovernanceStateConfig {
@@ -66,6 +69,10 @@ impl GovernanceStateConfig {
             protocol_parameters_topic: Self::conf(config, DEFAULT_PROTOCOL_PARAMETERS_TOPIC),
             enact_state_topic: Self::conf(config, DEFAULT_ENACT_STATE_TOPIC),
             governance_query_topic: Self::conf(config, DEFAULT_GOVERNANCE_QUERY_TOPIC),
+            verification_output_file: config
+                .get_string(VERIFICATION_OUTPUT_FILE)
+                .map(|x| Some(x))
+                .unwrap_or(None),
         })
     }
 }
@@ -134,6 +141,7 @@ impl GovernanceState {
         let state = Arc::new(Mutex::new(State::new(
             context.clone(),
             config.enact_state_topic.clone(),
+            config.verification_output_file.clone()
         )));
 
         // Ticker to log stats

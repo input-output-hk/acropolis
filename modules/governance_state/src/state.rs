@@ -17,10 +17,20 @@ use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::Context;
 use hex::ToHex;
 use std::{collections::{HashMap, HashSet}, sync::Arc};
+use std::fs::OpenOptions;
+use std::io::Write;
 use tracing::{debug, error, info};
+
+#[derive(Debug)]
+pub struct ActionStatus {
+    expiration_epoch: u64,
+    ratification_epoch: Option<u64>,
+    enactment_epoch: Option<u64>
+}
 
 pub struct State {
     pub enact_state_topic: String,
+    pub verification_output_file: Option<String>,
     pub context: Arc<Context<Message>>,
 
     proposal_count: usize,
@@ -37,10 +47,36 @@ pub struct State {
     alonzo_babbage_voting: AlonzoBabbageVoting,
     proposals: HashMap<GovActionId, (u64, ProposalProcedure)>,
     votes: HashMap<GovActionId, HashMap<Voter, (TxHash, VotingProcedure)>>,
+    action_status: HashMap<GovActionId, ActionStatus>
+}
+
+impl ActionStatus {
+    pub fn new(current_epoch: u64, voting_length: u64) -> Self {
+        Self {
+            expiration_epoch: current_epoch + voting_length,
+            ratification_epoch: None,
+            enactment_epoch: None
+        }
+    }
+
+    pub fn is_accepted(&self) -> bool {
+        self.ratification_epoch.is_some()
+    }
+
+    pub fn is_enacted(&self, epoch: u64) -> bool {
+        match self.enactment_epoch {
+            None => false,
+            Some(enact_epoch) => enact_epoch <= epoch,
+        }
+    }
 }
 
 impl State {
-    pub fn new(context: Arc<Context<Message>>, enact_state_topic: String) -> Self {
+    pub fn new(
+        context: Arc<Context<Message>>,
+        enact_state_topic: String,
+        verification_output_file: Option<String>
+    ) -> Self {
         Self {
             context,
             enact_state_topic,
@@ -56,9 +92,11 @@ impl State {
             alonzo_babbage_voting: AlonzoBabbageVoting::default(),
             proposals: HashMap::new(),
             votes: HashMap::new(),
+            action_status: HashMap::new(),
 
             drep_stake: HashMap::new(),
             spo_stake: HashMap::new(),
+            verification_output_file,
         }
     }
 
@@ -169,6 +207,19 @@ impl State {
                 prev
             ));
         }
+
+        let prev = self.action_status.insert(
+            proc.gov_action_id.clone(),
+            ActionStatus::new(epoch, self.get_conway_params()?.gov_action_lifetime as u64)
+        );
+        if let Some(prev) = prev {
+            return Err(anyhow!(
+                "Governance procedure {} action status already exists! Old: {:?}",
+                proc.gov_action_id,
+                prev
+            ));
+        }
+
         Ok(())
     }
 
@@ -210,8 +261,18 @@ impl State {
         let threshold = voting_state.get_action_thresholds(proposal, conway_params)?;
 
         let votes = self.get_actual_votes(action_id);
-        let accepted = votes.majorizes(&threshold);
-        info!("Proposal {action_id}: votes {votes}, thresholds {threshold}, result {accepted}");
+        let voted = votes.majorizes(&threshold);
+        let previous_ok = match proposal.gov_action.get_previous_action_id() {
+            Some(act) => self.action_status
+                .get(&act).map(|x| x.is_accepted())
+                .unwrap_or(false),
+            None => true
+        };
+        let accepted = previous_ok && voted;
+        info!(
+            "Proposal {action_id}: votes {votes}, thresholds {threshold}, prevous_ok {previous_ok}, \
+             voted {voted}, result {accepted}"
+        );
 
         Ok(VotingOutcome {
             procedure: proposal.clone(),
@@ -319,6 +380,84 @@ impl State {
         Ok(None)
     }
 
+    fn gov_action_id_to_string(action_id: &GovActionId) -> String {
+        format!(
+            "transaction: {}, action_index: {}",
+            hex::encode(action_id.transaction_id),
+            action_id.action_index
+        )
+    }
+
+    fn get_action_name(action: &GovernanceAction) -> &str {
+        match action {
+            GovernanceAction::ParameterChange(_) => "ParameterChange",
+            GovernanceAction::HardForkInitiation(_) => "HardForkInitiation",
+            GovernanceAction::TreasuryWithdrawals(_) => "TreasuryWithdrawals",
+            GovernanceAction::NoConfidence(_) => "NoConfidence",
+            GovernanceAction::UpdateCommittee(_) => "UpdateCommittee",
+            GovernanceAction::NewConstitution(_) => "NewConstitution",
+            GovernanceAction::Information => "Information"
+        }
+    }
+
+    /// Function dumps information about completed (expired, ratified, enacted) governance 
+    /// actions in format, close to that of `gov_action_proposal` from `sqldb`.
+    fn print_outcome_to_verify(&self, outcome: &Vec<GovernanceOutcome>) -> Result<()> {
+        let out_file_name = match &self.verification_output_file {
+            Some(o) => o,
+            None => return Ok(())
+        };
+
+        if outcome.is_empty() {
+            return Ok(());
+        }
+
+        let mut out_file = match OpenOptions::new().append(true).open(out_file_name.clone()) {
+            Ok(res) => res,
+            Err(e) => bail!("Cannot open verification output {out_file_name} for writing: {e}")
+        };
+
+        // id,tx_id,index,prev_gov_action_proposal,deposit,return_address,expiration,
+        // voting_anchor_id,type,description,param_proposal,ratified_epoch,enacted_epoch,
+        // dropped_epoch,expired_epoch
+        for elem in outcome.iter() {
+            let prev_action = match &elem.voting.procedure.gov_action.get_previous_action_id()
+            {
+                Some(act) => Self::gov_action_id_to_string(act),
+                None => "".to_owned()
+            };
+
+            let action_status = self.action_status.get(
+                &elem.voting.procedure.gov_action_id
+            ).ok_or_else(|| anyhow!("Cannot get action status for {}",
+                &elem.voting.procedure.gov_action_id
+            ))?;
+
+            let deposit = &elem.voting.procedure.deposit;
+            let reward = hex::encode(elem.voting.procedure.reward_account.to_vec());
+            let ratification_info = if elem.voting.accepted {
+                format!(
+                    "{:?},{:?}", action_status.ratification_epoch, action_status.enactment_epoch
+                )
+            }
+            else {
+                ",".to_owned()
+            };
+            let ptype = Self::get_action_name(&elem.voting.procedure.gov_action);
+            let expired = action_status.expiration_epoch.to_string();
+            let res = format!(
+                ",,,{prev_action},{deposit},{reward},,,{ptype},,,{ratification_info},,{expired}\n"
+            );
+            if let Err(e) = out_file.write(&res.as_bytes()) {
+                error!(
+                    "Cannot write 'res' to verification output {out_file_name} for writing: {e}"
+                );
+            }
+        }
+
+        Ok(())
+    }
+
     fn finalize_conway_voting(
         &mut self,
         new_block: &BlockInfo,
@@ -399,6 +538,8 @@ impl State {
             info!("Conway voting: new epoch {}, outcomes: {outcome:?}", new_block.epoch);
             output.conway_outcomes = outcome;
         }
+
+        self.print_outcome_to_verify(&output.conway_outcomes)?;
         return Ok(output);
     }
 
