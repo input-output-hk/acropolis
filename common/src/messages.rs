@@ -5,7 +5,7 @@
 
 use crate::genesis_values::GenesisValues;
 use crate::ledger_state::SPOState;
-use crate::protocol_params::ProtocolParams;
+use crate::protocol_params::{NonceHash, ProtocolParams};
 use crate::queries::parameters::{ParametersStateQuery, ParametersStateQueryResponse};
 use crate::queries::{
     accounts::{AccountsStateQuery, AccountsStateQueryResponse},
@@ -73,8 +73,8 @@ pub struct UTXODeltasMessage {
 /// Message encapsulating multiple asset deltas
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AssetDeltasMessage {
-    /// Ordered set of deltas
-    pub deltas: Vec<(TxHash, NativeAssetsDelta)>,
+    /// Mint and burn deltas per tx
+    pub deltas: Vec<(TxIdentifier, NativeAssetsDelta)>,
 
     /// CIP 25 metadata blobs (Using 721 label)
     pub cip25_metadata_updates: Vec<Vec<u8>>,
@@ -143,6 +143,9 @@ pub struct EpochActivityMessage {
     /// List of all VRF vkey hashes used on blocks (SPO indicator) and
     /// number of blocks produced
     pub vrf_vkey_hashes: Vec<(KeyHash, usize)>,
+
+    /// Nonce
+    pub nonce: Option<NonceHash>,
 }
 
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]

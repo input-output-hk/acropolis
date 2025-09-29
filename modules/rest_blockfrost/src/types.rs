@@ -1,11 +1,11 @@
 use crate::cost_models::{PLUTUS_V1, PLUTUS_V2, PLUTUS_V3};
 use acropolis_common::{
     messages::EpochActivityMessage,
-    protocol_params::{Nonce, NonceVariant, ProtocolParams},
+    protocol_params::{Nonce, NonceHash, NonceVariant, ProtocolParams},
     queries::governance::DRepActionUpdate,
     rest_helper::ToCheckedF64,
-    AssetMetadataStandard, AssetMintRecord, KeyHash, PolicyAsset, PoolEpochState, PoolUpdateAction,
-    Relay, TxHash, Vote,
+    AssetAddressEntry, AssetMetadataStandard, AssetMintRecord, KeyHash, PolicyAsset,
+    PoolEpochState, PoolUpdateAction, Relay, TxHash, Vote,
 };
 use num_traits::ToPrimitive;
 use rust_decimal::Decimal;
@@ -15,12 +15,15 @@ use serde_with::{hex::Hex, serde_as, DisplayFromStr};
 use std::collections::HashMap;
 
 // REST response structure for /epoch
+#[serde_as]
 #[derive(Serialize)]
 pub struct EpochActivityRest {
     pub epoch: u64,
     pub total_blocks: usize,
     pub total_fees: u64,
     pub vrf_vkey_hashes: Vec<VRFKeyCount>,
+    #[serde_as(as = "Option<Hex>")]
+    pub nonce: Option<NonceHash>,
 }
 
 #[derive(Serialize)]
@@ -43,6 +46,7 @@ impl From<EpochActivityMessage> for EpochActivityRest {
                     block_count: *count,
                 })
                 .collect(),
+            nonce: ea_message.nonce.clone(),
         }
     }
 }
@@ -723,7 +727,7 @@ impl From<&AssetMintRecord> for AssetMintRecordRest {
         };
 
         AssetMintRecordRest {
-            tx_hash: hex::encode(record.tx_hash.as_ref()),
+            tx_hash: "transaction_state not yet implemented".to_string(),
             amount: record.amount.to_string(),
             action,
         }
@@ -748,5 +752,30 @@ impl From<&PolicyAsset> for PolicyAssetRest {
             asset: asset_hex,
             quantity: asset.quantity.to_string(),
         }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct AssetTransactionRest {
+    pub tx_hash: String, // Requires a query to transactions state which is not yet implemented
+    pub tx_index: u16,
+    pub block_height: u32,
+    pub block_time: String, // Change to u64 when transactions state is implemented
+}
+
+#[derive(Debug, Serialize)]
+pub struct AssetAddressRest {
+    pub address: String,
+    pub quantity: String,
+}
+
+impl TryFrom<&AssetAddressEntry> for AssetAddressRest {
+    type Error = anyhow::Error;
+
+    fn try_from(entry: &AssetAddressEntry) -> Result<Self, Self::Error> {
+        Ok(AssetAddressRest {
+            address: entry.address.to_string()?,
+            quantity: entry.quantity.to_string(),
+        })
     }
 }

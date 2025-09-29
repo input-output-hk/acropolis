@@ -1,4 +1,4 @@
-# Acropolis reward state module
+# Acropolis assets state module
 
 [package]
 name = "acropolis_module_assets_state"
@@ -9,15 +9,17 @@ description = "Native Asset State Tracker"
 license = "Apache-2.0"
 
 [dependencies]
-caryatid_sdk = "0.12"
 acropolis_common = { path = "../../common" }
-config = "0.15.11"
-tokio = { version = "1", features = ["full"] }
-tracing = "0.1.40"
-anyhow = "1.0"
-imbl = { version = "5.0.0", features = ["serde"] }
-hex = "0.4.3"
+
+caryatid_sdk = { workspace = true }
+
+anyhow = { workspace = true }
+config = { workspace = true }
+hex = { workspace = true }
+imbl = { workspace = true }
 serde_cbor = "0.11"
+tokio = { workspace = true }
+tracing = { workspace = true }
 
 [lib]
 path = "src/assets_state.rs"

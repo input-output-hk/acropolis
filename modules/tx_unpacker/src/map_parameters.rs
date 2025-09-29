@@ -524,7 +524,7 @@ fn map_alonzo_nonce(e: &alonzo::Nonce) -> Nonce {
             alonzo::NonceVariant::NeutralNonce => NonceVariant::NeutralNonce,
             alonzo::NonceVariant::Nonce => NonceVariant::Nonce,
         },
-        hash: e.hash.map(|v| v.to_vec()),
+        hash: e.hash.map(|v| *v),
     }
 }
 

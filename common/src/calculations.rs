@@ -20,6 +20,18 @@ pub fn slot_to_epoch_with_shelley_params(
     }
 }
 
+pub fn epoch_to_first_slot_with_shelley_params(
+    epoch: u64,
+    shelley_epoch: u64,
+    shelley_epoch_len: u64,
+) -> u64 {
+    if epoch >= shelley_epoch {
+        shelley_epoch * BYRON_SLOTS_PER_EPOCH + (epoch - shelley_epoch) * shelley_epoch_len
+    } else {
+        epoch * BYRON_SLOTS_PER_EPOCH
+    }
+}
+
 pub fn slot_to_timestamp_with_params(slot: u64, byron_timestamp: u64, shelley_epoch: u64) -> u64 {
     let shelley_start_slot = shelley_epoch * BYRON_SLOTS_PER_EPOCH;
     if slot < shelley_start_slot {
@@ -40,6 +52,10 @@ mod tests {
 
     fn slot_to_epoch(slot: u64) -> (u64, u64) {
         slot_to_epoch_with_shelley_params(slot, SHELLEY_START_EPOCH, SHELLEY_SLOTS_PER_EPOCH)
+    }
+
+    fn epoch_to_first_slot(epoch: u64) -> u64 {
+        epoch_to_first_slot_with_shelley_params(epoch, SHELLEY_START_EPOCH, SHELLEY_SLOTS_PER_EPOCH)
     }
 
     fn slot_to_timestamp(slot: u64) -> u64 {
@@ -82,5 +98,13 @@ mod tests {
         // Slot 98_272_003 maps to epoch 425
         assert_eq!(slot_to_epoch(98_272_003), (425, 35_203));
         assert_eq!(slot_to_timestamp(98_272_003), 1689838294);
+    }
+
+    #[test]
+    fn epoch_to_first_slot_test() {
+        assert_eq!(slot_to_epoch(epoch_to_first_slot(208)), (208, 0));
+        assert_eq!(slot_to_epoch(epoch_to_first_slot(0)), (0, 0));
+        assert_eq!(slot_to_epoch(epoch_to_first_slot(209)), (209, 0));
+        assert_eq!(slot_to_epoch(epoch_to_first_slot(150)), (150, 0));
     }
 }
