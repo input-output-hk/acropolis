@@ -423,11 +423,11 @@ impl ConwayVoting {
     {
         for one_outcome in outcomes.into_iter() {
             let action_id = &one_outcome.voting.procedure.gov_action_id;
-            let mut action = self.action_status
-                .get_mut(action_id)
-                .ok_or_else(|| anyhow!("Cannot get action status for {action_id}"))?;
-
             let wait_till = if one_outcome.voting.accepted {
+                let action = self.action_status
+                    .get_mut(action_id)
+                    .ok_or_else(|| anyhow!("Cannot get action status for {action_id}"))?;
+
                 action.ratification_epoch = Some(epoch);
                 action.enactment_epoch = Some(epoch + 1);
                 epoch + 1
@@ -467,13 +467,13 @@ mod tests {
     use super::*;
     use acropolis_common::Anchor;
     
-    const votes: VotesCount = VotesCount {
-        committee: 1,
-        drep: 1,
-        pool: 1,
-    };
-
     fn create_governance_outcome(id: u8) -> GovernanceOutcome {
+        let votes = VotesCount {
+            committee: 1,
+            drep: 1,
+            pool: 1,
+        };
+
         let v = VotingOutcome {
             procedure: ProposalProcedure {
                 deposit: 0,
@@ -486,6 +486,7 @@ mod tests {
             votes_threshold: votes.clone(),
             accepted: true,
         };
+
         GovernanceOutcome {
             voting: v,
             action_to_perform: GovernanceOutcomeVariant::NoAction,
@@ -517,7 +518,7 @@ mod tests {
 
         let r2 = voting.put_outcomes_to_queue(2, vec![oc2.clone()])?;
         assert_eq!(r2.len(), 1);
-        assert_eq!(r2.get(0).unwrap().voting.procedure.deposit, 1);
+        assert_eq!(r2.get(0).unwrap().voting.procedure.gov_action_id.action_index, 1);
         assert_eq!(
             voting.action_status.get(&oc1.voting.procedure.gov_action_id).unwrap()
                 .ratification_epoch,
@@ -525,7 +526,7 @@ mod tests {
 
         let r3 = voting.put_outcomes_to_queue(3, vec![])?;
         assert_eq!(r3.len(), 1);
-        assert_eq!(r3.get(0).unwrap().voting.procedure.deposit, 2);
+        assert_eq!(r3.get(0).unwrap().voting.procedure.gov_action_id.action_index, 2);
 
         let r4 = voting.put_outcomes_to_queue(4, vec![])?;
         assert_eq!(r4.len(), 0);
