@@ -106,6 +106,10 @@ impl AlonzoBabbageVoting {
     pub fn advance_epoch(&mut self, epoch_blk: &BlockInfo) {
         self.proposals.retain(|enact_epoch, _| *enact_epoch >= epoch_blk.epoch);
     }
+
+    pub fn get_stats(&self) -> String {
+        format!("alonzo proposal epochs: {:?}", self.proposals.keys())
+    }
 }
 
 #[cfg(test)]
