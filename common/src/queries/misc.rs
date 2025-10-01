@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 pub enum Order {
     Asc,
     Desc,

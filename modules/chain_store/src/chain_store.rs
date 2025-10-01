@@ -8,6 +8,7 @@ use acropolis_common::{
         BlocksStateQuery, BlocksStateQueryResponse, NextBlocks, PreviousBlocks,
         DEFAULT_BLOCKS_QUERY_TOPIC,
     },
+    queries::misc::Order,
     BlockHash, TxHash,
 };
 use anyhow::{bail, Result};
@@ -94,27 +95,25 @@ impl ChainStore {
                 Ok(BlocksStateQueryResponse::LatestBlock(info))
             }
             BlocksStateQuery::GetLatestBlockTransactions {
-                // TODO: apply these parameters
-                limit: _,
-                skip: _,
-                order: _,
+                limit,
+                skip,
+                order,
             } => {
                 let Some(block) = store.get_latest_block()? else {
                     return Ok(BlocksStateQueryResponse::NotFound);
                 };
-                let txs = Self::to_block_transactions(block)?;
+                let txs = Self::to_block_transactions(block, limit, skip, order)?;
                 Ok(BlocksStateQueryResponse::LatestBlockTransactions(txs))
             }
             BlocksStateQuery::GetLatestBlockTransactionsCBOR {
-                // TODO: apply these parameters
-                limit: _,
-                skip: _,
-                order: _,
+                limit,
+                skip,
+                order,
             } => {
                 let Some(block) = store.get_latest_block()? else {
                     return Ok(BlocksStateQueryResponse::NotFound);
                 };
-                let txs = Self::to_block_transactions_cbor(block)?;
+                let txs = Self::to_block_transactions_cbor(block, limit, skip, order)?;
                 Ok(BlocksStateQueryResponse::LatestBlockTransactionsCBOR(txs))
             }
             BlocksStateQuery::GetBlockInfo { block_key } => {
@@ -188,28 +187,26 @@ impl ChainStore {
             }
             BlocksStateQuery::GetBlockTransactions {
                 block_key,
-                // TODO: apply these parameters
-                limit: _,
-                skip: _,
-                order: _,
+                limit,
+                skip,
+                order,
             } => {
                 let Some(block) = Self::get_block_by_key(store, block_key)? else {
                     return Ok(BlocksStateQueryResponse::NotFound);
                 };
-                let txs = Self::to_block_transactions(block)?;
+                let txs = Self::to_block_transactions(block, limit, skip, order)?;
                 Ok(BlocksStateQueryResponse::BlockTransactions(txs))
             }
             BlocksStateQuery::GetBlockTransactionsCBOR {
                 block_key,
-                // TODO: apply these parameters
-                limit: _,
-                skip: _,
-                order: _,
+                limit,
+                skip,
+                order,
             } => {
                 let Some(block) = Self::get_block_by_key(store, block_key)? else {
                     return Ok(BlocksStateQueryResponse::NotFound);
                 };
-                let txs = Self::to_block_transactions_cbor(block)?;
+                let txs = Self::to_block_transactions_cbor(block, limit, skip, order)?;
                 Ok(BlocksStateQueryResponse::BlockTransactionsCBOR(txs))
             }
 
@@ -331,17 +328,26 @@ impl ChainStore {
         Ok(block_info)
     }
 
-    fn to_block_transactions(block: Block) -> Result<BlockTransactions> {
+    fn to_block_transactions(block: Block, limit: &u64, skip: &u64, order: &Order) -> Result<BlockTransactions> {
         let decoded = pallas_traverse::MultiEraBlock::decode(&block.bytes)?;
-        let hashes = decoded.txs().iter().map(|tx| TxHash(*tx.hash())).collect();
+        let txs = decoded.txs();
+        let txs_iter: Box<dyn Iterator<Item = _>> = match *order {
+            Order::Asc => Box::new(txs.iter()),
+            Order::Desc => Box::new(txs.iter().rev()),
+        };
+        let hashes = txs_iter.skip(*skip as usize).take(*limit as usize).map(|tx| TxHash(*tx.hash())).collect();
         Ok(BlockTransactions { hashes })
     }
 
-    fn to_block_transactions_cbor(block: Block) -> Result<BlockTransactionsCBOR> {
+    fn to_block_transactions_cbor(block: Block, limit: &u64, skip: &u64, order: &Order) -> Result<BlockTransactionsCBOR> {
         let decoded = pallas_traverse::MultiEraBlock::decode(&block.bytes)?;
-        let txs = decoded
-            .txs()
-            .iter()
+        let txs = decoded.txs();
+        let txs_iter: Box<dyn Iterator<Item = _>> = match *order {
+            Order::Asc => Box::new(txs.iter()),
+            Order::Desc => Box::new(txs.iter().rev()),
+        };
+        let txs = txs_iter
+            .skip(*skip as usize).take(*limit as usize)
             .map(|tx| {
                 let hash = TxHash(*tx.hash());
                 let cbor = tx.encode();
