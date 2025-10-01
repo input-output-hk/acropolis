@@ -62,6 +62,21 @@ impl ByronAddress {
 
         Ok(address)
     }
+
+    pub fn to_bytes_key(&self) -> Result<Vec<u8>> {
+        let crc = self.compute_crc32();
+
+        let mut buf = Vec::new();
+        {
+            let mut enc = minicbor::Encoder::new(&mut buf);
+            enc.array(2)?;
+            enc.tag(minicbor::data::IanaTag::Cbor)?;
+            enc.bytes(&self.payload)?;
+            enc.u32(crc)?;
+        }
+
+        Ok(buf)
+    }
 }
 
 /// Address network identifier
@@ -221,6 +236,53 @@ impl ShelleyAddress {
         data.extend(delegation_hash);
         Ok(bech32::encode::<bech32::Bech32>(hrp, &data)?)
     }
+
+    pub fn to_bytes_key(&self) -> Result<Vec<u8>> {
+        let network_bits = match self.network {
+            AddressNetwork::Main => 1u8,
+            AddressNetwork::Test => 0u8,
+        };
+
+        let (payment_hash, payment_bits): (&Vec<u8>, u8) = match &self.payment {
+            ShelleyAddressPaymentPart::PaymentKeyHash(data) => (data, 0),
+            ShelleyAddressPaymentPart::ScriptHash(data) => (data, 1),
+        };
+
+        let mut data = Vec::new();
+
+        match &self.delegation {
+            ShelleyAddressDelegationPart::None => {
+                let header = network_bits | (payment_bits << 4) | (3 << 5);
+                data.push(header);
+                data.extend(payment_hash);
+            }
+            ShelleyAddressDelegationPart::StakeKeyHash(hash) => {
+                let header = network_bits | (payment_bits << 4) | (0 << 5);
+                data.push(header);
+                data.extend(payment_hash);
+                data.extend(hash);
+            }
+            ShelleyAddressDelegationPart::ScriptHash(hash) => {
+                let header = network_bits | (payment_bits << 4) | (1 << 5);
+                data.push(header);
+                data.extend(payment_hash);
+                data.extend(hash);
+            }
+            ShelleyAddressDelegationPart::Pointer(pointer) => {
+                let header = network_bits | (payment_bits << 4) | (2 << 5);
+                data.push(header);
+                data.extend(payment_hash);
+
+                let mut encoder = VarIntEncoder::new();
+                encoder.push(pointer.slot);
+                encoder.push(pointer.tx_index);
+                encoder.push(pointer.cert_index);
+                data.extend(encoder.to_vec());
+            }
+        }
+
+        Ok(data)
+    }
 }
 
 /// Payload of a stake address
@@ -322,6 +384,24 @@ impl StakeAddress {
         data.extend(stake_hash);
         Ok(bech32::encode::<bech32::Bech32>(hrp, &data)?)
     }
+
+    pub fn to_bytes_key(&self) -> Result<Vec<u8>> {
+        let mut out = Vec::new();
+        let (bits, hash): (u8, &[u8]) = match &self.payload {
+            StakeAddressPayload::StakeKeyHash(h) => (0b1110, h),
+            StakeAddressPayload::ScriptHash(h) => (0b1111, h),
+        };
+
+        let net_bit = match self.network {
+            AddressNetwork::Main => 1,
+            AddressNetwork::Test => 0,
+        };
+
+        let header = net_bit | (bits << 4);
+        out.push(header);
+        out.extend_from_slice(hash);
+        Ok(out)
+    }
 }
 
 /// A Cardano address
@@ -371,6 +451,18 @@ impl Address {
             Self::Byron(byron) => byron.to_string(),
             Self::Shelley(shelley) => shelley.to_string(),
             Self::Stake(stake) => stake.to_string(),
+        }
+    }
+
+    pub fn to_bytes_key(&self) -> Result<Vec<u8>> {
+        match self {
+            Address::Byron(b) => b.to_bytes_key(),
+
+            Address::Shelley(s) => s.to_bytes_key(),
+
+            Address::Stake(stake) => stake.to_bytes_key(),
+
+            Address::None => Err(anyhow!("No address to convert")),
         }
     }
 }

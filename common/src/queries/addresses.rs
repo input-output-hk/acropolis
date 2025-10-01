@@ -1,4 +1,4 @@
-use crate::{Address, AddressTotalsEntry, TxIdentifier, UTxOIdentifier};
+use crate::{Address, AddressTotals, TxIdentifier, UTxOIdentifier};
 
 pub const DEFAULT_ADDRESS_QUERY_TOPIC: (&str, &str) =
     ("address-state-query-topic", "cardano.query.address");
@@ -12,7 +12,7 @@ pub enum AddressStateQuery {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum AddressStateQueryResponse {
-    AddressTotals(AddressTotalsEntry),
+    AddressTotals(AddressTotals),
     AddressUTxOs(Vec<UTxOIdentifier>),
     AddressTransactions(Vec<TxIdentifier>),
     NotFound,

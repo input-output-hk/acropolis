@@ -61,10 +61,13 @@ version = "0.1.0"
 dependencies = [
  "acropolis_common",
  "anyhow",
+ "async-trait",
  "caryatid_sdk",
  "config",
+ "fjall",
  "hex",
  "imbl",
+ "minicbor 0.26.5",
  "serde_cbor",
  "tokio",
  "tracing",

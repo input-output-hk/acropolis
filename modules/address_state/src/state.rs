@@ -1,6 +1,11 @@
-use acropolis_common::{Address, AddressDelta, AddressTotalsEntry, TxIdentifier, UTxOIdentifier};
+use std::collections::HashSet;
+
+use acropolis_common::{
+    Address, AddressDelta, AddressTotals, TxIdentifier, UTxOIdentifier, ValueDelta,
+};
 use anyhow::Result;
-use imbl::{HashMap, Vector};
+
+use crate::{address_store::AddressStore, volatile_index::VolatileIndex};
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct AddressStorageConfig {
@@ -15,75 +20,137 @@ impl AddressStorageConfig {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash, minicbor::Encode, minicbor::Decode)]
+pub enum UtxoDelta {
+    #[n(0)]
+    Created(#[n(0)] UTxOIdentifier),
+    #[n(1)]
+    Spent(#[n(0)] UTxOIdentifier),
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct AddressEntry {
-    pub utxos: Option<HashMap<UTxOIdentifier, ()>>,
-    pub transactions: Option<Vector<TxIdentifier>>,
-    pub totals: Option<AddressTotalsEntry>,
+    pub utxos: Option<Vec<UtxoDelta>>,
+    pub transactions: Option<Vec<TxIdentifier>>,
+    pub totals: Option<Vec<ValueDelta>>,
 }
 
 #[derive(Debug, Default, Clone)]
 pub struct State {
     pub config: AddressStorageConfig,
-
-    pub addresses: Option<HashMap<Address, AddressEntry>>,
+    pub volatile_entries: VolatileIndex,
 }
 
 impl State {
     pub fn new(config: AddressStorageConfig) -> Self {
         Self {
             config,
-            addresses: if config.any_enabled() {
-                Some(HashMap::new())
-            } else {
-                None
-            },
+            volatile_entries: VolatileIndex::default(),
         }
     }
 
-    pub fn get_address_utxos(&self, address: &Address) -> Result<Option<Vec<UTxOIdentifier>>> {
+    pub async fn get_address_utxos(
+        &self,
+        store: &dyn AddressStore,
+        address: &Address,
+    ) -> Result<Option<Vec<UTxOIdentifier>>> {
         if !self.config.store_info {
-            anyhow::bail!("address info storage disabled in config");
+            return Err(anyhow::anyhow!("address info storage disabled in config"));
         }
 
-        Ok(self
-            .addresses
-            .as_ref()
-            .and_then(|map| map.get(address))
-            .and_then(|entry| entry.utxos.as_ref())
-            .map(|m| m.keys().cloned().collect()))
+        let mut combined: HashSet<UTxOIdentifier> = match store.get_utxos(address).await? {
+            Some(db) => db.into_iter().collect(),
+            None => HashSet::new(),
+        };
+
+        for map in self.volatile_entries.window.iter() {
+            if let Some(entry) = map.get(address) {
+                if let Some(deltas) = &entry.utxos {
+                    for delta in deltas {
+                        match delta {
+                            UtxoDelta::Created(u) => {
+                                combined.insert(*u);
+                            }
+                            UtxoDelta::Spent(u) => {
+                                combined.remove(u);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if combined.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(combined.into_iter().collect()))
+        }
     }
 
-    pub fn get_address_totals(&self, address: &Address) -> Result<AddressTotalsEntry> {
+    pub async fn get_address_transactions(
+        &self,
+        store: &dyn AddressStore,
+        address: &Address,
+    ) -> Result<Option<Vec<TxIdentifier>>> {
+        if !self.config.store_transactions {
+            return Err(anyhow::anyhow!(
+                "address transactions storage disabled in config"
+            ));
+        }
+
+        let mut combined: Vec<TxIdentifier> = match store.get_txs(address).await? {
+            Some(db) => db,
+            None => Vec::new(),
+        };
+
+        for map in self.volatile_entries.window.iter() {
+            if let Some(entry) = map.get(address) {
+                if let Some(txs) = &entry.transactions {
+                    combined.extend(txs.iter().cloned());
+                }
+            }
+        }
+
+        if combined.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(combined))
+        }
+    }
+
+    pub async fn get_address_totals(
+        &self,
+        store: &dyn AddressStore,
+        address: &Address,
+    ) -> Result<AddressTotals> {
         if !self.config.store_totals {
             anyhow::bail!("address totals storage disabled in config");
         }
 
-        self.addresses
-            .as_ref()
-            .and_then(|map| map.get(address))
-            .and_then(|entry| entry.totals.clone())
-            .ok_or_else(|| anyhow::anyhow!("address not initialized in totals map"))
-    }
+        let mut totals = match store.get_totals(address).await? {
+            Some(db) => db,
+            None => AddressTotals::default(),
+        };
 
-    pub fn get_address_transactions(&self, address: &Address) -> Result<Option<Vec<TxIdentifier>>> {
-        if !self.config.store_transactions {
-            anyhow::bail!("address transactions storage disabled in config");
+        for map in self.volatile_entries.window.iter() {
+            if let Some(entry) = map.get(address) {
+                if let Some(address_deltas) = &entry.totals {
+                    for delta in address_deltas {
+                        totals.apply_delta(delta);
+                    }
+                }
+            }
         }
 
-        Ok(self
-            .addresses
-            .as_ref()
-            .and_then(|map| map.get(address))
-            .and_then(|entry| entry.transactions.as_ref())
-            .map(|v| v.iter().cloned().collect()))
+        Ok(totals)
     }
 
     pub fn tick(&self) -> Result<()> {
-        let count = self.addresses.as_ref().map(|m| m.len()).unwrap_or(0);
+        let count: usize =
+            self.volatile_entries.window.iter().map(|block_map| block_map.len()).sum();
 
         if count != 0 {
-            tracing::info!("Tracking {} addresses", count);
+            tracing::info!("Tracking {} volatile addresses", count);
         } else {
             tracing::info!("address_state storage disabled in config");
         }
@@ -94,32 +161,36 @@ impl State {
     pub fn handle_address_deltas(&self, deltas: &[AddressDelta]) -> Result<Self> {
         let mut new_state = self.clone();
 
-        let Some(addresses) = new_state.addresses.as_mut() else {
-            return Ok(new_state);
-        };
+        // Always work on the most recent block in the window
+        let addresses = new_state
+            .volatile_entries
+            .window
+            .back_mut()
+            .expect("next_block() must be called before handle_address_deltas");
 
         for delta in deltas {
             let entry = addresses.entry(delta.address.clone()).or_default();
 
             if self.config.store_info {
-                let utxos = entry.utxos.get_or_insert_with(HashMap::new);
+                let utxos = entry.utxos.get_or_insert(Vec::new());
                 if delta.value.lovelace > 0 {
-                    utxos.insert(delta.utxo, ());
+                    utxos.push(UtxoDelta::Created(delta.utxo));
                 } else {
-                    utxos.remove(&delta.utxo);
+                    utxos.push(UtxoDelta::Spent(delta.utxo));
                 }
             }
 
             if self.config.store_transactions {
-                let transactions = entry.transactions.get_or_insert_with(Vector::new);
+                let txs = entry.transactions.get_or_insert(Vec::new());
+                txs.push(delta.utxo.to_tx_identifier())
+            }
 
-                let tx_id = delta.utxo.to_tx_identifier();
-
-                if transactions.last() != Some(&tx_id) {
-                    transactions.push_back(tx_id);
-                }
+            if self.config.store_totals {
+                let totals = entry.totals.get_or_insert(Vec::new());
+                totals.push(delta.value.clone());
             }
         }
+
         Ok(new_state)
     }
 }
