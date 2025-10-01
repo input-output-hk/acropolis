@@ -303,10 +303,6 @@ impl ConwayVoting {
             Err(e) => bail!("Cannot open verification output {out_file_name} for writing: {e}")
         };
 
-        // id,tx_id,index,prev_gov_action_proposal,deposit,return_address,expiration,
-        // voting_anchor_id,type,description,param_proposal,ratified_epoch,enacted_epoch,
-        // dropped_epoch,expired_epoch
-
         // If there is no outcome, the file will be created (appended), but not changed.
         // This is intentional for ease of debugging.
         for elem in outcome.iter() {
@@ -332,10 +328,16 @@ impl ConwayVoting {
             else {
                 ",".to_owned()
             };
+            let txid: String = elem.voting.procedure.gov_action_id.transaction_id.encode_hex();
+            let idx = elem.voting.procedure.gov_action_id.action_index;
             let ptype = Self::get_action_name(&elem.voting.procedure.gov_action);
+            let proc = &elem.voting.procedure.gov_action;
             let expired = action_status.expiration_epoch.to_string();
+            // id,tx_id,index,prev_gov_action_proposal,deposit,return_address,expiration,
+            // voting_anchor_id,type,description,param_proposal,ratified_epoch,enacted_epoch,
+            // dropped_epoch,expired_epoch
             let res = format!(
-                ",,,{prev_action},{deposit},{reward},,,{ptype},,,{ratification_info},,{expired}\n"
+                ",{txid},{idx},{prev_action},{deposit},{reward},,,{ptype},{proc:?},,{ratification_info},,{expired}\n"
             );
             if let Err(e) = out_file.write(&res.as_bytes()) {
                 error!(
@@ -523,14 +525,48 @@ mod tests {
             voting.action_status.get(&oc1.voting.procedure.gov_action_id).unwrap()
                 .ratification_epoch,
             Some(1));
+        assert_eq!(
+            voting.action_status.get(&oc1.voting.procedure.gov_action_id).unwrap()
+                .enactment_epoch,
+            Some(2));
 
         let r3 = voting.put_outcomes_to_queue(3, vec![])?;
         assert_eq!(r3.len(), 1);
         assert_eq!(r3.get(0).unwrap().voting.procedure.gov_action_id.action_index, 2);
+        assert_eq!(
+            voting.action_status.get(&oc2.voting.procedure.gov_action_id).unwrap()
+                .ratification_epoch,
+            Some(2));
+        assert_eq!(
+            voting.action_status.get(&oc2.voting.procedure.gov_action_id).unwrap()
+                .enactment_epoch,
+            Some(3));
 
         let r4 = voting.put_outcomes_to_queue(4, vec![])?;
         assert_eq!(r4.len(), 0);
 
         Ok(())
     }
+
+    /*
+    #[test]
+    fn test_chained_actions() -> anyhow::Result<()> {
+        let mut voting = ConwayVoting::new(None);
+        let mut oc1 = create_governance_outcome(1);
+        oc1.voting.procedure.gov_action = GovernanceAction::NoConfidence(None);
+        voting.action_status.insert(oc1.voting.procedure.gov_action_id.clone(), ActionStatus {
+            expiration_epoch: 3,
+            ratification_epoch: None,
+            enactment_epoch: None,
+        });
+
+        let mut oc2 = create_governance_outcome(2);
+        oc2.voting.procedure.gov_action = GovernanceAction::NoConfidence(Some(oc1.voting.procedure.gov_action_id.clone()));
+        voting.action_status.insert(oc2.voting.procedure.gov_action_id.clone(), ActionStatus {
+            expiration_epoch: 3,
+            ratification_epoch: None,
+            enactment_epoch: None,
+        });
+    }
+     */
 }

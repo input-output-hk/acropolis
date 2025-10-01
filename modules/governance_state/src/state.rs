@@ -1,24 +1,24 @@
 //! Acropolis Governance State: State storage
 
-use crate::alonzo_babbage_voting::AlonzoBabbageVoting;
-use crate::VotingRegistrationState;
 use acropolis_common::{
     messages::{
         CardanoMessage, DRepStakeDistributionMessage, GovernanceOutcomesMessage,
         GovernanceProceduresMessage, Message, ProtocolParamsMessage, SPOStakeDistributionMessage,
     },
-    protocol_params::ConwayParams,
-    BlockInfo, DRepCredential, DelegatedStake, EnactStateElem, Era, GovActionId, GovernanceAction,
-    GovernanceOutcome, GovernanceOutcomeVariant, KeyHash, Lovelace, ProposalProcedure,
-    SingleVoterVotes, TreasuryWithdrawalsAction, TxHash, Voter, VotesCount, VotingOutcome,
-    VotingProcedure,
+    BlockInfo, DRepCredential, DelegatedStake, Era, GovActionId, KeyHash, Lovelace,
+    ProposalProcedure, TxHash, Voter, VotingProcedure,
 };
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::Context;
 use hex::ToHex;
-use std::{collections::{HashMap, HashSet}, sync::Arc};
-use tracing::{debug, error, info};
-use crate::conway_voting::ConwayVoting;
+use std::{collections::HashMap, sync::Arc};
+use tracing::{error, info};
+
+use crate::{
+    alonzo_babbage_voting::AlonzoBabbageVoting,
+    conway_voting::ConwayVoting,
+    VotingRegistrationState
+};
 
 pub struct State {
     pub enact_state_topic: String,
