@@ -16,10 +16,10 @@
 //! ```
 
 use anyhow::{bail, Context, Result};
-use serde::{Serialize, Deserialize};
 use bytes::Bytes;
 use dashmap::DashMap;
 use memmap2::Mmap;
+use serde::{Deserialize, Serialize};
 use std::{fs::File, ops::Range, sync::Arc};
 
 /***
@@ -178,24 +178,17 @@ mod tests {
     // use std::{sync::Arc, thread};
 
     fn unique_path() -> std::path::PathBuf {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
+        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
         std::env::temp_dir().join(format!("acropolis_resolver_{nanos}.bin"))
     }
 
     fn create_file_with(bytes: &[u8]) -> Result<File> {
         let path = unique_path();
-        let mut f = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(&path)?;
+        let mut f =
+            OpenOptions::new().read(true).write(true).create(true).truncate(true).open(&path)?;
         f.write_all(bytes)?;
         f.sync_all()?; // ensure size/content visible to mmap
-        // Reopen read-only (optional, but mirrors production “reader” role)
+                       // Reopen read-only (optional, but mirrors production “reader” role)
         drop(f);
         let f = OpenOptions::new().read(true).open(&path)?;
         Ok(f)
@@ -244,7 +237,10 @@ mod tests {
         let loc = Loc {
             store,
             object: obj,
-            region: Region { offset: 100, len: 20 },
+            region: Region {
+                offset: 100,
+                len: 20,
+            },
             inline: None,
         };
 
@@ -328,56 +324,57 @@ mod tests {
     }
 
     #[test]
-fn concurrent_resolves_share_backing() -> Result<()> {
-    use std::sync::Arc;
+    fn concurrent_resolves_share_backing() -> Result<()> {
+        use std::sync::Arc;
 
-    // 1) Create file content.
-    let mut bytes = Vec::with_capacity(1024);
-    for i in 0..1024u32 {
-        bytes.push((i % 251) as u8);
+        // 1) Create file content.
+        let mut bytes = Vec::with_capacity(1024);
+        for i in 0..1024u32 {
+            bytes.push((i % 251) as u8);
+        }
+
+        // 2) Pre-compute the expected slice and share it via Arc.
+        let expected: Arc<Vec<u8>> = Arc::new(bytes[128..384].to_vec());
+
+        // 3) Register the file once.
+        let file = create_file_with(&bytes)?;
+        let reg = Arc::new(Registry::default());
+        let store = StoreId(11);
+        let obj = ObjectId(0xABCD);
+        reg.register_file(store, obj, &file)?;
+
+        let loc = Loc {
+            store,
+            object: obj,
+            region: Region {
+                offset: 128,
+                len: 256,
+            },
+            inline: None,
+        };
+
+        // 4) Resolve in parallel without ever capturing `bytes`.
+        let mut handles = Vec::new();
+        for _ in 0..8 {
+            let reg_cloned = Arc::clone(&reg);
+            let loc_cloned = loc.clone();
+            let expected_cloned = Arc::clone(&expected);
+
+            handles.push(std::thread::spawn(move || {
+                let resolver = Resolver::new(&reg_cloned);
+                let r = resolver.resolve(&loc_cloned).expect("resolve");
+                assert_eq!(r.as_slice(), &expected_cloned[..]);
+            }));
+        }
+
+        // 4) Concurrently, sanity check in the main thread.
+        let resolver_main = Resolver::new(&reg);
+        let r_main = resolver_main.resolve(&loc)?;
+        assert_eq!(r_main.as_slice(), &expected[..]);
+
+        for h in handles {
+            h.join().expect("thread join ok");
+        }
+        Ok(())
     }
-
-    // 2) Pre-compute the expected slice and share it via Arc.
-    let expected: Arc<Vec<u8>> = Arc::new(bytes[128..384].to_vec());
-
-    // 3) Register the file once.
-    let file = create_file_with(&bytes)?;
-    let reg = Arc::new(Registry::default());
-    let store = StoreId(11);
-    let obj = ObjectId(0xABCD);
-    reg.register_file(store, obj, &file)?;
-
-    let loc = Loc {
-        store,
-        object: obj,
-        region: Region { offset: 128, len: 256 },
-        inline: None,
-    };
-
-
-    // 4) Resolve in parallel without ever capturing `bytes`.
-    let mut handles = Vec::new();
-    for _ in 0..8 {
-        let reg_cloned = Arc::clone(&reg);
-        let loc_cloned = loc.clone();
-        let expected_cloned = Arc::clone(&expected);
-
-        handles.push(std::thread::spawn(move || {
-            let resolver = Resolver::new(&reg_cloned);
-            let r = resolver.resolve(&loc_cloned).expect("resolve");
-            assert_eq!(r.as_slice(), &expected_cloned[..]);
-        }));
-    }
-
-    // 4) Concurrently, sanity check in the main thread.
-    let resolver_main = Resolver::new(&reg);
-    let r_main = resolver_main.resolve(&loc)?;
-    assert_eq!(r_main.as_slice(), &expected[..]);
-
-    for h in handles {
-        h.join().expect("thread join ok");
-    }
-    Ok(())
-}
-
 }
