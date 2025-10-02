@@ -182,9 +182,11 @@ async fn loc_round_trip_over_caryatid() -> Result<()> {
     REGISTRY.set(reg.clone()).ok();
 
     // Read the config
+    // Use an absolute path for the config file so the test works regardless of the working directory.
+    // This ensures config-rs always finds the file, even when integration tests are run from the workspace root or other locations.
     let config = Arc::new(
         Config::builder()
-            .add_source(File::with_name("test"))
+            .add_source(File::with_name(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/test")))
             .add_source(Environment::with_prefix("CARYATID"))
             .build()
             .unwrap(),
