@@ -7,17 +7,16 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{Result};
+use anyhow::Result;
 use caryatid_sdk::{module, Context, Module};
 use serde::{Deserialize, Serialize};
 use tempfile::NamedTempFile;
 use tokio::{sync::watch, time::timeout};
-use tracing::{info};
+use tracing::info;
 
-
-use config::{Config, Environment, File};
-use caryatid_process::Process;
 use acropolis_common::resolver::{Loc, ObjectId, Region, Registry, Resolver, StoreId};
+use caryatid_process::Process;
+use config::{Config, Environment, File};
 
 // --------- shared test completion signaling ---------
 static TEST_COMPLETION_TX: Mutex<Option<watch::Sender<bool>>> = Mutex::new(None);
@@ -40,7 +39,7 @@ fn registry() -> Arc<Registry> {
 enum BusMsg {
     #[default]
     None, // Just so we have a simple default
-    
+
     Loc(Loc),
     Ack(String), // response back to publisher
 }
@@ -73,14 +72,32 @@ impl Subscriber {
                                 let slice = view.as_slice();
                                 // trivial check: non-empty
                                 if !slice.is_empty() {
-                                    context.publish(&ack_topic, Arc::new(BusMsg::Ack("ok".to_string()))).await.expect("Failed to publish ACK");
+                                    context
+                                        .publish(
+                                            &ack_topic,
+                                            Arc::new(BusMsg::Ack("ok".to_string())),
+                                        )
+                                        .await
+                                        .expect("Failed to publish ACK");
                                 } else {
-                                    context.publish(&ack_topic, Arc::new(BusMsg::Ack("empty".to_string()))).await.expect("Failed to publish ACK");
+                                    context
+                                        .publish(
+                                            &ack_topic,
+                                            Arc::new(BusMsg::Ack("empty".to_string())),
+                                        )
+                                        .await
+                                        .expect("Failed to publish ACK");
                                 }
                                 break; // test done
                             }
                             Err(_) => {
-                                context.publish(&ack_topic, Arc::new(BusMsg::Ack("resolve_err".to_string()))).await.expect("Failed to publish ACK");
+                                context
+                                    .publish(
+                                        &ack_topic,
+                                        Arc::new(BusMsg::Ack("resolve_err".to_string())),
+                                    )
+                                    .await
+                                    .expect("Failed to publish ACK");
                                 break;
                             }
                         }
@@ -120,9 +137,12 @@ impl Publisher {
         context.run(async move {
             // Custom struct
             let message = BusMsg::Loc(Loc {
-                store:  StoreId(1),
+                store: StoreId(1),
                 object: ObjectId(0xFEED_CAFE_BEEF),
-                region: Region { offset: 100, len: 40 },
+                region: Region {
+                    offset: 100,
+                    len: 40,
+                },
                 inline: None,
             });
             info!("Sending {:?}", message);
@@ -138,7 +158,7 @@ impl Publisher {
                         signal_test_completion();
                         break;
                     } else {
-                        assert!(false, "Unexpected ACK message: {}", s);
+                        panic!("Unexpected ACK message: {}", s);
                     }
                 }
             }
@@ -179,7 +199,7 @@ async fn loc_round_trip_over_caryatid() -> Result<()> {
 
     // Create the process
     let mut process = Process::<BusMsg>::create(config).await;
-    
+
     // Register modules
     Subscriber::register(&mut process);
     Publisher::register(&mut process);
@@ -189,7 +209,7 @@ async fn loc_round_trip_over_caryatid() -> Result<()> {
 
     match timeout(Duration::from_secs(5), async {
         tokio::select! {
-            // run everythng
+            // run everything
             result = process.run() => {
                 result
             }
@@ -202,7 +222,7 @@ async fn loc_round_trip_over_caryatid() -> Result<()> {
     {
         Ok(result) => result?,
         Err(_) => {
-            assert!(false, "Test timed out after 5 seconds");
+            panic!("Test timed out after 5 seconds");
         }
     }
     Ok(())
