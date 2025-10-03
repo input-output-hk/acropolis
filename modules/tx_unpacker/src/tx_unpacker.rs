@@ -1,6 +1,7 @@
 //! Acropolis transaction unpacker module for Caryatid
 //! Unpacks transaction bodies into UTXO events
 
+use acropolis_codec::*;
 use acropolis_common::{
     messages::{
         AssetDeltasMessage, BlockFeesMessage, CardanoMessage, GovernanceProceduresMessage, Message,
@@ -18,8 +19,6 @@ use pallas::codec::minicbor::encode;
 use pallas::ledger::primitives::KeyValuePairs;
 use pallas::ledger::{primitives, traverse, traverse::MultiEraTx};
 use tracing::{debug, error, info, info_span, Instrument};
-
-mod map_parameters;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.txs";
 const CIP25_METADATA_LABEL: u64 = 721;

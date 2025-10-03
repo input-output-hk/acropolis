@@ -1,4 +1,6 @@
-use crate::{queries::misc::Order, serialization::Bech32WithHrp, BlockHash, KeyHash, TxHash};
+use crate::{
+    queries::misc::Order, serialization::Bech32WithHrp, Address, BlockHash, KeyHash, TxHash,
+};
 use cryptoxide::hashing::blake2b::Blake2b;
 use serde::ser::{Serialize, SerializeStruct, Serializer};
 use serde_with::{hex::Hex, serde_as};
@@ -53,6 +55,8 @@ pub enum BlocksStateQuery {
     },
     GetBlockInvolvedAddresses {
         block_key: BlockKey,
+        limit: u64,
+        skip: u64,
     },
 }
 
@@ -172,4 +176,25 @@ pub struct BlockTransaction {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct BlockInvolvedAddresses {}
+pub struct BlockInvolvedAddresses {
+    pub addresses: Vec<BlockInvolvedAddress>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct BlockInvolvedAddress {
+    pub address: Address,
+    pub txs: Vec<TxHash>,
+}
+
+impl Serialize for BlockInvolvedAddress {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("BlockInvolvedAddress", 2)?;
+        state.serialize_field("address", &self.address.to_string().unwrap_or("<invalid or unknown address type>".to_string()))?;
+        state.serialize_field("transactions", &self.txs)?;
+        state.end()
+    }
+}
+

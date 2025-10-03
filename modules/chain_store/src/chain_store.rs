@@ -1,19 +1,22 @@
 mod stores;
 
+use acropolis_codec::map_parameters;
 use acropolis_common::{
     crypto::keyhash,
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::blocks::{
-        BlockInfo, BlockKey, BlockTransaction, BlockTransactions, BlockTransactionsCBOR,
-        BlocksStateQuery, BlocksStateQueryResponse, NextBlocks, PreviousBlocks,
-        DEFAULT_BLOCKS_QUERY_TOPIC,
+        BlockInfo, BlockInvolvedAddress, BlockInvolvedAddresses, BlockKey, BlockTransaction,
+        BlockTransactions, BlockTransactionsCBOR, BlocksStateQuery, BlocksStateQueryResponse,
+        NextBlocks, PreviousBlocks, DEFAULT_BLOCKS_QUERY_TOPIC,
     },
     queries::misc::Order,
-    BlockHash, TxHash,
+    Address, BlockHash, TxHash,
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Module};
 use config::Config;
+use std::cmp::Ordering;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use tracing::error;
 
@@ -94,22 +97,14 @@ impl ChainStore {
                 let info = Self::to_block_info(block, store, true)?;
                 Ok(BlocksStateQueryResponse::LatestBlock(info))
             }
-            BlocksStateQuery::GetLatestBlockTransactions {
-                limit,
-                skip,
-                order,
-            } => {
+            BlocksStateQuery::GetLatestBlockTransactions { limit, skip, order } => {
                 let Some(block) = store.get_latest_block()? else {
                     return Ok(BlocksStateQueryResponse::NotFound);
                 };
                 let txs = Self::to_block_transactions(block, limit, skip, order)?;
                 Ok(BlocksStateQueryResponse::LatestBlockTransactions(txs))
             }
-            BlocksStateQuery::GetLatestBlockTransactionsCBOR {
-                limit,
-                skip,
-                order,
-            } => {
+            BlocksStateQuery::GetLatestBlockTransactionsCBOR { limit, skip, order } => {
                 let Some(block) = store.get_latest_block()? else {
                     return Ok(BlocksStateQueryResponse::NotFound);
                 };
@@ -209,8 +204,17 @@ impl ChainStore {
                 let txs = Self::to_block_transactions_cbor(block, limit, skip, order)?;
                 Ok(BlocksStateQueryResponse::BlockTransactionsCBOR(txs))
             }
-
-            other => bail!("{other:?} not yet supported"),
+            BlocksStateQuery::GetBlockInvolvedAddresses {
+                block_key,
+                limit,
+                skip,
+            } => {
+                let Some(block) = Self::get_block_by_key(store, block_key)? else {
+                    return Ok(BlocksStateQueryResponse::NotFound);
+                };
+                let addresses = Self::to_block_involved_addresses(block, limit, skip)?;
+                Ok(BlocksStateQueryResponse::BlockInvolvedAddresses(addresses))
+            }
         }
     }
 
@@ -328,18 +332,32 @@ impl ChainStore {
         Ok(block_info)
     }
 
-    fn to_block_transactions(block: Block, limit: &u64, skip: &u64, order: &Order) -> Result<BlockTransactions> {
+    fn to_block_transactions(
+        block: Block,
+        limit: &u64,
+        skip: &u64,
+        order: &Order,
+    ) -> Result<BlockTransactions> {
         let decoded = pallas_traverse::MultiEraBlock::decode(&block.bytes)?;
         let txs = decoded.txs();
         let txs_iter: Box<dyn Iterator<Item = _>> = match *order {
             Order::Asc => Box::new(txs.iter()),
             Order::Desc => Box::new(txs.iter().rev()),
         };
-        let hashes = txs_iter.skip(*skip as usize).take(*limit as usize).map(|tx| TxHash(*tx.hash())).collect();
+        let hashes = txs_iter
+            .skip(*skip as usize)
+            .take(*limit as usize)
+            .map(|tx| TxHash(*tx.hash()))
+            .collect();
         Ok(BlockTransactions { hashes })
     }
 
-    fn to_block_transactions_cbor(block: Block, limit: &u64, skip: &u64, order: &Order) -> Result<BlockTransactionsCBOR> {
+    fn to_block_transactions_cbor(
+        block: Block,
+        limit: &u64,
+        skip: &u64,
+        order: &Order,
+    ) -> Result<BlockTransactionsCBOR> {
         let decoded = pallas_traverse::MultiEraBlock::decode(&block.bytes)?;
         let txs = decoded.txs();
         let txs_iter: Box<dyn Iterator<Item = _>> = match *order {
@@ -347,7 +365,8 @@ impl ChainStore {
             Order::Desc => Box::new(txs.iter().rev()),
         };
         let txs = txs_iter
-            .skip(*skip as usize).take(*limit as usize)
+            .skip(*skip as usize)
+            .take(*limit as usize)
             .map(|tx| {
                 let hash = TxHash(*tx.hash());
                 let cbor = tx.encode();
@@ -355,5 +374,56 @@ impl ChainStore {
             })
             .collect();
         Ok(BlockTransactionsCBOR { txs })
+    }
+
+    fn to_block_involved_addresses(
+        block: Block,
+        limit: &u64,
+        skip: &u64,
+    ) -> Result<BlockInvolvedAddresses> {
+        let decoded = pallas_traverse::MultiEraBlock::decode(&block.bytes)?;
+        let mut addresses = BTreeMap::new();
+        for tx in decoded.txs() {
+            let hash = TxHash(*tx.hash());
+            for output in tx.outputs() {
+                match output.address() {
+                    Ok(pallas_address) => match map_parameters::map_address(&pallas_address) {
+                        Ok(address) => {
+                            addresses
+                                .entry(BechOrdAddress(address))
+                                .or_insert_with(Vec::new)
+                                .push(hash.clone());
+                        },
+                        _ => (),
+                    },
+                    _ => (),
+                }
+            }
+        }
+        let addresses: Vec<BlockInvolvedAddress> = addresses
+            .into_iter()
+            .skip(*skip as usize)
+            .take(*limit as usize)
+            .map(|(address, txs)| BlockInvolvedAddress {
+                address: address.0,
+                txs,
+            })
+            .collect();
+        Ok(BlockInvolvedAddresses { addresses })
+    }
+}
+
+#[derive(Eq, PartialEq)]
+struct BechOrdAddress(Address);
+
+impl Ord for BechOrdAddress {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.0.to_string().into_iter().cmp(other.0.to_string())
+    }
+}
+
+impl PartialOrd for BechOrdAddress {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }

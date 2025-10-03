@@ -26,7 +26,7 @@ members = [
     # Process builds
     "processes/omnibus",      # All-inclusive omnibus process
     "processes/replayer",     # All-inclusive process to replay messages
-    "processes/golden_tests", #All-inclusive golden tests process
+    "processes/golden_tests", "codec", #All-inclusive golden tests process
 ]
 resolver = "2"
 

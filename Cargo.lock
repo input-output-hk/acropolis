@@ -3,6 +3,16 @@
 version = 4
 
 [[package]]
+name = "acropolis_codec"
+version = "0.1.0"
+dependencies = [
+ "acropolis_common",
+ "anyhow",
+ "pallas",
+ "tracing",
+]
+
+[[package]]
 name = "acropolis_common"
 version = "0.3.0"
 dependencies = [
@@ -87,6 +97,7 @@ dependencies = [
 name = "acropolis_module_chain_store"
 version = "0.1.0"
 dependencies = [
+ "acropolis_codec",
  "acropolis_common",
  "anyhow",
  "caryatid_sdk",
@@ -321,6 +332,7 @@ dependencies = [
 name = "acropolis_module_tx_unpacker"
 version = "0.2.1"
 dependencies = [
+ "acropolis_codec",
  "acropolis_common",
  "anyhow",
  "async-trait",

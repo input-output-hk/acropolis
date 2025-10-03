@@ -9,6 +9,7 @@ license = "Apache-2.0"
 [dependencies]
 caryatid_sdk = "0.12"
 acropolis_common = { path = "../../common" }
+acropolis_codec = { path = "../../codec" }
 anyhow = "1.0"
 config = "0.15.11"
 fjall = "2.7.0"

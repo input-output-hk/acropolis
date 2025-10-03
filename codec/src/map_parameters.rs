@@ -1,12 +1,12 @@
 //! Acropolis transaction unpacker module for Caryatid
 //! Performs conversion from Pallas library data to Acropolis
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use pallas::ledger::{
     primitives::{
-        alonzo, babbage, conway, ExUnitPrices as PallasExUnitPrices, Nullable,
-        ProtocolVersion as PallasProtocolVersion, Relay as PallasRelay, ScriptHash,
-        StakeCredential as PallasStakeCredential,
+        ExUnitPrices as PallasExUnitPrices, Nullable, ProtocolVersion as PallasProtocolVersion,
+        Relay as PallasRelay, ScriptHash, StakeCredential as PallasStakeCredential, alonzo,
+        babbage, conway,
     },
     traverse::{MultiEraCert, MultiEraPolicyAssets, MultiEraValue},
     *,

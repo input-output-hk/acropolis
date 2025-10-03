@@ -284,7 +284,7 @@ impl BlockfrostREST {
         );
 
         // Handler for /blocks/{hash_or_number}/addresses
-        register_handler(
+        register_handler_with_query(
             context.clone(),
             DEFAULT_HANDLE_BLOCKS_HASH_NUMBER_ADDRESSES_TOPIC,
             handlers_config.clone(),

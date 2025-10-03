@@ -709,9 +709,70 @@ pub async fn handle_blocks_epoch_slot_blockfrost(
 
 /// Handle `/blocks/{hash_or_number}/addresses`
 pub async fn handle_blocks_hash_number_addresses_blockfrost(
-    _context: Arc<Context<Message>>,
-    _params: Vec<String>,
-    _handlers_config: Arc<HandlersConfig>,
+    context: Arc<Context<Message>>,
+    params: Vec<String>,
+    query_params: HashMap<String, String>,
+    handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
-    Ok(RESTResponse::with_text(501, "Not implemented"))
+    let param = match params.as_slice() {
+        [param] => param,
+        _ => return Ok(RESTResponse::with_text(400, "Invalid parameters")),
+    };
+
+    let block_key = match parse_block_key(param) {
+        Ok(block_key) => block_key,
+        Err(error) => return Err(error),
+    };
+
+    extract_strict_query_params!(query_params, {
+        "count" => limit: Option<u64>,
+        "page" => page: Option<u64>,
+    });
+    let limit = limit.unwrap_or(100);
+    let skip = (page.unwrap_or(1) - 1) * limit;
+
+    let block_involved_addresses_msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
+        BlocksStateQuery::GetBlockInvolvedAddresses {
+            block_key,
+            limit,
+            skip,
+        },
+    )));
+    let block_addresses = query_state(
+        &context,
+        &handlers_config.blocks_query_topic,
+        block_involved_addresses_msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Blocks(
+                BlocksStateQueryResponse::BlockInvolvedAddresses(block_addresses),
+            )) => Ok(Some(block_addresses)),
+            Message::StateQueryResponse(StateQueryResponse::Blocks(
+                BlocksStateQueryResponse::NotFound,
+            )) => Ok(None),
+            Message::StateQueryResponse(StateQueryResponse::Blocks(
+                BlocksStateQueryResponse::Error(e),
+            )) => {
+                return Err(anyhow::anyhow!(
+                    "Internal server error while retrieving block addresses by hash or number: {e}"
+                ));
+            }
+            _ => {
+                return Err(anyhow::anyhow!(
+                    "Unexpected message type while retrieving block addresses by hash or number"
+                ))
+            }
+        },
+    )
+    .await?;
+
+    match block_addresses {
+        Some(block_addresses) => match serde_json::to_string(&block_addresses) {
+            Ok(json) => Ok(RESTResponse::with_json(200, &json)),
+            Err(e) => Ok(RESTResponse::with_text(
+                500,
+                &format!("Internal server error while retrieving block addresses: {e}"),
+            )),
+        },
+        None => Ok(RESTResponse::with_text(404, "Not found")),
+    }
 }
