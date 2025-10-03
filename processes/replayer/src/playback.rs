@@ -188,7 +188,7 @@ impl PlaybackRunner {
         info!("Current replay state: {stats}");
     }
 
-    async fn run(&mut self) -> Result<()> {
+    async fn run_loop(&mut self) -> Result<()> {
         // Initializing message status
         for (topic, prefix, _epoch_bound, _skip_zero) in self.topics.clone().iter() {
             let msg = self
@@ -227,5 +227,18 @@ impl PlaybackRunner {
 
         info!("All messages replayed, stopping");
         Ok(())
+    }
+
+    async fn run(&mut self) -> Result<()> {
+        match self.run_loop().await {
+            Err(e) => { 
+                tracing::error!("Error running playback: {e}");
+                Err(e)
+            }
+            Ok(()) => {
+                info!("Playback is over"); 
+                Ok(())
+            }
+        }
     }
 }

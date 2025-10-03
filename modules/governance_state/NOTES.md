@@ -24,8 +24,19 @@ https://book.world.dev.cardano.org/environments/mainnet/conway-genesis.json
 ### Ratification process.
 Ratification checked at epoch boundary. 
 If ratified, deposits returned immediately, actions take place at E+1/E+2
-boundary.
+boundary. Expriation also formally happens at E+1/E+2 transition.
 Deposits transferred to reward account.
+
+### Bootstrap period (Chang sub-epoch of Conway)
+
+Conway epoch is split into two parts: Chang (9.0 protocol version) and 
+Plomin (10.0 protocol version). The first ("Chang") epoch has limited 
+governance ("bootstrap governance"):
+
+* DReps may vote only for Info actions, they don't count for other actions.
+* Only Info, ParameterChange and HardFork actions are allowed.
+
+https://docs.cardano.org/about-cardano/evolution/upgrades/chang
 
 ### Genesis blocks
 * Conway genesis: committee key hashes have prefix 'scriptHash-' (I believe,
@@ -73,6 +84,8 @@ epoch. Special message?
 total. Need info about voting registration.
 * DRep::epoch -- it's written that it's epoch, which has ended. But I receive
 messages with this epoch in its beginning. Need to sort out.
+* Implement bootstrap period.
+* 5 of 7 constitutional committee members are lost. Need to check implementation.
 
 ## Alonzo-compatible vote
 
