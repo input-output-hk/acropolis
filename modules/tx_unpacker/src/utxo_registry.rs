@@ -48,11 +48,12 @@ impl<K: Eq + std::hash::Hash> VolatileIndex<K> {
             ));
         }
 
-        let len_u32 = u32::try_from(self.window.len())
-            .map_err(|_| format!("window length {} exceeds u32::MAX", self.window.len()))?;
-
         let mut out = Vec::new();
-        while let Some(last_block) = self.start_index.checked_add(len_u32.saturating_sub(1)) {
+        while let Some(last_block) = self.start_index.checked_add(
+            u32::try_from(self.window.len())
+                .map_err(|_| "window length exceeds u32::MAX")?
+                .saturating_sub(1),
+        ) {
             if last_block < index {
                 break;
             }
