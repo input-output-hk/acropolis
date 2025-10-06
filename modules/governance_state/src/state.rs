@@ -147,8 +147,6 @@ impl State {
         Ok(())
     }
 
-    /// Update proposals memory cache
-
     fn recalculate_voting_state(&self) -> Result<VotingRegistrationState> {
         let drep_stake = self.drep_stake.iter().map(|(_dr, lov)| lov).sum();
 

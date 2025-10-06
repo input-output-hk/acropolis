@@ -5,8 +5,9 @@ activity in memory).
 
 ## Conway: Governance actions implementation details (in random order)
 
-### Message bus reorders messages (???)
+### Message bus reorders messages
 Serializer for GovernanceProceduresMessage is necessary (and was used).
+Update: no longer necessary.
 
 ### Users may re-vote their previously submitted votes
 This is ok, mainnet Cardano scanners detect this and show latest vote.
@@ -102,7 +103,12 @@ total. Need info about voting registration.
 * DRep::epoch -- it's written that it's epoch, which has ended. But I receive
 messages with this epoch in its beginning. Need to sort out.
 * Implement bootstrap period.
-* 5 of 7 constitutional committee members are lost. Need to check implementation.
+* 5 of 7 constitutional committee members are lost. Need to check implementation. 
+(voting after deadline, fixed)
+* What if voting length changes during voting process? E.g.:
+   (a) epoch 100 voting starts, voting length is 10 epochs
+   (b) epoch 107 voting length change to 3 enacts (e.g., because some earlier successful vote)
+  Will voting stop immediately in the begninning of epoch 107?
 
 ## Alonzo-compatible vote
 
