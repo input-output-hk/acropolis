@@ -166,11 +166,12 @@ impl VotingRegistrationState {
 
     /// Computes necessary votes count to accept proposal `pp`, according to
     /// actual parameters. The result is triple of votes' thresholds (as fraction of the
-    /// total corresponding votes count): (Pool, DRep, Committee)
-    pub fn get_action_thresholds(
+    /// total corresponding votes count): (Pool, DRep, Committee).
+    /// This function computes results in full governance implementation ('plomin' sub-era).
+    fn get_plomin_action_thresholds(
         &self,
         pp: &ProposalProcedure,
-        thresholds: &ConwayParams,
+        thresholds: &ConwayParams
     ) -> Result<VotesCount> {
         let d = &thresholds.d_rep_voting_thresholds;
         let p = &thresholds.pool_voting_thresholds;
@@ -231,6 +232,39 @@ impl VotingRegistrationState {
                 self.proportional_count(zero, &d.update_constitution, &c.threshold)
             }
             GovernanceAction::Information => self.proportional_count(one, one, zero),
+        }
+    }
+
+    /// Computes necessary votes count to accept proposal `pp`, according to
+    /// actual parameters. The result is triple of votes' thresholds (as fraction of the
+    /// total corresponding votes count): (Pool, DRep, Committee).
+    /// This function variant works both for bootstrap governance era (Chang sub-era),
+    /// and full governance (Plomin sub-era) --- this is controlled by `bootstrap` parameter.
+    pub fn get_action_thresholds(
+        &self,
+        pp: &ProposalProcedure,
+        thresholds: &ConwayParams,
+        bootstrap: bool
+    ) -> Result<VotesCount> {
+        // In case of governance bootstrap (Chang sub-era for Conway) Info, ParamChange and
+        // HardFork actions are allowed, with dreps voting only for Info.
+        if bootstrap {
+            match &pp.gov_action {
+                GovernanceAction::Information => self.get_plomin_action_thresholds(pp, thresholds),
+
+                GovernanceAction::ParameterChange(_) |
+                GovernanceAction::HardForkInitiation(_) => {
+                    let mut votes_count = self.get_plomin_action_thresholds(pp, thresholds)?;
+                    votes_count.drep = 0;
+                    Ok(votes_count)
+                }
+
+                // All other actions can never be approved
+                _ => Ok(VotesCount::infinity())
+            }
+        }
+        else {
+            self.get_plomin_action_thresholds(pp, thresholds)
         }
     }
 }

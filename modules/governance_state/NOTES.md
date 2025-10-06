@@ -15,21 +15,38 @@ This is ok, mainnet Cardano scanners detect this and show latest vote.
 Other names: 'Gov Action Validity', 'govActionLifetime',
 updated in governance_action_validity_period parameter (measured in epochs).
 That is, if proposal is published in epoch E, then voting is finished at
-the end of epoch E+governance_action_validity_period.
+the end of epoch E+governance_action_validity_period+1.
+
+In another words, each action is granted 'govActionLifetime' full
+epochs for voting (P is proposal, E is expiration, govActionLifetime is 6):
+
+'---P--|-----|-----|-----|-----|-----|-----|E'
+
+For +1 origin see e.g. `cardano-node/cardano-testnet/src/Testnet/Components/Query.hs`:
+
+```
+-- | Obtains the @govActionLifetime@ from the protocol parameters.
+-- The @govActionLifetime@ or governance action maximum lifetime in epochs is
+-- the number of epochs such that a governance action submitted during an epoch @e@
+-- expires if it is still not ratified as of the end of epoch: @e + govActionLifetime + 1@.
+```
 
 Default value (6) is taken from Conway Genesis, which is (in turn) taken from
 Cardano book:
 https://book.world.dev.cardano.org/environments/mainnet/conway-genesis.json
 
+So, if voting starts at 529, gov_action_lifetime is 6, then the last epoch
+when votes have meaning is 535. At the 535/536 transition all votes expire.
+
 ### Ratification process.
 Ratification checked at epoch boundary. 
-If ratified, deposits returned immediately, actions take place at E+1/E+2
-boundary. Expriation also formally happens at E+1/E+2 transition.
+If ratified at E/E+1 transition, actions take place at E+1/E+2 boundary. 
+Rewards are paid at E+1/E+2 transition (?)
 Deposits transferred to reward account.
 
-### Bootstrap period (Chang sub-epoch of Conway)
+### Bootstrap period (Chang sub-era of Conway)
 
-Conway epoch is split into two parts: Chang (9.0 protocol version) and 
+Conway era is split into two parts: Chang (9.0 protocol version) and 
 Plomin (10.0 protocol version). The first ("Chang") epoch has limited 
 governance ("bootstrap governance"):
 

@@ -1,21 +1,22 @@
 use std::collections::{HashMap, HashSet};
 use std::fs::OpenOptions;
 use std::io::Write;
-use anyhow::{anyhow, bail};
+use std::ops::Range;
+use anyhow::{anyhow, bail, Result};
 use hex::ToHex;
 use tracing::{debug, error, info};
 use acropolis_common::{
     SingleVoterVotes, TreasuryWithdrawalsAction, BlockInfo, DRepCredential,
     EnactStateElem, GovActionId, GovernanceAction, GovernanceOutcome,
-    GovernanceOutcomeVariant, ProposalProcedure, TxHash, Voter, VotesCount,
-    VotingOutcome, VotingProcedure, Lovelace, KeyHash, DelegatedStake
+    GovernanceOutcomeVariant, ProposalProcedure, TxHash, Vote, Voter, 
+    VotesCount, VotingOutcome, VotingProcedure, Lovelace, KeyHash, DelegatedStake
 };
 use acropolis_common::protocol_params::ConwayParams;
 use crate::voting_state::VotingRegistrationState;
 
 #[derive(Debug)]
 pub struct ActionStatus {
-    voting_ends: u64,
+    voting_epochs: Range<u64>,
     ratification_epoch: Option<u64>,
     enactment_epoch: Option<u64>,
     expiration_epoch: Option<u64>
@@ -24,27 +25,25 @@ pub struct ActionStatus {
 impl ActionStatus {
     pub fn new(current_epoch: u64, voting_length: u64) -> Self {
         Self {
-            voting_ends: current_epoch + voting_length,
+            voting_epochs: current_epoch .. current_epoch + voting_length + 1,
             ratification_epoch: None,
             enactment_epoch: None,
             expiration_epoch: None
         }
     }
 
-    pub fn is_accepted(&self) -> bool {
-        self.ratification_epoch.is_some()
+    pub fn is_active(&self, current_epoch: u64) -> bool {
+        self.voting_epochs.contains(&current_epoch)
     }
 
-    pub fn is_enacted(&self, epoch: u64) -> bool {
-        match self.enactment_epoch {
-            None => false,
-            Some(enact_epoch) => enact_epoch <= epoch,
-        }
+    pub fn is_accepted(&self) -> bool {
+        self.ratification_epoch.is_some()
     }
 }
 
 pub struct ConwayVoting {
     conway: Option<ConwayParams>,
+    bootstrap: Option<bool>,
 
     pub proposals: HashMap<GovActionId, (u64, ProposalProcedure)>,
     pub votes: HashMap<GovActionId, HashMap<Voter, (TxHash, VotingProcedure)>>,
@@ -59,6 +58,7 @@ pub struct ConwayVoting {
 impl ConwayVoting {
     pub fn new(verification_output_file: Option<String>) -> Self { Self {
         conway: None,
+        bootstrap: None,
         proposals: Default::default(),
         votes: Default::default(),
         action_status: Default::default(),
@@ -68,15 +68,16 @@ impl ConwayVoting {
         verification_output_file
     }}
 
-    pub fn get_conway_params(&self) -> anyhow::Result<&ConwayParams> {
+    pub fn get_conway_params(&self) -> Result<&ConwayParams> {
         self.conway.as_ref().ok_or_else(|| anyhow!("Conway parameters not available"))
     }
 
-    pub fn update_parameters(&mut self, conway: &Option<ConwayParams>) {
+    pub fn update_parameters(&mut self, conway: &Option<ConwayParams>, bootstrap: bool) {
         self.conway = conway.clone();
+        self.bootstrap = Some(bootstrap);
     }
 
-    pub fn insert_proposal_procedure(&mut self, epoch: u64, proc: &ProposalProcedure) -> anyhow::Result<()> {
+    pub fn insert_proposal_procedure(&mut self, epoch: u64, proc: &ProposalProcedure) -> Result<()> {
         self.action_proposal_count += 1;
         let prev = self.proposals.insert(proc.gov_action_id.clone(), (epoch, proc.clone()));
         if let Some(prev) = prev {
@@ -106,14 +107,31 @@ impl ConwayVoting {
     /// Update votes memory cache
     pub fn insert_voting_procedure(
         &mut self,
+        current_epoch: u64,
         voter: &Voter,
         transaction: &TxHash,
         voter_votes: &SingleVoterVotes,
-    ) -> anyhow::Result<()> {
+    ) -> Result<()> {
         self.votes_count += voter_votes.voting_procedures.len();
         for (action_id, procedure) in voter_votes.voting_procedures.iter() {
             let votes = self.votes.entry(action_id.clone()).or_insert_with(|| HashMap::new());
-            info!("Voting by {voter} for {action_id}");
+
+            match self.action_status.get(action_id) {
+                None => { 
+                    error!("Governance vote by {} for non-registered {}. Ignored.",
+                        voter, action_id
+                    );
+                    continue
+                }
+                Some(vs) if !vs.is_active(current_epoch) => {
+                    error!("Governance vote by {} for inactive {}. Active at {:?}. Ignored.",
+                        voter, action_id, vs.voting_epochs
+                    );
+                    continue
+                }
+                Some(_) => ()
+            }
+
             if let Some((prev_trans, prev_vote)) =
                 votes.insert(voter.clone(), (transaction.clone(), procedure.clone()))
             {
@@ -136,13 +154,14 @@ impl ConwayVoting {
         action_id: &GovActionId,
         drep_stake: &HashMap<DRepCredential, Lovelace>,
         spo_stake: &HashMap<KeyHash, DelegatedStake>,
-    ) -> anyhow::Result<VotingOutcome> {
+    ) -> Result<VotingOutcome> {
         let (_epoch, proposal) = self
             .proposals
             .get(action_id)
             .ok_or_else(|| anyhow!("action {} not found", action_id))?;
         let conway_params = self.get_conway_params()?;
-        let threshold = voting_state.get_action_thresholds(proposal, conway_params)?;
+        let bootstrap = self.bootstrap.ok_or_else(|| anyhow!("'bootstrap' param not set"))?;
+        let threshold = voting_state.get_action_thresholds(proposal, conway_params, bootstrap)?;
 
         let votes = self.get_actual_votes(action_id, drep_stake, spo_stake);
         let voted = votes.majorizes(&threshold);
@@ -167,7 +186,7 @@ impl ConwayVoting {
     }
 
     /// Should be called when voting is over
-    fn end_voting(&mut self, action_id: &GovActionId) -> anyhow::Result<()> {
+    fn end_voting(&mut self, action_id: &GovActionId) -> Result<()> {
         self.votes.remove(&action_id);
         self.proposals.remove(&action_id);
 
@@ -183,7 +202,12 @@ impl ConwayVoting {
     ) -> VotesCount {
         let mut votes = VotesCount::zero();
         if let Some(all_votes) = self.votes.get(&action_id) {
-            for voter in all_votes.keys() {
+            for (voter, (_hash, voting_proc)) in all_votes.iter() {
+                if voting_proc.vote != Vote::Yes {
+                    // TODO: correctly count abstain votes + count vote pools
+                    continue;
+                }
+
                 match voter {
                     Voter::ConstitutionalCommitteeKey(_) => votes.committee += 1,
                     Voter::ConstitutionalCommitteeScript(_) => votes.committee += 1,
@@ -207,26 +231,26 @@ impl ConwayVoting {
     }
 
     /// Checks whether action is expired at the beginning of new_epoch
-    fn is_expired(&self, new_epoch: u64, action_id: &GovActionId) -> anyhow::Result<bool> {
+    fn is_expired(&self, new_epoch: u64, action_id: &GovActionId) -> Result<bool> {
         info!(
             "Checking whether {} is expired at new epoch {}",
             action_id, new_epoch
         );
 
-        let voting_ends = self
+        let action_status = self
             .action_status.get(action_id)
-            .ok_or_else(|| anyhow!("Action status {action_id} not found"))?
-            .voting_ends;
+            .ok_or_else(|| anyhow!("Action status {action_id} not found"))?;
 
-        Ok(voting_ends <= new_epoch)
+        Ok(!action_status.is_active(new_epoch))
     }
 
     fn pack_as_enact_state_elem(p: &ProposalProcedure) -> Option<EnactStateElem> {
         match &p.gov_action {
-            GovernanceAction::HardForkInitiation(_hf) => None,
-            GovernanceAction::TreasuryWithdrawals(_wt) => None,
             GovernanceAction::Information => None,
-
+            GovernanceAction::TreasuryWithdrawals(_wt) => None,
+            GovernanceAction::HardForkInitiation(hf) => {
+                Some(EnactStateElem::ProtVer(hf.protocol_version.clone()))
+            }
             GovernanceAction::ParameterChange(pc) => {
                 Some(EnactStateElem::Params(pc.protocol_param_update.clone()))
             }
@@ -257,7 +281,7 @@ impl ConwayVoting {
         action_id: &GovActionId,
         drep_stake: &HashMap<DRepCredential, Lovelace>,
         spo_stake: &HashMap<KeyHash, DelegatedStake>,
-    ) -> anyhow::Result<Option<VotingOutcome>> {
+    ) -> Result<Option<VotingOutcome>> {
         let outcome = self.is_finally_accepted(
             voting_state, &action_id, drep_stake, spo_stake,
         )?;
@@ -296,7 +320,7 @@ impl ConwayVoting {
 
     /// Function dumps information about completed (expired, ratified, enacted) governance
     /// actions in format, close to that of `gov_action_proposal` from `sqldb`.
-    pub fn print_outcome_to_verify(&self, outcome: &Vec<GovernanceOutcome>) -> anyhow::Result<()> {
+    pub fn print_outcome_to_verify(&self, outcome: &Vec<GovernanceOutcome>) -> Result<()> {
         let out_file_name = match &self.verification_output_file {
             Some(o) => o,
             None => return Ok(())
@@ -324,26 +348,29 @@ impl ConwayVoting {
 
             let deposit = &elem.voting.procedure.deposit;
             let reward = hex::encode(elem.voting.procedure.reward_account.to_vec());
+            let expire = action_status.voting_epochs.end;
             let ratification_info = if elem.voting.accepted {
                 format!(
-                    "{:?},{:?}", action_status.ratification_epoch, action_status.enactment_epoch
+                    "{:?},{:?},,", action_status.ratification_epoch, action_status.enactment_epoch
                 )
             }
             else {
-                ",".to_owned()
+                format!(
+                    ",,,{:?}", action_status.expiration_epoch
+                )
             };
             let txid: String = elem.voting.procedure.gov_action_id.transaction_id.encode_hex();
             let idx = elem.voting.procedure.gov_action_id.action_index;
             let ptype = Self::get_action_name(&elem.voting.procedure.gov_action);
             let proc = &elem.voting.procedure.gov_action;
-            let expired = format!("{:?}", action_status.expiration_epoch);
 
             // id,tx_id,index,prev_gov_action_proposal,deposit,return_address,expiration,
             // voting_anchor_id,type,description,param_proposal,ratified_epoch,enacted_epoch,
             // dropped_epoch,expired_epoch
             let res = format!(
-                ",{txid},{idx},{prev_action},{deposit},{reward},,,{ptype},{proc:?},,\
-                 {ratification_info},,{expired}\n"
+                "{},{txid},{idx},{prev_action},{deposit},{reward},{expire},,{ptype},{proc:?},,\
+                 {ratification_info}\n",
+                elem.voting.procedure.gov_action_id
             );
             if let Err(e) = out_file.write(&res.as_bytes()) {
                 error!(
@@ -361,7 +388,7 @@ impl ConwayVoting {
         voting_state: &VotingRegistrationState,
         drep_stake: &HashMap<DRepCredential, Lovelace>,
         spo_stake: &HashMap<KeyHash, DelegatedStake>,
-    ) -> anyhow::Result<Vec<GovernanceOutcome>> {
+    ) -> Result<Vec<GovernanceOutcome>> {
         let mut outcome = Vec::<GovernanceOutcome>::new();
         let actions = self.proposals.keys().map(|a| a.clone()).collect::<Vec<_>>();
 
@@ -427,7 +454,7 @@ impl ConwayVoting {
     /// Adds final `outcomes` of ratification to enaction waiting list.
     /// Takes all outcomes that are enacted at the start of the current epoch.
     pub fn put_outcomes_to_queue(&mut self, epoch: u64, outcomes: Vec<GovernanceOutcome>)
-                                 -> anyhow::Result<Vec<GovernanceOutcome>>
+                                 -> Result<Vec<GovernanceOutcome>>
     {
         for one_outcome in outcomes.into_iter() {
             let action_id = &one_outcome.voting.procedure.gov_action_id;
@@ -440,9 +467,14 @@ impl ConwayVoting {
                 action.enactment_epoch = Some(epoch + 1);
             }
             else {
-                action.expiration_epoch = Some(epoch + 1);
+                if action.is_active(epoch) {
+                     bail!("Impossible outcome: {action_id} votes {:?}, not ended at {epoch}",
+                         action.voting_epochs
+                     );
+                }
+                action.expiration_epoch = Some(epoch);
             }
-            self.enaction_waiting_list.push((epoch + 1, one_outcome));
+            self.enaction_waiting_list.push((epoch, one_outcome));
         }
 
         let mut for_enactment = Vec::new();
@@ -472,7 +504,7 @@ impl ConwayVoting {
 mod tests {
     use super::*;
     use acropolis_common::Anchor;
-    
+
     fn create_governance_outcome(id: u8) -> GovernanceOutcome {
         let votes = VotesCount {
             committee: 1,
@@ -500,11 +532,11 @@ mod tests {
     }
 
     #[test]
-    fn test_outcomes_queue() -> anyhow::Result<()> {
+    fn test_outcomes_queue() -> Result<()> {
         let mut voting = ConwayVoting::new(None);
         let oc1 = create_governance_outcome(1);
         voting.action_status.insert(oc1.voting.procedure.gov_action_id.clone(), ActionStatus {
-            voting_ends: 3,
+            voting_epochs: 0..4,
             ratification_epoch: None,
             enactment_epoch: None,
             expiration_epoch: None,
@@ -514,11 +546,12 @@ mod tests {
         assert_eq!(r0.len(), 0);
 
         let r1 = voting.put_outcomes_to_queue(1, vec![oc1.clone()])?;
+        println!("{r1:?}");
         assert_eq!(r1.len(), 0);
 
         let oc2 = create_governance_outcome(2);
         voting.action_status.insert(oc2.voting.procedure.gov_action_id.clone(), ActionStatus {
-            voting_ends: 4,
+            voting_epochs: 0..5,
             ratification_epoch: None,
             enactment_epoch: None,
             expiration_epoch: None,
@@ -556,7 +589,7 @@ mod tests {
 
     /*
     #[test]
-    fn test_chained_actions() -> anyhow::Result<()> {
+    fn test_chained_actions() -> Result<()> {
         let mut voting = ConwayVoting::new(None);
         let mut oc1 = create_governance_outcome(1);
         oc1.voting.procedure.gov_action = GovernanceAction::NoConfidence(None);

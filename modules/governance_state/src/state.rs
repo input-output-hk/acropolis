@@ -71,11 +71,16 @@ impl State {
         &mut self,
         message: &ProtocolParamsMessage,
     ) -> Result<()> {
-        if let Some(p) = &message.params.shelley {
-            self.alonzo_babbage_voting.update_parameters(p.epoch_length, p.update_quorum);
+        if let Some(ps) = &message.params.shelley {
+            self.alonzo_babbage_voting.update_parameters(ps.epoch_length, ps.update_quorum);
+
+            if message.params.conway.is_some() {
+                let bootstrap = ps.protocol_params.protocol_version.is_chang()?;
+                self.conway_voting.update_parameters(&message.params.conway, bootstrap)
+            }
         }
-        if message.params.conway.is_some() {
-            self.conway_voting.update_parameters(&message.params.conway);
+        else if message.params.conway.is_some() {
+            bail!("Impossible parameters combination: Shelley is missing, but Conway is present.");
         }
 
         Ok(())
@@ -125,7 +130,9 @@ impl State {
 
             for (trans, vproc) in &governance_message.voting_procedures {
                 for (voter, voter_votes) in vproc.votes.iter() {
-                    if let Err(e) = self.conway_voting.insert_voting_procedure(voter, trans, voter_votes) {
+                    if let Err(e) = self.conway_voting.insert_voting_procedure(
+                        block.epoch, voter, trans, voter_votes
+                    ) {
                         error!(
                             "Error handling governance voting block {}, trans {}: '{}'",
                             block.number,

@@ -1384,7 +1384,7 @@ pub struct ParameterChangeAction {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct HardForkInitiationAction {
     pub previous_action_id: Option<GovActionId>,
-    pub protocol_version: (u64, u64),
+    pub protocol_version: protocol_params::ProtocolVersion,
 }
 
 #[serde_as]
@@ -1518,6 +1518,14 @@ impl VotesCount {
         }
     }
 
+    pub fn infinity() -> Self {
+        Self {
+            committee: u64::MAX,
+            drep: u64::MAX,
+            pool: u64::MAX
+        }
+    }
+
     pub fn majorizes(&self, v: &VotesCount) -> bool {
         self.committee >= v.committee && self.drep >= v.drep && self.pool >= v.pool
     }
@@ -1559,6 +1567,7 @@ pub enum EnactStateElem {
     Params(Box<ProtocolParamUpdate>),
     Constitution(Constitution),
     Committee(CommitteeChange),
+    ProtVer(protocol_params::ProtocolVersion),
     NoConfidence,
 }
 
