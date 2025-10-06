@@ -367,13 +367,15 @@ impl ConwayVoting {
             let idx = elem.voting.procedure.gov_action_id.action_index;
             let ptype = Self::get_action_name(&elem.voting.procedure.gov_action);
             let proc = Self::prepare_quotes(&format!("{:?}",&elem.voting.procedure.gov_action));
+            let cast = &elem.voting.votes_cast;
+            let threshold = &elem.voting.votes_threshold;
 
             // id,tx_id,index,prev_gov_action_proposal,deposit,return_address,expiration,
             // voting_anchor_id,type,description,param_proposal,ratified_epoch,enacted_epoch,
-            // dropped_epoch,expired_epoch
+            // dropped_epoch,expired_epoch,votes_cast,votes_threshold
             let res = format!(
                 "{},{txid},{idx},{prev_action},{deposit},{reward},{expire},,{ptype},\"{proc}\",,\
-                 {ratification_info}\n",
+                 {ratification_info},{cast},{threshold}\n",
                 elem.voting.procedure.gov_action_id
             );
             if let Err(e) = out_file.write(&res.as_bytes()) {
@@ -457,9 +459,11 @@ impl ConwayVoting {
 
     /// Adds final `outcomes` of ratification to enaction waiting list.
     /// Takes all outcomes that are enacted at the start of the current epoch.
-    pub fn put_outcomes_to_queue(&mut self, epoch: u64, outcomes: Vec<GovernanceOutcome>)
-                                 -> Result<Vec<GovernanceOutcome>>
-    {
+    pub fn put_outcomes_to_queue(
+        &mut self, 
+        epoch: u64,
+        outcomes: Vec<GovernanceOutcome>
+    ) -> Result<Vec<GovernanceOutcome>> {
         for one_outcome in outcomes.into_iter() {
             let action_id = &one_outcome.voting.procedure.gov_action_id;
             let action = self.action_status
