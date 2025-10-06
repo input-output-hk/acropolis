@@ -150,7 +150,7 @@ impl TxUnpacker {
                                     error!("rollback_before({}) failed: {}", block_number, e);
                                 }
                                 utxo_registry.next_block();
-                            } 
+                            }
 
                             for (tx_index , raw_tx) in txs_msg.txs.iter().enumerate() {
                                 let tx_index = tx_index as u16;
@@ -365,7 +365,7 @@ impl TxUnpacker {
                                                      block.slot)
                                 }
                             }
-                            
+
                             utxo_registry.next_block();
 
                             // Publish messages in parallel
