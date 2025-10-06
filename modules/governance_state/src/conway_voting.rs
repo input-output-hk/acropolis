@@ -318,6 +318,10 @@ impl ConwayVoting {
         }
     }
 
+    fn prepare_quotes(input: &str) -> String {
+        input.replace("\"", "\"\"")
+    }
+
     /// Function dumps information about completed (expired, ratified, enacted) governance
     /// actions in format, close to that of `gov_action_proposal` from `sqldb`.
     pub fn print_outcome_to_verify(&self, outcome: &Vec<GovernanceOutcome>) -> Result<()> {
@@ -362,13 +366,13 @@ impl ConwayVoting {
             let txid: String = elem.voting.procedure.gov_action_id.transaction_id.encode_hex();
             let idx = elem.voting.procedure.gov_action_id.action_index;
             let ptype = Self::get_action_name(&elem.voting.procedure.gov_action);
-            let proc = &elem.voting.procedure.gov_action;
+            let proc = Self::prepare_quotes(&format!("{:?}",&elem.voting.procedure.gov_action));
 
             // id,tx_id,index,prev_gov_action_proposal,deposit,return_address,expiration,
             // voting_anchor_id,type,description,param_proposal,ratified_epoch,enacted_epoch,
             // dropped_epoch,expired_epoch
             let res = format!(
-                "{},{txid},{idx},{prev_action},{deposit},{reward},{expire},,{ptype},{proc:?},,\
+                "{},{txid},{idx},{prev_action},{deposit},{reward},{expire},,{ptype},\"{proc}\",,\
                  {ratification_info}\n",
                 elem.voting.procedure.gov_action_id
             );
@@ -546,8 +550,17 @@ mod tests {
         assert_eq!(r0.len(), 0);
 
         let r1 = voting.put_outcomes_to_queue(1, vec![oc1.clone()])?;
-        println!("{r1:?}");
-        assert_eq!(r1.len(), 0);
+        assert_eq!(r1.len(), 1);
+        assert_eq!(r1.get(0).unwrap().voting.procedure.gov_action_id.action_index, 1);
+        assert_eq!(
+            voting.action_status.get(&oc1.voting.procedure.gov_action_id).unwrap()
+                .ratification_epoch,
+            Some(1));
+        assert_eq!(
+            voting.action_status.get(&oc1.voting.procedure.gov_action_id).unwrap()
+                .enactment_epoch,
+            Some(2));
+
 
         let oc2 = create_governance_outcome(2);
         voting.action_status.insert(oc2.voting.procedure.gov_action_id.clone(), ActionStatus {
@@ -559,19 +572,7 @@ mod tests {
 
         let r2 = voting.put_outcomes_to_queue(2, vec![oc2.clone()])?;
         assert_eq!(r2.len(), 1);
-        assert_eq!(r2.get(0).unwrap().voting.procedure.gov_action_id.action_index, 1);
-        assert_eq!(
-            voting.action_status.get(&oc1.voting.procedure.gov_action_id).unwrap()
-                .ratification_epoch,
-            Some(1));
-        assert_eq!(
-            voting.action_status.get(&oc1.voting.procedure.gov_action_id).unwrap()
-                .enactment_epoch,
-            Some(2));
-
-        let r3 = voting.put_outcomes_to_queue(3, vec![])?;
-        assert_eq!(r3.len(), 1);
-        assert_eq!(r3.get(0).unwrap().voting.procedure.gov_action_id.action_index, 2);
+        assert_eq!(r2.get(0).unwrap().voting.procedure.gov_action_id.action_index, 2);
         assert_eq!(
             voting.action_status.get(&oc2.voting.procedure.gov_action_id).unwrap()
                 .ratification_epoch,
@@ -581,9 +582,17 @@ mod tests {
                 .enactment_epoch,
             Some(3));
 
-        let r4 = voting.put_outcomes_to_queue(4, vec![])?;
-        assert_eq!(r4.len(), 0);
+        let r3 = voting.put_outcomes_to_queue(3, vec![])?;
+        assert_eq!(r3.len(), 0);
 
+        Ok(())
+    }
+
+    #[test]
+    fn test_prepare_quotes() -> Result<()> {
+        let x = "\"A\"\" lot (\"of\") quotes\"";
+        let xx = ConwayVoting::prepare_quotes(x);
+        assert_eq!(xx, "\"\"A\"\"\"\" lot (\"\"of\"\") quotes\"\"");
         Ok(())
     }
 

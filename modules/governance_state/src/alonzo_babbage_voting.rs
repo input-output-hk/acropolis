@@ -215,7 +215,7 @@ mod tests {
     // Mainnet Tests
     //
 
-    const MAINNET_PROPOSALS_JSON: &[u8] = include_bytes!("./alonzo_babbage_voting.json");
+    const MAINNET_PROPOSALS_JSON: &[u8] = include_bytes!("../data/alonzo_babbage_voting.json");
 
     fn extract_mainnet_parameter<T: Clone>(
         f: impl Fn(&ProtocolParamUpdate) -> Option<T>,
@@ -314,7 +314,7 @@ mod tests {
     // SanchoNet Tests
     //
 
-    const SANCHONET_PROPOSALS_JSON: &[u8] = include_bytes!("./ab_sancho_voting.json");
+    const SANCHONET_PROPOSALS_JSON: &[u8] = include_bytes!("../data/ab_sancho_voting.json");
 
     fn extract_sanchonet_parameter<T: Clone>(
         f: impl Fn(&ProtocolParamUpdate) -> Option<T>,
