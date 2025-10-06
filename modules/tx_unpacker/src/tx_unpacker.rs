@@ -146,10 +146,11 @@ impl TxUnpacker {
                             // handle rollback or advance registry to the next block
                             let block_number = block.number as u32;
                             if block.status == BlockStatus::RolledBack {
-                                utxo_registry.rollback_before(block_number);
-                            } else {
+                                if let Err(e) = utxo_registry.rollback_before(block_number) {
+                                    error!("rollback_before({}) failed: {}", block_number, e);
+                                }
                                 utxo_registry.next_block();
-                            }
+                            } 
 
                             for (tx_index , raw_tx) in txs_msg.txs.iter().enumerate() {
                                 let tx_index = tx_index as u16;
@@ -179,7 +180,7 @@ impl TxUnpacker {
                                                 let oref = input.output_ref();
                                                 let tx_ref = TxOutRef::new(**oref.hash(), oref.index() as u16);
 
-                                                match utxo_registry.consume(block_number, &tx_ref) {
+                                                match utxo_registry.consume(&tx_ref) {
                                                     Ok(tx_identifier) => {
                                                         // Add TxInput to utxo_deltas
                                                         utxo_deltas.push(UTXODelta::Input(TxInput {
@@ -364,6 +365,8 @@ impl TxUnpacker {
                                                      block.slot)
                                 }
                             }
+                            
+                            utxo_registry.next_block();
 
                             // Publish messages in parallel
                             let mut futures = Vec::new();
