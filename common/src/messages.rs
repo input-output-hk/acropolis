@@ -277,10 +277,10 @@ pub enum CardanoMessage {
     AddressDeltas(AddressDeltasMessage),     // Address deltas received
     Withdrawals(WithdrawalsMessage),         // Withdrawals from reward accounts
     PotDeltas(PotDeltasMessage),             // Changes to pot balances
-    BlockTxs(BlockTxsMessage), // Transactions Info like total count, total output, total fees in a block
+    BlockInfoMessage(BlockTxsMessage), // Transaction Info (total count, total output, total fees in a block)
     EpochActivity(EpochActivityMessage), // Total fees and VRF keys for an epoch
-    DRepState(DRepStateMessage), // Active DReps at epoch end
-    SPOState(SPOStateMessage), // Active SPOs at epoch end
+    DRepState(DRepStateMessage),       // Active DReps at epoch end
+    SPOState(SPOStateMessage),         // Active SPOs at epoch end
     GovernanceProcedures(GovernanceProceduresMessage), // Governance procedures received
 
     // Protocol Parameters
