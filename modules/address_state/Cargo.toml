@@ -24,5 +24,8 @@ serde_cbor = "0.11"
 tokio = { workspace = true }
 tracing = { workspace = true }
 
+[dev-dependencies]
+tempfile = "3"
+
 [lib]
 path = "src/address_state.rs"

@@ -218,10 +218,6 @@ impl AddressState {
                 (None, None)
             };
 
-        match persist_epoch {
-            Some(epoch) => info!("Persist epoch marker found: {}", epoch),
-            None => info!("No persist epoch marker found in store"),
-        }
         let query_store = store.clone();
         let store_run = store.clone();
 
@@ -327,6 +323,70 @@ impl AddressState {
             .await
             .unwrap_or_else(|e| error!("Failed: {e}"));
         });
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::state::{AddressEntry, UtxoDelta};
+
+    use super::*;
+    use acropolis_common::{Address, TxIdentifier, UTxOIdentifier};
+    use std::collections::HashMap;
+    use tempfile::tempdir;
+
+    fn dummy_address() -> Address {
+        Address::from_string("DdzFFzCqrht7fNAHwdou7iXPJ5NZrssAH53yoRMUtF9t6momHH52EAxM5KmqDwhrjT7QsHjbMPJUBywmzAgmF4hj2h9eKj4U6Ahandyy").unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_persist_and_read_epoch() -> Result<()> {
+        let tmpdir = tempdir().unwrap();
+        let store = FjallImmutableAddressStore::new(tmpdir.path())?;
+
+        let addr = dummy_address();
+
+        let mut entry = AddressEntry::default();
+        entry.utxos = Some(vec![
+            UtxoDelta::Created(UTxOIdentifier::new(0, 0, 0)),
+            UtxoDelta::Created(UTxOIdentifier::new(0, 1, 0)),
+        ]);
+        entry.transactions = Some(vec![TxIdentifier::new(0, 0)]);
+        entry.totals = Some(Default::default());
+
+        let mut block = HashMap::new();
+        block.insert(addr.clone(), entry);
+
+        let drained_blocks = vec![block];
+
+        let config = AddressStorageConfig {
+            store_info: true,
+            store_transactions: true,
+            store_totals: true,
+        };
+
+        // Persist epoch 1
+        store.persist_epoch(1, drained_blocks, &config).await?;
+
+        // Assert we can read back UTxOs
+        let utxos = store.get_utxos(&addr)?;
+        assert!(utxos.is_some());
+        assert_eq!(utxos.unwrap().len(), 2);
+
+        // Assert we can read back Txs
+        let txs = store.get_txs(&addr).await?;
+        assert!(txs.is_some());
+        assert_eq!(txs.unwrap().len(), 1);
+
+        // Assert totals exists
+        let totals = store.get_totals(&addr).await?;
+        assert!(totals.is_some());
+
+        // Assert epoch marker written
+        let last_epoch = store.get_last_epoch_stored().await?;
+        assert_eq!(last_epoch, Some(1));
 
         Ok(())
     }

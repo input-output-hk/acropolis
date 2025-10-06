@@ -69,6 +69,7 @@ dependencies = [
  "imbl",
  "minicbor 0.26.5",
  "serde_cbor",
+ "tempfile",
  "tokio",
  "tracing",
 ]

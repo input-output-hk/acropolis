@@ -58,7 +58,7 @@ impl State {
             return Err(anyhow::anyhow!("address info storage disabled in config"));
         }
 
-        let mut combined: HashSet<UTxOIdentifier> = match store.get_utxos(address).await? {
+        let mut combined: HashSet<UTxOIdentifier> = match store.get_utxos(address)? {
             Some(db) => db.into_iter().collect(),
             None => HashSet::new(),
         };

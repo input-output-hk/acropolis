@@ -148,17 +148,16 @@ impl AddressStore for FjallImmutableAddressStore {
         Ok(())
     }
 
-    async fn get_utxos(&self, address: &Address) -> Result<Option<Vec<UTxOIdentifier>>> {
+    fn get_utxos(&self, address: &Address) -> Result<Option<Vec<UTxOIdentifier>>> {
         let key = address.to_bytes_key()?;
-        let partition = self.utxos.clone();
-        task::spawn_blocking(move || match partition.get(key)? {
+        info!("searching for {}", hex::encode(&key));
+        match self.utxos.get(key)? {
             Some(bytes) => {
                 let decoded: Vec<UTxOIdentifier> = decode(&bytes)?;
                 Ok(Some(decoded))
             }
             None => Ok(None),
-        })
-        .await?
+        }
     }
 
     async fn get_txs(&self, address: &Address) -> Result<Option<Vec<TxIdentifier>>> {
@@ -186,8 +185,10 @@ impl AddressStore for FjallImmutableAddressStore {
         })
         .await?
     }
+}
 
-    async fn get_last_epoch_stored(&self) -> Result<Option<u64>> {
+impl FjallImmutableAddressStore {
+    pub async fn get_last_epoch_stored(&self) -> Result<Option<u64>> {
         let read_marker = |partition: Partition, key: &'static [u8]| async move {
             task::spawn_blocking(move || {
                 Ok::<_, anyhow::Error>(match partition.get(key)? {
