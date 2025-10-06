@@ -300,7 +300,7 @@ impl ConwayVoting {
 
     fn gov_action_id_to_string(action_id: &GovActionId) -> String {
         format!(
-            "transaction: {}, action_index: {}",
+            "\"transaction: {}, action_index: {}\"",
             hex::encode(action_id.transaction_id),
             action_id.action_index
         )
