@@ -13,10 +13,10 @@ use bitmask_enum::bitmask;
 use hex::decode;
 use serde::{Deserialize, Serialize};
 use serde_with::{hex::Hex, serde_as};
-use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 use std::ops::Neg;
+use std::{cmp::Ordering, fmt};
 
 #[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NetworkId {
@@ -396,6 +396,18 @@ impl UTxOIdentifier {
 
     pub fn to_bytes(&self) -> [u8; 8] {
         self.0
+    }
+}
+
+impl fmt::Display for UTxOIdentifier {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}:{}:{}",
+            self.block_number(),
+            self.tx_index(),
+            self.output_index()
+        )
     }
 }
 
