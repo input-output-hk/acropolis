@@ -383,7 +383,7 @@ impl TxUnpacker {
                             if let Some(ref topic) = publish_block_txs_topic {
                                 let msg = Message::Cardano((
                                     block.clone(),
-                                    CardanoMessage::BlockTxs(BlockTxsMessage {
+                                    CardanoMessage::BlockInfoMessage(BlockTxsMessage {
                                         total_txs,
                                         total_output,
                                         total_fees

@@ -170,7 +170,7 @@ impl EpochsState {
             // Handle block txs second so new epoch's state don't get counted in the last one
             let (_, message) = block_txs_message_f.await?;
             match message.as_ref() {
-                Message::Cardano((block_info, CardanoMessage::BlockTxs(txs_msg))) => {
+                Message::Cardano((block_info, CardanoMessage::BlockInfoMessage(txs_msg))) => {
                     let span =
                         info_span!("epochs_state.handle_block_txs", block = block_info.number);
                     span.in_scope(|| {

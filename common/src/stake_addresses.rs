@@ -275,6 +275,8 @@ impl StakeAddressMap {
         }
         Some(total)
     }
+    
+    
 
     /// Derive the Stake Pool Delegation Distribution (SPDD) - a map of total stake values
     /// (both with and without rewards) for each active SPO

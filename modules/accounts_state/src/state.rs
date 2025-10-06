@@ -151,6 +151,19 @@ impl State {
         stake_addresses.get_accounts_balances_map(stake_keys)
     }
 
+    /// Map delegator to their current snapshot balance (utxo + rewards)
+    pub fn get_latest_snapshot_account_balances(
+        &self,
+    ) -> u64 {
+        let mut total_active_stake: u64 = 0;
+        for spo in self.rewards_state.mark.spos.iter() {
+            for delegator in spo.1.delegators.iter() {
+                total_active_stake += delegator.1;
+            }
+        }
+        total_active_stake
+    }
+
     /// Map stake_keys to their delegated DRep
     pub fn get_drep_delegations_map(
         &self,

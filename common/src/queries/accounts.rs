@@ -22,6 +22,8 @@ pub enum AccountsStateQuery {
     GetAccountsUtxoValuesSum { stake_keys: Vec<Vec<u8>> },
     GetAccountsBalancesMap { stake_keys: Vec<Vec<u8>> },
     GetAccountsBalancesSum { stake_keys: Vec<Vec<u8>> },
+    // TODO: Implement GetAccountBalances
+    GetActiveStakes {},
 
     // Pools related queries
     GetOptimalPoolSizing,
@@ -51,6 +53,8 @@ pub enum AccountsStateQueryResponse {
     AccountsUtxoValuesSum(u64),
     AccountsBalancesMap(HashMap<Vec<u8>, u64>),
     AccountsBalancesSum(u64),
+    // TODO: Implement GetAccountBalances (credential + balance)
+    ActiveStakes(u64),
 
     // Pools related responses
     OptimalPoolSizing(Option<OptimalPoolSizing>),

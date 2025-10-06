@@ -515,6 +515,10 @@ impl AccountsState {
                         }
                     }
 
+                    AccountsStateQuery::GetActiveStakes {} => {
+                        AccountsStateQueryResponse::ActiveStakes(state.get_latest_snapshot_account_balances())
+                    }
+
                     AccountsStateQuery::GetAccountsBalancesSum { stake_keys } => {
                         match state.get_account_balances_sum(stake_keys) {
                             Some(sum) => AccountsStateQueryResponse::AccountsBalancesSum(sum),

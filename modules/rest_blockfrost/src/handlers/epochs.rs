@@ -1,8 +1,14 @@
+use crate::{
+    handlers_config::HandlersConfig,
+    types::{EpochActivityRest, ProtocolParamsRest},
+};
 use acropolis_common::{
     messages::{Message, RESTResponse, StateQuery, StateQueryResponse},
     queries::{
+        accounts::{AccountsStateQuery, AccountsStateQueryResponse},
         epochs::{EpochsStateQuery, EpochsStateQueryResponse},
-        parameters::{ParametersStateQuery, ParametersStateQueryResponse},
+        parameters::{ParametersStateQuery, ParametersStateQueryResponse}
+        ,
         spdd::{SPDDStateQuery, SPDDStateQueryResponse},
         utils::query_state,
     },
@@ -10,11 +16,6 @@ use acropolis_common::{
 use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
 use std::sync::Arc;
-
-use crate::{
-    handlers_config::HandlersConfig,
-    types::{EpochActivityRest, ProtocolParamsRest},
-};
 
 pub async fn handle_epoch_info_blockfrost(
     context: Arc<Context<Message>>,
@@ -48,7 +49,7 @@ pub async fn handle_epoch_info_blockfrost(
         };
     }
 
-    // Get current epoch number from epochs-state
+    // Get the current epoch number from epochs-state
     let epoch_info_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(query)));
     let epoch_info_response = query_state(
         &context,
@@ -78,29 +79,51 @@ pub async fn handle_epoch_info_blockfrost(
     }?;
     let epoch_number = ea_message.epoch;
 
-    // query total_active_stakes from spdd_state
-    let total_active_stakes_msg = Arc::new(Message::StateQuery(StateQuery::SPDD(
-        SPDDStateQuery::GetEpochTotalActiveStakes {
-            epoch: epoch_number,
-        },
-    )));
-    let total_active_stakes = query_state(
-        &context,
-        &handlers_config.spdd_query_topic,
-        total_active_stakes_msg,
-        |message| match message {
-            Message::StateQueryResponse(StateQueryResponse::SPDD(
-                SPDDStateQueryResponse::EpochTotalActiveStakes(total_active_stakes),
-            )) => Ok(Some(total_active_stakes)),
-            Message::StateQueryResponse(StateQueryResponse::SPDD(
-                SPDDStateQueryResponse::Error(_e),
-            )) => Ok(None),
-            _ => Err(anyhow::anyhow!(
-                "Unexpected message type while retrieving total active stakes"
-            )),
-        },
-    )
-    .await?;
+    // For the latest epoch, query accounts-state for the stake pool delegation distribution (SPDD)
+    // Otherwise, fall back to SPDD module to fetch historical epoch totals
+    let total_active_stakes: Option<u64> = if param == "latest" {
+        let total_active_stakes_msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
+            AccountsStateQuery::GetActiveStakes {},
+        )));
+        query_state(
+            &context,
+            &handlers_config.accounts_query_topic,
+            total_active_stakes_msg,
+            |message| match message {
+                Message::StateQueryResponse(StateQueryResponse::Accounts(
+                    AccountsStateQueryResponse::ActiveStakes(total_active_stake),
+                )) => Ok(Some(total_active_stake)),
+                _ => Err(anyhow::anyhow!(
+                    "Unexpected message type while retrieving total active stakes",
+                )),
+            },
+        )
+        .await?
+    } else {
+        // Historical epoch: use SPDD if available
+        let total_active_stakes_msg = Arc::new(Message::StateQuery(StateQuery::SPDD(
+            SPDDStateQuery::GetEpochTotalActiveStakes {
+                epoch: epoch_number,
+            },
+        )));
+        query_state(
+            &context,
+            &handlers_config.spdd_query_topic,
+            total_active_stakes_msg,
+            |message| match message {
+                Message::StateQueryResponse(StateQueryResponse::SPDD(
+                    SPDDStateQueryResponse::EpochTotalActiveStakes(total_active_stakes),
+                )) => Ok(Some(total_active_stakes)),
+                Message::StateQueryResponse(StateQueryResponse::SPDD(
+                    SPDDStateQueryResponse::Error(_e),
+                )) => Ok(None),
+                _ => Err(anyhow::anyhow!(
+                    "Unexpected message type while retrieving total active stakes",
+                )),
+            },
+        )
+        .await?
+    };
 
     let mut response = EpochActivityRest::from(ea_message);
     response.active_stake = total_active_stakes;
