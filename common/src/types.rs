@@ -363,6 +363,12 @@ impl TxIdentifier {
     }
 }
 
+impl From<UTxOIdentifier> for TxIdentifier {
+    fn from(id: UTxOIdentifier) -> Self {
+        Self::new(id.block_number(), id.tx_index())
+    }
+}
+
 // Compact UTxO identifier (block_number, tx_index, output_index)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct UTxOIdentifier([u8; 8]);
@@ -390,10 +396,6 @@ impl UTxOIdentifier {
 
     pub fn to_bytes(&self) -> [u8; 8] {
         self.0
-    }
-
-    pub fn to_tx_identifier(&self) -> TxIdentifier {
-        TxIdentifier::new(self.block_number(), self.tx_index())
     }
 }
 
