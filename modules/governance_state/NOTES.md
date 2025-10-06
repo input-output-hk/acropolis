@@ -102,9 +102,7 @@ epoch. Special message?
 total. Need info about voting registration.
 * DRep::epoch -- it's written that it's epoch, which has ended. But I receive
 messages with this epoch in its beginning. Need to sort out.
-* Implement bootstrap period.
-* 5 of 7 constitutional committee members are lost. Need to check implementation. 
-(voting after deadline, fixed)
+* Implement bootstrap period (resolved).
 * What if voting length changes during voting process? E.g.:
    (a) epoch 100 voting starts, voting length is 10 epochs
    (b) epoch 107 voting length change to 3 enacts (e.g., because some earlier successful vote)
