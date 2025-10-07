@@ -145,24 +145,8 @@ impl State {
         Ok(totals)
     }
 
-    pub fn tick(&self) -> Result<()> {
-        let count: usize =
-            self.volatile_entries.window.iter().map(|block_map| block_map.len()).sum();
-
-        if count != 0 {
-            tracing::info!("Tracking {} volatile addresses", count);
-        } else {
-            tracing::info!("address_state storage disabled in config");
-        }
-
-        Ok(())
-    }
-
-    pub fn handle_address_deltas(&self, deltas: &[AddressDelta]) -> Result<Self> {
-        let mut new_state = self.clone();
-
-        // Always work on the most recent block in the window
-        let addresses = new_state
+    pub fn handle_address_deltas(&mut self, deltas: &[AddressDelta]) -> Result<()> {
+        let addresses = self
             .volatile_entries
             .window
             .back_mut()
@@ -182,7 +166,7 @@ impl State {
 
             if self.config.store_transactions {
                 let txs = entry.transactions.get_or_insert(Vec::new());
-                txs.push(delta.utxo.to_tx_identifier())
+                txs.push(TxIdentifier::from(delta.utxo))
             }
 
             if self.config.store_totals {
@@ -191,6 +175,6 @@ impl State {
             }
         }
 
-        Ok(new_state)
+        Ok(())
     }
 }

@@ -17,6 +17,7 @@ pub mod pools;
 pub mod scripts;
 pub mod transactions;
 pub mod utils;
+pub mod utxos;
 
 pub fn get_query_topic(context: Arc<Context<Message>>, topic: (&str, &str)) -> String {
     context.config.get_string(topic.0).unwrap_or_else(|_| topic.1.to_string())

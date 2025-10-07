@@ -283,6 +283,33 @@ impl ShelleyAddress {
 
         Ok(data)
     }
+
+    pub fn stake_address_string(&self) -> Result<Option<String>> {
+        let network_bit = match self.network {
+            AddressNetwork::Main => 1,
+            AddressNetwork::Test => 0,
+        };
+
+        match &self.delegation {
+            ShelleyAddressDelegationPart::StakeKeyHash(key_hash) => {
+                let mut data = Vec::with_capacity(29);
+                data.push(network_bit | (0b1110 << 4));
+                data.extend_from_slice(key_hash);
+                let stake = StakeAddress::from_binary(&data)?.to_string()?;
+                Ok(Some(stake))
+            }
+            ShelleyAddressDelegationPart::ScriptHash(script_hash) => {
+                let mut data = Vec::with_capacity(29);
+                data.push(network_bit | (0b1111 << 4));
+                data.extend_from_slice(script_hash);
+                let stake = StakeAddress::from_binary(&data)?.to_string()?;
+                Ok(Some(stake))
+            }
+            // TODO: Use chain store to resolve pointer delegation addresses
+            ShelleyAddressDelegationPart::Pointer(_pointer) => Ok(None),
+            ShelleyAddressDelegationPart::None => Ok(None),
+        }
+    }
 }
 
 /// Payload of a stake address
@@ -463,6 +490,29 @@ impl Address {
             Address::Stake(stake) => stake.to_bytes_key(),
 
             Address::None => Err(anyhow!("No address to convert")),
+        }
+    }
+
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Address::Byron(_) => "byron",
+            Address::Shelley(_) => "shelley",
+            Address::Stake(_) => "stake",
+            Address::None => "none",
+        }
+    }
+
+    pub fn is_script(&self) -> bool {
+        match self {
+            Address::Shelley(shelley) => match shelley.payment {
+                ShelleyAddressPaymentPart::PaymentKeyHash(_) => false,
+                ShelleyAddressPaymentPart::ScriptHash(_) => true,
+            },
+            Address::Stake(stake) => match stake.payload {
+                StakeAddressPayload::StakeKeyHash(_) => false,
+                StakeAddressPayload::ScriptHash(_) => true,
+            },
+            Address::Byron(_) | Address::None => false,
         }
     }
 }

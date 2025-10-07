@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use serde_with::{hex::Hex, serde_as};
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
-use std::ops::Neg;
+use std::ops::{AddAssign, Neg};
 use std::{cmp::Ordering, fmt};
 
 #[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -252,6 +252,30 @@ impl Value {
 
     pub fn coin(&self) -> u64 {
         self.lovelace
+    }
+}
+
+impl AddAssign<&Value> for Value {
+    fn add_assign(&mut self, other: &Value) {
+        self.lovelace += other.lovelace;
+
+        for (policy_id, other_assets) in &other.assets {
+            if let Some((_, existing_assets)) =
+                self.assets.iter_mut().find(|(pid, _)| pid == policy_id)
+            {
+                for other_asset in other_assets {
+                    if let Some(existing) =
+                        existing_assets.iter_mut().find(|a| a.name == other_asset.name)
+                    {
+                        existing.amount += other_asset.amount;
+                    } else {
+                        existing_assets.push(other_asset.clone());
+                    }
+                }
+            } else {
+                self.assets.push((*policy_id, other_assets.clone()));
+            }
+        }
     }
 }
 

@@ -91,6 +91,25 @@ impl State {
         }
     }
 
+    /// Get the total value of multiple utxos
+    pub async fn get_utxos_sum(&self, utxo_identifiers: &Vec<UTxOIdentifier>) -> Result<Value> {
+        let mut balance = Value::new(0, Vec::new());
+        for identifier in utxo_identifiers {
+            match self.lookup_utxo(&identifier).await {
+                Ok(Some(utxo)) => balance += &utxo.value,
+                Ok(None) => return Err(anyhow::anyhow!("UTxO {} does not exist", identifier)),
+                Err(e) => {
+                    return Err(anyhow::anyhow!(
+                        "Failed to look up UTxO {}: {}",
+                        identifier,
+                        e
+                    ));
+                }
+            }
+        }
+        Ok(balance)
+    }
+
     /// Register the delta observer
     pub fn register_address_delta_observer(&mut self, observer: Arc<dyn AddressDeltaObserver>) {
         self.address_delta_observer = Some(observer);

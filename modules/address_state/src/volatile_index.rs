@@ -25,8 +25,11 @@ impl Default for VolatileIndex {
 
 impl VolatileIndex {
     pub fn new() -> Self {
+        let mut window = VecDeque::new();
+        window.push_back(HashMap::new());
+
         VolatileIndex {
-            window: VecDeque::new(),
+            window,
             start_block: 0,
             epoch_start_block: 0,
             last_persisted_epoch: None,

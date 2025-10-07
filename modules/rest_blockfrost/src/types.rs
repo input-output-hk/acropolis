@@ -779,3 +779,13 @@ impl TryFrom<&AssetAddressEntry> for AssetAddressRest {
         })
     }
 }
+
+#[derive(Debug, Serialize)]
+pub struct AddressInfoREST {
+    pub address: String,
+    pub amount: acropolis_common::Value,
+    pub stake_address: Option<String>,
+    #[serde(rename = "type")]
+    pub address_type: String,
+    pub script: bool,
+}

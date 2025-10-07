@@ -29,7 +29,7 @@ pub struct FjallImmutableAddressStore {
 
 impl FjallImmutableAddressStore {
     pub fn new(path: impl AsRef<Path>) -> Result<Self> {
-        let cfg = fjall::Config::new(path);
+        let cfg = fjall::Config::new(path).max_write_buffer_size(512 * 1024 * 1024);
         let keyspace = Keyspace::open(cfg)?;
 
         let utxos = keyspace.open_partition("address_utxos", PartitionCreateOptions::default())?;
@@ -62,6 +62,7 @@ impl AddressStore for FjallImmutableAddressStore {
             && !self.epoch_exists(self.totals.clone(), ADDRESS_TOTALS_EPOCH_COUNTER, epoch).await?;
 
         if !(persist_utxos || persist_txs || persist_totals) {
+            tracing::debug!("skipping epoch {} (already persisted or disabled)", epoch);
             return Ok(());
         }
 
@@ -72,9 +73,14 @@ impl AddressStore for FjallImmutableAddressStore {
 
         task::spawn_blocking(move || {
             let mut batch = keyspace.batch();
+            let mut change_count = 0;
+            for block_map in drained_blocks.into_iter() {
+                if block_map.is_empty() {
+                    continue;
+                }
 
-            for block_map in drained_blocks {
                 for (addr, entry) in block_map {
+                    change_count += 1;
                     let addr_key = addr.to_bytes_key()?;
 
                     if persist_utxos {
@@ -140,8 +146,19 @@ impl AddressStore for FjallImmutableAddressStore {
                 batch.insert(&totals, ADDRESS_TOTALS_EPOCH_COUNTER, &epoch.to_le_bytes());
             }
 
-            batch.commit()?;
-            Ok::<_, anyhow::Error>(())
+            match batch.commit() {
+                Ok(_) => {
+                    tracing::info!(
+                        "address_state: wrote {} address changes to Fjall.",
+                        change_count,
+                    );
+                    Ok::<_, anyhow::Error>(())
+                }
+                Err(e) => {
+                    tracing::error!("address_state: failed to commit batch: {}", e);
+                    Err(e.into())
+                }
+            }
         })
         .await??;
 

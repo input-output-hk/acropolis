@@ -15,7 +15,7 @@ use anyhow::Result;
 use caryatid_sdk::{module, Context, Module, Subscription};
 use config::Config;
 use tokio::sync::Mutex;
-use tracing::{error, info, info_span, Instrument};
+use tracing::{error, info};
 
 use crate::{
     address_store::AddressStore,
@@ -70,7 +70,6 @@ impl AddressState {
                     Message::Cardano((ref block_info, _)) => {
                         if block_info.status == BlockStatus::RolledBack {
                             state.volatile_entries.rollback_before(block_info.number);
-                        } else {
                             state.volatile_entries.next_block();
                         }
                         current_block = Some(block_info.clone());
@@ -136,6 +135,8 @@ impl AddressState {
                     }
                     other => error!("Unexpected message on utxo-deltas subscription: {other:?}"),
                 }
+
+                state.volatile_entries.next_block();
             }
         }
     }
@@ -199,7 +200,6 @@ impl AddressState {
         let state = Arc::new(Mutex::new(State::new(storage_config)));
         let state_run = state.clone();
         let state_query = state.clone();
-        let state_tick = state.clone();
 
         // Initialize Fjall store
         let (store, persist_epoch): (Option<Arc<dyn AddressStore>>, Option<u64>) =
@@ -275,29 +275,6 @@ impl AddressState {
             }
         });
 
-        // Ticker to log stats
-        let mut subscription = context.subscribe("clock.tick").await?;
-        context.run(async move {
-            loop {
-                let Ok((_, message)) = subscription.read().await else {
-                    return;
-                };
-                if let Message::Clock(message) = message.as_ref() {
-                    if message.number % 60 == 0 {
-                        let span = info_span!("address_state.tick", number = message.number);
-                        async {
-                            let state = state_tick.lock().await;
-                            if let Err(e) = state.tick() {
-                                error!("Tick error: {e}");
-                            }
-                        }
-                        .instrument(span)
-                        .await;
-                    }
-                }
-            }
-        });
-
         // Subscribe to enabled topics
         let address_deltas_sub = if let Some(topic) = &address_deltas_subscribe_topic {
             Some(context.subscribe(topic).await?)
@@ -330,11 +307,8 @@ impl AddressState {
 
 #[cfg(test)]
 mod tests {
-    use crate::state::{AddressEntry, UtxoDelta};
-
     use super::*;
-    use acropolis_common::{Address, TxIdentifier, UTxOIdentifier};
-    use std::collections::HashMap;
+    use acropolis_common::{Address, AddressDelta, UTxOIdentifier, ValueDelta};
     use tempfile::tempdir;
 
     fn dummy_address() -> Address {
@@ -342,51 +316,54 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_persist_and_read_epoch() -> Result<()> {
+    async fn test_persist_all_and_read_back() -> Result<()> {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        // Temp store directory
         let tmpdir = tempdir().unwrap();
-        let store = FjallImmutableAddressStore::new(tmpdir.path())?;
+        let store = Arc::new(FjallImmutableAddressStore::new(tmpdir.path())?);
 
-        let addr = dummy_address();
-
-        let mut entry = AddressEntry::default();
-        entry.utxos = Some(vec![
-            UtxoDelta::Created(UTxOIdentifier::new(0, 0, 0)),
-            UtxoDelta::Created(UTxOIdentifier::new(0, 1, 0)),
-        ]);
-        entry.transactions = Some(vec![TxIdentifier::new(0, 0)]);
-        entry.totals = Some(Default::default());
-
-        let mut block = HashMap::new();
-        block.insert(addr.clone(), entry);
-
-        let drained_blocks = vec![block];
-
+        // Config: store everything
         let config = AddressStorageConfig {
             store_info: true,
             store_transactions: true,
             store_totals: true,
         };
 
-        // Persist epoch 1
-        store.persist_epoch(1, drained_blocks, &config).await?;
+        // Build fake delta
+        let addr = dummy_address();
+        let deltas = vec![AddressDelta {
+            address: addr.clone(),
+            utxo: UTxOIdentifier::new(0, 0, 0),
+            value: ValueDelta {
+                lovelace: 1,
+                assets: Vec::new(),
+            },
+        }];
 
-        // Assert we can read back UTxOs
+        // Create a ready state
+        let mut state = State::new(config.clone());
+        state.volatile_entries.epoch_start_block = 1;
+
+        // Apply deltas
+        state.handle_address_deltas(&deltas)?;
+
+        // Persist everything
+        state.volatile_entries.persist_all(store.as_ref(), &config).await?;
+
+        // Verify persisted UTxOs
         let utxos = store.get_utxos(&addr)?;
         assert!(utxos.is_some());
-        assert_eq!(utxos.unwrap().len(), 2);
+        assert_eq!(utxos.as_ref().unwrap().len(), 1);
+        assert_eq!(utxos.as_ref().unwrap()[0], UTxOIdentifier::new(0, 0, 0));
 
-        // Assert we can read back Txs
-        let txs = store.get_txs(&addr).await?;
-        assert!(txs.is_some());
-        assert_eq!(txs.unwrap().len(), 1);
-
-        // Assert totals exists
+        // Totals should exist
         let totals = store.get_totals(&addr).await?;
         assert!(totals.is_some());
 
-        // Assert epoch marker written
+        // Epoch marker advanced
         let last_epoch = store.get_last_epoch_stored().await?;
-        assert_eq!(last_epoch, Some(1));
+        assert_eq!(last_epoch, Some(0));
 
         Ok(())
     }

@@ -1,7 +1,10 @@
 //! Acropolis UTXO state module for Caryatid
 //! Accepts UTXO events and derives the current ledger state in memory
 
-use acropolis_common::messages::{CardanoMessage, Message};
+use acropolis_common::{
+    messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
+    queries::utxos::{UTxOStateQuery, UTxOStateQueryResponse, DEFAULT_UTXOS_QUERY_TOPIC},
+};
 use caryatid_sdk::{module, Context, Module};
 
 use anyhow::{anyhow, Result};
@@ -50,6 +53,10 @@ impl UTXOState {
             config.get_string("subscribe-topic").unwrap_or(DEFAULT_SUBSCRIBE_TOPIC.to_string());
         info!("Creating subscriber on '{subscribe_topic}'");
 
+        let utxos_query_topic = config
+            .get_string(DEFAULT_UTXOS_QUERY_TOPIC.0)
+            .unwrap_or(DEFAULT_UTXOS_QUERY_TOPIC.1.to_string());
+
         // Create store
         let store_type = config.get_string("store").unwrap_or(DEFAULT_STORE.to_string());
         let store: Arc<dyn ImmutableUTXOStore> = match store_type.as_str() {
@@ -95,6 +102,32 @@ impl UTXOState {
 
                     _ => error!("Unexpected message type: {message:?}"),
                 }
+            }
+        });
+
+        // Query handler
+        let state_query = state.clone();
+        context.handle(&utxos_query_topic, move |message| {
+            let state_mutex = state_query.clone();
+            async move {
+                let Message::StateQuery(StateQuery::UTxOs(query)) = message.as_ref() else {
+                    return Arc::new(Message::StateQueryResponse(StateQueryResponse::UTxOs(
+                        UTxOStateQueryResponse::Error("Invalid message for utxo-state".into()),
+                    )));
+                };
+
+                let state = state_mutex.lock().await;
+                let response = match query {
+                    UTxOStateQuery::GetUTxOsSum { utxo_identifiers } => {
+                        match state.get_utxos_sum(utxo_identifiers).await {
+                            Ok(balance) => UTxOStateQueryResponse::UTxOsSum(balance),
+                            Err(e) => UTxOStateQueryResponse::Error(e.to_string()),
+                        }
+                    }
+                };
+                Arc::new(Message::StateQueryResponse(StateQueryResponse::UTxOs(
+                    response,
+                )))
             }
         });
 
