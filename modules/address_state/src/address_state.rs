@@ -315,35 +315,44 @@ mod tests {
         Address::from_string("DdzFFzCqrht7fNAHwdou7iXPJ5NZrssAH53yoRMUtF9t6momHH52EAxM5KmqDwhrjT7QsHjbMPJUBywmzAgmF4hj2h9eKj4U6Ahandyy").unwrap()
     }
 
+    fn test_config() -> AddressStorageConfig {
+        AddressStorageConfig {
+            store_info: true,
+            store_transactions: true,
+            store_totals: true,
+        }
+    }
+
+    async fn setup_state_and_store() -> Result<(Arc<FjallImmutableAddressStore>, State)> {
+        let tmpdir = tempdir().unwrap();
+        let store = Arc::new(FjallImmutableAddressStore::new(tmpdir.path())?);
+        let config = test_config();
+        let mut state = State::new(config.clone());
+        state.volatile_entries.epoch_start_block = 1;
+        Ok((store, state))
+    }
+
+    fn delta(addr: &Address, utxo: &UTxOIdentifier, lovelace: i64) -> AddressDelta {
+        AddressDelta {
+            address: addr.clone(),
+            utxo: utxo.clone(),
+            value: ValueDelta {
+                lovelace,
+                assets: Vec::new(),
+            },
+        }
+    }
+
     #[tokio::test]
     async fn test_persist_all_and_read_back() -> Result<()> {
         let _ = tracing_subscriber::fmt::try_init();
 
-        // Temp store directory
-        let tmpdir = tempdir().unwrap();
-        let store = Arc::new(FjallImmutableAddressStore::new(tmpdir.path())?);
+        let (store, mut state) = setup_state_and_store().await?;
+        let config = test_config();
 
-        // Config: store everything
-        let config = AddressStorageConfig {
-            store_info: true,
-            store_transactions: true,
-            store_totals: true,
-        };
-
-        // Build fake delta
         let addr = dummy_address();
-        let deltas = vec![AddressDelta {
-            address: addr.clone(),
-            utxo: UTxOIdentifier::new(0, 0, 0),
-            value: ValueDelta {
-                lovelace: 1,
-                assets: Vec::new(),
-            },
-        }];
-
-        // Create a ready state
-        let mut state = State::new(config.clone());
-        state.volatile_entries.epoch_start_block = 1;
+        let utxo = UTxOIdentifier::new(0, 0, 0);
+        let deltas = vec![delta(&addr, &utxo, 1)];
 
         // Apply deltas
         state.handle_address_deltas(&deltas)?;
@@ -364,6 +373,95 @@ mod tests {
         // Epoch marker advanced
         let last_epoch = store.get_last_epoch_stored().await?;
         assert_eq!(last_epoch, Some(0));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_utxo_removed_when_spent() -> Result<()> {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let (store, mut state) = setup_state_and_store().await?;
+        let config = test_config();
+
+        let addr = dummy_address();
+        let utxo = UTxOIdentifier::new(0, 0, 0);
+
+        // Before processing
+        assert!(
+            state.get_address_utxos(store.as_ref(), &addr).await?.is_none(),
+            "Expected no UTxOs before creation"
+        );
+
+        let created = vec![delta(&addr, &utxo, 1)];
+
+        state.handle_address_deltas(&created)?;
+
+        // After processing creation
+        let after_create = state.get_address_utxos(store.as_ref(), &addr).await?;
+        assert_eq!(after_create.as_ref().unwrap(), &[utxo]);
+
+        state.volatile_entries.persist_all(store.as_ref(), &config).await?;
+
+        // After persisting creation
+        let after_persist = state.get_address_utxos(store.as_ref(), &addr).await?;
+        assert_eq!(after_persist.as_ref().unwrap(), &[utxo]);
+
+        state.volatile_entries.next_block();
+        state.volatile_entries.epoch_start_block = 2;
+        state.handle_address_deltas(&[delta(&addr, &utxo, -1)])?;
+
+        // After processing spend
+        let after_spend_volatile = state.get_address_utxos(store.as_ref(), &addr).await?;
+        assert!(after_spend_volatile.as_ref().map_or(true, |u| u.is_empty()));
+
+        state.volatile_entries.persist_all(store.as_ref(), &config).await?;
+
+        // After persisting spend
+        let after_spend_disk = state.get_address_utxos(store.as_ref(), &addr).await?;
+        assert!(after_spend_disk.as_ref().map_or(true, |u| u.is_empty()));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_utxo_spent_and_created_across_blocks_in_volatile() -> Result<()> {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let (store, mut state) = setup_state_and_store().await?;
+        let config = test_config();
+
+        let addr = dummy_address();
+        let utxo_old = UTxOIdentifier::new(0, 0, 0);
+        let utxo_new = UTxOIdentifier::new(0, 1, 0);
+
+        state.volatile_entries.epoch_start_block = 1;
+
+        state.handle_address_deltas(&[delta(&addr, &utxo_old, 1)])?;
+        state.volatile_entries.next_block();
+        state.handle_address_deltas(&[delta(&addr, &utxo_old, -1), delta(&addr, &utxo_new, 1)])?;
+
+        // Create and spend both in volatile is not included in address utxos
+        let volatile = state.get_address_utxos(store.as_ref(), &addr).await?;
+        assert!(
+            volatile.as_ref().is_some_and(|u| u.contains(&utxo_new) && !u.contains(&utxo_old)),
+            "Expected only new UTxO {:?} in volatile view, got {:?}",
+            utxo_new,
+            volatile
+        );
+
+        state.volatile_entries.persist_all(store.as_ref(), &config).await?;
+
+        // UTxO not persisted to disk if created and spent in pruned volatile window
+        let persisted_view = state.get_address_utxos(store.as_ref(), &addr).await?;
+        assert!(
+            persisted_view
+                .as_ref()
+                .is_some_and(|u| u.contains(&utxo_new) && !u.contains(&utxo_old)),
+            "Expected only new UTxO {:?} after persistence, got {:?}",
+            utxo_new,
+            persisted_view
+        );
 
         Ok(())
     }
