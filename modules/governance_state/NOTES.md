@@ -45,6 +45,86 @@ If ratified at E/E+1 transition, actions take place at E+1/E+2 boundary.
 Rewards are paid at E+1/E+2 transition (?)
 Deposits transferred to reward account.
 
+### Counting votes
+
+Proper votes counting (see `cardano-ledger/eras/conway/impl/src/Cardano/Ledger/Conway/Rules/Ratify.hs`)
+
+Committee:
+```
+-- Compute the ratio yes/(yes + no), where
+-- yes:
+--      - the number of registered, unexpired, unresigned committee members that voted yes
+-- no:
+--      - the number of registered, unexpired, unresigned committee members that voted no, plus
+--      - the number of registered, unexpired, unresigned committee members that did not vote for this action
+--
+-- We iterate over the committee, and incrementally construct the numerator and denominator,
+-- based on the votes and the committee state.
+```
+Committee voting should also check committee members expiration.
+
+```
+-- | Final ratio for `totalAcceptedStakePoolsRatio` we want during the bootstrap period is:
+-- t = y \/ (s - a)
+-- Where:
+--  * `y` - total delegated stake that voted Yes
+--  * `a` - total delegated stake that voted Abstain
+--  * `s` - total delegated stake
+--
+-- For `HardForkInitiation` all SPOs that didn't vote are considered as
+-- `No` votes. Whereas, for all other `GovAction`s, SPOs that didn't
+-- vote are considered as `Abstain` votes.
+--
+-- `No` votes are not counted.
+-- After the bootstrap period if an SPO didn't vote, it will be considered as a `No` vote by default.
+-- The only exceptions are when a pool delegated to an `AlwaysNoConfidence` or an `AlwaysAbstain` DRep.
+-- In those cases, behaviour is as expected: vote `Yes` on `NoConfidence` proposals in case of the former and
+-- and vote `Abstain` by default in case of the latter. For `HardForkInitiation`, behaviour is the same as
+-- during the bootstrap period: if an SPO didn't vote, their vote will always count as `No`.
+```
+
+The description is a bit hard to understand, the actual code is the following:
+
+```
+         in case vote of
+              Nothing
+                | HardForkInitiation {} <- pProcGovAction -> (yes, abstain)
+                | bootstrapPhase pv -> (yes, abstain + stake)
+                | otherwise -> case defaultStakePoolVote poolId rePoolParams reDelegatees of
+                    DefaultNoConfidence
+                      | NoConfidence {} <- pProcGovAction -> (yes + stake, abstain)
+                    DefaultAbstain -> (yes, abstain + stake)
+                    _ -> (yes, abstain) -- Default is No, unless overridden by one of the above cases
+              Just Abstain -> (yes, abstain + stake)
+              Just VoteNo -> (yes, abstain)
+              Just VoteYes -> (yes + stake, abstain)
+      (yesStake, abstainStake) =
+```
+And then the final ratio is:
+```
+    toInteger yesStake %? toInteger (totalActiveStake - abstainStake)
+```
+
+So, the formula is the same and the difference between bootstrap period and normal operation is the way 
+how not voted SPOs are treated:
+* HardFork voting -- same as in bootstrap, all non-voted SPOs are 'No';
+* Normal voting with SPO as 'DefaultNoConfidence' -- no-confidence as 'Yes', otherwise as 'Abstain'
+* Normal voting with SPO as 'DefaultAbstain' -- counted as 'Abstain'
+* Normal voting with normal SPO -- counted as 'No'
+
+```
+-- Compute the dRep ratio yes/(yes + no), where
+-- yes: is the total stake of
+--    - registered dReps that voted 'yes', plus
+--    - the AlwaysNoConfidence dRep, in case the action is NoConfidence
+-- no: is the total stake of
+--    - registered dReps that voted 'no', plus
+--    - registered dReps that did not vote for this action, plus
+--    - the AlwaysNoConfidence dRep
+-- In other words, the denominator `yes + no` is the total stake of all registered dReps, minus the abstain votes stake
+-- (both credential DReps and AlwaysAbstain)
+```
+
 ### Bootstrap period (Chang sub-era of Conway)
 
 Conway era is split into two parts: Chang (9.0 protocol version) and 
