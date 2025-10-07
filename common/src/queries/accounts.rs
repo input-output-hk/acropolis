@@ -53,16 +53,17 @@ pub enum AccountsStateQueryResponse {
     AccountsUtxoValuesSum(u64),
     AccountsBalancesMap(HashMap<Vec<u8>, u64>),
     AccountsBalancesSum(u64),
-    // TODO: Implement GetAccountBalances (credential + balance)
+
+    // Epochs-related responses
     ActiveStakes(u64),
 
-    // Pools related responses
+    // Pools-related responses
     OptimalPoolSizing(Option<OptimalPoolSizing>),
     PoolsLiveStakes(Vec<u64>),
     PoolDelegators(PoolDelegators),
     PoolLiveStake(PoolLiveStakeInfo),
 
-    // DReps related responses
+    // DReps-related responses
     DrepDelegators(DrepDelegators),
     AccountsDrepDelegationsMap(HashMap<Vec<u8>, Option<DRepChoice>>),
 

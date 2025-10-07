@@ -94,7 +94,7 @@ pub async fn handle_epoch_info_blockfrost(
                     AccountsStateQueryResponse::ActiveStakes(total_active_stake),
                 )) => Ok(Some(total_active_stake)),
                 _ => Err(anyhow::anyhow!(
-                    "Unexpected message type while retrieving total active stakes",
+                    "Unexpected message type while retrieving the latest total active stakes",
                 )),
             },
         )
@@ -118,7 +118,7 @@ pub async fn handle_epoch_info_blockfrost(
                     SPDDStateQueryResponse::Error(_e),
                 )) => Ok(None),
                 _ => Err(anyhow::anyhow!(
-                    "Unexpected message type while retrieving total active stakes",
+                    "Unexpected message type while retrieving total active stakes for epoch: {epoch_number}",
                 )),
             },
         )
