@@ -183,22 +183,22 @@ impl State {
                 &self.drep_stake,
                 &self.spo_stake,
             )?;
-            let outcome = self.conway_voting.put_outcomes_to_queue(new_block.epoch, ratified)?;
-            let acc = outcome.iter().filter(|oc| oc.voting.accepted).count();
+            self.conway_voting.update_action_status_with_outcomes(new_block.epoch, &ratified)?;
+            let acc = ratified.iter().filter(|oc| oc.voting.accepted).count();
 
             info!(
                 "Conway voting, epoch {} ({}): {voting_state}, total {} actions, {acc} accepted",
                 new_block.epoch,
                 new_block.era,
-                outcome.len()
+                ratified.len()
             );
 
             self.conway_voting.log_conway_voting_stats();
             info!(
-                "Conway voting: new epoch {}, outcomes: {outcome:?}",
+                "Conway voting: new epoch {}, outcomes: {ratified:?}",
                 new_block.epoch
             );
-            output.conway_outcomes = outcome;
+            output.conway_outcomes = ratified;
         }
 
         self.conway_voting.print_outcome_to_verify(&output.conway_outcomes)?;

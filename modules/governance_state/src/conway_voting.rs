@@ -48,7 +48,6 @@ pub struct ConwayVoting {
     pub proposals: HashMap<GovActionId, (u64, ProposalProcedure)>,
     pub votes: HashMap<GovActionId, HashMap<Voter, (TxHash, VotingProcedure)>>,
     action_status: HashMap<GovActionId, ActionStatus>,
-    enaction_waiting_list: Vec<(u64, GovernanceOutcome)>,
 
     verification_output_file: Option<String>,
     action_proposal_count: usize,
@@ -63,7 +62,6 @@ impl ConwayVoting {
             proposals: Default::default(),
             votes: Default::default(),
             action_status: Default::default(),
-            enaction_waiting_list: vec![],
             action_proposal_count: 0,
             votes_count: 0,
             verification_output_file,
@@ -467,14 +465,14 @@ impl ConwayVoting {
         info!("*** End of voting stats ***");
     }
 
-    /// Adds final `outcomes` of ratification to enaction waiting list.
-    /// Takes all outcomes that are enacted at the start of the current epoch.
-    pub fn put_outcomes_to_queue(
+    /// Processes final `outcomes`, checks ratification/enaction epochs,
+    /// updates `action_status` data structrure.
+    pub fn update_action_status_with_outcomes(
         &mut self,
         epoch: u64,
-        outcomes: Vec<GovernanceOutcome>,
-    ) -> Result<Vec<GovernanceOutcome>> {
-        for one_outcome in outcomes.into_iter() {
+        outcomes: &Vec<GovernanceOutcome>,
+    ) -> Result<()> {
+        for one_outcome in outcomes.iter() {
             let action_id = &one_outcome.voting.procedure.gov_action_id;
             let action = self
                 .action_status
@@ -493,21 +491,8 @@ impl ConwayVoting {
                 }
                 action.expiration_epoch = Some(epoch);
             }
-            self.enaction_waiting_list.push((epoch, one_outcome));
         }
-
-        let mut for_enactment = Vec::new();
-        for (dest_epoch, outcome) in self.enaction_waiting_list.iter() {
-            if *dest_epoch == epoch {
-                for_enactment.push(outcome.clone());
-            } else if *dest_epoch < epoch {
-                error!("Enacted epoch missed! Expected {dest_epoch}, now {epoch}, {outcome:?}")
-            }
-        }
-
-        self.enaction_waiting_list.retain(|(dest_epoch, _)| *dest_epoch > epoch);
-
-        Ok(for_enactment)
+        Ok(())
     }
 
     pub fn get_stats(&self) -> String {
@@ -570,15 +555,8 @@ mod tests {
             },
         );
 
-        let r0 = voting.put_outcomes_to_queue(0, vec![])?;
-        assert_eq!(r0.len(), 0);
-
-        let r1 = voting.put_outcomes_to_queue(1, vec![oc1.clone()])?;
-        assert_eq!(r1.len(), 1);
-        assert_eq!(
-            r1.get(0).unwrap().voting.procedure.gov_action_id.action_index,
-            1
-        );
+        voting.update_action_status_with_outcomes(0,  &vec![])?;
+        voting.update_action_status_with_outcomes(1, &vec![oc1.clone()])?;
         assert_eq!(
             voting
                 .action_status
@@ -602,13 +580,7 @@ mod tests {
                 expiration_epoch: None,
             },
         );
-
-        let r2 = voting.put_outcomes_to_queue(2, vec![oc2.clone()])?;
-        assert_eq!(r2.len(), 1);
-        assert_eq!(
-            r2.get(0).unwrap().voting.procedure.gov_action_id.action_index,
-            2
-        );
+        voting.update_action_status_with_outcomes(2, &vec![oc2.clone()])?;
         assert_eq!(
             voting
                 .action_status
@@ -621,10 +593,6 @@ mod tests {
             voting.action_status.get(&oc2.voting.procedure.gov_action_id).unwrap().enactment_epoch,
             Some(3)
         );
-
-        let r3 = voting.put_outcomes_to_queue(3, vec![])?;
-        assert_eq!(r3.len(), 0);
-
         Ok(())
     }
 
@@ -635,26 +603,4 @@ mod tests {
         assert_eq!(xx, "\"\"A\"\"\"\" lot (\"\"of\"\") quotes\"\"");
         Ok(())
     }
-
-    /*
-    #[test]
-    fn test_chained_actions() -> Result<()> {
-        let mut voting = ConwayVoting::new(None);
-        let mut oc1 = create_governance_outcome(1);
-        oc1.voting.procedure.gov_action = GovernanceAction::NoConfidence(None);
-        voting.action_status.insert(oc1.voting.procedure.gov_action_id.clone(), ActionStatus {
-            expiration_epoch: 3,
-            ratification_epoch: None,
-            enactment_epoch: None,
-        });
-
-        let mut oc2 = create_governance_outcome(2);
-        oc2.voting.procedure.gov_action = GovernanceAction::NoConfidence(Some(oc1.voting.procedure.gov_action_id.clone()));
-        voting.action_status.insert(oc2.voting.procedure.gov_action_id.clone(), ActionStatus {
-            expiration_epoch: 3,
-            ratification_epoch: None,
-            enactment_epoch: None,
-        });
-    }
-     */
 }
