@@ -152,9 +152,7 @@ impl State {
     }
 
     /// Sum total_active_stake for delegators of all spos in the latest snapshot
-    pub fn get_latest_snapshot_account_balances(
-        &self,
-    ) -> u64 {
+    pub fn get_latest_snapshot_account_balances(&self) -> u64 {
         let mut total_active_stake: u64 = 0;
         for spo in self.rewards_state.mark.spos.iter() {
             for delegator in spo.1.delegators.iter() {

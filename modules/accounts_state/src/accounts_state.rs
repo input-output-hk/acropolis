@@ -226,7 +226,7 @@ impl AccountsState {
                     _ => error!("Unexpected message type: {message:?}"),
                 }
 
-                // Update parameters - *after* reward calculation in epoch-activity above
+                // Update parameters - *after* reward calculation in the epoch-activity above
                 // ready for the *next* epoch boundary
                 let (_, message) = params_message_f.await?;
                 match message.as_ref() {
@@ -516,7 +516,9 @@ impl AccountsState {
                     }
 
                     AccountsStateQuery::GetActiveStakes {} => {
-                        AccountsStateQueryResponse::ActiveStakes(state.get_latest_snapshot_account_balances())
+                        AccountsStateQueryResponse::ActiveStakes(
+                            state.get_latest_snapshot_account_balances(),
+                        )
                     }
 
                     AccountsStateQuery::GetAccountsBalancesSum { stake_keys } => {
