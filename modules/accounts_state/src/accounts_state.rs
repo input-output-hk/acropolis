@@ -7,7 +7,7 @@ use acropolis_common::{
     state_history::{StateHistory, StateHistoryStore},
     BlockInfo, BlockStatus,
 };
-use anyhow::{Result, Context as AnyhowContext};
+use anyhow::Result;
 use caryatid_sdk::{message_bus::Subscription, module, Context, Module};
 use config::Config;
 use std::sync::Arc;

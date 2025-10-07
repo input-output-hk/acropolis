@@ -20,11 +20,9 @@ use acropolis_common::{
 };
 use anyhow::Result;
 use imbl::OrdMap;
-use rayon::prelude::*;
-use serde_with::{hex::Hex, serde_as};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::mem::take;
-use std::sync::{atomic::AtomicU64, Arc, Mutex, mpsc};
+use std::sync::{Arc, Mutex, mpsc};
 use tokio::task::{spawn_blocking, JoinHandle};
 use tracing::{debug, error, info, warn};
 

@@ -7,7 +7,6 @@ use itertools::EitherOrBoth::{Both, Left, Right};
 use itertools::Itertools;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
-use anyhow::Result;
 use tracing::{debug, error, info, warn};
 
 /// Verifier
