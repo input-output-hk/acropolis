@@ -253,8 +253,9 @@ impl ParametersUpdater {
             EnactStateElem::Constitution(cu) => c.constitution = cu.clone(),
             EnactStateElem::Committee(cu) => Self::update_committee(&mut c.committee, cu),
             EnactStateElem::NoConfidence => c.committee.members.clear(),
-            EnactStateElem::ProtVer(pv) => 
+            EnactStateElem::ProtVer(pv) => {
                 self.sh_upd(|sp| &mut sp.protocol_version, &Some(pv.clone()))?
+            }
         }
 
         Ok(())

@@ -15,9 +15,8 @@ use std::{collections::HashMap, sync::Arc};
 use tracing::{error, info};
 
 use crate::{
-    alonzo_babbage_voting::AlonzoBabbageVoting,
-    conway_voting::ConwayVoting,
-    VotingRegistrationState
+    alonzo_babbage_voting::AlonzoBabbageVoting, conway_voting::ConwayVoting,
+    VotingRegistrationState,
 };
 
 pub struct State {
@@ -31,14 +30,14 @@ pub struct State {
     spo_stake: HashMap<KeyHash, DelegatedStake>,
 
     alonzo_babbage_voting: AlonzoBabbageVoting,
-    conway_voting: ConwayVoting
+    conway_voting: ConwayVoting,
 }
 
 impl State {
     pub fn new(
         context: Arc<Context<Message>>,
         enact_state_topic: String,
-        verification_output_file: Option<String>
+        verification_output_file: Option<String>,
     ) -> Self {
         Self {
             context,
@@ -78,8 +77,7 @@ impl State {
                 let bootstrap = ps.protocol_params.protocol_version.is_chang()?;
                 self.conway_voting.update_parameters(&message.params.conway, bootstrap)
             }
-        }
-        else if message.params.conway.is_some() {
+        } else if message.params.conway.is_some() {
             bail!("Impossible parameters combination: Shelley is missing, but Conway is present.");
         }
 
@@ -131,7 +129,10 @@ impl State {
             for (trans, vproc) in &governance_message.voting_procedures {
                 for (voter, voter_votes) in vproc.votes.iter() {
                     if let Err(e) = self.conway_voting.insert_voting_procedure(
-                        block.epoch, voter, trans, voter_votes
+                        block.epoch,
+                        voter,
+                        trans,
+                        voter_votes,
                     ) {
                         error!(
                             "Error handling governance voting block {}, trans {}: '{}'",
@@ -177,7 +178,10 @@ impl State {
         if self.current_era >= Era::Conway {
             let voting_state = self.recalculate_voting_state()?;
             let ratified = self.conway_voting.finalize_conway_voting(
-                &new_block, &voting_state, &self.drep_stake, &self.spo_stake
+                &new_block,
+                &voting_state,
+                &self.drep_stake,
+                &self.spo_stake,
             )?;
             let outcome = self.conway_voting.put_outcomes_to_queue(new_block.epoch, ratified)?;
             let acc = outcome.iter().filter(|oc| oc.voting.accepted).count();
@@ -190,7 +194,10 @@ impl State {
             );
 
             self.conway_voting.log_conway_voting_stats();
-            info!("Conway voting: new epoch {}, outcomes: {outcome:?}", new_block.epoch);
+            info!(
+                "Conway voting: new epoch {}, outcomes: {outcome:?}",
+                new_block.epoch
+            );
             output.conway_outcomes = outcome;
         }
 
@@ -199,10 +206,12 @@ impl State {
     }
 
     fn log_stats(&self) {
-        info!("{}, {}, drep stake msgs (size): {} ({})",
+        info!(
+            "{}, {}, drep stake msgs (size): {} ({})",
             self.alonzo_babbage_voting.get_stats(),
             self.conway_voting.get_stats(),
-            self.drep_stake_messages_count, self.drep_stake.len(),
+            self.drep_stake_messages_count,
+            self.drep_stake.len(),
         );
     }
 

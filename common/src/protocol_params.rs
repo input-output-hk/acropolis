@@ -228,7 +228,9 @@ pub struct ProtocolVersion {
 }
 
 impl ProtocolVersion {
-    pub fn new(major: u64, minor: u64) -> Self { Self { major, minor } }
+    pub fn new(major: u64, minor: u64) -> Self {
+        Self { major, minor }
+    }
 
     pub fn is_chang(&self) -> Result<bool> {
         if self.major == 9 {
@@ -377,21 +379,21 @@ mod tests {
 
     #[test]
     fn test_protocol_version_order() {
-         let v9_0 = ProtocolVersion::new(9,0);
-         let v9_1 = ProtocolVersion::new(9,1);
-         let v9_10 = ProtocolVersion::new(9,10);
-         let v10_0 = ProtocolVersion::new(10,0);
-         let v10_9 = ProtocolVersion::new(10,9);
-         let v10_10 = ProtocolVersion::new(10,10);
-         let v10_11 = ProtocolVersion::new(10,11);
+        let v9_0 = ProtocolVersion::new(9, 0);
+        let v9_1 = ProtocolVersion::new(9, 1);
+        let v9_10 = ProtocolVersion::new(9, 10);
+        let v10_0 = ProtocolVersion::new(10, 0);
+        let v10_9 = ProtocolVersion::new(10, 9);
+        let v10_10 = ProtocolVersion::new(10, 10);
+        let v10_11 = ProtocolVersion::new(10, 11);
 
-         assert!(v10_9 > v9_10);
+        assert!(v10_9 > v9_10);
 
-         let from = vec![v9_0, v9_1, v9_10, v10_0, v10_9, v10_10, v10_11];
-         let mut upd = from.clone();
-         upd.sort();
+        let from = vec![v9_0, v9_1, v9_10, v10_0, v10_9, v10_10, v10_11];
+        let mut upd = from.clone();
+        upd.sort();
 
-         assert_eq!(from, upd);
+        assert_eq!(from, upd);
     }
 
     #[test]
@@ -403,9 +405,9 @@ mod tests {
 
         assert_eq!(v9_0, v9_0a);
         assert_eq!(v0_9, v0_9a);
-        assert_eq!(v9_0, ProtocolVersion::new(9,0));
+        assert_eq!(v9_0, ProtocolVersion::new(9, 0));
         assert_eq!(v9_0.major, 9);
-        assert_eq!(v0_9, ProtocolVersion::new(0,9));
+        assert_eq!(v0_9, ProtocolVersion::new(0, 9));
 
         Ok(())
     }

@@ -231,12 +231,12 @@ impl PlaybackRunner {
 
     async fn run(&mut self) -> Result<()> {
         match self.run_loop().await {
-            Err(e) => { 
+            Err(e) => {
                 tracing::error!("Error running playback: {e}");
                 Err(e)
             }
             Ok(()) => {
-                info!("Playback is over"); 
+                info!("Playback is over");
                 Ok(())
             }
         }

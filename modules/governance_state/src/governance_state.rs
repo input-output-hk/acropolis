@@ -20,9 +20,9 @@ use tokio::sync::Mutex;
 use tracing::{error, info, info_span, Instrument};
 
 mod alonzo_babbage_voting;
+mod conway_voting;
 mod state;
 mod voting_state;
-mod conway_voting;
 
 use state::State;
 use voting_state::VotingRegistrationState;
@@ -143,7 +143,7 @@ impl GovernanceState {
         let state = Arc::new(Mutex::new(State::new(
             context.clone(),
             config.enact_state_topic.clone(),
-            config.verification_output_file.clone()
+            config.verification_output_file.clone(),
         )));
 
         // Ticker to log stats

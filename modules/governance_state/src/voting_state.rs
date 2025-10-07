@@ -171,7 +171,7 @@ impl VotingRegistrationState {
     fn get_plomin_action_thresholds(
         &self,
         pp: &ProposalProcedure,
-        thresholds: &ConwayParams
+        thresholds: &ConwayParams,
     ) -> Result<VotesCount> {
         let d = &thresholds.d_rep_voting_thresholds;
         let p = &thresholds.pool_voting_thresholds;
@@ -244,7 +244,7 @@ impl VotingRegistrationState {
         &self,
         pp: &ProposalProcedure,
         thresholds: &ConwayParams,
-        bootstrap: bool
+        bootstrap: bool,
     ) -> Result<VotesCount> {
         // In case of governance bootstrap (Chang sub-era for Conway) Info, ParamChange and
         // HardFork actions are allowed, with dreps voting only for Info.
@@ -252,18 +252,16 @@ impl VotingRegistrationState {
             match &pp.gov_action {
                 GovernanceAction::Information => self.get_plomin_action_thresholds(pp, thresholds),
 
-                GovernanceAction::ParameterChange(_) |
-                GovernanceAction::HardForkInitiation(_) => {
+                GovernanceAction::ParameterChange(_) | GovernanceAction::HardForkInitiation(_) => {
                     let mut votes_count = self.get_plomin_action_thresholds(pp, thresholds)?;
                     votes_count.drep = 0;
                     Ok(votes_count)
                 }
 
                 // All other actions can never be approved
-                _ => Ok(VotesCount::infinity())
+                _ => Ok(VotesCount::infinity()),
             }
-        }
-        else {
+        } else {
             self.get_plomin_action_thresholds(pp, thresholds)
         }
     }

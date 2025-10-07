@@ -1430,13 +1430,25 @@ pub enum GovernanceAction {
 impl GovernanceAction {
     pub fn get_previous_action_id(&self) -> Option<GovActionId> {
         match &self {
-            Self::ParameterChange(ParameterChangeAction {previous_action_id: prev, ..}) => prev.clone(),
-            Self::HardForkInitiation(HardForkInitiationAction {previous_action_id: prev, ..}) => prev.clone(),
+            Self::ParameterChange(ParameterChangeAction {
+                previous_action_id: prev,
+                ..
+            }) => prev.clone(),
+            Self::HardForkInitiation(HardForkInitiationAction {
+                previous_action_id: prev,
+                ..
+            }) => prev.clone(),
             Self::TreasuryWithdrawals(_) => None,
             Self::NoConfidence(prev) => prev.clone(),
-            Self::UpdateCommittee(UpdateCommitteeAction {previous_action_id: prev, ..}) => prev.clone(),
-            Self::NewConstitution(NewConstitutionAction {previous_action_id: prev, ..}) => prev.clone(),
-            Self::Information => None
+            Self::UpdateCommittee(UpdateCommitteeAction {
+                previous_action_id: prev,
+                ..
+            }) => prev.clone(),
+            Self::NewConstitution(NewConstitutionAction {
+                previous_action_id: prev,
+                ..
+            }) => prev.clone(),
+            Self::Information => None,
         }
     }
 }
@@ -1522,7 +1534,7 @@ impl VotesCount {
         Self {
             committee: u64::MAX,
             drep: u64::MAX,
-            pool: u64::MAX
+            pool: u64::MAX,
         }
     }
 
