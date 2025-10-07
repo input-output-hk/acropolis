@@ -555,7 +555,7 @@ mod tests {
             },
         );
 
-        voting.update_action_status_with_outcomes(0,  &vec![])?;
+        voting.update_action_status_with_outcomes(0, &vec![])?;
         voting.update_action_status_with_outcomes(1, &vec![oc1.clone()])?;
         assert_eq!(
             voting
