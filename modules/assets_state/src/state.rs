@@ -379,7 +379,7 @@ impl State {
                 continue;
             };
 
-            let tx_identifier = output.utxo_identifier.to_tx_identifier();
+            let tx_identifier = TxIdentifier::from(output.utxo_identifier);
             for (policy_id, assets) in &output.value.assets {
                 for asset in assets {
                     if let Some(asset_id) = registry.lookup_id(policy_id, &asset.name) {
@@ -1351,9 +1351,6 @@ mod tests {
             StoreTransactions::All,
         );
 
-        let tx1 = TxIdentifier::new(9, 0);
-        let tx2 = TxIdentifier::new(10, 0);
-
         let out1 = make_output(policy_id, asset_name.clone(), None);
         let out2 = make_output(policy_id, asset_name.clone(), None);
 
@@ -1373,8 +1370,8 @@ mod tests {
         // Both transactions were added to the Vec
         assert_eq!(entry.len(), 2);
         // Transactions are in order oldest to newest
-        assert_eq!(entry[0], tx1);
-        assert_eq!(entry[1], tx2);
+        assert_eq!(entry[0], TxIdentifier::new(9, 0));
+        assert_eq!(entry[1], TxIdentifier::new(10, 0));
     }
 
     #[test]
@@ -1390,9 +1387,6 @@ mod tests {
             false,
             StoreTransactions::Last(2),
         );
-
-        let tx2 = TxIdentifier::new(8, 0);
-        let tx3 = TxIdentifier::new(7, 0);
 
         let base_output = make_output(policy_id, asset_name.clone(), None);
         let delta1 = UTXODelta::Output(acropolis_common::TxOutput {
@@ -1415,8 +1409,8 @@ mod tests {
         // Transactions are pruned at the prune config
         assert_eq!(entry.len(), 2);
         // Transactions are in order with newest last
-        assert_eq!(entry[0], tx2);
-        assert_eq!(entry[1], tx3);
+        assert_eq!(entry[0], TxIdentifier::new(8, 0));
+        assert_eq!(entry[1], TxIdentifier::new(7, 0));
     }
 
     #[test]

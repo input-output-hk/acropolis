@@ -184,12 +184,7 @@ impl State {
         let key = input.utxo_identifier;
 
         if tracing::enabled!(tracing::Level::DEBUG) {
-            debug!(
-                "UTXO << {}:{}:{}",
-                key.block_number(),
-                key.tx_index(),
-                key.output_index()
-            );
+            debug!("UTXO << {}", key);
         }
 
         // UTXO exists?
@@ -240,12 +235,7 @@ impl State {
     /// Observe an output UXTO creation
     pub async fn observe_output(&mut self, output: &TxOutput, block: &BlockInfo) -> Result<()> {
         if tracing::enabled!(tracing::Level::DEBUG) {
-            debug!(
-                "UTXO >> {}:{}:{}",
-                output.utxo_identifier.block_number(),
-                output.utxo_identifier.tx_index(),
-                output.utxo_identifier.output_index(),
-            );
+            debug!("UTXO >> {}", output.utxo_identifier);
             debug!(
                 "        - adding {} to {:?}",
                 output.value.coin(),

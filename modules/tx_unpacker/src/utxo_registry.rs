@@ -5,26 +5,29 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 /// Volatile registry for entries within rollback window
 #[derive(Clone)]
-pub struct VolatileIndex<K> {
+struct VolatileIndex<K> {
     window: VecDeque<HashSet<K>>,
-    start_block: u32,
+    start_index: u32,
     capacity: usize,
 }
 
 impl<K: Eq + std::hash::Hash> VolatileIndex<K> {
     pub fn new(k: u32) -> Self {
         let capacity = (k + 1) as usize;
+        let mut window = VecDeque::with_capacity(capacity);
+        window.push_back(Default::default());
+
         VolatileIndex {
-            window: VecDeque::with_capacity(capacity),
+            window,
             capacity,
-            start_block: 0,
+            start_index: 0,
         }
     }
 
-    pub fn next_block(&mut self) {
+    pub fn next_index(&mut self) {
         if self.window.len() == self.capacity {
             self.window.pop_front();
-            self.start_block += 1;
+            self.start_index += 1;
         }
         self.window.push_back(HashSet::new());
     }
@@ -33,21 +36,32 @@ impl<K: Eq + std::hash::Hash> VolatileIndex<K> {
         if let Some(current) = self.window.back_mut() {
             current.insert(key);
         } else {
-            panic!("Called add() before any block was initialized with next_block()");
+            panic!("VolatileIndex window should never be empty");
         }
     }
 
-    pub fn prune_on_or_after(&mut self, block: u32) -> Vec<K> {
+    pub fn prune_on_or_after(&mut self, index: u32) -> Result<Vec<K>, String> {
+        if index < self.start_index {
+            return Err(format!(
+                "cannot prune before start_index (requested: {}, start_index: {})",
+                index, self.start_index,
+            ));
+        }
+
         let mut out = Vec::new();
-        while let Some(last_block) = self.start_block.checked_add(self.window.len() as u32 - 1) {
-            if last_block < block {
+        while let Some(last_block) = self.start_index.checked_add(
+            u32::try_from(self.window.len())
+                .map_err(|_| "window length exceeds u32::MAX")?
+                .saturating_sub(1),
+        ) {
+            if last_block < index {
                 break;
             }
             if let Some(set) = self.window.pop_back() {
                 out.extend(set);
             }
         }
-        out
+        Ok(out)
     }
 }
 
@@ -58,7 +72,7 @@ pub struct UTxORegistry {
     live_map: HashMap<TxOutRef, TxIdentifier>,
     created: VolatileIndex<TxOutRef>,
     spent: VolatileIndex<(TxOutRef, TxIdentifier)>,
-    last_number: u32,
+    last_block_number: u32,
 }
 
 impl Default for UTxORegistry {
@@ -73,25 +87,25 @@ impl UTxORegistry {
             live_map: HashMap::new(),
             created: VolatileIndex::new(k),
             spent: VolatileIndex::new(k),
-            last_number: 0,
+            last_block_number: 0,
         }
     }
 
     pub fn bootstrap_from_genesis_utxos(&mut self, pairs: &Vec<(TxOutRef, TxIdentifier)>) {
-        self.created.next_block();
-        self.spent.next_block();
+        self.created.next_index();
+        self.spent.next_index();
 
         for (utxo_ref, id) in pairs {
             self.live_map.insert(*utxo_ref, *id);
             self.created.add(*utxo_ref);
         }
-        self.last_number = 0;
+        self.last_block_number = 0;
     }
 
     pub fn next_block(&mut self) {
-        self.created.next_block();
-        self.spent.next_block();
-        self.last_number += 1;
+        self.created.next_index();
+        self.spent.next_index();
+        self.last_block_number += 1;
     }
 
     /// Add a new TxOutRef and return its UTxOIdentifier
@@ -114,7 +128,6 @@ impl UTxORegistry {
 
         self.live_map.insert(tx_ref, id);
         self.created.add(tx_ref);
-        self.last_number = block_number;
 
         Ok(UTxOIdentifier::new(
             block_number,
@@ -124,11 +137,10 @@ impl UTxORegistry {
     }
 
     /// Consume an existing TxOutRef and return its UTxOIdentifier
-    pub fn consume(&mut self, block_number: u32, tx_ref: &TxOutRef) -> Result<TxIdentifier> {
+    pub fn consume(&mut self, tx_ref: &TxOutRef) -> Result<TxIdentifier> {
         match self.live_map.remove(tx_ref) {
             Some(id) => {
                 self.spent.add((tx_ref.clone(), id));
-                self.last_number = block_number;
                 Ok(id)
             }
             None => Err(anyhow::anyhow!(
@@ -139,18 +151,19 @@ impl UTxORegistry {
     }
 
     /// Rollback to block N-1
-    pub fn rollback_before(&mut self, block: u32) {
+    pub fn rollback_before(&mut self, block_number: u32) -> Result<(), String> {
         // Remove tx ouputs created at or after rollback block
-        for h in self.created.prune_on_or_after(block) {
+        for h in self.created.prune_on_or_after(block_number)? {
             self.live_map.remove(&h);
         }
 
         // Reinsert tx outputs removed at or after rollback block
-        for (h, id) in self.spent.prune_on_or_after(block) {
+        for (h, id) in self.spent.prune_on_or_after(block_number)? {
             self.live_map.insert(h, id);
         }
 
-        self.last_number = block;
+        self.last_block_number = block_number - 1;
+        Ok(())
     }
 }
 
@@ -213,7 +226,7 @@ mod tests {
         assert!(registry.lookup_by_hash(tx_ref).is_ok());
 
         registry.next_block();
-        registry.consume(11, &tx_ref).unwrap();
+        registry.consume(&tx_ref).unwrap();
 
         // Entry was removed from the regsitry
         assert!(registry.lookup_by_hash(tx_ref).is_err());
@@ -237,12 +250,12 @@ mod tests {
         assert!(registry.lookup_by_hash(tx_ref).is_ok());
 
         registry.next_block();
-        registry.consume(11, &tx_ref).unwrap();
+        registry.consume(&tx_ref).unwrap();
 
         // Entry was removed from the registry
         assert!(registry.lookup_by_hash(tx_ref).is_err());
 
-        registry.rollback_before(10);
+        registry.rollback_before(10).unwrap();
         let id = registry.lookup_by_hash(tx_ref).unwrap();
 
         // Entry was restored on rollback
@@ -267,7 +280,7 @@ mod tests {
         // Entry was added to the registry
         assert!(registry.lookup_by_hash(tx_ref).is_ok());
 
-        registry.rollback_before(14);
+        registry.rollback_before(14).unwrap();
 
         // Entry was removed on rollback
         assert!(registry.lookup_by_hash(tx_ref).is_err());
