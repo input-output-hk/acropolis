@@ -151,7 +151,7 @@ impl State {
         stake_addresses.get_accounts_balances_map(stake_keys)
     }
 
-    /// Map delegator to their current snapshot balance (utxo + rewards)
+    /// Sum total_active_stake for delegators of all spos in the latest snapshot
     pub fn get_latest_snapshot_account_balances(
         &self,
     ) -> u64 {

@@ -11,7 +11,7 @@ use acropolis_common::{
 use anyhow::Result;
 use imbl::HashMap;
 use pallas::ledger::traverse::MultiEraHeader;
-use tracing::{error, info};
+use tracing::{info};
 
 #[derive(Default, Debug, Clone)]
 pub struct State {
