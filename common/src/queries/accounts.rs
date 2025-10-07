@@ -22,7 +22,8 @@ pub enum AccountsStateQuery {
     GetAccountsUtxoValuesSum { stake_keys: Vec<Vec<u8>> },
     GetAccountsBalancesMap { stake_keys: Vec<Vec<u8>> },
     GetAccountsBalancesSum { stake_keys: Vec<Vec<u8>> },
-    // TODO: Implement GetAccountBalances
+
+    // Epochs-related queries
     GetActiveStakes {},
 
     // Pools related queries
