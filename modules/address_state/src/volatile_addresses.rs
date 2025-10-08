@@ -52,7 +52,7 @@ impl VolatileAddresses {
     pub fn rollback_before(&mut self, block: u64) -> Vec<(Address, AddressEntry)> {
         let mut out = Vec::new();
 
-        while self.start_block + self.window.len() as u64 > block {
+        while self.start_block + self.window.len() as u64 >= block {
             if let Some(map) = self.window.pop_back() {
                 out.extend(map.into_iter());
             } else {
