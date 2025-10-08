@@ -22,17 +22,36 @@ impl EpochsHistoryState {
         }
     }
 
-    pub fn is_enabled(&self) -> bool {
-        self.epochs_history.is_some()
-    }
-
     /// Get Epoch Activity Message for certain pool operator at certain epoch
     pub fn get_historical_epoch(&self, epoch: u64) -> Result<Option<EpochActivityMessage>> {
-        if self.is_enabled() {
-            Ok(self
-                .epochs_history
-                .as_ref()
-                .and_then(|epochs| epochs.get(&epoch).map(|e| e.clone())))
+        if let Some(epochs_history) = self.epochs_history.as_ref() {
+            Ok(epochs_history.get(&epoch).map(|e| e.clone()))
+        } else {
+            Err(anyhow::anyhow!("Historical epoch storage is disabled"))
+        }
+    }
+
+    /// Get Epoch Activity Messages for epochs following a specific epoch. (exclusive)
+    pub fn get_next_epochs(&self, epoch: u64) -> Result<Vec<EpochActivityMessage>> {
+        if let Some(epochs_history) = self.epochs_history.as_ref() {
+            Ok(epochs_history
+                .iter()
+                .filter(|entry| *entry.key() > epoch)
+                .map(|e| e.value().clone())
+                .collect())
+        } else {
+            Err(anyhow::anyhow!("Historical epoch storage is disabled"))
+        }
+    }
+
+    /// Get Epoch Activity Messages for epochs following a specific epoch. (exclusive)
+    pub fn get_previous_epochs(&self, epoch: u64) -> Result<Vec<EpochActivityMessage>> {
+        if let Some(epochs_history) = self.epochs_history.as_ref() {
+            Ok(epochs_history
+                .iter()
+                .filter(|entry| *entry.key() < epoch)
+                .map(|e| e.value().clone())
+                .collect())
         } else {
             Err(anyhow::anyhow!("Historical epoch storage is disabled"))
         }
