@@ -18,14 +18,12 @@ use tokio::sync::Mutex;
 use tracing::{error, info};
 
 use crate::{
-    address_store::AddressStore,
+    immutable_address_store::ImmutableAddressStore,
     state::{AddressStorageConfig, State},
 };
-mod address_store;
-mod fjall_immutable_address_store;
-use fjall_immutable_address_store::FjallImmutableAddressStore;
+mod immutable_address_store;
 mod state;
-mod volatile_index;
+mod volatile_addresses;
 
 // Subscription topics
 const DEFAULT_ADDRESS_DELTAS_SUBSCRIBE_TOPIC: (&str, &str) =
@@ -52,7 +50,7 @@ impl AddressState {
         mut address_deltas_subscription: Option<Box<dyn Subscription<Message>>>,
         mut params_subscription: Option<Box<dyn Subscription<Message>>>,
         persist_epoch: Option<u64>,
-        store: Option<Arc<dyn AddressStore>>,
+        store: Option<Arc<ImmutableAddressStore>>,
     ) -> Result<()> {
         if let Some(sub) = params_subscription.as_mut() {
             let _ = sub.read().await?;
@@ -69,8 +67,8 @@ impl AddressState {
                 let new_epoch = match deltas_msg.as_ref() {
                     Message::Cardano((ref block_info, _)) => {
                         if block_info.status == BlockStatus::RolledBack {
-                            state.volatile_entries.rollback_before(block_info.number);
-                            state.volatile_entries.next_block();
+                            state.volatile.rollback_before(block_info.number);
+                            state.volatile.next_block();
                         }
                         current_block = Some(block_info.clone());
                         block_info.new_epoch && block_info.epoch > 0
@@ -87,9 +85,9 @@ impl AddressState {
                         )) = message.as_ref()
                         {
                             Self::check_sync(&current_block, &block_info, "params");
-                            state.volatile_entries.start_new_epoch(block_info.number);
+                            state.volatile.start_new_epoch(block_info.number);
                             if let Some(shelley) = &params.params.shelley {
-                                state.volatile_entries.update_k(shelley.security_param);
+                                state.volatile.update_k(shelley.security_param);
                             }
                         }
                     }
@@ -114,18 +112,16 @@ impl AddressState {
 
                         if block_info.epoch > 0 {
                             // Compute the safe_block at which the previous epoch can be removed from volatile
-                            let safe_block = state.volatile_entries.epoch_start_block
-                                + state.volatile_entries.security_param_k;
+                            let safe_block =
+                                state.volatile.epoch_start_block + state.volatile.security_param_k;
 
                             // Persist to disk and prune from volatile when block number exceeds safe block
                             if block_info.number > safe_block {
-                                if Some(block_info.epoch)
-                                    != state.volatile_entries.last_persisted_epoch
-                                {
+                                if Some(block_info.epoch) != state.volatile.last_persisted_epoch {
                                     if let Some(address_store) = &store {
                                         let config = state.config.clone();
                                         state
-                                            .volatile_entries
+                                            .volatile
                                             .persist_all(address_store.as_ref(), &config)
                                             .await?;
                                     }
@@ -136,7 +132,7 @@ impl AddressState {
                     other => error!("Unexpected message on utxo-deltas subscription: {other:?}"),
                 }
 
-                state.volatile_entries.next_block();
+                state.volatile.next_block();
             }
         }
     }
@@ -202,18 +198,15 @@ impl AddressState {
         let state_query = state.clone();
 
         // Initialize Fjall store
-        let (store, persist_epoch): (Option<Arc<dyn AddressStore>>, Option<u64>) =
+        let (store, persist_epoch): (Option<Arc<ImmutableAddressStore>>, Option<u64>) =
             if storage_config.any_enabled() {
                 let path = config
                     .get_string("address_state.path")
                     .unwrap_or_else(|_| "./data/address_state".to_string());
 
-                let store = FjallImmutableAddressStore::new(path)?;
+                let store = ImmutableAddressStore::new(path)?;
                 let persist_after = store.get_last_epoch_stored().await?;
-                (
-                    Some(Arc::new(store) as Arc<dyn AddressStore>),
-                    persist_after,
-                )
+                (Some(Arc::new(store)), persist_after)
             } else {
                 (None, None)
             };
@@ -236,7 +229,7 @@ impl AddressState {
                 let response = match query {
                     AddressStateQuery::GetAddressUTxOs { address } => {
                         if let Some(ref s) = store {
-                            match state.get_address_utxos(s.as_ref(), &address).await {
+                            match state.get_address_utxos(s, &address).await {
                                 Ok(Some(utxos)) => AddressStateQueryResponse::AddressUTxOs(utxos),
                                 Ok(None) => AddressStateQueryResponse::NotFound,
                                 Err(e) => AddressStateQueryResponse::Error(e.to_string()),
@@ -247,7 +240,7 @@ impl AddressState {
                     }
                     AddressStateQuery::GetAddressTransactions { address } => {
                         if let Some(ref s) = store {
-                            match state.get_address_transactions(s.as_ref(), &address).await {
+                            match state.get_address_transactions(s, &address).await {
                                 Ok(Some(txs)) => {
                                     AddressStateQueryResponse::AddressTransactions(txs)
                                 }
@@ -323,12 +316,12 @@ mod tests {
         }
     }
 
-    async fn setup_state_and_store() -> Result<(Arc<FjallImmutableAddressStore>, State)> {
+    async fn setup_state_and_store() -> Result<(Arc<ImmutableAddressStore>, State)> {
         let tmpdir = tempdir().unwrap();
-        let store = Arc::new(FjallImmutableAddressStore::new(tmpdir.path())?);
+        let store = Arc::new(ImmutableAddressStore::new(tmpdir.path())?);
         let config = test_config();
         let mut state = State::new(config.clone());
-        state.volatile_entries.epoch_start_block = 1;
+        state.volatile.epoch_start_block = 1;
         Ok((store, state))
     }
 
@@ -358,7 +351,7 @@ mod tests {
         state.handle_address_deltas(&deltas)?;
 
         // Persist everything
-        state.volatile_entries.persist_all(store.as_ref(), &config).await?;
+        state.volatile.persist_all(store.as_ref(), &config).await?;
 
         // Verify persisted UTxOs
         let utxos = store.get_utxos(&addr)?;
@@ -401,21 +394,21 @@ mod tests {
         let after_create = state.get_address_utxos(store.as_ref(), &addr).await?;
         assert_eq!(after_create.as_ref().unwrap(), &[utxo]);
 
-        state.volatile_entries.persist_all(store.as_ref(), &config).await?;
+        state.volatile.persist_all(store.as_ref(), &config).await?;
 
         // After persisting creation
         let after_persist = state.get_address_utxos(store.as_ref(), &addr).await?;
         assert_eq!(after_persist.as_ref().unwrap(), &[utxo]);
 
-        state.volatile_entries.next_block();
-        state.volatile_entries.epoch_start_block = 2;
+        state.volatile.next_block();
+        state.volatile.epoch_start_block = 2;
         state.handle_address_deltas(&[delta(&addr, &utxo, -1)])?;
 
         // After processing spend
         let after_spend_volatile = state.get_address_utxos(store.as_ref(), &addr).await?;
         assert!(after_spend_volatile.as_ref().map_or(true, |u| u.is_empty()));
 
-        state.volatile_entries.persist_all(store.as_ref(), &config).await?;
+        state.volatile.persist_all(store.as_ref(), &config).await?;
 
         // After persisting spend
         let after_spend_disk = state.get_address_utxos(store.as_ref(), &addr).await?;
@@ -435,10 +428,10 @@ mod tests {
         let utxo_old = UTxOIdentifier::new(0, 0, 0);
         let utxo_new = UTxOIdentifier::new(0, 1, 0);
 
-        state.volatile_entries.epoch_start_block = 1;
+        state.volatile.epoch_start_block = 1;
 
         state.handle_address_deltas(&[delta(&addr, &utxo_old, 1)])?;
-        state.volatile_entries.next_block();
+        state.volatile.next_block();
         state.handle_address_deltas(&[delta(&addr, &utxo_old, -1), delta(&addr, &utxo_new, 1)])?;
 
         // Create and spend both in volatile is not included in address utxos
@@ -450,7 +443,7 @@ mod tests {
             volatile
         );
 
-        state.volatile_entries.persist_all(store.as_ref(), &config).await?;
+        state.volatile.persist_all(store.as_ref(), &config).await?;
 
         // UTxO not persisted to disk if created and spent in pruned volatile window
         let persisted_view = state.get_address_utxos(store.as_ref(), &addr).await?;

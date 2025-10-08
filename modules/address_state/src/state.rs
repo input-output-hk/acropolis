@@ -5,7 +5,9 @@ use acropolis_common::{
 };
 use anyhow::Result;
 
-use crate::{address_store::AddressStore, volatile_index::VolatileIndex};
+use crate::{
+    immutable_address_store::ImmutableAddressStore, volatile_addresses::VolatileAddresses,
+};
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct AddressStorageConfig {
@@ -38,20 +40,20 @@ pub struct AddressEntry {
 #[derive(Debug, Default, Clone)]
 pub struct State {
     pub config: AddressStorageConfig,
-    pub volatile_entries: VolatileIndex,
+    pub volatile: VolatileAddresses,
 }
 
 impl State {
     pub fn new(config: AddressStorageConfig) -> Self {
         Self {
             config,
-            volatile_entries: VolatileIndex::default(),
+            volatile: VolatileAddresses::default(),
         }
     }
 
     pub async fn get_address_utxos(
         &self,
-        store: &dyn AddressStore,
+        store: &ImmutableAddressStore,
         address: &Address,
     ) -> Result<Option<Vec<UTxOIdentifier>>> {
         if !self.config.store_info {
@@ -63,7 +65,7 @@ impl State {
             None => HashSet::new(),
         };
 
-        for map in self.volatile_entries.window.iter() {
+        for map in self.volatile.window.iter() {
             if let Some(entry) = map.get(address) {
                 if let Some(deltas) = &entry.utxos {
                     for delta in deltas {
@@ -89,7 +91,7 @@ impl State {
 
     pub async fn get_address_transactions(
         &self,
-        store: &dyn AddressStore,
+        store: &ImmutableAddressStore,
         address: &Address,
     ) -> Result<Option<Vec<TxIdentifier>>> {
         if !self.config.store_transactions {
@@ -103,7 +105,7 @@ impl State {
             None => Vec::new(),
         };
 
-        for map in self.volatile_entries.window.iter() {
+        for map in self.volatile.window.iter() {
             if let Some(entry) = map.get(address) {
                 if let Some(txs) = &entry.transactions {
                     combined.extend(txs.iter().cloned());
@@ -120,7 +122,7 @@ impl State {
 
     pub async fn get_address_totals(
         &self,
-        store: &dyn AddressStore,
+        store: &ImmutableAddressStore,
         address: &Address,
     ) -> Result<AddressTotals> {
         if !self.config.store_totals {
@@ -132,7 +134,7 @@ impl State {
             None => AddressTotals::default(),
         };
 
-        for map in self.volatile_entries.window.iter() {
+        for map in self.volatile.window.iter() {
             if let Some(entry) = map.get(address) {
                 if let Some(address_deltas) = &entry.totals {
                     for delta in address_deltas {
@@ -146,8 +148,7 @@ impl State {
     }
 
     pub fn handle_address_deltas(&mut self, deltas: &[AddressDelta]) -> Result<()> {
-        let addresses =
-            self.volatile_entries.window.back_mut().expect("window should never be empty");
+        let addresses = self.volatile.window.back_mut().expect("window should never be empty");
 
         for delta in deltas {
             let entry = addresses.entry(delta.address.clone()).or_default();

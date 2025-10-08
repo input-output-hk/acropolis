@@ -3,13 +3,9 @@ use std::{
     path::Path,
 };
 
-use crate::{
-    address_store::AddressStore,
-    state::{AddressEntry, AddressStorageConfig, UtxoDelta},
-};
+use crate::state::{AddressEntry, AddressStorageConfig, UtxoDelta};
 use acropolis_common::{Address, AddressTotals, TxIdentifier, UTxOIdentifier};
 use anyhow::Result;
-use async_trait::async_trait;
 use fjall::{Keyspace, Partition, PartitionCreateOptions};
 use minicbor::{decode, to_vec};
 use tokio::task;
@@ -20,14 +16,14 @@ const ADDRESS_UTXOS_EPOCH_COUNTER: &[u8] = b"utxos_epoch_last";
 const ADDRESS_TXS_EPOCH_COUNTER: &[u8] = b"txs_epoch_last";
 const ADDRESS_TOTALS_EPOCH_COUNTER: &[u8] = b"totals_epoch_last";
 
-pub struct FjallImmutableAddressStore {
+pub struct ImmutableAddressStore {
     utxos: Partition,
     txs: Partition,
     totals: Partition,
     keyspace: Keyspace,
 }
 
-impl FjallImmutableAddressStore {
+impl ImmutableAddressStore {
     pub fn new(path: impl AsRef<Path>) -> Result<Self> {
         let cfg = fjall::Config::new(path).max_write_buffer_size(512 * 1024 * 1024);
         let keyspace = Keyspace::open(cfg)?;
@@ -44,11 +40,8 @@ impl FjallImmutableAddressStore {
             keyspace,
         })
     }
-}
 
-#[async_trait]
-impl AddressStore for FjallImmutableAddressStore {
-    async fn persist_epoch(
+    pub async fn persist_epoch(
         &self,
         epoch: u64,
         drained_blocks: Vec<HashMap<Address, AddressEntry>>,
@@ -165,7 +158,7 @@ impl AddressStore for FjallImmutableAddressStore {
         Ok(())
     }
 
-    fn get_utxos(&self, address: &Address) -> Result<Option<Vec<UTxOIdentifier>>> {
+    pub fn get_utxos(&self, address: &Address) -> Result<Option<Vec<UTxOIdentifier>>> {
         let key = address.to_bytes_key()?;
         info!("searching for {}", hex::encode(&key));
         match self.utxos.get(key)? {
@@ -177,7 +170,7 @@ impl AddressStore for FjallImmutableAddressStore {
         }
     }
 
-    async fn get_txs(&self, address: &Address) -> Result<Option<Vec<TxIdentifier>>> {
+    pub async fn get_txs(&self, address: &Address) -> Result<Option<Vec<TxIdentifier>>> {
         let key = address.to_bytes_key()?;
         let partition = self.txs.clone();
         task::spawn_blocking(move || match partition.get(key)? {
@@ -190,7 +183,7 @@ impl AddressStore for FjallImmutableAddressStore {
         .await?
     }
 
-    async fn get_totals(&self, address: &Address) -> Result<Option<AddressTotals>> {
+    pub async fn get_totals(&self, address: &Address) -> Result<Option<AddressTotals>> {
         let key = address.to_bytes_key()?;
         let partition = self.totals.clone();
         task::spawn_blocking(move || match partition.get(key)? {
@@ -202,9 +195,7 @@ impl AddressStore for FjallImmutableAddressStore {
         })
         .await?
     }
-}
 
-impl FjallImmutableAddressStore {
     pub async fn get_last_epoch_stored(&self) -> Result<Option<u64>> {
         let read_marker = |partition: Partition, key: &'static [u8]| async move {
             task::spawn_blocking(move || {

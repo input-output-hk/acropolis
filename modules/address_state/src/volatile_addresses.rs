@@ -4,12 +4,12 @@ use acropolis_common::Address;
 use anyhow::Result;
 
 use crate::{
-    address_store::AddressStore,
+    immutable_address_store::ImmutableAddressStore,
     state::{AddressEntry, AddressStorageConfig},
 };
 
 #[derive(Debug, Clone)]
-pub struct VolatileIndex {
+pub struct VolatileAddresses {
     pub window: VecDeque<HashMap<Address, AddressEntry>>,
     pub start_block: u64,
     pub epoch_start_block: u64,
@@ -17,18 +17,18 @@ pub struct VolatileIndex {
     pub security_param_k: u64,
 }
 
-impl Default for VolatileIndex {
+impl Default for VolatileAddresses {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl VolatileIndex {
+impl VolatileAddresses {
     pub fn new() -> Self {
         let mut window = VecDeque::new();
         window.push_back(HashMap::new());
 
-        VolatileIndex {
+        VolatileAddresses {
             window,
             start_block: 0,
             epoch_start_block: 0,
@@ -61,12 +61,10 @@ impl VolatileIndex {
         }
         out
     }
-}
 
-impl VolatileIndex {
     pub async fn persist_all(
         &mut self,
-        store: &dyn AddressStore,
+        store: &ImmutableAddressStore,
         config: &AddressStorageConfig,
     ) -> Result<()> {
         let epoch = self.last_persisted_epoch.map(|e| e + 1).unwrap_or(0);
