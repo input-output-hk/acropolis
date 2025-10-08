@@ -11,6 +11,7 @@ use acropolis_common::{
     PotDelta, TxIdentifier, TxOutRef, TxOutput, UTXODelta, UTxOIdentifier, Value,
 };
 use anyhow::Result;
+use blake2::{digest::consts::U32, Blake2b, Digest};
 use caryatid_sdk::{module, Context, Module};
 use config::Config;
 use pallas::ledger::configs::{
@@ -30,18 +31,21 @@ const DEFAULT_NETWORK_NAME: &str = "mainnet";
 // Include genesis data (downloaded by build.rs)
 const MAINNET_BYRON_GENESIS: &[u8] = include_bytes!("../downloads/mainnet-byron-genesis.json");
 const MAINNET_SHELLEY_GENESIS: &[u8] = include_bytes!("../downloads/mainnet-shelley-genesis.json");
-const MAINNET_SHELLEY_GENESIS_HASH: &str =
-    include_str!("../downloads/mainnet-shelley-genesis.hash");
 const MAINNET_SHELLEY_START_EPOCH: u64 = 208;
 const SANCHONET_BYRON_GENESIS: &[u8] = include_bytes!("../downloads/sanchonet-byron-genesis.json");
 const SANCHONET_SHELLEY_GENESIS: &[u8] =
     include_bytes!("../downloads/sanchonet-shelley-genesis.json");
-const SANCHONET_SHELLEY_GENESIS_HASH: &str =
-    include_str!("../downloads/sanchonet-shelley-genesis.hash");
 const SANCHONET_SHELLEY_START_EPOCH: u64 = 0;
 
 // Initial reserves (=maximum ever Lovelace supply)
 const INITIAL_RESERVES: Lovelace = 45_000_000_000_000_000;
+
+fn hash_genesis_bytes(raw_bytes: &[u8]) -> [u8; 32] {
+    let mut hasher = Blake2b::<U32>::new();
+    hasher.update(raw_bytes);
+    let hash: [u8; 32] = hasher.finalize().into();
+    hash
+}
 
 /// Genesis bootstrapper module
 #[module(
@@ -90,18 +94,16 @@ impl GenesisBootstrapper {
                 let network_name =
                     config.get_string("network-name").unwrap_or(DEFAULT_NETWORK_NAME.to_string());
 
-                let (byron_genesis, shelley_genesis, shelley_genesis_hash, shelley_start_epoch) =
+                let (byron_genesis, shelley_genesis, shelley_start_epoch) =
                     match network_name.as_ref() {
                         "mainnet" => (
                             MAINNET_BYRON_GENESIS,
                             MAINNET_SHELLEY_GENESIS,
-                            MAINNET_SHELLEY_GENESIS_HASH,
                             MAINNET_SHELLEY_START_EPOCH,
                         ),
                         "sanchonet" => (
                             SANCHONET_BYRON_GENESIS,
                             SANCHONET_SHELLEY_GENESIS,
-                            SANCHONET_SHELLEY_GENESIS_HASH,
                             SANCHONET_SHELLEY_START_EPOCH,
                         ),
                         _ => {
@@ -110,6 +112,7 @@ impl GenesisBootstrapper {
                         }
                     };
                 info!("Reading genesis for '{network_name}'");
+                let shelley_genesis_hash = hash_genesis_bytes(&shelley_genesis);
 
                 // Read genesis data
                 let byron_genesis: ByronGenesisFile = serde_json::from_slice(byron_genesis)
@@ -201,10 +204,7 @@ impl GenesisBootstrapper {
                     byron_timestamp: byron_genesis.start_time,
                     shelley_epoch: shelley_start_epoch,
                     shelley_epoch_len: shelley_genesis.epoch_length.unwrap() as u64,
-                    shelley_genesis_hash: hex::decode(shelley_genesis_hash)
-                        .unwrap()
-                        .try_into()
-                        .unwrap(),
+                    shelley_genesis_hash,
                 };
 
                 // Send completion message
