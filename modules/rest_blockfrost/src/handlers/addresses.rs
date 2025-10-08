@@ -117,7 +117,7 @@ pub async fn handle_address_single_blockfrost(
         script: is_script,
     };
 
-    match serde_json::to_string(&rest_response) {
+    match serde_json::to_string_pretty(&rest_response) {
         Ok(json) => Ok(RESTResponse::with_json(200, &json)),
         Err(e) => Ok(RESTResponse::with_text(
             500,

@@ -222,7 +222,7 @@ impl State {
                     obs.observe_delta(&AddressDelta {
                         address: utxo.address.clone(),
                         utxo: key.clone(),
-                        value: ValueDelta::from(&utxo.value),
+                        value: -ValueDelta::from(&utxo.value),
                     })
                     .await;
                 }

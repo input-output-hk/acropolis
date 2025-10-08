@@ -146,11 +146,8 @@ impl State {
     }
 
     pub fn handle_address_deltas(&mut self, deltas: &[AddressDelta]) -> Result<()> {
-        let addresses = self
-            .volatile_entries
-            .window
-            .back_mut()
-            .expect("next_block() must be called before handle_address_deltas");
+        let addresses =
+            self.volatile_entries.window.back_mut().expect("window should never be empty");
 
         for delta in deltas {
             let entry = addresses.entry(delta.address.clone()).or_default();
