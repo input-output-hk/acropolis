@@ -1,15 +1,20 @@
 // Build-time script to download generics
+use blake2::{digest::consts::U32, Blake2b, Digest};
 use std::fs;
 use std::io::Write;
 use std::path::Path;
-use blake2::{digest::consts::U32, Blake2b, Digest};
 
 use anyhow::{Context, Result};
 
 const OUTPUT_DIR: &str = "downloads";
 
 /// Download a URL to a file in OUTPUT_DIR
-async fn download(client: &reqwest::Client, url: &str, filename: &str, hash_filename: Option<&str>) -> Result<()> {
+async fn download(
+    client: &reqwest::Client,
+    url: &str,
+    filename: &str,
+    hash_filename: Option<&str>,
+) -> Result<()> {
     let request = client.get(url).build().with_context(|| format!("Failed to request {url}"))?;
     let response =
         client.execute(request).await.with_context(|| format!("Failed to fetch {url}"))?;
@@ -29,8 +34,9 @@ async fn download(client: &reqwest::Client, url: &str, filename: &str, hash_file
         let hash_file_path = output_path.join(hash_filename);
         let mut hash_file = fs::File::create(&hash_file_path)
             .with_context(|| format!("Failed to create file {}", hash_file_path.display()))?;
-        
-        hash_file.write_all(hex::encode(hash.as_slice()).as_bytes())
+
+        hash_file
+            .write_all(hex::encode(hash.as_slice()).as_bytes())
             .with_context(|| format!("Failed to write file {}", hash_file_path.display()))?;
     }
 
