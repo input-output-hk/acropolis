@@ -91,7 +91,8 @@ store-info = false
 # Enables /assets/{asset}/history endpoint
 store-history = false
 # Enables /assets/{asset}/transactions endpoint
-store-transactions = false
+#   Usage: "none", "all", or most recent: "1", "20", etc.
+store-transactions = "none"
 # Enables /assets/{asset}/addresses endpoint
 store-addresses = false
 # Enables /assets/{asset} endpoint (requires store-assets to be enabled)
