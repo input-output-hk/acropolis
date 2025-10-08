@@ -131,8 +131,11 @@ impl From<&State> for SPOState {
     fn from(state: &State) -> Self {
         Self {
             pools: state.spos.iter().map(|(key, value)| (key.clone(), value.clone())).collect(),
-            updates: state.pending_updates.iter()
-                .map(|(key, value)| (key.clone(), value.clone())).collect(),
+            updates: state
+                .pending_updates
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect(),
             retiring: state
                 .pending_deregistrations
                 .iter()
@@ -1044,7 +1047,10 @@ mod tests {
 
         block = new_block(3);
         state.handle_mint(&block, &vec![1]);
-        assert_eq!(2, state.get_total_blocks_minted_by_pools(&vec![spo_id.clone()])[0]);
+        assert_eq!(
+            2,
+            state.get_total_blocks_minted_by_pools(&vec![spo_id.clone()])[0]
+        );
     }
 
     #[test]
@@ -1081,7 +1087,7 @@ mod tests {
         ));
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
         block = new_block(2);
-        state.handle_mint(&block, &vec![1]);  // Note raw issuer_vkey
+        state.handle_mint(&block, &vec![1]); // Note raw issuer_vkey
         let block_hashes = state.get_pool_block_hashes(&spo_id).unwrap();
         assert_eq!(block_hashes.len(), 1);
         assert_eq!(block_hashes[0], block.hash);

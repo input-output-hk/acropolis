@@ -119,13 +119,19 @@ pub fn calculate_rewards(
         let mut pay_to_pool_reward_account =
             performance_spo.two_previous_reward_account_is_registered;
 
-        info!("SPO {} reward account registered two epochs ago: {}", hex::encode(operator_id),
-             pay_to_pool_reward_account);
+        info!(
+            "SPO {} reward account registered two epochs ago: {}",
+            hex::encode(operator_id),
+            pay_to_pool_reward_account
+        );
 
         // Also, to handle the early Shelley timing bug, we allow it if it was registered
         // during the current epoch
         if !pay_to_pool_reward_account {
-            info!("Checking old reward account {}", hex::encode(&staking_spo.reward_account));
+            info!(
+                "Checking old reward account {}",
+                hex::encode(&staking_spo.reward_account)
+            );
 
             // Note we use the staking reward account - it could have changed
             pay_to_pool_reward_account = registrations.contains(&staking_spo.reward_account)
@@ -232,14 +238,10 @@ fn calculate_spo_rewards(
     pay_to_pool_reward_account: bool,
     deregistrations: &HashSet<KeyHash>,
 ) -> Vec<RewardDetail> {
-
     // Active stake (sigma)
     let pool_stake = BigDecimal::from(spo.total_stake);
     if pool_stake.is_zero() {
-        warn!(
-            "SPO {} has no stake - skipping",
-            hex::encode(&operator_id),
-        );
+        warn!("SPO {} has no stake - skipping", hex::encode(&operator_id),);
 
         // No stake, no rewards or earnings
         return vec![];

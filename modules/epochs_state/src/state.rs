@@ -295,11 +295,19 @@ mod tests {
         assert_eq!(state.epoch_blocks, 3);
         assert_eq!(state.blocks_minted.len(), 2);
         assert_eq!(
-            state.blocks_minted.iter().find(|(k, _)| *k == &keyhash_224(b"issuer_1")).map(|(_, v)| *v),
+            state
+                .blocks_minted
+                .iter()
+                .find(|(k, _)| *k == &keyhash_224(b"issuer_1"))
+                .map(|(_, v)| *v),
             Some(1)
         );
         assert_eq!(
-            state.blocks_minted.iter().find(|(k, _)| *k == &keyhash_224(b"issuer_2")).map(|(_, v)| *v),
+            state
+                .blocks_minted
+                .iter()
+                .find(|(k, _)| *k == &keyhash_224(b"issuer_2"))
+                .map(|(_, v)| *v),
             Some(2)
         );
 

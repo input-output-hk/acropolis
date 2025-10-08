@@ -2,8 +2,8 @@
 use crate::monetary::calculate_monetary_change;
 use crate::rewards::{calculate_rewards, RewardsResult};
 use crate::snapshot::Snapshot;
-use acropolis_common::queries::accounts::OptimalPoolSizing;
 use crate::verifier::Verifier;
+use acropolis_common::queries::accounts::OptimalPoolSizing;
 use acropolis_common::{
     math::update_value_with_delta,
     messages::{
@@ -14,15 +14,15 @@ use acropolis_common::{
     protocol_params::ProtocolParams,
     stake_addresses::{StakeAddressMap, StakeAddressState},
     BlockInfo, DRepChoice, DRepCredential, DelegatedStake, InstantaneousRewardSource,
-    InstantaneousRewardTarget, KeyHash, Lovelace, MoveInstantaneousReward,
-    PoolLiveStakeInfo, PoolRegistration, Pot,
-    SPORewards, StakeAddress, StakeCredential, StakeRewardDelta, TxCertificate,
+    InstantaneousRewardTarget, KeyHash, Lovelace, MoveInstantaneousReward, PoolLiveStakeInfo,
+    PoolRegistration, Pot, SPORewards, StakeAddress, StakeCredential, StakeRewardDelta,
+    TxCertificate,
 };
 use anyhow::Result;
 use imbl::OrdMap;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::mem::take;
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{mpsc, Arc, Mutex};
 use tokio::task::{spawn_blocking, JoinHandle};
 use tracing::{debug, error, info, warn};
 
@@ -32,7 +32,7 @@ const DEFAULT_POOL_DEPOSIT: u64 = 500_000_000;
 /// Stability window = slots into epoch at which Haskell node starts the rewards calculation
 // We need this because of a Shelley-era bug where stake deregistrations were still counted
 // up to the point of start of the calculation, rather than point of snapshot
-const STABILITY_WINDOW_SLOT: u64 = 4 * 2160 * 20;  // TODO configure from genesis?
+const STABILITY_WINDOW_SLOT: u64 = 4 * 2160 * 20; // TODO configure from genesis?
 
 /// Global 'pot' account state
 #[derive(Debug, Default, PartialEq, Clone, serde::Serialize)]
@@ -299,16 +299,14 @@ impl State {
 
         // Capture a new snapshot for the end of the previous epoch and push it to state
         let snapshot = Snapshot::new(
-            epoch-1,
+            epoch - 1,
             &self.stake_addresses.lock().unwrap(),
             &self.spos,
             &spo_block_counts,
             &self.pots,
             total_non_obft_blocks,
-
             // Take and clear registration changes
             std::mem::take(&mut *self.current_epoch_registration_changes.lock().unwrap()),
-
             // Pass in two-previous epoch snapshot for capture of SPO reward accounts
             self.epoch_snapshots.set.clone(), // Will become 'go' in the next line!
         );
@@ -351,17 +349,20 @@ impl State {
         // handle the Shelley bug part!
         let mut registrations: HashSet<KeyHash> = HashSet::new();
         let mut deregistrations: HashSet<KeyHash> = HashSet::new();
-        Self::apply_registration_changes(&self.epoch_snapshots.set.registration_changes,
-                                         &mut registrations,
-                                         &mut deregistrations);
-        Self::apply_registration_changes(&self.epoch_snapshots.mark.registration_changes,
-                                         &mut registrations,
-                                         &mut deregistrations);
+        Self::apply_registration_changes(
+            &self.epoch_snapshots.set.registration_changes,
+            &mut registrations,
+            &mut deregistrations,
+        );
+        Self::apply_registration_changes(
+            &self.epoch_snapshots.mark.registration_changes,
+            &mut registrations,
+            &mut deregistrations,
+        );
 
         let (start_rewards_tx, start_rewards_rx) = mpsc::channel::<()>();
         let current_epoch_registration_changes = self.current_epoch_registration_changes.clone();
         self.epoch_rewards_task = Arc::new(Mutex::new(Some(spawn_blocking(move || {
-
             // Wait for start signal
             let _ = start_rewards_rx.recv();
 
@@ -370,14 +371,15 @@ impl State {
             Self::apply_registration_changes(
                 &current_epoch_registration_changes.lock().unwrap(),
                 &mut registrations,
-                &mut deregistrations);
+                &mut deregistrations,
+            );
 
-         registrations.iter().for_each(|k| info!("Registration {}", hex::encode(k)));
-         deregistrations.iter().for_each(|k| info!("Deregistration {}", hex::encode(k)));
- 
+            registrations.iter().for_each(|k| info!("Registration {}", hex::encode(k)));
+            deregistrations.iter().for_each(|k| info!("Deregistration {}", hex::encode(k)));
+
             // Calculate reward payouts for previous epoch
             calculate_rewards(
-                epoch-1,
+                epoch - 1,
                 performance,
                 staking,
                 &shelley_params,
@@ -403,9 +405,11 @@ impl State {
     /// Apply a registration change set to a deregistrations list
     /// registrations gets all registrations still in effect at the end of the changes
     /// deregistrations likewise for net deregistrations
-    fn apply_registration_changes(changes: &Vec<RegistrationChange>,
-                                  registrations: &mut HashSet<KeyHash>,
-                                  deregistrations: &mut HashSet<KeyHash>) {
+    fn apply_registration_changes(
+        changes: &Vec<RegistrationChange>,
+        registrations: &mut HashSet<KeyHash>,
+        deregistrations: &mut HashSet<KeyHash>,
+    ) {
         for change in changes {
             match change.kind {
                 RegistrationChangeKind::Registered => {
@@ -422,12 +426,13 @@ impl State {
 
     /// Notify of a new block
     pub fn notify_block(&mut self, block: &BlockInfo) {
-
         // Is the rewards task blocked on us reaching the 4 * k block?
         if let Some(tx) = &self.start_rewards_tx {
             if block.epoch_slot >= STABILITY_WINDOW_SLOT {
-                info!("Starting rewards calculation at block {}, epoch slot {}",
-                      block.number, block.epoch_slot);
+                info!(
+                    "Starting rewards calculation at block {}, epoch slot {}",
+                    block.number, block.epoch_slot
+                );
                 let _ = tx.send(());
                 self.start_rewards_tx = None;
             }
@@ -639,7 +644,6 @@ impl State {
         if let Some(task) = task.take() {
             match task.await {
                 Ok(Ok(reward_result)) => {
-
                     // Collect rewards to stake addresses reward deltas
                     for (_, rewards) in &reward_result.rewards {
                         reward_deltas.extend(
@@ -675,7 +679,8 @@ impl State {
         };
 
         // Map block counts, filtering out SPOs we don't know (OBFT in early Shelley)
-        let spo_blocks: HashMap<KeyHash, usize> = ea_msg.spo_blocks
+        let spo_blocks: HashMap<KeyHash, usize> = ea_msg
+            .spo_blocks
             .iter()
             .filter(|(hash, _)| self.spos.contains_key(hash))
             .map(|(hash, count)| (hash.clone(), *count))
@@ -800,11 +805,10 @@ impl State {
         }
 
         // Add to registration changes
-        self.current_epoch_registration_changes.lock().unwrap().push(
-            RegistrationChange {
-                address: credential.get_hash(),
-                kind: RegistrationChangeKind::Registered,
-            });
+        self.current_epoch_registration_changes.lock().unwrap().push(RegistrationChange {
+            address: credential.get_hash(),
+            kind: RegistrationChangeKind::Registered,
+        });
     }
 
     /// Deregister a stake address, with specified refund if known
@@ -827,11 +831,10 @@ impl State {
             self.pots.deposits -= deposit;
 
             // Add to registration changes
-            self.current_epoch_registration_changes.lock().unwrap().push(
-                RegistrationChange {
-                    address: credential.get_hash(),
-                    kind: RegistrationChangeKind::Deregistered,
-                });
+            self.current_epoch_registration_changes.lock().unwrap().push(RegistrationChange {
+                address: credential.get_hash(),
+                kind: RegistrationChangeKind::Deregistered,
+            });
         }
     }
 

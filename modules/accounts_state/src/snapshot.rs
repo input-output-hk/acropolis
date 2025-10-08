@@ -1,8 +1,8 @@
 //! Acropolis AccountsState: snapshot for rewards calculations
 
 use crate::state::{Pots, RegistrationChange};
-use acropolis_common::{KeyHash, Lovelace, PoolRegistration, Ratio, RewardAccount, StakeAddress};
 use acropolis_common::stake_addresses::StakeAddressMap;
+use acropolis_common::{KeyHash, Lovelace, PoolRegistration, Ratio, RewardAccount, StakeAddress};
 use imbl::OrdMap;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -88,25 +88,23 @@ impl Snapshot {
             // TODO should spo.reward_account be a StakeAddress to begin with?
             let two_previous_reward_account_is_registered =
                 match two_previous_snapshot.spos.get(spo_id) {
-                    Some(old_spo) => {
-                        match StakeAddress::from_binary(&old_spo.reward_account) {
-                            Ok(spo_reward_address) => {
-                                let spo_reward_hash = spo_reward_address.get_hash();
-                                stake_addresses
-                                    .get(spo_reward_hash)
-                                    .map(|sas| sas.registered)
-                                    .unwrap_or(false)
-                            }
-                            Err(e) => {
-                                error!(
-                                    "Can't decode reward address for SPO {}: {e}",
-                                    hex::encode(&spo_id)
-                                );
-
-                                false
-                            }
+                    Some(old_spo) => match StakeAddress::from_binary(&old_spo.reward_account) {
+                        Ok(spo_reward_address) => {
+                            let spo_reward_hash = spo_reward_address.get_hash();
+                            stake_addresses
+                                .get(spo_reward_hash)
+                                .map(|sas| sas.registered)
+                                .unwrap_or(false)
                         }
-                    }
+                        Err(e) => {
+                            error!(
+                                "Can't decode reward address for SPO {}: {e}",
+                                hex::encode(&spo_id)
+                            );
+
+                            false
+                        }
+                    },
                     None => false,
                 };
 
@@ -140,9 +138,12 @@ impl Snapshot {
                         snap_spo.total_stake += active_stake;
                     } else {
                         // SPO has retired - this stake is simply ignored
-                        debug!(epoch, "SPO {} for hash {} retired?  Ignored",
-                               hex::encode(spo_id),
-                               hex::encode(hash));
+                        debug!(
+                            epoch,
+                            "SPO {} for hash {} retired?  Ignored",
+                            hex::encode(spo_id),
+                            hex::encode(hash)
+                        );
                         continue;
                     }
                 }
