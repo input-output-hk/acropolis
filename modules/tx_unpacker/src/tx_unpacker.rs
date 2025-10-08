@@ -3,7 +3,7 @@
 
 use acropolis_common::{
     messages::{
-        AssetDeltasMessage, BlockFeesMessage, CardanoMessage, GovernanceProceduresMessage, Message,
+        AssetDeltasMessage, BlockTxsMessage, CardanoMessage, GovernanceProceduresMessage, Message,
         TxCertificatesMessage, UTXODeltasMessage, WithdrawalsMessage,
     },
     *,
@@ -98,9 +98,9 @@ impl TxUnpacker {
             info!("Publishing governance procedures on '{topic}'");
         }
 
-        let publish_fees_topic = config.get_string("publish-fees-topic").ok();
-        if let Some(ref topic) = publish_fees_topic {
-            info!("Publishing block fees on '{topic}'");
+        let publish_block_txs_topic = config.get_string("publish-block-txs-topic").ok();
+        if let Some(ref topic) = publish_block_txs_topic {
+            info!("Publishing block txs on '{topic}'");
         }
 
         // Initialize UTxORegistry
@@ -141,7 +141,9 @@ impl TxUnpacker {
                             let mut voting_procedures = Vec::new();
                             let mut proposal_procedures = Vec::new();
                             let mut alonzo_babbage_update_proposals = Vec::new();
+                            let mut total_output: u128 = 0;
                             let mut total_fees: u64 = 0;
+                            let total_txs = txs_msg.txs.len() as u64;
 
                             // handle rollback or advance registry to the next block
                             let block_number = block.number as u32;
@@ -219,6 +221,9 @@ impl TxUnpacker {
                                                                         value: map_parameters::map_value(&output.value()),
                                                                         datum: map_parameters::map_datum(&output.datum()),
                                                                     }));
+
+                                                                    // catch all output lovelaces
+                                                                    total_output += output.value().coin() as u128;
                                                                 }
                                                                 Err(e) => error!("Output {index} in tx ignored: {e}"),
                                                             },
@@ -430,10 +435,12 @@ impl TxUnpacker {
                                                                          governance_msg.clone()));
                             }
 
-                            if let Some(ref topic) = publish_fees_topic {
+                            if let Some(ref topic) = publish_block_txs_topic {
                                 let msg = Message::Cardano((
                                     block.clone(),
-                                    CardanoMessage::BlockFees(BlockFeesMessage {
+                                    CardanoMessage::BlockInfoMessage(BlockTxsMessage {
+                                        total_txs,
+                                        total_output,
                                         total_fees
                                     })
                                 ));

@@ -89,7 +89,13 @@ pub fn new_spdd_message(epoch: u64) -> SPOStakeDistributionMessage {
 pub fn new_epoch_activity_message(epoch: u64) -> EpochActivityMessage {
     EpochActivityMessage {
         epoch,
+        epoch_start_time: 0,
+        epoch_end_time: 0,
+        first_block_time: 0,
+        last_block_time: 0,
         total_blocks: 0,
+        total_txs: 0,
+        total_outputs: 0,
         total_fees: 0,
         vrf_vkey_hashes: Vec::new(),
         nonce: None,
