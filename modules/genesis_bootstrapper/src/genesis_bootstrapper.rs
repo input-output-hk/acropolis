@@ -26,13 +26,13 @@ const DEFAULT_NETWORK_NAME: &str = "mainnet";
 const MAINNET_BYRON_GENESIS: &[u8] = include_bytes!("../downloads/mainnet-byron-genesis.json");
 const MAINNET_SHELLEY_GENESIS: &[u8] = include_bytes!("../downloads/mainnet-shelley-genesis.json");
 const MAINNET_SHELLEY_GENESIS_HASH: &str =
-    "1a3be38bcbb7911969283716ad7aa550250226b76a61fc51cc9a9a35d9276d81";
+    include_str!("../downloads/mainnet-shelley-genesis.hash");
 const MAINNET_SHELLEY_START_EPOCH: u64 = 208;
 const SANCHONET_BYRON_GENESIS: &[u8] = include_bytes!("../downloads/sanchonet-byron-genesis.json");
 const SANCHONET_SHELLEY_GENESIS: &[u8] =
     include_bytes!("../downloads/sanchonet-shelley-genesis.json");
 const SANCHONET_SHELLEY_GENESIS_HASH: &str =
-    "f94457ec45a0c6773057a529533cf7ccf746cb44dabd56ae970e1dbfb55bfdb2";
+    include_str!("../downloads/sanchonet-shelley-genesis.hash");
 const SANCHONET_SHELLEY_START_EPOCH: u64 = 0;
 
 // Initial reserves (=maximum ever Lovelace supply)
