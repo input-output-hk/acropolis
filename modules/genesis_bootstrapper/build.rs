@@ -58,7 +58,7 @@ async fn main() -> Result<()> {
             &client,
             "https://book.world.dev.cardano.org/environments/mainnet/byron-genesis.json",
             "mainnet-byron-genesis.json",
-            None, 
+            None,
         ),
         download(
             &client,
