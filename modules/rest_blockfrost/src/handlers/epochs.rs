@@ -128,7 +128,7 @@ pub async fn handle_epoch_info_blockfrost(
     } else {
         response.active_stake = Some(total_active_stakes);
     }
-    
+
     let json = match serde_json::to_string(&response) {
         Ok(j) => j,
         Err(e) => {
