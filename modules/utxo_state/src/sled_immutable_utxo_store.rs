@@ -1,6 +1,7 @@
 //! On-disk store using Sled for immutable UTXOs
 
-use crate::state::{ImmutableUTXOStore, UTXOKey, UTXOValue};
+use crate::state::{ImmutableUTXOStore, UTXOValue};
+use acropolis_common::UTxOIdentifier;
 use anyhow::Result;
 use async_trait::async_trait;
 use config::Config;
@@ -37,7 +38,7 @@ impl SledImmutableUTXOStore {
 #[async_trait]
 impl ImmutableUTXOStore for SledImmutableUTXOStore {
     /// Add a UTXO
-    async fn add_utxo(&self, key: UTXOKey, value: UTXOValue) -> Result<()> {
+    async fn add_utxo(&self, key: UTxOIdentifier, value: UTXOValue) -> Result<()> {
         let key_bytes = key.to_bytes();
         let value_bytes = serde_cbor::to_vec(&value)?;
         self.db.insert(key_bytes, value_bytes)?;
@@ -45,14 +46,14 @@ impl ImmutableUTXOStore for SledImmutableUTXOStore {
     }
 
     /// Delete a UTXO
-    async fn delete_utxo(&self, key: &UTXOKey) -> Result<()> {
+    async fn delete_utxo(&self, key: &UTxOIdentifier) -> Result<()> {
         let key_bytes = key.to_bytes();
         self.db.remove(key_bytes)?;
         Ok(())
     }
 
     /// Lookup a UTXO
-    async fn lookup_utxo(&self, key: &UTXOKey) -> Result<Option<UTXOValue>> {
+    async fn lookup_utxo(&self, key: &UTxOIdentifier) -> Result<Option<UTXOValue>> {
         let key_bytes = key.to_bytes();
         Ok(match self.db.get(key_bytes)? {
             Some(ivec) => Some(serde_cbor::from_slice(&ivec)?),

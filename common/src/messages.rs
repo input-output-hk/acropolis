@@ -63,6 +63,12 @@ pub struct GenesisCompleteMessage {
     pub values: GenesisValues,
 }
 
+// Genesis tx hashes used to seed TxRegistry
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct GenesisUTxOsMessage {
+    pub utxos: Vec<(TxOutRef, TxIdentifier)>,
+}
+
 /// Message encapsulating multiple UTXO deltas, in order
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct UTXODeltasMessage {
@@ -246,6 +252,7 @@ pub enum CardanoMessage {
     SnapshotComplete,                        // Mithril snapshot loaded
     ReceivedTxs(RawTxsMessage),              // Transaction available
     GenesisComplete(GenesisCompleteMessage), // Genesis UTXOs done + genesis params
+    GenesisUTxOs(GenesisUTxOsMessage),       // Genesis UTxOs with their UTxOIdentifiers
     UTXODeltas(UTXODeltasMessage),           // UTXO deltas received
     AssetDeltas(AssetDeltasMessage),         // Asset mint and burn deltas
     TxCertificates(TxCertificatesMessage),   // Transaction certificates received
