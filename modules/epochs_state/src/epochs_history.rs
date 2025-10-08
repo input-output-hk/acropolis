@@ -110,7 +110,13 @@ mod tests {
             &block,
             &EpochActivityMessage {
                 epoch: 199,
+                epoch_start_time: 0,
+                epoch_end_time: 0,
+                first_block_time: 0,
+                last_block_time: 0,
                 total_blocks: 1,
+                total_txs: 1,
+                total_outputs: 100,
                 total_fees: 50,
                 vrf_vkey_hashes: vec![],
                 nonce: None,
