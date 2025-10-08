@@ -3,10 +3,9 @@
 #![allow(dead_code)]
 
 use crate::{
-    address::{Address, StakeAddress},
+    address::{Address, ShelleyAddress, StakeAddress},
     protocol_params,
     rational_number::RationalNumber,
-    ShelleyAddress,
 };
 use anyhow::{anyhow, bail, Error, Result};
 use bech32::{Bech32, Hrp};
@@ -14,10 +13,10 @@ use bitmask_enum::bitmask;
 use hex::decode;
 use serde::{Deserialize, Serialize};
 use serde_with::{hex::Hex, serde_as};
-use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 use std::ops::Neg;
+use std::{cmp::Ordering, fmt};
 
 #[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NetworkId {
@@ -282,19 +281,13 @@ impl Neg for ValueDelta {
 /// Transaction output (UTXO)
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TxOutput {
-    /// Tx hash
-    pub tx_hash: TxHash,
-
-    /// Tx identifier for compact storage
-    pub tx_identifier: TxIdentifier,
-
-    /// Output index in tx
-    pub index: u64,
+    /// Identifier for this UTxO
+    pub utxo_identifier: UTxOIdentifier,
 
     /// Address data
     pub address: Address,
 
-    /// Output value (Lovelace)
+    /// Output value (Lovelace + native assets)
     pub value: Value,
 
     /// Datum (Inline or Hash)
@@ -304,11 +297,8 @@ pub struct TxOutput {
 /// Transaction input (UTXO reference)
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TxInput {
-    /// Tx hash of referenced UTXO
-    pub tx_hash: TxHash,
-
-    /// Index of UTXO in referenced tx
-    pub index: u64,
+    /// Identifer of the referenced UTxO
+    pub utxo_identifier: UTxOIdentifier,
 }
 
 /// Option of either TxOutput or TxInput
@@ -342,9 +332,9 @@ pub type DataHash = Vec<u8>;
 /// Transaction hash
 pub type TxHash = [u8; 32];
 
-/// Compact transaction identifier for index states
+/// Compact transaction identifier (block_number, tx_index).
 #[derive(
-    Clone, Default, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+    Debug, Default, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
 )]
 pub struct TxIdentifier([u8; 6]);
 
@@ -352,18 +342,88 @@ impl TxIdentifier {
     pub fn new(block_number: u32, tx_index: u16) -> Self {
         let mut buf = [0u8; 6];
         buf[..4].copy_from_slice(&block_number.to_be_bytes());
-        buf[4..].copy_from_slice(&tx_index.to_be_bytes());
+        buf[4..6].copy_from_slice(&tx_index.to_be_bytes());
         Self(buf)
     }
 
-    /// Retrieve block number from TxIdentifier
     pub fn block_number(&self) -> u32 {
         u32::from_be_bytes(self.0[..4].try_into().unwrap())
     }
 
-    /// Retrieve transaction index from TxIdentifier
     pub fn tx_index(&self) -> u16 {
         u16::from_be_bytes(self.0[4..6].try_into().unwrap())
+    }
+
+    pub fn from_bytes(bytes: [u8; 6]) -> Self {
+        Self(bytes)
+    }
+
+    pub fn as_bytes(&self) -> &[u8; 6] {
+        &self.0
+    }
+}
+
+impl From<UTxOIdentifier> for TxIdentifier {
+    fn from(id: UTxOIdentifier) -> Self {
+        Self::new(id.block_number(), id.tx_index())
+    }
+}
+
+// Compact UTxO identifier (block_number, tx_index, output_index)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct UTxOIdentifier([u8; 8]);
+
+impl UTxOIdentifier {
+    pub fn new(block_number: u32, tx_index: u16, output_index: u16) -> Self {
+        let mut buf = [0u8; 8];
+        buf[..4].copy_from_slice(&block_number.to_be_bytes());
+        buf[4..6].copy_from_slice(&tx_index.to_be_bytes());
+        buf[6..].copy_from_slice(&output_index.to_be_bytes());
+        Self(buf)
+    }
+
+    pub fn block_number(&self) -> u32 {
+        u32::from_be_bytes(self.0[..4].try_into().unwrap())
+    }
+
+    pub fn tx_index(&self) -> u16 {
+        u16::from_be_bytes(self.0[4..6].try_into().unwrap())
+    }
+
+    pub fn output_index(&self) -> u16 {
+        u16::from_be_bytes(self.0[6..8].try_into().unwrap())
+    }
+
+    pub fn to_bytes(&self) -> [u8; 8] {
+        self.0
+    }
+}
+
+impl fmt::Display for UTxOIdentifier {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}:{}:{}",
+            self.block_number(),
+            self.tx_index(),
+            self.output_index()
+        )
+    }
+}
+
+// Full TxOutRef stored in UTxORegistry for UTxOIdentifier lookups
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct TxOutRef {
+    pub tx_hash: TxHash,
+    pub output_index: u16,
+}
+
+impl TxOutRef {
+    pub fn new(tx_hash: TxHash, output_index: u16) -> Self {
+        TxOutRef {
+            tx_hash,
+            output_index,
+        }
     }
 }
 
