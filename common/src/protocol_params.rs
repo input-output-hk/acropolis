@@ -2,12 +2,13 @@ use crate::{
     genesis_values::GenesisValues,
     rational_number::{ChameleonFraction, RationalNumber},
     BlockHash, BlockVersionData, Committee, Constitution, CostModel, DRepVotingThresholds, Era,
-    ExUnitPrices, ExUnits, NetworkId, PoolVotingThresholds, ProtocolConsts,
-};
+    ExUnitPrices, ExUnits, GenesisDelegate, HeavyDelegate, NetworkId,
+    PoolVotingThresholds, ProtocolConsts, };
 use anyhow::Result;
 use blake2::{digest::consts::U32, Blake2b, Digest};
 use chrono::{DateTime, Utc};
 use serde_with::serde_as;
+use std::collections::HashMap;
 use std::ops::Deref;
 
 #[derive(Debug, Default, PartialEq, Clone, serde::Serialize, serde::Deserialize)]
@@ -29,6 +30,7 @@ pub struct ByronParams {
     pub fts_seed: Option<Vec<u8>>,
     pub protocol_consts: ProtocolConsts,
     pub start_time: u64,
+    pub heavy_delegation: HashMap<Vec<u8>, HeavyDelegate>,
 }
 
 //
@@ -123,6 +125,8 @@ pub struct ShelleyParams {
     pub slots_per_kes_period: u32,
     pub system_start: DateTime<Utc>,
     pub update_quorum: u32,
+
+    pub gen_delegs: HashMap<Vec<u8>, GenesisDelegate>,
 }
 
 #[serde_as]

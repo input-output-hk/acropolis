@@ -1,5 +1,5 @@
 use crate::{
-    queries::misc::Order, serialization::Bech32WithHrp, Address, BlockHash, KeyHash, TxHash,
+    queries::misc::Order, serialization::Bech32WithHrp, Address, BlockHash, GenesisDelegate, HeavyDelegate, KeyHash, TxHash,
 };
 use cryptoxide::hashing::blake2b::Blake2b;
 use serde::ser::{Serialize, SerializeStruct, Serializer};
@@ -83,6 +83,13 @@ pub enum BlocksStateQueryResponse {
     Error(String),
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum BlockIssuer {
+    HeavyDelegate(HeavyDelegate),
+    GenesisDelegate(GenesisDelegate),
+    SPO(Vec<u8>),
+}
+
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct BlockInfo {
     pub timestamp: u64,
@@ -91,8 +98,7 @@ pub struct BlockInfo {
     pub slot: u64,
     pub epoch: u64,
     pub epoch_slot: u64,
-    // TODO: make a proper type for these pub keys
-    pub issuer_vkey: Option<Vec<u8>>,
+    pub issuer: Option<BlockIssuer>,
     pub size: u64,
     pub tx_count: u64,
     pub output: Option<u64>,
@@ -118,14 +124,17 @@ impl Serialize for BlockInfo {
         state.serialize_field("slot", &self.slot)?;
         state.serialize_field("epoch", &self.epoch)?;
         state.serialize_field("epoch_slot", &self.epoch_slot)?;
-        // TODO: handle non-SPO keys
-        state.serialize_field(
-            "slot_issuer",
-            &self.issuer_vkey.clone().map(|vkey| -> String {
-                let mut context = Blake2b::<224>::new();
-                context.update_mut(&vkey);
-                let digest = context.finalize().as_slice().to_owned();
-                digest.to_bech32_with_hrp("pool").unwrap_or(String::new())
+        state.serialize_field("slot_issuer", &self.issuer.clone().map(|vkey| -> String {
+                match vkey {
+                    BlockIssuer::HeavyDelegate(_) => "Byron genesis slot issuer".to_string(),
+                    BlockIssuer::GenesisDelegate(_) => "Shelley genesis slot issuer".to_string(),
+                    BlockIssuer::SPO(vkey) => {
+                        let mut context = Blake2b::<224>::new();
+                        context.update_mut(&vkey);
+                        let digest = context.finalize().as_slice().to_owned();
+                        digest.to_bech32_with_hrp("pool").unwrap_or(String::new())
+                    },
+                }
             }),
         )?;
         state.serialize_field("size", &self.size)?;

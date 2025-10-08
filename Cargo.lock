@@ -104,9 +104,11 @@ dependencies = [
  "config",
  "fjall",
  "hex",
+ "imbl",
  "minicbor 0.26.5",
  "pallas-traverse",
  "tempfile",
+ "tokio",
  "tracing",
 ]
 
@@ -219,6 +221,7 @@ dependencies = [
  "acropolis_common",
  "anyhow",
  "async-trait",
+ "base64 0.22.1",
  "blake2 0.10.6",
  "caryatid_sdk",
  "config",
