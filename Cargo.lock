@@ -138,6 +138,7 @@ version = "0.1.0"
 dependencies = [
  "acropolis_common",
  "anyhow",
+ "blake2 0.10.6",
  "caryatid_sdk",
  "config",
  "hex",
