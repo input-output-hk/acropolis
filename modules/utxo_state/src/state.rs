@@ -2,7 +2,7 @@
 use crate::volatile_index::VolatileIndex;
 use acropolis_common::{
     messages::UTXODeltasMessage, params::SECURITY_PARAMETER_K, Address, BlockInfo, BlockStatus,
-    TxInput, TxOutput, UTXODelta,
+    Datum, TxInput, TxOutput, UTXODelta,
 };
 use acropolis_common::{UTxOIdentifier, Value, ValueDelta};
 use anyhow::Result;
@@ -19,6 +19,9 @@ pub struct UTXOValue {
 
     /// Value in Lovelace
     pub value: Value,
+
+    /// Datum
+    pub datum: Option<Datum>,
 }
 
 /// Address delta observer
@@ -236,6 +239,7 @@ impl State {
         let value = UTXOValue {
             address: output.address.clone(),
             value: output.value.clone(),
+            datum: output.datum.clone(),
         };
 
         // Add to volatile or immutable maps
@@ -412,6 +416,8 @@ mod tests {
     #[tokio::test]
     async fn observe_output_adds_to_immutable_utxos() {
         let mut state = new_state();
+        let datum_data = vec![1, 2, 3, 4, 5];
+
         let output = TxOutput {
             utxo_identifier: UTxOIdentifier::new(0, 0, 0),
             address: create_address(99),
@@ -431,7 +437,7 @@ mod tests {
                     ],
                 )],
             ),
-            datum: None,
+            datum: Some(Datum::Inline(datum_data.clone())),
         };
 
         let block = create_block(BlockStatus::Immutable, 1, 1);
@@ -444,7 +450,7 @@ mod tests {
             Some(value) => {
                 assert!(
                     matches!(&value.address, Address::Byron(ByronAddress{ payload })
-                    if payload[0] == 99)
+                if payload[0] == 99)
                 );
                 assert_eq!(42, value.value.lovelace);
 
@@ -459,6 +465,11 @@ mod tests {
                 assert!(assets
                     .iter()
                     .any(|a| a.name == AssetName::new(b"FOO").unwrap() && a.amount == 200));
+
+                assert!(matches!(
+                    value.datum,
+                    Some(Datum::Inline(ref data)) if data == &datum_data
+                ));
             }
 
             _ => panic!("UTXO not found"),

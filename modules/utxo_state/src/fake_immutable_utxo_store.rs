@@ -52,6 +52,7 @@ impl ImmutableUTXOStore for FakeImmutableUTXOStore {
         Ok(Some(UTXOValue {
             address: Address::None,
             value: Value::new(42, Vec::new()),
+            datum: None,
         }))
     }
 
