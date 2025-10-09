@@ -7,6 +7,7 @@ use crate::genesis_values::GenesisValues;
 use crate::ledger_state::SPOState;
 use crate::protocol_params::{NonceHash, ProtocolParams};
 use crate::queries::parameters::{ParametersStateQuery, ParametersStateQueryResponse};
+use crate::queries::spdd::{SPDDStateQuery, SPDDStateQueryResponse};
 use crate::queries::utxos::{UTxOStateQuery, UTxOStateQueryResponse};
 use crate::queries::{
     accounts::{AccountsStateQuery, AccountsStateQueryResponse},
@@ -130,7 +131,13 @@ pub struct StakeRewardDeltasMessage {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct BlockFeesMessage {
+pub struct BlockTxsMessage {
+    /// Total transactions
+    pub total_txs: u64,
+
+    /// Total output
+    pub total_output: u128,
+
     /// Total fees
     pub total_fees: u64,
 }
@@ -141,8 +148,26 @@ pub struct EpochActivityMessage {
     /// Epoch which has ended
     pub epoch: u64,
 
+    /// Epoch start time
+    pub epoch_start_time: u64,
+
+    /// Epoch end time
+    pub epoch_end_time: u64,
+
+    /// First block time
+    pub first_block_time: u64,
+
+    /// Last block time
+    pub last_block_time: u64,
+
     /// Total blocks in this epoch
     pub total_blocks: usize,
+
+    /// Total txs in this epoch
+    pub total_txs: u64,
+
+    /// Total outputs of all txs in this epoch
+    pub total_outputs: u128,
 
     /// Total fees in this epoch
     pub total_fees: u64,
@@ -260,10 +285,10 @@ pub enum CardanoMessage {
     AddressDeltas(AddressDeltasMessage),     // Address deltas received
     Withdrawals(WithdrawalsMessage),         // Withdrawals from reward accounts
     PotDeltas(PotDeltasMessage),             // Changes to pot balances
-    BlockFees(BlockFeesMessage),             // Total fees in a block
-    EpochActivity(EpochActivityMessage),     // Total fees and VRF keys for an epoch
-    DRepState(DRepStateMessage),             // Active DReps at epoch end
-    SPOState(SPOStateMessage),               // Active SPOs at epoch end
+    BlockInfoMessage(BlockTxsMessage), // Transaction Info (total count, total output, total fees in a block)
+    EpochActivity(EpochActivityMessage), // Total fees and VRF keys for an epoch
+    DRepState(DRepStateMessage),       // Active DReps at epoch end
+    SPOState(SPOStateMessage),         // Active SPOs at epoch end
     GovernanceProcedures(GovernanceProceduresMessage), // Governance procedures received
 
     // Protocol Parameters
@@ -368,6 +393,7 @@ pub enum StateQuery {
     Scripts(ScriptsStateQuery),
     Transactions(TransactionsStateQuery),
     UTxOs(UTxOStateQuery),
+    SPDD(SPDDStateQuery),
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -387,4 +413,5 @@ pub enum StateQueryResponse {
     Scripts(ScriptsStateQueryResponse),
     Transactions(TransactionsStateQueryResponse),
     UTxOs(UTxOStateQueryResponse),
+    SPDD(SPDDStateQueryResponse),
 }
