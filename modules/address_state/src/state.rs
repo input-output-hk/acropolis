@@ -1,4 +1,8 @@
-use std::collections::HashSet;
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use acropolis_common::{
     Address, AddressDelta, AddressTotals, BlockInfo, TxIdentifier, UTxOIdentifier, ValueDelta,
@@ -9,8 +13,11 @@ use crate::{
     immutable_address_store::ImmutableAddressStore, volatile_addresses::VolatileAddresses,
 };
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone)]
 pub struct AddressStorageConfig {
+    pub db_path: String,
+    pub skip_until: Option<u64>,
+
     pub store_info: bool,
     pub store_totals: bool,
     pub store_transactions: bool,
@@ -37,29 +44,42 @@ pub struct AddressEntry {
     pub totals: Option<Vec<ValueDelta>>,
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Clone)]
 pub struct State {
     pub config: AddressStorageConfig,
     pub volatile: VolatileAddresses,
+    pub immutable: Arc<ImmutableAddressStore>,
 }
 
 impl State {
-    pub fn new(config: AddressStorageConfig) -> Self {
-        Self {
+    pub async fn new(config: &AddressStorageConfig) -> Result<Self> {
+        let db_path = if Path::new(&config.db_path).is_relative() {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(&config.db_path)
+        } else {
+            PathBuf::from(&config.db_path)
+        };
+
+        let store = Arc::new(ImmutableAddressStore::new(&db_path)?);
+
+        let mut config = config.clone();
+        config.skip_until = store.get_last_epoch_stored().await?;
+
+        Ok(Self {
             config,
             volatile: VolatileAddresses::default(),
-        }
+            immutable: store,
+        })
     }
 
     pub async fn get_address_utxos(
         &self,
-        store: &ImmutableAddressStore,
         address: &Address,
     ) -> Result<Option<Vec<UTxOIdentifier>>> {
         if !self.config.store_info {
             return Err(anyhow::anyhow!("address info storage disabled in config"));
         }
 
+        let store = self.immutable.clone();
         let mut combined: HashSet<UTxOIdentifier> = match store.get_utxos(address).await? {
             Some(db) => db.into_iter().collect(),
             None => HashSet::new(),
@@ -91,7 +111,6 @@ impl State {
 
     pub async fn get_address_transactions(
         &self,
-        store: &ImmutableAddressStore,
         address: &Address,
     ) -> Result<Option<Vec<TxIdentifier>>> {
         if !self.config.store_transactions {
@@ -99,6 +118,8 @@ impl State {
                 "address transactions storage disabled in config"
             ));
         }
+
+        let store = self.immutable.clone();
 
         let mut combined: Vec<TxIdentifier> = match store.get_txs(address).await? {
             Some(db) => db,
@@ -120,14 +141,12 @@ impl State {
         }
     }
 
-    pub async fn get_address_totals(
-        &self,
-        store: &ImmutableAddressStore,
-        address: &Address,
-    ) -> Result<AddressTotals> {
+    pub async fn get_address_totals(&self, address: &Address) -> Result<AddressTotals> {
         if !self.config.store_totals {
             anyhow::bail!("address totals storage disabled in config");
         }
+
+        let store = self.immutable.clone();
 
         let mut totals = match store.get_totals(address).await? {
             Some(db) => db,
@@ -145,6 +164,11 @@ impl State {
         }
 
         Ok(totals)
+    }
+
+    pub async fn prune_volatile(&mut self) {
+        let drained = self.volatile.prune_volatile();
+        self.immutable.update_immutable(drained).await;
     }
 
     pub fn ready_to_prune(&self, block_info: &BlockInfo) -> bool {
@@ -196,7 +220,10 @@ mod tests {
     }
 
     fn test_config() -> AddressStorageConfig {
+        let dir = tempdir().unwrap();
         AddressStorageConfig {
+            db_path: dir.path().to_string_lossy().into_owned(),
+            skip_until: None,
             store_info: true,
             store_transactions: true,
             store_totals: true,
@@ -207,7 +234,7 @@ mod tests {
         let tmpdir = tempdir().unwrap();
         let store = Arc::new(ImmutableAddressStore::new(tmpdir.path())?);
         let config = test_config();
-        let mut state = State::new(config.clone());
+        let mut state = State::new(&config.clone()).await?;
         state.volatile.epoch_start_block = 1;
         Ok((store, state))
     }
@@ -228,7 +255,6 @@ mod tests {
         let _ = tracing_subscriber::fmt::try_init();
 
         let (store, mut state) = setup_state_and_store().await?;
-        let config = test_config();
 
         let addr = dummy_address();
         let utxo = UTxOIdentifier::new(0, 0, 0);
@@ -237,11 +263,15 @@ mod tests {
         // Apply deltas
         state.apply_address_deltas(&deltas)?;
 
-        // Persist everything
-        state.volatile.persist_all(store.as_ref(), &config).await?;
+        // Drain volatile to immutable
+        state.volatile.epoch_start_block = 1;
+        state.prune_volatile().await;
+
+        // Perisist immutable to disk
+        store.persist_epoch(0, &state.config).await?;
 
         // Verify persisted UTxOs
-        let utxos = store.get_utxos(&addr).await?;
+        let utxos = state.get_address_utxos(&addr).await?;
         assert!(utxos.is_some());
         assert_eq!(utxos.as_ref().unwrap().len(), 1);
         assert_eq!(utxos.as_ref().unwrap()[0], UTxOIdentifier::new(0, 0, 0));
@@ -262,14 +292,13 @@ mod tests {
         let _ = tracing_subscriber::fmt::try_init();
 
         let (store, mut state) = setup_state_and_store().await?;
-        let config = test_config();
 
         let addr = dummy_address();
         let utxo = UTxOIdentifier::new(0, 0, 0);
 
         // Before processing
         assert!(
-            state.get_address_utxos(store.as_ref(), &addr).await?.is_none(),
+            state.get_address_utxos(&addr).await?.is_none(),
             "Expected no UTxOs before creation"
         );
 
@@ -278,27 +307,35 @@ mod tests {
         state.apply_address_deltas(&created)?;
 
         // After processing creation
-        let after_create = state.get_address_utxos(store.as_ref(), &addr).await?;
+        let after_create = state.get_address_utxos(&addr).await?;
         assert_eq!(after_create.as_ref().unwrap(), &[utxo]);
 
-        state.volatile.persist_all(store.as_ref(), &config).await?;
+        // Drain volatile to immutable
+        state.volatile.epoch_start_block = 1;
+        state.prune_volatile().await;
+
+        // Perisist immutable to disk
+        store.persist_epoch(0, &state.config).await?;
 
         // After persisting creation
-        let after_persist = state.get_address_utxos(store.as_ref(), &addr).await?;
+        let after_persist = state.get_address_utxos(&addr).await?;
         assert_eq!(after_persist.as_ref().unwrap(), &[utxo]);
 
         state.volatile.next_block();
-        state.volatile.epoch_start_block = 2;
         state.apply_address_deltas(&[delta(&addr, &utxo, -1)])?;
 
         // After processing spend
-        let after_spend_volatile = state.get_address_utxos(store.as_ref(), &addr).await?;
+        let after_spend_volatile = state.get_address_utxos(&addr).await?;
         assert!(after_spend_volatile.as_ref().map_or(true, |u| u.is_empty()));
 
-        state.volatile.persist_all(store.as_ref(), &config).await?;
+        // Drain volatile to immutable
+        state.prune_volatile().await;
+
+        // Perisist immutable to disk
+        store.persist_epoch(2, &state.config).await?;
 
         // After persisting spend
-        let after_spend_disk = state.get_address_utxos(store.as_ref(), &addr).await?;
+        let after_spend_disk = state.get_address_utxos(&addr).await?;
         assert!(after_spend_disk.as_ref().map_or(true, |u| u.is_empty()));
 
         Ok(())
@@ -309,7 +346,6 @@ mod tests {
         let _ = tracing_subscriber::fmt::try_init();
 
         let (store, mut state) = setup_state_and_store().await?;
-        let config = test_config();
 
         let addr = dummy_address();
         let utxo_old = UTxOIdentifier::new(0, 0, 0);
@@ -322,7 +358,7 @@ mod tests {
         state.apply_address_deltas(&[delta(&addr, &utxo_old, -1), delta(&addr, &utxo_new, 1)])?;
 
         // Create and spend both in volatile is not included in address utxos
-        let volatile = state.get_address_utxos(store.as_ref(), &addr).await?;
+        let volatile = state.get_address_utxos(&addr).await?;
         assert!(
             volatile.as_ref().is_some_and(|u| u.contains(&utxo_new) && !u.contains(&utxo_old)),
             "Expected only new UTxO {:?} in volatile view, got {:?}",
@@ -330,10 +366,14 @@ mod tests {
             volatile
         );
 
-        state.volatile.persist_all(store.as_ref(), &config).await?;
+        // Drain volatile to immutable
+        state.prune_volatile().await;
+
+        // Perisist immutable to disk
+        store.persist_epoch(0, &state.config).await?;
 
         // UTxO not persisted to disk if created and spent in pruned volatile window
-        let persisted_view = state.get_address_utxos(store.as_ref(), &addr).await?;
+        let persisted_view = state.get_address_utxos(&addr).await?;
         assert!(
             persisted_view
                 .as_ref()

@@ -99,14 +99,12 @@ index-by-policy = false
 
 [module.address-state]
 # Enables /addresses/{address}, /addresses/{address}/extended,
-# and /addresses/{address}/utxos endpoints
+# /addresses/{address}/utxos/{asset}, and /addresses/{address}/utxos endpoints
 store-info = true
 # Enables /addresses/{address}/totals endpoint
 store-totals = true
 # Enables /addresses/{address}/transactions endpoint
 store-transactions = true
-# Enables /addresses/{address}/utxos/{asset} endpoint
-index-utxos-by-asset = false
 
 [module.clock]
 

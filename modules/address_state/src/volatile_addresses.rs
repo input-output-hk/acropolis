@@ -1,12 +1,8 @@
 use std::collections::{HashMap, VecDeque};
 
 use acropolis_common::Address;
-use anyhow::Result;
 
-use crate::{
-    immutable_address_store::ImmutableAddressStore,
-    state::{AddressEntry, AddressStorageConfig},
-};
+use crate::state::AddressEntry;
 
 #[derive(Debug, Clone)]
 pub struct VolatileAddresses {
@@ -62,20 +58,13 @@ impl VolatileAddresses {
         out
     }
 
-    pub async fn persist_all(
-        &mut self,
-        store: &ImmutableAddressStore,
-        config: &AddressStorageConfig,
-    ) -> Result<()> {
+    pub fn prune_volatile(&mut self) -> Vec<HashMap<Address, AddressEntry>> {
         let epoch = self.last_persisted_epoch.map(|e| e + 1).unwrap_or(0);
         let blocks_to_drain = (self.epoch_start_block - self.start_block) as usize;
-
-        let drained: Vec<_> = self.window.drain(..blocks_to_drain).collect();
-        store.persist_epoch(epoch, drained, config).await?;
 
         self.start_block += blocks_to_drain as u64;
         self.last_persisted_epoch = Some(epoch);
 
-        Ok(())
+        self.window.drain(..blocks_to_drain).collect()
     }
 }

@@ -17,10 +17,7 @@ use config::Config;
 use tokio::sync::Mutex;
 use tracing::{error, info};
 
-use crate::{
-    immutable_address_store::ImmutableAddressStore,
-    state::{AddressStorageConfig, State},
-};
+use crate::state::{AddressStorageConfig, State};
 mod immutable_address_store;
 mod state;
 mod volatile_addresses;
@@ -32,6 +29,7 @@ const DEFAULT_PARAMETERS_SUBSCRIBE_TOPIC: (&str, &str) =
     ("parameters-subscribe-topic", "cardano.protocol.parameters");
 
 // Configuration defaults
+const DEFAULT_ADDRESS_DB_PATH: (&str, &str) = ("db-path", "./db");
 const DEFAULT_STORE_INFO: (&str, bool) = ("store-info", false);
 const DEFAULT_STORE_TOTALS: (&str, bool) = ("store-totals", false);
 const DEFAULT_STORE_TRANSACTIONS: (&str, bool) = ("store-transactions", false);
@@ -49,8 +47,6 @@ impl AddressState {
         state_mutex: Arc<Mutex<State>>,
         mut address_deltas_subscription: Box<dyn Subscription<Message>>,
         mut params_subscription: Box<dyn Subscription<Message>>,
-        persist_after: Option<u64>,
-        store: Arc<ImmutableAddressStore>,
     ) -> Result<()> {
         let _ = params_subscription.read().await?;
         info!("Consumed initial genesis params from params_subscription");
@@ -92,27 +88,47 @@ impl AddressState {
                     ref block_info,
                     CardanoMessage::AddressDeltas(address_deltas_msg),
                 )) => {
-                    let mut state = state_mutex.lock().await;
-                    // Skip processing for epochs already stored to DB
-                    if let Some(min_epoch) = persist_after {
-                        if block_info.epoch <= min_epoch {
-                            state.volatile.next_block();
-                            continue;
+                    let (should_prune, store, config, epoch);
+                    {
+                        let mut state = state_mutex.lock().await;
+                        // Skip processing for epochs already stored to DB
+                        if let Some(min_epoch) = state.config.skip_until {
+                            if block_info.epoch <= min_epoch {
+                                state.volatile.next_block();
+                                continue;
+                            }
+                        }
+
+                        // Add deltas to volatile
+                        if let Err(e) = state.apply_address_deltas(&address_deltas_msg.deltas) {
+                            error!("address deltas handling error: {e:#}");
+                        }
+
+                        store = state.immutable.clone();
+                        config = state.config.clone();
+                        epoch = block_info.epoch;
+
+                        // Move volatile deltas for an epoch to ImmutableAddressStore if out of rollback window
+                        should_prune = state.ready_to_prune(&current_block);
+                        if should_prune {
+                            state.prune_volatile().await;
                         }
                     }
 
-                    // Add deltas to volatile
-                    if let Err(e) = state.apply_address_deltas(&address_deltas_msg.deltas) {
-                        error!("address deltas handling error: {e:#}");
+                    if should_prune {
+                        tokio::spawn(async move {
+                            if let Err(e) = store.persist_epoch(epoch, &config).await {
+                                error!("failed to persist epoch {}: {}", epoch, e);
+                            } else {
+                                info!("persisted address state for epoch {}", epoch);
+                            }
+                        });
                     }
 
-                    // Persist full epoch to disk if ready
-                    if state.ready_to_prune(&current_block) {
-                        let config = state.config.clone();
-                        state.volatile.persist_all(store.as_ref(), &config).await?;
+                    {
+                        let mut state = state_mutex.lock().await;
+                        state.volatile.next_block();
                     }
-
-                    state.volatile.next_block();
                 }
                 other => error!("Unexpected message on address-deltas subscription: {other:?}"),
             }
@@ -148,6 +164,8 @@ impl AddressState {
 
         // Get configuration flags and query topic
         let storage_config = AddressStorageConfig {
+            db_path: get_string_flag(&config, DEFAULT_ADDRESS_DB_PATH),
+            skip_until: None,
             store_info: get_bool_flag(&config, DEFAULT_STORE_INFO),
             store_totals: get_bool_flag(&config, DEFAULT_STORE_TOTALS),
             store_transactions: get_bool_flag(&config, DEFAULT_STORE_TRANSACTIONS),
@@ -156,27 +174,14 @@ impl AddressState {
         let address_query_topic = get_string_flag(&config, DEFAULT_ADDRESS_QUERY_TOPIC);
         info!("Creating asset query handler on '{address_query_topic}'");
 
-        // Initialize state history
-        let state = Arc::new(Mutex::new(State::new(storage_config)));
-        let state_run = state.clone();
-        let state_query = state.clone();
-
-        // Initialize Fjall store
-        let store = if storage_config.any_enabled() {
-            let path = config
-                .get_string("address_state.path")
-                .unwrap_or_else(|_| "./data/address_state".to_string());
-            let store = ImmutableAddressStore::new(path)?;
-            Some(Arc::new(store))
-        } else {
-            None
-        };
-        let query_store = store.clone();
+        // Initialize state
+        let state = State::new(&storage_config).await?;
+        let state_mutex = Arc::new(Mutex::new(state));
+        let state_run = state_mutex.clone();
 
         // Query handler
         context.handle(&address_query_topic, move |message| {
-            let state_mutex = state_query.clone();
-            let store = query_store.clone();
+            let state_mutex = state_mutex.clone();
             async move {
                 let Message::StateQuery(StateQuery::Addresses(query)) = message.as_ref() else {
                     return Arc::new(Message::StateQueryResponse(StateQueryResponse::Addresses(
@@ -189,37 +194,23 @@ impl AddressState {
                 let state = state_mutex.lock().await;
                 let response = match query {
                     AddressStateQuery::GetAddressUTxOs { address } => {
-                        if let Some(ref s) = store {
-                            match state.get_address_utxos(s, &address).await {
-                                Ok(Some(utxos)) => AddressStateQueryResponse::AddressUTxOs(utxos),
-                                Ok(None) => AddressStateQueryResponse::NotFound,
-                                Err(e) => AddressStateQueryResponse::Error(e.to_string()),
-                            }
-                        } else {
-                            AddressStateQueryResponse::Error("Address store not initialized".into())
+                        match state.get_address_utxos(&address).await {
+                            Ok(Some(utxos)) => AddressStateQueryResponse::AddressUTxOs(utxos),
+                            Ok(None) => AddressStateQueryResponse::NotFound,
+                            Err(e) => AddressStateQueryResponse::Error(e.to_string()),
                         }
                     }
                     AddressStateQuery::GetAddressTransactions { address } => {
-                        if let Some(ref s) = store {
-                            match state.get_address_transactions(s, &address).await {
-                                Ok(Some(txs)) => {
-                                    AddressStateQueryResponse::AddressTransactions(txs)
-                                }
-                                Ok(None) => AddressStateQueryResponse::NotFound,
-                                Err(e) => AddressStateQueryResponse::Error(e.to_string()),
-                            }
-                        } else {
-                            AddressStateQueryResponse::Error("Address store not initialized".into())
+                        match state.get_address_transactions(&address).await {
+                            Ok(Some(txs)) => AddressStateQueryResponse::AddressTransactions(txs),
+                            Ok(None) => AddressStateQueryResponse::NotFound,
+                            Err(e) => AddressStateQueryResponse::Error(e.to_string()),
                         }
                     }
                     AddressStateQuery::GetAddressTotals { address } => {
-                        if let Some(ref s) = store {
-                            match state.get_address_totals(s.as_ref(), &address).await {
-                                Ok(totals) => AddressStateQueryResponse::AddressTotals(totals),
-                                Err(e) => AddressStateQueryResponse::Error(e.to_string()),
-                            }
-                        } else {
-                            AddressStateQueryResponse::Error("Address store not initialized".into())
+                        match state.get_address_totals(&address).await {
+                            Ok(totals) => AddressStateQueryResponse::AddressTotals(totals),
+                            Err(e) => AddressStateQueryResponse::Error(e.to_string()),
                         }
                     }
                 };
@@ -229,7 +220,7 @@ impl AddressState {
             }
         });
 
-        if let Some(store) = store {
+        if storage_config.any_enabled() {
             // Get subscribe topics
             let address_deltas_subscribe_topic =
                 get_string_flag(&config, DEFAULT_ADDRESS_DELTAS_SUBSCRIBE_TOPIC);
@@ -242,18 +233,11 @@ impl AddressState {
             let address_deltas_sub = context.subscribe(&address_deltas_subscribe_topic).await?;
             let params_sub = context.subscribe(&params_subscribe_topic).await?;
 
-            let persist_after = store.get_last_epoch_stored().await?;
             // Start run task
             context.run(async move {
-                Self::run(
-                    state_run,
-                    address_deltas_sub,
-                    params_sub,
-                    persist_after,
-                    store,
-                )
-                .await
-                .unwrap_or_else(|e| error!("Failed: {e}"));
+                Self::run(state_run, address_deltas_sub, params_sub)
+                    .await
+                    .unwrap_or_else(|e| error!("Failed: {e}"));
             });
         }
 

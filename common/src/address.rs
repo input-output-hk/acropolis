@@ -531,7 +531,7 @@ mod tests {
         let payload = vec![42];
         let address = Address::Byron(ByronAddress { payload });
         let text = address.to_string().unwrap();
-        assert_eq!(text, "j");
+        assert_eq!(text, "8MMy4x9jE734Gz");
 
         let unpacked = Address::from_string(&text).unwrap();
         assert_eq!(address, unpacked);

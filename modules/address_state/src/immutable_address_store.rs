@@ -8,7 +8,7 @@ use acropolis_common::{Address, AddressTotals, TxIdentifier, UTxOIdentifier};
 use anyhow::Result;
 use fjall::{Keyspace, Partition, PartitionCreateOptions};
 use minicbor::{decode, to_vec};
-use tokio::task;
+use tokio::{sync::Mutex, task};
 use tracing::{debug, error, info};
 
 // Metadata keys which store the last epoch saved in each partition
@@ -21,6 +21,7 @@ pub struct ImmutableAddressStore {
     txs: Partition,
     totals: Partition,
     keyspace: Keyspace,
+    pub pending: Mutex<Vec<HashMap<Address, AddressEntry>>>,
 }
 
 impl ImmutableAddressStore {
@@ -38,18 +39,14 @@ impl ImmutableAddressStore {
             txs,
             totals,
             keyspace,
+            pending: Mutex::new(Vec::new()),
         })
     }
 
     /// Persists volatile UTxOs, transactions, and totals into their respective Fjall partitions for an entire epoch.
     /// Skips any partitions that have already stored the given epoch.
     /// All writes are batched and committed atomically, preventing on-disk corruption in case of failure.
-    pub async fn persist_epoch(
-        &self,
-        epoch: u64,
-        drained_blocks: Vec<HashMap<Address, AddressEntry>>,
-        config: &AddressStorageConfig,
-    ) -> Result<()> {
+    pub async fn persist_epoch(&self, epoch: u64, config: &AddressStorageConfig) -> Result<()> {
         let persist_utxos = config.store_info
             && !self.epoch_exists(self.utxos.clone(), ADDRESS_UTXOS_EPOCH_COUNTER, epoch).await?;
         let persist_txs = config.store_transactions
@@ -62,104 +59,117 @@ impl ImmutableAddressStore {
             return Ok(());
         }
 
-        let keyspace = self.keyspace.clone();
-        let utxos = self.utxos.clone();
-        let txs = self.txs.clone();
-        let totals = self.totals.clone();
+        info!("Pending has {}", self.pending.lock().await.len());
 
-        task::spawn_blocking(move || -> Result<()> {
-            let mut batch = keyspace.batch();
-            let mut change_count = 0;
+        let drained_blocks = {
+            let mut pending = self.pending.lock().await;
+            std::mem::take(&mut *pending)
+        };
 
-            for block_map in drained_blocks.into_iter() {
-                if block_map.is_empty() {
-                    continue;
-                }
+        let mut batch = self.keyspace.batch();
+        let mut change_count = 0;
 
-                for (addr, entry) in block_map {
-                    change_count += 1;
-                    let addr_key = addr.to_bytes_key()?;
+        for block_map in drained_blocks.into_iter() {
+            if block_map.is_empty() {
+                continue;
+            }
 
-                    if persist_utxos {
-                        let mut live: HashSet<UTxOIdentifier> = utxos
-                            .get(&addr_key)?
-                            .map(|bytes| decode(&bytes))
-                            .transpose()?
-                            .unwrap_or_default();
+            for (addr, entry) in block_map {
+                change_count += 1;
+                let addr_key = addr.to_bytes_key()?;
 
-                        if let Some(deltas) = &entry.utxos {
-                            for delta in deltas {
-                                match delta {
-                                    UtxoDelta::Created(u) => {
-                                        live.insert(*u);
-                                    }
-                                    UtxoDelta::Spent(u) => {
-                                        live.remove(u);
-                                    }
+                if persist_utxos {
+                    let mut live: HashSet<UTxOIdentifier> = self
+                        .utxos
+                        .get(&addr_key)?
+                        .map(|bytes| decode(&bytes))
+                        .transpose()?
+                        .unwrap_or_default();
+
+                    if let Some(deltas) = &entry.utxos {
+                        for delta in deltas {
+                            match delta {
+                                UtxoDelta::Created(u) => {
+                                    live.insert(*u);
+                                }
+                                UtxoDelta::Spent(u) => {
+                                    live.remove(u);
                                 }
                             }
                         }
-
-                        batch.insert(&utxos, &addr_key, to_vec(&live)?);
                     }
 
-                    if persist_txs {
-                        let mut live: Vec<TxIdentifier> = txs
-                            .get(&addr_key)?
-                            .map(|bytes| decode(&bytes))
-                            .transpose()?
-                            .unwrap_or_default();
+                    batch.insert(&self.utxos, &addr_key, to_vec(&live)?);
+                }
 
-                        if let Some(txs_deltas) = &entry.transactions {
-                            live.extend(txs_deltas.iter().cloned());
+                if persist_txs {
+                    let mut live: Vec<TxIdentifier> = self
+                        .txs
+                        .get(&addr_key)?
+                        .map(|bytes| decode(&bytes))
+                        .transpose()?
+                        .unwrap_or_default();
+
+                    if let Some(txs_deltas) = &entry.transactions {
+                        live.extend(txs_deltas.iter().cloned());
+                    }
+
+                    batch.insert(&self.txs, &addr_key, to_vec(&live)?);
+                }
+
+                if persist_totals {
+                    let mut live: AddressTotals = self
+                        .totals
+                        .get(&addr_key)?
+                        .map(|bytes| decode(&bytes))
+                        .transpose()?
+                        .unwrap_or_default();
+
+                    if let Some(deltas) = &entry.totals {
+                        for delta in deltas {
+                            live.apply_delta(delta);
                         }
-
-                        batch.insert(&txs, &addr_key, to_vec(&live)?);
                     }
 
-                    if persist_totals {
-                        let mut live: AddressTotals = totals
-                            .get(&addr_key)?
-                            .map(|bytes| decode(&bytes))
-                            .transpose()?
-                            .unwrap_or_default();
-
-                        if let Some(deltas) = &entry.totals {
-                            for delta in deltas {
-                                live.apply_delta(delta);
-                            }
-                        }
-
-                        batch.insert(&totals, &addr_key, to_vec(&live)?);
-                    }
+                    batch.insert(&self.totals, &addr_key, to_vec(&live)?);
                 }
             }
+        }
 
-            // Metadata markers
-            if persist_utxos {
-                batch.insert(&utxos, ADDRESS_UTXOS_EPOCH_COUNTER, &epoch.to_le_bytes());
-            }
-            if persist_txs {
-                batch.insert(&txs, ADDRESS_TXS_EPOCH_COUNTER, &epoch.to_le_bytes());
-            }
-            if persist_totals {
-                batch.insert(&totals, ADDRESS_TOTALS_EPOCH_COUNTER, &epoch.to_le_bytes());
-            }
+        // Metadata markers
+        if persist_utxos {
+            batch.insert(
+                &self.utxos,
+                ADDRESS_UTXOS_EPOCH_COUNTER,
+                &epoch.to_le_bytes(),
+            );
+        }
+        if persist_txs {
+            batch.insert(&self.txs, ADDRESS_TXS_EPOCH_COUNTER, &epoch.to_le_bytes());
+        }
+        if persist_totals {
+            batch.insert(
+                &self.totals,
+                ADDRESS_TOTALS_EPOCH_COUNTER,
+                &epoch.to_le_bytes(),
+            );
+        }
 
-            match batch.commit() {
-                Ok(_) => {
-                    info!("committed {change_count} address changes for epoch {epoch}");
-                    Ok(())
-                }
-                Err(e) => {
-                    error!("batch commit failed for epoch {epoch}: {e}");
-                    Err(e.into())
-                }
+        match batch.commit() {
+            Ok(_) => {
+                info!("committed {change_count} address changes for epoch {epoch}");
+                Ok(())
             }
-        })
-        .await??;
+            Err(e) => {
+                error!("batch commit failed for epoch {epoch}: {e}");
+                Err(e.into())
+            }
+        }
+    }
 
-        Ok(())
+    pub async fn update_immutable(&self, drained: Vec<HashMap<Address, AddressEntry>>) {
+        let mut pending = self.pending.lock().await;
+        pending.extend(drained);
     }
 
     pub async fn get_utxos(&self, address: &Address) -> Result<Option<Vec<UTxOIdentifier>>> {
