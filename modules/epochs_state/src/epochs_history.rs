@@ -135,4 +135,60 @@ mod tests {
         assert_eq!(history.total_blocks, 1);
         assert_eq!(history.total_fees, 50);
     }
+
+    #[test]
+    fn get_next_previous_epochs_sorts_epochs() {
+        let epochs_history = EpochsHistoryState::new(&StoreConfig::new(true));
+        let block = make_block(200);
+        epochs_history.handle_epoch_activity(
+            &block,
+            &EpochActivityMessage {
+                epoch: 199,
+                epoch_start_time: 0,
+                epoch_end_time: 0,
+                first_block_time: 0,
+                last_block_time: 0,
+                total_blocks: 1,
+                total_txs: 1,
+                total_outputs: 100,
+                total_fees: 50,
+                vrf_vkey_hashes: vec![],
+                nonce: None,
+            },
+        );
+
+        let block = make_block(201);
+        epochs_history.handle_epoch_activity(
+            &block,
+            &EpochActivityMessage {
+                epoch: 200,
+                epoch_start_time: 0,
+                epoch_end_time: 0,
+                first_block_time: 0,
+                last_block_time: 0,
+                total_blocks: 1,
+                total_txs: 1,
+                total_outputs: 100,
+                total_fees: 50,
+                vrf_vkey_hashes: vec![],
+                nonce: None,
+            },
+        );
+
+        let next_epochs = epochs_history.get_next_epochs(199).expect("history disabled in test");
+        assert_eq!(next_epochs.len(), 1);
+        assert_eq!(next_epochs[0].epoch, 200);
+
+        let previous_epochs =
+            epochs_history.get_previous_epochs(201).expect("history disabled in test");
+        assert_eq!(previous_epochs.len(), 2);
+        assert_eq!(previous_epochs[0].epoch, 199);
+
+        let next_epochs = epochs_history.get_next_epochs(200).expect("history disabled in test");
+        assert_eq!(next_epochs.len(), 0);
+
+        let previous_epochs =
+            epochs_history.get_previous_epochs(199).expect("history disabled in test");
+        assert_eq!(previous_epochs.len(), 0);
+    }
 }
