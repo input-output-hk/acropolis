@@ -156,8 +156,14 @@ pub struct EpochActivityMessage {
     /// First block time
     pub first_block_time: u64,
 
+    /// First block height
+    pub first_block_height: u64,
+
     /// Last block time
     pub last_block_time: u64,
+
+    /// Last block height
+    pub last_block_height: u64,
 
     /// Total blocks in this epoch
     pub total_blocks: usize,

@@ -242,7 +242,9 @@ impl State {
             epoch_start_time: self.epoch_start_time,
             epoch_end_time: self.epoch_start_time + EPOCH_LENGTH,
             first_block_time: self.first_block_time,
+            first_block_height: self.first_block_height,
             last_block_time: self.last_block_time,
+            last_block_height: self.last_block_height,
             // NOTE:
             // total_blocks will be missing one
             // This is only because we now ignore EBBs

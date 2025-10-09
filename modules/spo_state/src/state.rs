@@ -231,9 +231,9 @@ impl State {
             .unwrap_or_default())
     }
 
-    /// Get Pool Block Hashes per Epoch
+    /// Get Pool Block Hashes by Epoch
     /// Return Err when block_hashes not enabled
-    pub fn get_pool_block_hashes_per_epoch(
+    pub fn get_pool_block_hashes_by_epoch(
         &self,
         pool_id: &KeyHash,
         epoch: u64,
@@ -1126,11 +1126,11 @@ mod tests {
         assert_eq!(block_hashes.len(), 1);
         assert_eq!(block_hashes[0], block.hash);
 
-        let block_hashes = state.get_pool_block_hashes_per_epoch(&vec![1], 2).unwrap();
+        let block_hashes = state.get_pool_block_hashes_by_epoch(&vec![1], 2).unwrap();
         assert_eq!(block_hashes.len(), 1);
         assert_eq!(block_hashes[0], block.hash);
 
-        let block_hashes = state.get_pool_block_hashes_per_epoch(&vec![1], 3).unwrap();
+        let block_hashes = state.get_pool_block_hashes_by_epoch(&vec![1], 3).unwrap();
         assert_eq!(block_hashes.len(), 0);
     }
 }
