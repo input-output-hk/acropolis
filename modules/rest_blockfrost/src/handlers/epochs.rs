@@ -262,7 +262,7 @@ pub async fn handle_epoch_next_blockfrost(
     if params.len() != 1 {
         return Ok(RESTResponse::with_text(
             400,
-            "Expected one parameter: 'latest' or an epoch number",
+            "Expected one parameter: an epoch number",
         ));
     }
     let param = &params[0];
@@ -331,7 +331,7 @@ pub async fn handle_epoch_previous_blockfrost(
     if params.len() != 1 {
         return Ok(RESTResponse::with_text(
             400,
-            "Expected one parameter: 'latest' or an epoch number",
+            "Expected one parameter: an epoch number",
         ));
     }
     let param = &params[0];
