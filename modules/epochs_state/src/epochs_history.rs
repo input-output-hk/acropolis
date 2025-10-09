@@ -34,11 +34,13 @@ impl EpochsHistoryState {
     /// Get Epoch Activity Messages for epochs following a specific epoch. (exclusive)
     pub fn get_next_epochs(&self, epoch: u64) -> Result<Vec<EpochActivityMessage>> {
         if let Some(epochs_history) = self.epochs_history.as_ref() {
-            Ok(epochs_history
+            let mut epochs: Vec<EpochActivityMessage> = epochs_history
                 .iter()
                 .filter(|entry| *entry.key() > epoch)
                 .map(|e| e.value().clone())
-                .collect())
+                .collect();
+            epochs.sort_by(|a, b| a.epoch.cmp(&b.epoch));
+            Ok(epochs)
         } else {
             Err(anyhow::anyhow!("Historical epoch storage is disabled"))
         }
@@ -47,11 +49,13 @@ impl EpochsHistoryState {
     /// Get Epoch Activity Messages for epochs following a specific epoch. (exclusive)
     pub fn get_previous_epochs(&self, epoch: u64) -> Result<Vec<EpochActivityMessage>> {
         if let Some(epochs_history) = self.epochs_history.as_ref() {
-            Ok(epochs_history
+            let mut epochs: Vec<EpochActivityMessage> = epochs_history
                 .iter()
                 .filter(|entry| *entry.key() < epoch)
                 .map(|e| e.value().clone())
-                .collect())
+                .collect();
+            epochs.sort_by(|a, b| a.epoch.cmp(&b.epoch));
+            Ok(epochs)
         } else {
             Err(anyhow::anyhow!("Historical epoch storage is disabled"))
         }

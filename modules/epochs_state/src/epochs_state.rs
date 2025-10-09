@@ -282,25 +282,40 @@ impl EpochsState {
                     }
 
                     EpochsStateQuery::GetNextEpochs { epoch_number } => {
-                        match epochs_history.get_next_epochs(*epoch_number) {
-                            Ok(epochs) => {
-                                // check the current epoch also
-                                EpochsStateQueryResponse::NextEpochs(NextEpochs { epochs })
+                        let current_epoch = state.get_epoch_info();
+                        if *epoch_number > current_epoch.epoch {
+                            EpochsStateQueryResponse::NotFound
+                        } else {
+                            match epochs_history.get_next_epochs(*epoch_number) {
+                                Ok(mut epochs) => {
+                                    // check the current epoch also
+                                    if current_epoch.epoch > *epoch_number {
+                                        epochs.push(current_epoch);
+                                    }
+                                    EpochsStateQueryResponse::NextEpochs(NextEpochs { epochs })
+                                }
+                                Err(_) => EpochsStateQueryResponse::Error(
+                                    "Historical epoch storage is disabled".to_string(),
+                                ),
                             }
-                            Err(_) => EpochsStateQueryResponse::Error(
-                                "Historical epoch storage is disabled".to_string(),
-                            ),
                         }
                     }
 
                     EpochsStateQuery::GetPreviousEpochs { epoch_number } => {
-                        match epochs_history.get_previous_epochs(*epoch_number) {
-                            Ok(epochs) => {
-                                EpochsStateQueryResponse::PreviousEpochs(PreviousEpochs { epochs })
+                        let current_epoch = state.get_epoch_info();
+                        if *epoch_number > current_epoch.epoch {
+                            EpochsStateQueryResponse::NotFound
+                        } else {
+                            match epochs_history.get_previous_epochs(*epoch_number) {
+                                Ok(epochs) => {
+                                    EpochsStateQueryResponse::PreviousEpochs(PreviousEpochs {
+                                        epochs,
+                                    })
+                                }
+                                Err(_) => EpochsStateQueryResponse::Error(
+                                    "Historical epoch storage is disabled".to_string(),
+                                ),
                             }
-                            Err(_) => EpochsStateQueryResponse::Error(
-                                "Historical epoch storage is disabled".to_string(),
-                            ),
                         }
                     }
 
