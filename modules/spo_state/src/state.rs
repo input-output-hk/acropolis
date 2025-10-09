@@ -15,7 +15,7 @@ use acropolis_common::{
     TxHash, Voter, VotingProcedures,
 };
 use anyhow::Result;
-use imbl::{HashMap, Vector};
+use imbl::{HashMap, OrdMap, Vector};
 use std::sync::{Arc, Mutex};
 use tracing::{debug, error, info};
 
@@ -42,7 +42,7 @@ pub struct State {
     total_blocks_minted: HashMap<KeyHash, u64>,
 
     /// block hashes keyed pool id
-    block_hashes: Option<HashMap<KeyHash, Vector<BlockHash>>>,
+    block_hashes: Option<HashMap<KeyHash, OrdMap<u64, Vector<BlockHash>>>>,
 
     /// historical spo state
     /// keyed by pool operator id
@@ -219,9 +219,33 @@ impl State {
         delegators_map.map(|map| map.into_iter().collect())
     }
 
-    /// Get Pool Blocks
-    pub fn get_pool_block_hashes(&self, pool_id: &KeyHash) -> Option<Vec<BlockHash>> {
-        self.block_hashes.as_ref()?.get(pool_id).map(|blocks| blocks.clone().into_iter().collect())
+    /// Get Pool Block Hashes
+    /// Return Err when block_hashes not enabled
+    pub fn get_pool_block_hashes(&self, pool_id: &KeyHash) -> Result<Vec<BlockHash>> {
+        let Some(block_hashes) = self.block_hashes.as_ref() else {
+            return Err(anyhow::anyhow!("Block hashes are not enabled"));
+        };
+        Ok(block_hashes
+            .get(pool_id)
+            .map(|epochs| epochs.values().flatten().cloned().collect())
+            .unwrap_or_default())
+    }
+
+    /// Get Pool Block Hashes per Epoch
+    /// Return Err when block_hashes not enabled
+    pub fn get_pool_block_hashes_per_epoch(
+        &self,
+        pool_id: &KeyHash,
+        epoch: u64,
+    ) -> Result<Vec<BlockHash>> {
+        let Some(block_hashes) = self.block_hashes.as_ref() else {
+            return Err(anyhow::anyhow!("Block hashes are not enabled"));
+        };
+        Ok(block_hashes
+            .get(pool_id)
+            .map(|epochs| epochs.get(&epoch).map(|blocks| blocks.iter().cloned().collect()))
+            .flatten()
+            .unwrap_or_default())
     }
 
     /// Get Pool Updates
@@ -268,20 +292,24 @@ impl State {
     }
 
     // Handle block's minting.
-    // Returns None if block_hashes is not enabled
-    // Return Some(false) if pool_id for vrf_vkey is not found
-    pub fn handle_mint(&mut self, block_info: &BlockInfo, vrf_vkey: &[u8]) -> Option<bool> {
+    // Returns false if vrf_vkey_hash is not mapped to any pool_id
+    pub fn handle_mint(&mut self, block_info: &BlockInfo, vrf_vkey: &[u8]) -> bool {
         let vrf_key_hash = keyhash(vrf_vkey);
         let Some(pool_id) = self.vrf_key_hash_to_pool_id_map.get(&vrf_key_hash).cloned() else {
-            return Some(false);
+            return false;
         };
 
         *(self.total_blocks_minted.entry(pool_id.clone()).or_insert(0)) += 1;
         // if block_hashes are enabled
         if let Some(block_hashes) = self.block_hashes.as_mut() {
-            block_hashes.entry(pool_id).or_insert_with(Vector::new).push_back(block_info.hash);
+            block_hashes
+                .entry(pool_id)
+                .or_insert_with(OrdMap::new)
+                .entry(block_info.epoch)
+                .or_insert_with(Vector::new)
+                .push_back(block_info.hash);
         };
-        Some(true)
+        true
     }
 
     fn handle_new_epoch(&mut self, block: &BlockInfo) -> Arc<Message> {
@@ -1045,25 +1073,25 @@ mod tests {
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
 
         block = new_block(2);
-        assert_eq!(Some(true), state.handle_mint(&block, &vec![0]));
+        assert_eq!(true, state.handle_mint(&block, &vec![0]));
         assert_eq!(1, state.get_total_blocks_minted_by_pool(&vec![1]));
 
         block = new_block(3);
-        assert_eq!(Some(true), state.handle_mint(&block, &vec![0]));
+        assert_eq!(true, state.handle_mint(&block, &vec![0]));
         assert_eq!(2, state.get_total_blocks_minted_by_pools(&vec![vec![1]])[0]);
     }
 
     #[test]
-    fn get_block_hashes_returns_none_when_state_is_new() {
+    fn get_block_hashes_returns_err_when_block_hashes_not_enabled() {
         let state = State::default();
-        assert!(state.get_pool_block_hashes(&vec![0]).is_none());
+        assert!(state.get_pool_block_hashes(&vec![0]).is_err());
     }
 
     #[test]
     fn handle_mint_returns_false_if_pool_not_found() {
         let mut state = State::new(&save_block_hashes_store_config());
         let block = new_block(0);
-        assert_eq!(Some(false), state.handle_mint(&block, &vec![0]));
+        assert_eq!(false, state.handle_mint(&block, &vec![0]));
     }
 
     #[test]
@@ -1093,9 +1121,16 @@ mod tests {
         ));
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
         block = new_block(2);
-        assert_eq!(Some(true), state.handle_mint(&block, &vec![0]));
+        assert_eq!(true, state.handle_mint(&block, &vec![0]));
         let block_hashes = state.get_pool_block_hashes(&vec![1]).unwrap();
         assert_eq!(block_hashes.len(), 1);
         assert_eq!(block_hashes[0], block.hash);
+
+        let block_hashes = state.get_pool_block_hashes_per_epoch(&vec![1], 2).unwrap();
+        assert_eq!(block_hashes.len(), 1);
+        assert_eq!(block_hashes[0], block.hash);
+
+        let block_hashes = state.get_pool_block_hashes_per_epoch(&vec![1], 3).unwrap();
+        assert_eq!(block_hashes.len(), 0);
     }
 }

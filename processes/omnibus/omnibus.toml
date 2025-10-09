@@ -44,7 +44,7 @@ store-updates = false
 store-delegators = false
 # Enables /pools/{pool_id}/votes endpoint
 store-votes = false
-# Store block hashes, enables /pools/{pool_id}/blocks endpoints
+# Store block hashes, enables /pools/{pool_id}/blocks, /epochs/{number}/blocks/{pool_id}
 store-block-hashes = false
 # Store stake_addresses
 store-stake-addresses = false
