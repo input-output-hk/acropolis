@@ -129,7 +129,7 @@ pub async fn handle_epoch_info_blockfrost(
         response.active_stake = Some(total_active_stakes);
     }
 
-    let json = match serde_json::to_string(&response) {
+    let json = match serde_json::to_string_pretty(&response) {
         Ok(j) => j,
         Err(e) => {
             return Ok(RESTResponse::with_text(
@@ -311,7 +311,7 @@ pub async fn handle_epoch_next_blockfrost(
     )
     .await?;
 
-    let json = match serde_json::to_string(&next_epochs) {
+    let json = match serde_json::to_string_pretty(&next_epochs) {
         Ok(j) => j,
         Err(e) => {
             return Ok(RESTResponse::with_text(
@@ -380,7 +380,7 @@ pub async fn handle_epoch_previous_blockfrost(
     )
     .await?;
 
-    let json = match serde_json::to_string(&previous_epochs) {
+    let json = match serde_json::to_string_pretty(&previous_epochs) {
         Ok(j) => j,
         Err(e) => {
             return Ok(RESTResponse::with_text(
