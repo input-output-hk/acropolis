@@ -27,7 +27,7 @@ publish-utxo-deltas-topic = "cardano.utxo.deltas"
 publish-withdrawals-topic = "cardano.withdrawals"
 publish-certificates-topic = "cardano.certificates"
 publish-governance-topic = "cardano.governance"
-publish-fees-topic = "cardano.block.fees"
+publish-block-txs-topic = "cardano.block.txs"
 
 [module.utxo-state]
 store = "memory" # "memory", "dashmap", "fjall", "fjall-async", "sled", "sled-async", "fake"

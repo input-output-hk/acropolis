@@ -16,6 +16,7 @@ pub mod network;
 pub mod parameters;
 pub mod pools;
 pub mod scripts;
+pub mod spdd;
 pub mod transactions;
 pub mod utils;
 

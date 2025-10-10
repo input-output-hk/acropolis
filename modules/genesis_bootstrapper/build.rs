@@ -12,7 +12,7 @@ async fn download(client: &reqwest::Client, url: &str, filename: &str) -> Result
     let request = client.get(url).build().with_context(|| format!("Failed to request {url}"))?;
     let response =
         client.execute(request).await.with_context(|| format!("Failed to fetch {url}"))?;
-    let data = response.text().await.context("Failed to read response")?;
+    let data = response.bytes().await.context("Failed to read response")?;
 
     let output_path = Path::new(OUTPUT_DIR);
     if !output_path.exists() {
@@ -23,7 +23,7 @@ async fn download(client: &reqwest::Client, url: &str, filename: &str) -> Result
     let file_path = output_path.join(filename);
     let mut file = fs::File::create(&file_path)
         .with_context(|| format!("Failed to create file {}", file_path.display()))?;
-    file.write_all(data.as_bytes())
+    file.write_all(data.as_ref())
         .with_context(|| format!("Failed to write file {}", file_path.display()))?;
     Ok(())
 }

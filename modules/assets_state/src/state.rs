@@ -379,8 +379,7 @@ impl State {
                 continue;
             };
 
-            let tx_identifier = output.tx_identifier.clone();
-
+            let tx_identifier = TxIdentifier::from(output.utxo_identifier);
             for (policy_id, assets) in &output.value.assets {
                 for asset in assets {
                     if let Some(asset_id) = registry.lookup_id(policy_id, &asset.name) {
@@ -640,7 +639,7 @@ mod tests {
     use acropolis_common::{
         Address, AddressDelta, AssetInfoRecord, AssetMetadataStandard, AssetName, Datum,
         NativeAsset, NativeAssetDelta, PolicyId, ShelleyAddress, TxIdentifier, TxInput, TxOutput,
-        UTXODelta, Value, ValueDelta,
+        UTXODelta, UTxOIdentifier, Value, ValueDelta,
     };
 
     fn dummy_policy(byte: u8) -> PolicyId {
@@ -761,9 +760,7 @@ mod tests {
 
     fn make_output(policy_id: PolicyId, asset_name: AssetName, datum: Option<Vec<u8>>) -> TxOutput {
         TxOutput {
-            tx_hash: [0u8; 32].into(),
-            tx_identifier: TxIdentifier::new(0, 0),
-            index: 0,
+            utxo_identifier: UTxOIdentifier::new(0, 0, 0),
             address: dummy_address(),
             value: Value {
                 lovelace: 0,
@@ -1208,8 +1205,7 @@ mod tests {
         );
 
         let input_delta = UTXODelta::Input(TxInput {
-            tx_hash: [1u8; 32].into(),
-            index: 0,
+            utxo_identifier: UTxOIdentifier::new(0, 0, 0),
         });
         let output = make_output(policy_id, name, None);
         let output_delta = UTXODelta::Output(output);
@@ -1324,11 +1320,11 @@ mod tests {
         let output = make_output(policy_id, asset_name.clone(), None);
 
         let delta1 = UTXODelta::Output(acropolis_common::TxOutput {
-            tx_identifier: dummy_tx_identifier(5),
+            utxo_identifier: UTxOIdentifier::new(0, 0, 0),
             ..output.clone()
         });
         let delta2 = UTXODelta::Output(acropolis_common::TxOutput {
-            tx_identifier: dummy_tx_identifier(5),
+            utxo_identifier: UTxOIdentifier::new(0, 0, 1),
             ..output
         });
 
@@ -1354,18 +1350,15 @@ mod tests {
             StoreTransactions::All,
         );
 
-        let tx1 = dummy_tx_identifier(9);
-        let tx2 = dummy_tx_identifier(8);
-
         let out1 = make_output(policy_id, asset_name.clone(), None);
         let out2 = make_output(policy_id, asset_name.clone(), None);
 
         let delta1 = UTXODelta::Output(acropolis_common::TxOutput {
-            tx_identifier: tx1,
+            utxo_identifier: UTxOIdentifier::new(9, 0, 0),
             ..out1
         });
         let delta2 = UTXODelta::Output(acropolis_common::TxOutput {
-            tx_identifier: tx2,
+            utxo_identifier: UTxOIdentifier::new(10, 0, 0),
             ..out2
         });
 
@@ -1376,8 +1369,8 @@ mod tests {
         // Both transactions were added to the Vec
         assert_eq!(entry.len(), 2);
         // Transactions are in order oldest to newest
-        assert_eq!(entry[0], tx1);
-        assert_eq!(entry[1], tx2);
+        assert_eq!(entry[0], TxIdentifier::new(9, 0));
+        assert_eq!(entry[1], TxIdentifier::new(10, 0));
     }
 
     #[test]
@@ -1394,21 +1387,17 @@ mod tests {
             StoreTransactions::Last(2),
         );
 
-        let tx1 = dummy_tx_identifier(9);
-        let tx2 = dummy_tx_identifier(8);
-        let tx3 = dummy_tx_identifier(7);
-
         let base_output = make_output(policy_id, asset_name.clone(), None);
         let delta1 = UTXODelta::Output(acropolis_common::TxOutput {
-            tx_identifier: tx1.clone(),
+            utxo_identifier: UTxOIdentifier::new(9, 0, 0),
             ..base_output.clone()
         });
         let delta2 = UTXODelta::Output(acropolis_common::TxOutput {
-            tx_identifier: tx2.clone(),
+            utxo_identifier: UTxOIdentifier::new(8, 0, 0),
             ..base_output.clone()
         });
         let delta3 = UTXODelta::Output(acropolis_common::TxOutput {
-            tx_identifier: tx3.clone(),
+            utxo_identifier: UTxOIdentifier::new(7, 0, 0),
             ..base_output
         });
 
@@ -1419,8 +1408,8 @@ mod tests {
         // Transactions are pruned at the prune config
         assert_eq!(entry.len(), 2);
         // Transactions are in order with newest last
-        assert_eq!(entry[0], tx2);
-        assert_eq!(entry[1], tx3);
+        assert_eq!(entry[0], TxIdentifier::new(8, 0));
+        assert_eq!(entry[1], TxIdentifier::new(7, 0));
     }
 
     #[test]

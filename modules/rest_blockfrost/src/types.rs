@@ -1,7 +1,7 @@
 use crate::cost_models::{PLUTUS_V1, PLUTUS_V2, PLUTUS_V3};
 use acropolis_common::{
     messages::EpochActivityMessage,
-    protocol_params::{Nonce, NonceHash, NonceVariant, ProtocolParams},
+    protocol_params::{Nonce, NonceVariant, ProtocolParams},
     queries::blocks::BlockInfo,
     queries::governance::DRepActionUpdate,
     rest_helper::ToCheckedF64,
@@ -20,34 +20,33 @@ use std::collections::HashMap;
 #[derive(Serialize)]
 pub struct EpochActivityRest {
     pub epoch: u64,
-    pub total_blocks: usize,
-    pub total_fees: u64,
-    pub vrf_vkey_hashes: Vec<VRFKeyCount>,
-    #[serde_as(as = "Option<Hex>")]
-    pub nonce: Option<NonceHash>,
-}
-
-#[derive(Serialize)]
-pub struct VRFKeyCount {
-    pub vrf_key_hash: String,
+    pub start_time: u64,
+    pub end_time: u64,
+    pub first_block_time: u64,
+    pub last_block_time: u64,
     pub block_count: usize,
+    pub tx_count: u64,
+    #[serde_as(as = "DisplayFromStr")]
+    pub output: u128,
+    #[serde_as(as = "DisplayFromStr")]
+    pub fees: u64,
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub active_stake: Option<u64>,
 }
 
 impl From<EpochActivityMessage> for EpochActivityRest {
     fn from(ea_message: EpochActivityMessage) -> Self {
         Self {
             epoch: ea_message.epoch,
-            total_blocks: ea_message.total_blocks,
-            total_fees: ea_message.total_fees,
-            vrf_vkey_hashes: ea_message
-                .vrf_vkey_hashes
-                .iter()
-                .map(|(key, count)| VRFKeyCount {
-                    vrf_key_hash: hex::encode(key),
-                    block_count: *count,
-                })
-                .collect(),
-            nonce: ea_message.nonce.clone(),
+            start_time: ea_message.epoch_start_time,
+            end_time: ea_message.epoch_end_time,
+            first_block_time: ea_message.first_block_time,
+            last_block_time: ea_message.last_block_time,
+            block_count: ea_message.total_blocks,
+            tx_count: ea_message.total_txs,
+            output: ea_message.total_outputs,
+            fees: ea_message.total_fees,
+            active_stake: None,
         }
     }
 }
@@ -78,6 +77,7 @@ pub struct DRepInfoREST {
 }
 
 // REST response structure for /governance/dreps/{drep_id}/delegators
+#[allow(dead_code)]
 #[derive(Serialize)]
 pub struct DRepDelegatorREST {
     pub address: String,
@@ -112,6 +112,7 @@ pub struct DRepVoteREST {
 }
 
 // REST response structure for /governance/proposals
+#[allow(dead_code)]
 #[derive(Serialize)]
 pub struct ProposalsListREST {
     pub tx_hash: String,
@@ -133,6 +134,7 @@ pub enum ProposalTypeREST {
 }
 
 // REST response structure for /governance/proposals/{tx_hash}/{cert_index}
+#[allow(dead_code)]
 #[derive(Serialize)]
 pub struct ProposalInfoREST {
     pub tx_hash: String,
@@ -149,6 +151,7 @@ pub struct ProposalInfoREST {
 }
 
 // REST response structure for /governance/proposals/{tx_hash}/{cert_index}/parameters
+#[allow(dead_code)]
 #[derive(Serialize)]
 pub struct ProposalParametersREST {
     pub tx_hash: String,
@@ -215,6 +218,7 @@ pub struct ParametersREST {
 }
 
 // REST response structure for /governance/proposals/{tx_hash}/{cert_index}/withdrawals
+#[allow(dead_code)]
 #[derive(Serialize)]
 pub struct ProposalWithdrawalsREST {
     pub stake_address: String,
@@ -240,6 +244,7 @@ pub enum VoterRoleREST {
 }
 
 // REST response structure for /governance/proposals/{tx_hash}/{cert_index}/metadata
+#[allow(dead_code)]
 #[derive(Serialize)]
 pub struct ProposalMetadataREST {
     pub tx_hash: String,

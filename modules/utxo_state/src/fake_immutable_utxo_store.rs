@@ -1,7 +1,7 @@
 //! Fake store for immutable UTXOs
 
-use crate::state::{ImmutableUTXOStore, UTXOKey, UTXOValue};
-use acropolis_common::{Address, Value};
+use crate::state::{ImmutableUTXOStore, UTXOValue};
+use acropolis_common::{Address, UTxOIdentifier, Value};
 use anyhow::Result;
 use async_trait::async_trait;
 use config::Config;
@@ -30,7 +30,7 @@ impl FakeImmutableUTXOStore {
 #[async_trait]
 impl ImmutableUTXOStore for FakeImmutableUTXOStore {
     /// Add a UTXO
-    async fn add_utxo(&self, _key: UTXOKey, _value: UTXOValue) -> Result<()> {
+    async fn add_utxo(&self, _key: UTxOIdentifier, _value: UTXOValue) -> Result<()> {
         if self.delay_us != 0 {
             sleep(Duration::from_micros(self.delay_us)).await;
         }
@@ -39,7 +39,7 @@ impl ImmutableUTXOStore for FakeImmutableUTXOStore {
     }
 
     /// Delete a UTXO
-    async fn delete_utxo(&self, _key: &UTXOKey) -> Result<()> {
+    async fn delete_utxo(&self, _key: &UTxOIdentifier) -> Result<()> {
         if self.delay_us != 0 {
             sleep(Duration::from_micros(self.delay_us)).await;
         }
@@ -48,10 +48,11 @@ impl ImmutableUTXOStore for FakeImmutableUTXOStore {
     }
 
     /// Lookup a UTXO
-    async fn lookup_utxo(&self, _key: &UTXOKey) -> Result<Option<UTXOValue>> {
+    async fn lookup_utxo(&self, _key: &UTxOIdentifier) -> Result<Option<UTXOValue>> {
         Ok(Some(UTXOValue {
             address: Address::None,
             value: Value::new(42, Vec::new()),
+            datum: None,
         }))
     }
 
