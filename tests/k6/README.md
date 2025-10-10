@@ -16,6 +16,7 @@ npm install
 
 For more detailed instructions on installing k6, please refer to the [documentation here](https://grafana.com/docs/k6/latest/set-up/install-k6/#install-k6).
 
+
 ### macOS
 
 Using Homebrew:
@@ -55,5 +56,90 @@ Confirm k6 is installed correctly:
 ```bash
 k6 version
 ```
+
+## Project Structure
+
+```
+performance-tests/
+├── src/
+│   ├── tests/        # Test configurations (smoke, load, stress, soak)
+│   ├── scenarios/    # Endpoint-specific test scenarios
+│   ├── config/       # Endpoints, test data, thresholds
+│   └── utils/        # Helpers, metrics, checks
+├── scripts/          # Run and report generation scripts
+└── Makefile          # Convenient test commands
+```
+
+## Usage
+
+See the `Makefile` for all available commands:
+
+```bash
+# Build TypeScript
+make build
+
+# Run individual tests
+make test-smoke    # Quick validation (1 minute)
+make test-load     # Sustained load (16 minutes)
+make test-stress   # Find breaking point (13 minutes)
+make test-soak     # Long-running stability (2+ hours)
+
+# Run all tests
+make test-all
+
+# Clean build artifacts
+make clean
+```
+
+### Environment Variables
+
+Configure the API endpoint:
+
+```bash
+export API_URL="http://127.0.0.1:4340"
+make test-smoke
+```
+
+Or inline:
+
+```bash
+API_URL="http://127.0.0.1:4340" make test-load
+```
+
+## Results
+
+Test results are saved as JSON files in the `results/` directory with timestamps.
+
+### Generate HTML Reports
+
+```bash
+# Install reporter
+npm install -g k6-html-reporter
+
+# Generate reports
+./scripts/generate-report.sh
+```
+
+## Customization
+
+### Modify Load Patterns
+
+Edit test files in `src/tests/` to adjust:
+- Virtual user counts
+- Ramp-up/ramp-down durations
+- Test duration
+- Traffic distribution weights
+
+### Add New Endpoints
+
+1. Add endpoint definition to `src/config/endpoints.ts`
+2. Add test data to `src/config/test-data.ts`
+3. Create scenario function in `src/scenarios/`
+4. Import and use in test files
+
+### Adjust Thresholds
+
+Edit `src/config/thresholds.ts` to modify performance expectations.
+
 
 ---

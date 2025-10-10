@@ -25,19 +25,23 @@ results-dir: ## Create results directory
 	@mkdir -p results
 	@echo "✅ Results directory created"
 
-smoke: build results-dir ## Run smoke test only (1 minute)
+test-smoke: build results-dir ## Run smoke test only (1 minute)
 	@echo "Running Smoke Test..."
 	@export API_URL=$(API_URL) && k6 run --out json=results/smoke-$$(date +%Y%m%d-%H%M%S).json dist/smoke.test.js
 
-load: build results-dir ## Run load test only (16 minutes)
+test-load: build results-dir ## Run load test only (16 minutes)
 	@echo "Running Load Test..."
 	@export API_URL=$(API_URL) && k6 run --out json=results/load-$$(date +%Y%m%d-%H%M%S).json dist/load.test.js
 
-stress: build results-dir ## Run stress test only (13 minutes)
+test-stress: build results-dir ## Run stress test only (13 minutes)
 	@echo "Running Stress Test..."
 	@export API_URL=$(API_URL) && k6 run --out json=results/stress-$$(date +%Y%m%d-%H%M%S).json dist/stress.test.js
 
-test: ## Run all performance tests (30 minutes total)
+test-soak: build results-dir ## Run soak test only (2 hours 10 minutes)
+	@echo "Running Soak Test..."
+	@export API_URL=$(API_URL) && k6 run --out json=results/soak-$$(date +%Y%m%d-%H%M%S).json dist/soak.test.js
+
+test-all: ## Run all performance tests (30 minutes total)
 	@chmod +x ./run-tests.sh
 	@API_URL=$(API_URL) ./run-tests.sh
 
