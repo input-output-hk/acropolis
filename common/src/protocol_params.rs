@@ -7,7 +7,7 @@ use crate::{
 use anyhow::Result;
 use blake2::{digest::consts::U32, Blake2b, Digest};
 use chrono::{DateTime, Utc};
-use serde_with::serde_as;
+use serde_with::{ hex::Hex, serde_as };
 use std::collections::HashMap;
 use std::ops::Deref;
 
@@ -126,6 +126,7 @@ pub struct ShelleyParams {
     pub system_start: DateTime<Utc>,
     pub update_quorum: u32,
 
+    #[serde_as(as = "HashMap<Hex, _>")]
     pub gen_delegs: HashMap<Vec<u8>, GenesisDelegate>,
 }
 
