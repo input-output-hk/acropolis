@@ -154,3 +154,117 @@ pub fn validate_integrity<P: AsRef<Path>>(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_manifest_validates_fields() {
+        // Create a temporary test manifest
+        let temp_dir = std::env::temp_dir();
+        let test_file = temp_dir.join("test_parser_manifest.json");
+        
+        // Valid manifest
+        let valid_json = r#"{
+            "magic": "CARDANO_SNAPSHOT",
+            "version": "1.0",
+            "era": "conway",
+            "block_height": 100,
+            "block_hash": "abc123",
+            "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "size_bytes": 1024
+        }"#;
+        
+        std::fs::write(&test_file, valid_json).unwrap();
+        let result = parse_manifest(&test_file);
+        assert!(result.is_ok());
+        
+        // Invalid: empty magic
+        let invalid_json = r#"{
+            "magic": "",
+            "version": "1.0",
+            "era": "conway",
+            "block_height": 100,
+            "block_hash": "abc123",
+            "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "size_bytes": 1024
+        }"#;
+        
+        std::fs::write(&test_file, invalid_json).unwrap();
+        let result = parse_manifest(&test_file);
+        assert!(result.is_err());
+        
+        // Cleanup
+        let _ = std::fs::remove_file(&test_file);
+    }
+
+    #[test]
+    fn test_validate_era() {
+        let meta = SnapshotMeta {
+            magic: "CARDANO_SNAPSHOT".to_string(),
+            version: "1.0".to_string(),
+            era: "conway".to_string(),
+            block_height: 100,
+            block_hash: "abc123".to_string(),
+            sha256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string(),
+            size_bytes: 1024,
+        };
+        
+        assert!(validate_era(&meta).is_ok());
+        
+        let mut wrong_era = meta.clone();
+        wrong_era.era = "byron".to_string();
+        assert!(validate_era(&wrong_era).is_err());
+    }
+
+    #[test]
+    fn test_compute_sha256() {
+        // Create a temporary test file
+        let temp_dir = std::env::temp_dir();
+        let test_file = temp_dir.join("test_parser_snapshot.dat");
+        
+        std::fs::write(&test_file, b"test data").unwrap();
+        
+        let hash = compute_sha256(&test_file).unwrap();
+        assert_eq!(hash.len(), 64); // SHA256 hex is 64 chars
+        
+        // Verify it's consistent
+        let hash2 = compute_sha256(&test_file).unwrap();
+        assert_eq!(hash, hash2);
+        
+        // Cleanup
+        let _ = std::fs::remove_file(&test_file);
+    }
+
+    #[test]
+    #[ignore] // Requires fixtures directory
+    fn test_parse_real_manifest() {
+        // Test with real fixture file if available
+        let manifest_path = "tests/fixtures/test-manifest.json";
+        if std::path::Path::new(manifest_path).exists() {
+            let result = parse_manifest(manifest_path);
+            assert!(result.is_ok());
+            
+            let meta = result.unwrap();
+            assert_eq!(meta.era, "conway");
+            assert_eq!(meta.block_height, 1000000);
+            assert_eq!(meta.size_bytes, 245);
+        }
+    }
+
+    #[test]
+    #[ignore] // Requires fixtures directory
+    fn test_validate_real_integrity() {
+        // Test with real fixture files if available
+        let manifest_path = "tests/fixtures/test-manifest.json";
+        let snapshot_path = "tests/fixtures/snapshot-small.cbor";
+        
+        if std::path::Path::new(manifest_path).exists() 
+            && std::path::Path::new(snapshot_path).exists() {
+            let meta = parse_manifest(manifest_path).unwrap();
+            let result = validate_integrity(snapshot_path, &meta);
+            assert!(result.is_ok());
+        }
+    }
+}

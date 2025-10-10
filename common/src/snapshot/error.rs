@@ -18,16 +18,10 @@ pub enum SnapshotError {
     IoError(String),
 
     /// Era mismatch between expected and actual
-    EraMismatch {
-        expected: String,
-        actual: String,
-    },
+    EraMismatch { expected: String, actual: String },
 
     /// Integrity check failed (hash mismatch)
-    IntegrityMismatch {
-        expected: String,
-        actual: String,
-    },
+    IntegrityMismatch { expected: String, actual: String },
 
     /// JSON parsing error
     Json(serde_json::Error),
@@ -44,7 +38,11 @@ impl fmt::Display for SnapshotError {
                 write!(f, "Era mismatch: expected {}, got {}", expected, actual)
             }
             SnapshotError::IntegrityMismatch { expected, actual } => {
-                write!(f, "Integrity mismatch: expected {}, got {}", expected, actual)
+                write!(
+                    f,
+                    "Integrity mismatch: expected {}, got {}",
+                    expected, actual
+                )
             }
             SnapshotError::Json(e) => write!(f, "JSON error: {}", e),
         }
