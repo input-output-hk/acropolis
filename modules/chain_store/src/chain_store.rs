@@ -1,24 +1,23 @@
 mod stores;
 
-use acropolis_codec::map_parameters;
+use acropolis_codec::{block::map_to_block_issuer, map_parameters};
 use acropolis_common::{
     crypto::keyhash,
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::blocks::{
-        BlockInfo, BlockInvolvedAddress, BlockInvolvedAddresses, BlockIssuer, BlockKey,
-        BlockTransaction, BlockTransactions, BlockTransactionsCBOR, BlocksStateQuery,
-        BlocksStateQueryResponse, NextBlocks, PreviousBlocks, DEFAULT_BLOCKS_QUERY_TOPIC,
+        BlockInfo, BlockInvolvedAddress, BlockInvolvedAddresses, BlockKey, BlockTransaction,
+        BlockTransactions, BlockTransactionsCBOR, BlocksStateQuery, BlocksStateQueryResponse,
+        NextBlocks, PreviousBlocks, DEFAULT_BLOCKS_QUERY_TOPIC,
     },
     queries::misc::Order,
     state_history::{StateHistory, StateHistoryStore},
-    Address, BlockHash, TxHash,
+    Address, BlockHash, GenesisDelegate, HeavyDelegate, TxHash,
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Module};
 use config::Config;
-use imbl::HashMap;
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::error;
@@ -70,14 +69,12 @@ impl ChainStore {
                         BlocksStateQueryResponse::Error("Invalid message for blocks-state".into()),
                     )));
                 };
-                let Some(delegates) =
-                    query_history.lock().await.current().map(|s| s.delegates.clone())
-                else {
+                let Some(state) = query_history.lock().await.current().map(|s| s.clone()) else {
                     return Arc::new(Message::StateQueryResponse(StateQueryResponse::Blocks(
                         BlocksStateQueryResponse::Error("unitialised state".to_string()),
                     )));
                 };
-                let res = Self::handle_blocks_query(&query_store, &delegates, &query)
+                let res = Self::handle_blocks_query(&query_store, &state, &query)
                     .unwrap_or_else(|err| BlocksStateQueryResponse::Error(err.to_string()));
                 Arc::new(Message::StateQueryResponse(StateQueryResponse::Blocks(res)))
             }
@@ -104,7 +101,7 @@ impl ChainStore {
                             };
                             let mut history = history.lock().await;
                             let mut state = history.get_current_state();
-                            if !Self::handle_new_params(&mut state.delegates, message).is_ok() {
+                            if !Self::handle_new_params(&mut state, message).is_ok() {
                                 return;
                             };
                             history.commit(block_info.number, state);
@@ -129,7 +126,7 @@ impl ChainStore {
 
     fn handle_blocks_query(
         store: &Arc<dyn Store>,
-        delegates: &HashMap<Vec<u8>, BlockIssuer>,
+        state: &State,
         query: &BlocksStateQuery,
     ) -> Result<BlocksStateQueryResponse> {
         match query {
@@ -137,7 +134,7 @@ impl ChainStore {
                 let Some(block) = store.get_latest_block()? else {
                     return Ok(BlocksStateQueryResponse::NotFound);
                 };
-                let info = Self::to_block_info(block, store, &delegates, true)?;
+                let info = Self::to_block_info(block, store, &state, true)?;
                 Ok(BlocksStateQueryResponse::LatestBlock(info))
             }
             BlocksStateQuery::GetLatestBlockTransactions { limit, skip, order } => {
@@ -158,21 +155,21 @@ impl ChainStore {
                 let Some(block) = Self::get_block_by_key(store, block_key)? else {
                     return Ok(BlocksStateQueryResponse::NotFound);
                 };
-                let info = Self::to_block_info(block, store, &delegates, false)?;
+                let info = Self::to_block_info(block, store, &state, false)?;
                 Ok(BlocksStateQueryResponse::BlockInfo(info))
             }
             BlocksStateQuery::GetBlockBySlot { slot } => {
                 let Some(block) = store.get_block_by_slot(*slot)? else {
                     return Ok(BlocksStateQueryResponse::NotFound);
                 };
-                let info = Self::to_block_info(block, store, &delegates, false)?;
+                let info = Self::to_block_info(block, store, &state, false)?;
                 Ok(BlocksStateQueryResponse::BlockBySlot(info))
             }
             BlocksStateQuery::GetBlockByEpochSlot { epoch, slot } => {
                 let Some(block) = store.get_block_by_epoch_slot(*epoch, *slot)? else {
                     return Ok(BlocksStateQueryResponse::NotFound);
                 };
-                let info = Self::to_block_info(block, store, &delegates, false)?;
+                let info = Self::to_block_info(block, store, &state, false)?;
                 Ok(BlocksStateQueryResponse::BlockByEpochSlot(info))
             }
             BlocksStateQuery::GetNextBlocks {
@@ -192,7 +189,7 @@ impl ChainStore {
                 let min_number = number + 1 + skip;
                 let max_number = min_number + limit - 1;
                 let blocks = store.get_blocks_by_number_range(min_number, max_number)?;
-                let info = Self::to_block_info_bulk(blocks, store, delegates, false)?;
+                let info = Self::to_block_info_bulk(blocks, store, &state, false)?;
                 Ok(BlocksStateQueryResponse::NextBlocks(NextBlocks {
                     blocks: info,
                 }))
@@ -218,7 +215,7 @@ impl ChainStore {
                 };
                 let min_number = max_number.saturating_sub(limit - 1);
                 let blocks = store.get_blocks_by_number_range(min_number, max_number)?;
-                let info = Self::to_block_info_bulk(blocks, store, delegates, false)?;
+                let info = Self::to_block_info_bulk(blocks, store, &state, false)?;
                 Ok(BlocksStateQueryResponse::PreviousBlocks(PreviousBlocks {
                     blocks: info,
                 }))
@@ -275,18 +272,18 @@ impl ChainStore {
     fn to_block_info(
         block: Block,
         store: &Arc<dyn Store>,
-        delegates: &HashMap<Vec<u8>, BlockIssuer>,
+        state: &State,
         is_latest: bool,
     ) -> Result<BlockInfo> {
         let blocks = vec![block];
-        let mut info = Self::to_block_info_bulk(blocks, store, &delegates, is_latest)?;
+        let mut info = Self::to_block_info_bulk(blocks, store, &state, is_latest)?;
         Ok(info.remove(0))
     }
 
     fn to_block_info_bulk(
         blocks: Vec<Block>,
         store: &Arc<dyn Store>,
-        delegates: &HashMap<Vec<u8>, BlockIssuer>,
+        state: &State,
         final_block_is_latest: bool,
     ) -> Result<Vec<BlockInfo>> {
         if blocks.is_empty() {
@@ -361,9 +358,11 @@ impl ChainStore {
                 slot: header.slot(),
                 epoch: block.extra.epoch,
                 epoch_slot: block.extra.epoch_slot,
-                issuer: header
-                    .issuer_vkey()
-                    .map(|key| Self::vkey_to_block_issuer(key.to_vec(), delegates)),
+                issuer: map_to_block_issuer(
+                    &header,
+                    &state.byron_heavy_delegates,
+                    &state.shelley_genesis_delegates,
+                ),
                 size: block.bytes.len() as u64,
                 tx_count: decoded.tx_count() as u64,
                 output,
@@ -463,48 +462,34 @@ impl ChainStore {
         Ok(BlockInvolvedAddresses { addresses })
     }
 
-    fn handle_new_params(
-        delegates: &mut HashMap<Vec<u8>, BlockIssuer>,
-        message: Arc<Message>,
-    ) -> Result<()> {
+    fn handle_new_params(state: &mut State, message: Arc<Message>) -> Result<()> {
         match message.as_ref() {
-            Message::Cardano((block_info, CardanoMessage::ProtocolParams(params))) => {
+            Message::Cardano((_, CardanoMessage::ProtocolParams(params))) => {
                 if let Some(byron) = &params.params.byron {
-                    for (k, deleg) in &byron.heavy_delegation {
-                        delegates.insert(k.clone(), BlockIssuer::HeavyDelegate(deleg.clone()));
-                    }
+                    state.byron_heavy_delegates = byron.heavy_delegation.clone();
                 }
                 if let Some(shelley) = &params.params.shelley {
-                    for (k, deleg) in &shelley.gen_delegs {
-                        delegates.insert(k.clone(), BlockIssuer::GenesisDelegate(deleg.clone()));
-                    }
+                    state.shelley_genesis_delegates = shelley.gen_delegs.clone();
                 }
             }
             _ => (),
         }
         Ok(())
     }
-
-    fn vkey_to_block_issuer(
-        vkey: Vec<u8>,
-        delegates: &HashMap<Vec<u8>, BlockIssuer>,
-    ) -> BlockIssuer {
-        match delegates.get(&vkey) {
-            Some(delegate) => delegate.clone(),
-            None => BlockIssuer::SPO(vkey),
-        }
-    }
 }
 
 #[derive(Default, Debug, Clone)]
 pub struct State {
-    pub delegates: HashMap<Vec<u8>, BlockIssuer>,
+    // Keyed on cert
+    pub byron_heavy_delegates: HashMap<Vec<u8>, HeavyDelegate>,
+    pub shelley_genesis_delegates: HashMap<Vec<u8>, GenesisDelegate>,
 }
 
 impl State {
     pub fn new() -> Self {
         Self {
-            delegates: HashMap::new(),
+            byron_heavy_delegates: HashMap::new(),
+            shelley_genesis_delegates: HashMap::new(),
         }
     }
 }

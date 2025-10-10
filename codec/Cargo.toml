@@ -1,0 +1,14 @@
+[package]
+name = "acropolis_codec"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+acropolis_common = { path = "../common" }
+
+anyhow = { workspace = true }
+cryptoxide = "0.5.1"
+pallas = { workspace = true }
+pallas-primitives = { workspace = true }
+pallas-traverse = { workspace = true }
+tracing = { workspace = true }
