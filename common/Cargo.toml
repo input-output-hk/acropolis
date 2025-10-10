@@ -21,6 +21,7 @@ bitmask-enum = "2.2"
 blake2 = "0.10"
 bs58 = "0.5"
 chrono = { workspace = true }
+crc = "3"
 gcd = "2.3"
 fraction = "0.15"
 hex = { workspace = true }

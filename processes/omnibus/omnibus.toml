@@ -98,6 +98,15 @@ store-addresses = false
 # Enables /assets/{asset} endpoint (requires store-assets to be enabled)
 index-by-policy = false
 
+[module.address-state]
+# Enables /addresses/{address}, /addresses/{address}/extended,
+# /addresses/{address}/utxos/{asset}, and /addresses/{address}/utxos endpoints
+store-info = true
+# Enables /addresses/{address}/totals endpoint
+store-totals = true
+# Enables /addresses/{address}/transactions endpoint
+store-transactions = true
+
 [module.clock]
 
 [module.rest-server]
