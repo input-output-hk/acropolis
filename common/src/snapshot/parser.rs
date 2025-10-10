@@ -164,7 +164,7 @@ mod tests {
         // Create a temporary test manifest
         let temp_dir = std::env::temp_dir();
         let test_file = temp_dir.join("test_parser_manifest.json");
-        
+
         // Valid manifest
         let valid_json = r#"{
             "magic": "CARDANO_SNAPSHOT",
@@ -175,11 +175,11 @@ mod tests {
             "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             "size_bytes": 1024
         }"#;
-        
+
         std::fs::write(&test_file, valid_json).unwrap();
         let result = parse_manifest(&test_file);
         assert!(result.is_ok());
-        
+
         // Invalid: empty magic
         let invalid_json = r#"{
             "magic": "",
@@ -190,11 +190,11 @@ mod tests {
             "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             "size_bytes": 1024
         }"#;
-        
+
         std::fs::write(&test_file, invalid_json).unwrap();
         let result = parse_manifest(&test_file);
         assert!(result.is_err());
-        
+
         // Cleanup
         let _ = std::fs::remove_file(&test_file);
     }
@@ -210,9 +210,9 @@ mod tests {
             sha256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string(),
             size_bytes: 1024,
         };
-        
+
         assert!(validate_era(&meta).is_ok());
-        
+
         let mut wrong_era = meta.clone();
         wrong_era.era = "byron".to_string();
         assert!(validate_era(&wrong_era).is_err());
@@ -223,16 +223,16 @@ mod tests {
         // Create a temporary test file
         let temp_dir = std::env::temp_dir();
         let test_file = temp_dir.join("test_parser_snapshot.dat");
-        
+
         std::fs::write(&test_file, b"test data").unwrap();
-        
+
         let hash = compute_sha256(&test_file).unwrap();
         assert_eq!(hash.len(), 64); // SHA256 hex is 64 chars
-        
+
         // Verify it's consistent
         let hash2 = compute_sha256(&test_file).unwrap();
         assert_eq!(hash, hash2);
-        
+
         // Cleanup
         let _ = std::fs::remove_file(&test_file);
     }
@@ -245,7 +245,7 @@ mod tests {
         if std::path::Path::new(manifest_path).exists() {
             let result = parse_manifest(manifest_path);
             assert!(result.is_ok());
-            
+
             let meta = result.unwrap();
             assert_eq!(meta.era, "conway");
             assert_eq!(meta.block_height, 1000000);
@@ -259,9 +259,10 @@ mod tests {
         // Test with real fixture files if available
         let manifest_path = "tests/fixtures/test-manifest.json";
         let snapshot_path = "tests/fixtures/snapshot-small.cbor";
-        
-        if std::path::Path::new(manifest_path).exists() 
-            && std::path::Path::new(snapshot_path).exists() {
+
+        if std::path::Path::new(manifest_path).exists()
+            && std::path::Path::new(snapshot_path).exists()
+        {
             let meta = parse_manifest(manifest_path).unwrap();
             let result = validate_integrity(snapshot_path, &meta);
             assert!(result.is_ok());

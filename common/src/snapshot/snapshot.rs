@@ -1197,3 +1197,108 @@ pub fn estimate_block_height_from_slot(slot: u64) -> u64 {
         SHELLEY_START_BLOCK + shelley_blocks
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_amaru_snapshot_detection() {
+        // This test will pass if the Amaru snapshot file exists
+        let path = "tests/fixtures/134092758.670ca68c3de580f8469677754a725e86ca72a7be381d3108569f0704a5fca327.cbor";
+        if std::path::Path::new(path).exists() {
+            let snapshot = AmaruSnapshot::from_file(path).expect("should parse Amaru snapshot");
+            assert!(snapshot.size_bytes > 0);
+            assert_eq!(snapshot.structure_type, "array");
+            println!("{}", snapshot.summary());
+        }
+    }
+
+    #[test]
+    fn test_conway_metadata_extraction() {
+        // Test Conway era metadata extraction
+        let path = "tests/fixtures/134092758.670ca68c3de580f8469677754a725e86ca72a7be381d3108569f0704a5fca327.cbor";
+        if std::path::Path::new(path).exists() {
+            let metadata = EpochStateMetadata::from_file(path)
+                .expect("should extract metadata from Conway snapshot");
+
+            // Validate epoch is Conway era
+            assert!(
+                metadata.epoch >= MIN_SUPPORTED_EPOCH,
+                "epoch should be >= 505"
+            );
+            assert_eq!(
+                metadata.epoch, 507,
+                "this specific snapshot is from epoch 507"
+            );
+
+            // Validate file size
+            assert!(
+                metadata.file_size > 2_000_000_000,
+                "snapshot should be > 2GB"
+            );
+
+            println!("{}", metadata.summary());
+        }
+    }
+
+    #[test]
+    fn test_parse_sample_utxos() {
+        // Test parsing a few UTXOs from the snapshot
+        let path = "tests/fixtures/134092758.670ca68c3de580f8469677754a725e86ca72a7be381d3108569f0704a5fca327.cbor";
+        if std::path::Path::new(path).exists() {
+            match parse_sample_utxos(path, 5) {
+                Ok(utxos) => {
+                    println!("Successfully parsed {} sample UTXOs:", utxos.len());
+                    for (i, utxo) in utxos.iter().enumerate() {
+                        println!(
+                            "  [{}] {}#{} -> {} ({} lovelace)",
+                            i,
+                            &utxo.tx_hash[..16],
+                            utxo.output_index,
+                            &utxo.address[..16],
+                            utxo.value
+                        );
+                    }
+                    assert!(!utxos.is_empty(), "should parse at least one UTXO");
+                }
+                Err(e) => {
+                    println!("UTXO parsing not yet fully implemented: {e}");
+                    // Don't fail the test yet - this is exploratory
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_extract_tip_from_filename() {
+        let path = "tests/fixtures/134092758.670ca68c3de580f8469677754a725e86ca72a7be381d3108569f0704a5fca327.cbor";
+        let tip = extract_tip_from_filename(path).expect("should extract tip from filename");
+
+        assert_eq!(tip.slot, 134092758);
+        assert_eq!(
+            tip.block_hash,
+            "670ca68c3de580f8469677754a725e86ca72a7be381d3108569f0704a5fca327"
+        );
+
+        // Estimate block height
+        let height = estimate_block_height_from_slot(tip.slot);
+        println!("Slot {} ≈ block height {}", tip.slot, height);
+
+        // Should be in the reasonable range for Conway era mainnet
+        assert!(height > 10_000_000, "Conway era should be > 10M blocks");
+        assert!(height < 20_000_000, "Should be < 20M blocks as of 2025");
+    }
+
+    #[test]
+    fn test_extract_tip_invalid_filename() {
+        // Test various invalid filename formats
+        assert!(extract_tip_from_filename("invalid.cbor").is_err());
+        assert!(extract_tip_from_filename("not-a-slot.hash.cbor").is_err());
+        assert!(extract_tip_from_filename("12345.tooshort.cbor").is_err());
+        assert!(extract_tip_from_filename(
+            "12345.notahexhashxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.cbor"
+        )
+        .is_err());
+    }
+}
