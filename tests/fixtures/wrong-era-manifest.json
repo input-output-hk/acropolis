@@ -1,0 +1,11 @@
+{
+    "magic": "CARDANO_SNAPSHOT",
+    "version": "1.0.0",
+    "era": "byron",
+    "block_height": 1000000,
+    "block_hash": "abc123def456",
+    "sha256": "177a492180573a7ba542f133824d6d5ad5267ece598fac4722ddadc8b75e472b",
+    "created_at": "2025-10-08T00:00:00Z",
+    "size_bytes": 48,
+    "governance_section_present": false
+}
