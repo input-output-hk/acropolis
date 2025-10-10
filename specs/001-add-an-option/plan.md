@@ -1,6 +1,6 @@
 # Implementation Plan: Parse and Display Amaru Snapshot (Conway+)
 
-**Branch**: `cet/snapshot_parser` | **Date**: 2025-10-10 | **Spec**: /home/parallels/projects/acropolis/specs/001-add-an-option/spec.md
+**Branch**: `cet-add-snapshot-parser` | **Date**: 2025-10-10 | **Spec**: /home/parallels/projects/acropolis/specs/001-add-an-option/spec.md
 **Input**: Feature specification from `/specs/001-add-an-option/spec.md`
 
 ## Summary
