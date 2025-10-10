@@ -81,18 +81,16 @@ pub async fn main() -> Result<()> {
         let path_arg = it.next().unwrap_or("");
         let path = std::path::Path::new(path_arg);
         match cmd {
-            "summary" => {
-                match snapshot::snapshot_summary(path) {
-                    Ok(out) => {
-                        println!("{}", out);
-                        return Ok(());
-                    }
-                    Err(e) => {
-                        eprintln!("error: {}", e);
-                        std::process::exit(2);
-                    }
+            "summary" => match snapshot::snapshot_summary(path) {
+                Ok(out) => {
+                    println!("{}", out);
+                    return Ok(());
                 }
-            }
+                Err(e) => {
+                    eprintln!("error: {}", e);
+                    std::process::exit(2);
+                }
+            },
             "sections" => {
                 let mut sections = vec![];
                 for flag in it {
@@ -116,17 +114,17 @@ pub async fn main() -> Result<()> {
                     }
                 }
             }
-            "bootstrap" => {
-                match snapshot::snapshot_bootstrap(path) {
-                    Ok(()) => return Ok(()),
-                    Err(e) => {
-                        eprintln!("error: {}", e);
-                        std::process::exit(2);
-                    }
+            "bootstrap" => match snapshot::snapshot_bootstrap(path) {
+                Ok(()) => return Ok(()),
+                Err(e) => {
+                    eprintln!("error: {}", e);
+                    std::process::exit(2);
                 }
-            }
+            },
             _ => {
-                eprintln!("unknown snapshot command; expected 'summary', 'sections', or 'bootstrap'");
+                eprintln!(
+                    "unknown snapshot command; expected 'summary', 'sections', or 'bootstrap'"
+                );
                 std::process::exit(2);
             }
         }

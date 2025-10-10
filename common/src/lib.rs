@@ -14,10 +14,10 @@ pub mod queries;
 pub mod rational_number;
 pub mod rest_helper;
 pub mod serialization;
+pub mod snapshot;
 pub mod stake_addresses;
 pub mod state_history;
 pub mod types;
-pub mod snapshot;
 
 // Flattened re-exports
 pub use self::address::*;

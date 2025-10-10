@@ -5,7 +5,7 @@ CARGO := cargo
 PROCESS_PKG := acropolis_process_omnibus
 
 # Override with: make <target> SNAPSHOT=/path/to/snapshot.cbor
-SNAPSHOT ?= tests/fixtures/your_snapshot.cbor
+SNAPSHOT ?= tests/fixtures/134092758.670ca68c3de580f8469677754a725e86ca72a7be381d3108569f0704a5fca327.cbor
 
 SECTIONS_ALL := --params --governance --pools --accounts --utxo
 
