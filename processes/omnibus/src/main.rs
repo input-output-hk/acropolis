@@ -121,9 +121,23 @@ pub async fn main() -> Result<()> {
                     std::process::exit(2);
                 }
             },
+            "utxos" => {
+                // Parse optional limit argument
+                let limit = it.next().and_then(|s| s.parse::<usize>().ok()).unwrap_or(10);
+                match snapshot::snapshot_utxos(path, limit) {
+                    Ok(out) => {
+                        println!("{}", out);
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        eprintln!("error: {}", e);
+                        std::process::exit(2);
+                    }
+                }
+            }
             _ => {
                 eprintln!(
-                    "unknown snapshot command; expected 'summary', 'sections', or 'bootstrap'"
+                    "unknown snapshot command; expected 'summary', 'sections', 'bootstrap', or 'utxos'"
                 );
                 std::process::exit(2);
             }

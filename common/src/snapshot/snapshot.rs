@@ -637,8 +637,8 @@ pub fn parse_sample_utxos(path: &str, sample_size: usize) -> Result<Vec<UtxoEntr
             }
             Err(e) => {
                 eprintln!("Warning: failed to parse UTXO value: {e}");
-                // Skip this entry
-                dec.skip().map_err(|e| SnapshotError::Cbor(e))?;
+                // parse_transaction_output already consumed/skipped the data,
+                // so we just continue to the next entry
             }
         }
     }
@@ -1128,7 +1128,7 @@ fn parse_transaction_output(dec: &mut Decoder) -> Result<(String, u64), Snapshot
 ///
 /// # Example
 /// ```ignore
-/// use acropolis_common::snapshot::amaru::extract_tip_from_filename;
+/// use acropolis_common::snapshot::snapshot::extract_tip_from_filename;
 ///
 /// let tip = extract_tip_from_filename(
 ///     "tests/fixtures/134092758.670ca68c3de580f8469677754a725e86ca72a7be381d3108569f0704a5fca327.cbor"
@@ -1307,18 +1307,18 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires large fixture file (1GB)
+    #[ignore] // Requires large fixture file (2.4GB)
     fn test_extract_boot_data() {
         // Test extracting boot data from the real snapshot
         let path = "../tests/fixtures/134092758.670ca68c3de580f8469677754a725e86ca72a7be381d3108569f0704a5fca327.cbor";
-        
+
         if !std::path::Path::new(path).exists() {
             println!("Skipping test: snapshot file not found at {}", path);
             return;
         }
-        
+
         println!("Testing extract_boot_data with file: {}", path);
-        
+
         match extract_boot_data(path) {
             Ok(data) => {
                 println!("Successfully extracted boot data:");
@@ -1329,7 +1329,7 @@ mod tests {
                 println!("  DReps: {}", data.dreps);
                 println!("  Stake Accounts: {}", data.stake_accounts);
                 println!("  Governance Proposals: {}", data.governance_proposals);
-                
+
                 assert_eq!(data.epoch, 507);
                 assert!(data.treasury > 0);
                 assert!(data.reserves > 0);

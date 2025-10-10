@@ -156,9 +156,7 @@ snap-utxos:
 	@echo "Limit: $${LIMIT:-10}"
 	@echo ""
 	@test -f "$(SNAPSHOT)" || (echo "Error: Snapshot file not found: $(SNAPSHOT)"; exit 1)
-	@echo "Note: UTXO parsing functionality to be wired into CLI"
-	@echo "Using sections command for now:"
-	@ACROPOLIS_SNAPSHOT_ARGS="sections $(SNAPSHOT) --utxo" $(CARGO) run --release -p $(PROCESS_PKG)
+	@ACROPOLIS_SNAPSHOT_ARGS="utxos $(SNAPSHOT) $${LIMIT:-10}" $(CARGO) run --release -p $(PROCESS_PKG)
 
 # Pattern rule: generate .json manifest from .cbor snapshot
 # Usage: make tests/fixtures/my-snapshot.json

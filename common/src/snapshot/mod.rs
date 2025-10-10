@@ -158,6 +158,41 @@ mod tests {
     }
 }
 
+/// Parse and list UTXOs from the snapshot
+///
+/// This function extracts a sample of UTXOs from the snapshot and returns
+/// them as formatted text. For the full UTXO set, use `parse_all_utxos` with
+/// a streaming callback to avoid memory issues.
+///
+/// **Note**: Multi-GB snapshots may contain 11M+ UTXOs. This function limits
+/// output to a sample size (default: 10) to avoid excessive memory usage.
+pub fn snapshot_utxos(path: &Path, limit: usize) -> Result<String> {
+    if !path.exists() {
+        bail!("snapshot file not found: {}", path.display());
+    }
+
+    let path_str = path.to_str().ok_or_else(|| anyhow::anyhow!("invalid path"))?;
+
+    // Parse sample UTXOs
+    let utxos = snapshot::parse_sample_utxos(path_str, limit)
+        .map_err(|e| anyhow::anyhow!("failed to parse UTXOs: {}", e))?;
+
+    let mut out = String::new();
+    out.push_str(&format!("Snapshot: {}\n", path.display()));
+    out.push_str(&format!("UTXOs (showing {} entries):\n\n", utxos.len()));
+
+    for (i, utxo) in utxos.iter().enumerate() {
+        out.push_str(&format!("UTXO #{}\n", i + 1));
+        out.push_str(&format!("  TxHash: {}\n", utxo.tx_hash));
+        out.push_str(&format!("  Output Index: {}\n", utxo.output_index));
+        out.push_str(&format!("  Address: {}\n", utxo.address));
+        out.push_str(&format!("  Value: {} lovelace\n", utxo.value));
+        out.push('\n');
+    }
+
+    Ok(out)
+}
+
 /// Bootstrap the node from a snapshot by dispatching per-module data.
 ///
 /// This function extracts data from the snapshot and dispatches it to the
