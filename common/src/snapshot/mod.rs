@@ -134,6 +134,30 @@ pub fn snapshot_sections(path: &Path, sections: &[Section]) -> Result<String> {
     Ok(lines.join("\n"))
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[ignore]
+    fn test_snapshot_summary_with_real_file() {
+        let path = Path::new("../tests/fixtures/134092758.670ca68c3de580f8469677754a725e86ca72a7be381d3108569f0704a5fca327.cbor");
+        if path.exists() {
+            match snapshot_summary(path) {
+                Ok(summary) => {
+                    println!("Success!\n{}", summary);
+                    assert!(summary.contains("Epoch"));
+                }
+                Err(e) => {
+                    panic!("Failed to get snapshot summary: {}", e);
+                }
+            }
+        } else {
+            println!("Snapshot file not found at {:?}, skipping test", path);
+        }
+    }
+}
+
 /// Bootstrap the node from a snapshot by dispatching per-module data.
 ///
 /// This function extracts data from the snapshot and dispatches it to the

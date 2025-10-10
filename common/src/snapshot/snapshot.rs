@@ -167,10 +167,7 @@ impl EpochStateMetadata {
 
     /// Display a human-readable summary
     pub fn summary(&self) -> String {
-        let utxo_str = self
-            .utxo_count
-            .map(|c| format!(", ~{c} UTXOs"))
-            .unwrap_or_default();
+        let utxo_str = self.utxo_count.map(|c| format!(", ~{c} UTXOs")).unwrap_or_default();
         format!(
             "Conway era snapshot: epoch {}, {} bytes{}",
             self.epoch, self.file_size, utxo_str
@@ -218,10 +215,8 @@ impl AmaruSnapshot {
 
     /// Display a human-readable summary of the snapshot
     pub fn summary(&self) -> String {
-        let count_str = self
-            .top_level_count
-            .map(|c| format!(" with {c} elements"))
-            .unwrap_or_default();
+        let count_str =
+            self.top_level_count.map(|c| format!(" with {c} elements")).unwrap_or_default();
         format!(
             "Amaru EpochState snapshot: {} bytes, top-level {} CBOR{}",
             self.size_bytes, self.structure_type, count_str
@@ -495,7 +490,8 @@ fn count_ledger_state_utxos(path: &str) -> Result<u64, SnapshotError> {
 
     // Parse top-level array
     let top_len = dec
-        .array().map_err(|e| SnapshotError::Cbor(e))?
+        .array()
+        .map_err(|e| SnapshotError::Cbor(e))?
         .ok_or_else(|| SnapshotError::StructuralDecode("expected top-level array".into()))?;
 
     if top_len < 4 {
@@ -515,7 +511,8 @@ fn count_ledger_state_utxos(path: &str) -> Result<u64, SnapshotError> {
 
     // [3] = Epoch State (ARRAY)
     let epoch_state_len = dec
-        .array().map_err(|e| SnapshotError::Cbor(e))?
+        .array()
+        .map_err(|e| SnapshotError::Cbor(e))?
         .ok_or_else(|| SnapshotError::StructuralDecode("expected Epoch State array".into()))?;
 
     if epoch_state_len < 2 {
@@ -529,7 +526,8 @@ fn count_ledger_state_utxos(path: &str) -> Result<u64, SnapshotError> {
 
     // Epoch State[1] = Ledger State (ARRAY)
     let ledger_state_len = dec
-        .array().map_err(|e| SnapshotError::Cbor(e))?
+        .array()
+        .map_err(|e| SnapshotError::Cbor(e))?
         .ok_or_else(|| SnapshotError::StructuralDecode("expected Ledger State array".into()))?;
 
     if ledger_state_len < 2 {
@@ -543,7 +541,8 @@ fn count_ledger_state_utxos(path: &str) -> Result<u64, SnapshotError> {
 
     // Ledger State[1] = UTxO State (ARRAY)
     let utxo_state_len = dec
-        .array().map_err(|e| SnapshotError::Cbor(e))?
+        .array()
+        .map_err(|e| SnapshotError::Cbor(e))?
         .ok_or_else(|| SnapshotError::StructuralDecode("expected UTxO State array".into()))?;
 
     if utxo_state_len < 1 {
@@ -777,7 +776,8 @@ pub fn extract_boot_data(path: &str) -> Result<SnapshotData, SnapshotError> {
 
     // Top-level array
     let top_len = dec
-        .array().map_err(|e| SnapshotError::Cbor(e))?
+        .array()
+        .map_err(|e| SnapshotError::Cbor(e))?
         .ok_or_else(|| SnapshotError::StructuralDecode("expected top-level array".into()))?;
 
     if top_len < 4 {
@@ -991,7 +991,8 @@ pub fn extract_boot_data(path: &str) -> Result<SnapshotData, SnapshotError> {
 fn navigate_to_utxo_map(dec: &mut Decoder) -> Result<(), SnapshotError> {
     // Parse top-level array
     let top_len = dec
-        .array().map_err(|e| SnapshotError::Cbor(e))?
+        .array()
+        .map_err(|e| SnapshotError::Cbor(e))?
         .ok_or_else(|| SnapshotError::StructuralDecode("expected top-level array".into()))?;
 
     if top_len < 4 {
@@ -1011,7 +1012,8 @@ fn navigate_to_utxo_map(dec: &mut Decoder) -> Result<(), SnapshotError> {
 
     // [3] = Epoch State (ARRAY)
     let epoch_state_len = dec
-        .array().map_err(|e| SnapshotError::Cbor(e))?
+        .array()
+        .map_err(|e| SnapshotError::Cbor(e))?
         .ok_or_else(|| SnapshotError::StructuralDecode("expected Epoch State array".into()))?;
 
     if epoch_state_len < 2 {
@@ -1025,7 +1027,8 @@ fn navigate_to_utxo_map(dec: &mut Decoder) -> Result<(), SnapshotError> {
 
     // Epoch State[1] = Ledger State (ARRAY)
     let ledger_state_len = dec
-        .array().map_err(|e| SnapshotError::Cbor(e))?
+        .array()
+        .map_err(|e| SnapshotError::Cbor(e))?
         .ok_or_else(|| SnapshotError::StructuralDecode("expected Ledger State array".into()))?;
 
     if ledger_state_len < 2 {
@@ -1039,7 +1042,8 @@ fn navigate_to_utxo_map(dec: &mut Decoder) -> Result<(), SnapshotError> {
 
     // Ledger State[1] = UTxO State (ARRAY)
     let utxo_state_len = dec
-        .array().map_err(|e| SnapshotError::Cbor(e))?
+        .array()
+        .map_err(|e| SnapshotError::Cbor(e))?
         .ok_or_else(|| SnapshotError::StructuralDecode("expected UTxO State array".into()))?;
 
     if utxo_state_len < 1 {
@@ -1300,5 +1304,40 @@ mod tests {
             "12345.notahexhashxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.cbor"
         )
         .is_err());
+    }
+
+    #[test]
+    #[ignore] // Requires large fixture file (1GB)
+    fn test_extract_boot_data() {
+        // Test extracting boot data from the real snapshot
+        let path = "../tests/fixtures/134092758.670ca68c3de580f8469677754a725e86ca72a7be381d3108569f0704a5fca327.cbor";
+        
+        if !std::path::Path::new(path).exists() {
+            println!("Skipping test: snapshot file not found at {}", path);
+            return;
+        }
+        
+        println!("Testing extract_boot_data with file: {}", path);
+        
+        match extract_boot_data(path) {
+            Ok(data) => {
+                println!("Successfully extracted boot data:");
+                println!("  Epoch: {}", data.epoch);
+                println!("  Treasury: {} lovelace", data.treasury);
+                println!("  Reserves: {} lovelace", data.reserves);
+                println!("  Stake Pools: {}", data.stake_pools);
+                println!("  DReps: {}", data.dreps);
+                println!("  Stake Accounts: {}", data.stake_accounts);
+                println!("  Governance Proposals: {}", data.governance_proposals);
+                
+                assert_eq!(data.epoch, 507);
+                assert!(data.treasury > 0);
+                assert!(data.reserves > 0);
+            }
+            Err(e) => {
+                println!("Error extracting boot data: {}", e);
+                panic!("extract_boot_data failed: {}", e);
+            }
+        }
     }
 }
