@@ -1,11 +1,11 @@
 //! 'main' for the Acropolis omnibus process
 
-use acropolis_common::messages::Message;
+use acropolis_common::{messages::Message, snapshot};
 use anyhow::Result;
 use caryatid_process::Process;
 use config::{Config, Environment, File};
 use std::sync::Arc;
-use tracing::info;
+use tracing::{error, info};
 use tracing_subscriber;
 
 // External modules
@@ -73,6 +73,65 @@ pub async fn main() -> Result<()> {
 
     info!("Acropolis omnibus process");
 
+    // Snapshot CLI: if ACROPOLIS_SNAPSHOT_ARGS is provided, run in CLI mode and exit.
+    if let Some(args) = std::env::var_os("ACROPOLIS_SNAPSHOT_ARGS") {
+        let args = args.to_string_lossy().to_string();
+        let mut it = args.split_whitespace();
+        let cmd = it.next().unwrap_or("");
+        let path_arg = it.next().unwrap_or("");
+        let path = std::path::Path::new(path_arg);
+        match cmd {
+            "summary" => {
+                match snapshot::snapshot_summary(path) {
+                    Ok(out) => {
+                        println!("{}", out);
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        eprintln!("error: {}", e);
+                        std::process::exit(2);
+                    }
+                }
+            }
+            "sections" => {
+                let mut sections = vec![];
+                for flag in it {
+                    match flag {
+                        "--params" => sections.push(snapshot::Section::Params),
+                        "--governance" => sections.push(snapshot::Section::Governance),
+                        "--pools" => sections.push(snapshot::Section::Pools),
+                        "--accounts" => sections.push(snapshot::Section::Accounts),
+                        "--utxo" => sections.push(snapshot::Section::Utxo),
+                        _ => {}
+                    }
+                }
+                match snapshot::snapshot_sections(path, &sections) {
+                    Ok(out) => {
+                        println!("{}", out);
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        eprintln!("error: {}", e);
+                        std::process::exit(2);
+                    }
+                }
+            }
+            "bootstrap" => {
+                match snapshot::snapshot_bootstrap(path) {
+                    Ok(()) => return Ok(()),
+                    Err(e) => {
+                        eprintln!("error: {}", e);
+                        std::process::exit(2);
+                    }
+                }
+            }
+            _ => {
+                eprintln!("unknown snapshot command; expected 'summary', 'sections', or 'bootstrap'");
+                std::process::exit(2);
+            }
+        }
+    }
+
     // Read the config
     let config = Arc::new(
         Config::builder()
@@ -108,7 +167,7 @@ pub async fn main() -> Result<()> {
     RESTServer::<Message>::register(&mut process);
     Spy::<Message>::register(&mut process);
 
-    // Run it
+    // Run it (normal process mode)
     process.run().await?;
 
     // Bye!
