@@ -1,5 +1,6 @@
 use crate::{
-    queries::misc::Order, serialization::Bech32WithHrp, Address, BlockHash, GenesisDelegate, HeavyDelegate, KeyHash, TxHash,
+    queries::misc::Order, serialization::Bech32WithHrp, Address, BlockHash, GenesisDelegate,
+    HeavyDelegate, KeyHash, TxHash,
 };
 use cryptoxide::hashing::blake2b::Blake2b;
 use serde::ser::{Serialize, SerializeStruct, Serializer};
@@ -124,7 +125,9 @@ impl Serialize for BlockInfo {
         state.serialize_field("slot", &self.slot)?;
         state.serialize_field("epoch", &self.epoch)?;
         state.serialize_field("epoch_slot", &self.epoch_slot)?;
-        state.serialize_field("slot_issuer", &self.issuer.clone().map(|vkey| -> String {
+        state.serialize_field(
+            "slot_issuer",
+            &self.issuer.clone().map(|vkey| -> String {
                 match vkey {
                     BlockIssuer::HeavyDelegate(_) => "Byron genesis slot issuer".to_string(),
                     BlockIssuer::GenesisDelegate(_) => "Shelley genesis slot issuer".to_string(),
@@ -133,7 +136,7 @@ impl Serialize for BlockInfo {
                         context.update_mut(&vkey);
                         let digest = context.finalize().as_slice().to_owned();
                         digest.to_bech32_with_hrp("pool").unwrap_or(String::new())
-                    },
+                    }
                 }
             }),
         )?;
@@ -201,9 +204,11 @@ impl Serialize for BlockInvolvedAddress {
         S: Serializer,
     {
         let mut state = serializer.serialize_struct("BlockInvolvedAddress", 2)?;
-        state.serialize_field("address", &self.address.to_string().unwrap_or("<invalid or unknown address type>".to_string()))?;
+        state.serialize_field(
+            "address",
+            &self.address.to_string().unwrap_or("<invalid or unknown address type>".to_string()),
+        )?;
         state.serialize_field("transactions", &self.txs)?;
         state.end()
     }
 }
-

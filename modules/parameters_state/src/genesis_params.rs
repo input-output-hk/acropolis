@@ -179,15 +179,19 @@ fn map_protocol_consts(c: &byron::ProtocolConsts) -> Result<ProtocolConsts> {
 }
 
 fn map_byron(genesis: &byron::GenesisFile) -> Result<ByronParams> {
-    let heavy_delegation = genesis.heavy_delegation.iter().map(|(k, v)| {
-        let k = hex::decode(k)?;
-        let v = HeavyDelegate {
-            cert: hex::decode(v.cert.clone())?,
-            delegate_pk: BASE64_STANDARD.decode(v.delegate_pk.clone())?,
-            issuer_pk: BASE64_STANDARD.decode(v.issuer_pk.clone())?,
-        };
-        Ok::<(Vec<u8>, HeavyDelegate), anyhow::Error>((k, v))
-    }).collect::<Result<_, _>>()?;
+    let heavy_delegation = genesis
+        .heavy_delegation
+        .iter()
+        .map(|(k, v)| {
+            let k = hex::decode(k)?;
+            let v = HeavyDelegate {
+                cert: hex::decode(v.cert.clone())?,
+                delegate_pk: BASE64_STANDARD.decode(v.delegate_pk.clone())?,
+                issuer_pk: BASE64_STANDARD.decode(v.issuer_pk.clone())?,
+            };
+            Ok::<(Vec<u8>, HeavyDelegate), anyhow::Error>((k, v))
+        })
+        .collect::<Result<_, _>>()?;
     Ok(ByronParams {
         block_version_data: map_block_version_data(&genesis.block_version_data)?,
         fts_seed: genesis.fts_seed.as_ref().map(|s| decode_hex_string(s, 42)).transpose()?,

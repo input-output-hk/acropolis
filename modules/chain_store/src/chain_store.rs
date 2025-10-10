@@ -5,9 +5,9 @@ use acropolis_common::{
     crypto::keyhash,
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::blocks::{
-        BlockInfo, BlockInvolvedAddress, BlockInvolvedAddresses, BlockIssuer, BlockKey, BlockTransaction,
-        BlockTransactions, BlockTransactionsCBOR, BlocksStateQuery, BlocksStateQueryResponse,
-        NextBlocks, PreviousBlocks, DEFAULT_BLOCKS_QUERY_TOPIC,
+        BlockInfo, BlockInvolvedAddress, BlockInvolvedAddresses, BlockIssuer, BlockKey,
+        BlockTransaction, BlockTransactions, BlockTransactionsCBOR, BlocksStateQuery,
+        BlocksStateQueryResponse, NextBlocks, PreviousBlocks, DEFAULT_BLOCKS_QUERY_TOPIC,
     },
     queries::misc::Order,
     state_history::{StateHistory, StateHistoryStore},
@@ -40,8 +40,9 @@ impl ChainStore {
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         let new_blocks_topic =
             config.get_string("blocks-topic").unwrap_or(DEFAULT_BLOCKS_TOPIC.to_string());
-        let params_topic =
-            config.get_string("protocol-parameters-topic").unwrap_or(DEFAULT_PROTOCOL_PARAMETERS_TOPIC.to_string());
+        let params_topic = config
+            .get_string("protocol-parameters-topic")
+            .unwrap_or(DEFAULT_PROTOCOL_PARAMETERS_TOPIC.to_string());
         let block_queries_topic = config
             .get_string(DEFAULT_BLOCKS_QUERY_TOPIC.0)
             .unwrap_or(DEFAULT_BLOCKS_QUERY_TOPIC.1.to_string());
@@ -52,7 +53,10 @@ impl ChainStore {
             _ => bail!("Unknown store type {store_type}"),
         };
 
-        let history = Arc::new(Mutex::new(StateHistory::<State>::new("chain_store", StateHistoryStore::default_epoch_store())));
+        let history = Arc::new(Mutex::new(StateHistory::<State>::new(
+            "chain_store",
+            StateHistoryStore::default_epoch_store(),
+        )));
         history.lock().await.commit_forced(State::new());
 
         let query_store = store.clone();
@@ -66,7 +70,13 @@ impl ChainStore {
                         BlocksStateQueryResponse::Error("Invalid message for blocks-state".into()),
                     )));
                 };
-                let Some(delegates) = query_history.lock().await.current().map(|s| s.delegates.clone()) else { return Arc::new(Message::StateQueryResponse(StateQueryResponse::Blocks(BlocksStateQueryResponse::Error("unitialised state".to_string())))); };
+                let Some(delegates) =
+                    query_history.lock().await.current().map(|s| s.delegates.clone())
+                else {
+                    return Arc::new(Message::StateQueryResponse(StateQueryResponse::Blocks(
+                        BlocksStateQueryResponse::Error("unitialised state".to_string()),
+                    )));
+                };
                 let res = Self::handle_blocks_query(&query_store, &delegates, &query)
                     .unwrap_or_else(|err| BlocksStateQueryResponse::Error(err.to_string()));
                 Arc::new(Message::StateQueryResponse(StateQueryResponse::Blocks(res)))
@@ -262,7 +272,12 @@ impl ChainStore {
         Ok(pallas_traverse::MultiEraBlock::decode(&block.bytes)?.number())
     }
 
-    fn to_block_info(block: Block, store: &Arc<dyn Store>, delegates: &HashMap<Vec<u8>, BlockIssuer>, is_latest: bool) -> Result<BlockInfo> {
+    fn to_block_info(
+        block: Block,
+        store: &Arc<dyn Store>,
+        delegates: &HashMap<Vec<u8>, BlockIssuer>,
+        is_latest: bool,
+    ) -> Result<BlockInfo> {
         let blocks = vec![block];
         let mut info = Self::to_block_info_bulk(blocks, store, &delegates, is_latest)?;
         Ok(info.remove(0))
@@ -346,7 +361,9 @@ impl ChainStore {
                 slot: header.slot(),
                 epoch: block.extra.epoch,
                 epoch_slot: block.extra.epoch_slot,
-                issuer: header.issuer_vkey().map(|key| Self::vkey_to_block_issuer(key.to_vec(), delegates)),
+                issuer: header
+                    .issuer_vkey()
+                    .map(|key| Self::vkey_to_block_issuer(key.to_vec(), delegates)),
                 size: block.bytes.len() as u64,
                 tx_count: decoded.tx_count() as u64,
                 output,
@@ -427,7 +444,7 @@ impl ChainStore {
                                 .entry(BechOrdAddress(address))
                                 .or_insert_with(Vec::new)
                                 .push(hash.clone());
-                        },
+                        }
                         _ => (),
                     },
                     _ => (),
@@ -446,7 +463,10 @@ impl ChainStore {
         Ok(BlockInvolvedAddresses { addresses })
     }
 
-    fn handle_new_params(delegates: &mut HashMap<Vec<u8>, BlockIssuer>, message: Arc<Message>) -> Result<()> {
+    fn handle_new_params(
+        delegates: &mut HashMap<Vec<u8>, BlockIssuer>,
+        message: Arc<Message>,
+    ) -> Result<()> {
         match message.as_ref() {
             Message::Cardano((block_info, CardanoMessage::ProtocolParams(params))) => {
                 if let Some(byron) = &params.params.byron {
@@ -459,13 +479,16 @@ impl ChainStore {
                         delegates.insert(k.clone(), BlockIssuer::GenesisDelegate(deleg.clone()));
                     }
                 }
-            },
+            }
             _ => (),
         }
         Ok(())
     }
 
-    fn vkey_to_block_issuer(vkey: Vec<u8>, delegates: &HashMap<Vec<u8>, BlockIssuer>) -> BlockIssuer {
+    fn vkey_to_block_issuer(
+        vkey: Vec<u8>,
+        delegates: &HashMap<Vec<u8>, BlockIssuer>,
+    ) -> BlockIssuer {
         match delegates.get(&vkey) {
             Some(delegate) => delegate.clone(),
             None => BlockIssuer::SPO(vkey),

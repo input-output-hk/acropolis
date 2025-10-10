@@ -2,12 +2,13 @@ use crate::{
     genesis_values::GenesisValues,
     rational_number::{ChameleonFraction, RationalNumber},
     BlockHash, BlockVersionData, Committee, Constitution, CostModel, DRepVotingThresholds, Era,
-    ExUnitPrices, ExUnits, GenesisDelegate, HeavyDelegate, NetworkId,
-    PoolVotingThresholds, ProtocolConsts, };
+    ExUnitPrices, ExUnits, GenesisDelegate, HeavyDelegate, NetworkId, PoolVotingThresholds,
+    ProtocolConsts,
+};
 use anyhow::Result;
 use blake2::{digest::consts::U32, Blake2b, Digest};
 use chrono::{DateTime, Utc};
-use serde_with::{ hex::Hex, serde_as };
+use serde_with::{hex::Hex, serde_as};
 use std::collections::HashMap;
 use std::ops::Deref;
 
