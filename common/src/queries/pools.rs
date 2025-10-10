@@ -44,6 +44,10 @@ pub enum PoolsStateQuery {
     GetPoolBlockHashes {
         pool_id: KeyHash,
     },
+    GetPoolBlockHashesByEpoch {
+        pool_id: KeyHash,
+        epoch: u64,
+    },
     GetPoolUpdates {
         pool_id: KeyHash,
     },
@@ -68,6 +72,7 @@ pub enum PoolsStateQueryResponse {
     PoolDelegators(PoolDelegators),
     PoolTotalBlocksMinted(u64),
     PoolBlockHashes(Vec<BlockHash>),
+    PoolBlockHashesByEpoch(Vec<BlockHash>),
     PoolUpdates(Vec<PoolUpdateEvent>),
     PoolVotes(Vec<VoteRecord>),
     NotFound,
