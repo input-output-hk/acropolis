@@ -1841,3 +1841,31 @@ mod tests {
         Ok(())
     }
 }
+
+/// Snapshot manifest metadata
+///
+/// This represents the JSON manifest file that accompanies a snapshot,
+/// containing metadata for validation and integrity checking.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SnapshotMeta {
+    /// Magic identifier (e.g., "CARDANO_SNAPSHOT")
+    pub magic: String,
+    
+    /// Version string (e.g., "1.0")
+    pub version: String,
+    
+    /// Era name (e.g., "conway")
+    pub era: String,
+    
+    /// Block height at snapshot point
+    pub block_height: u64,
+    
+    /// Block hash (hex string)
+    pub block_hash: String,
+    
+    /// SHA256 checksum of snapshot file (hex string, 64 chars)
+    pub sha256: String,
+    
+    /// File size in bytes
+    pub size_bytes: u64,
+}

@@ -5,7 +5,7 @@ use anyhow::Result;
 use caryatid_process::Process;
 use config::{Config, Environment, File};
 use std::sync::Arc;
-use tracing::{error, info};
+use tracing::info;
 use tracing_subscriber;
 
 // External modules

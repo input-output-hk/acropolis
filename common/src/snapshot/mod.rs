@@ -5,17 +5,20 @@
 //!
 //! ## Module Structure
 //! - `snapshot`: Full-featured Amaru snapshot parser with memory-efficient streaming
+//! - `parser`: Manifest parsing and integrity validation
 //! - `error`: Error types for snapshot parsing operations
 //! - Public API for CLI integration (summary, sections, bootstrap)
 
-pub mod snapshot;
 pub mod error;
+pub mod parser;
+pub mod snapshot;
 
 // Re-export commonly used types
 pub use error::SnapshotError;
+pub use parser::{compute_sha256, parse_manifest, validate_era, validate_integrity};
 pub use snapshot::{
-    AmaruSnapshot, EpochStateMetadata, SnapshotData, TipInfo, UtxoEntry,
-    extract_tip_from_filename, estimate_block_height_from_slot,
+    estimate_block_height_from_slot, extract_tip_from_filename, AmaruSnapshot, EpochStateMetadata,
+    SnapshotData, TipInfo, UtxoEntry,
 };
 
 use anyhow::{bail, Result};
@@ -74,7 +77,10 @@ pub fn snapshot_summary(path: &Path) -> Result<String> {
     out.push_str(&format!("Stake Pools: {}\n", data.stake_pools));
     out.push_str(&format!("DReps: {}\n", data.dreps));
     out.push_str(&format!("Stake Accounts: {}\n", data.stake_accounts));
-    out.push_str(&format!("Governance Proposals: {}\n", data.governance_proposals));
+    out.push_str(&format!(
+        "Governance Proposals: {}\n",
+        data.governance_proposals
+    ));
 
     Ok(out)
 }

@@ -1,6 +1,6 @@
 // Unit tests for snapshot parser
 
-use spec_test::snapshot::parser::{parse_manifest, validate_era, validate_integrity};
+use acropolis_common::snapshot::{parse_manifest, validate_era, validate_integrity};
 
 #[test]
 fn test_parse_valid_manifest() {

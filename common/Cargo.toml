@@ -37,6 +37,7 @@ num-traits = "0.2"
 imbl = { workspace = true }
 dashmap = { workspace = true }
 rayon = "1.11.0"
+sha2 = "0.10"
 
 [lib]
 crate-type = ["rlib"]
