@@ -1,6 +1,6 @@
 # Implementation Plan: Parse and Display Amaru Snapshot (Conway+)
 
-**Branch**: `001-add-an-option` | **Date**: 2025-10-10 | **Spec**: /home/parallels/projects/acropolis/specs/001-add-an-option/spec.md
+**Branch**: `cet/snapshot_parser` | **Date**: 2025-10-10 | **Spec**: /home/parallels/projects/acropolis/specs/001-add-an-option/spec.md
 **Input**: Feature specification from `/specs/001-add-an-option/spec.md`
 
 ## Summary
@@ -34,6 +34,16 @@ Gate mapping against spec-test Constitution:
 
 Re-check post-design: Ensure any new crates include rationale in Cargo.toml comments.
 
+### Post-design Constitution Check (final)
+
+Status: PASS (2025-10-10)
+
+- Dependencies: No new heavy dependencies introduced beyond those planned (serde, bytes, memmap2, pallas, anyhow, tracing). If pallas is added where missing, include a brief rationale comment in Cargo.toml. ✔️
+- Determinism: CLI design keeps all parse output on stdout and errors on stderr; no network or time-dependent code in parsing path. ✔️
+- Testing: Integration tests planned cover summary, section filtering, error cases, and a performance smoke. Panics forbidden; errors mapped. ✔️
+- Safety/Lints: No unsafe required; memmap2 used via existing patterns. clippy and fmt enforced locally/CI. ✔️
+- Structure: Implementation localized to existing crates (common, processes/*), no global mutable state added. ✔️
+
 ### Documentation (this feature)
 
 ```
@@ -47,48 +57,6 @@ specs/[###-feature]/
 ```
 
 ### Source Code (repository root)
-<!--
-  ACTION REQUIRED: Replace the placeholder tree below with the concrete layout
-  for this feature. Delete unused options and expand the chosen structure with
-  real paths (e.g., apps/admin, packages/something). The delivered plan must
-  not include Option labels.
--->
-
-```
-# [REMOVE IF UNUSED] Option 1: Single project (DEFAULT)
-src/
-├── models/
-├── services/
-├── cli/
-└── lib/
-
-tests/
-├── contract/
-├── integration/
-└── unit/
-
-# [REMOVE IF UNUSED] Option 2: Web application (when "frontend" + "backend" detected)
-backend/
-├── src/
-│   ├── models/
-│   ├── services/
-│   └── api/
-└── tests/
-
-frontend/
-├── src/
-│   ├── components/
-│   ├── pages/
-│   └── services/
-└── tests/
-
-# [REMOVE IF UNUSED] Option 3: Mobile + API (when "iOS/Android" detected)
-api/
-└── [same as backend above]
-
-ios/ or android/
-└── [platform-specific structure: feature modules, UI flows, platform tests]
-```
 
 **Structure Decision**: Use existing workspace structure. New/updated code primarily in:
 
@@ -103,12 +71,3 @@ Tests under `tests/` with fixtures and manifest oracle.
 | Violation | Why Needed | Simpler Alternative Rejected Because |
 |-----------|------------|-------------------------------------|
 | None | N/A | N/A |
-
-## Complexity Tracking
-
-*Fill ONLY if Constitution Check has violations that must be justified*
-
-| Violation | Why Needed | Simpler Alternative Rejected Because |
-|-----------|------------|-------------------------------------|
-| [e.g., 4th project] | [current need] | [why 3 projects insufficient] |
-| [e.g., Repository pattern] | [specific problem] | [why direct DB access insufficient] |

@@ -1,6 +1,6 @@
 # Feature Specification: Parse and Display Amaru Snapshot (Conway+)
 
-**Feature Branch**: `001-add-an-option`  
+**Feature Branch**: `cet/snapshot_parser`  
 **Created**: 2025-10-10  
 **Status**: Draft  
 **Input**: User description: "Add an option to parse and display information from an Amaru formatted snapshot. We only need to handle data types for Conway and forward (epoch 505 and beyond). We need full parsing of the snapshot according to the docs/amaru-snapshot-structure.md and snapshot-format.md files."
