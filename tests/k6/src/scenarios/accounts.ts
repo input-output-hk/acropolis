@@ -1,10 +1,11 @@
 import http from 'k6/http';
 import { group } from 'k6';
 import { ENDPOINTS, buildUrl } from '../config/endpoints';
-import { TEST_DATA, getRandomItem } from '../config/test-data';
+import { getRandomItem } from '../config/test-data';
 import { checkResponse } from '../utils/checks';
 import { metrics } from '../utils/metrics';
 import { getEnv } from '../utils/helpers';
+import { TEST_DATA } from '../config/shelley-test-data';
 
 const BASE_URL = getEnv('API_URL', 'http://127.0.0.1:4340');
 

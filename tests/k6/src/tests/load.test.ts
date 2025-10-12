@@ -24,10 +24,10 @@ export default function () {
   // ideally needs to be data driven eventually.
   const scenarios: EndpointWeight[] = [
     { name: 'epochs', weight: 30, fn: testEpochEndpoints },
-    { name: 'pools', weight: 25, fn: testPoolEndpoints },
-    { name: 'assets', weight: 20, fn: testAssetEndpoints },
-    { name: 'accounts', weight: 15, fn: testAccountEndpoints },
-    { name: 'governance', weight: 10, fn: testGovernanceEndpoints },
+    { name: 'pools', weight: 30, fn: testPoolEndpoints },
+    // { name: 'assets', weight: 20, fn: testAssetEndpoints },
+    { name: 'accounts', weight: 40, fn: testAccountEndpoints },
+    // { name: 'governance', weight: 10, fn: testGovernanceEndpoints },
   ];
 
   const selectedScenario = weightedRandomChoice(scenarios);

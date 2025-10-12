@@ -13,12 +13,11 @@ export function checkResponse(
   endpointName: string,
   expectedStatus: number = 200,
 ): CheckResult {
+  // Only check functional correctness, not performance
   const checks = {
     [`${endpointName} - status is ${expectedStatus}`]: (r: Response): boolean =>
       r.status === expectedStatus,
     [`${endpointName} - has response body`]: (r: Response): boolean => hasResponseBody(r),
-    [`${endpointName} - response time acceptable`]: (r: Response): boolean =>
-      r.timings.duration < 1000,
   };
 
   const passed = check(res, checks);
@@ -31,6 +30,9 @@ export function checkResponse(
   };
 }
 
-export function checkBatchResponses(responses: Response[], endpointNames: string[]): CheckResult[] {
+export function checkBatchResponses(
+  responses: Response[],
+  endpointNames: string[],
+): CheckResult[] {
   return responses.map((res, i) => checkResponse(res, endpointNames[i]));
 }

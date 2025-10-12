@@ -42,12 +42,8 @@ test-soak: build results-dir ## Run soak test only (2 hours 10 minutes)
 	@export API_URL=$(API_URL) && k6 run --out json=results/soak-$$(date +%Y%m%d-%H%M%S).json dist/soak.test.js
 
 test-all: ## Run all performance tests (30 minutes total)
-	@chmod +x ./run-tests.sh
-	@API_URL=$(API_URL) ./run-tests.sh
-
-reports: ## Generate HTML reports from JSON results
-	@chmod +x ./generate-reports.sh
-	@./generate-reports.sh
+	@chmod +x scripts/run-all.sh
+	@API_URL=$(API_URL) scripts/run-all.sh
 
 clean: ## Remove results directory
 	@echo "Cleaning results..."

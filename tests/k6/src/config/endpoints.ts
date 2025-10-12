@@ -35,6 +35,7 @@ export const ENDPOINTS = {
   POOL: '/pools/{pool_id}',
 } as const;
 
+
 export function buildUrl(endpoint: string, params: Record<string, string>): string {
   let url = endpoint;
   for (const [key, value] of Object.entries(params)) {

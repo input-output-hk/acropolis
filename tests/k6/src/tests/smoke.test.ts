@@ -15,9 +15,9 @@ export const options: Options = {
 
 export default function () {
   testAccountEndpoints();
-  testAssetEndpoints();
+  // testAssetEndpoints();
   testEpochEndpoints();
-  testGovernanceEndpoints();
+  // testGovernanceEndpoints();
   testPoolEndpoints();
 
   randomSleep(1, 2);

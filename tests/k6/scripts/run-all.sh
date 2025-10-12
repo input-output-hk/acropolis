@@ -24,7 +24,7 @@ echo ""
 echo "=========================================="
 echo "1. Running Smoke Test (1 minute)"
 echo "=========================================="
-k6 run --out json=results/smoke-$(date +%Y%m%d-%H%M%S).json dist/smoke.test.js
+K6_WEB_DASHBOARD=true K6_WEB_DASHBOARD_EXPORT=results/smoke-$(date +%Y%m%d-%H%M%S).html k6 run --out json=results/smoke-$(date +%Y%m%d-%H%M%S).json dist/smoke.test.js
 
 if [ $? -ne 0 ]; then
     echo "❌ Smoke test failed! Stopping test suite."
@@ -37,7 +37,7 @@ echo ""
 echo "=========================================="
 echo "2. Running Load Test (16 minutes)"
 echo "=========================================="
-k6 run --out json=results/load-$(date +%Y%m%d-%H%M%S).json dist/load.test.js
+K6_WEB_DASHBOARD=true K6_WEB_DASHBOARD_EXPORT=results/load-$(date +%Y%m%d-%H%M%S).html k6 run --out json=results/load-$(date +%Y%m%d-%H%M%S).json dist/load.test.js
 
 if [ $? -ne 0 ]; then
     echo "⚠️  Load test failed, but continuing..."
@@ -49,7 +49,7 @@ echo ""
 echo "=========================================="
 echo "3. Running Stress Test (13 minutes)"
 echo "=========================================="
-k6 run --out json=results/stress-$(date +%Y%m%d-%H%M%S).json dist/stress.test.js
+K6_WEB_DASHBOARD=true K6_WEB_DASHBOARD_EXPORT=results/stress-$(date +%Y%m%d-%H%M%S).html k6 run --out json=results/stress-$(date +%Y%m%d-%H%M%S).json dist/stress.test.js
 
 if [ $? -ne 0 ]; then
     echo "⚠️  Stress test failed (expected behavior)"
@@ -62,11 +62,3 @@ echo "=========================================="
 echo "All tests completed!"
 echo "Results saved in results/ directory"
 echo "=========================================="
-
-if command -v k6-reporter &> /dev/null; then
-    echo "Generating HTML reports..."
-    for file in results/*.json; do
-        k6-reporter "$file" --output "${file%.json}.html"
-    done
-    echo "✅ HTML reports generated"
-fi
