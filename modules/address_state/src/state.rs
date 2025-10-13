@@ -209,8 +209,6 @@ impl State {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use super::*;
     use acropolis_common::{Address, AddressDelta, UTxOIdentifier, ValueDelta};
     use tempfile::tempdir;
@@ -230,13 +228,11 @@ mod tests {
         }
     }
 
-    async fn setup_state_and_store() -> Result<(Arc<ImmutableAddressStore>, State)> {
-        let tmpdir = tempdir().unwrap();
-        let store = Arc::new(ImmutableAddressStore::new(tmpdir.path())?);
+    async fn setup_state_and_store() -> Result<State> {
         let config = test_config();
         let mut state = State::new(&config.clone()).await?;
         state.volatile.epoch_start_block = 1;
-        Ok((store, state))
+        Ok(state)
     }
 
     fn delta(addr: &Address, utxo: &UTxOIdentifier, lovelace: i64) -> AddressDelta {
@@ -254,7 +250,7 @@ mod tests {
     async fn test_persist_all_and_read_back() -> Result<()> {
         let _ = tracing_subscriber::fmt::try_init();
 
-        let (store, mut state) = setup_state_and_store().await?;
+        let mut state = setup_state_and_store().await?;
 
         let addr = dummy_address();
         let utxo = UTxOIdentifier::new(0, 0, 0);
@@ -268,7 +264,7 @@ mod tests {
         state.prune_volatile().await;
 
         // Perisist immutable to disk
-        store.persist_epoch(0, &state.config).await?;
+        state.immutable.persist_epoch(0, &state.config).await?;
 
         // Verify persisted UTxOs
         let utxos = state.get_address_utxos(&addr).await?;
@@ -277,11 +273,11 @@ mod tests {
         assert_eq!(utxos.as_ref().unwrap()[0], UTxOIdentifier::new(0, 0, 0));
 
         // Totals should exist
-        let totals = store.get_totals(&addr).await?;
+        let totals = state.immutable.get_totals(&addr).await?;
         assert!(totals.is_some());
 
         // Epoch marker advanced
-        let last_epoch = store.get_last_epoch_stored().await?;
+        let last_epoch = state.immutable.get_last_epoch_stored().await?;
         assert_eq!(last_epoch, Some(0));
 
         Ok(())
@@ -291,7 +287,7 @@ mod tests {
     async fn test_utxo_removed_when_spent() -> Result<()> {
         let _ = tracing_subscriber::fmt::try_init();
 
-        let (store, mut state) = setup_state_and_store().await?;
+        let mut state = setup_state_and_store().await?;
 
         let addr = dummy_address();
         let utxo = UTxOIdentifier::new(0, 0, 0);
@@ -315,7 +311,7 @@ mod tests {
         state.prune_volatile().await;
 
         // Perisist immutable to disk
-        store.persist_epoch(0, &state.config).await?;
+        state.immutable.persist_epoch(0, &state.config).await?;
 
         // After persisting creation
         let after_persist = state.get_address_utxos(&addr).await?;
@@ -332,7 +328,7 @@ mod tests {
         state.prune_volatile().await;
 
         // Perisist immutable to disk
-        store.persist_epoch(2, &state.config).await?;
+        state.immutable.persist_epoch(2, &state.config).await?;
 
         // After persisting spend
         let after_spend_disk = state.get_address_utxos(&addr).await?;
@@ -345,7 +341,7 @@ mod tests {
     async fn test_utxo_spent_and_created_across_blocks_in_volatile() -> Result<()> {
         let _ = tracing_subscriber::fmt::try_init();
 
-        let (store, mut state) = setup_state_and_store().await?;
+        let mut state = setup_state_and_store().await?;
 
         let addr = dummy_address();
         let utxo_old = UTxOIdentifier::new(0, 0, 0);
@@ -370,7 +366,7 @@ mod tests {
         state.prune_volatile().await;
 
         // Perisist immutable to disk
-        store.persist_epoch(0, &state.config).await?;
+        state.immutable.persist_epoch(0, &state.config).await?;
 
         // UTxO not persisted to disk if created and spent in pruned volatile window
         let persisted_view = state.get_address_utxos(&addr).await?;

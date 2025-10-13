@@ -59,8 +59,6 @@ impl ImmutableAddressStore {
             return Ok(());
         }
 
-        info!("Pending has {}", self.pending.lock().await.len());
-
         let drained_blocks = {
             let mut pending = self.pending.lock().await;
             std::mem::take(&mut *pending)
