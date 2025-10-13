@@ -635,17 +635,18 @@ impl SPOState {
                     }
 
                     PoolsStateQuery::GetBlocksByPool { pool_id } => {
-                        match state.get_blocks_by_pool(pool_id) {
-                            Ok(blocks) => PoolsStateQueryResponse::BlocksByPool(blocks),
-                            Err(_) => PoolsStateQueryResponse::Error("Blocks are not enabled".into()),
-                        }
+                        state
+                            .is_historical_blocks_enabled()
+                            .then(|| PoolsStateQueryResponse::BlocksByPool(state.get_blocks_by_pool(pool_id).unwrap_or_default()))
+                            .unwrap_or(PoolsStateQueryResponse::Error("Blocks are not enabled".into()))
                     }
 
                     PoolsStateQuery::GetBlocksByPoolAndEpoch { pool_id, epoch } => {
-                        match state.get_blocks_by_pool_and_epoch(pool_id, *epoch) {
-                            Ok(blocks) => PoolsStateQueryResponse::BlocksByPoolAndEpoch(blocks),
-                            Err(_) => PoolsStateQueryResponse::Error("Blocks are not enabled".into()),
-                        }
+                        state
+                        .is_historical_blocks_enabled()
+                        .then(|| PoolsStateQueryResponse::BlocksByPoolAndEpoch(state.get_blocks_by_pool_and_epoch(pool_id, *epoch)
+                        .unwrap_or_default()))
+                        .unwrap_or(PoolsStateQueryResponse::Error("Blocks are not enabled".into()))
                     }
 
                     PoolsStateQuery::GetPoolUpdates { pool_id } => {

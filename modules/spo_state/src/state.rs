@@ -15,7 +15,7 @@ use acropolis_common::{
     VotingProcedures,
 };
 use anyhow::Result;
-use imbl::{HashMap, OrdMap, Vector};
+use imbl::HashMap;
 use std::sync::{Arc, Mutex};
 use tracing::{debug, error, info};
 
@@ -41,10 +41,6 @@ pub struct State {
     // Keyed by pool_id
     total_blocks_minted: HashMap<KeyHash, u64>,
 
-    /// block heights (numbers) keyed pool id and epoch
-    /// <Pool Id, <Epoch Number, Block Height>>
-    blocks: Option<HashMap<KeyHash, OrdMap<u64, Vector<u64>>>>,
-
     /// historical spo state
     /// keyed by pool operator id
     historical_spos: Option<HashMap<KeyHash, HistoricalSPOState>>,
@@ -64,11 +60,6 @@ impl State {
             vrf_key_hash_to_pool_id_map: HashMap::new(),
             total_blocks_minted: HashMap::new(),
             historical_spos: if config.store_historical_state() {
-                Some(HashMap::new())
-            } else {
-                None
-            },
-            blocks: if config.store_blocks {
                 Some(HashMap::new())
             } else {
                 None
@@ -97,7 +88,7 @@ impl State {
         self.store_config.store_votes
     }
 
-    pub fn is_blocks_enabled(&self) -> bool {
+    pub fn is_historical_blocks_enabled(&self) -> bool {
         self.store_config.store_blocks
     }
 
@@ -125,7 +116,6 @@ impl From<SPOState> for State {
             vrf_key_hash_to_pool_id_map,
             total_blocks_minted: HashMap::new(),
             historical_spos: None,
-            blocks: None,
             stake_addresses: None,
         }
     }
@@ -222,28 +212,21 @@ impl State {
 
     /// Get Blocks by Pool
     /// Return Vector of block heights
-    /// Return Err when store_blocks not enabled
-    pub fn get_blocks_by_pool(&self, pool_id: &KeyHash) -> Result<Vec<u64>> {
-        let Some(blocks) = self.blocks.as_ref() else {
-            return Err(anyhow::anyhow!("Blocks are not enabled"));
+    /// Return None when store_blocks not enabled
+    pub fn get_blocks_by_pool(&self, pool_id: &KeyHash) -> Option<Vec<u64>> {
+        let Some(historical_spos) = self.historical_spos.as_ref() else {
+            return None;
         };
-        Ok(blocks
-            .get(pool_id)
-            .map(|epochs| epochs.values().flatten().cloned().collect())
-            .unwrap_or_default())
+        historical_spos.get(pool_id).and_then(|s| s.get_all_blocks())
     }
 
     /// Get Blocks by Pool and Epoch
-    /// Return Err when store_blocks not enabled
-    pub fn get_blocks_by_pool_and_epoch(&self, pool_id: &KeyHash, epoch: u64) -> Result<Vec<u64>> {
-        let Some(blocks) = self.blocks.as_ref() else {
-            return Err(anyhow::anyhow!("Blocks are not enabled"));
+    /// Return None when store_blocks not enabled
+    pub fn get_blocks_by_pool_and_epoch(&self, pool_id: &KeyHash, epoch: u64) -> Option<Vec<u64>> {
+        let Some(historical_spos) = self.historical_spos.as_ref() else {
+            return None;
         };
-        Ok(blocks
-            .get(pool_id)
-            .map(|epochs| epochs.get(&epoch).map(|blocks| blocks.iter().cloned().collect()))
-            .flatten()
-            .unwrap_or_default())
+        historical_spos.get(pool_id).and_then(|s| s.get_blocks_by_epoch(epoch))
     }
 
     /// Get Pool Updates
@@ -299,14 +282,13 @@ impl State {
 
         *(self.total_blocks_minted.entry(pool_id.clone()).or_insert(0)) += 1;
         // if store_blocks is enabled
-        if let Some(blocks) = self.blocks.as_mut() {
-            blocks
-                .entry(pool_id)
-                .or_insert_with(OrdMap::new)
-                .entry(block_info.epoch)
-                .or_insert_with(Vector::new)
-                .push_back(block_info.number);
-        };
+        if self.is_historical_blocks_enabled() {
+            if let Some(historical_spos) = self.historical_spos.as_mut() {
+                if let Some(historical_spo) = historical_spos.get_mut(&pool_id) {
+                    historical_spo.add_block(block_info.epoch, block_info.number);
+                }
+            }
+        }
         true
     }
 
@@ -1080,9 +1062,9 @@ mod tests {
     }
 
     #[test]
-    fn get_blocks_returns_err_when_blocks_not_enabled() {
+    fn get_blocks_returns_none_when_blocks_not_enabled() {
         let state = State::default();
-        assert!(state.get_blocks_by_pool(&vec![0]).is_err());
+        assert!(state.get_blocks_by_pool(&vec![0]).is_none());
     }
 
     #[test]
