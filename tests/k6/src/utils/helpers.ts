@@ -14,5 +14,9 @@ export function weightedRandomChoice(choices: EndpointWeight[]): () => void {
 }
 
 export function randomSleep(min: number = 1, max: number = 3): void {
-  sleep(Math.random() * (max - min) + min);
+  sleep(randomIntBetween(min, max));
+}
+
+export function randomIntBetween(min: number = 1, max: number = 3) {
+  return Math.floor(Math.random() * (max - min + 1) + min);
 }

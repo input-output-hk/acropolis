@@ -6,13 +6,19 @@ import {
   testPoolDetails,
   testPoolsExtended,
   testPoolsList,
-  testPoolsRetired, testPoolsRetiring,
+  testPoolsRetired,
+  testPoolsRetiring,
 } from '../scenarios/pools';
 import { randomSleep } from '../utils/helpers';
 
 export const options: Options = {
-  vus: 3,
-  duration: '1m',
+  scenarios: {
+    smoke: {
+      vus: 3,
+      executor: 'externally-controlled',
+      duration: '1m',
+    },
+  },
   thresholds: SMOKE_THRESHOLDS,
 };
 
@@ -33,7 +39,7 @@ export default function () {
   testPoolsRetired();
   testPoolsRetiring();
 
-  // Assets
+  // Assets - 20% (uncomment when ready)
   // { name: 'assets_list', weight: 5, fn: testAssetsList },
   // { name: 'assets_details', weight: 7, fn: testAssetDetails },
   // { name: 'assets_history', weight: 3, fn: testAssetHistory },
@@ -41,7 +47,7 @@ export default function () {
   // { name: 'assets_addresses', weight: 2, fn: testAssetAddresses },
   // { name: 'assets_policy', weight: 1, fn: testAssetPolicy },
 
-  // Governance
+  // Governance - 10% (uncomment when ready)
   // { name: 'gov_dreps', weight: 3, fn: testGovernanceDReps },
   // { name: 'gov_drep_details', weight: 2, fn: testGovernanceDRepDetails },
   // { name: 'gov_drep_delegators', weight: 1, fn: testGovernanceDRepDelegators },

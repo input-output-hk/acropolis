@@ -6,7 +6,7 @@ export function testAssetsList(): void {
   apiClient.get(ENDPOINTS.ASSETS, {
     endpointName: 'GET /assets',
     tagName: 'list_assets',
-    metricType: 'asset',
+    metricType: MetricType.ASSET,
   });
 }
 
@@ -61,19 +61,7 @@ export function testAssetPolicy(): void {
   apiClient.get(url, {
     endpointName: 'GET /assets/policy/{policy_id}',
     tagName: 'asset_policy',
-    metricType: 'asset',
+    metricType: MetricType.ASSET,
   });
 }
 
-export function testAssetEndpoints(): void {
-  const tests = [
-    testAssetsList,
-    testAssetDetails,
-    testAssetHistory,
-    testAssetTransactions,
-    testAssetAddresses,
-    testAssetPolicy,
-  ];
-  const randomTest = tests[Math.floor(Math.random() * tests.length)];
-  randomTest();
-}

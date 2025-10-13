@@ -7,7 +7,7 @@ export function testPoolsList(): void {
   apiClient.get(ENDPOINTS.POOLS, {
     endpointName: 'GET /pools',
     tagName: 'list_pools',
-    metricType: 'pool',
+    metricType: MetricType.POOL,
   });
 }
 
@@ -15,7 +15,7 @@ export function testPoolsExtended(): void {
   apiClient.get(ENDPOINTS.POOLS_EXTENDED, {
     endpointName: 'GET /pools/extended',
     tagName: 'pools_extended',
-    metricType: 'pool',
+    metricType: MetricType.POOL,
   });
 }
 
@@ -44,16 +44,4 @@ export function testPoolDetails(): void {
     tagName: 'get_pool',
     metricType: MetricType.POOL,
   });
-}
-
-export function testPoolEndpoints(): void {
-  const tests = [
-    testPoolsList,
-    testPoolsExtended,
-    testPoolsRetired,
-    testPoolsRetiring,
-    testPoolDetails,
-  ];
-  const randomTest = tests[Math.floor(Math.random() * tests.length)];
-  randomTest();
 }

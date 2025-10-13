@@ -31,9 +31,3 @@ export function testEpochSpecific(): void {
     });
   }
 }
-
-export function testEpochEndpoints(): void {
-  const tests = [testEpochLatest, testEpochParameters, testEpochSpecific];
-  const randomTest = tests[Math.floor(Math.random() * tests.length)];
-  randomTest();
-}

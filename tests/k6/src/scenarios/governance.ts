@@ -117,20 +117,3 @@ export function testGovernanceProposalMetadata(): void {
     metricType: MetricType.GOVERNANCE,
   });
 }
-
-export function testGovernanceEndpoints(): void {
-  const tests = [
-    testGovernanceDReps,
-    testGovernanceDRepDetails,
-    testGovernanceDRepDelegators,
-    testGovernanceDRepMetadata,
-    testGovernanceDRepUpdates,
-    testGovernanceDRepVotes,
-    testGovernanceProposals,
-    testGovernanceProposalDetails,
-    testGovernanceProposalVotes,
-    testGovernanceProposalMetadata,
-  ];
-  const randomTest = tests[Math.floor(Math.random() * tests.length)];
-  randomTest();
-}

@@ -47,18 +47,38 @@ export class ApiClient {
     switch (metricType) {
       case MetricType.ACCOUNT:
         metrics.accountDuration.add(res.timings.duration);
+        metrics.accountRequests.add(1);
+        if (!passed) {
+          metrics.accountErrors.add(1);
+        }
         break;
       case MetricType.ASSET:
         metrics.assetDuration.add(res.timings.duration);
+        metrics.assetRequests.add(1);
+        if (!passed) {
+          metrics.assetErrors.add(1);
+        }
         break;
       case MetricType.EPOCH:
         metrics.epochDuration.add(res.timings.duration);
+        metrics.epochRequests.add(1);
+        if (!passed) {
+          metrics.epochErrors.add(1);
+        }
         break;
       case MetricType.GOVERNANCE:
         metrics.governanceDuration.add(res.timings.duration);
+        metrics.governanceRequests.add(1);
+        if (!passed) {
+          metrics.governanceErrors.add(1);
+        }
         break;
       case MetricType.POOL:
         metrics.poolDuration.add(res.timings.duration);
+        metrics.poolRequests.add(1);
+        if (!passed) {
+          metrics.poolErrors.add(1);
+        }
         break;
     }
 
