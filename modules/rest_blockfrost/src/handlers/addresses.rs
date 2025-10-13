@@ -111,7 +111,7 @@ pub async fn handle_address_single_blockfrost(
 
     let rest_response = AddressInfoREST {
         address: address_str.to_string(),
-        amount: address_balance,
+        amount: address_balance.into(),
         stake_address,
         address_type,
         script: is_script,
