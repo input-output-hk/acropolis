@@ -11,10 +11,10 @@ use acropolis_common::{
     TxCertificate,
 };
 use anyhow::Result;
-use std::{fs, io::Write, sync::Arc};
-use tracing::info;
 use serde_with::serde_as;
 use std::collections::HashMap;
+use std::{fs, io::Write, sync::Arc};
+use tracing::info;
 
 #[allow(dead_code)]
 #[serde_as]
