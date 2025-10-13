@@ -13,7 +13,6 @@ export function checkResponse(
   endpointName: string,
   expectedStatus: number = 200,
 ): CheckResult {
-  // Only check functional correctness, not performance
   const checks = {
     [`${endpointName} - status is ${expectedStatus}`]: (r: Response): boolean =>
       r.status === expectedStatus,
@@ -28,11 +27,4 @@ export function checkResponse(
     statusCode: res.status,
     duration: res.timings.duration,
   };
-}
-
-export function checkBatchResponses(
-  responses: Response[],
-  endpointNames: string[],
-): CheckResult[] {
-  return responses.map((res, i) => checkResponse(res, endpointNames[i]));
 }

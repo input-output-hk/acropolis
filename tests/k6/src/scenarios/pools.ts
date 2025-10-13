@@ -1,47 +1,59 @@
-import http from 'k6/http';
-import { group } from 'k6';
 import { buildUrl, ENDPOINTS } from '../config/endpoints';
 import { getRandomItem } from '../config/test-data';
-import { checkResponse } from '../utils/checks';
-import { metrics } from '../utils/metrics';
-import { getEnv } from '../utils/helpers';
+import { apiClient, MetricType } from '../utils/api-client';
 import { TEST_DATA } from '../config/shelley-test-data';
 
-const BASE_URL = getEnv('API_URL', 'http://127.0.0.1:4340');
+export function testPoolsList(): void {
+  apiClient.get(ENDPOINTS.POOLS, {
+    endpointName: 'GET /pools',
+    tagName: 'list_pools',
+    metricType: 'pool',
+  });
+}
+
+export function testPoolsExtended(): void {
+  apiClient.get(ENDPOINTS.POOLS_EXTENDED, {
+    endpointName: 'GET /pools/extended',
+    tagName: 'pools_extended',
+    metricType: 'pool',
+  });
+}
+
+export function testPoolsRetired(): void {
+  apiClient.get(ENDPOINTS.POOLS_RETIRED, {
+    endpointName: 'GET /pools/retired',
+    tagName: 'pools_retired',
+    metricType: MetricType.POOL,
+  });
+}
+
+export function testPoolsRetiring(): void {
+  apiClient.get(ENDPOINTS.POOLS_RETIRING, {
+    endpointName: 'GET /pools/retiring',
+    tagName: 'pools_retiring',
+    metricType: MetricType.POOL,
+  });
+}
+
+export function testPoolDetails(): void {
+  const poolId = getRandomItem(TEST_DATA.poolIds);
+  const url = buildUrl(ENDPOINTS.POOL, { pool_id: poolId });
+
+  apiClient.get(url, {
+    endpointName: 'GET /pools/{pool_id}',
+    tagName: 'get_pool',
+    metricType: MetricType.POOL,
+  });
+}
 
 export function testPoolEndpoints(): void {
-  group('Pool Endpoints', () => {
-    const poolListResponses = http.batch([
-      ['GET', BASE_URL + ENDPOINTS.POOLS, null, { tags: { name: 'list_pools' } }],
-      ['GET', BASE_URL + ENDPOINTS.POOLS_EXTENDED, null, { tags: { name: 'pools_extended' } }],
-      ['GET', BASE_URL + ENDPOINTS.POOLS_RETIRED, null, { tags: { name: 'pools_retired' } }],
-      ['GET', BASE_URL + ENDPOINTS.POOLS_RETIRING, null, { tags: { name: 'pools_retiring' } }],
-    ]);
-
-    poolListResponses.forEach((res, i) => {
-      const names = [
-        'GET /pools',
-        'GET /pools/extended',
-        'GET /pools/retired',
-        'GET /pools/retiring',
-      ];
-      checkResponse(res, names[i]);
-      metrics.poolDuration.add(res.timings.duration);
-      metrics.totalRequests.add(1);
-    });
-
-    const poolId = getRandomItem(TEST_DATA.poolIds);
-    const poolRes = http.get(BASE_URL + buildUrl(ENDPOINTS.POOL, { pool_id: poolId }), {
-      tags: { name: 'get_pool' },
-    });
-
-    const result = checkResponse(poolRes, 'GET /pools/{pool_id}');
-    metrics.poolDuration.add(poolRes.timings.duration);
-    metrics.totalRequests.add(1);
-    metrics.successfulRequests.add(result.passed ? 1 : 0);
-
-    if (!result.passed) {
-      metrics.failedRequests.add(1);
-    }
-  });
+  const tests = [
+    testPoolsList,
+    testPoolsExtended,
+    testPoolsRetired,
+    testPoolsRetiring,
+    testPoolDetails,
+  ];
+  const randomTest = tests[Math.floor(Math.random() * tests.length)];
+  randomTest();
 }

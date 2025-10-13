@@ -16,7 +16,3 @@ export function weightedRandomChoice(choices: EndpointWeight[]): () => void {
 export function randomSleep(min: number = 1, max: number = 3): void {
   sleep(Math.random() * (max - min) + min);
 }
-
-export function getEnv(key: string, defaultValue: string): string {
-  return __ENV[key] || defaultValue;
-}
