@@ -172,41 +172,79 @@ impl ImmutableAddressStore {
 
     pub async fn get_utxos(&self, address: &Address) -> Result<Option<Vec<UTxOIdentifier>>> {
         let key = address.to_bytes_key()?;
-        let partition = self.utxos.clone();
-        task::spawn_blocking(move || match partition.get(key)? {
-            Some(bytes) => {
-                let decoded: Vec<UTxOIdentifier> = decode(&bytes)?;
-                Ok(Some(decoded))
+
+        let mut live: HashSet<UTxOIdentifier> =
+            self.utxos.get(&key)?.map(|bytes| decode(&bytes)).transpose()?.unwrap_or_default();
+
+        let pending = self.pending.lock().await;
+        for block_map in pending.iter() {
+            if let Some(entry) = block_map.get(address) {
+                if let Some(deltas) = &entry.utxos {
+                    for delta in deltas {
+                        match delta {
+                            UtxoDelta::Created(u) => {
+                                live.insert(*u);
+                            }
+                            UtxoDelta::Spent(u) => {
+                                live.remove(u);
+                            }
+                        }
+                    }
+                }
             }
-            None => Ok(None),
-        })
-        .await?
+        }
+
+        if live.is_empty() {
+            Ok(None)
+        } else {
+            let vec: Vec<_> = live.into_iter().collect();
+            Ok(Some(vec))
+        }
     }
 
     pub async fn get_txs(&self, address: &Address) -> Result<Option<Vec<TxIdentifier>>> {
         let key = address.to_bytes_key()?;
-        let partition = self.txs.clone();
-        task::spawn_blocking(move || match partition.get(key)? {
-            Some(bytes) => {
-                let decoded: Vec<TxIdentifier> = decode(&bytes)?;
-                Ok(Some(decoded))
+        let mut live: Vec<TxIdentifier> =
+            self.txs.get(&key)?.map(|bytes| decode(&bytes)).transpose()?.unwrap_or_default();
+
+        let pending = self.pending.lock().await;
+        for block_map in pending.iter() {
+            if let Some(entry) = block_map.get(address) {
+                if let Some(txs) = &entry.transactions {
+                    live.extend(txs.iter().cloned());
+                }
             }
-            None => Ok(None),
-        })
-        .await?
+        }
+
+        if live.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(live))
+        }
     }
 
     pub async fn get_totals(&self, address: &Address) -> Result<Option<AddressTotals>> {
         let key = address.to_bytes_key()?;
-        let partition = self.totals.clone();
-        task::spawn_blocking(move || match partition.get(key)? {
-            Some(bytes) => {
-                let decoded: AddressTotals = decode(&bytes)?;
-                Ok(Some(decoded))
+
+        let mut live: AddressTotals =
+            self.totals.get(&key)?.map(|bytes| decode(&bytes)).transpose()?.unwrap_or_default();
+
+        let pending = self.pending.lock().await;
+        for block_map in pending.iter() {
+            if let Some(entry) = block_map.get(address) {
+                if let Some(deltas) = &entry.totals {
+                    for delta in deltas {
+                        live.apply_delta(delta);
+                    }
+                }
             }
-            None => Ok(None),
-        })
-        .await?
+        }
+
+        if live.tx_count == 0 {
+            Ok(None)
+        } else {
+            Ok(Some(live))
+        }
     }
 
     pub async fn get_last_epoch_stored(&self) -> Result<Option<u64>> {

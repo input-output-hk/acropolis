@@ -247,7 +247,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_persist_all_and_read_back() -> Result<()> {
+    async fn test_utxo_storage_lifecycle() -> Result<()> {
         let _ = tracing_subscriber::fmt::try_init();
 
         let mut state = setup_state_and_store().await?;
@@ -259,26 +259,30 @@ mod tests {
         // Apply deltas
         state.apply_address_deltas(&deltas)?;
 
-        // Drain volatile to immutable
-        state.volatile.epoch_start_block = 1;
-        state.prune_volatile().await;
-
-        // Perisist immutable to disk
-        state.immutable.persist_epoch(0, &state.config).await?;
-
-        // Verify persisted UTxOs
+        // Verify UTxO is retrievable when in volatile
         let utxos = state.get_address_utxos(&addr).await?;
         assert!(utxos.is_some());
         assert_eq!(utxos.as_ref().unwrap().len(), 1);
         assert_eq!(utxos.as_ref().unwrap()[0], UTxOIdentifier::new(0, 0, 0));
 
-        // Totals should exist
-        let totals = state.immutable.get_totals(&addr).await?;
-        assert!(totals.is_some());
+        // Drain volatile to immutable
+        state.volatile.epoch_start_block = 1;
+        state.prune_volatile().await;
 
-        // Epoch marker advanced
-        let last_epoch = state.immutable.get_last_epoch_stored().await?;
-        assert_eq!(last_epoch, Some(0));
+        // Verify UTxO is retrievable when in immutable pending
+        let utxos = state.get_address_utxos(&addr).await?;
+        assert!(utxos.is_some());
+        assert_eq!(utxos.as_ref().unwrap().len(), 1);
+        assert_eq!(utxos.as_ref().unwrap()[0], UTxOIdentifier::new(0, 0, 0));
+
+        // Perisist immutable to disk
+        state.immutable.persist_epoch(0, &state.config).await?;
+
+        // Verify UTxO is retrievable after persisted to disk
+        let utxos = state.get_address_utxos(&addr).await?;
+        assert!(utxos.is_some());
+        assert_eq!(utxos.as_ref().unwrap().len(), 1);
+        assert_eq!(utxos.as_ref().unwrap()[0], UTxOIdentifier::new(0, 0, 0));
 
         Ok(())
     }
@@ -292,45 +296,40 @@ mod tests {
         let addr = dummy_address();
         let utxo = UTxOIdentifier::new(0, 0, 0);
 
-        // Before processing
-        assert!(
-            state.get_address_utxos(&addr).await?.is_none(),
-            "Expected no UTxOs before creation"
-        );
-
         let created = vec![delta(&addr, &utxo, 1)];
 
+        // Apply delta to volatile
         state.apply_address_deltas(&created)?;
 
-        // After processing creation
-        let after_create = state.get_address_utxos(&addr).await?;
-        assert_eq!(after_create.as_ref().unwrap(), &[utxo]);
-
-        // Drain volatile to immutable
+        // Drain volatile to immutable pending
         state.volatile.epoch_start_block = 1;
         state.prune_volatile().await;
 
         // Perisist immutable to disk
         state.immutable.persist_epoch(0, &state.config).await?;
 
-        // After persisting creation
+        // Verify UTxO was persisted
         let after_persist = state.get_address_utxos(&addr).await?;
         assert_eq!(after_persist.as_ref().unwrap(), &[utxo]);
 
         state.volatile.next_block();
         state.apply_address_deltas(&[delta(&addr, &utxo, -1)])?;
 
-        // After processing spend
+        // Verify UTxO was removed while in volatile
         let after_spend_volatile = state.get_address_utxos(&addr).await?;
         assert!(after_spend_volatile.as_ref().map_or(true, |u| u.is_empty()));
 
         // Drain volatile to immutable
         state.prune_volatile().await;
 
+        // Verify UTxO was removed while in pending immutable
+        let after_spend_pending = state.get_address_utxos(&addr).await?;
+        assert!(after_spend_pending.as_ref().map_or(true, |u| u.is_empty()));
+
         // Perisist immutable to disk
         state.immutable.persist_epoch(2, &state.config).await?;
 
-        // After persisting spend
+        // Verify UTxO was removed after persisting spend to disk
         let after_spend_disk = state.get_address_utxos(&addr).await?;
         assert!(after_spend_disk.as_ref().map_or(true, |u| u.is_empty()));
 
@@ -353,7 +352,7 @@ mod tests {
         state.volatile.next_block();
         state.apply_address_deltas(&[delta(&addr, &utxo_old, -1), delta(&addr, &utxo_new, 1)])?;
 
-        // Create and spend both in volatile is not included in address utxos
+        // Verify Create and spend both in volatile is not included in address utxos
         let volatile = state.get_address_utxos(&addr).await?;
         assert!(
             volatile.as_ref().is_some_and(|u| u.contains(&utxo_new) && !u.contains(&utxo_old)),

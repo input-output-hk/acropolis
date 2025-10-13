@@ -14,10 +14,13 @@ use acropolis_common::{
 use anyhow::Result;
 use caryatid_sdk::{module, Context, Module, Subscription};
 use config::Config;
-use tokio::sync::Mutex;
+use tokio::sync::{mpsc, Mutex};
 use tracing::{error, info};
 
-use crate::state::{AddressStorageConfig, State};
+use crate::{
+    immutable_address_store::ImmutableAddressStore,
+    state::{AddressStorageConfig, State},
+};
 mod immutable_address_store;
 mod state;
 mod volatile_addresses;
@@ -50,6 +53,20 @@ impl AddressState {
     ) -> Result<()> {
         let _ = params_subscription.read().await?;
         info!("Consumed initial genesis params from params_subscription");
+
+        // Background task to persist epochs sequentialy
+        const MAX_PENDING_PERSISTS: usize = 1;
+        let (persist_tx, mut persist_rx) =
+            mpsc::channel::<(u64, Arc<ImmutableAddressStore>, AddressStorageConfig)>(
+                MAX_PENDING_PERSISTS,
+            );
+        tokio::spawn(async move {
+            while let Some((epoch, store, config)) = persist_rx.recv().await {
+                if let Err(e) = store.persist_epoch(epoch, &config).await {
+                    error!("failed to persist epoch {epoch}: {e}");
+                }
+            }
+        });
 
         // Main loop of synchronised messages
         loop {
@@ -116,13 +133,11 @@ impl AddressState {
                     }
 
                     if should_prune {
-                        tokio::spawn(async move {
-                            if let Err(e) = store.persist_epoch(epoch, &config).await {
-                                error!("failed to persist epoch {}: {}", epoch, e);
-                            } else {
-                                info!("persisted address state for epoch {}", epoch);
-                            }
-                        });
+                        if let Err(e) =
+                            persist_tx.send((epoch, store.clone(), config.clone())).await
+                        {
+                            panic!("persistence worker crashed: {e}");
+                        }
                     }
 
                     {
