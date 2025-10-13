@@ -45,6 +45,7 @@ dependencies = [
  "caryatid_sdk",
  "chrono",
  "config",
+ "fjall",
  "hex",
  "imbl",
  "serde",

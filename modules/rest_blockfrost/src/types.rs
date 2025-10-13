@@ -4,6 +4,7 @@ use acropolis_common::{
     protocol_params::{Nonce, NonceVariant, ProtocolParams},
     queries::governance::DRepActionUpdate,
     rest_helper::ToCheckedF64,
+    serialization::{DisplayFromBech32, PoolPrefix, StakePrefix},
     AssetAddressEntry, AssetMetadataStandard, AssetMintRecord, KeyHash, PolicyAsset,
     PoolEpochState, PoolUpdateAction, Relay, TxHash, Vote,
 };
@@ -46,6 +47,47 @@ impl From<EpochActivityMessage> for EpochActivityRest {
             output: ea_message.total_outputs,
             fees: ea_message.total_fees,
             active_stake: None,
+        }
+    }
+}
+
+// REST response structure for /epochs/{number}/stakes
+#[serde_as]
+#[derive(Serialize)]
+pub struct SPDDByEpochItemRest {
+    #[serde_as(as = "DisplayFromBech32<StakePrefix>")]
+    stake_address: KeyHash,
+    #[serde_as(as = "DisplayFromBech32<PoolPrefix>")]
+    pool_id: KeyHash,
+    #[serde_as(as = "DisplayFromStr")]
+    amount: u64,
+}
+
+impl From<(KeyHash, KeyHash, u64)> for SPDDByEpochItemRest {
+    fn from((pool_id, stake_address, amount): (KeyHash, KeyHash, u64)) -> Self {
+        Self {
+            pool_id,
+            stake_address,
+            amount,
+        }
+    }
+}
+
+// REST response structure for /epochs/{number}/stakes/{pool_id}
+#[serde_as]
+#[derive(Serialize)]
+pub struct SPDDByEpochAndPoolItemRest {
+    #[serde_as(as = "DisplayFromBech32<StakePrefix>")]
+    stake_address: KeyHash,
+    #[serde_as(as = "DisplayFromStr")]
+    amount: u64,
+}
+
+impl From<(KeyHash, u64)> for SPDDByEpochAndPoolItemRest {
+    fn from((stake_address, amount): (KeyHash, u64)) -> Self {
+        Self {
+            stake_address,
+            amount,
         }
     }
 }

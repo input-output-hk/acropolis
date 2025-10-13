@@ -82,6 +82,9 @@ write-full-cache = "false"
 store-history = false
 
 [module.accounts-state]
+# Store SPDD history
+# Enable /epochs/{number}/stakes, /epochs/{number}/stakes/{pool_id} endpoints
+store-spdd-history = true
 
 [module.assets-state]
 # Enables /assets endpoint

@@ -31,6 +31,9 @@ use acropolis_common::queries::accounts::{
     AccountInfo, AccountsStateQuery, AccountsStateQueryResponse,
 };
 
+use crate::spo_distribution_store::SPDDStore;
+mod spo_distribution_store;
+
 const DEFAULT_SPO_STATE_TOPIC: &str = "cardano.spo.state";
 const DEFAULT_EPOCH_ACTIVITY_TOPIC: &str = "cardano.epoch.activity";
 const DEFAULT_TX_CERTIFICATES_TOPIC: &str = "cardano.certificates";
@@ -44,6 +47,8 @@ const DEFAULT_SPO_REWARDS_TOPIC: &str = "cardano.spo.rewards";
 const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: &str = "cardano.protocol.parameters";
 const DEFAULT_STAKE_REWARD_DELTAS_TOPIC: &str = "cardano.stake.reward.deltas";
 
+const DEFAULT_STORE_SPDD_HISTORY: (&str, bool) = ("store-spdd-history", false);
+
 /// Accounts State module
 #[module(
     message_type(Message),
@@ -56,6 +61,7 @@ impl AccountsState {
     /// Async run loop
     async fn run(
         history: Arc<Mutex<StateHistory<State>>>,
+        spdd_store: Option<Arc<Mutex<SPDDStore>>>,
         mut drep_publisher: DRepDistributionPublisher,
         mut spo_publisher: SPODistributionPublisher,
         mut spo_rewards_publisher: SPORewardsPublisher,
@@ -136,6 +142,11 @@ impl AccountsState {
                 let ea_message_f = ea_subscription.read();
                 let params_message_f = parameters_subscription.read();
 
+                let spdd_store_guard = match spdd_store.as_ref() {
+                    Some(s) => Some(s.lock().await),
+                    None => None,
+                };
+
                 // Handle DRep
                 let (_, message) = dreps_message_f.await?;
                 match message.as_ref() {
@@ -176,6 +187,17 @@ impl AccountsState {
                             let spdd = state.generate_spdd();
                             if let Err(e) = spo_publisher.publish_spdd(block_info, spdd).await {
                                 error!("Error publishing SPO stake distribution: {e:#}")
+                            }
+
+                            // if we store spdd history
+                            let spdd_state = state.dump_spdd_state();
+                            if let Some(spdd_store) = spdd_store_guard {
+                                // active stakes taken at beginning of epoch i is for epoch + 1
+                                if let Err(e) =
+                                    spdd_store.store_spdd(block_info.epoch + 1, spdd_state)
+                                {
+                                    error!("Error storing SPDD state: {e:#}")
+                                }
                             }
                         }
                         .instrument(span)
@@ -400,6 +422,11 @@ impl AccountsState {
             .unwrap_or(DEFAULT_STAKE_REWARD_DELTAS_TOPIC.to_string());
         info!("Creating stake reward deltas subscriber on '{stake_reward_deltas_topic}'");
 
+        // store spdd history config
+        let store_spdd_history =
+            config.get_bool(DEFAULT_STORE_SPDD_HISTORY.0).unwrap_or(DEFAULT_STORE_SPDD_HISTORY.1);
+        info!("Store SPDD history: {}", store_spdd_history);
+
         // Query topics
         let accounts_query_topic = config
             .get_string(DEFAULT_ACCOUNTS_QUERY_TOPIC.0)
@@ -411,11 +438,23 @@ impl AccountsState {
             "AccountsState",
             StateHistoryStore::default_block_store(),
         )));
-        let history_account_state = history.clone();
+        let history_query = history.clone();
         let history_tick = history.clone();
 
+        // Create spdd history
+        // Return Err if failed to load SPDD store
+        let spdd_store = if store_spdd_history {
+            Some(Arc::new(Mutex::new(SPDDStore::load(
+                std::path::Path::new("spdd_db"),
+            )?)))
+        } else {
+            None
+        };
+        let spdd_store_query = spdd_store.clone();
+
         context.handle(&accounts_query_topic, move |message| {
-            let history = history_account_state.clone();
+            let history = history_query.clone();
+            let spdd_store = spdd_store_query.clone();
             async move {
                 let Message::StateQuery(StateQuery::Accounts(query)) = message.as_ref() else {
                     return Arc::new(Message::StateQueryResponse(StateQueryResponse::Accounts(
@@ -426,6 +465,10 @@ impl AccountsState {
                 };
 
                 let guard = history.lock().await;
+                let spdd_store_guard = match spdd_store.as_ref() {
+                    Some(s) => Some(s.lock().await),
+                    None => None,
+                };
                 let state = match guard.current() {
                     Some(s) => s,
                     None => {
@@ -530,6 +573,36 @@ impl AccountsState {
                         }
                     }
 
+                    AccountsStateQuery::GetSPDDByEpoch { epoch } => match spdd_store_guard {
+                        Some(spdd_store) => {
+                            let result = spdd_store.query_by_epoch(*epoch);
+                            match result {
+                                Ok(result) => AccountsStateQueryResponse::SPDDByEpoch(result),
+                                Err(e) => AccountsStateQueryResponse::Error(e.to_string()),
+                            }
+                        }
+                        None => AccountsStateQueryResponse::Error(
+                            "SPDD store is not enabled".to_string(),
+                        ),
+                    },
+
+                    AccountsStateQuery::GetSPDDByEpochAndPool { epoch, pool_id } => {
+                        match spdd_store_guard {
+                            Some(spdd_store) => {
+                                let result = spdd_store.query_by_epoch_and_pool(*epoch, pool_id);
+                                match result {
+                                    Ok(result) => {
+                                        AccountsStateQueryResponse::SPDDByEpochAndPool(result)
+                                    }
+                                    Err(e) => AccountsStateQueryResponse::Error(e.to_string()),
+                                }
+                            }
+                            None => AccountsStateQueryResponse::Error(
+                                "SPDD store is not enabled".to_string(),
+                            ),
+                        }
+                    }
+
                     _ => AccountsStateQueryResponse::Error(format!(
                         "Unimplemented query variant: {:?}",
                         query
@@ -586,6 +659,7 @@ impl AccountsState {
         context.run(async move {
             Self::run(
                 history,
+                spdd_store,
                 drep_publisher,
                 spo_publisher,
                 spo_rewards_publisher,
