@@ -327,22 +327,22 @@ pub async fn handle_epoch_pool_blocks_blockfrost(
         ));
     };
 
-    // query Pool's BlockHashes by epoch from spo-state
+    // query Pool's Blocks by epoch from spo-state
     let msg = Arc::new(Message::StateQuery(StateQuery::Pools(
-        PoolsStateQuery::GetPoolBlockHashesByEpoch {
+        PoolsStateQuery::GetBlocksByPoolAndEpoch {
             pool_id: spo.clone(),
             epoch: epoch_number,
         },
     )));
 
-    let block_hashes = query_state(
+    let blocks = query_state(
         &context,
         &handlers_config.pools_query_topic,
         msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Pools(
-                PoolsStateQueryResponse::PoolBlockHashesByEpoch(block_hashes),
-            )) => Ok(block_hashes),
+                PoolsStateQueryResponse::BlocksByPoolAndEpoch(blocks),
+            )) => Ok(blocks),
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::Error(e),
             )) => Err(anyhow::anyhow!(
@@ -353,9 +353,11 @@ pub async fn handle_epoch_pool_blocks_blockfrost(
     )
     .await?;
 
-    let block_hashes_rest = block_hashes.into_iter().map(|b| hex::encode(b)).collect::<Vec<_>>();
+    // NOTE:
+    // Need to query chain_store
+    // to get block_hash for each block height
 
-    match serde_json::to_string(&block_hashes_rest) {
+    match serde_json::to_string_pretty(&blocks) {
         Ok(json) => Ok(RESTResponse::with_json(200, &json)),
         Err(e) => Ok(RESTResponse::with_text(
             500,

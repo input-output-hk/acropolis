@@ -634,17 +634,17 @@ impl SPOState {
                         PoolsStateQueryResponse::PoolTotalBlocksMinted(state.get_total_blocks_minted_by_pool(&pool_id))
                     }
 
-                    PoolsStateQuery::GetPoolBlockHashes { pool_id } => {
-                        match state.get_pool_block_hashes(pool_id) {
-                            Ok(block_hashes) => PoolsStateQueryResponse::PoolBlockHashes(block_hashes),
-                            Err(_) => PoolsStateQueryResponse::Error("Block hashes are not enabled".into()),
+                    PoolsStateQuery::GetBlocksByPool { pool_id } => {
+                        match state.get_blocks_by_pool(pool_id) {
+                            Ok(blocks) => PoolsStateQueryResponse::BlocksByPool(blocks),
+                            Err(_) => PoolsStateQueryResponse::Error("Blocks are not enabled".into()),
                         }
                     }
 
-                    PoolsStateQuery::GetPoolBlockHashesByEpoch { pool_id, epoch } => {
-                        match state.get_pool_block_hashes_by_epoch(pool_id, *epoch) {
-                            Ok(block_hashes) => PoolsStateQueryResponse::PoolBlockHashesByEpoch(block_hashes),
-                            Err(_) => PoolsStateQueryResponse::Error("Block hashes are not enabled".into()),
+                    PoolsStateQuery::GetBlocksByPoolAndEpoch { pool_id, epoch } => {
+                        match state.get_blocks_by_pool_and_epoch(pool_id, *epoch) {
+                            Ok(blocks) => PoolsStateQueryResponse::BlocksByPoolAndEpoch(blocks),
+                            Err(_) => PoolsStateQueryResponse::Error("Blocks are not enabled".into()),
                         }
                     }
 

@@ -148,21 +148,23 @@ pub struct EpochActivityMessage {
     pub epoch: u64,
 
     /// Epoch start time
+    /// UNIX timestamp
     pub epoch_start_time: u64,
 
     /// Epoch end time
+    /// UNIX timestamp
     pub epoch_end_time: u64,
 
-    /// First block time
+    /// When first block of this epoch was created
     pub first_block_time: u64,
 
-    /// First block height
+    /// Block height of first block of this epoch
     pub first_block_height: u64,
 
-    /// Last block time
+    /// When last block of this epoch was created
     pub last_block_time: u64,
 
-    /// Last block height
+    /// Block height of last block of this epoch
     pub last_block_height: u64,
 
     /// Total blocks in this epoch

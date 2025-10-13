@@ -15,7 +15,7 @@ pub fn default_store_config() -> StoreConfig {
         store_updates: false,
         store_delegators: false,
         store_votes: false,
-        store_block_hashes: false,
+        store_blocks: false,
         store_stake_addresses: false,
     }
 }
@@ -28,7 +28,7 @@ pub fn save_history_store_config() -> StoreConfig {
         store_updates: false,
         store_delegators: false,
         store_votes: false,
-        store_block_hashes: false,
+        store_blocks: false,
         store_stake_addresses: false,
     }
 }
@@ -41,12 +41,12 @@ pub fn save_retired_pools_store_config() -> StoreConfig {
         store_updates: false,
         store_delegators: false,
         store_votes: false,
-        store_block_hashes: false,
+        store_blocks: false,
         store_stake_addresses: false,
     }
 }
 
-pub fn save_block_hashes_store_config() -> StoreConfig {
+pub fn save_blocks_store_config() -> StoreConfig {
     StoreConfig {
         store_epochs_history: false,
         store_retired_pools: false,
@@ -54,7 +54,7 @@ pub fn save_block_hashes_store_config() -> StoreConfig {
         store_updates: false,
         store_delegators: false,
         store_votes: false,
-        store_block_hashes: true,
+        store_blocks: true,
         store_stake_addresses: false,
     }
 }
