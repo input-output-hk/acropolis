@@ -442,11 +442,11 @@ impl AccountsState {
         let history_tick = history.clone();
 
         // Create spdd history
-        // Return Err if failed to load SPDD store
+        // Return Err if failed to create SPDD store
         let spdd_store = if store_spdd_history {
-            Some(Arc::new(Mutex::new(SPDDStore::load(
-                std::path::Path::new("spdd_db"),
-            )?)))
+            Some(Arc::new(Mutex::new(SPDDStore::new(std::path::Path::new(
+                "spdd_db",
+            ))?)))
         } else {
             None
         };

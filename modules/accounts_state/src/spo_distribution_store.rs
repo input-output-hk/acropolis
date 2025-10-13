@@ -42,21 +42,18 @@ pub struct SPDDStore {
 }
 
 impl SPDDStore {
-    pub fn load(path: impl AsRef<std::path::Path>) -> fjall::Result<Self> {
+    pub fn new(path: impl AsRef<std::path::Path>) -> fjall::Result<Self> {
+        let path = path.as_ref();
+
+        // Delete existing data
+        if path.exists() {
+            std::fs::remove_dir_all(path).map_err(|e| fjall::Error::Io(e))?;
+        }
+
         let keyspace = Config::new(path).open()?;
         let spdd = keyspace.open_partition("spdd", PartitionCreateOptions::default())?;
 
         Ok(Self { keyspace, spdd })
-    }
-
-    /// Drop the partition and recreate it (fastest way to clear)
-    #[allow(dead_code)]
-    pub fn reset(&mut self) -> fjall::Result<()> {
-        if let Ok(spdd) = self.keyspace.open_partition("spdd", PartitionCreateOptions::default()) {
-            self.keyspace.delete_partition(self.spdd.clone())?;
-            self.spdd = spdd;
-        }
-        Ok(())
     }
 
     /// Store SPDD state for an epoch
@@ -135,15 +132,9 @@ mod tests {
     const DB_PATH: &str = "spdd_db";
 
     #[test]
-    fn test_spdd_store_load() {
-        let spdd_store = SPDDStore::load(std::path::Path::new(DB_PATH));
-        assert!(spdd_store.is_ok());
-    }
-
-    #[test]
     fn test_store_spdd_state() {
         let spdd_store =
-            SPDDStore::load(std::path::Path::new(DB_PATH)).expect("Failed to load SPDD store");
+            SPDDStore::new(std::path::Path::new(DB_PATH)).expect("Failed to create SPDD store");
         let mut spdd_state: HashMap<KeyHash, Vec<(KeyHash, u64)>> = HashMap::new();
         spdd_state.insert(
             vec![0x01; 28],
@@ -154,6 +145,7 @@ mod tests {
             vec![(vec![0x20; 28], 200), (vec![0x21; 28], 250)],
         );
         spdd_store.store_spdd(1, spdd_state).expect("Failed to store SPDD state");
+
         let result = spdd_store.query_by_epoch(1).expect("Failed to query SPDD state");
         assert_eq!(result.len(), 4);
         let result = spdd_store
@@ -164,12 +156,5 @@ mod tests {
             .query_by_epoch_and_pool(1, &vec![0x02; 28])
             .expect("Failed to query SPDD state");
         assert_eq!(result.len(), 2);
-    }
-
-    #[test]
-    fn test_spdd_store_reset() {
-        let mut spdd_store =
-            SPDDStore::load(std::path::Path::new(DB_PATH)).expect("Failed to load SPDD store");
-        spdd_store.reset().expect("Failed to reset SPDD store");
     }
 }
