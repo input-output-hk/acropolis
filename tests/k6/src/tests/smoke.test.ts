@@ -39,7 +39,7 @@ export default function () {
   testPoolsRetired();
   testPoolsRetiring();
 
-  // Assets - 20% (uncomment when ready)
+  // Assets
   // { name: 'assets_list', weight: 5, fn: testAssetsList },
   // { name: 'assets_details', weight: 7, fn: testAssetDetails },
   // { name: 'assets_history', weight: 3, fn: testAssetHistory },
@@ -47,7 +47,7 @@ export default function () {
   // { name: 'assets_addresses', weight: 2, fn: testAssetAddresses },
   // { name: 'assets_policy', weight: 1, fn: testAssetPolicy },
 
-  // Governance - 10% (uncomment when ready)
+  // Governance
   // { name: 'gov_dreps', weight: 3, fn: testGovernanceDReps },
   // { name: 'gov_drep_details', weight: 2, fn: testGovernanceDRepDetails },
   // { name: 'gov_drep_delegators', weight: 1, fn: testGovernanceDRepDelegators },

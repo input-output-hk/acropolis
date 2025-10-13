@@ -14,9 +14,9 @@ import { EndpointWeight } from '../types';
 
 export const options: Options = {
   stages: [
-    { duration: '5m', target: 30 }, // Ramp up
-    { duration: '2h', target: 30 }, // Stay for 2 hours (soak period)
-    { duration: '5m', target: 0 }, // Ramp down
+    { duration: '5m', target: 30 },
+    { duration: '2h', target: 30 },
+    { duration: '5m', target: 0 },
   ],
   thresholds: THRESHOLDS,
 };

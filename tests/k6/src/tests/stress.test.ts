@@ -13,12 +13,15 @@ import { randomSleep, weightedRandomChoice } from '../utils/helpers';
 import { EndpointWeight } from '../types';
 
 export const options: Options = {
+  // These are just some hypothetical stages for a stress test
+  // They need to be adjusted based on the actual system capacity and goals for the
+  // Blockfrost API.
   stages: [
-    { duration: '2m', target: 50 }, // Ramp up to normal load
-    { duration: '3m', target: 100 }, // Increase to double
-    { duration: '3m', target: 200 }, // Push harder
-    { duration: '3m', target: 300 }, // Find the breaking point
-    { duration: '2m', target: 0 }, // Ramp down
+    { duration: '2m', target: 50 },
+    { duration: '3m', target: 100 },
+    { duration: '3m', target: 200 },
+    { duration: '3m', target: 300 },
+    { duration: '2m', target: 0 },
   ],
   thresholds: {
     ...THRESHOLDS,

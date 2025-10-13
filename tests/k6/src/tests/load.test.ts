@@ -14,11 +14,11 @@ import { EndpointWeight } from '../types';
 
 export const options: Options = {
   stages: [
-    { duration: '2m', target: 10 }, // Ramp up
-    { duration: '5m', target: 20 }, // Stay at 20 users
-    { duration: '2m', target: 25 }, // Ramp to 50
-    { duration: '5m', target: 30 }, // Stay at 50
-    { duration: '2m', target: 0 }, // Ramp down
+    { duration: '2m', target: 10 },
+    { duration: '5m', target: 20 },
+    { duration: '2m', target: 25 },
+    { duration: '5m', target: 30 },
+    { duration: '2m', target: 0 },
   ],
   thresholds: THRESHOLDS,
 };
