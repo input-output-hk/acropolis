@@ -48,10 +48,14 @@ pub struct EpochInfo {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct NextEpochs {}
+pub struct NextEpochs {
+    pub epochs: Vec<EpochActivityMessage>,
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PreviousEpochs {}
+pub struct PreviousEpochs {
+    pub epochs: Vec<EpochActivityMessage>,
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EpochStakeDistribution {}

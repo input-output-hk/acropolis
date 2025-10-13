@@ -22,17 +22,40 @@ impl EpochsHistoryState {
         }
     }
 
-    pub fn is_enabled(&self) -> bool {
-        self.epochs_history.is_some()
-    }
-
     /// Get Epoch Activity Message for certain pool operator at certain epoch
     pub fn get_historical_epoch(&self, epoch: u64) -> Result<Option<EpochActivityMessage>> {
-        if self.is_enabled() {
-            Ok(self
-                .epochs_history
-                .as_ref()
-                .and_then(|epochs| epochs.get(&epoch).map(|e| e.clone())))
+        if let Some(epochs_history) = self.epochs_history.as_ref() {
+            Ok(epochs_history.get(&epoch).map(|e| e.clone()))
+        } else {
+            Err(anyhow::anyhow!("Historical epoch storage is disabled"))
+        }
+    }
+
+    /// Get Epoch Activity Messages for epochs following a specific epoch. (exclusive)
+    pub fn get_next_epochs(&self, epoch: u64) -> Result<Vec<EpochActivityMessage>> {
+        if let Some(epochs_history) = self.epochs_history.as_ref() {
+            let mut epochs: Vec<EpochActivityMessage> = epochs_history
+                .iter()
+                .filter(|entry| *entry.key() > epoch)
+                .map(|e| e.value().clone())
+                .collect();
+            epochs.sort_by(|a, b| a.epoch.cmp(&b.epoch));
+            Ok(epochs)
+        } else {
+            Err(anyhow::anyhow!("Historical epoch storage is disabled"))
+        }
+    }
+
+    /// Get Epoch Activity Messages for epochs following a specific epoch. (exclusive)
+    pub fn get_previous_epochs(&self, epoch: u64) -> Result<Vec<EpochActivityMessage>> {
+        if let Some(epochs_history) = self.epochs_history.as_ref() {
+            let mut epochs: Vec<EpochActivityMessage> = epochs_history
+                .iter()
+                .filter(|entry| *entry.key() < epoch)
+                .map(|e| e.value().clone())
+                .collect();
+            epochs.sort_by(|a, b| a.epoch.cmp(&b.epoch));
+            Ok(epochs)
         } else {
             Err(anyhow::anyhow!("Historical epoch storage is disabled"))
         }
@@ -111,5 +134,61 @@ mod tests {
             .expect("epoch history missing");
         assert_eq!(history.total_blocks, 1);
         assert_eq!(history.total_fees, 50);
+    }
+
+    #[test]
+    fn get_next_previous_epochs_sorts_epochs() {
+        let epochs_history = EpochsHistoryState::new(&StoreConfig::new(true));
+        let block = make_block(200);
+        epochs_history.handle_epoch_activity(
+            &block,
+            &EpochActivityMessage {
+                epoch: 199,
+                epoch_start_time: 0,
+                epoch_end_time: 0,
+                first_block_time: 0,
+                last_block_time: 0,
+                total_blocks: 1,
+                total_txs: 1,
+                total_outputs: 100,
+                total_fees: 50,
+                spo_blocks: vec![],
+                nonce: None,
+            },
+        );
+
+        let block = make_block(201);
+        epochs_history.handle_epoch_activity(
+            &block,
+            &EpochActivityMessage {
+                epoch: 200,
+                epoch_start_time: 0,
+                epoch_end_time: 0,
+                first_block_time: 0,
+                last_block_time: 0,
+                total_blocks: 1,
+                total_txs: 1,
+                total_outputs: 100,
+                total_fees: 50,
+                spo_blocks: vec![],
+                nonce: None,
+            },
+        );
+
+        let next_epochs = epochs_history.get_next_epochs(199).expect("history disabled in test");
+        assert_eq!(next_epochs.len(), 1);
+        assert_eq!(next_epochs[0].epoch, 200);
+
+        let previous_epochs =
+            epochs_history.get_previous_epochs(201).expect("history disabled in test");
+        assert_eq!(previous_epochs.len(), 2);
+        assert_eq!(previous_epochs[0].epoch, 199);
+
+        let next_epochs = epochs_history.get_next_epochs(200).expect("history disabled in test");
+        assert_eq!(next_epochs.len(), 0);
+
+        let previous_epochs =
+            epochs_history.get_previous_epochs(199).expect("history disabled in test");
+        assert_eq!(previous_epochs.len(), 0);
     }
 }
