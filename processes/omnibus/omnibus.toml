@@ -101,11 +101,11 @@ index-by-policy = false
 [module.address-state]
 # Enables /addresses/{address}, /addresses/{address}/extended,
 # /addresses/{address}/utxos/{asset}, and /addresses/{address}/utxos endpoints
-store-info = true
+store-info = false
 # Enables /addresses/{address}/totals endpoint
-store-totals = true
+store-totals = false
 # Enables /addresses/{address}/transactions endpoint
-store-transactions = true
+store-transactions = false
 
 [module.clock]
 

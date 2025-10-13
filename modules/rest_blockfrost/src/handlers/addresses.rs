@@ -8,7 +8,7 @@ use acropolis_common::{
         utils::query_state,
         utxos::{UTxOStateQuery, UTxOStateQueryResponse},
     },
-    Address,
+    Address, Value,
 };
 use caryatid_sdk::Context;
 
@@ -59,26 +59,48 @@ pub async fn handle_address_single_blockfrost(
         AddressStateQuery::GetAddressUTxOs { address },
     )));
 
-    let utxo_identifiers = match query_state(
+    let utxo_query_result = query_state(
         &context,
         &handlers_config.addresses_query_topic,
         address_query_msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Addresses(
                 AddressStateQueryResponse::AddressUTxOs(utxo_identifiers),
-            )) => Ok(utxo_identifiers),
+            )) => Ok(Some(utxo_identifiers)),
+
             Message::StateQueryResponse(StateQueryResponse::Addresses(
                 AddressStateQueryResponse::NotFound,
-            )) => Err(anyhow::anyhow!("Address not found")),
+            )) => Ok(None),
+
             Message::StateQueryResponse(StateQueryResponse::Addresses(
                 AddressStateQueryResponse::Error(_),
             )) => Err(anyhow::anyhow!("Address info storage disabled")),
+
             _ => Err(anyhow::anyhow!("Unexpected response")),
         },
     )
-    .await
-    {
-        Ok(utxo_identifiers) => utxo_identifiers,
+    .await;
+
+    let utxo_identifiers = match utxo_query_result {
+        Ok(Some(utxo_identifiers)) => utxo_identifiers,
+        Ok(None) => {
+            let rest_response = AddressInfoREST {
+                address: address_str.to_string(),
+                amount: Value {
+                    lovelace: 0,
+                    assets: Vec::new(),
+                }
+                .into(),
+                stake_address,
+                address_type,
+                script: is_script,
+            };
+
+            let json = serde_json::to_string_pretty(&rest_response)
+                .map_err(|e| anyhow::anyhow!("JSON serialization error: {e}"))?;
+
+            return Ok(RESTResponse::with_json(200, &json));
+        }
         Err(e) => return Ok(RESTResponse::with_text(500, &format!("Query failed: {e}"))),
     };
 
