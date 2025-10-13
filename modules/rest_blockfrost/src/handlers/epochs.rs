@@ -14,6 +14,7 @@ use acropolis_common::{
         utils::query_state,
     },
     serialization::Bech32WithHrp,
+    AddressNetwork, StakeAddress, StakeAddressPayload,
 };
 use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
@@ -344,8 +345,22 @@ pub async fn handle_epoch_total_stakes_blockfrost(
         },
     )
     .await?;
-    let spdd_response =
-        spdd.into_iter().map(|item| SPDDByEpochItemRest::from(item)).collect::<Vec<_>>();
+    let spdd_response = spdd
+        .into_iter()
+        .map(|(pool_id, stake_key_hash, amount)| {
+            let stake_address = StakeAddress {
+                network: AddressNetwork::Main,
+                payload: StakeAddressPayload::StakeKeyHash(stake_key_hash),
+            }
+            .to_string()
+            .map_err(|e| anyhow::anyhow!("Failed to convert stake address to string: {e}"))?;
+            Ok(SPDDByEpochItemRest {
+                pool_id,
+                stake_address,
+                amount,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
 
     match serde_json::to_string_pretty(&spdd_response) {
         Ok(json) => Ok(RESTResponse::with_json(200, &json)),
@@ -436,8 +451,22 @@ pub async fn handle_epoch_pool_stakes_blockfrost(
         },
     )
     .await?;
-    let spdd_response =
-        spdd.into_iter().map(|item| SPDDByEpochAndPoolItemRest::from(item)).collect::<Vec<_>>();
+    let spdd_response = spdd
+        .into_iter()
+        .map(|(stake_key_hash, amount)| {
+            let stake_address = StakeAddress {
+                network: AddressNetwork::Main,
+                payload: StakeAddressPayload::StakeKeyHash(stake_key_hash),
+            }
+            .to_string()
+            .map_err(|e| anyhow::anyhow!("Failed to convert stake address to string: {e}"))?;
+
+            Ok(SPDDByEpochAndPoolItemRest {
+                stake_address,
+                amount,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
 
     match serde_json::to_string_pretty(&spdd_response) {
         Ok(json) => Ok(RESTResponse::with_json(200, &json)),
