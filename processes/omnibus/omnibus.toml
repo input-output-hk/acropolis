@@ -84,7 +84,7 @@ store-history = false
 [module.accounts-state]
 # Store SPDD history
 # Enable /epochs/{number}/stakes, /epochs/{number}/stakes/{pool_id} endpoints
-store-spdd-history = true
+store-spdd-history = false
 
 [module.assets-state]
 # Enables /assets endpoint
