@@ -193,7 +193,6 @@ impl AccountsState {
                     _ => error!("Unexpected message type: {message:?}"),
                 }
 
-                // Update parameters, ready for monetary/rewards calc triggered by epoch_activity
                 let (_, message) = params_message_f.await?;
                 match message.as_ref() {
                     Message::Cardano((block_info, CardanoMessage::ProtocolParams(params_msg))) => {
@@ -533,6 +532,12 @@ impl AccountsState {
                                 "One or more accounts not found".to_string(),
                             ),
                         }
+                    }
+
+                    AccountsStateQuery::GetActiveStakes {} => {
+                        AccountsStateQueryResponse::ActiveStakes(
+                            state.get_latest_snapshot_account_balances(),
+                        )
                     }
 
                     AccountsStateQuery::GetAccountsBalancesSum { stake_keys } => {

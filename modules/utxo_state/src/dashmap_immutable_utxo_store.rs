@@ -2,7 +2,8 @@
 // Faster and API is simpler because it uses internally sharded locks
 // but it takes a lot more memory than HashMap
 
-use crate::state::{ImmutableUTXOStore, UTXOKey, UTXOValue};
+use crate::state::{ImmutableUTXOStore, UTXOValue};
+use acropolis_common::UTxOIdentifier;
 use anyhow::Result;
 use async_trait::async_trait;
 use config::Config;
@@ -12,7 +13,7 @@ use tracing::info;
 
 pub struct DashMapImmutableUTXOStore {
     /// Map of UTXOs
-    utxos: DashMap<UTXOKey, UTXOValue>,
+    utxos: DashMap<UTxOIdentifier, UTXOValue>,
 }
 
 impl DashMapImmutableUTXOStore {
@@ -27,19 +28,19 @@ impl DashMapImmutableUTXOStore {
 #[async_trait]
 impl ImmutableUTXOStore for DashMapImmutableUTXOStore {
     /// Add a UTXO
-    async fn add_utxo(&self, key: UTXOKey, value: UTXOValue) -> Result<()> {
+    async fn add_utxo(&self, key: UTxOIdentifier, value: UTXOValue) -> Result<()> {
         self.utxos.insert(key, value);
         Ok(())
     }
 
     /// Delete a UTXO
-    async fn delete_utxo(&self, key: &UTXOKey) -> Result<()> {
+    async fn delete_utxo(&self, key: &UTxOIdentifier) -> Result<()> {
         self.utxos.remove(key);
         Ok(())
     }
 
     /// Lookup a UTXO
-    async fn lookup_utxo(&self, key: &UTXOKey) -> Result<Option<UTXOValue>> {
+    async fn lookup_utxo(&self, key: &UTxOIdentifier) -> Result<Option<UTXOValue>> {
         // Essential to clone here because ref is not async safe
         Ok(self.utxos.get(key).map(|value| value.clone()))
     }

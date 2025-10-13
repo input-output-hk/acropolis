@@ -20,6 +20,7 @@ hex = { workspace = true }
 pallas = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
+blake2 = "0.10.6"
 tracing = { workspace = true }
 
 [build-dependencies]

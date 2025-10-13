@@ -7,12 +7,23 @@ use acropolis_common::{
         AddressDeltasMessage, CardanoMessage, Message, StakeAddressDeltasMessage,
         TxCertificatesMessage,
     },
-    BlockInfo, ShelleyAddressPointer, StakeAddress, StakeAddressPayload, StakeCredential,
+    Address, BlockInfo, ShelleyAddressPointer, StakeAddress, StakeAddressPayload, StakeCredential,
     TxCertificate,
 };
 use anyhow::Result;
 use std::{fs, io::Write, sync::Arc};
 use tracing::info;
+use serde_with::serde_as;
+use std::collections::HashMap;
+
+#[allow(dead_code)]
+#[serde_as]
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+pub struct PointerOccurrence {
+    /// List of occurrences of the pointer in the blockchain
+    #[serde_as(as = "Vec<(_, _)>")]
+    pub occurrence: HashMap<ShelleyAddressPointer, Vec<(Option<Address>, BlockInfo, Address)>>,
+}
 
 pub struct DeltaPublisher {
     pub params: Arc<StakeDeltaFilterParams>,

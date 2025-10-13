@@ -2,54 +2,14 @@
 use crate::volatile_index::VolatileIndex;
 use acropolis_common::{
     messages::UTXODeltasMessage, params::SECURITY_PARAMETER_K, Address, BlockInfo, BlockStatus,
-    TxHash, TxInput, TxOutput, UTXODelta,
+    Datum, TxInput, TxOutput, UTXODelta,
 };
-use acropolis_common::{Value, ValueDelta};
+use acropolis_common::{UTxOIdentifier, Value, ValueDelta};
 use anyhow::Result;
 use async_trait::async_trait;
-use hex::encode;
 use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use tracing::{debug, error, info};
-
-/// Key of ledger state store
-#[derive(Debug, Clone, Eq)]
-pub struct UTXOKey {
-    pub hash: TxHash, // Tx hash
-    pub index: u64,   // Output index in the transaction
-}
-
-impl UTXOKey {
-    /// Creates a new UTXOKey from any slice (pads with zeros if < 32 bytes)
-    pub fn new(hash_slice: &[u8], index: u64) -> Self {
-        let mut hash = [0u8; 32]; // Initialize with zeros
-        let len = hash_slice.len().min(32); // Cap at 32 bytes
-        hash[..len].copy_from_slice(&hash_slice[..len]); // Copy input hash
-        Self { hash, index }
-    }
-
-    /// Serialise to bytes for KV store
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let mut key = Vec::with_capacity(40);
-        key.extend_from_slice(&self.hash);
-        key.extend_from_slice(&self.index.to_be_bytes());
-        key
-    }
-}
-
-impl PartialEq for UTXOKey {
-    fn eq(&self, other: &Self) -> bool {
-        self.index == other.index && self.hash == other.hash
-    }
-}
-
-impl Hash for UTXOKey {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.hash.hash(state);
-        self.index.hash(state);
-    }
-}
 
 /// Value stored in UTXO
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -59,6 +19,9 @@ pub struct UTXOValue {
 
     /// Value in Lovelace
     pub value: Value,
+
+    /// Datum
+    pub datum: Option<Datum>,
 }
 
 /// Address delta observer
@@ -81,13 +44,13 @@ pub trait AddressDeltaObserver: Send + Sync {
 #[async_trait]
 pub trait ImmutableUTXOStore: Send + Sync {
     /// Add a UTXO
-    async fn add_utxo(&self, key: UTXOKey, value: UTXOValue) -> Result<()>;
+    async fn add_utxo(&self, key: UTxOIdentifier, value: UTXOValue) -> Result<()>;
 
     /// Delete a UTXO
-    async fn delete_utxo(&self, key: &UTXOKey) -> Result<()>;
+    async fn delete_utxo(&self, key: &UTxOIdentifier) -> Result<()>;
 
     /// Lookup a UTXO
-    async fn lookup_utxo(&self, key: &UTXOKey) -> Result<Option<UTXOValue>>;
+    async fn lookup_utxo(&self, key: &UTxOIdentifier) -> Result<Option<UTXOValue>>;
 
     /// Get the number of UTXOs in the store
     async fn len(&self) -> Result<usize>;
@@ -102,7 +65,7 @@ pub struct State {
     last_number: u64,
 
     /// Volatile UTXOs
-    volatile_utxos: HashMap<UTXOKey, UTXOValue>,
+    volatile_utxos: HashMap<UTxOIdentifier, UTXOValue>,
 
     /// Index of volatile UTXOs by created block
     volatile_created: VolatileIndex,
@@ -137,7 +100,7 @@ impl State {
     }
 
     /// Look up a UTXO
-    pub async fn lookup_utxo(&self, key: &UTXOKey) -> Result<Option<UTXOValue>> {
+    pub async fn lookup_utxo(&self, key: &UTxOIdentifier) -> Result<Option<UTXOValue>> {
         match self.volatile_utxos.get(key) {
             Some(key) => Ok(Some(key.clone())),
             None => Ok(self.immutable_utxos.lookup_utxo(key).await?),
@@ -213,10 +176,10 @@ impl State {
 
     /// Observe an input UTXO spend
     pub async fn observe_input(&mut self, input: &TxInput, block: &BlockInfo) -> Result<()> {
-        let key = UTXOKey::new(&input.tx_hash, input.index);
+        let key = input.utxo_identifier;
 
         if tracing::enabled!(tracing::Level::DEBUG) {
-            debug!("UTXO << {}:{}", encode(&key.hash), key.index);
+            debug!("UTXO << {}", key);
         }
 
         // UTXO exists?
@@ -248,10 +211,10 @@ impl State {
             }
             _ => {
                 error!(
-                    "UTXO {}:{} unknown in block {}",
-                    encode(&key.hash),
-                    key.index,
-                    block.number
+                    "UTXO output {} unknown in transaction {} of block {}",
+                    &key.output_index(),
+                    key.tx_index(),
+                    key.block_number()
                 );
             }
         }
@@ -262,7 +225,7 @@ impl State {
     /// Observe an output UXTO creation
     pub async fn observe_output(&mut self, output: &TxOutput, block: &BlockInfo) -> Result<()> {
         if tracing::enabled!(tracing::Level::DEBUG) {
-            debug!("UTXO >> {}:{}", encode(&output.tx_hash), output.index);
+            debug!("UTXO >> {}", output.utxo_identifier);
             debug!(
                 "        - adding {} to {:?}",
                 output.value.coin(),
@@ -271,11 +234,12 @@ impl State {
         }
 
         // Insert the UTXO, checking if it already existed
-        let key = UTXOKey::new(&output.tx_hash, output.index);
+        let key = output.utxo_identifier;
 
         let value = UTXOValue {
             address: output.address.clone(),
             value: output.value.clone(),
+            datum: output.datum.clone(),
         };
 
         // Add to volatile or immutable maps
@@ -285,10 +249,10 @@ impl State {
 
                 if self.volatile_utxos.insert(key.clone(), value).is_some() {
                     error!(
-                        "Saw UTXO {}:{} before, in block {}",
-                        encode(&output.tx_hash),
-                        output.index,
-                        block.number
+                        "Saw UTXO {}:{}:{} before",
+                        output.utxo_identifier.block_number(),
+                        output.utxo_identifier.tx_index(),
+                        output.utxo_identifier.output_index(),
                     );
                 }
             }
@@ -409,9 +373,7 @@ impl State {
 mod tests {
     use super::*;
     use crate::InMemoryImmutableUTXOStore;
-    use acropolis_common::{
-        AssetName, BlockHash, ByronAddress, Era, NativeAsset, TxIdentifier, Value,
-    };
+    use acropolis_common::{AssetName, BlockHash, ByronAddress, Era, NativeAsset, Value};
     use config::Config;
     use tokio::sync::Mutex;
 
@@ -454,10 +416,10 @@ mod tests {
     #[tokio::test]
     async fn observe_output_adds_to_immutable_utxos() {
         let mut state = new_state();
+        let datum_data = vec![1, 2, 3, 4, 5];
+
         let output = TxOutput {
-            tx_hash: TxHash::default(),
-            tx_identifier: TxIdentifier::default(),
-            index: 0,
+            utxo_identifier: UTxOIdentifier::new(0, 0, 0),
             address: create_address(99),
             value: Value::new(
                 42,
@@ -475,7 +437,7 @@ mod tests {
                     ],
                 )],
             ),
-            datum: None,
+            datum: Some(Datum::Inline(datum_data.clone())),
         };
 
         let block = create_block(BlockStatus::Immutable, 1, 1);
@@ -483,12 +445,12 @@ mod tests {
         assert_eq!(1, state.immutable_utxos.len().await.unwrap());
         assert_eq!(1, state.count_valid_utxos().await);
 
-        let key = UTXOKey::new(&output.tx_hash, output.index);
+        let key = output.utxo_identifier;
         match state.lookup_utxo(&key).await.unwrap() {
             Some(value) => {
                 assert!(
                     matches!(&value.address, Address::Byron(ByronAddress{ payload })
-                    if payload[0] == 99)
+                if payload[0] == 99)
                 );
                 assert_eq!(42, value.value.lovelace);
 
@@ -503,6 +465,11 @@ mod tests {
                 assert!(assets
                     .iter()
                     .any(|a| a.name == AssetName::new(b"FOO").unwrap() && a.amount == 200));
+
+                assert!(matches!(
+                    value.datum,
+                    Some(Datum::Inline(ref data)) if data == &datum_data
+                ));
             }
 
             _ => panic!("UTXO not found"),
@@ -513,9 +480,7 @@ mod tests {
     async fn observe_input_spends_utxo() {
         let mut state = new_state();
         let output = TxOutput {
-            tx_hash: TxHash::default(),
-            tx_identifier: TxIdentifier::default(),
-            index: 0,
+            utxo_identifier: UTxOIdentifier::new(0, 0, 0),
             address: create_address(99),
             value: Value::new(
                 42,
@@ -542,8 +507,11 @@ mod tests {
         assert_eq!(1, state.count_valid_utxos().await);
 
         let input = TxInput {
-            tx_hash: output.tx_hash,
-            index: output.index,
+            utxo_identifier: UTxOIdentifier::new(
+                output.utxo_identifier.block_number(),
+                output.utxo_identifier.tx_index(),
+                output.utxo_identifier.output_index(),
+            ),
         };
 
         let block2 = create_block(BlockStatus::Immutable, 2, 2);
@@ -556,9 +524,7 @@ mod tests {
     async fn rollback_removes_future_created_utxos() {
         let mut state = new_state();
         let output = TxOutput {
-            tx_hash: TxHash::default(),
-            tx_identifier: TxIdentifier::default(),
-            index: 0,
+            utxo_identifier: UTxOIdentifier::new(0, 0, 0),
             address: create_address(99),
             value: Value::new(
                 42,
@@ -598,9 +564,7 @@ mod tests {
 
         // Create the UTXO in block 10
         let output = TxOutput {
-            tx_hash: TxHash::default(),
-            tx_identifier: TxIdentifier::default(),
-            index: 0,
+            utxo_identifier: UTxOIdentifier::new(0, 0, 0),
             address: create_address(99),
             value: Value::new(
                 42,
@@ -629,8 +593,11 @@ mod tests {
 
         // Spend it in block 11
         let input = TxInput {
-            tx_hash: output.tx_hash,
-            index: output.index,
+            utxo_identifier: UTxOIdentifier::new(
+                output.utxo_identifier.block_number(),
+                output.utxo_identifier.tx_index(),
+                output.utxo_identifier.output_index(),
+            ),
         };
 
         let block11 = create_block(BlockStatus::Volatile, 11, 11);
@@ -652,9 +619,7 @@ mod tests {
     async fn prune_shifts_new_utxos_into_immutable() {
         let mut state = new_state();
         let output = TxOutput {
-            tx_hash: TxHash::default(),
-            tx_identifier: TxIdentifier::default(),
-            index: 0,
+            utxo_identifier: UTxOIdentifier::new(0, 0, 0),
             address: create_address(99),
             value: Value::new(
                 42,
@@ -701,9 +666,7 @@ mod tests {
     async fn prune_deletes_old_spent_utxos() {
         let mut state = new_state();
         let output = TxOutput {
-            tx_hash: TxHash::default(),
-            tx_identifier: TxIdentifier::default(),
-            index: 0,
+            utxo_identifier: UTxOIdentifier::new(0, 0, 0),
             address: create_address(99),
             value: Value::new(
                 42,
@@ -731,8 +694,11 @@ mod tests {
         assert_eq!(1, state.count_valid_utxos().await);
 
         let input = TxInput {
-            tx_hash: output.tx_hash,
-            index: output.index,
+            utxo_identifier: UTxOIdentifier::new(
+                output.utxo_identifier.block_number(),
+                output.utxo_identifier.tx_index(),
+                output.utxo_identifier.output_index(),
+            ),
         };
 
         let block2 = create_block(BlockStatus::Volatile, 2, 2);
@@ -808,9 +774,7 @@ mod tests {
         state.register_address_delta_observer(observer.clone());
 
         let output = TxOutput {
-            tx_hash: TxHash::default(),
-            tx_identifier: TxIdentifier::default(),
-            index: 0,
+            utxo_identifier: UTxOIdentifier::new(0, 0, 0),
             address: create_address(99),
             value: Value::new(
                 42,
@@ -838,8 +802,11 @@ mod tests {
         assert_eq!(42, *observer.balance.lock().await);
 
         let input = TxInput {
-            tx_hash: output.tx_hash,
-            index: output.index,
+            utxo_identifier: UTxOIdentifier::new(
+                output.utxo_identifier.block_number(),
+                output.utxo_identifier.tx_index(),
+                output.utxo_identifier.output_index(),
+            ),
         };
 
         let block2 = create_block(BlockStatus::Immutable, 2, 2);
@@ -865,9 +832,7 @@ mod tests {
         state.register_address_delta_observer(observer.clone());
 
         let output = TxOutput {
-            tx_hash: TxHash::default(),
-            tx_identifier: TxIdentifier::default(),
-            index: 0,
+            utxo_identifier: UTxOIdentifier::new(0, 0, 0),
             address: create_address(99),
             value: Value::new(
                 42,
@@ -921,9 +886,7 @@ mod tests {
 
         // Create the UTXO in block 10
         let output = TxOutput {
-            tx_hash: TxHash::default(),
-            tx_identifier: TxIdentifier::default(),
-            index: 0,
+            utxo_identifier: UTxOIdentifier::new(0, 0, 0),
             address: create_address(99),
             value: Value::new(
                 42,
@@ -953,8 +916,11 @@ mod tests {
 
         // Spend it in block 11
         let input = TxInput {
-            tx_hash: output.tx_hash,
-            index: output.index,
+            utxo_identifier: UTxOIdentifier::new(
+                output.utxo_identifier.block_number(),
+                output.utxo_identifier.tx_index(),
+                output.utxo_identifier.output_index(),
+            ),
         };
 
         let block11 = create_block(BlockStatus::Volatile, 11, 11);
