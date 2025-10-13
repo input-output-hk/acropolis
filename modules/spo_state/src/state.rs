@@ -1110,7 +1110,6 @@ mod tests {
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0], block.number);
 
-        let blocks = state.get_blocks_by_pool_and_epoch(&vec![1], 3).unwrap();
-        assert_eq!(blocks.len(), 0);
+        assert!(state.get_blocks_by_pool_and_epoch(&vec![1], 3).is_none());
     }
 }

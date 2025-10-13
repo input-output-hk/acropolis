@@ -48,7 +48,11 @@ impl StoreConfig {
     }
 
     pub fn store_historical_state(&self) -> bool {
-        self.store_registration || self.store_updates || self.store_delegators || self.store_votes
+        self.store_registration
+            || self.store_updates
+            || self.store_delegators
+            || self.store_votes
+            || self.store_blocks
     }
 }
 
