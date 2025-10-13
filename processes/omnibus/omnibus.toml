@@ -44,13 +44,14 @@ store-updates = false
 store-delegators = false
 # Enables /pools/{pool_id}/votes endpoint
 store-votes = false
-# Store block hashes, enables /pools/{pool_id}/blocks endpoints
-store-block-hashes = false
+# Store blocks, enables /pools/{pool_id}/blocks, /epochs/{number}/blocks/{pool_id}
+store-blocks = false
 # Store stake_addresses
 store-stake-addresses = false
 
 [module.spdd-state]
 # Enables active_stakes in /epochs/latest | {number} endpoints
+# Enables /epochs/{number}/{next | previous}
 store-spdd = false
 
 [module.drep-state]
