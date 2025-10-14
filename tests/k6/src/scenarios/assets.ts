@@ -1,6 +1,7 @@
-import { buildUrl, ENDPOINTS } from '../config/endpoints';
+import { ENDPOINTS } from '../config/endpoints';
 import { getRandomItem, TEST_DATA } from '../config/test-data';
 import { apiClient, MetricType } from '../utils/api-client';
+import { buildUrl } from '../utils/helpers';
 
 export function testAssetsList(): void {
   apiClient.get(ENDPOINTS.ASSETS, {

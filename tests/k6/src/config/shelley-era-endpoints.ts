@@ -1,4 +1,3 @@
-// For now, resort to testing only Shelley Era ledger state endpoints
 export const ENDPOINTS = {
   // Accounts
   ACCOUNT: '/accounts/{stake_address}',

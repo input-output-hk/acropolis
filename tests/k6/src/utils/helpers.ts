@@ -20,3 +20,12 @@ export function randomSleep(min: number = 1, max: number = 3): void {
 export function randomIntBetween(min: number = 1, max: number = 3) {
   return Math.floor(Math.random() * (max - min + 1) + min);
 }
+
+export function buildUrl(endpoint: string, params: Record<string, string>): string {
+  let url = endpoint;
+  for (const [key, value] of Object.entries(params)) {
+    url = url.replace(`{${key}}`, value);
+  }
+  return url;
+}
+

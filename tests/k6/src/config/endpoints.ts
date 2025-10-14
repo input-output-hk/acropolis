@@ -36,10 +36,3 @@ export const ENDPOINTS = {
 } as const;
 
 
-export function buildUrl(endpoint: string, params: Record<string, string>): string {
-  let url = endpoint;
-  for (const [key, value] of Object.entries(params)) {
-    url = url.replace(`{${key}}`, value);
-  }
-  return url;
-}

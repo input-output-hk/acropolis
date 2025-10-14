@@ -1,8 +1,5 @@
 export const THRESHOLDS = {
-  // HTTP request duration (95th and 99th percentiles)
   http_req_duration: ['p(95)<2000', 'p(99)<2200'],
-
-  // Error rate must be below 1%
   http_req_failed: ['rate<0.01'],
 
   // Endpoint-specific thresholds
@@ -12,7 +9,6 @@ export const THRESHOLDS = {
   governance_duration: ['p(95)<800'],
   pool_duration: ['p(95)<2000'],
 
-  // Success rate
   successful_requests: ['rate>0.99'],
 };
 

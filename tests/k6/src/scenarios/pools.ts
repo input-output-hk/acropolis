@@ -1,7 +1,8 @@
-import { buildUrl, ENDPOINTS } from '../config/endpoints';
+import { ENDPOINTS } from '../config/endpoints';
 import { getRandomItem } from '../config/test-data';
 import { apiClient, MetricType } from '../utils/api-client';
 import { TEST_DATA } from '../config/shelley-test-data';
+import { buildUrl } from '../utils/helpers';
 
 export function testPoolsList(): void {
   apiClient.get(ENDPOINTS.POOLS, {

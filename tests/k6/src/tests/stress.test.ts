@@ -27,7 +27,7 @@ export const options: Options = {
     ...THRESHOLDS,
     // Relax thresholds for stress test - we expect some degradation
     http_req_duration: ['p(95)<1500', 'p(99)<3000'],
-    http_req_failed: ['rate<0.05'], // Allow 5% error rate
+    http_req_failed: ['rate<0.05'],
   },
 };
 

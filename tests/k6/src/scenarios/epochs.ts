@@ -1,5 +1,6 @@
-import { buildUrl, ENDPOINTS } from '../config/endpoints';
+import { ENDPOINTS } from '../config/endpoints';
 import { apiClient, MetricType } from '../utils/api-client';
+import { buildUrl } from '../utils/helpers';
 
 export function testEpochLatest(): void {
   apiClient.get(ENDPOINTS.EPOCHS_LATEST, {
