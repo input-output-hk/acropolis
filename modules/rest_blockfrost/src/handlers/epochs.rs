@@ -256,6 +256,10 @@ pub async fn handle_epoch_params_blockfrost(
             "Protocol parameters not found for requested epoch",
         )),
         ParametersStateQueryResponse::Error(msg) => Ok(RESTResponse::with_text(400, &msg)),
+        _ => Ok(RESTResponse::with_text(
+            500,
+            "Unexpected message type while retrieving parameters",
+        )),
     }
 }
 
@@ -443,6 +447,36 @@ pub async fn handle_epoch_total_stakes_blockfrost(
         return Ok(RESTResponse::with_text(404, "Epoch not found"));
     }
 
+    // Query current network from parameters-state
+    let current_network_msg = Arc::new(Message::StateQuery(StateQuery::Parameters(
+        ParametersStateQuery::GetNetworkName,
+    )));
+    let current_network = query_state(
+        &context,
+        &handlers_config.parameters_query_topic,
+        current_network_msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Parameters(
+                ParametersStateQueryResponse::NetworkName(network),
+            )) => Ok(network),
+            _ => Err(anyhow::anyhow!(
+                "Unexpected message type while retrieving current network"
+            )),
+        },
+    )
+    .await?;
+
+    let network = match current_network.as_str() {
+        "mainnet" => AddressNetwork::Main,
+        "testnet" => AddressNetwork::Test,
+        unknown => {
+            return Ok(RESTResponse::with_text(
+                404,
+                format!("Unknown network: {unknown}").as_str(),
+            ))
+        }
+    };
+
     // Query SPDD by epoch from accounts-state
     let msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
         AccountsStateQuery::GetSPDDByEpoch {
@@ -472,7 +506,7 @@ pub async fn handle_epoch_total_stakes_blockfrost(
         .into_iter()
         .map(|(pool_id, stake_key_hash, amount)| {
             let stake_address = StakeAddress {
-                network: AddressNetwork::Main,
+                network: network.clone(),
                 payload: StakeAddressPayload::StakeKeyHash(stake_key_hash),
             }
             .to_string()
@@ -548,6 +582,36 @@ pub async fn handle_epoch_pool_stakes_blockfrost(
         return Ok(RESTResponse::with_text(404, "Epoch not found"));
     }
 
+    // Query current network from parameters-state
+    let current_network_msg = Arc::new(Message::StateQuery(StateQuery::Parameters(
+        ParametersStateQuery::GetNetworkName,
+    )));
+    let current_network = query_state(
+        &context,
+        &handlers_config.parameters_query_topic,
+        current_network_msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Parameters(
+                ParametersStateQueryResponse::NetworkName(network),
+            )) => Ok(network),
+            _ => Err(anyhow::anyhow!(
+                "Unexpected message type while retrieving current network"
+            )),
+        },
+    )
+    .await?;
+
+    let network = match current_network.as_str() {
+        "mainnet" => AddressNetwork::Main,
+        "testnet" => AddressNetwork::Test,
+        unknown => {
+            return Ok(RESTResponse::with_text(
+                404,
+                format!("Unknown network: {unknown}").as_str(),
+            ))
+        }
+    };
+
     // Query SPDD by epoch and pool from accounts-state
     let msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
         AccountsStateQuery::GetSPDDByEpochAndPool {
@@ -578,7 +642,7 @@ pub async fn handle_epoch_pool_stakes_blockfrost(
         .into_iter()
         .map(|(stake_key_hash, amount)| {
             let stake_address = StakeAddress {
-                network: AddressNetwork::Main,
+                network: network.clone(),
                 payload: StakeAddressPayload::StakeKeyHash(stake_key_hash),
             }
             .to_string()
