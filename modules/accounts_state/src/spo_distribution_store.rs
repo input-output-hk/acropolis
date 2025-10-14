@@ -2,11 +2,16 @@ use std::collections::HashMap;
 
 use acropolis_common::KeyHash;
 use fjall::{Config, Keyspace, PartitionCreateOptions};
+use tracing::info;
 
 const POOL_ID_LEN: usize = 28;
 const STAKE_KEY_LEN: usize = 28;
 const EPOCH_LEN: usize = 8;
 const TOTAL_KEY_LEN: usize = EPOCH_LEN + POOL_ID_LEN + STAKE_KEY_LEN; // 64 bytes
+
+// Batch size balances commit overhead vs memory usage
+// ~720KB per batch (72 bytes × 10,000)
+// ~130 commits for typical epoch (~1.3M delegations)
 const BATCH_SIZE: usize = 10_000;
 
 /// Encode: epoch + pool_id + stake_key
@@ -39,19 +44,28 @@ pub struct SPDDStore {
     /// Key format: epoch(8 bytes) + pool_id + stake_key
     /// Value: amount(8 bytes)
     spdd: fjall::PartitionHandle,
+    /// Maximum number of epochs to retain (None = unlimited)
+    retention_epochs: Option<u64>,
 }
 
 impl SPDDStore {
-    pub fn new(path: impl AsRef<std::path::Path>) -> fjall::Result<Self> {
+    pub fn new(
+        path: impl AsRef<std::path::Path>,
+        retention_epochs: Option<u64>,
+    ) -> fjall::Result<Self> {
         let path = path.as_ref();
 
         let keyspace = Config::new(path).open()?;
         let spdd = keyspace.open_partition("spdd", PartitionCreateOptions::default())?;
 
-        Ok(Self { keyspace, spdd })
+        Ok(Self {
+            keyspace,
+            spdd,
+            retention_epochs,
+        })
     }
 
-    /// Store SPDD state for an epoch
+    /// Store SPDD state for an epoch and prune old epochs if needed
     pub fn store_spdd(
         &self,
         epoch: u64,
@@ -77,6 +91,49 @@ impl SPDDStore {
 
         // Commit remaining entries
         if count > 0 {
+            batch.commit()?;
+        }
+
+        info!("Stored {} SPDD records for epoch {}", count, epoch);
+
+        // Prune old epochs if retention is configured
+        // Keep the last N epochs, delete everything older
+        if let Some(retention) = self.retention_epochs {
+            if epoch >= retention {
+                // Keep epochs [epoch - retention + 1, epoch]
+                // Delete everything before (epoch - retention + 1)
+                let keep_from_epoch = epoch - retention + 1;
+                self.prune_epochs_before(keep_from_epoch)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Prune all SPDD data for epochs before the specified epoch
+    pub fn prune_epochs_before(&self, before_epoch: u64) -> fjall::Result<()> {
+        let mut batch = self.keyspace.batch();
+        let mut deleted_count = 0;
+
+        // Iterate through all epochs less than before_epoch
+        for epoch in 0..before_epoch {
+            let prefix = epoch.to_be_bytes();
+
+            for item in self.spdd.prefix(prefix) {
+                let (key, _) = item?;
+                batch.remove(&self.spdd, key);
+
+                deleted_count += 1;
+                if deleted_count >= BATCH_SIZE {
+                    batch.commit()?;
+                    batch = self.keyspace.batch();
+                    deleted_count = 0;
+                }
+            }
+        }
+
+        // Commit remaining deletions
+        if deleted_count > 0 {
             batch.commit()?;
         }
 
@@ -128,8 +185,8 @@ mod tests {
 
     #[test]
     fn test_store_spdd_state() {
-        let spdd_store =
-            SPDDStore::new(std::path::Path::new(DB_PATH)).expect("Failed to create SPDD store");
+        let spdd_store = SPDDStore::new(std::path::Path::new(DB_PATH), None)
+            .expect("Failed to create SPDD store");
         let mut spdd_state: HashMap<KeyHash, Vec<(KeyHash, u64)>> = HashMap::new();
         spdd_state.insert(
             vec![0x01; 28],
@@ -151,5 +208,32 @@ mod tests {
             .query_by_epoch_and_pool(1, &vec![0x02; 28])
             .expect("Failed to query SPDD state");
         assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_prune_old_epochs() {
+        let spdd_store = SPDDStore::new(std::path::Path::new("spdd_prune_test_db"), Some(2))
+            .expect("Failed to create SPDD store");
+
+        // Store data for epochs 1, 2, 3
+        for epoch in 1..=3 {
+            let mut spdd_state: HashMap<KeyHash, Vec<(KeyHash, u64)>> = HashMap::new();
+            spdd_state.insert(
+                vec![epoch as u8; 28],
+                vec![(vec![0x10; 28], epoch * 100), (vec![0x11; 28], epoch * 150)],
+            );
+            spdd_store.store_spdd(epoch, spdd_state).expect("Failed to store SPDD state");
+        }
+
+        // After storing epoch 3 with retention=2, epoch 1 should be pruned
+        let result = spdd_store.query_by_epoch(1);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().len(), 0, "Epoch 1 should be pruned");
+
+        let result = spdd_store.query_by_epoch(2).expect("Failed to query epoch 2");
+        assert_eq!(result.len(), 2, "Epoch 2 should still exist");
+
+        let result = spdd_store.query_by_epoch(3).expect("Failed to query epoch 3");
+        assert_eq!(result.len(), 2, "Epoch 3 should still exist");
     }
 }

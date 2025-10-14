@@ -88,6 +88,9 @@ store-history = false
 store-spdd-history = false
 # SPDD database path (only used when store-spdd-history is enabled)
 spdd-db-path = "./spdd_db"
+# Number of epochs to retain in SPDD history
+# Example: 73
+# spdd-retention-epochs = none
 
 [module.assets-state]
 # Enables /assets endpoint

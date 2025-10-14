@@ -49,6 +49,7 @@ const DEFAULT_STAKE_REWARD_DELTAS_TOPIC: &str = "cardano.stake.reward.deltas";
 
 const DEFAULT_STORE_SPDD_HISTORY: (&str, bool) = ("store-spdd-history", false);
 const DEFAULT_SPDD_DB_PATH: (&str, &str) = ("spdd-db-path", "./spdd_db");
+const DEFAULT_SPDD_RETENTION_EPOCHS: &str = "spdd-retention-epochs";
 
 /// Accounts State module
 #[module(
@@ -440,8 +441,23 @@ impl AccountsState {
             current_dir.join(&spdd_db_path).to_string_lossy().to_string()
         };
 
+        // Get retention epochs configuration (None = unlimited)
+        let spdd_retention_epochs = config
+            .get_int(DEFAULT_SPDD_RETENTION_EPOCHS)
+            .ok()
+            .and_then(|v| if v > 0 { Some(v as u64) } else { None });
+        info!("SPDD retention epochs: {:?}", spdd_retention_epochs);
+
         if store_spdd_history {
             info!("SPDD database path: {}", spdd_db_path);
+            match spdd_retention_epochs {
+                Some(epochs) => info!(
+                    "SPDD retention: {} epochs (~{} GB max)",
+                    epochs,
+                    (epochs as f64 * 0.12).ceil()
+                ),
+                None => info!("SPDD retention: unlimited (no automatic pruning)"),
+            }
         }
 
         // Query topics
@@ -461,9 +477,10 @@ impl AccountsState {
         // Create spdd history
         // Return Err if failed to create SPDD store
         let spdd_store = if store_spdd_history {
-            Some(Arc::new(Mutex::new(SPDDStore::new(std::path::Path::new(
-                &spdd_db_path,
-            ))?)))
+            Some(Arc::new(Mutex::new(SPDDStore::new(
+                std::path::Path::new(&spdd_db_path),
+                spdd_retention_epochs,
+            )?)))
         } else {
             None
         };
