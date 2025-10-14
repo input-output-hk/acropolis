@@ -202,16 +202,6 @@ impl AccountsState {
                         );
                         async {
                             Self::check_sync(&current_block, &block_info);
-                            if let Some(ref block) = current_block {
-                                if block.number != block_info.number {
-                                    error!(
-                                        expected = block.number,
-                                        received = block_info.number,
-                                        "Certificate and parameters messages re-ordered!"
-                                    );
-                                }
-                            }
-
                             state
                                 .handle_parameters(params_msg)
                                 .inspect_err(|e| error!("Messaging handling error: {e}"))
