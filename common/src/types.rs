@@ -709,7 +709,6 @@ pub struct PoolRegistration {
     pub margin: Ratio,
 
     /// Reward account
-    // #[serde_as(as = "Hex")]
     #[n(5)]
     pub reward_account: StakeAddress,
 
@@ -1747,9 +1746,8 @@ pub struct AssetAddressEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use anyhow::Result;
     use crate::{AddressNetwork, StakeAddressPayload};
-
+    use anyhow::Result;
 
     #[test]
     fn era_order() -> Result<()> {
@@ -1832,7 +1830,7 @@ mod tests {
             deposit: 9876,
             reward_account: StakeAddress {
                 network: AddressNetwork::Main,
-                payload: StakeAddressPayload::StakeKeyHash(vec![1, 2, 3, 4])
+                payload: StakeAddressPayload::StakeKeyHash(vec![1, 2, 3, 4]),
             },
             gov_action_id,
             gov_action,
