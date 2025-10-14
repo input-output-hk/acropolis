@@ -428,9 +428,8 @@ impl AccountsState {
             config.get_bool(DEFAULT_STORE_SPDD_HISTORY.0).unwrap_or(DEFAULT_STORE_SPDD_HISTORY.1);
         info!("Store SPDD history: {}", store_spdd_history);
 
-        let spdd_db_path = config
-            .get_string(DEFAULT_SPDD_DB_PATH.0)
-            .unwrap_or(DEFAULT_SPDD_DB_PATH.1.to_string());
+        let spdd_db_path =
+            config.get_string(DEFAULT_SPDD_DB_PATH.0).unwrap_or(DEFAULT_SPDD_DB_PATH.1.to_string());
         if store_spdd_history {
             info!("SPDD database path: {}", spdd_db_path);
         }
@@ -452,9 +451,9 @@ impl AccountsState {
         // Create spdd history
         // Return Err if failed to create SPDD store
         let spdd_store = if store_spdd_history {
-            Some(Arc::new(Mutex::new(SPDDStore::new(
-                std::path::Path::new(&spdd_db_path),
-            )?)))
+            Some(Arc::new(Mutex::new(SPDDStore::new(std::path::Path::new(
+                &spdd_db_path,
+            ))?)))
         } else {
             None
         };
