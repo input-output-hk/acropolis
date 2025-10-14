@@ -430,6 +430,16 @@ impl AccountsState {
 
         let spdd_db_path =
             config.get_string(DEFAULT_SPDD_DB_PATH.0).unwrap_or(DEFAULT_SPDD_DB_PATH.1.to_string());
+
+        // Convert to absolute path if relative
+        let spdd_db_path = if std::path::Path::new(&spdd_db_path).is_absolute() {
+            spdd_db_path
+        } else {
+            let current_dir = std::env::current_dir()
+                .map_err(|e| anyhow::anyhow!("Failed to get current directory: {}", e))?;
+            current_dir.join(&spdd_db_path).to_string_lossy().to_string()
+        };
+
         if store_spdd_history {
             info!("SPDD database path: {}", spdd_db_path);
         }
