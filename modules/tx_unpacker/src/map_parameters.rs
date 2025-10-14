@@ -245,10 +245,7 @@ pub fn map_certificate(
                             numerator: margin.numerator,
                             denominator: margin.denominator,
                         },
-                        reward_account: StakeAddress {
-                            network: AddressNetwork::Main,
-                            payload: StakeAddressPayload::ScriptHash(reward_account.to_vec()),
-                        },
+                        reward_account: StakeAddress::from_binary(reward_account)?,
                         pool_owners: pool_owners.into_iter().map(|v| v.to_vec()).collect(),
                         relays: relays.into_iter().map(|relay| map_relay(relay)).collect(),
                         pool_metadata: match pool_metadata {
@@ -350,10 +347,7 @@ pub fn map_certificate(
                                 numerator: margin.numerator,
                                 denominator: margin.denominator,
                             },
-                            reward_account: StakeAddress {
-                                network: AddressNetwork::Main,
-                                payload: StakeAddressPayload::ScriptHash(reward_account.to_vec()),
-                            },
+                            reward_account: StakeAddress::from_binary(reward_account)?,
                             pool_owners: pool_owners.into_iter().map(|v| v.to_vec()).collect(),
                             relays: relays.into_iter().map(|relay| map_relay(relay)).collect(),
                             pool_metadata: match pool_metadata {

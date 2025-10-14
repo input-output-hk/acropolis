@@ -273,22 +273,12 @@ impl StakeAddress {
     }
 }
 
-impl Default for StakeAddress {
-    fn default() -> Self {
-        StakeAddress {
-            network: AddressNetwork::Main,
-            payload: StakeAddressPayload::StakeKeyHash(vec![0u8; 28]),
-        }
-    }
-}
-
 impl<C> minicbor::Encode<C> for StakeAddress {
     fn encode<W: minicbor::encode::Write>(
         &self,
         e: &mut minicbor::Encoder<W>,
         _ctx: &mut C,
     ) -> Result<(), minicbor::encode::Error<W::Error>> {
-        // Encode as bytes (same format as from_binary expects)
         let network_bits = match self.network {
             AddressNetwork::Main => 0b1u8,
             AddressNetwork::Test => 0b0u8,
@@ -315,6 +305,15 @@ impl<'b, C> minicbor::Decode<'b, C> for StakeAddress {
         let bytes = d.bytes()?;
         StakeAddress::from_binary(bytes)
             .map_err(|e| minicbor::decode::Error::message(e.to_string()))
+    }
+}
+
+impl Default for StakeAddress {
+    fn default() -> Self {
+        StakeAddress {
+            network: AddressNetwork::Main,
+            payload: StakeAddressPayload::StakeKeyHash(vec![0u8; 28]),
+        }
     }
 }
 
