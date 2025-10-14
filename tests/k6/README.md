@@ -66,7 +66,7 @@ performance-tests/
 │   ├── scenarios/    # Endpoint-specific test scenarios
 │   ├── config/       # Endpoints, test data, thresholds
 │   └── utils/        # Helpers, metrics, checks
-├── scripts/          # Run and report generation scripts
+├── scripts/          # Run scripts
 └── Makefile          # Convenient test commands
 ```
 
@@ -108,17 +108,8 @@ API_URL="http://127.0.0.1:4340" make test-load
 
 ## Results
 
-Test results are saved as JSON files in the `results/` directory with timestamps.
-
-### Generate HTML Reports
-
-```bash
-# Install reporter
-npm install -g k6-html-reporter
-
-# Generate reports
-./scripts/generate-report.sh
-```
+Test results are saved as JSON files in the `results/` directory with timestamps. These can
+be imported into Grafana for analysis.
 
 ## Customization
 

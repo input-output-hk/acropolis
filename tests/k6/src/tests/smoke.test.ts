@@ -1,6 +1,6 @@
 import { Options } from 'k6/options';
 import { SMOKE_THRESHOLDS } from '../config/thresholds';
-import { testAccountEndpoints } from '../scenarios/accounts';
+import { testGetAccount } from '../scenarios/accounts';
 import { testEpochLatest, testEpochParameters } from '../scenarios/epochs';
 import {
   testPoolDetails,
@@ -24,7 +24,7 @@ export const options: Options = {
 
 export default function () {
   // Accounts
-  testAccountEndpoints();
+  testGetAccount();
 
   // Epochs
   testEpochLatest();

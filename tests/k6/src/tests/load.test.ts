@@ -1,6 +1,6 @@
 import { Options } from 'k6/options';
 import { THRESHOLDS } from '../config/thresholds';
-import { testAccountEndpoints } from '../scenarios/accounts';
+import { testGetAccount } from '../scenarios/accounts';
 import { testEpochLatest, testEpochParameters, testEpochSpecific } from '../scenarios/epochs';
 import {
   testPoolDetails,
@@ -26,7 +26,7 @@ export const options: Options = {
 export default function () {
   const scenarios: EndpointWeight[] = [
     // Accounts
-    { name: 'accounts', weight: 40, fn: testAccountEndpoints },
+    { name: 'accounts', weight: 40, fn: testGetAccount },
 
     // Epochs
     { name: 'epoch_latest', weight: 20, fn: testEpochLatest },

@@ -3,7 +3,7 @@ import { getRandomItem } from '../config/test-data';
 import { TEST_DATA } from '../config/shelley-test-data';
 import { apiClient, MetricType } from '../utils/api-client';
 
-export function testAccountEndpoints(): void {
+export function testGetAccount(): void {
   const stakeAddress = getRandomItem(TEST_DATA.stakeAddresses);
   const url = buildUrl(ENDPOINTS.ACCOUNT, { stake_address: stakeAddress });
 
