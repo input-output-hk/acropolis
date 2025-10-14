@@ -44,11 +44,11 @@ paths:
                 items:
                   $ref: '#/components/schemas/dreps'
         '400':
-          $ref: '#/components/responses/bad_request'
+          $ref: '#/components/responses/400'
         '404':
-          $ref: '#/components/responses/not_found'
+          $ref: '#/components/responses/404'
         '500':
-          $ref: '#/components/responses/internal_error'
+          $ref: '#/components/responses/500'
 
   '/governance/dreps/{drep_id}':
     get:
@@ -72,11 +72,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/drep'
         '400':
-          $ref: '#/components/responses/bad_request'
+          $ref: '#/components/responses/400'
         '404':
-          $ref: '#/components/responses/not_found'
+          $ref: '#/components/responses/404'
         '500':
-          $ref: '#/components/responses/internal_error'
+          $ref: '#/components/responses/500'
 
   '/governance/dreps/{drep_id}/delegators':
     get:
@@ -100,11 +100,11 @@ paths:
                 items:
                   $ref: '#/components/schemas/drep_delegators'
         '400':
-          $ref: '#/components/responses/bad_request'
+          $ref: '#/components/responses/400'
         '404':
-          $ref: '#/components/responses/not_found'
+          $ref: '#/components/responses/404'
         '500':
-          $ref: '#/components/responses/internal_error'
+          $ref: '#/components/responses/500'
         '501':
           $ref: '#/components/responses/feature_disabled'
 
@@ -128,11 +128,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/drep_metadata'
         '400':
-          $ref: '#/components/responses/bad_request'
+          $ref: '#/components/responses/400'
         '404':
-          $ref: '#/components/responses/not_found'
+          $ref: '#/components/responses/404'
         '500':
-          $ref: '#/components/responses/internal_error'
+          $ref: '#/components/responses/500'
 
   '/governance/dreps/{drep_id}/updates':
     get:
@@ -156,11 +156,11 @@ paths:
                 items:
                   $ref: '#/components/schemas/drep_updates'
         '400':
-          $ref: '#/components/responses/bad_request'
+          $ref: '#/components/responses/400'
         '404':
-          $ref: '#/components/responses/not_found'
+          $ref: '#/components/responses/404'
         '500':
-          $ref: '#/components/responses/internal_error'
+          $ref: '#/components/responses/500'
         '501':
           $ref: '#/components/responses/feature_disabled'
 
@@ -186,11 +186,11 @@ paths:
                 items:
                   $ref: '#/components/schemas/drep_votes'
         '400':
-          $ref: '#/components/responses/bad_request'
+          $ref: '#/components/responses/400'
         '404':
-          $ref: '#/components/responses/not_found'
+          $ref: '#/components/responses/404'
         '500':
-          $ref: '#/components/responses/internal_error'
+          $ref: '#/components/responses/500'
         '503':
           $ref: '#/components/responses/feature_disabled'
 
@@ -211,11 +211,11 @@ paths:
                   type: string
                   description: Bech32-encoded governance action ID
         '400':
-          $ref: '#/components/responses/bad_request'
+          $ref: '#/components/responses/400'
         '404':
-          $ref: '#/components/responses/not_found'
+          $ref: '#/components/responses/404'
         '500':
-          $ref: '#/components/responses/internal_error'
+          $ref: '#/components/responses/500'
 
 
   # ============================================
@@ -235,11 +235,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/epoch_content'
         '400':
-          $ref: '#/components/responses/bad_request'
+          $ref: '#/components/responses/400'
         '404':
-          $ref: '#/components/responses/not_found'
+          $ref: '#/components/responses/404'
         '500':
-          $ref: '#/components/responses/internal_error'
+          $ref: '#/components/responses/500'
 
   /epochs/latest/parameters:
     get:
@@ -255,11 +255,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/epoch_param_content'
         '400':
-          $ref: '#/components/responses/bad_request'
+          $ref: '#/components/responses/400'
         '404':
-          $ref: '#/components/responses/not_found'
+          $ref: '#/components/responses/404'
         '500':
-          $ref: '#/components/responses/internal_error'
+          $ref: '#/components/responses/500'
 
   '/epochs/{number}':
     get:
@@ -282,11 +282,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/epoch_content'
         '400':
-          $ref: '#/components/responses/bad_request'
+          $ref: '#/components/responses/400'
         '404':
-          $ref: '#/components/responses/not_found'
+          $ref: '#/components/responses/404'
         '500':
-          $ref: '#/components/responses/internal_error'
+          $ref: '#/components/responses/500'
 
   '/epochs/{number}/next':
     get:
@@ -310,11 +310,11 @@ paths:
                 items:
                   $ref: '#/components/schemas/epoch_content_array'
         '400':
-          $ref: '#/components/responses/bad_request'
+          $ref: '#/components/responses/400'
         '404':
-          $ref: '#/components/responses/not_found'
+          $ref: '#/components/responses/404'
         '500':
-          $ref: '#/components/responses/internal_error'
+          $ref: '#/components/responses/500'
 
   '/epochs/{number}/previous':
     get:
@@ -338,11 +338,11 @@ paths:
                 items:
                   $ref: '#/components/schemas/epoch_content_array'
         '400':
-          $ref: '#/components/responses/bad_request'
+          $ref: '#/components/responses/400'
         '404':
-          $ref: '#/components/responses/not_found'
+          $ref: '#/components/responses/404'
         '500':
-          $ref: '#/components/responses/internal_error'
+          $ref: '#/components/responses/500'
 
   '/epochs/{number}/parameters':
     get:
@@ -364,11 +364,76 @@ paths:
               schema:
                 $ref: '#/components/schemas/epoch_param_content'
         '400':
-          $ref: '#/components/responses/bad_request'
+          $ref: '#/components/responses/400'
         '404':
-          $ref: '#/components/responses/not_found'
+          $ref: '#/components/responses/404'
         '500':
-          $ref: '#/components/responses/internal_error'
+          $ref: '#/components/responses/500'
+
+  '/epochs/{number}/blocks/{pool_id}':
+    get:
+      tags:
+        - Cardano » Epochs
+      summary: Block distribution by pool
+      description: Return the block minted for the epoch specified by stake pool.
+      parameters:
+        - in: path
+          name: number
+          required: true
+          schema:
+            type: integer
+          description: Number of the epoch
+          example: 225
+        - in: path
+          required: true
+          name: pool_id
+          schema:
+            type: string
+          description: Stake pool ID to filter
+          example: pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy
+        - in: query
+          name: count
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 100
+          description: The number of results displayed on one page.
+        - in: query
+          name: page
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 21474836
+            default: 1
+          description: The page number for listing the results.
+        - in: query
+          name: order
+          required: false
+          schema:
+            type: string
+            enum:
+              - asc
+              - desc
+            default: asc
+          description: >
+            The ordering of items from the point of view of the blockchain,
+            
+            not the page listing itself. By default, we return oldest first,
+            newest last.
+      responses:
+        '200':
+          description: Return the data about the epoch
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/epoch_block_content'
+        '400':
+          $ref: '#/components/responses/400'
+        '500':
+          $ref: '#/components/responses/500'
 
   # ============================================
   # ACCOUNTS ENDPOINTS
@@ -441,9 +506,9 @@ paths:
                   type: string
                   description: Bech32-encoded pool ID
         '400':
-          $ref: '#/components/responses/bad_request'
+          $ref: '#/components/responses/400'
         '500':
-          $ref: '#/components/responses/internal_error'
+          $ref: '#/components/responses/500'
 
   /pools/extended:
     get:
@@ -461,9 +526,9 @@ paths:
                 items:
                   $ref: '#/components/schemas/pool_list_extended'
         '400':
-          $ref: '#/components/responses/bad_request'
+          $ref: '#/components/responses/400'
         '500':
-          $ref: '#/components/responses/internal_error'
+          $ref: '#/components/responses/500'
 
   /pools/retired:
     get:
@@ -481,9 +546,9 @@ paths:
                 items:
                   $ref: '#/components/schemas/pool_list_retire'
         '400':
-          $ref: '#/components/responses/bad_request'
+          $ref: '#/components/responses/400'
         '500':
-          $ref: '#/components/responses/internal_error'
+          $ref: '#/components/responses/500'
 
   '/pools/{pool_id}':
     get:
@@ -506,11 +571,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/pool'
         '400':
-          $ref: '#/components/responses/bad_request'
+          $ref: '#/components/responses/400'
         '404':
-          $ref: '#/components/responses/not_found'
+          $ref: '#/components/responses/404'
         '500':
-          $ref: '#/components/responses/internal_error'
+          $ref: '#/components/responses/500'
 
   '/pools/{pool_id}/history':
     get:
@@ -534,11 +599,11 @@ paths:
                 items:
                   $ref: '#/components/schemas/pool_history'
         '400':
-          $ref: '#/components/responses/bad_request'
+          $ref: '#/components/responses/400'
         '404':
-          $ref: '#/components/responses/not_found'
+          $ref: '#/components/responses/404'
         '500':
-          $ref: '#/components/responses/internal_error'
+          $ref: '#/components/responses/500'
         '501':
           $ref: '#/components/responses/feature_disabled'
 
@@ -562,11 +627,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/pool_metadata'
         '400':
-          $ref: '#/components/responses/bad_request'
+          $ref: '#/components/responses/400'
         '404':
-          $ref: '#/components/responses/not_found'
+          $ref: '#/components/responses/404'
         '500':
-          $ref: '#/components/responses/internal_error'
+          $ref: '#/components/responses/500'
 
   '/pools/{pool_id}/relays':
     get:
@@ -590,11 +655,11 @@ paths:
                 items:
                   $ref: '#/components/schemas/pool_relays'
         '400':
-          $ref: '#/components/responses/bad_request'
+          $ref: '#/components/responses/400'
         '404':
-          $ref: '#/components/responses/not_found'
+          $ref: '#/components/responses/404'
         '500':
-          $ref: '#/components/responses/internal_error'
+          $ref: '#/components/responses/500'
 
   '/pools/{pool_id}/delegators':
     get:
@@ -618,11 +683,11 @@ paths:
                 items:
                   $ref: '#/components/schemas/pool_delegators'
         '400':
-          $ref: '#/components/responses/bad_request'
+          $ref: '#/components/responses/400'
         '404':
-          $ref: '#/components/responses/not_found'
+          $ref: '#/components/responses/404'
         '500':
-          $ref: '#/components/responses/internal_error'
+          $ref: '#/components/responses/500'
 
   '/pools/{pool_id}/blocks':
     get:
@@ -647,11 +712,11 @@ paths:
                   type: string
                   description: Hex-encoded block hash
         '400':
-          $ref: '#/components/responses/bad_request'
+          $ref: '#/components/responses/400'
         '404':
-          $ref: '#/components/responses/not_found'
+          $ref: '#/components/responses/404'
         '500':
-          $ref: '#/components/responses/internal_error'
+          $ref: '#/components/responses/500'
         '501':
           $ref: '#/components/responses/feature_disabled'
 
@@ -677,11 +742,11 @@ paths:
                 items:
                   $ref: '#/components/schemas/pool_updates'
         '400':
-          $ref: '#/components/responses/bad_request'
+          $ref: '#/components/responses/400'
         '404':
-          $ref: '#/components/responses/not_found'
+          $ref: '#/components/responses/404'
         '500':
-          $ref: '#/components/responses/internal_error'
+          $ref: '#/components/responses/500'
 
   '/pools/{pool_id}/votes':
     get:
@@ -705,11 +770,11 @@ paths:
                 items:
                   $ref: '#/components/schemas/pool_votes'
         '400':
-          $ref: '#/components/responses/bad_request'
+          $ref: '#/components/responses/400'
         '404':
-          $ref: '#/components/responses/not_found'
+          $ref: '#/components/responses/404'
         '500':
-          $ref: '#/components/responses/internal_error'
+          $ref: '#/components/responses/500'
 
   # ============================================
   # ASSETS ENDPOINTS
@@ -740,9 +805,9 @@ paths:
                 - asset: "b0d07d45fe9514f80213f4020e5a61241458be626841cde717cb38a76e75d"
                   quantity: "100000"
         '400':
-          $ref: '#/components/responses/bad_request'
+          $ref: '#/components/responses/400'
         '500':
-          $ref: '#/components/responses/internal_error'
+          $ref: '#/components/responses/500'
 
   '/assets/{asset}':
     get:
@@ -786,11 +851,11 @@ paths:
                   logo: "iVBORw0KGgoAAAANSUhEUgAAABkAAAALCAYAAACK9ybzAAAABGdBTUEAALGPC=="
                   decimals: 0
         '400':
-          $ref: '#/components/responses/bad_request'
+          $ref: '#/components/responses/400'
         '404':
-          $ref: '#/components/responses/not_found'
+          $ref: '#/components/responses/404'
         '500':
-          $ref: '#/components/responses/internal_error'
+          $ref: '#/components/responses/500'
         '501':
           $ref: '#/components/responses/feature_disabled'
 
@@ -823,11 +888,11 @@ paths:
                   amount: "-5000"
                   action: "burned"
         '400':
-          $ref: '#/components/responses/bad_request'
+          $ref: '#/components/responses/400'
         '404':
-          $ref: '#/components/responses/not_found'
+          $ref: '#/components/responses/404'
         '500':
-          $ref: '#/components/responses/internal_error'
+          $ref: '#/components/responses/500'
         '501':
           $ref: '#/components/responses/feature_disabled'
 
@@ -862,11 +927,11 @@ paths:
                   block_height: 4547
                   block_time: "transaction_state not yet implemented"
         '400':
-          $ref: '#/components/responses/bad_request'
+          $ref: '#/components/responses/400'
         '404':
-          $ref: '#/components/responses/not_found'
+          $ref: '#/components/responses/404'
         '500':
-          $ref: '#/components/responses/internal_error'
+          $ref: '#/components/responses/500'
         '501':
           $ref: '#/components/responses/feature_disabled'
 
@@ -897,11 +962,11 @@ paths:
                 - address: "addr1qx2kd28nq8ac5prwg32hhvudlwggpgfp8utlyqxu6wqgz62f79qsdmm5dsknt9ecr5w468r9ey0fxwkdrwh08ly3tu9sy0f4qd"
                   quantity: "100"
         '400':
-          $ref: '#/components/responses/bad_request'
+          $ref: '#/components/responses/400'
         '404':
-          $ref: '#/components/responses/not_found'
+          $ref: '#/components/responses/404'
         '500':
-          $ref: '#/components/responses/internal_error'
+          $ref: '#/components/responses/500'
         '501':
           $ref: '#/components/responses/feature_disabled'
 
@@ -934,17 +999,17 @@ paths:
                 - asset: "476039a0949cf0b22f6a800f56780184c44533887ca6e821007840c3504154415445"
                   quantity: "100000"
         '400':
-          $ref: '#/components/responses/bad_request'
+          $ref: '#/components/responses/400'
         '404':
-          $ref: '#/components/responses/not_found'
+          $ref: '#/components/responses/404'
         '500':
-          $ref: '#/components/responses/internal_error'
+          $ref: '#/components/responses/500'
         '501':
           $ref: '#/components/responses/feature_disabled'
 
 components:
   responses:
-    bad_request:
+    400:
       description: Bad Request - Invalid parameters or malformed request
       content:
         text/plain:
@@ -960,7 +1025,7 @@ components:
             invalidLength:
               value: "Invalid tx_hash length, must be 32 bytes"
 
-    not_found:
+    404:
       description: Resource Not Found
       content:
         text/plain:
@@ -982,7 +1047,7 @@ components:
             parametersNotFound:
               value: "Protocol parameters not found for requested epoch"
 
-    internal_error:
+    500:
       description: Internal Server Error
       content:
         text/plain:
