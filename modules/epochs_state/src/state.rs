@@ -29,9 +29,15 @@ pub struct State {
     // UNIX timestamp
     first_block_time: u64,
 
+    // first block height
+    first_block_height: u64,
+
     // last block time
     // UNIX timestamp
     last_block_time: u64,
+
+    // last block height
+    last_block_height: u64,
 
     // Map of counts by VRF key hashes
     blocks_minted: HashMap<KeyHash, usize>,
@@ -63,7 +69,9 @@ impl State {
             epoch: 0,
             epoch_start_time: genesis.byron_timestamp,
             first_block_time: genesis.byron_timestamp,
+            first_block_height: 0,
             last_block_time: 0,
+            last_block_height: 0,
             blocks_minted: HashMap::new(),
             epoch_blocks: 0,
             epoch_txs: 0,
@@ -175,8 +183,10 @@ impl State {
     }
 
     // Handle mint
-    pub fn handle_mint(&mut self, block: &BlockInfo, issuer_vkey: &[u8]) {
-        self.last_block_time = block.timestamp;
+    // This will update last block time
+    pub fn handle_mint(&mut self, block_info: &BlockInfo, issuer_vkey: &[u8]) {
+        self.last_block_time = block_info.timestamp;
+        self.last_block_height = block_info.number;
         self.epoch_blocks += 1;
         let spo_id = keyhash_224(issuer_vkey);
 
@@ -212,7 +222,9 @@ impl State {
         self.epoch = block_info.epoch;
         self.epoch_start_time = block_info.timestamp;
         self.first_block_time = block_info.timestamp;
+        self.first_block_height = block_info.number;
         self.last_block_time = block_info.timestamp;
+        self.last_block_height = block_info.number;
         self.blocks_minted.clear();
         self.epoch_blocks = 0;
         self.epoch_txs = 0;
@@ -228,7 +240,9 @@ impl State {
             epoch_start_time: self.epoch_start_time,
             epoch_end_time: self.epoch_start_time + EPOCH_LENGTH,
             first_block_time: self.first_block_time,
+            first_block_height: self.first_block_height,
             last_block_time: self.last_block_time,
+            last_block_height: self.last_block_height,
             // NOTE:
             // total_blocks will be missing one
             // This is only because we now ignore EBBs
@@ -427,7 +441,9 @@ mod tests {
         assert!(state.blocks_minted.is_empty());
         assert_eq!(state.epoch_start_time, block.timestamp);
         assert_eq!(state.first_block_time, block.timestamp);
+        assert_eq!(state.first_block_height, block.number);
         assert_eq!(state.last_block_time, block.timestamp);
+        assert_eq!(state.last_block_height, block.number);
 
         let blocks_minted = state.get_latest_epoch_blocks_minted_by_pool(&keyhash_224(b"vrf_1"));
         assert_eq!(blocks_minted, 0);

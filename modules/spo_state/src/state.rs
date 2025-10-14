@@ -10,12 +10,12 @@ use acropolis_common::{
     params::TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH,
     queries::governance::VoteRecord,
     stake_addresses::StakeAddressMap,
-    BlockHash, BlockInfo, KeyHash, PoolMetadata, PoolRegistration, PoolRegistrationWithPos,
-    PoolRetirement, PoolRetirementWithPos, PoolUpdateEvent, Relay, StakeCredential, TxCertificate,
-    TxHash, Voter, VotingProcedures,
+    BlockInfo, KeyHash, PoolMetadata, PoolRegistration, PoolRegistrationWithPos, PoolRetirement,
+    PoolRetirementWithPos, PoolUpdateEvent, Relay, StakeCredential, TxCertificate, TxHash, Voter,
+    VotingProcedures,
 };
 use anyhow::Result;
-use imbl::{HashMap, Vector};
+use imbl::HashMap;
 use std::sync::{Arc, Mutex};
 use tracing::{debug, error, info};
 
@@ -40,9 +40,6 @@ pub struct State {
     // Keyed by pool_id
     total_blocks_minted: HashMap<KeyHash, u64>,
 
-    /// block hashes keyed pool id
-    block_hashes: Option<HashMap<KeyHash, Vector<BlockHash>>>,
-
     /// historical spo state
     /// keyed by pool operator id
     historical_spos: Option<HashMap<KeyHash, HistoricalSPOState>>,
@@ -62,11 +59,6 @@ impl State {
             pending_deregistrations: HashMap::new(),
             total_blocks_minted: HashMap::new(),
             historical_spos: if config.store_historical_state() {
-                Some(HashMap::new())
-            } else {
-                None
-            },
-            block_hashes: if config.store_block_hashes {
                 Some(HashMap::new())
             } else {
                 None
@@ -95,8 +87,8 @@ impl State {
         self.store_config.store_votes
     }
 
-    pub fn is_block_hashes_enabled(&self) -> bool {
-        self.store_config.store_block_hashes
+    pub fn is_historical_blocks_enabled(&self) -> bool {
+        self.store_config.store_blocks
     }
 
     pub fn is_stake_address_enabled(&self) -> bool {
@@ -121,7 +113,6 @@ impl From<SPOState> for State {
             pending_deregistrations,
             total_blocks_minted: HashMap::new(),
             historical_spos: None,
-            block_hashes: None,
             stake_addresses: None,
         }
     }
@@ -208,9 +199,23 @@ impl State {
         delegators_map.map(|map| map.into_iter().collect())
     }
 
-    /// Get Pool Blocks
-    pub fn get_pool_block_hashes(&self, pool_id: &KeyHash) -> Option<Vec<BlockHash>> {
-        self.block_hashes.as_ref()?.get(pool_id).map(|blocks| blocks.clone().into_iter().collect())
+    /// Get Blocks by Pool
+    /// Return Vector of block heights
+    /// Return None when store_blocks not enabled
+    pub fn get_blocks_by_pool(&self, pool_id: &KeyHash) -> Option<Vec<u64>> {
+        let Some(historical_spos) = self.historical_spos.as_ref() else {
+            return None;
+        };
+        historical_spos.get(pool_id).and_then(|s| s.get_all_blocks())
+    }
+
+    /// Get Blocks by Pool and Epoch
+    /// Return None when store_blocks not enabled
+    pub fn get_blocks_by_pool_and_epoch(&self, pool_id: &KeyHash, epoch: u64) -> Option<Vec<u64>> {
+        let Some(historical_spos) = self.historical_spos.as_ref() else {
+            return None;
+        };
+        historical_spos.get(pool_id).and_then(|s| s.get_blocks_by_epoch(epoch))
     }
 
     /// Get Pool Updates
@@ -257,13 +262,22 @@ impl State {
     }
 
     // Handle block's minting.
-    pub fn handle_mint(&mut self, block_info: &BlockInfo, issuer_vkey: &[u8]) {
+    pub fn handle_mint(&mut self, block_info: &BlockInfo, issuer_vkey: &[u8]) -> bool {
         let pool_id = keyhash_224(issuer_vkey);
+        if self.spos.get(&pool_id).is_none() {
+            return false;
+        }
+
         *(self.total_blocks_minted.entry(pool_id.clone()).or_insert(0)) += 1;
-        // if block_hashes are enabled
-        if let Some(block_hashes) = self.block_hashes.as_mut() {
-            block_hashes.entry(pool_id).or_insert_with(Vector::new).push_back(block_info.hash);
-        };
+        // if store_blocks is enabled
+        if self.is_historical_blocks_enabled() {
+            if let Some(historical_spos) = self.historical_spos.as_mut() {
+                if let Some(historical_spo) = historical_spos.get_mut(&pool_id) {
+                    historical_spo.add_block(block_info.epoch, block_info.number);
+                }
+            }
+        }
+        true
     }
 
     fn handle_new_epoch(&mut self, block: &BlockInfo) -> Arc<Message> {
@@ -1015,7 +1029,7 @@ mod tests {
 
     #[test]
     fn get_total_blocks_minted_returns_after_handle_mint() {
-        let mut state = State::new(&save_block_hashes_store_config());
+        let mut state = State::new(&save_blocks_store_config());
         let mut block = new_block(0);
         let mut msg = new_certs_msg();
         let spo_id = keyhash_224(&vec![1 as u8]);
@@ -1042,26 +1056,30 @@ mod tests {
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
 
         block = new_block(2);
-        state.handle_mint(&block, &vec![1]);
+        assert_eq!(true, state.handle_mint(&block, &vec![1]));
         assert_eq!(1, state.get_total_blocks_minted_by_pool(&spo_id));
 
         block = new_block(3);
-        state.handle_mint(&block, &vec![1]);
-        assert_eq!(
-            2,
-            state.get_total_blocks_minted_by_pools(&vec![spo_id.clone()])[0]
-        );
+        assert_eq!(true, state.handle_mint(&block, &vec![1]));
+        assert_eq!(2, state.get_total_blocks_minted_by_pools(&vec![spo_id])[0]);
     }
 
     #[test]
-    fn get_block_hashes_returns_none_when_state_is_new() {
+    fn get_blocks_returns_none_when_blocks_not_enabled() {
         let state = State::default();
-        assert!(state.get_pool_block_hashes(&vec![0]).is_none());
+        assert!(state.get_blocks_by_pool(&vec![0]).is_none());
     }
 
     #[test]
-    fn get_block_hashes_return_data_after_handle_mint() {
-        let mut state = State::new(&save_block_hashes_store_config());
+    fn handle_mint_returns_false_if_pool_not_found() {
+        let mut state = State::new(&save_blocks_store_config());
+        let block = new_block(0);
+        assert_eq!(false, state.handle_mint(&block, &vec![0]));
+    }
+
+    #[test]
+    fn get_blocks_return_data_after_handle_mint() {
+        let mut state = State::new(&save_blocks_store_config());
         let mut block = new_block(0);
         let mut msg = new_certs_msg();
         let spo_id = keyhash_224(&vec![1 as u8]);
@@ -1087,9 +1105,15 @@ mod tests {
         ));
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
         block = new_block(2);
-        state.handle_mint(&block, &vec![1]); // Note raw issuer_vkey
-        let block_hashes = state.get_pool_block_hashes(&spo_id).unwrap();
-        assert_eq!(block_hashes.len(), 1);
-        assert_eq!(block_hashes[0], block.hash);
+        assert_eq!(true, state.handle_mint(&block, &vec![1])); // Note raw issuer_vkey
+        let blocks = state.get_blocks_by_pool(&spo_id).unwrap();
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0], block.number);
+
+        let blocks = state.get_blocks_by_pool_and_epoch(&spo_id, 2).unwrap();
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0], block.number);
+
+        assert!(state.get_blocks_by_pool_and_epoch(&spo_id, 3).is_none());
     }
 }
