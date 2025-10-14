@@ -2,7 +2,6 @@ use std::collections::HashMap;
 
 use acropolis_common::KeyHash;
 use fjall::{Config, Keyspace, PartitionCreateOptions};
-use tracing::info;
 
 const POOL_ID_LEN: usize = 28;
 const STAKE_KEY_LEN: usize = 28;
@@ -46,6 +45,8 @@ pub struct SPDDStore {
     spdd: fjall::PartitionHandle,
     /// Maximum number of epochs to retain (None = unlimited)
     retention_epochs: Option<u64>,
+    /// Latest epoch stored
+    latest_epoch: Option<u64>,
 }
 
 impl SPDDStore {
@@ -62,12 +63,13 @@ impl SPDDStore {
             keyspace,
             spdd,
             retention_epochs,
+            latest_epoch: None,
         })
     }
 
     /// Store SPDD state for an epoch and prune old epochs if needed
     pub fn store_spdd(
-        &self,
+        &mut self,
         epoch: u64,
         spdd_state: HashMap<KeyHash, Vec<(KeyHash, u64)>>,
     ) -> fjall::Result<()> {
@@ -94,7 +96,7 @@ impl SPDDStore {
             batch.commit()?;
         }
 
-        info!("Stored {} SPDD records for epoch {}", count, epoch);
+        self.latest_epoch = Some(epoch);
 
         // Prune old epochs if retention is configured
         // Keep the last N epochs, delete everything older
@@ -138,6 +140,24 @@ impl SPDDStore {
         }
 
         Ok(())
+    }
+
+    pub fn is_epoch_stored(&self, epoch: u64) -> Option<bool> {
+        let Some(latest_epoch) = self.latest_epoch else {
+            return None;
+        };
+        let min_epoch = match self.retention_epochs {
+            Some(retention) => {
+                if latest_epoch > retention {
+                    latest_epoch - retention + 1
+                } else {
+                    0
+                }
+            }
+            None => 0,
+        };
+
+        Some(epoch >= min_epoch && epoch <= latest_epoch)
     }
 
     /// Query all data for an epoch
@@ -185,7 +205,7 @@ mod tests {
 
     #[test]
     fn test_store_spdd_state() {
-        let spdd_store = SPDDStore::new(std::path::Path::new(DB_PATH), None)
+        let mut spdd_store = SPDDStore::new(std::path::Path::new(DB_PATH), None)
             .expect("Failed to create SPDD store");
         let mut spdd_state: HashMap<KeyHash, Vec<(KeyHash, u64)>> = HashMap::new();
         spdd_state.insert(
@@ -212,7 +232,7 @@ mod tests {
 
     #[test]
     fn test_prune_old_epochs() {
-        let spdd_store = SPDDStore::new(std::path::Path::new("spdd_prune_test_db"), Some(2))
+        let mut spdd_store = SPDDStore::new(std::path::Path::new("spdd_prune_test_db"), Some(2))
             .expect("Failed to create SPDD store");
 
         // Store data for epochs 1, 2, 3
@@ -226,6 +246,10 @@ mod tests {
         }
 
         // After storing epoch 3 with retention=2, epoch 1 should be pruned
+        assert!(!spdd_store.is_epoch_stored(1).unwrap());
+        assert!(spdd_store.is_epoch_stored(2).unwrap());
+        assert!(spdd_store.is_epoch_stored(3).unwrap());
+
         let result = spdd_store.query_by_epoch(1);
         assert!(result.is_ok());
         assert_eq!(result.unwrap().len(), 0, "Epoch 1 should be pruned");

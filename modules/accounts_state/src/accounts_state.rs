@@ -193,7 +193,7 @@ impl AccountsState {
 
                             // if we store spdd history
                             let spdd_state = state.dump_spdd_state();
-                            if let Some(spdd_store) = spdd_store_guard {
+                            if let Some(mut spdd_store) = spdd_store_guard {
                                 // active stakes taken at beginning of epoch i is for epoch + 1
                                 if let Err(e) =
                                     spdd_store.store_spdd(block_info.epoch + 1, spdd_state)
@@ -608,13 +608,21 @@ impl AccountsState {
                     }
 
                     AccountsStateQuery::GetSPDDByEpoch { epoch } => match spdd_store_guard {
-                        Some(spdd_store) => {
-                            let result = spdd_store.query_by_epoch(*epoch);
-                            match result {
-                                Ok(result) => AccountsStateQueryResponse::SPDDByEpoch(result),
-                                Err(e) => AccountsStateQueryResponse::Error(e.to_string()),
+                        Some(spdd_store) => match spdd_store.is_epoch_stored(*epoch) {
+                            Some(true) => {
+                                let result = spdd_store.query_by_epoch(*epoch);
+                                match result {
+                                    Ok(result) => AccountsStateQueryResponse::SPDDByEpoch(result),
+                                    Err(e) => AccountsStateQueryResponse::Error(e.to_string()),
+                                }
                             }
-                        }
+                            Some(false) => {
+                                AccountsStateQueryResponse::Error("Epoch is too old".to_string())
+                            }
+                            None => AccountsStateQueryResponse::Error(
+                                "SPDD store is not started".to_string(),
+                            ),
+                        },
                         None => AccountsStateQueryResponse::Error(
                             "SPDD store is not enabled".to_string(),
                         ),
@@ -622,15 +630,24 @@ impl AccountsState {
 
                     AccountsStateQuery::GetSPDDByEpochAndPool { epoch, pool_id } => {
                         match spdd_store_guard {
-                            Some(spdd_store) => {
-                                let result = spdd_store.query_by_epoch_and_pool(*epoch, pool_id);
-                                match result {
-                                    Ok(result) => {
-                                        AccountsStateQueryResponse::SPDDByEpochAndPool(result)
+                            Some(spdd_store) => match spdd_store.is_epoch_stored(*epoch) {
+                                Some(true) => {
+                                    let result =
+                                        spdd_store.query_by_epoch_and_pool(*epoch, pool_id);
+                                    match result {
+                                        Ok(result) => {
+                                            AccountsStateQueryResponse::SPDDByEpochAndPool(result)
+                                        }
+                                        Err(e) => AccountsStateQueryResponse::Error(e.to_string()),
                                     }
-                                    Err(e) => AccountsStateQueryResponse::Error(e.to_string()),
                                 }
-                            }
+                                Some(false) => AccountsStateQueryResponse::Error(
+                                    "Epoch is too old".to_string(),
+                                ),
+                                None => AccountsStateQueryResponse::Error(
+                                    "SPDD store is not started".to_string(),
+                                ),
+                            },
                             None => AccountsStateQueryResponse::Error(
                                 "SPDD store is not enabled".to_string(),
                             ),
