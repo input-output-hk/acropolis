@@ -117,12 +117,14 @@ impl SPDDStore {
         let mut batch = self.keyspace.batch();
         let mut deleted_count = 0;
 
-        // Iterate through all epochs less than before_epoch
-        for epoch in 0..before_epoch {
+        // Iterate reverse through all epochs less than before_epoch
+        for epoch in (0..before_epoch).rev() {
             let prefix = epoch.to_be_bytes();
+            let mut has_data = false;
 
             for item in self.spdd.prefix(prefix) {
                 let (key, _) = item?;
+                has_data = true;
                 batch.remove(&self.spdd, key);
 
                 deleted_count += 1;
@@ -131,6 +133,10 @@ impl SPDDStore {
                     batch = self.keyspace.batch();
                     deleted_count = 0;
                 }
+            }
+
+            if !has_data {
+                break;
             }
         }
 
