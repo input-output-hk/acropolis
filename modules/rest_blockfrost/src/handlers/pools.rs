@@ -623,7 +623,7 @@ async fn handle_pools_spo_blockfrost(
     // Query blocks_minted from epochs_state
     let epoch_blocks_minted_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
         EpochsStateQuery::GetLatestEpochBlocksMintedByPool {
-            vrf_key_hash: pool_info.vrf_key_hash.clone(),
+            spo_id: pool_info.operator.clone(),
         },
     )));
     let epoch_blocks_minted_f = query_state(

@@ -99,7 +99,7 @@ pub fn new_epoch_activity_message(epoch: u64) -> EpochActivityMessage {
         total_txs: 0,
         total_outputs: 0,
         total_fees: 0,
-        vrf_vkey_hashes: Vec::new(),
+        spo_blocks: Vec::new(),
         nonce: None,
     }
 }

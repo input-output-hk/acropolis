@@ -1,7 +1,7 @@
 //! Acropolis epoch activity counter: state storage
 
 use acropolis_common::{
-    crypto::keyhash,
+    crypto::keyhash_224,
     genesis_values::GenesisValues,
     messages::{BlockTxsMessage, EpochActivityMessage, ProtocolParamsMessage},
     params::EPOCH_LENGTH,
@@ -184,16 +184,14 @@ impl State {
 
     // Handle mint
     // This will update last block time
-    pub fn handle_mint(&mut self, block_info: &BlockInfo, vrf_vkey: Option<&[u8]>) {
+    pub fn handle_mint(&mut self, block_info: &BlockInfo, issuer_vkey: &[u8]) {
         self.last_block_time = block_info.timestamp;
         self.last_block_height = block_info.number;
         self.epoch_blocks += 1;
+        let spo_id = keyhash_224(issuer_vkey);
 
-        if let Some(vrf_vkey) = vrf_vkey {
-            let vrf_key_hash = keyhash(vrf_vkey);
-            // Count one on this hash
-            *(self.blocks_minted.entry(vrf_key_hash.clone()).or_insert(0)) += 1;
-        }
+        // Count one on this hash
+        *(self.blocks_minted.entry(spo_id.clone()).or_insert(0)) += 1;
     }
 
     // Handle Block Txs
@@ -209,7 +207,7 @@ impl State {
         info!(
             epoch = block_info.epoch - 1,
             blocks = self.epoch_blocks,
-            unique_vrf_keys = self.blocks_minted.len(),
+            unique_spo_ids = self.blocks_minted.len(),
             fees = self.epoch_fees,
             outputs = self.epoch_outputs,
             txs = self.epoch_txs,
@@ -252,13 +250,13 @@ impl State {
             total_txs: self.epoch_txs,
             total_outputs: self.epoch_outputs,
             total_fees: self.epoch_fees,
-            vrf_vkey_hashes: self.blocks_minted.iter().map(|(k, v)| (k.clone(), *v)).collect(),
+            spo_blocks: self.blocks_minted.iter().map(|(k, v)| (k.clone(), *v)).collect(),
             nonce: self.nonces.as_ref().map(|n| n.active.hash.clone()).flatten(),
         }
     }
 
-    pub fn get_latest_epoch_blocks_minted_by_pool(&self, vrf_key_hash: &KeyHash) -> u64 {
-        self.blocks_minted.get(vrf_key_hash).map(|v| *v as u64).unwrap_or(0)
+    pub fn get_latest_epoch_blocks_minted_by_pool(&self, spo_id: &KeyHash) -> u64 {
+        self.blocks_minted.get(spo_id).map(|v| *v as u64).unwrap_or(0)
     }
 }
 
@@ -268,7 +266,7 @@ mod tests {
 
     use super::*;
     use acropolis_common::{
-        crypto::keyhash,
+        crypto::keyhash_224,
         protocol_params::{Nonce, NonceHash},
         state_history::{StateHistory, StateHistoryStore},
         BlockHash, BlockInfo, BlockStatus, Era,
@@ -328,41 +326,49 @@ mod tests {
     }
 
     #[test]
-    fn handle_mint_single_vrf_records_counts() {
+    fn handle_mint_single_issuer_records_counts() {
         let mut state = State::new(&GenesisValues::mainnet());
-        let vrf = b"vrf_key";
+        let issuer = b"issuer_key";
         let mut block = make_block(100);
-        state.handle_mint(&block, Some(vrf));
+        state.handle_mint(&block, issuer);
         block.number += 1;
-        state.handle_mint(&block, Some(vrf));
+        state.handle_mint(&block, issuer);
 
         assert_eq!(state.epoch_blocks, 2);
         assert_eq!(state.blocks_minted.len(), 1);
-        assert_eq!(state.blocks_minted.get(&keyhash(vrf)), Some(&2));
+        assert_eq!(state.blocks_minted.get(&keyhash_224(issuer)), Some(&2));
     }
 
     #[test]
-    fn handle_mint_multiple_vrf_records_counts() {
+    fn handle_mint_multiple_issuer_records_counts() {
         let mut state = State::new(&GenesisValues::mainnet());
         let mut block = make_block(100);
-        state.handle_mint(&block, Some(b"vrf_1"));
+        state.handle_mint(&block, b"issuer_1");
         block.number += 1;
-        state.handle_mint(&block, Some(b"vrf_2"));
+        state.handle_mint(&block, b"issuer_2");
         block.number += 1;
-        state.handle_mint(&block, Some(b"vrf_2"));
+        state.handle_mint(&block, b"issuer_2");
 
         assert_eq!(state.epoch_blocks, 3);
         assert_eq!(state.blocks_minted.len(), 2);
         assert_eq!(
-            state.blocks_minted.iter().find(|(k, _)| *k == &keyhash(b"vrf_1")).map(|(_, v)| *v),
+            state
+                .blocks_minted
+                .iter()
+                .find(|(k, _)| *k == &keyhash_224(b"issuer_1"))
+                .map(|(_, v)| *v),
             Some(1)
         );
         assert_eq!(
-            state.blocks_minted.iter().find(|(k, _)| *k == &keyhash(b"vrf_2")).map(|(_, v)| *v),
+            state
+                .blocks_minted
+                .iter()
+                .find(|(k, _)| *k == &keyhash_224(b"issuer_2"))
+                .map(|(_, v)| *v),
             Some(2)
         );
 
-        let blocks_minted = state.get_latest_epoch_blocks_minted_by_pool(&keyhash(b"vrf_2"));
+        let blocks_minted = state.get_latest_epoch_blocks_minted_by_pool(&keyhash_224(b"issuer_2"));
         assert_eq!(blocks_minted, 2);
     }
 
@@ -399,7 +405,7 @@ mod tests {
         let genesis = GenesisValues::mainnet();
         let mut state = State::new(&genesis);
         let block = make_block(1);
-        state.handle_mint(&block, Some(b"vrf_1"));
+        state.handle_mint(&block, b"issuer_1");
         state.handle_block_txs(
             &block,
             &BlockTxsMessage {
@@ -416,9 +422,9 @@ mod tests {
         assert_eq!(ea.total_txs, 1);
         assert_eq!(ea.total_outputs, 123);
         assert_eq!(ea.total_fees, 123);
-        assert_eq!(ea.vrf_vkey_hashes.len(), 1);
+        assert_eq!(ea.spo_blocks.len(), 1);
         assert_eq!(
-            ea.vrf_vkey_hashes.iter().find(|(k, _)| k == &keyhash(b"vrf_1")).map(|(_, v)| *v),
+            ea.spo_blocks.iter().find(|(k, _)| k == &keyhash_224(b"issuer_1")).map(|(_, v)| *v),
             Some(1)
         );
         assert_eq!(ea.epoch_start_time, genesis.byron_timestamp);
@@ -439,7 +445,7 @@ mod tests {
         assert_eq!(state.last_block_time, block.timestamp);
         assert_eq!(state.last_block_height, block.number);
 
-        let blocks_minted = state.get_latest_epoch_blocks_minted_by_pool(&keyhash(b"vrf_1"));
+        let blocks_minted = state.get_latest_epoch_blocks_minted_by_pool(&keyhash_224(b"vrf_1"));
         assert_eq!(blocks_minted, 0);
     }
 
@@ -451,7 +457,7 @@ mod tests {
         )));
         let mut state = history.lock().await.get_current_state();
         let mut block = make_block(1);
-        state.handle_mint(&block, Some(b"vrf_1"));
+        state.handle_mint(&block, b"issuer_1");
         state.handle_block_txs(
             &block,
             &BlockTxsMessage {
@@ -464,7 +470,7 @@ mod tests {
 
         let mut state = history.lock().await.get_current_state();
         block.number += 1;
-        state.handle_mint(&block, Some(b"vrf_1"));
+        state.handle_mint(&block, b"issuer_1");
         state.handle_block_txs(
             &block,
             &BlockTxsMessage {
@@ -474,14 +480,14 @@ mod tests {
             },
         );
         assert_eq!(
-            state.get_latest_epoch_blocks_minted_by_pool(&keyhash(b"vrf_1")),
+            state.get_latest_epoch_blocks_minted_by_pool(&keyhash_224(b"issuer_1")),
             2
         );
         history.lock().await.commit(block.number, state);
 
         block = make_rolled_back_block(0);
         let mut state = history.lock().await.get_rolled_back_state(block.number);
-        state.handle_mint(&block, Some(b"vrf_2"));
+        state.handle_mint(&block, b"issuer_2");
         state.handle_block_txs(
             &block,
             &BlockTxsMessage {
@@ -491,11 +497,11 @@ mod tests {
             },
         );
         assert_eq!(
-            state.get_latest_epoch_blocks_minted_by_pool(&keyhash(b"vrf_1")),
+            state.get_latest_epoch_blocks_minted_by_pool(&keyhash_224(b"issuer_1")),
             0
         );
         assert_eq!(
-            state.get_latest_epoch_blocks_minted_by_pool(&keyhash(b"vrf_2")),
+            state.get_latest_epoch_blocks_minted_by_pool(&keyhash_224(b"issuer_2")),
             1
         );
         history.lock().await.commit(block.number, state);
