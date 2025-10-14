@@ -24,7 +24,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::mem::take;
 use std::sync::{mpsc, Arc, Mutex};
 use tokio::task::{spawn_blocking, JoinHandle};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, warn, Level};
 
 const DEFAULT_KEY_DEPOSIT: u64 = 2_000_000;
 const DEFAULT_POOL_DEPOSIT: u64 = 500_000_000;
@@ -385,8 +385,10 @@ impl State {
                 &mut deregistrations,
             );
 
-            registrations.iter().for_each(|k| info!("Registration {}", hex::encode(k)));
-            deregistrations.iter().for_each(|k| info!("Deregistration {}", hex::encode(k)));
+            if tracing::enabled!(Level::DEBUG) {
+                registrations.iter().for_each(|k| debug!("Registration {}", hex::encode(k)));
+                deregistrations.iter().for_each(|k| debug!("Deregistration {}", hex::encode(k)));
+            }
 
             // Calculate reward payouts for previous epoch
             calculate_rewards(

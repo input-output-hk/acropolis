@@ -119,7 +119,7 @@ pub fn calculate_rewards(
         let mut pay_to_pool_reward_account =
             performance_spo.two_previous_reward_account_is_registered;
 
-        info!(
+        debug!(
             "SPO {} reward account registered two epochs ago: {}",
             hex::encode(operator_id),
             pay_to_pool_reward_account
@@ -128,7 +128,7 @@ pub fn calculate_rewards(
         // Also, to handle the early Shelley timing bug, we allow it if it was registered
         // during the current epoch
         if !pay_to_pool_reward_account {
-            info!(
+            debug!(
                 "Checking old reward account {}",
                 hex::encode(&staking_spo.reward_account)
             );
@@ -294,16 +294,16 @@ fn calculate_spo_rewards(
         let relative_blocks = BigDecimal::from(blocks_produced)  // Beta
             / BigDecimal::from(total_blocks as u64);
 
-        info!(blocks_produced, %relative_blocks, %pool_stake, %relative_active_stake,
-              "Pool performance calc:");
+        debug!(blocks_produced, %relative_blocks, %pool_stake, %relative_active_stake,
+               "Pool performance calc:");
         &relative_blocks / &relative_active_stake
     };
 
     // Get actual pool rewards
     let pool_rewards = (&optimum_rewards * &pool_performance).with_scale(0);
 
-    info!(%pool_stake, %relative_pool_stake, %pool_performance,
-          %optimum_rewards, %pool_rewards, pool_owner_stake, %pool_pledge,
+    debug!(%pool_stake, %relative_pool_stake, %pool_performance,
+           %optimum_rewards, %pool_rewards, pool_owner_stake, %pool_pledge,
            "Pool {}", hex::encode(&operator_id));
 
     // Subtract fixed costs
@@ -386,7 +386,7 @@ fn calculate_spo_rewards(
             }
         }
 
-        info!(%fixed_cost, %margin_cost, leader_reward=%costs, %to_delegators, total_paid,
+        debug!(%fixed_cost, %margin_cost, leader_reward=%costs, %to_delegators, total_paid,
                delegators_paid, "Reward split:");
 
         costs.to_u64().unwrap_or(0)
