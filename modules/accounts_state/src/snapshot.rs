@@ -1,8 +1,7 @@
 //! Acropolis AccountsState: snapshot for rewards calculations
 
+use acropolis_common::{stake_addresses::StakeAddressMap, KeyHash, Lovelace, PoolRegistration, Ratio, RewardAccount, StakeAddress};
 use crate::state::{Pots, RegistrationChange};
-use acropolis_common::stake_addresses::StakeAddressMap;
-use acropolis_common::{KeyHash, Lovelace, PoolRegistration, Ratio, RewardAccount, StakeAddress};
 use imbl::OrdMap;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -30,7 +29,7 @@ pub struct SnapshotSPO {
     pub blocks_produced: usize,
 
     /// Reward account
-    pub reward_account: RewardAccount,
+    pub reward_account: StakeAddress,
 
     /// Is the reward account from two epochs ago registered at the time of this snapshot?
     pub two_previous_reward_account_is_registered: bool,

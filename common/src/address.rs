@@ -214,7 +214,7 @@ impl StakeAddress {
         }
     }
 
-    /// Read from string format
+    /// Read from a string format
     pub fn from_string(text: &str) -> Result<Self> {
         let (hrp, data) = bech32::decode(text)?;
         if let Some(header) = data.first() {
@@ -223,7 +223,7 @@ impl StakeAddress {
                 false => AddressNetwork::Main,
             };
 
-            let payload = match (header >> 4) & 0x0F {
+            let payload = match (header >> 4) & 0x0Fu8 {
                 0b1110 => StakeAddressPayload::StakeKeyHash(data[1..].to_vec()),
                 0b1111 => StakeAddressPayload::ScriptHash(data[1..].to_vec()),
                 _ => return Err(anyhow!("Unknown header {header} in stake address")),
@@ -270,6 +270,51 @@ impl StakeAddress {
         let mut data = vec![network_bits | (stake_bits << 4)];
         data.extend(stake_hash);
         Ok(bech32::encode::<bech32::Bech32>(hrp, &data)?)
+    }
+}
+
+impl Default for StakeAddress {
+    fn default() -> Self {
+        StakeAddress {
+            network: AddressNetwork::Main,
+            payload: StakeAddressPayload::StakeKeyHash(vec![0u8; 28]),
+        }
+    }
+}
+
+impl<C> minicbor::Encode<C> for StakeAddress {
+    fn encode<W: minicbor::encode::Write>(
+        &self,
+        e: &mut minicbor::Encoder<W>,
+        _ctx: &mut C,
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        // Encode as bytes (same format as from_binary expects)
+        let network_bits = match self.network {
+            AddressNetwork::Main => 0b1u8,
+            AddressNetwork::Test => 0b0u8,
+        };
+
+        let (stake_bits, stake_hash): (u8, &Vec<u8>) = match &self.payload {
+            StakeAddressPayload::StakeKeyHash(data) => (0b1110, data),
+            StakeAddressPayload::ScriptHash(data) => (0b1111, data),
+        };
+
+        let mut data = vec![network_bits | (stake_bits << 4)];
+        data.extend(stake_hash);
+
+        e.bytes(&data)?;
+        Ok(())
+    }
+}
+
+impl<'b, C> minicbor::Decode<'b, C> for StakeAddress {
+    fn decode(
+        d: &mut minicbor::Decoder<'b>,
+        _ctx: &mut C,
+    ) -> Result<Self, minicbor::decode::Error> {
+        let bytes = d.bytes()?;
+        StakeAddress::from_binary(bytes)
+            .map_err(|e| minicbor::decode::Error::message(e.to_string()))
     }
 }
 
