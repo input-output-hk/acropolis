@@ -623,7 +623,7 @@ async fn handle_pools_spo_blockfrost(
     // Query blocks_minted from epochs_state
     let epoch_blocks_minted_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
         EpochsStateQuery::GetLatestEpochBlocksMintedByPool {
-            vrf_key_hash: pool_info.vrf_key_hash.clone(),
+            spo_id: pool_info.operator.clone(),
         },
     )));
     let epoch_blocks_minted_f = query_state(
@@ -1062,9 +1062,9 @@ pub async fn handle_pool_blocks_blockfrost(
         ));
     };
 
-    // Get block hashes by pool_id from spo_state
+    // Get blocks by pool_id from spo_state
     let pool_blocks_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
-        PoolsStateQuery::GetPoolBlockHashes {
+        PoolsStateQuery::GetBlocksByPool {
             pool_id: spo.clone(),
         },
     )));
@@ -1075,18 +1075,21 @@ pub async fn handle_pool_blocks_blockfrost(
         pool_blocks_msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Pools(
-                PoolsStateQueryResponse::PoolBlockHashes(pool_blocks),
+                PoolsStateQueryResponse::BlocksByPool(pool_blocks),
             )) => Ok(pool_blocks),
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::Error(_),
-            )) => Err(anyhow::anyhow!("Block hashes are not enabled")),
+            )) => Err(anyhow::anyhow!("Blocks are not enabled")),
             _ => Err(anyhow::anyhow!("Unexpected message type")),
         },
     )
     .await?;
 
-    let pool_blocks_rest = pool_blocks.into_iter().map(|b| hex::encode(b)).collect::<Vec<_>>();
-    match serde_json::to_string(&pool_blocks_rest) {
+    // NOTE:
+    // Need to query chain_store
+    // to get block_hash for each block height
+
+    match serde_json::to_string_pretty(&pool_blocks) {
         Ok(json) => Ok(RESTResponse::with_json(200, &json)),
         Err(e) => Ok(RESTResponse::with_text(
             500,

@@ -18,6 +18,7 @@ dependencies = [
  "caryatid_sdk",
  "chrono",
  "crc",
+ "cryptoxide 0.5.1",
  "dashmap",
  "fraction",
  "futures",
@@ -46,8 +47,12 @@ dependencies = [
  "caryatid_sdk",
  "chrono",
  "config",
+ "csv",
+ "dashmap",
  "hex",
  "imbl",
+ "itertools 0.14.0",
+ "rayon",
  "serde",
  "serde_json",
  "serde_with 3.14.1",
@@ -1691,6 +1696,33 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "382ce8820a5bb815055d3553a610e8cb542b2d767bbacea99038afda96cd760d"
 
 [[package]]
+name = "cryptoxide"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "facfae029ec4373769eb4bd936bcf537de1052abaee9f246e667c9443be6aa95"
+
+[[package]]
+name = "csv"
+version = "1.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "acdc4883a9c96732e4733212c01447ebd805833b7275a73ca3ee080fd77afdaf"
+dependencies = [
+ "csv-core",
+ "itoa",
+ "ryu",
+ "serde",
+]
+
+[[package]]
+name = "csv-core"
+version = "0.1.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d02f3b0da4c6504f86e9cd789d8dbafab48c2321be74e9987593de5a894d93d"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
 name = "curve25519-dalek"
 version = "4.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1939,7 +1971,7 @@ version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb588f93c0d91b2f668849fd6d030cddb0b2e31f105963be189da5acdf492a21"
 dependencies = [
- "cryptoxide",
+ "cryptoxide 0.4.4",
 ]
 
 [[package]]
@@ -3817,7 +3849,7 @@ dependencies = [
  "base58",
  "bech32 0.9.1",
  "crc",
- "cryptoxide",
+ "cryptoxide 0.4.4",
  "hex",
  "pallas-codec",
  "pallas-crypto",
@@ -3876,7 +3908,7 @@ version = "0.32.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "59c89ea16190a87a1d8bd36923093740a2b659ed6129f4636329319a70cc4db3"
 dependencies = [
- "cryptoxide",
+ "cryptoxide 0.4.4",
  "hex",
  "pallas-codec",
  "rand_core 0.6.4",
@@ -3991,7 +4023,7 @@ checksum = "086f428e68ab513a0445c23a345cd462dc925e37626f72f1dbb7276919f68bfa"
 dependencies = [
  "bech32 0.9.1",
  "bip39",
- "cryptoxide",
+ "cryptoxide 0.4.4",
  "ed25519-bip32",
  "pallas-crypto",
  "rand 0.8.5",

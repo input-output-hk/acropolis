@@ -11,9 +11,7 @@ pub enum EpochsStateQuery {
     GetPreviousEpochs { epoch_number: u64 },
     GetEpochStakeDistribution { epoch_number: u64 },
     GetEpochStakeDistributionByPool { epoch_number: u64 },
-    GetEpochBlockDistribution { epoch_number: u64 },
-    GetEpochBlockDistributionByPool { epoch_number: u64 },
-    GetLatestEpochBlocksMintedByPool { vrf_key_hash: KeyHash },
+    GetLatestEpochBlocksMintedByPool { spo_id: KeyHash },
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -24,8 +22,6 @@ pub enum EpochsStateQueryResponse {
     PreviousEpochs(PreviousEpochs),
     EpochStakeDistribution(EpochStakeDistribution),
     EpochStakeDistributionByPool(EpochStakeDistributionByPool),
-    EpochBlockDistribution(EpochBlockDistribution),
-    EpochBlockDistributionByPool(EpochBlockDistributionByPool),
     LatestEpochBlocksMintedByPool(u64),
 
     NotFound,
@@ -48,19 +44,17 @@ pub struct EpochInfo {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct NextEpochs {}
+pub struct NextEpochs {
+    pub epochs: Vec<EpochActivityMessage>,
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PreviousEpochs {}
+pub struct PreviousEpochs {
+    pub epochs: Vec<EpochActivityMessage>,
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EpochStakeDistribution {}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EpochStakeDistributionByPool {}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct EpochBlockDistribution {}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct EpochBlockDistributionByPool {}

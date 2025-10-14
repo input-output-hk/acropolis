@@ -1,12 +1,12 @@
 //! Acropolis AccountsState: snapshot for rewards calculations
 
-use crate::state::Pots;
-use acropolis_common::{
-    stake_addresses::StakeAddressMap, KeyHash, Lovelace, PoolRegistration, Ratio, RewardAccount,
-};
+use crate::state::{Pots, RegistrationChange};
+use acropolis_common::stake_addresses::StakeAddressMap;
+use acropolis_common::{KeyHash, Lovelace, PoolRegistration, Ratio, RewardAccount, StakeAddress};
 use imbl::OrdMap;
 use std::collections::HashMap;
-use tracing::info;
+use std::sync::Arc;
+use tracing::{debug, error, info};
 
 /// SPO data for stake snapshot
 #[derive(Debug, Default)]
@@ -32,15 +32,18 @@ pub struct SnapshotSPO {
     /// Reward account
     pub reward_account: RewardAccount,
 
+    /// Is the reward account from two epochs ago registered at the time of this snapshot?
+    pub two_previous_reward_account_is_registered: bool,
+
     /// Pool owners
     pub pool_owners: Vec<KeyHash>,
 }
 
-/// Snapshot of stake distribution taken at the *start* of a particular epoch
+/// Snapshot of stake distribution taken at the end of an particular epoch
 #[derive(Debug, Default)]
 pub struct Snapshot {
-    /// Epoch it's for (the new one that has just started)
-    pub _epoch: u64,
+    /// Epoch it's for (the one that has just ended)
+    pub epoch: u64,
 
     /// Map of SPOs by operator ID
     pub spos: HashMap<KeyHash, SnapshotSPO>,
@@ -48,8 +51,11 @@ pub struct Snapshot {
     /// Persistent pot values
     pub pots: Pots,
 
-    /// Fees
-    pub fees: Lovelace,
+    /// Total SPO (non-OBFT) blocks produced
+    pub blocks: usize,
+
+    /// Ordered registration changes
+    pub registration_changes: Vec<RegistrationChange>,
 }
 
 impl Snapshot {
@@ -60,50 +66,88 @@ impl Snapshot {
         spos: &OrdMap<KeyHash, PoolRegistration>,
         spo_block_counts: &HashMap<KeyHash, usize>,
         pots: &Pots,
-        fees: Lovelace,
+        blocks: usize,
+        registration_changes: Vec<RegistrationChange>,
+        two_previous_snapshot: Arc<Snapshot>,
     ) -> Self {
         let mut snapshot = Self {
-            _epoch: epoch,
+            epoch,
             pots: pots.clone(),
-            fees,
+            blocks,
+            registration_changes,
             ..Self::default()
         };
 
+        // Add all SPOs - some may only have stake, some may only produce blocks (their
+        // stake has been removed), we need both in rewards
+        for (spo_id, spo) in spos {
+            // See how many blocks produced
+            let blocks_produced = spo_block_counts.get(spo_id).copied().unwrap_or(0);
+
+            // Check if the reward account from two epochs ago is still registered
+            // TODO should spo.reward_account be a StakeAddress to begin with?
+            let two_previous_reward_account_is_registered =
+                match two_previous_snapshot.spos.get(spo_id) {
+                    Some(old_spo) => match StakeAddress::from_binary(&old_spo.reward_account) {
+                        Ok(spo_reward_address) => {
+                            let spo_reward_hash = spo_reward_address.get_hash();
+                            stake_addresses
+                                .get(spo_reward_hash)
+                                .map(|sas| sas.registered)
+                                .unwrap_or(false)
+                        }
+                        Err(e) => {
+                            error!(
+                                "Can't decode reward address for SPO {}: {e}",
+                                hex::encode(&spo_id)
+                            );
+
+                            false
+                        }
+                    },
+                    None => false,
+                };
+
+            // Add the new one
+            snapshot.spos.insert(
+                spo_id.clone(),
+                SnapshotSPO {
+                    delegators: vec![],
+                    total_stake: 0,
+                    pledge: spo.pledge,
+                    fixed_cost: spo.cost,
+                    margin: spo.margin.clone(),
+                    blocks_produced,
+                    pool_owners: spo.pool_owners.clone(),
+                    reward_account: spo.reward_account.clone(),
+                    two_previous_reward_account_is_registered,
+                },
+            );
+        }
+
         // Scan all stake addresses and post to their delegated SPO's list
-        // Note this is _active_ stake, for reward calculations, and hence doesn't include rewards
+        // Note this is 'active stake', for reward calculations, and does include rewards
         let mut total_stake: Lovelace = 0;
         for (hash, sas) in stake_addresses.iter() {
-            if sas.utxo_value > 0 {
-                if let Some(spo_id) = &sas.delegated_spo {
-                    // Only clone if insertion is needed
-                    if let Some(snap_spo) = snapshot.spos.get_mut(spo_id) {
-                        snap_spo.delegators.push((hash.clone(), sas.utxo_value));
-                        snap_spo.total_stake += sas.utxo_value;
-                    } else {
-                        // Find in the SPO list
-                        let Some(spo) = spos.get(spo_id) else {
-                            // SPO has retired - this stake is simply ignored
-                            continue;
-                        };
+            let active_stake = sas.utxo_value + sas.rewards;
 
-                        // See how many blocks produced
-                        let blocks_produced = spo_block_counts.get(spo_id).copied().unwrap_or(0);
-                        snapshot.spos.insert(
-                            spo_id.clone(),
-                            SnapshotSPO {
-                                delegators: vec![(hash.clone(), sas.utxo_value)],
-                                total_stake: sas.utxo_value,
-                                pledge: spo.pledge,
-                                fixed_cost: spo.cost,
-                                margin: spo.margin.clone(),
-                                blocks_produced,
-                                pool_owners: spo.pool_owners.clone(),
-                                reward_account: spo.reward_account.clone(),
-                            },
+            if sas.registered && active_stake > 0 {
+                if let Some(spo_id) = &sas.delegated_spo {
+                    if let Some(snap_spo) = snapshot.spos.get_mut(spo_id) {
+                        snap_spo.delegators.push((hash.clone(), active_stake));
+                        snap_spo.total_stake += active_stake;
+                    } else {
+                        // SPO has retired - this stake is simply ignored
+                        debug!(
+                            epoch,
+                            "SPO {} for hash {} retired?  Ignored",
+                            hex::encode(spo_id),
+                            hex::encode(hash)
                         );
+                        continue;
                     }
                 }
-                total_stake += sas.utxo_value;
+                total_stake += active_stake;
             }
         }
 
@@ -119,7 +163,7 @@ impl Snapshot {
             deposits = pots.deposits,
             total_stake,
             spos = snapshot.spos.len(),
-            fees,
+            blocks,
             "Snapshot"
         );
 
@@ -158,7 +202,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn get_stake_snapshot_counts_stake_and_ignores_undelegated_and_zero_values() {
+    fn get_stake_snapshot_counts_stake_and_ignores_unregistered_undelegated_and_zero_values() {
         let spo1: KeyHash = vec![0x01];
         let spo2: KeyHash = vec![0x02];
 
@@ -166,12 +210,14 @@ mod tests {
         let addr2: KeyHash = vec![0x12];
         let addr3: KeyHash = vec![0x13];
         let addr4: KeyHash = vec![0x14];
+        let addr5: KeyHash = vec![0x15];
 
         let mut stake_addresses: StakeAddressMap = StakeAddressMap::new();
         stake_addresses.insert(
             addr1.clone(),
             StakeAddressState {
                 utxo_value: 42,
+                registered: true,
                 delegated_spo: Some(spo1.clone()),
                 ..StakeAddressState::default()
             },
@@ -180,6 +226,7 @@ mod tests {
             addr2.clone(),
             StakeAddressState {
                 utxo_value: 99,
+                registered: true,
                 delegated_spo: Some(spo2.clone()),
                 ..StakeAddressState::default()
             },
@@ -188,6 +235,7 @@ mod tests {
             addr3.clone(),
             StakeAddressState {
                 utxo_value: 0,
+                registered: true,
                 delegated_spo: Some(spo1.clone()),
                 ..StakeAddressState::default()
             },
@@ -196,6 +244,16 @@ mod tests {
             addr4.clone(),
             StakeAddressState {
                 utxo_value: 1000000,
+                registered: true,
+                delegated_spo: None,
+                ..StakeAddressState::default()
+            },
+        );
+        stake_addresses.insert(
+            addr5.clone(),
+            StakeAddressState {
+                utxo_value: 2000000,
+                registered: false,
                 delegated_spo: None,
                 ..StakeAddressState::default()
             },
@@ -212,6 +270,8 @@ mod tests {
             &spo_block_counts,
             &Pots::default(),
             0,
+            Vec::new(),
+            Arc::new(Snapshot::default()),
         );
 
         assert_eq!(snapshot.spos.len(), 2);
