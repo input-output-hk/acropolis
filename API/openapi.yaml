@@ -217,134 +217,6 @@ paths:
         '500':
           $ref: '#/components/responses/internal_error'
 
-  '/governance/proposals/{tx_hash}/{cert_index}':
-    get:
-      tags:
-        - Cardano » Governance
-      summary: Specific proposal
-      description: Detailed information about a specific governance proposal.
-      parameters:
-        - in: path
-          name: tx_hash
-          required: true
-          schema:
-            type: string
-          description: Transaction hash (hex-encoded)
-        - in: path
-          name: cert_index
-          required: true
-          schema:
-            type: integer
-          description: Certificate index within the transaction (u8)
-      responses:
-        '200':
-          description: Return the proposal information
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/proposal'
-        '400':
-          $ref: '#/components/responses/bad_request'
-        '404':
-          $ref: '#/components/responses/not_found'
-        '500':
-          $ref: '#/components/responses/internal_error'
-
-  '/governance/proposals/{tx_hash}/{cert_index}/parameters':
-    get:
-      tags:
-        - Cardano » Governance
-      summary: Proposal parameters
-      description: Protocol parameter changes proposed (not yet implemented).
-      parameters:
-        - in: path
-          name: tx_hash
-          required: true
-          schema:
-            type: string
-        - in: path
-          name: cert_index
-          required: true
-          schema:
-            type: integer
-      responses:
-        '501':
-          $ref: '#/components/responses/not_implemented'
-
-  '/governance/proposals/{tx_hash}/{cert_index}/metadata':
-    get:
-      tags:
-        - Cardano » Governance
-      summary: Proposal metadata
-      description: Metadata associated with a specific proposal (not yet implemented).
-      parameters:
-        - in: path
-          name: tx_hash
-          required: true
-          schema:
-            type: string
-        - in: path
-          name: cert_index
-          required: true
-          schema:
-            type: integer
-      responses:
-        '501':
-          $ref: '#/components/responses/not_implemented'
-
-  '/governance/proposals/{tx_hash}/{cert_index}/withdrawals':
-    get:
-      tags:
-        - Cardano » Governance
-      summary: Proposal withdrawals
-      description: Treasury withdrawal details for a specific proposal (not yet implemented).
-      parameters:
-        - in: path
-          name: tx_hash
-          required: true
-          schema:
-            type: string
-        - in: path
-          name: cert_index
-          required: true
-          schema:
-            type: integer
-      responses:
-        '501':
-          $ref: '#/components/responses/not_implemented'
-
-  '/governance/proposals/{tx_hash}/{cert_index}/votes':
-    get:
-      tags:
-        - Cardano » Governance
-      summary: Proposal votes
-      description: All votes cast on a specific governance proposal.
-      parameters:
-        - in: path
-          name: tx_hash
-          required: true
-          schema:
-            type: string
-        - in: path
-          name: cert_index
-          required: true
-          schema:
-            type: integer
-      responses:
-        '200':
-          description: Return votes on the proposal
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/proposal_votes'
-        '400':
-          $ref: '#/components/responses/bad_request'
-        '404':
-          $ref: '#/components/responses/not_found'
-        '500':
-          $ref: '#/components/responses/internal_error'
 
   # ============================================
   # EPOCHS ENDPOINTS
@@ -1532,6 +1404,7 @@ components:
           amount: '18605647'
     drep_metadata:
       type: object
+      nullable: true
       properties:
         drep_id:
           type: string
@@ -1553,11 +1426,10 @@ components:
             - type: object
               additionalProperties: true
             - type: array
-              items: {}
+              items: { }
             - type: integer
             - type: number
             - type: boolean
-            - type: 'null'
           description: Content of the JSON metadata (validated CIP-119)
         bytes:
           type: string
@@ -2253,6 +2125,7 @@ components:
           vote: abstain
     proposal_metadata:
       type: object
+      nullable: true
       properties:
         tx_hash:
           type: string
@@ -2276,11 +2149,10 @@ components:
             - type: object
               additionalProperties: true
             - type: array
-              items: {}
+              items: { }
             - type: integer
             - type: number
             - type: boolean
-            - type: 'null'
           description: Content of the JSON metadata (validated CIP-108)
         bytes:
           type: string
@@ -4237,6 +4109,7 @@ components:
           count: '16321'
     tx_metadata_label_json:
       type: array
+      nullable: true
       items:
         type: object
         properties:
@@ -4249,11 +4122,10 @@ components:
               - type: object
                 additionalProperties: true
               - type: array
-                items: {}
+                items: { }
               - type: integer
               - type: number
               - type: boolean
-              - type: 'null'
             description: Content of the JSON metadata
         required:
           - tx_hash
@@ -5535,6 +5407,7 @@ components:
         - serialised_size
     script_json:
       type: object
+      nullable: true
       properties:
         json:
           anyOf:
@@ -5542,11 +5415,10 @@ components:
             - type: object
               additionalProperties: true
             - type: array
-              items: {}
+              items: { }
             - type: integer
             - type: number
             - type: boolean
-            - type: 'null'
           description: 'JSON contents of the `timelock` script, null for `plutus` scripts'
       required:
         - json
@@ -5948,7 +5820,7 @@ components:
               - type: string
               - type: object
               - type: array
-                items: {}
+                items: { }
               - type: integer
               - type: number
               - type: boolean
@@ -5990,7 +5862,7 @@ components:
               - type: string
               - type: object
               - type: array
-                items: {}
+                items: { }
               - type: integer
               - type: number
               - type: boolean
