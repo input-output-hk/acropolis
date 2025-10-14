@@ -471,8 +471,9 @@ pub async fn handle_epoch_total_stakes_blockfrost(
         "testnet" => AddressNetwork::Test,
         unknown => {
             return Ok(RESTResponse::with_text(
-                404,
-                format!("Unknown network: {unknown}").as_str(),
+                500,
+                format!("Internal server error while retrieving current network: {unknown}")
+                    .as_str(),
             ))
         }
     };
@@ -606,8 +607,9 @@ pub async fn handle_epoch_pool_stakes_blockfrost(
         "testnet" => AddressNetwork::Test,
         unknown => {
             return Ok(RESTResponse::with_text(
-                404,
-                format!("Unknown network: {unknown}").as_str(),
+                500,
+                format!("Internal server error while retrieving current network: {unknown}")
+                    .as_str(),
             ))
         }
     };
