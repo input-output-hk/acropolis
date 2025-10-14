@@ -14,6 +14,7 @@ use caryatid_sdk::Context;
 
 use crate::{handlers_config::HandlersConfig, types::AddressInfoREST};
 
+/// Handle `/addresses/{address}` Blockfrost-compatible endpoint
 pub async fn handle_address_single_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
@@ -148,6 +149,7 @@ pub async fn handle_address_single_blockfrost(
     }
 }
 
+/// Handle `/addresses/{address}/extended` Blockfrost-compatible endpoint
 pub async fn handle_address_extended_blockfrost(
     _context: Arc<Context<Message>>,
     _params: Vec<String>,
@@ -156,6 +158,7 @@ pub async fn handle_address_extended_blockfrost(
     Ok(RESTResponse::with_text(501, "Not implemented"))
 }
 
+/// Handle `/addresses/{address}/totals` Blockfrost-compatible endpoint
 pub async fn handle_address_totals_blockfrost(
     _context: Arc<Context<Message>>,
     _params: Vec<String>,
@@ -164,6 +167,7 @@ pub async fn handle_address_totals_blockfrost(
     Ok(RESTResponse::with_text(501, "Not implemented"))
 }
 
+/// Handle `/addresses/{address}/utxos` Blockfrost-compatible endpoint
 pub async fn handle_address_utxos_blockfrost(
     _context: Arc<Context<Message>>,
     _params: Vec<String>,
@@ -172,6 +176,7 @@ pub async fn handle_address_utxos_blockfrost(
     Ok(RESTResponse::with_text(501, "Not implemented"))
 }
 
+/// Handle `/addresses/{address}/utxos/{asset}` Blockfrost-compatible endpoint
 pub async fn handle_address_asset_utxos_blockfrost(
     _context: Arc<Context<Message>>,
     _params: Vec<String>,
@@ -180,6 +185,7 @@ pub async fn handle_address_asset_utxos_blockfrost(
     Ok(RESTResponse::with_text(501, "Not implemented"))
 }
 
+/// Handle `/addresses/{address}/transactions` Blockfrost-compatible endpoint
 pub async fn handle_address_transactions_blockfrost(
     _context: Arc<Context<Message>>,
     _params: Vec<String>,
