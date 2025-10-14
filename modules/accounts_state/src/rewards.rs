@@ -1,10 +1,7 @@
 //! Acropolis AccountsState: rewards calculations
 
 use crate::snapshot::{Snapshot, SnapshotSPO};
-use acropolis_common::{
-    protocol_params::ShelleyParams, rational_number::RationalNumber, KeyHash, Lovelace,
-    RewardAccount, SPORewards,
-};
+use acropolis_common::{protocol_params::ShelleyParams, rational_number::RationalNumber, KeyHash, Lovelace, RewardAccount, SPORewards, StakeAddress};
 use anyhow::{bail, Result};
 use bigdecimal::{BigDecimal, One, ToPrimitive, Zero};
 use std::cmp::min;
@@ -231,7 +228,7 @@ impl RewardsState {
                            hex::encode(&hash));
 
                     // Transfer from reserves to this account
-                    result.rewards.push((hash.clone(), to_pay));
+                    result.rewards.push((RewardAccount::from(spo.reward_account.get_hash()), to_pay));
                     result.total_paid += to_pay;
 
                     *num_delegators_paid += 1;
@@ -243,7 +240,7 @@ impl RewardsState {
 
             costs.to_u64().unwrap_or(0)
         };
-        result.rewards.push((spo.reward_account.clone(), spo_benefit));
+        result.rewards.push((RewardAccount::from(spo.reward_account.get_hash()), spo_benefit));
         result.spo_rewards.push((
             operator_id.clone(),
             SPORewards {

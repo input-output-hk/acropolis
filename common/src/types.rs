@@ -709,9 +709,9 @@ pub struct PoolRegistration {
     pub margin: Ratio,
 
     /// Reward account
-    #[serde_as(as = "Hex")]
+    // #[serde_as(as = "Hex")]
     #[n(5)]
-    pub reward_account: RewardAccount,
+    pub reward_account: StakeAddress,
 
     /// Pool owners by their key hash
     #[serde_as(as = "Vec<Hex>")]
@@ -1586,7 +1586,7 @@ pub struct VotingOutcome {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProposalProcedure {
     pub deposit: Lovelace,
-    pub reward_account: RewardAccount,
+    pub reward_account: StakeAddress,
     pub gov_action_id: GovActionId,
     pub gov_action: GovernanceAction,
     pub anchor: Anchor,
@@ -1748,6 +1748,8 @@ pub struct AssetAddressEntry {
 mod tests {
     use super::*;
     use anyhow::Result;
+    use crate::{AddressNetwork, StakeAddressPayload};
+
 
     #[test]
     fn era_order() -> Result<()> {
@@ -1828,7 +1830,10 @@ mod tests {
 
         let proposal = ProposalProcedure {
             deposit: 9876,
-            reward_account: vec![7, 4, 6, 7],
+            reward_account: StakeAddress {
+                network: AddressNetwork::Main,
+                payload: StakeAddressPayload::StakeKeyHash(vec![1, 2, 3, 4])
+            },
             gov_action_id,
             gov_action,
             anchor: Anchor {

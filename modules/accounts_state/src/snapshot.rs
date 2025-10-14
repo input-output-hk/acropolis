@@ -1,9 +1,7 @@
 //! Acropolis AccountsState: snapshot for rewards calculations
 
 use crate::state::Pots;
-use acropolis_common::{
-    stake_addresses::StakeAddressMap, KeyHash, Lovelace, PoolRegistration, Ratio, RewardAccount,
-};
+use acropolis_common::{stake_addresses::StakeAddressMap, KeyHash, Lovelace, PoolRegistration, Ratio, RewardAccount, StakeAddress};
 use imbl::OrdMap;
 use std::collections::HashMap;
 use tracing::info;
@@ -30,7 +28,7 @@ pub struct SnapshotSPO {
     pub blocks_produced: usize,
 
     /// Reward account
-    pub reward_account: RewardAccount,
+    pub reward_account: StakeAddress,
 
     /// Pool owners
     pub pool_owners: Vec<KeyHash>,
