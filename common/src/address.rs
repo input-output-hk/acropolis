@@ -748,6 +748,30 @@ mod tests {
     }
 
     #[test]
+    fn shelley_to_stake_address_string_mainnet() {
+        let normal_address = ShelleyAddress::from_string("addr1q82peck5fynytkgjsp9vnpul59zswsd4jqnzafd0mfzykma625r684xsx574ltpznecr9cnc7n9e2hfq9lyart3h5hpszffds5").expect("valid normal address");
+        let script_address = ShelleyAddress::from_string("addr1zx0whlxaw4ksygvuljw8jxqlw906tlql06ern0gtvvzhh0c6409492020k6xml8uvwn34wrexagjh5fsk5xk96jyxk2qhlj6gf").expect("valid script address");
+
+        let normal_stake_address = normal_address
+            .stake_address_string()
+            .expect("stake_address_string should not fail")
+            .expect("normal address should have stake credential");
+        let script_stake_address = script_address
+            .stake_address_string()
+            .expect("stake_address_string should not fail")
+            .expect("script address should have stake credential");
+
+        assert_eq!(
+            normal_stake_address,
+            "stake1uxa92par6ngr202l4s3fuupjufu0fju4t5szljw34cm6tscq40449"
+        );
+        assert_eq!(
+            script_stake_address,
+            "stake1uyd2hj6j4848mdrdln7x8fc6hpunw5ft6yct2rtzafzrt9qh0m28h"
+        );
+    }
+
+    #[test]
     fn stake_address_from_binary_mainnet_stake() {
         // First withdrawal on Mainnet
         let binary =
