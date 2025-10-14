@@ -48,6 +48,7 @@ const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: &str = "cardano.protocol.parameters";
 const DEFAULT_STAKE_REWARD_DELTAS_TOPIC: &str = "cardano.stake.reward.deltas";
 
 const DEFAULT_STORE_SPDD_HISTORY: (&str, bool) = ("store-spdd-history", false);
+const DEFAULT_SPDD_DB_PATH: (&str, &str) = ("spdd-db-path", "./spdd_db");
 
 /// Accounts State module
 #[module(
@@ -427,6 +428,13 @@ impl AccountsState {
             config.get_bool(DEFAULT_STORE_SPDD_HISTORY.0).unwrap_or(DEFAULT_STORE_SPDD_HISTORY.1);
         info!("Store SPDD history: {}", store_spdd_history);
 
+        let spdd_db_path = config
+            .get_string(DEFAULT_SPDD_DB_PATH.0)
+            .unwrap_or(DEFAULT_SPDD_DB_PATH.1.to_string());
+        if store_spdd_history {
+            info!("SPDD database path: {}", spdd_db_path);
+        }
+
         // Query topics
         let accounts_query_topic = config
             .get_string(DEFAULT_ACCOUNTS_QUERY_TOPIC.0)
@@ -444,9 +452,9 @@ impl AccountsState {
         // Create spdd history
         // Return Err if failed to create SPDD store
         let spdd_store = if store_spdd_history {
-            Some(Arc::new(Mutex::new(SPDDStore::new(std::path::Path::new(
-                "spdd_db",
-            ))?)))
+            Some(Arc::new(Mutex::new(SPDDStore::new(
+                std::path::Path::new(&spdd_db_path),
+            )?)))
         } else {
             None
         };

@@ -45,11 +45,6 @@ impl SPDDStore {
     pub fn new(path: impl AsRef<std::path::Path>) -> fjall::Result<Self> {
         let path = path.as_ref();
 
-        // Delete existing data
-        if path.exists() {
-            std::fs::remove_dir_all(path).map_err(|e| fjall::Error::Io(e))?;
-        }
-
         let keyspace = Config::new(path).open()?;
         let spdd = keyspace.open_partition("spdd", PartitionCreateOptions::default())?;
 

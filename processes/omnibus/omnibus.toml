@@ -85,6 +85,8 @@ store-history = false
 # Store SPDD history
 # Enable /epochs/{number}/stakes, /epochs/{number}/stakes/{pool_id} endpoints
 store-spdd-history = false
+# SPDD database path (only used when store-spdd-history is enabled)
+spdd-db-path = "./spdd_db"
 
 [module.assets-state]
 # Enables /assets endpoint
