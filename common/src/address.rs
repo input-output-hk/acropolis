@@ -214,7 +214,18 @@ impl StakeAddress {
         }
     }
 
-    /// Read from a string format
+    /// Convert to string stake1xxx format
+    pub fn to_string(&self) -> Result<String> {
+        let hrp = match self.network {
+            AddressNetwork::Main => bech32::Hrp::parse("stake")?,
+            AddressNetwork::Test => bech32::Hrp::parse("stake_test")?,
+        };
+
+        let data = self.to_binary();
+        Ok(bech32::encode::<bech32::Bech32>(hrp, &data)?)
+    }
+
+    /// Read from a string format ("stake1xxx...")
     pub fn from_string(text: &str) -> Result<Self> {
         let (hrp, data) = bech32::decode(text)?;
         if let Some(header) = data.first() {
@@ -235,6 +246,23 @@ impl StakeAddress {
         Err(anyhow!("Empty stake address data"))
     }
 
+    /// Convert to binary format (29 bytes)
+    pub fn to_binary(&self) -> Vec<u8> {
+        let network_bits = match self.network {
+            AddressNetwork::Main => 0b1u8,
+            AddressNetwork::Test => 0b0u8,
+        };
+
+        let (stake_bits, stake_hash): (u8, &Vec<u8>) = match &self.payload {
+            StakeAddressPayload::StakeKeyHash(data) => (0b1110, data),
+            StakeAddressPayload::ScriptHash(data) => (0b1111, data),
+        };
+
+        let mut data = vec![network_bits | (stake_bits << 4)];
+        data.extend(stake_hash);
+        data
+    }
+
     /// Read from binary format (29 bytes)
     pub fn from_binary(data: &[u8]) -> Result<Self> {
         if data.len() != 29 {
@@ -252,24 +280,7 @@ impl StakeAddress {
             _ => bail!("Unknown header byte {:x} in stake address", data[0]),
         };
 
-        return Ok(StakeAddress { network, payload });
-    }
-
-    /// Convert to string stake1xxx form
-    pub fn to_string(&self) -> Result<String> {
-        let (hrp, network_bits) = match self.network {
-            AddressNetwork::Main => (bech32::Hrp::parse("stake")?, 1u8),
-            AddressNetwork::Test => (bech32::Hrp::parse("stake_test")?, 0u8),
-        };
-
-        let (stake_hash, stake_bits): (&Vec<u8>, u8) = match &self.payload {
-            StakeAddressPayload::StakeKeyHash(data) => (data, 0b1110),
-            StakeAddressPayload::ScriptHash(data) => (data, 0b1111),
-        };
-
-        let mut data = vec![network_bits | (stake_bits << 4)];
-        data.extend(stake_hash);
-        Ok(bech32::encode::<bech32::Bech32>(hrp, &data)?)
+        Ok(StakeAddress { network, payload })
     }
 }
 
@@ -279,20 +290,8 @@ impl<C> minicbor::Encode<C> for StakeAddress {
         e: &mut minicbor::Encoder<W>,
         _ctx: &mut C,
     ) -> Result<(), minicbor::encode::Error<W::Error>> {
-        let network_bits = match self.network {
-            AddressNetwork::Main => 0b1u8,
-            AddressNetwork::Test => 0b0u8,
-        };
-
-        let (stake_bits, stake_hash): (u8, &Vec<u8>) = match &self.payload {
-            StakeAddressPayload::StakeKeyHash(data) => (0b1110, data),
-            StakeAddressPayload::ScriptHash(data) => (0b1111, data),
-        };
-
-        let mut data = vec![network_bits | (stake_bits << 4)];
-        data.extend(stake_hash);
-
-        e.bytes(&data)?;
+        let bytes = self.to_binary();
+        e.writer_mut().write_all(&bytes).map_err(|err| minicbor::encode::Error::write(err))?;
         Ok(())
     }
 }
@@ -302,8 +301,7 @@ impl<'b, C> minicbor::Decode<'b, C> for StakeAddress {
         d: &mut minicbor::Decoder<'b>,
         _ctx: &mut C,
     ) -> Result<Self, minicbor::decode::Error> {
-        let bytes = d.bytes()?;
-        StakeAddress::from_binary(bytes)
+        StakeAddress::from_binary(d.input())
             .map_err(|e| minicbor::decode::Error::message(e.to_string()))
     }
 }
@@ -340,10 +338,10 @@ impl Address {
                 return Some(ptr.clone());
             }
         }
-        return None;
+        None
     }
 
-    /// Read from string format
+    /// Read from string format ("addr1...")
     pub fn from_string(text: &str) -> Result<Self> {
         if text.starts_with("addr1") || text.starts_with("addr_test1") {
             Ok(Self::Shelley(ShelleyAddress::from_string(text)?))
@@ -374,6 +372,7 @@ impl Address {
 mod tests {
     use super::*;
     use crate::crypto::keyhash_224;
+    use minicbor::{Decode, Encode};
 
     #[test]
     fn byron_address() {
@@ -636,5 +635,100 @@ mod tests {
             },
             "558f3ee09b26d88fac2eddc772a9eda94cce6dbadbe9fee439bd6001"
         );
+    }
+
+    fn mainnet_stake_address() -> StakeAddress {
+        let binary =
+            hex::decode("e1558f3ee09b26d88fac2eddc772a9eda94cce6dbadbe9fee439bd6001").unwrap();
+        StakeAddress::from_binary(&binary).unwrap()
+    }
+
+    fn testnet_script_address() -> StakeAddress {
+        let binary =
+            hex::decode("e0558f3ee09b26d88fac2eddc772a9eda94cce6dbadbe9fee439bd6001").unwrap();
+        StakeAddress::from_binary(&binary).unwrap()
+    }
+
+    #[test]
+    fn stake_addresses_encode_mainnet_stake() {
+        let address = mainnet_stake_address();
+        let expected = address.to_binary();
+
+        let mut actual = Vec::new();
+        let mut encoder = minicbor::Encoder::new(&mut actual);
+        let result = address.encode(&mut encoder, &mut ());
+
+        assert!(result.is_ok());
+        assert_eq!(actual.len(), 29);
+        assert_eq!(&actual[..], &expected[..]);
+    }
+
+    #[test]
+    fn stake_addresses_decode_mainnet_stake() {
+        let binary = mainnet_stake_address().to_binary();
+
+        let mut decoder = minicbor::Decoder::new(&binary);
+        let decoded = StakeAddress::decode(&mut decoder, &mut ()).unwrap();
+
+        assert_eq!(decoded.network, AddressNetwork::Main);
+        assert_eq!(
+            match decoded.payload {
+                StakeAddressPayload::StakeKeyHash(key) => hex::encode(&key),
+                _ => "STAKE".to_string(),
+            },
+            "558f3ee09b26d88fac2eddc772a9eda94cce6dbadbe9fee439bd6001"
+        );
+    }
+    #[test]
+    fn stake_addresses_round_trip_mainnet_stake() {
+        let binary =
+            hex::decode("f1558f3ee09b26d88fac2eddc772a9eda94cce6dbadbe9fee439bd6001").unwrap();
+        let original = StakeAddress::from_binary(&binary).unwrap();
+
+        let mut encoded = Vec::new();
+        let mut encoder = minicbor::Encoder::new(&mut encoded);
+        original.encode(&mut encoder, &mut ()).unwrap();
+
+        let mut decoder = minicbor::Decoder::new(&encoded);
+        let decoded = StakeAddress::decode(&mut decoder, &mut ()).unwrap();
+
+        assert_eq!(decoded.network, AddressNetwork::Main);
+        assert_eq!(
+            match decoded.payload {
+                StakeAddressPayload::ScriptHash(key) => hex::encode(&key),
+                _ => "STAKE".to_string(),
+            },
+            "558f3ee09b26d88fac2eddc772a9eda94cce6dbadbe9fee439bd6001"
+        );
+    }
+
+    #[test]
+    fn stake_addresses_roundtrip_testnet_script() {
+        let original = testnet_script_address();
+
+        let mut encoded = Vec::new();
+        let mut encoder = minicbor::Encoder::new(&mut encoded);
+        original.encode(&mut encoder, &mut ()).unwrap();
+
+        let mut decoder = minicbor::Decoder::new(&encoded);
+        let decoded = StakeAddress::decode(&mut decoder, &mut ()).unwrap();
+
+        assert_eq!(decoded.network, AddressNetwork::Test);
+        assert_eq!(
+            match decoded.payload {
+                StakeAddressPayload::StakeKeyHash(key) => hex::encode(&key),
+                _ => "SCRIPT".to_string(),
+            },
+            "558f3ee09b26d88fac2eddc772a9eda94cce6dbadbe9fee439bd6001"
+        );
+    }
+
+    #[test]
+    fn stake_addresses_decode_invalid_length() {
+        let bad_data = vec![0xe1, 0x00, 0x01, 0x02, 0x03];
+        let mut decoder = minicbor::Decoder::new(&bad_data);
+
+        let result = StakeAddress::decode(&mut decoder, &mut ());
+        assert!(result.is_err());
     }
 }
