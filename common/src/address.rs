@@ -290,8 +290,7 @@ impl<C> minicbor::Encode<C> for StakeAddress {
         e: &mut minicbor::Encoder<W>,
         _ctx: &mut C,
     ) -> Result<(), minicbor::encode::Error<W::Error>> {
-        let bytes = self.to_binary();
-        e.writer_mut().write_all(&bytes).map_err(|err| minicbor::encode::Error::write(err))?;
+        e.bytes(&self.to_binary())?;
         Ok(())
     }
 }
@@ -301,8 +300,9 @@ impl<'b, C> minicbor::Decode<'b, C> for StakeAddress {
         d: &mut minicbor::Decoder<'b>,
         _ctx: &mut C,
     ) -> Result<Self, minicbor::decode::Error> {
-        StakeAddress::from_binary(d.input())
-            .map_err(|e| minicbor::decode::Error::message(e.to_string()))
+        let bytes = d.bytes()?;
+        Self::from_binary(bytes)
+            .map_err(|e| minicbor::decode::Error::message(format!("invalid stake address: {e}")))
     }
 }
 
@@ -652,20 +652,30 @@ mod tests {
     #[test]
     fn stake_addresses_encode_mainnet_stake() {
         let address = mainnet_stake_address();
-        let expected = address.to_binary();
+        let binary = address.to_binary();
+
+        // CBOR encoding wraps the raw 29-byte stake address in a byte string:
+        // - 0x58: CBOR major type 2 (byte string) with 1-byte length follows
+        // - 0x1d: Length of 29 bytes (the stake address data)
+        // - [29 bytes]: The actual stake address (network header + 28-byte hash)
+        // Total: 31 bytes (2-byte CBOR framing + 29-byte payload)
+        let expected = [[0x58, 0x1d].as_slice(), &binary].concat();
 
         let mut actual = Vec::new();
         let mut encoder = minicbor::Encoder::new(&mut actual);
-        let result = address.encode(&mut encoder, &mut ());
+        address.encode(&mut encoder, &mut ()).unwrap();
 
-        assert!(result.is_ok());
-        assert_eq!(actual.len(), 29);
-        assert_eq!(&actual[..], &expected[..]);
+        assert_eq!(actual.len(), 31);
+        assert_eq!(actual, expected);
     }
 
     #[test]
     fn stake_addresses_decode_mainnet_stake() {
-        let binary = mainnet_stake_address().to_binary();
+        let binary = {
+            let mut v = vec![0x58, 0x1d];
+            v.extend_from_slice(&mainnet_stake_address().to_binary());
+            v
+        };
 
         let mut decoder = minicbor::Decoder::new(&binary);
         let decoded = StakeAddress::decode(&mut decoder, &mut ()).unwrap();
@@ -679,6 +689,7 @@ mod tests {
             "558f3ee09b26d88fac2eddc772a9eda94cce6dbadbe9fee439bd6001"
         );
     }
+
     #[test]
     fn stake_addresses_round_trip_mainnet_stake() {
         let binary =
