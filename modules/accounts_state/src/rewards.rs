@@ -130,11 +130,11 @@ pub fn calculate_rewards(
         if !pay_to_pool_reward_account {
             debug!(
                 "Checking old reward account {}",
-                hex::encode(&staking_spo.reward_account)
+                hex::encode(&staking_spo.reward_account.get_hash())
             );
 
             // Note we use the staking reward account - it could have changed
-            pay_to_pool_reward_account = registrations.contains(&staking_spo.reward_account)
+            pay_to_pool_reward_account = registrations.contains(staking_spo.reward_account.get_hash())
         }
 
         // There was a bug in the original node from Shelley until Allegra where if multiple SPOs
@@ -155,7 +155,7 @@ pub fn calculate_rewards(
                         warn!("Shelley shared reward account bug: Dropping reward to {} in favour of {} on shared account {}",
                               hex::encode(&operator_id),
                               hex::encode(&other_id),
-                              hex::encode(&staking_spo.reward_account));
+                              hex::encode(&staking_spo.reward_account.get_hash()));
                         break;
                     }
                 }
@@ -357,8 +357,7 @@ fn calculate_spo_rewards(
                 }
 
                 // Check pool's reward address - removing e1 prefix
-                // TODO use StakeAddress.get_hash()
-                if spo.reward_account[1..] == *hash {
+                if spo.reward_account.get_hash() == *hash {
                     debug!(
                         "Skipping pool reward account {}, losing {to_pay}",
                         hex::encode(hash)
@@ -395,7 +394,7 @@ fn calculate_spo_rewards(
     if pay_to_pool_reward_account {
         rewards.push(RewardDetail {
             // TODO Hack to remove e1 header - needs resolving properly with StakeAddress
-            account: RewardAccount::from(&spo.reward_account[1..]),
+            account: RewardAccount::from(spo.reward_account.get_hash()),
             rtype: RewardType::Leader,
             amount: spo_benefit,
         });
@@ -403,7 +402,7 @@ fn calculate_spo_rewards(
         info!(
             "SPO {}'s reward account {} not paid {}",
             hex::encode(&operator_id),
-            hex::encode(&spo.reward_account),
+            hex::encode(&spo.reward_account.get_hash()),
             spo_benefit,
         );
     }

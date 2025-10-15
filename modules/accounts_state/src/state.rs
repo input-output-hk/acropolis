@@ -773,23 +773,18 @@ impl State {
         self.pool_refunds = Vec::new();
         for id in &spo_msg.retired_spos {
             if let Some(retired_spo) = new_spos.get(id) {
-                match StakeAddress::from_binary(&retired_spo.reward_account) {
-                    Ok(stake_address) => {
-                        let keyhash = stake_address.get_hash();
-                        debug!(
-                            "SPO {} has retired - refunding their deposit to {}",
-                            hex::encode(id),
-                            hex::encode(keyhash)
-                        );
-                        self.pool_refunds.push(keyhash.to_vec());
-                    }
-                    Err(e) => error!("Error repaying SPO deposit: {e}"),
-                }
-
-                // Schedule to retire - we need them to still be in place when we count
-                // blocks for the previous epoch
-                self.retiring_spos.push(id.to_vec());
+                let key_hash = &retired_spo.reward_account.get_hash();
+                debug!(
+                    "SPO {} has retired - refunding their deposit to {}",
+                    hex::encode(id),
+                    hex::encode(key_hash)
+                );
+                self.pool_refunds.push(key_hash.to_vec());
             }
+
+            // Schedule to retire - we need them to still be in place when we count
+            // blocks for the previous epoch
+            self.retiring_spos.push(id.clone());
         }
 
         self.spos = new_spos;
@@ -1072,7 +1067,7 @@ mod tests {
                             numerator: 1,
                             denominator: 20,
                         },
-                        reward_account: Vec::new(),
+                        reward_account: StakeAddress::default(),
                         pool_owners: Vec::new(),
                         relays: Vec::new(),
                         pool_metadata: None,
@@ -1086,7 +1081,7 @@ mod tests {
                             numerator: 1,
                             denominator: 10,
                         },
-                        reward_account: Vec::new(),
+                        reward_account: StakeAddress::default(),
                         pool_owners: Vec::new(),
                         relays: Vec::new(),
                         pool_metadata: None,
