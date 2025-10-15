@@ -1,4 +1,4 @@
-use std::{path::Path, sync::Arc};
+use std::{fs, path::Path, sync::Arc};
 
 use acropolis_common::{BlockInfo, TxHash};
 use anyhow::Result;
@@ -14,6 +14,7 @@ pub struct FjallStore {
 }
 
 const DEFAULT_DATABASE_PATH: &str = "fjall-blocks";
+const DEFAULT_CLEAR_ON_START: bool = true;
 const BLOCKS_PARTITION: &str = "blocks";
 const BLOCK_HASHES_BY_SLOT_PARTITION: &str = "block-hashes-by-slot";
 const BLOCK_HASHES_BY_NUMBER_PARTITION: &str = "block-hashes-by-number";
@@ -23,7 +24,12 @@ const TXS_PARTITION: &str = "txs";
 impl FjallStore {
     pub fn new(config: Arc<Config>) -> Result<Self> {
         let path = config.get_string("database-path").unwrap_or(DEFAULT_DATABASE_PATH.to_string());
-        let fjall_config = fjall::Config::new(Path::new(&path));
+        let clear = config.get_bool("clear-on-start").unwrap_or(DEFAULT_CLEAR_ON_START);
+        let path = Path::new(&path);
+        if clear && path.exists() {
+            fs::remove_dir_all(path)?;
+        }
+        let fjall_config = fjall::Config::new(path);
         let keyspace = fjall_config.open()?;
         let blocks = FjallBlockStore::new(&keyspace)?;
         let txs = FjallTXStore::new(&keyspace)?;

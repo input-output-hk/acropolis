@@ -99,6 +99,8 @@ store-addresses = false
 index-by-policy = false
 
 [module.chain-store]
+# Clear state on start up (default true)
+clear-on-start = true
 
 [module.clock]
 
