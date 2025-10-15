@@ -144,11 +144,9 @@ snap-boot-data:
 snap-tip:
 	@echo "Extracting tip information from snapshot filename..."
 	@echo "Snapshot: $(SNAPSHOT)"
-	@echo "Format: <slot>.<block_hash>.cbor"
 	@echo ""
 	@test -f "$(SNAPSHOT)" || (echo "Error: Snapshot file not found: $(SNAPSHOT)"; exit 1)
-	@echo "Filename: $$(basename $(SNAPSHOT))"
-	@echo "Note: Tip extraction functionality to be wired into CLI"
+	@ACROPOLIS_SNAPSHOT_ARGS="tip $(SNAPSHOT)" $(CARGO) run --release -p $(PROCESS_PKG)
 
 snap-utxos:
 	@echo "Parsing UTXOs from snapshot..."

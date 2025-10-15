@@ -135,9 +135,19 @@ pub async fn main() -> Result<()> {
                     }
                 }
             }
+            "tip" => match snapshot::snapshot_tip(path) {
+                Ok(out) => {
+                    println!("{}", out);
+                    return Ok(());
+                }
+                Err(e) => {
+                    eprintln!("error: {}", e);
+                    std::process::exit(2);
+                }
+            },
             _ => {
                 eprintln!(
-                    "unknown snapshot command; expected 'summary', 'sections', 'bootstrap', or 'utxos'"
+                    "unknown snapshot command; expected 'summary', 'sections', 'bootstrap', 'utxos', or 'tip'"
                 );
                 std::process::exit(2);
             }

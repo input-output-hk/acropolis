@@ -193,6 +193,39 @@ pub fn snapshot_utxos(path: &Path, limit: usize) -> Result<String> {
     Ok(out)
 }
 
+/// Extract tip information from snapshot filename
+///
+/// Amaru snapshots follow the naming convention: `<slot>.<block_hash>.cbor`
+/// This function extracts the slot number and block hash from the filename
+/// and estimates the corresponding block height.
+///
+/// **Note**: The filename must follow the Amaru convention. This works for
+/// snapshots from both Haskell node and Amaru.
+pub fn snapshot_tip(path: &Path) -> Result<String> {
+    if !path.exists() {
+        bail!("snapshot file not found: {}", path.display());
+    }
+
+    let path_str = path.to_str().ok_or_else(|| anyhow::anyhow!("invalid path"))?;
+
+    // Extract tip info from filename
+    let tip = extract_tip_from_filename(path_str)
+        .map_err(|e| anyhow::anyhow!("failed to extract tip from filename: {}", e))?;
+
+    let mut out = String::new();
+    out.push_str(&format!("Snapshot: {}\n", path.display()));
+    out.push_str(&format!("Format: <slot>.<block_hash>.cbor\n\n"));
+    out.push_str(&format!("Tip Information:\n"));
+    out.push_str(&format!("  Slot: {}\n", tip.slot));
+    out.push_str(&format!("  Block Hash: {}\n", tip.block_hash));
+    out.push_str(&format!(
+        "  Estimated Block Height: {}\n",
+        estimate_block_height_from_slot(tip.slot)
+    ));
+
+    Ok(out)
+}
+
 /// Bootstrap the node from a snapshot by dispatching per-module data.
 ///
 /// This function extracts data from the snapshot and dispatches it to the
