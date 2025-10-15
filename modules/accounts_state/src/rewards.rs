@@ -3,7 +3,7 @@
 use crate::snapshot::{Snapshot, SnapshotSPO};
 use acropolis_common::{
     protocol_params::ShelleyParams, rational_number::RationalNumber, KeyHash, Lovelace,
-    RewardAccount, SPORewards,
+    RewardAccount, SPORewards, StakeAddress,
 };
 use anyhow::{bail, Result};
 use bigdecimal::{BigDecimal, One, ToPrimitive, Zero};
@@ -24,7 +24,7 @@ pub enum RewardType {
 #[derive(Debug, Clone)]
 pub struct RewardDetail {
     /// Account reward paid to
-    pub account: RewardAccount,
+    pub account: StakeAddress,
 
     /// Type of reward
     pub rtype: RewardType,
@@ -134,7 +134,8 @@ pub fn calculate_rewards(
             );
 
             // Note we use the staking reward account - it could have changed
-            pay_to_pool_reward_account = registrations.contains(staking_spo.reward_account.get_hash())
+            pay_to_pool_reward_account =
+                registrations.contains(staking_spo.reward_account.get_hash())
         }
 
         // There was a bug in the original node from Shelley until Allegra where if multiple SPOs
@@ -376,7 +377,7 @@ fn calculate_spo_rewards(
 
                 // Transfer from reserves to this account
                 rewards.push(RewardDetail {
-                    account: hash.clone(),
+                    account: spo.reward_account.clone(),
                     rtype: RewardType::Member,
                     amount: to_pay,
                 });
@@ -393,8 +394,7 @@ fn calculate_spo_rewards(
 
     if pay_to_pool_reward_account {
         rewards.push(RewardDetail {
-            // TODO Hack to remove e1 header - needs resolving properly with StakeAddress
-            account: RewardAccount::from(spo.reward_account.get_hash()),
+            account: spo.reward_account.clone(),
             rtype: RewardType::Leader,
             amount: spo_benefit,
         });
@@ -402,7 +402,7 @@ fn calculate_spo_rewards(
         info!(
             "SPO {}'s reward account {} not paid {}",
             hex::encode(&operator_id),
-            hex::encode(&spo.reward_account.get_hash()),
+            hex::encode(spo.reward_account.get_hash()),
             spo_benefit,
         );
     }

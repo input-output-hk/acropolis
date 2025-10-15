@@ -1,7 +1,7 @@
 //! Verification of calculated values against captured CSV from Haskell node / DBSync
 use crate::rewards::{RewardDetail, RewardType, RewardsResult};
 use crate::state::Pots;
-use acropolis_common::{KeyHash, RewardAccount};
+use acropolis_common::{KeyHash, RewardAccount, StakeAddress};
 use hex::FromHex;
 use itertools::EitherOrBoth::{Both, Left, Right};
 use itertools::Itertools;
@@ -114,7 +114,7 @@ impl Verifier {
         match (&left.rtype, &right.rtype) {
             (RewardType::Leader, RewardType::Member) => Ordering::Less,
             (RewardType::Member, RewardType::Leader) => Ordering::Greater,
-            _ => left.account.cmp(&right.account),
+            _ => left.account.get_hash().cmp(&right.account.get_hash()),
         }
     }
 
@@ -161,12 +161,13 @@ impl Verifier {
                     _ => continue,
                 };
 
-                // Convert account with e1 header to just hash
-                // TODO: use StakeAddress, skipping first byte (e1) for now
-                let account = RewardAccount::from(&account[1..]);
+                let Ok(stake_address) = StakeAddress::from_binary(&account[1..]) else {
+                    error!("Bad stake address in {path} for address: {address} - skipping");
+                    continue;
+                };
 
                 expected_rewards.entry(spo).or_default().push(RewardDetail {
-                    account,
+                    account: stake_address,
                     rtype,
                     amount,
                 });
@@ -217,7 +218,7 @@ impl Verifier {
                                     error!(
                                         "Missing reward: SPO {} account {} {:?} {}",
                                         hex::encode(&expected_spo.0),
-                                        hex::encode(&expected.account),
+                                        hex::encode(&expected.account.get_hash()),
                                         expected.rtype,
                                         expected.amount
                                     );
@@ -227,7 +228,7 @@ impl Verifier {
                                     error!(
                                         "Extra reward: SPO {} account {} {:?} {}",
                                         hex::encode(&actual_spo.0),
-                                        hex::encode(&actual.account),
+                                        hex::encode(&actual.account.get_hash()),
                                         actual.rtype,
                                         actual.amount
                                     );
@@ -237,7 +238,7 @@ impl Verifier {
                                     if expected.amount != actual.amount {
                                         error!("Different reward: SPO {} account {} {:?} expected {}, actual {} ({})",
                                                hex::encode(&expected_spo.0),
-                                               hex::encode(&expected.account),
+                                               hex::encode(&expected.account.get_hash()),
                                                expected.rtype,
                                                expected.amount,
                                                actual.amount,
@@ -247,7 +248,7 @@ impl Verifier {
                                         debug!(
                                             "Reward match: SPO {} account {} {:?} {}",
                                             hex::encode(&expected_spo.0),
-                                            hex::encode(&expected.account),
+                                            hex::encode(&expected.account.get_hash()),
                                             expected.rtype,
                                             expected.amount
                                         );

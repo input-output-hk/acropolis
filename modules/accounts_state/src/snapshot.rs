@@ -1,7 +1,10 @@
 //! Acropolis AccountsState: snapshot for rewards calculations
 
-use acropolis_common::{stake_addresses::StakeAddressMap, KeyHash, Lovelace, PoolRegistration, Ratio, RewardAccount, StakeAddress};
 use crate::state::{Pots, RegistrationChange};
+use acropolis_common::{
+    stake_addresses::StakeAddressMap, KeyHash, Lovelace, PoolRegistration, Ratio, RewardAccount,
+    StakeAddress,
+};
 use imbl::OrdMap;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -85,17 +88,16 @@ impl Snapshot {
 
             // Check if the reward account from two epochs ago is still registered
             // TODO should spo.reward_account be a StakeAddress to begin with?
-            let two_previous_reward_account_is_registered =
-                match two_previous_snapshot.spos.get(spo_id) {
-                    Some(old_spo) => {
-                        let spo_reward_hash = old_spo.reward_account.get_hash();
-                        stake_addresses
-                            .get(spo_reward_hash)
-                            .map(|sas| sas.registered)
-                            .unwrap_or(false)
-                    },
-                    None => false,
-                };
+            let two_previous_reward_account_is_registered = match two_previous_snapshot
+                .spos
+                .get(spo_id)
+            {
+                Some(old_spo) => {
+                    let spo_reward_hash = old_spo.reward_account.get_hash();
+                    stake_addresses.get(spo_reward_hash).map(|sas| sas.registered).unwrap_or(false)
+                }
+                None => false,
+            };
 
             // Add the new one
             snapshot.spos.insert(

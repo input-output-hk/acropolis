@@ -663,7 +663,7 @@ impl State {
                             rewards
                                 .iter()
                                 .map(|reward| StakeRewardDelta {
-                                    hash: reward.account.clone(),
+                                    hash: reward.account.get_hash().to_vec(),
                                     delta: reward.amount as i64,
                                 })
                                 .collect::<Vec<_>>(),
@@ -677,7 +677,8 @@ impl State {
                     let mut stake_addresses = self.stake_addresses.lock().unwrap();
                     for (_, rewards) in reward_result.rewards {
                         for reward in rewards {
-                            stake_addresses.add_to_reward(&reward.account, reward.amount);
+                            stake_addresses
+                                .add_to_reward(&reward.account.get_hash().to_vec(), reward.amount);
                         }
                     }
 
@@ -784,14 +785,14 @@ impl State {
 
             // Schedule to retire - we need them to still be in place when we count
             // blocks for the previous epoch
-            self.retiring_spos.push(id.clone());
+            self.retiring_spos.push(id.to_vec());
         }
 
         self.spos = new_spos;
         Ok(())
     }
 
-    /// Register a stake address, with specified deposit if known
+    /// Register a stake address, with a specified deposit if known
     fn register_stake_address(&mut self, credential: &StakeCredential, deposit: Option<Lovelace>) {
         // Stake addresses can be registered after being used in UTXOs
         let mut stake_addresses = self.stake_addresses.lock().unwrap();
