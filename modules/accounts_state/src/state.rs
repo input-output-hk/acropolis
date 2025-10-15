@@ -15,8 +15,7 @@ use acropolis_common::{
     stake_addresses::{StakeAddressMap, StakeAddressState},
     BlockInfo, DRepChoice, DRepCredential, DelegatedStake, InstantaneousRewardSource,
     InstantaneousRewardTarget, KeyHash, Lovelace, MoveInstantaneousReward, PoolLiveStakeInfo,
-    PoolRegistration, Pot, SPORewards, StakeAddress, StakeCredential, StakeRewardDelta,
-    TxCertificate,
+    PoolRegistration, Pot, SPORewards, StakeCredential, StakeRewardDelta, TxCertificate,
 };
 use anyhow::Result;
 use imbl::OrdMap;

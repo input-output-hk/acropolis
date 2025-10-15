@@ -2,13 +2,12 @@
 
 use crate::state::{Pots, RegistrationChange};
 use acropolis_common::{
-    stake_addresses::StakeAddressMap, KeyHash, Lovelace, PoolRegistration, Ratio, RewardAccount,
-    StakeAddress,
+    stake_addresses::StakeAddressMap, KeyHash, Lovelace, PoolRegistration, Ratio, StakeAddress,
 };
 use imbl::OrdMap;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tracing::{debug, error, info};
+use tracing::{debug, info};
 
 /// SPO data for stake snapshot
 #[derive(Debug, Default)]

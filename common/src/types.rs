@@ -662,8 +662,6 @@ pub struct PoolMetadata {
     pub hash: DataHash,
 }
 
-pub type RewardAccount = Vec<u8>;
-
 /// Pool registration with position
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PoolRegistrationWithPos {
