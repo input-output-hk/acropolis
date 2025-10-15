@@ -124,7 +124,7 @@ mod tests {
                 total_txs: 1,
                 total_outputs: 100,
                 total_fees: 50,
-                vrf_vkey_hashes: vec![],
+                spo_blocks: vec![],
                 nonce: None,
             },
         );
@@ -156,7 +156,7 @@ mod tests {
                 total_txs: 1,
                 total_outputs: 100,
                 total_fees: 50,
-                vrf_vkey_hashes: vec![],
+                spo_blocks: vec![],
                 nonce: None,
             },
         );
@@ -176,7 +176,7 @@ mod tests {
                 total_txs: 1,
                 total_outputs: 100,
                 total_fees: 50,
-                vrf_vkey_hashes: vec![],
+                spo_blocks: vec![],
                 nonce: None,
             },
         );

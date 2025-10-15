@@ -27,9 +27,11 @@ use state::State;
 mod monetary;
 mod rewards;
 mod snapshot;
+mod verifier;
 use acropolis_common::queries::accounts::{
     AccountInfo, AccountsStateQuery, AccountsStateQueryResponse,
 };
+use verifier::Verifier;
 
 use crate::spo_distribution_store::SPDDStore;
 mod spo_distribution_store;
@@ -76,6 +78,7 @@ impl AccountsState {
         mut stake_subscription: Box<dyn Subscription<Message>>,
         mut drep_state_subscription: Box<dyn Subscription<Message>>,
         mut parameters_subscription: Box<dyn Subscription<Message>>,
+        verifier: &Verifier,
     ) -> Result<()> {
         // Get the stake address deltas from the genesis bootstrap, which we know
         // don't contain any stake, plus an extra parameter state (!unexplained)
@@ -136,6 +139,11 @@ impl AccountsState {
                 }
                 _ => false,
             };
+
+            // Notify the state of the block (used to schedule reward calculations)
+            if let Some(block_info) = &current_block {
+                state.notify_block(block_info);
+            }
 
             // Read from epoch-boundary messages only when it's a new epoch
             if new_epoch {
@@ -209,6 +217,27 @@ impl AccountsState {
                     _ => error!("Unexpected message type: {message:?}"),
                 }
 
+                let (_, message) = params_message_f.await?;
+                match message.as_ref() {
+                    Message::Cardano((block_info, CardanoMessage::ProtocolParams(params_msg))) => {
+                        let span = info_span!(
+                            "account_state.handle_parameters",
+                            block = block_info.number
+                        );
+                        async {
+                            Self::check_sync(&current_block, &block_info);
+                            state
+                                .handle_parameters(params_msg)
+                                .inspect_err(|e| error!("Messaging handling error: {e}"))
+                                .ok();
+                        }
+                        .instrument(span)
+                        .await;
+                    }
+
+                    _ => error!("Unexpected message type: {message:?}"),
+                }
+
                 // Handle epoch activity
                 let (_, message) = ea_message_f.await?;
                 match message.as_ref() {
@@ -220,7 +249,7 @@ impl AccountsState {
                         async {
                             Self::check_sync(&current_block, &block_info);
                             let after_epoch_result = state
-                                .handle_epoch_activity(ea_msg)
+                                .handle_epoch_activity(ea_msg, &verifier)
                                 .await
                                 .inspect_err(|e| error!("EpochActivity handling error: {e:#}"))
                                 .ok();
@@ -242,39 +271,6 @@ impl AccountsState {
                                     error!("Error publishing stake reward deltas: {e:#}")
                                 });
                             }
-                        }
-                        .instrument(span)
-                        .await;
-                    }
-
-                    _ => error!("Unexpected message type: {message:?}"),
-                }
-
-                // Update parameters - *after* reward calculation in the epoch-activity above
-                // ready for the *next* epoch boundary
-                let (_, message) = params_message_f.await?;
-                match message.as_ref() {
-                    Message::Cardano((block_info, CardanoMessage::ProtocolParams(params_msg))) => {
-                        let span = info_span!(
-                            "account_state.handle_parameters",
-                            block = block_info.number
-                        );
-                        async {
-                            Self::check_sync(&current_block, &block_info);
-                            if let Some(ref block) = current_block {
-                                if block.number != block_info.number {
-                                    error!(
-                                        expected = block.number,
-                                        received = block_info.number,
-                                        "Certificate and parameters messages re-ordered!"
-                                    );
-                                }
-                            }
-
-                            state
-                                .handle_parameters(params_msg)
-                                .inspect_err(|e| error!("Messaging handling error: {e}"))
-                                .ok();
                         }
                         .instrument(span)
                         .await;
@@ -465,6 +461,19 @@ impl AccountsState {
             .get_string(DEFAULT_ACCOUNTS_QUERY_TOPIC.0)
             .unwrap_or(DEFAULT_ACCOUNTS_QUERY_TOPIC.1.to_string());
         info!("Creating query handler on '{}'", accounts_query_topic);
+
+        // Create verifier and read comparison data according to config
+        let mut verifier = Verifier::new();
+
+        if let Ok(verify_pots_file) = config.get_string("verify-pots-file") {
+            info!("Verifying pots against '{verify_pots_file}'");
+            verifier.read_pots(&verify_pots_file);
+        }
+
+        if let Ok(verify_rewards_files) = config.get_string("verify-rewards-files") {
+            info!("Verifying rewards against '{verify_rewards_files}'");
+            verifier.read_rewards(&verify_rewards_files);
+        }
 
         // Create history
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
@@ -723,6 +732,7 @@ impl AccountsState {
                 stake_subscription,
                 drep_state_subscription,
                 parameters_subscription,
+                &verifier,
             )
             .await
             .unwrap_or_else(|e| error!("Failed: {e}"));

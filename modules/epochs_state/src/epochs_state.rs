@@ -159,7 +159,9 @@ impl EpochsState {
                     let span = info_span!("epochs_state.handle_mint", block = block_info.number);
                     span.in_scope(|| {
                         if let Some(header) = header.as_ref() {
-                            state.handle_mint(&block_info, header.vrf_vkey());
+                            if let Some(issuer_vkey) = header.issuer_vkey() {
+                                state.handle_mint(&block_info, &issuer_vkey);
+                            }
                         }
                     });
                 }
@@ -319,9 +321,9 @@ impl EpochsState {
                         }
                     }
 
-                    EpochsStateQuery::GetLatestEpochBlocksMintedByPool { vrf_key_hash } => {
+                    EpochsStateQuery::GetLatestEpochBlocksMintedByPool { spo_id } => {
                         EpochsStateQueryResponse::LatestEpochBlocksMintedByPool(
-                            state.get_latest_epoch_blocks_minted_by_pool(vrf_key_hash),
+                            state.get_latest_epoch_blocks_minted_by_pool(spo_id),
                         )
                     }
 
