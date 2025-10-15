@@ -20,7 +20,7 @@ SECTIONS_ALL := --params --governance --pools --accounts --utxo
 .PHONY: help all build test run fmt clippy
 .PHONY: snapshot-summary snapshot-sections-all snapshot-bootstrap
 .PHONY: snap-info snap-inspect snap-metadata snap-boot-data snap-tip snap-utxos snap-count-utxos
-.PHONY: snap-summary snap-sections snap-bootstrap
+.PHONY: snap-summary snap-sections snap-bootstrap snap-test-streaming
 
 help:
 	@echo "Acropolis Makefile Targets:"
@@ -48,6 +48,7 @@ help:
 	@echo "  snap-tip                 Extract tip info from snapshot filename"
 	@echo "  snap-utxos               Parse sample UTXOs from snapshot (use LIMIT to control count)"
 	@echo "  snap-count-utxos         Count ALL UTXOs in snapshot (slow for large files)"
+	@echo "  snap-test-streaming      Test streaming parser with large snapshot (2.4GB)"
 	@echo ""
 	@echo "Variables:"
 	@echo "  SNAPSHOT=<path>          Path to snapshot file (default: Conway epoch 507)"
@@ -164,6 +165,18 @@ snap-count-utxos:
 	@test -f "$(SNAPSHOT)" || (echo "Error: Snapshot file not found: $(SNAPSHOT)"; exit 1)
 	@echo "Note: For large snapshots (11M+ UTXOs), this operation will take several minutes"
 	@ACROPOLIS_SNAPSHOT_ARGS="count-utxos $(SNAPSHOT)" $(CARGO) run --release -p $(PROCESS_PKG)
+
+snap-test-streaming:
+	@echo "Testing Streaming Snapshot Parser"
+	@echo "=================================="
+	@echo "Snapshot: $(SNAPSHOT)"
+	@echo "Size: $$(du -h $(SNAPSHOT) | cut -f1)"
+	@echo ""
+	@test -f "$(SNAPSHOT)" || (echo "Error: Snapshot file not found: $(SNAPSHOT)"; exit 1)
+	@echo "This will parse the entire snapshot and collect all data with callbacks..."
+	@echo "Expected time: ~1-3 minutes for 2.4GB snapshot with 11M UTXOs"
+	@echo ""
+	@$(CARGO) run --release --example test_streaming_parser -- "$(SNAPSHOT)"
 
 # Pattern rule: generate .json manifest from .cbor snapshot
 # Usage: make tests/fixtures/my-snapshot.json
