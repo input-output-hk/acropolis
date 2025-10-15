@@ -148,16 +148,24 @@ pub struct EpochActivityMessage {
     pub epoch: u64,
 
     /// Epoch start time
+    /// UNIX timestamp
     pub epoch_start_time: u64,
 
     /// Epoch end time
+    /// UNIX timestamp
     pub epoch_end_time: u64,
 
-    /// First block time
+    /// When first block of this epoch was created
     pub first_block_time: u64,
 
-    /// Last block time
+    /// Block height of first block of this epoch
+    pub first_block_height: u64,
+
+    /// When last block of this epoch was created
     pub last_block_time: u64,
+
+    /// Block height of last block of this epoch
+    pub last_block_height: u64,
 
     /// Total blocks in this epoch
     pub total_blocks: usize,
@@ -171,9 +179,8 @@ pub struct EpochActivityMessage {
     /// Total fees in this epoch
     pub total_fees: u64,
 
-    /// List of all VRF vkey hashes used on blocks (SPO indicator) and
-    /// number of blocks produced
-    pub vrf_vkey_hashes: Vec<(KeyHash, usize)>,
+    /// Map of SPO IDs to blocks produced
+    pub spo_blocks: Vec<(KeyHash, usize)>,
 
     /// Nonce
     pub nonce: Option<NonceHash>,

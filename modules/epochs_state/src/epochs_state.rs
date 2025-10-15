@@ -4,8 +4,8 @@
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::epochs::{
-        EpochInfo, EpochsStateQuery, EpochsStateQueryResponse, LatestEpoch,
-        DEFAULT_EPOCHS_QUERY_TOPIC,
+        EpochInfo, EpochsStateQuery, EpochsStateQueryResponse, LatestEpoch, NextEpochs,
+        PreviousEpochs, DEFAULT_EPOCHS_QUERY_TOPIC,
     },
     state_history::{StateHistory, StateHistoryStore},
     BlockInfo, BlockStatus, Era,
@@ -159,7 +159,9 @@ impl EpochsState {
                     let span = info_span!("epochs_state.handle_mint", block = block_info.number);
                     span.in_scope(|| {
                         if let Some(header) = header.as_ref() {
-                            state.handle_mint(&block_info, header.vrf_vkey());
+                            if let Some(issuer_vkey) = header.issuer_vkey() {
+                                state.handle_mint(&block_info, &issuer_vkey);
+                            }
                         }
                     });
                 }
@@ -281,9 +283,47 @@ impl EpochsState {
                         }
                     }
 
-                    EpochsStateQuery::GetLatestEpochBlocksMintedByPool { vrf_key_hash } => {
+                    EpochsStateQuery::GetNextEpochs { epoch_number } => {
+                        let current_epoch = state.get_epoch_info();
+                        if *epoch_number > current_epoch.epoch {
+                            EpochsStateQueryResponse::NotFound
+                        } else {
+                            match epochs_history.get_next_epochs(*epoch_number) {
+                                Ok(mut epochs) => {
+                                    // check the current epoch also
+                                    if current_epoch.epoch > *epoch_number {
+                                        epochs.push(current_epoch);
+                                    }
+                                    EpochsStateQueryResponse::NextEpochs(NextEpochs { epochs })
+                                }
+                                Err(_) => EpochsStateQueryResponse::Error(
+                                    "Historical epoch storage is disabled".to_string(),
+                                ),
+                            }
+                        }
+                    }
+
+                    EpochsStateQuery::GetPreviousEpochs { epoch_number } => {
+                        let current_epoch = state.get_epoch_info();
+                        if *epoch_number > current_epoch.epoch {
+                            EpochsStateQueryResponse::NotFound
+                        } else {
+                            match epochs_history.get_previous_epochs(*epoch_number) {
+                                Ok(epochs) => {
+                                    EpochsStateQueryResponse::PreviousEpochs(PreviousEpochs {
+                                        epochs,
+                                    })
+                                }
+                                Err(_) => EpochsStateQueryResponse::Error(
+                                    "Historical epoch storage is disabled".to_string(),
+                                ),
+                            }
+                        }
+                    }
+
+                    EpochsStateQuery::GetLatestEpochBlocksMintedByPool { spo_id } => {
                         EpochsStateQueryResponse::LatestEpochBlocksMintedByPool(
-                            state.get_latest_epoch_blocks_minted_by_pool(vrf_key_hash),
+                            state.get_latest_epoch_blocks_minted_by_pool(spo_id),
                         )
                     }
 

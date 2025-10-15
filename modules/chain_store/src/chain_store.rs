@@ -2,7 +2,7 @@ mod stores;
 
 use acropolis_codec::{block::map_to_block_issuer, map_parameters};
 use acropolis_common::{
-    crypto::keyhash,
+    crypto::keyhash_224,
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::blocks::{
         BlockHashes, BlockInfo, BlockInvolvedAddress, BlockInvolvedAddresses, BlockKey,
@@ -390,7 +390,7 @@ impl ChainStore {
                 ),
                 _ => (None, None),
             };
-            let op_cert = op_cert_hot_vkey.map(|vkey| keyhash(vkey));
+            let op_cert = op_cert_hot_vkey.map(|vkey| keyhash_224(vkey));
 
             block_info.push(BlockInfo {
                 timestamp: block.extra.timestamp,
