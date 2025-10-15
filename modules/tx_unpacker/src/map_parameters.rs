@@ -804,8 +804,7 @@ pub fn map_governance_proposals_procedures(
 ) -> Result<ProposalProcedure> {
     Ok(ProposalProcedure {
         deposit: prop.deposit,
-        reward_account: StakeAddress::from_binary(&prop.reward_account)
-            .expect("Failed to convert reward account"),
+        reward_account: StakeAddress::from_binary(&prop.reward_account)?,
         gov_action_id: gov_action_id.clone(),
         gov_action: map_governance_action(&prop.gov_action)?,
         anchor: map_anchor(&prop.anchor),
