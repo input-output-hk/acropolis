@@ -1,6 +1,6 @@
 //! 'main' for the Acropolis omnibus process
 
-use acropolis_common::{messages::Message, snapshot};
+use acropolis_common::messages::Message;
 use anyhow::Result;
 use caryatid_process::Process;
 use config::{Config, Environment, File};
@@ -73,96 +73,9 @@ pub async fn main() -> Result<()> {
 
     info!("Acropolis omnibus process");
 
-    // Snapshot CLI: if ACROPOLIS_SNAPSHOT_ARGS is provided, run in CLI mode and exit.
-    if let Some(args) = std::env::var_os("ACROPOLIS_SNAPSHOT_ARGS") {
-        let args = args.to_string_lossy().to_string();
-        let mut it = args.split_whitespace();
-        let cmd = it.next().unwrap_or("");
-        let path_arg = it.next().unwrap_or("");
-        let path = std::path::Path::new(path_arg);
-        match cmd {
-            "summary" => match snapshot::snapshot_summary(path) {
-                Ok(out) => {
-                    println!("{}", out);
-                    return Ok(());
-                }
-                Err(e) => {
-                    eprintln!("error: {}", e);
-                    std::process::exit(2);
-                }
-            },
-            "sections" => {
-                let mut sections = vec![];
-                for flag in it {
-                    match flag {
-                        "--params" => sections.push(snapshot::Section::Params),
-                        "--governance" => sections.push(snapshot::Section::Governance),
-                        "--pools" => sections.push(snapshot::Section::Pools),
-                        "--accounts" => sections.push(snapshot::Section::Accounts),
-                        "--utxo" => sections.push(snapshot::Section::Utxo),
-                        _ => {}
-                    }
-                }
-                match snapshot::snapshot_sections(path, &sections) {
-                    Ok(out) => {
-                        println!("{}", out);
-                        return Ok(());
-                    }
-                    Err(e) => {
-                        eprintln!("error: {}", e);
-                        std::process::exit(2);
-                    }
-                }
-            }
-            "bootstrap" => match snapshot::snapshot_bootstrap(path) {
-                Ok(()) => return Ok(()),
-                Err(e) => {
-                    eprintln!("error: {}", e);
-                    std::process::exit(2);
-                }
-            },
-            "utxos" => {
-                // Parse optional limit argument
-                let limit = it.next().and_then(|s| s.parse::<usize>().ok()).unwrap_or(10);
-                match snapshot::snapshot_utxos(path, limit) {
-                    Ok(out) => {
-                        println!("{}", out);
-                        return Ok(());
-                    }
-                    Err(e) => {
-                        eprintln!("error: {}", e);
-                        std::process::exit(2);
-                    }
-                }
-            }
-            "tip" => match snapshot::snapshot_tip(path) {
-                Ok(out) => {
-                    println!("{}", out);
-                    return Ok(());
-                }
-                Err(e) => {
-                    eprintln!("error: {}", e);
-                    std::process::exit(2);
-                }
-            },
-            "count-utxos" => match snapshot::snapshot_count_utxos(path) {
-                Ok(out) => {
-                    println!("{}", out);
-                    return Ok(());
-                }
-                Err(e) => {
-                    eprintln!("error: {}", e);
-                    std::process::exit(2);
-                }
-            },
-            _ => {
-                eprintln!(
-                    "unknown snapshot command; expected 'summary', 'sections', 'bootstrap', 'utxos', 'count-utxos', or 'tip'"
-                );
-                std::process::exit(2);
-            }
-        }
-    }
+    // Note: Snapshot CLI commands have been removed in favor of using the streaming parser
+    // directly via examples/test_streaming_parser.rs
+    // Use: cargo run --example test_streaming_parser -- <snapshot_path>
 
     // Read the config
     let config = Arc::new(
