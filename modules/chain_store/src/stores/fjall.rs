@@ -1,0 +1,377 @@
+use std::{fs, path::Path, sync::Arc};
+
+use acropolis_common::{BlockInfo, TxHash};
+use anyhow::Result;
+use config::Config;
+use fjall::{Batch, Keyspace, Partition};
+
+use crate::stores::{Block, ExtraBlockData};
+
+pub struct FjallStore {
+    keyspace: Keyspace,
+    blocks: FjallBlockStore,
+    txs: FjallTXStore,
+}
+
+const DEFAULT_DATABASE_PATH: &str = "fjall-blocks";
+const DEFAULT_CLEAR_ON_START: bool = true;
+const BLOCKS_PARTITION: &str = "blocks";
+const BLOCK_HASHES_BY_SLOT_PARTITION: &str = "block-hashes-by-slot";
+const BLOCK_HASHES_BY_NUMBER_PARTITION: &str = "block-hashes-by-number";
+const BLOCK_HASHES_BY_EPOCH_SLOT_PARTITION: &str = "block-hashes-by-epoch-slot";
+const TXS_PARTITION: &str = "txs";
+
+impl FjallStore {
+    pub fn new(config: Arc<Config>) -> Result<Self> {
+        let path = config.get_string("database-path").unwrap_or(DEFAULT_DATABASE_PATH.to_string());
+        let clear = config.get_bool("clear-on-start").unwrap_or(DEFAULT_CLEAR_ON_START);
+        let path = Path::new(&path);
+        if clear && path.exists() {
+            fs::remove_dir_all(path)?;
+        }
+        let fjall_config = fjall::Config::new(path);
+        let keyspace = fjall_config.open()?;
+        let blocks = FjallBlockStore::new(&keyspace)?;
+        let txs = FjallTXStore::new(&keyspace)?;
+        Ok(Self {
+            keyspace,
+            blocks,
+            txs,
+        })
+    }
+}
+
+impl super::Store for FjallStore {
+    fn insert_block(&self, info: &BlockInfo, block: &[u8]) -> Result<()> {
+        let extra = ExtraBlockData {
+            epoch: info.epoch,
+            epoch_slot: info.epoch_slot,
+            timestamp: info.timestamp,
+        };
+        let tx_hashes = super::extract_tx_hashes(block)?;
+        let raw = Block {
+            bytes: block.to_vec(),
+            extra,
+        };
+
+        let mut batch = self.keyspace.batch();
+        self.blocks.insert(&mut batch, info, &raw);
+        for (index, hash) in tx_hashes.iter().enumerate() {
+            let tx_ref = StoredTransaction::BlockReference {
+                block_hash: info.hash.to_vec(),
+                index,
+            };
+            self.txs.insert_tx(&mut batch, *hash, tx_ref);
+        }
+
+        batch.commit()?;
+
+        Ok(())
+    }
+
+    fn get_block_by_hash(&self, hash: &[u8]) -> Result<Option<Block>> {
+        self.blocks.get_by_hash(hash)
+    }
+
+    fn get_block_by_slot(&self, slot: u64) -> Result<Option<Block>> {
+        self.blocks.get_by_slot(slot)
+    }
+
+    fn get_block_by_number(&self, number: u64) -> Result<Option<Block>> {
+        self.blocks.get_by_number(number)
+    }
+
+    fn get_blocks_by_number_range(&self, min_number: u64, max_number: u64) -> Result<Vec<Block>> {
+        self.blocks.get_by_number_range(min_number, max_number)
+    }
+
+    fn get_block_by_epoch_slot(&self, epoch: u64, epoch_slot: u64) -> Result<Option<Block>> {
+        self.blocks.get_by_epoch_slot(epoch, epoch_slot)
+    }
+
+    fn get_latest_block(&self) -> Result<Option<Block>> {
+        self.blocks.get_latest()
+    }
+}
+
+struct FjallBlockStore {
+    blocks: Partition,
+    block_hashes_by_slot: Partition,
+    block_hashes_by_number: Partition,
+    block_hashes_by_epoch_slot: Partition,
+}
+
+impl FjallBlockStore {
+    fn new(keyspace: &Keyspace) -> Result<Self> {
+        let blocks =
+            keyspace.open_partition(BLOCKS_PARTITION, fjall::PartitionCreateOptions::default())?;
+        let block_hashes_by_slot = keyspace.open_partition(
+            BLOCK_HASHES_BY_SLOT_PARTITION,
+            fjall::PartitionCreateOptions::default(),
+        )?;
+        let block_hashes_by_number = keyspace.open_partition(
+            BLOCK_HASHES_BY_NUMBER_PARTITION,
+            fjall::PartitionCreateOptions::default(),
+        )?;
+        let block_hashes_by_epoch_slot = keyspace.open_partition(
+            BLOCK_HASHES_BY_EPOCH_SLOT_PARTITION,
+            fjall::PartitionCreateOptions::default(),
+        )?;
+        Ok(Self {
+            blocks,
+            block_hashes_by_slot,
+            block_hashes_by_number,
+            block_hashes_by_epoch_slot,
+        })
+    }
+
+    fn insert(&self, batch: &mut Batch, info: &BlockInfo, raw: &Block) {
+        let encoded = {
+            let mut bytes = vec![];
+            minicbor::encode(raw, &mut bytes).expect("infallible");
+            bytes
+        };
+        batch.insert(&self.blocks, &*info.hash, encoded);
+        batch.insert(
+            &self.block_hashes_by_slot,
+            info.slot.to_be_bytes(),
+            &*info.hash,
+        );
+        batch.insert(
+            &self.block_hashes_by_number,
+            info.number.to_be_bytes(),
+            &*info.hash,
+        );
+        batch.insert(
+            &self.block_hashes_by_epoch_slot,
+            epoch_slot_key(info.epoch, info.epoch_slot),
+            &*info.hash,
+        );
+    }
+
+    fn get_by_hash(&self, hash: &[u8]) -> Result<Option<Block>> {
+        let Some(block) = self.blocks.get(hash)? else {
+            return Ok(None);
+        };
+        Ok(minicbor::decode(&block)?)
+    }
+
+    fn get_by_slot(&self, slot: u64) -> Result<Option<Block>> {
+        let Some(hash) = self.block_hashes_by_slot.get(slot.to_be_bytes())? else {
+            return Ok(None);
+        };
+        self.get_by_hash(&hash)
+    }
+
+    fn get_by_number(&self, number: u64) -> Result<Option<Block>> {
+        let Some(hash) = self.block_hashes_by_number.get(number.to_be_bytes())? else {
+            return Ok(None);
+        };
+        self.get_by_hash(&hash)
+    }
+
+    fn get_by_number_range(&self, min_number: u64, max_number: u64) -> Result<Vec<Block>> {
+        let min_number_bytes = min_number.to_be_bytes();
+        let max_number_bytes = max_number.to_be_bytes();
+        let mut hashes = vec![];
+        for res in self.block_hashes_by_number.range(min_number_bytes..=max_number_bytes) {
+            let (_, hash) = res?;
+            hashes.push(hash);
+        }
+
+        let mut blocks = vec![];
+        for hash in hashes {
+            if let Some(block) = self.get_by_hash(&hash)? {
+                blocks.push(block);
+            }
+        }
+        Ok(blocks)
+    }
+
+    fn get_by_epoch_slot(&self, epoch: u64, epoch_slot: u64) -> Result<Option<Block>> {
+        let Some(hash) = self.block_hashes_by_epoch_slot.get(epoch_slot_key(epoch, epoch_slot))?
+        else {
+            return Ok(None);
+        };
+        self.get_by_hash(&hash)
+    }
+
+    fn get_latest(&self) -> Result<Option<Block>> {
+        let Some((_, hash)) = self.block_hashes_by_slot.last_key_value()? else {
+            return Ok(None);
+        };
+        self.get_by_hash(&hash)
+    }
+}
+
+fn epoch_slot_key(epoch: u64, epoch_slot: u64) -> [u8; 16] {
+    let mut key = [0; 16];
+    key[..8].copy_from_slice(epoch.to_be_bytes().as_slice());
+    key[8..].copy_from_slice(epoch_slot.to_be_bytes().as_slice());
+    key
+}
+
+struct FjallTXStore {
+    txs: Partition,
+}
+impl FjallTXStore {
+    fn new(keyspace: &Keyspace) -> Result<Self> {
+        let txs =
+            keyspace.open_partition(TXS_PARTITION, fjall::PartitionCreateOptions::default())?;
+        Ok(Self { txs })
+    }
+
+    fn insert_tx(&self, batch: &mut Batch, hash: TxHash, tx: StoredTransaction) {
+        let bytes = minicbor::to_vec(tx).expect("infallible");
+        batch.insert(&self.txs, hash.as_ref(), bytes);
+    }
+}
+
+#[derive(minicbor::Decode, minicbor::Encode)]
+enum StoredTransaction {
+    #[n(0)]
+    BlockReference {
+        #[n(0)]
+        block_hash: Vec<u8>,
+        #[n(1)]
+        index: usize,
+    },
+    #[n(1)]
+    Inline {
+        #[n(0)]
+        bytes: Vec<u8>,
+    },
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::stores::Store;
+
+    use super::*;
+    use acropolis_common::BlockHash;
+    use pallas_traverse::{wellknown::GenesisValues, MultiEraBlock};
+    use tempfile::TempDir;
+
+    const TEST_BLOCK: &str = "820785828a1a0010afaa1a0150d7925820a22f65265e7a71cfc3b637d6aefe8f8241d562f5b1b787ff36697ae4c3886f185820e856c84a3d90c8526891bd58d957afadc522de37b14ae04c395db8a7a1b08c4a582015587d5633be324f8de97168399ab59d7113f0a74bc7412b81f7cc1007491671825840af9ff8cb146880eba1b12beb72d86be46fbc98f6b88110cd009bd6746d255a14bb0637e3a29b7204bff28236c1b9f73e501fed1eb5634bd741be120332d25e5e5850a9f1de24d01ba43b025a3351b25de50cc77f931ed8cdd0be632ad1a437ec9cf327b24eb976f91dbf68526f15bacdf8f0c1ea4a2072df9412796b34836a816760f4909b98c0e76b160d9aec6b2da060071903705820b5858c659096fcc19f2f3baef5fdd6198641a623bd43e792157b5ea3a2ecc85c8458200ca1ec2c1c2af308bd9e7a86eb12d603a26157752f3f71c337781c456e6ed0c90018a558408e554b644a2b25cb5892d07a26c273893829f1650ec33bf6809d953451c519c32cfd48d044cd897a17cdef154d5f5c9b618d9b54f8c49e170082c08c236524098209005901c05a96b747789ef6678b2f4a2a7caca92e270f736e9b621686f95dd1332005102faee21ed50cf6fa6c67e38b33df686c79c91d55f30769f7c964d98aa84cbefe0a808ee6f45faaf9badcc3f746e6a51df1aa979195871fd5ffd91037ea216803be7e7fccbf4c13038c459c7a14906ab57f3306fe155af7877c88866eede7935f642f6a72f1368c33ed5cc7607c995754af787a5af486958edb531c0ae65ce9fdce423ad88925e13ef78700950093ae707bb1100299a66a5bb15137f7ba62132ba1c9b74495aac50e1106bacb5db2bed4592f66b610c2547f485d061c6c149322b0c92bdde644eb672267fdab5533157ff398b9e16dd6a06edfd67151e18a3ac93fc28a51f9a73f8b867f5f432b1d9b5ae454ef63dea7e1a78631cf3fee1ba82db61726701ac5db1c4fee4bb6316768c82c0cdc4ebd58ccc686be882f9608592b3c718e4b5d356982a6b83433fe76d37394eff9f3a8e4773e3bab9a8b93b4ea90fa33bfbcf0dc5a21bfe64be2eefaa82c0494ab729e50596110f60ae9ad64b3eb9ddb54001b03cc264b65634c071d3b24a44322f39a9eae239fd886db8d429969433cb2d0a82d7877f174b0e154262f1af44ce5bc053b62daadd2926f957440ff3981a600d9010281825820af09d312a642fecb47da719156517bec678469c15789bcf002ce2ef563edf54200018182581d6052e63f22c5107ed776b70f7b92248b02552fd08f3e747bc745099441821b00000001373049f4a1581c34250edd1e9836f5378702fbf9416b709bc140e04f668cc355208518a1494154414441636f696e1953a6021a000306b5031a01525e0209a1581c34250edd1e9836f5378702fbf9416b709bc140e04f668cc355208518a1494154414441636f696e010758206cf243cc513691d9edc092b1030c6d1e5f9a8621a4d4383032b3d292d4679d5c81a200d90102828258201287e9ce9e00a603d250b557146aa0581fc4edf277a244ce39d3b2f2ced5072f5840d40fbe736892d8dab09e864a25f2e59fb7bfe445d960bbace30996965dc12a34c59746febf9d32ade65b6a9e1a1a6efc53830a3acaab699972cd4f240c024c0f825820742d8af3543349b5b18f3cba28f23b2d6e465b9c136c42e1fae6b2390f565427584005637b5645784bd998bb8ed837021d520200211fdd958b9a4d4b3af128fa6e695fb86abad7a9ddad6f1db946f8b812113fa16cfb7025e2397277b14e8c9bed0a01d90102818200581c45d70e54f3b5e9c5a2b0cd417028197bd6f5fa5378c2f5eba896678da100d90103a100a11902a2a1636d73678f78264175746f2d4c6f6f702d5472616e73616374696f6e202336323733363820627920415441444160783c4c6976652045706f6368203235352c207765206861766520303131682035396d20323573206c65667420756e74696c20746865206e657874206f6e6578344974277320536f6e6e746167202d20323520466562727561722032303234202d2031333a33303a333520696e20417573747269616060607820412072616e646f6d205a656e2d51756f746520666f7220796f753a20f09f998f78344974206973206e6576657220746f6f206c61746520746f206265207768617420796f75206d696768742068617665206265656e2e6f202d2047656f72676520456c696f746078374e6f64652d5265766973696f6e3a203462623230343864623737643632336565366533363738363138633264386236633436373633333360782953616e63686f4e657420697320617765736f6d652c206861766520736f6d652066756e2120f09f988d7819204265737420726567617264732c204d617274696e203a2d2980";
+
+    fn test_block_info(bytes: &[u8]) -> BlockInfo {
+        let block = MultiEraBlock::decode(bytes).unwrap();
+        let genesis = GenesisValues::mainnet();
+        let (epoch, epoch_slot) = block.epoch(&genesis);
+        let timestamp = block.wallclock(&genesis);
+        BlockInfo {
+            status: acropolis_common::BlockStatus::Immutable,
+            slot: block.slot(),
+            number: block.number(),
+            hash: BlockHash(*block.hash()),
+            epoch,
+            epoch_slot,
+            new_epoch: false,
+            timestamp,
+            era: acropolis_common::Era::Conway,
+        }
+    }
+
+    fn test_block_bytes() -> Vec<u8> {
+        hex::decode(TEST_BLOCK).unwrap()
+    }
+
+    fn build_block(info: &BlockInfo, bytes: &[u8]) -> Block {
+        let extra = ExtraBlockData {
+            epoch: info.epoch,
+            epoch_slot: info.epoch_slot,
+            timestamp: info.timestamp,
+        };
+        Block {
+            bytes: bytes.to_vec(),
+            extra,
+        }
+    }
+
+    struct TestState {
+        #[expect(unused)]
+        dir: TempDir,
+        store: FjallStore,
+    }
+
+    fn init_state() -> TestState {
+        let dir = tempfile::tempdir().unwrap();
+        let dir_name = dir.path().to_str().expect("dir_name cannot be stored as string");
+        let config =
+            Config::builder().set_default("database-path", dir_name).unwrap().build().unwrap();
+        let store = FjallStore::new(Arc::new(config)).unwrap();
+        TestState { dir, store }
+    }
+
+    #[test]
+    fn should_get_block_by_hash() {
+        let state = init_state();
+        let bytes = test_block_bytes();
+        let info = test_block_info(&bytes);
+        let block = build_block(&info, &bytes);
+
+        state.store.insert_block(&info, &bytes).unwrap();
+
+        let new_block = state.store.get_block_by_hash(&info.hash.as_ref()).unwrap();
+        assert_eq!(block, new_block.unwrap());
+    }
+
+    #[test]
+    fn should_not_error_when_block_not_found() {
+        let state = init_state();
+        let new_block = state.store.get_block_by_hash(&[0xfa, 0x15, 0xe]).unwrap();
+        assert_eq!(new_block, None);
+    }
+
+    #[test]
+    fn should_get_block_by_slot() {
+        let state = init_state();
+        let bytes = test_block_bytes();
+        let info = test_block_info(&bytes);
+        let block = build_block(&info, &bytes);
+
+        state.store.insert_block(&info, &bytes).unwrap();
+
+        let new_block = state.store.get_block_by_slot(info.slot).unwrap();
+        assert_eq!(block, new_block.unwrap());
+    }
+
+    #[test]
+    fn should_get_block_by_number() {
+        let state = init_state();
+        let bytes = test_block_bytes();
+        let info = test_block_info(&bytes);
+        let block = build_block(&info, &bytes);
+
+        state.store.insert_block(&info, &bytes).unwrap();
+
+        let new_block = state.store.get_block_by_number(info.number).unwrap();
+        assert_eq!(block, new_block.unwrap());
+    }
+
+    #[test]
+    fn should_get_block_by_epoch_slot() {
+        let state = init_state();
+        let bytes = test_block_bytes();
+        let info = test_block_info(&bytes);
+        let block = build_block(&info, &bytes);
+
+        state.store.insert_block(&info, &bytes).unwrap();
+
+        let new_block = state.store.get_block_by_epoch_slot(info.epoch, info.epoch_slot).unwrap();
+        assert_eq!(block, new_block.unwrap());
+    }
+
+    #[test]
+    fn should_get_latest_block() {
+        let state = init_state();
+        let bytes = test_block_bytes();
+        let info = test_block_info(&bytes);
+        let block = build_block(&info, &bytes);
+
+        state.store.insert_block(&info, &bytes).unwrap();
+
+        let new_block = state.store.get_latest_block().unwrap();
+        assert_eq!(block, new_block.unwrap());
+    }
+}

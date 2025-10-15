@@ -1,13 +1,16 @@
 use crate::{
     genesis_values::GenesisValues,
     rational_number::{ChameleonFraction, RationalNumber},
-    BlockVersionData, Committee, Constitution, CostModel, DRepVotingThresholds, Era, ExUnitPrices,
-    ExUnits, NetworkId, PoolVotingThresholds, ProtocolConsts,
+    BlockHash, BlockVersionData, Committee, Constitution, CostModel, DRepVotingThresholds, Era,
+    ExUnitPrices, ExUnits, GenesisDelegate, HeavyDelegate, NetworkId, PoolVotingThresholds,
+    ProtocolConsts,
 };
 use anyhow::Result;
 use blake2::{digest::consts::U32, Blake2b, Digest};
 use chrono::{DateTime, Utc};
-use serde_with::serde_as;
+use serde_with::{hex::Hex, serde_as};
+use std::collections::HashMap;
+use std::ops::Deref;
 
 #[derive(Debug, Default, PartialEq, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtocolParams {
@@ -28,6 +31,7 @@ pub struct ByronParams {
     pub fts_seed: Option<Vec<u8>>,
     pub protocol_consts: ProtocolConsts,
     pub start_time: u64,
+    pub heavy_delegation: HashMap<Vec<u8>, HeavyDelegate>,
 }
 
 //
@@ -122,6 +126,9 @@ pub struct ShelleyParams {
     pub slots_per_kes_period: u32,
     pub system_start: DateTime<Utc>,
     pub update_quorum: u32,
+
+    #[serde_as(as = "HashMap<Hex, _>")]
+    pub gen_delegs: HashMap<Vec<u8>, GenesisDelegate>,
 }
 
 #[serde_as]
@@ -260,6 +267,15 @@ impl From<NonceHash> for Nonce {
         Self {
             tag: NonceVariant::Nonce,
             hash: Some(hash),
+        }
+    }
+}
+
+impl From<BlockHash> for Nonce {
+    fn from(hash: BlockHash) -> Self {
+        Self {
+            tag: NonceVariant::Nonce,
+            hash: Some(*hash.deref()),
         }
     }
 }
