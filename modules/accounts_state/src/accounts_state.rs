@@ -475,7 +475,7 @@ impl AccountsState {
             verifier.read_rewards(&verify_rewards_files);
         }
 
-        // Create history
+        // History
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "AccountsState",
             StateHistoryStore::default_block_store(),
@@ -483,10 +483,9 @@ impl AccountsState {
         let history_query = history.clone();
         let history_tick = history.clone();
 
-        // Create spdd history
-        // Return Err if failed to create SPDD store
+        // Spdd store
         let spdd_store = if store_spdd_history {
-            Some(Arc::new(Mutex::new(SPDDStore::new(
+            Some(Arc::new(Mutex::new(SPDDStore::load(
                 std::path::Path::new(&spdd_db_path),
                 spdd_retention_epochs,
             )?)))
@@ -617,20 +616,9 @@ impl AccountsState {
                     }
 
                     AccountsStateQuery::GetSPDDByEpoch { epoch } => match spdd_store_guard {
-                        Some(spdd_store) => match spdd_store.is_epoch_stored(*epoch) {
-                            Some(true) => {
-                                let result = spdd_store.query_by_epoch(*epoch);
-                                match result {
-                                    Ok(result) => AccountsStateQueryResponse::SPDDByEpoch(result),
-                                    Err(e) => AccountsStateQueryResponse::Error(e.to_string()),
-                                }
-                            }
-                            Some(false) => {
-                                AccountsStateQueryResponse::Error("Epoch is too old".to_string())
-                            }
-                            None => AccountsStateQueryResponse::Error(
-                                "SPDD store is not started".to_string(),
-                            ),
+                        Some(spdd_store) => match spdd_store.query_by_epoch(*epoch) {
+                            Ok(result) => AccountsStateQueryResponse::SPDDByEpoch(result),
+                            Err(e) => AccountsStateQueryResponse::Error(e.to_string()),
                         },
                         None => AccountsStateQueryResponse::Error(
                             "SPDD store is not enabled".to_string(),
@@ -639,24 +627,14 @@ impl AccountsState {
 
                     AccountsStateQuery::GetSPDDByEpochAndPool { epoch, pool_id } => {
                         match spdd_store_guard {
-                            Some(spdd_store) => match spdd_store.is_epoch_stored(*epoch) {
-                                Some(true) => {
-                                    let result =
-                                        spdd_store.query_by_epoch_and_pool(*epoch, pool_id);
-                                    match result {
-                                        Ok(result) => {
-                                            AccountsStateQueryResponse::SPDDByEpochAndPool(result)
-                                        }
-                                        Err(e) => AccountsStateQueryResponse::Error(e.to_string()),
+                            Some(spdd_store) => {
+                                match spdd_store.query_by_epoch_and_pool(*epoch, pool_id) {
+                                    Ok(result) => {
+                                        AccountsStateQueryResponse::SPDDByEpochAndPool(result)
                                     }
+                                    Err(e) => AccountsStateQueryResponse::Error(e.to_string()),
                                 }
-                                Some(false) => AccountsStateQueryResponse::Error(
-                                    "Epoch is too old".to_string(),
-                                ),
-                                None => AccountsStateQueryResponse::Error(
-                                    "SPDD store is not started".to_string(),
-                                ),
-                            },
+                            }
                             None => AccountsStateQueryResponse::Error(
                                 "SPDD store is not enabled".to_string(),
                             ),
