@@ -17,8 +17,8 @@ pub mod snapshot;
 pub use error::SnapshotError;
 pub use parser::{compute_sha256, parse_manifest, validate_era, validate_integrity};
 pub use snapshot::{
-    estimate_block_height_from_slot, extract_tip_from_filename, AmaruSnapshot, EpochStateMetadata,
-    SnapshotData, TipInfo, UtxoEntry,
+    estimate_block_height_from_slot, extract_tip_from_filename, parse_all_utxos, AmaruSnapshot,
+    EpochStateMetadata, SnapshotData, TipInfo, UtxoEntry,
 };
 
 use anyhow::{bail, Result};
@@ -120,9 +120,9 @@ pub fn snapshot_sections(path: &Path, sections: &[Section]) -> Result<String> {
                 lines.push(format!("accounts: {}", data.stake_accounts));
             }
             Section::Utxo => {
-                // For UTXO count, we could use count_ledger_state_utxos,
-                // but it's slow. For now, just indicate it's available.
-                lines.push("utxo: (count available via parse_all_utxos)".to_string());
+                // Note: Counting all UTXOs is slow for large snapshots (11M+ entries)
+                // For full count, use the dedicated 'count-utxos' command
+                lines.push("utxo: (use 'count-utxos' command for full count, 'utxos' command for sample)".to_string());
             }
         }
     }
@@ -222,6 +222,34 @@ pub fn snapshot_tip(path: &Path) -> Result<String> {
         "  Estimated Block Height: {}\n",
         estimate_block_height_from_slot(tip.slot)
     ));
+
+    Ok(out)
+}
+
+/// Count all UTXOs in the snapshot
+///
+/// This function uses the streaming parser `parse_all_utxos` to count
+/// all UTXOs in the snapshot without loading them into memory.
+///
+/// **Warning**: For large snapshots (11M+ UTXOs), this operation will take
+/// significant time as it must parse the entire UTXO set. Progress indication
+/// is recommended for production use.
+pub fn snapshot_count_utxos(path: &Path) -> Result<String> {
+    if !path.exists() {
+        bail!("snapshot file not found: {}", path.display());
+    }
+
+    let path_str = path.to_str().ok_or_else(|| anyhow::anyhow!("invalid path"))?;
+
+    println!("Counting UTXOs (this may take a while for large snapshots)...");
+
+    // Use streaming parser with a counting callback
+    let count = parse_all_utxos(path_str, |_tx_hash, _idx, _addr, _value| Ok(()))
+        .map_err(|e| anyhow::anyhow!("failed to count UTXOs: {}", e))?;
+
+    let mut out = String::new();
+    out.push_str(&format!("Snapshot: {}\n", path.display()));
+    out.push_str(&format!("Total UTXOs: {}\n", count));
 
     Ok(out)
 }

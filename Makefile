@@ -19,7 +19,7 @@ SECTIONS_ALL := --params --governance --pools --accounts --utxo
 
 .PHONY: help all build test run fmt clippy
 .PHONY: snapshot-summary snapshot-sections-all snapshot-bootstrap
-.PHONY: snap-info snap-inspect snap-metadata snap-boot-data snap-tip snap-utxos
+.PHONY: snap-info snap-inspect snap-metadata snap-boot-data snap-tip snap-utxos snap-count-utxos
 .PHONY: snap-summary snap-sections snap-bootstrap
 
 help:
@@ -46,7 +46,8 @@ help:
 	@echo "  snap-metadata            Extract metadata (epoch, file size, UTXO count)"
 	@echo "  snap-boot-data           Extract boot data (epoch, treasury, reserves, counts)"
 	@echo "  snap-tip                 Extract tip info from snapshot filename"
-	@echo "  snap-utxos               Parse UTXOs from snapshot (use LIMIT to control count)"
+	@echo "  snap-utxos               Parse sample UTXOs from snapshot (use LIMIT to control count)"
+	@echo "  snap-count-utxos         Count ALL UTXOs in snapshot (slow for large files)"
 	@echo ""
 	@echo "Variables:"
 	@echo "  SNAPSHOT=<path>          Path to snapshot file (default: Conway epoch 507)"
@@ -155,6 +156,14 @@ snap-utxos:
 	@echo ""
 	@test -f "$(SNAPSHOT)" || (echo "Error: Snapshot file not found: $(SNAPSHOT)"; exit 1)
 	@ACROPOLIS_SNAPSHOT_ARGS="utxos $(SNAPSHOT) $${LIMIT:-10}" $(CARGO) run --release -p $(PROCESS_PKG)
+
+snap-count-utxos:
+	@echo "Counting ALL UTXOs in snapshot (this may take a while)..."
+	@echo "Snapshot: $(SNAPSHOT)"
+	@echo ""
+	@test -f "$(SNAPSHOT)" || (echo "Error: Snapshot file not found: $(SNAPSHOT)"; exit 1)
+	@echo "Note: For large snapshots (11M+ UTXOs), this operation will take several minutes"
+	@ACROPOLIS_SNAPSHOT_ARGS="count-utxos $(SNAPSHOT)" $(CARGO) run --release -p $(PROCESS_PKG)
 
 # Pattern rule: generate .json manifest from .cbor snapshot
 # Usage: make tests/fixtures/my-snapshot.json

@@ -748,6 +748,8 @@ where
 ///
 /// This is a lightweight extraction that reads only the necessary fields
 /// without parsing the full UTXO set.
+/// 
+/// See docs/amaru-snapshot-structure.md
 ///
 /// Navigation path through the structure:
 /// - [0] Epoch number
@@ -768,7 +770,7 @@ pub fn extract_boot_data(path: &str) -> Result<SnapshotData, SnapshotError> {
     let metadata = f.metadata().map_err(|e| SnapshotError::IoError(e.to_string()))?;
     let file_size = metadata.len();
 
-    // Read entire file (we need to navigate deep into structure)
+    // Read entire file so we can navigate into all of its structure
     let mut buffer = Vec::new();
     f.read_to_end(&mut buffer).map_err(|e| SnapshotError::IoError(e.to_string()))?;
 
@@ -1111,10 +1113,86 @@ fn parse_transaction_output(dec: &mut Decoder) -> Result<(String, u64), Snapshot
         }
         Type::Map | Type::MapIndef => {
             // Map format (Conway with optional fields)
-            dec.skip().map_err(|e| SnapshotError::Cbor(e))?; // For now, just skip the entire map
-            Err(SnapshotError::StructuralDecode(
-                "map-based TxOut not yet supported".into(),
-            ))
+            // Map keys: 0=address, 1=value, 2=datum, 3=script_ref
+            let map_len = dec.map().map_err(|e| SnapshotError::Cbor(e))?;
+            
+            let mut address = String::new();
+            let mut value = 0u64;
+            let mut found_address = false;
+            let mut found_value = false;
+
+            let entries = map_len.unwrap_or(4); // Assume max 4 entries if indefinite
+            for _ in 0..entries {
+                // Check for break in indefinite map
+                if map_len.is_none() && matches!(dec.datatype(), Ok(Type::Break)) {
+                    dec.skip().ok(); // consume break
+                    break;
+                }
+
+                // Read key
+                let key = match dec.u32() {
+                    Ok(k) => k,
+                    Err(_) => {
+                        // Skip both key and value if key is not u32
+                        dec.skip().ok();
+                        dec.skip().ok();
+                        continue;
+                    }
+                };
+
+                // Read value based on key
+                match key {
+                    0 => {
+                        // Address
+                        if let Ok(addr_bytes) = dec.bytes() {
+                            address = hex::encode(addr_bytes);
+                            found_address = true;
+                        } else {
+                            dec.skip().ok();
+                        }
+                    }
+                    1 => {
+                        // Value (coin or multi-asset)
+                        match dec.datatype() {
+                            Ok(Type::U8) | Ok(Type::U16) | Ok(Type::U32) | Ok(Type::U64) => {
+                                if let Ok(coin) = dec.u64() {
+                                    value = coin;
+                                    found_value = true;
+                                } else {
+                                    dec.skip().ok();
+                                }
+                            }
+                            Ok(Type::Array) | Ok(Type::ArrayIndef) => {
+                                // Multi-asset: [coin, assets_map]
+                                if dec.array().is_ok() {
+                                    if let Ok(coin) = dec.u64() {
+                                        value = coin;
+                                        found_value = true;
+                                    }
+                                    dec.skip().ok(); // skip assets map
+                                } else {
+                                    dec.skip().ok();
+                                }
+                            }
+                            _ => {
+                                dec.skip().ok();
+                            }
+                        }
+                    }
+                    _ => {
+                        // datum (2), script_ref (3), or unknown - skip
+                        dec.skip().ok();
+                    }
+                }
+            }
+
+            if found_address && found_value {
+                Ok((address, value))
+            } else {
+                Err(SnapshotError::StructuralDecode(
+                    "map-based TxOut missing required fields".into(),
+                ))
+            }
         }
         _ => Err(SnapshotError::StructuralDecode(
             "unexpected TxOut type".into(),

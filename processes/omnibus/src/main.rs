@@ -145,9 +145,19 @@ pub async fn main() -> Result<()> {
                     std::process::exit(2);
                 }
             },
+            "count-utxos" => match snapshot::snapshot_count_utxos(path) {
+                Ok(out) => {
+                    println!("{}", out);
+                    return Ok(());
+                }
+                Err(e) => {
+                    eprintln!("error: {}", e);
+                    std::process::exit(2);
+                }
+            },
             _ => {
                 eprintln!(
-                    "unknown snapshot command; expected 'summary', 'sections', 'bootstrap', 'utxos', or 'tip'"
+                    "unknown snapshot command; expected 'summary', 'sections', 'bootstrap', 'utxos', 'count-utxos', or 'tip'"
                 );
                 std::process::exit(2);
             }
