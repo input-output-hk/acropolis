@@ -95,11 +95,11 @@ impl State {
         // rewards to calculate
         let shelly_params = match &self.protocol_parameters {
             Some(ProtocolParams {
-                     shelley: Some(sp), ..
-                 }) => sp,
+                shelley: Some(sp), ..
+            }) => sp,
             _ => return None,
         }
-            .clone();
+        .clone();
 
         let total_supply =
             shelly_params.max_lovelace_supply - self.rewards_state.mark.pots.reserves;
@@ -218,11 +218,11 @@ impl State {
         // rewards to calculate
         let shelley_params = match &self.protocol_parameters {
             Some(ProtocolParams {
-                     shelley: Some(sp), ..
-                 }) => sp,
+                shelley: Some(sp), ..
+            }) => sp,
             _ => return Ok(vec![]),
         }
-            .clone();
+        .clone();
 
         // Filter the block counts for SPOs that are registered - treating any we don't know
         // as 'OBFT' style (the legacy nodes)
@@ -567,10 +567,10 @@ impl State {
             if let Some(retired_spo) = new_spos.get(id) {
                 let keyhash = retired_spo.reward_account.get_hash();
                 debug!(
-    "SPO {} has retired - refunding their deposit to {}",
-    hex::encode(id),
-    hex::encode(keyhash)
-);
+                    "SPO {} has retired - refunding their deposit to {}",
+                    hex::encode(id),
+                    hex::encode(keyhash)
+                );
                 self.pool_refunds.push(keyhash.to_vec());
 
                 // Remove from our list
@@ -847,10 +847,7 @@ mod tests {
                             numerator: 1,
                             denominator: 20,
                         },
-                        reward_account: StakeAddress {
-                            network: AddressNetwork::Main,
-                            payload: StakeAddressPayload::StakeKeyHash(vec![1, 2, 3, 4])
-                        },
+                        reward_account: StakeAddress::default(),
                         pool_owners: Vec::new(),
                         relays: Vec::new(),
                         pool_metadata: None,
@@ -864,10 +861,7 @@ mod tests {
                             numerator: 1,
                             denominator: 10,
                         },
-                        reward_account: StakeAddress {
-                            network: AddressNetwork::Main,
-                            payload: StakeAddressPayload::StakeKeyHash(vec![1, 2, 3, 4])
-                        },
+                        reward_account: StakeAddress::default(),
                         pool_owners: Vec::new(),
                         relays: Vec::new(),
                         pool_metadata: None,
@@ -1208,7 +1202,7 @@ mod tests {
             DRepDelegationDistribution {
                 abstain: 10_000,
                 no_confidence: 100_000,
-                dreps: vec![(drep_addr_cred, 1_000_100), (drep_script_cred, 2_001_000), ],
+                dreps: vec![(drep_addr_cred, 1_000_100), (drep_script_cred, 2_001_000),],
             }
         );
 
