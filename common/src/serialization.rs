@@ -26,6 +26,13 @@ where
     }
 }
 
+pub trait Bech32Conversion {
+    fn to_bech32(&self) -> Result<String, anyhow::Error>;
+    fn from_bech32(s: &str) -> Result<Self, anyhow::Error>
+    where
+        Self: Sized;
+}
+
 pub trait Bech32WithHrp {
     fn to_bech32_with_hrp(&self, hrp: &str) -> Result<String, anyhow::Error>;
     fn from_bech32_with_hrp(s: &str, expected_hrp: &str) -> Result<Vec<u8>, anyhow::Error>;

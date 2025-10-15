@@ -11,7 +11,7 @@ use acropolis_common::{
     },
     queries::misc::Order,
     state_history::{StateHistory, StateHistoryStore},
-    Address, BlockHash, GenesisDelegate, HeavyDelegate, TxHash,
+    Address, BlockHash, GenesisDelegate, HeavyDelegate, TxHash, VRFKey,
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Module};
@@ -367,7 +367,7 @@ impl ChainStore {
                 tx_count: decoded.tx_count() as u64,
                 output,
                 fees,
-                block_vrf: header.vrf_vkey().map(|key| key.to_vec()),
+                block_vrf: header.vrf_vkey().map(|key| VRFKey::try_from(key).ok().unwrap()),
                 op_cert,
                 op_cert_counter,
                 previous_block: header.previous_hash().map(|h| BlockHash(*h)),
