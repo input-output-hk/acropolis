@@ -1,11 +1,12 @@
 use crate::{
     queries::misc::Order,
     serialization::{Bech32Conversion, Bech32WithHrp},
-    Address, BlockHash, GenesisDelegate, HeavyDelegate, KeyHash, TxHash, VRFKey,
+    Address, BlockHash, GenesisDelegate, HeavyDelegate, KeyHash, TxHash, TxIdentifier, VRFKey,
 };
 use cryptoxide::hashing::blake2b::Blake2b;
 use serde::ser::{Serialize, SerializeStruct, Serializer};
 use serde_with::{hex::Hex, serde_as};
+use std::collections::HashMap;
 
 pub const DEFAULT_BLOCKS_QUERY_TOPIC: (&str, &str) =
     ("blocks-state-query-topic", "cardano.query.blocks");
@@ -60,6 +61,12 @@ pub enum BlocksStateQuery {
         limit: u64,
         skip: u64,
     },
+    GetBlockHashes {
+        block_numbers: Vec<u64>,
+    },
+    GetTransactionHashes {
+        tx_ids: Vec<TxIdentifier>,
+    },
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -81,6 +88,8 @@ pub enum BlocksStateQueryResponse {
     BlockTransactions(BlockTransactions),
     BlockTransactionsCBOR(BlockTransactionsCBOR),
     BlockInvolvedAddresses(BlockInvolvedAddresses),
+    BlockHashes(BlockHashes),
+    TransactionHashes(TransactionHashes),
     NotFound,
     Error(String),
 }
@@ -209,4 +218,14 @@ impl Serialize for BlockInvolvedAddress {
         state.serialize_field("transactions", &self.txs)?;
         state.end()
     }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BlockHashes {
+    pub block_hashes: HashMap<u64, BlockHash>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TransactionHashes {
+    pub tx_hashes: HashMap<TxIdentifier, TxHash>,
 }

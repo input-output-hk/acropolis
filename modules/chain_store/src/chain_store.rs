@@ -5,9 +5,10 @@ use acropolis_common::{
     crypto::keyhash,
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::blocks::{
-        BlockInfo, BlockInvolvedAddress, BlockInvolvedAddresses, BlockKey, BlockTransaction,
-        BlockTransactions, BlockTransactionsCBOR, BlocksStateQuery, BlocksStateQueryResponse,
-        NextBlocks, PreviousBlocks, DEFAULT_BLOCKS_QUERY_TOPIC,
+        BlockHashes, BlockInfo, BlockInvolvedAddress, BlockInvolvedAddresses, BlockKey,
+        BlockTransaction, BlockTransactions, BlockTransactionsCBOR, BlocksStateQuery,
+        BlocksStateQueryResponse, NextBlocks, PreviousBlocks, TransactionHashes,
+        DEFAULT_BLOCKS_QUERY_TOPIC,
     },
     queries::misc::Order,
     state_history::{StateHistory, StateHistoryStore},
@@ -255,6 +256,40 @@ impl ChainStore {
                 let addresses = Self::to_block_involved_addresses(block, limit, skip)?;
                 Ok(BlocksStateQueryResponse::BlockInvolvedAddresses(addresses))
             }
+            BlocksStateQuery::GetBlockHashes { block_numbers } => {
+                let mut block_hashes = HashMap::new();
+                for block_number in block_numbers {
+                    if let Ok(Some(block)) = store.get_block_by_number(*block_number) {
+                        if let Ok(hash) = Self::get_block_hash(&block) {
+                            block_hashes.insert(*block_number, hash);
+                        }
+                    }
+                }
+                Ok(BlocksStateQueryResponse::BlockHashes(BlockHashes {
+                    block_hashes,
+                }))
+            }
+            BlocksStateQuery::GetTransactionHashes { tx_ids } => {
+                let mut block_ids: HashMap<_, Vec<_>> = HashMap::new();
+                for tx_id in tx_ids {
+                    block_ids.entry(tx_id.block_number()).or_default().push(tx_id);
+                }
+                let mut tx_hashes = HashMap::new();
+                for (block_number, tx_ids) in block_ids {
+                    if let Ok(Some(block)) = store.get_block_by_number(block_number.into()) {
+                        for tx_id in tx_ids {
+                            if let Ok(hashes) = Self::to_block_transaction_hashes(&block) {
+                                if let Some(hash) = hashes.get(tx_id.tx_index() as usize) {
+                                    tx_hashes.insert(*tx_id, *hash);
+                                }
+                            }
+                        }
+                    }
+                }
+                Ok(BlocksStateQueryResponse::TransactionHashes(
+                    TransactionHashes { tx_hashes },
+                ))
+            }
         }
     }
 
@@ -267,6 +302,12 @@ impl ChainStore {
 
     fn get_block_number(block: &Block) -> Result<u64> {
         Ok(pallas_traverse::MultiEraBlock::decode(&block.bytes)?.number())
+    }
+
+    fn get_block_hash(block: &Block) -> Result<BlockHash> {
+        Ok(BlockHash(
+            *pallas_traverse::MultiEraBlock::decode(&block.bytes)?.hash(),
+        ))
     }
 
     fn to_block_info(
@@ -380,6 +421,12 @@ impl ChainStore {
 
         block_info.reverse();
         Ok(block_info)
+    }
+
+    fn to_block_transaction_hashes(block: &Block) -> Result<Vec<TxHash>> {
+        let decoded = pallas_traverse::MultiEraBlock::decode(&block.bytes)?;
+        let txs = decoded.txs();
+        Ok(txs.iter().map(|tx| TxHash(*tx.hash())).collect())
     }
 
     fn to_block_transactions(
