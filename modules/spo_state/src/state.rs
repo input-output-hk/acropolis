@@ -679,7 +679,10 @@ impl State {
 mod tests {
     use super::*;
     use crate::test_utils::*;
-    use acropolis_common::{state_history::{StateHistory, StateHistoryStore}, AddressNetwork, PoolRetirement, Ratio, StakeAddress, StakeAddressPayload, TxCertificate, TxHash};
+    use acropolis_common::{
+        state_history::{StateHistory, StateHistoryStore},
+        PoolRetirement, Ratio, StakeAddress, TxCertificate, TxHash,
+    };
     use tokio::sync::Mutex;
 
     #[test]
@@ -718,10 +721,7 @@ mod tests {
                         numerator: 0,
                         denominator: 0,
                     },
-                    reward_account: StakeAddress {
-                        network: AddressNetwork::Main,
-                        payload: StakeAddressPayload::StakeKeyHash(vec![1, 2, 3, 4]),
-                    },
+                    reward_account: StakeAddress::default(),
                     pool_owners: vec![vec![0]],
                     relays: vec![],
                     pool_metadata: None,
@@ -870,10 +870,7 @@ mod tests {
                         numerator: 0,
                         denominator: 0,
                     },
-                    reward_account: StakeAddress {
-                        network: AddressNetwork::Main,
-                        payload: StakeAddressPayload::StakeKeyHash(vec![1, 2, 3, 4]),
-                    },
+                    reward_account: StakeAddress::default(),
                     pool_owners: vec![vec![0]],
                     relays: vec![],
                     pool_metadata: None,
@@ -929,10 +926,7 @@ mod tests {
                         numerator: 0,
                         denominator: 0,
                     },
-                    reward_account: StakeAddress {
-                        network: AddressNetwork::Main,
-                        payload: StakeAddressPayload::StakeKeyHash(vec![1, 2, 3, 4]),
-                    },
+                    reward_account: StakeAddress::default(),
                     pool_owners: vec![vec![0]],
                     relays: vec![],
                     pool_metadata: None,
@@ -1050,10 +1044,7 @@ mod tests {
                         numerator: 0,
                         denominator: 0,
                     },
-                    reward_account: StakeAddress {
-                        network: AddressNetwork::Main,
-                        payload: StakeAddressPayload::StakeKeyHash(vec![1, 2, 3, 4]),
-                    },
+                    reward_account: StakeAddress::default(),
                     pool_owners: vec![vec![0]],
                     relays: vec![],
                     pool_metadata: None,
@@ -1103,10 +1094,7 @@ mod tests {
                         numerator: 0,
                         denominator: 0,
                     },
-                    reward_account: StakeAddress {
-                        network: AddressNetwork::Main,
-                        payload: StakeAddressPayload::StakeKeyHash(vec![1, 2, 3, 4]),
-                    },
+                    reward_account: StakeAddress::default(),
                     pool_owners: vec![vec![0]],
                     relays: vec![],
                     pool_metadata: None,

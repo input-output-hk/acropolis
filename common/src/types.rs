@@ -1746,7 +1746,6 @@ pub struct AssetAddressEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AddressNetwork, StakeAddressPayload};
     use anyhow::Result;
 
     #[test]
@@ -1828,10 +1827,7 @@ mod tests {
 
         let proposal = ProposalProcedure {
             deposit: 9876,
-            reward_account: StakeAddress {
-                network: AddressNetwork::Main,
-                payload: StakeAddressPayload::StakeKeyHash(vec![1, 2, 3, 4]),
-            },
+            reward_account: StakeAddress::default(),
             gov_action_id,
             gov_action,
             anchor: Anchor {
