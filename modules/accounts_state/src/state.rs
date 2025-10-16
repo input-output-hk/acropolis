@@ -139,6 +139,10 @@ impl State {
         self.stake_addresses.lock().unwrap().get(stake_key)
     }
 
+    pub fn active_spos(&self) -> &OrdMap<KeyHash, PoolRegistration> {
+        &self.spos
+    }
+
     /// Get the current pot balances
     pub fn _get_pots(&self) -> Pots {
         self.pots.clone()
@@ -602,7 +606,8 @@ impl State {
     /// Key of returned map is the SPO 'operator' ID
     pub fn generate_spdd(&self) -> BTreeMap<KeyHash, DelegatedStake> {
         let stake_addresses = self.stake_addresses.lock().unwrap();
-        stake_addresses.generate_spdd()
+        let active_spos = self.active_spos();
+        stake_addresses.generate_spdd(active_spos)
     }
 
     /// Derive the DRep Delegation Distribution (SPDD) - the total amount

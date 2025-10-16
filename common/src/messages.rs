@@ -269,10 +269,10 @@ pub struct SPOStateMessage {
     /// Epoch which has ended
     pub epoch: u64,
 
-    /// All active and retiring SPOs
+    /// SPOs that remain active going into the next epoch
     pub spos: Vec<PoolRegistration>,
 
-    /// SPOs in the above list which retired at the start of this epoch, by operator ID
+    /// SPOs which retired at this boundary
     pub retired_spos: Vec<KeyHash>,
 }
 

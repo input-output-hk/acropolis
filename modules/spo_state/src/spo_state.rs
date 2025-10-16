@@ -139,6 +139,26 @@ impl SPOState {
                 }
             };
 
+            // Publish SPO State for the previous epoch on transition
+            if new_epoch {
+                if let Some(block_info) = current_block.as_ref() {
+                    let spo_message = state.handle_new_epoch(&block_info);
+
+                    if let Message::Cardano((
+                        _,
+                        CardanoMessage::SPOState(SPOStateMessage { retired_spos, .. }),
+                    )) = spo_message.as_ref()
+                    {
+                        retired_pools_history.handle_deregistrations(&block_info, retired_spos);
+                    }
+
+                    // 3. Publish SPO state message
+                    if let Err(e) = spo_state_publisher.publish(spo_message).await {
+                        error!("Error publishing SPO State: {e:#}");
+                    }
+                }
+            }
+
             // handle Block Headers (handle_mint) before handle_tx_certs
             // in case of epoch boundary
             let (_, block_headers_message) = block_headers_message_f.await?;
@@ -182,26 +202,11 @@ impl SPOState {
                     let span = info_span!("spo_state.handle_certs", block = block_info.number);
                     async {
                         Self::check_sync(&current_block, &block_info);
-                        let maybe_message = state
+
+                        state
                             .handle_tx_certs(block_info, tx_certs_msg)
-                            .inspect_err(|e| error!("TxCerts Messages handling error: {e}"))
+                            .inspect_err(|e| error!("TxCerts handling error: {e}"))
                             .ok();
-
-                        if let Some(Some(message)) = maybe_message {
-                            if let Message::Cardano((
-                                _,
-                                CardanoMessage::SPOState(SPOStateMessage { retired_spos, .. }),
-                            )) = message.as_ref()
-                            {
-                                retired_pools_history
-                                    .handle_deregistrations(block_info, retired_spos);
-                            }
-
-                            // publish spo message
-                            if let Err(e) = spo_state_publisher.publish(message).await {
-                                error!("Error publishing SPO State: {e:#}")
-                            }
-                        }
                     }
                     .instrument(span)
                     .await;

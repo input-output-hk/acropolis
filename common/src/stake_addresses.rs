@@ -10,11 +10,12 @@ use std::{
 
 use crate::{
     math::update_value_with_delta, messages::DRepDelegationDistribution, DRepChoice,
-    DRepCredential, DelegatedStake, KeyHash, Lovelace, PoolLiveStakeInfo, StakeAddressDelta,
-    StakeCredential, Withdrawal,
+    DRepCredential, DelegatedStake, KeyHash, Lovelace, PoolLiveStakeInfo, PoolRegistration,
+    StakeAddressDelta, StakeCredential, Withdrawal,
 };
 use anyhow::Result;
 use dashmap::DashMap;
+use imbl::OrdMap;
 use rayon::prelude::*;
 use serde_with::{hex::Hex, serde_as};
 use tracing::{error, warn};
@@ -86,17 +87,17 @@ impl StakeAddressMap {
     }
 
     #[inline]
-    pub fn entry(&mut self, stake_key: KeyHash) -> Entry<KeyHash, StakeAddressState> {
+    pub fn entry(&mut self, stake_key: KeyHash) -> Entry<'_, KeyHash, StakeAddressState> {
         self.inner.entry(stake_key)
     }
 
     #[inline]
-    pub fn values(&self) -> Values<KeyHash, StakeAddressState> {
+    pub fn values(&self) -> Values<'_, KeyHash, StakeAddressState> {
         self.inner.values()
     }
 
     #[inline]
-    pub fn iter(&self) -> Iter<KeyHash, StakeAddressState> {
+    pub fn iter(&self) -> Iter<'_, KeyHash, StakeAddressState> {
         self.inner.iter()
     }
 
@@ -280,38 +281,46 @@ impl StakeAddressMap {
     /// (both with and without rewards) for each active SPO
     /// And Stake Pool Reward State (rewards and delegators_count for each pool)
     /// Key of returned map is the SPO 'operator' ID
-    pub fn generate_spdd(&self) -> BTreeMap<KeyHash, DelegatedStake> {
+    pub fn generate_spdd(
+        &self,
+        active_spos: &OrdMap<KeyHash, PoolRegistration>,
+    ) -> BTreeMap<KeyHash, DelegatedStake> {
         // Shareable Dashmap with referenced keys
         let spo_stakes = DashMap::<KeyHash, DelegatedStake>::new();
 
         // Total stake across all addresses in parallel, first collecting into a vector
         // because imbl::OrdMap doesn't work in Rayon
         // Collect the SPO keys and UTXO, reward values
+        // Skips pools which are not not in the active set
         let sas_data: Vec<(KeyHash, (u64, u64))> = self
             .inner
             .values()
             .filter_map(|sas| {
-                sas.delegated_spo.as_ref().map(|spo| (spo.clone(), (sas.utxo_value, sas.rewards)))
+                sas.delegated_spo.as_ref().and_then(|spo| {
+                    if active_spos.contains_key(spo) {
+                        Some((spo.clone(), (sas.utxo_value, sas.rewards)))
+                    } else {
+                        None
+                    }
+                })
             })
             .collect();
 
         // Parallel sum all the stakes into the spo_stake map
-        sas_data
-            .par_iter() // Rayon multi-threaded iterator
-            .for_each(|(spo, (utxo_value, rewards))| {
-                spo_stakes
-                    .entry(spo.clone())
-                    .and_modify(|v| {
-                        v.active += *utxo_value;
-                        v.active_delegators_count += 1;
-                        v.live += *utxo_value + *rewards;
-                    })
-                    .or_insert(DelegatedStake {
-                        active: *utxo_value,
-                        active_delegators_count: 1,
-                        live: *utxo_value + *rewards,
-                    });
-            });
+        sas_data.par_iter().for_each(|(spo, (utxo_value, rewards))| {
+            spo_stakes
+                .entry(spo.clone())
+                .and_modify(|v| {
+                    v.active += *utxo_value + *rewards;
+                    v.active_delegators_count += 1;
+                    v.live += *utxo_value + *rewards;
+                })
+                .or_insert(DelegatedStake {
+                    active: *utxo_value + *rewards,
+                    active_delegators_count: 1,
+                    live: *utxo_value + *rewards,
+                });
+        });
 
         // Collect into a plain BTreeMap, so that it is ordered on output
         spo_stakes.iter().map(|entry| (entry.key().clone(), entry.value().clone())).collect()

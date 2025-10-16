@@ -280,13 +280,13 @@ impl State {
         true
     }
 
-    fn handle_new_epoch(&mut self, block: &BlockInfo) -> Arc<Message> {
+    pub fn handle_new_epoch(&mut self, block: &BlockInfo) -> Arc<Message> {
         self.epoch = block.epoch;
         debug!(epoch = self.epoch, "New epoch");
 
         // Flatten into vector of registrations, before retirement so retiring ones
         // are still included
-        let spos = self.spos.values().cloned().collect();
+        let spos: Vec<PoolRegistration> = self.spos.values().cloned().collect();
 
         // Update any pending
         for (operator, reg) in &self.pending_updates {
@@ -312,10 +312,25 @@ impl State {
             }
         }
 
+        info!(
+            "Epoch {} transition complete: {} active, {} retired",
+            self.epoch,
+            spos.len(),
+            retired_spos.len(),
+        );
+
+        if self.epoch > 207 {
+            use std::io::{self, Write};
+            print!("Press Enter to continue to next epoch...");
+            io::stdout().flush().unwrap();
+            let mut buf = String::new();
+            let _ = io::stdin().read_line(&mut buf);
+        }
+
         Arc::new(Message::Cardano((
             block.clone(),
             CardanoMessage::SPOState(SPOStateMessage {
-                epoch: block.epoch - 1,
+                epoch: self.epoch - 1,
                 spos,
                 retired_spos,
             }),
@@ -525,17 +540,11 @@ impl State {
     }
 
     /// Handle TxCertificates with SPO registrations / de-registrations
-    /// Returns an optional state message for end of epoch
     pub fn handle_tx_certs(
         &mut self,
         block: &BlockInfo,
         tx_certs_msg: &TxCertificatesMessage,
-    ) -> Result<Option<Arc<Message>>> {
-        let mut maybe_message: Option<Arc<Message>> = None;
-        if block.epoch > self.epoch {
-            // handle new epoch
-            maybe_message = Some(self.handle_new_epoch(block));
-        }
+    ) -> Result<()> {
         // Handle certificates
         for tx_cert in tx_certs_msg.certificates.iter() {
             match tx_cert {
@@ -585,7 +594,7 @@ impl State {
                 _ => (),
             }
         }
-        Ok(maybe_message)
+        Ok(())
     }
 
     pub fn handle_governance(
@@ -695,15 +704,6 @@ mod tests {
     fn list_pool_operators_returns_empty_on_empty_state() {
         let state = State::default();
         assert!(state.list_pool_operators().is_empty());
-    }
-
-    #[tokio::test]
-    async fn handle_tx_certs_returns_message_on_new_epoch() {
-        let mut state = State::default();
-        let msg = new_certs_msg();
-        let block = new_block(1);
-        let maybe_message = state.handle_tx_certs(&block, &msg).unwrap();
-        assert!(maybe_message.is_some());
     }
 
     #[tokio::test]

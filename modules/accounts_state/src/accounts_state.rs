@@ -168,31 +168,6 @@ impl AccountsState {
                     _ => error!("Unexpected message type: {message:?}"),
                 }
 
-                // Handle SPOs
-                let (_, message) = spos_message_f.await?;
-                match message.as_ref() {
-                    Message::Cardano((block_info, CardanoMessage::SPOState(spo_msg))) => {
-                        let span =
-                            info_span!("account_state.handle_spo_state", block = block_info.number);
-                        async {
-                            Self::check_sync(&current_block, &block_info);
-                            state
-                                .handle_spo_state(spo_msg)
-                                .inspect_err(|e| error!("SPOState handling error: {e:#}"))
-                                .ok();
-
-                            let spdd = state.generate_spdd();
-                            if let Err(e) = spo_publisher.publish_spdd(block_info, spdd).await {
-                                error!("Error publishing SPO stake distribution: {e:#}")
-                            }
-                        }
-                        .instrument(span)
-                        .await;
-                    }
-
-                    _ => error!("Unexpected message type: {message:?}"),
-                }
-
                 let (_, message) = params_message_f.await?;
                 match message.as_ref() {
                     Message::Cardano((block_info, CardanoMessage::ProtocolParams(params_msg))) => {
@@ -246,6 +221,31 @@ impl AccountsState {
                                 stake_reward_deltas_result.unwrap_or_else(|e| {
                                     error!("Error publishing stake reward deltas: {e:#}")
                                 });
+                            }
+                        }
+                        .instrument(span)
+                        .await;
+                    }
+
+                    _ => error!("Unexpected message type: {message:?}"),
+                }
+
+                // Handle SPOs
+                let (_, message) = spos_message_f.await?;
+                match message.as_ref() {
+                    Message::Cardano((block_info, CardanoMessage::SPOState(spo_msg))) => {
+                        let span =
+                            info_span!("account_state.handle_spo_state", block = block_info.number);
+                        async {
+                            Self::check_sync(&current_block, &block_info);
+                            state
+                                .handle_spo_state(spo_msg)
+                                .inspect_err(|e| error!("SPOState handling error: {e:#}"))
+                                .ok();
+
+                            let spdd = state.generate_spdd();
+                            if let Err(e) = spo_publisher.publish_spdd(block_info, spdd).await {
+                                error!("Error publishing SPO stake distribution: {e:#}")
                             }
                         }
                         .instrument(span)
