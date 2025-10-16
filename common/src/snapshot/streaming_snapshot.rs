@@ -28,7 +28,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::io::Read;
 
-use super::hash::{AddrKeyhash, Hash, ScriptHash};
+pub use crate::hash::{AddrKeyhash, Hash, ScriptHash};
 
 // -----------------------------------------------------------------------------
 // Cardano Ledger Types (for decoding with minicbor)
@@ -140,8 +140,327 @@ impl<'b, C> minicbor::Decode<'b, C> for Anchor {
     }
 }
 
-/// Set type (encoded as array)
-pub type Set<T> = Vec<T>;
+/// Set type (encoded as array, sometimes with CBOR tag 258)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Set<T>(pub Vec<T>);
+
+impl<T> Set<T> {
+    pub fn iter(&self) -> std::slice::Iter<T> {
+        self.0.iter()
+    }
+}
+
+impl<T> From<Vec<T>> for Set<T> {
+    fn from(vec: Vec<T>) -> Self {
+        Set(vec)
+    }
+}
+
+impl<T> From<Set<T>> for Vec<T> {
+    fn from(set: Set<T>) -> Self {
+        set.0
+    }
+}
+
+impl<'b, C, T> minicbor::Decode<'b, C> for Set<T>
+where
+    T: minicbor::Decode<'b, C>,
+{
+    fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        // Sets might be tagged with CBOR tag 258
+        if matches!(d.datatype()?, Type::Tag) {
+            d.tag()?;
+        }
+
+        let vec: Vec<T> = d.decode_with(ctx)?;
+        Ok(Set(vec))
+    }
+}
+
+impl<C, T> minicbor::Encode<C> for Set<T>
+where
+    T: minicbor::Encode<C>,
+{
+    fn encode<W: minicbor::encode::Write>(
+        &self,
+        e: &mut minicbor::Encoder<W>,
+        ctx: &mut C,
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        e.encode_with(&self.0, ctx)?;
+        Ok(())
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Type aliases for pool_params compatibility
+// -----------------------------------------------------------------------------
+
+/// Alias minicbor as cbor for pool_params module
+pub use minicbor as cbor;
+
+/// Coin amount (Lovelace)
+pub type Coin = u64;
+
+/// Pool ID (28-byte hash)
+pub type PoolId = Hash<28>;
+
+/// VRF key hash (32-byte hash)
+pub type VrfKeyhash = Hash<32>;
+
+/// Reward account (stake address bytes) - wrapper to handle CBOR bytes encoding
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RewardAccount(pub Vec<u8>);
+
+impl<'b, C> minicbor::Decode<'b, C> for RewardAccount {
+    fn decode(d: &mut Decoder<'b>, _ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        let bytes = d.bytes()?;
+        Ok(RewardAccount(bytes.to_vec()))
+    }
+}
+
+impl<C> minicbor::Encode<C> for RewardAccount {
+    fn encode<W: minicbor::encode::Write>(
+        &self,
+        e: &mut minicbor::Encoder<W>,
+        _ctx: &mut C,
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        e.bytes(&self.0)?;
+        Ok(())
+    }
+}
+
+/// Unit interval (rational number for pool margin)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnitInterval {
+    pub numerator: u64,
+    pub denominator: u64,
+}
+
+impl<'b, C> minicbor::Decode<'b, C> for UnitInterval {
+    fn decode(d: &mut Decoder<'b>, _ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        // UnitInterval might be tagged (tag 30 for rational)
+        if matches!(d.datatype()?, Type::Tag) {
+            d.tag()?;
+        }
+        d.array()?;
+        let numerator = d.u64()?;
+        let denominator = d.u64()?;
+        Ok(UnitInterval {
+            numerator,
+            denominator,
+        })
+    }
+}
+
+impl<C> minicbor::Encode<C> for UnitInterval {
+    fn encode<W: minicbor::encode::Write>(
+        &self,
+        e: &mut minicbor::Encoder<W>,
+        _ctx: &mut C,
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        e.tag(minicbor::data::Tag::new(30))?;
+        e.array(2)?;
+        e.u64(self.numerator)?;
+        e.u64(self.denominator)?;
+        Ok(())
+    }
+}
+
+/// Nullable type (like Maybe but with explicit null vs undefined)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Nullable<T> {
+    Undefined,
+    Null,
+    Some(T),
+}
+
+impl<'b, C, T> minicbor::Decode<'b, C> for Nullable<T>
+where
+    T: minicbor::Decode<'b, C>,
+{
+    fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        match d.datatype()? {
+            Type::Null => {
+                d.skip()?;
+                Ok(Nullable::Null)
+            }
+            Type::Undefined => {
+                d.skip()?;
+                Ok(Nullable::Undefined)
+            }
+            _ => {
+                let value = T::decode(d, ctx)?;
+                Ok(Nullable::Some(value))
+            }
+        }
+    }
+}
+
+impl<C, T> minicbor::Encode<C> for Nullable<T>
+where
+    T: minicbor::Encode<C>,
+{
+    fn encode<W: minicbor::encode::Write>(
+        &self,
+        e: &mut minicbor::Encoder<W>,
+        ctx: &mut C,
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        match self {
+            Nullable::Undefined => e.undefined()?.ok(),
+            Nullable::Null => e.null()?.ok(),
+            Nullable::Some(v) => v.encode(e, ctx),
+        }
+    }
+}
+
+// Network types for pool relays
+pub type Port = u32;
+
+/// IPv4 address (4 bytes, encoded as CBOR bytes)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IPv4(pub Vec<u8>);
+
+impl<'b, C> minicbor::Decode<'b, C> for IPv4 {
+    fn decode(d: &mut Decoder<'b>, _ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        let bytes = d.bytes()?;
+        Ok(IPv4(bytes.to_vec()))
+    }
+}
+
+impl<C> minicbor::Encode<C> for IPv4 {
+    fn encode<W: minicbor::encode::Write>(
+        &self,
+        e: &mut minicbor::Encoder<W>,
+        _ctx: &mut C,
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        e.bytes(&self.0)?;
+        Ok(())
+    }
+}
+
+/// IPv6 address (16 bytes, encoded as CBOR bytes)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IPv6(pub Vec<u8>);
+
+impl<'b, C> minicbor::Decode<'b, C> for IPv6 {
+    fn decode(d: &mut Decoder<'b>, _ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        let bytes = d.bytes()?;
+        Ok(IPv6(bytes.to_vec()))
+    }
+}
+
+impl<C> minicbor::Encode<C> for IPv6 {
+    fn encode<W: minicbor::encode::Write>(
+        &self,
+        e: &mut minicbor::Encoder<W>,
+        _ctx: &mut C,
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        e.bytes(&self.0)?;
+        Ok(())
+    }
+}
+
+/// Pool relay types (for CBOR encoding/decoding)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Relay {
+    SingleHostAddr(Nullable<Port>, Nullable<IPv4>, Nullable<IPv6>),
+    SingleHostName(Nullable<Port>, String),
+    MultiHostName(String),
+}
+
+impl<'b, C> minicbor::Decode<'b, C> for Relay {
+    fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        d.array()?;
+        let tag = d.u32()?;
+
+        match tag {
+            0 => {
+                // SingleHostAddr
+                let port = Nullable::<Port>::decode(d, ctx)?;
+                let ipv4 = Nullable::<IPv4>::decode(d, ctx)?;
+                let ipv6 = Nullable::<IPv6>::decode(d, ctx)?;
+                Ok(Relay::SingleHostAddr(port, ipv4, ipv6))
+            }
+            1 => {
+                // SingleHostName
+                let port = Nullable::<Port>::decode(d, ctx)?;
+                let hostname = d.str()?.to_string();
+                Ok(Relay::SingleHostName(port, hostname))
+            }
+            2 => {
+                // MultiHostName
+                let hostname = d.str()?.to_string();
+                Ok(Relay::MultiHostName(hostname))
+            }
+            _ => Err(minicbor::decode::Error::message("Invalid relay tag")),
+        }
+    }
+}
+
+impl<C> minicbor::Encode<C> for Relay {
+    fn encode<W: minicbor::encode::Write>(
+        &self,
+        e: &mut minicbor::Encoder<W>,
+        ctx: &mut C,
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        match self {
+            Relay::SingleHostAddr(port, ipv4, ipv6) => {
+                e.array(4)?;
+                e.u32(0)?;
+                port.encode(e, ctx)?;
+                ipv4.encode(e, ctx)?;
+                ipv6.encode(e, ctx)?;
+                Ok(())
+            }
+            Relay::SingleHostName(port, hostname) => {
+                e.array(3)?;
+                e.u32(1)?;
+                port.encode(e, ctx)?;
+                e.str(hostname)?;
+                Ok(())
+            }
+            Relay::MultiHostName(hostname) => {
+                e.array(2)?;
+                e.u32(2)?;
+                e.str(hostname)?;
+                Ok(())
+            }
+        }
+    }
+}
+
+/// Pool metadata (for CBOR encoding/decoding)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PoolMetadata {
+    pub url: String,
+    pub hash: Hash<32>,
+}
+
+impl<'b, C> minicbor::Decode<'b, C> for PoolMetadata {
+    fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        d.array()?;
+        let url = d.str()?.to_string();
+        let hash = Hash::<32>::decode(d, ctx)?;
+        Ok(PoolMetadata { url, hash })
+    }
+}
+
+impl<C> minicbor::Encode<C> for PoolMetadata {
+    fn encode<W: minicbor::encode::Write>(
+        &self,
+        e: &mut minicbor::Encoder<W>,
+        ctx: &mut C,
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        e.array(2)?;
+        e.str(&self.url)?;
+        self.hash.encode(e, ctx)?;
+        Ok(())
+    }
+}
+
+// -----------------------------------------------------------------------------
+// DRep State
+// -----------------------------------------------------------------------------
 
 /// DRep state from ledger
 #[derive(Debug, Clone)]
@@ -245,17 +564,17 @@ pub struct PoolInfo {
     /// List of pool owner stake addresses
     pub pool_owners: Vec<String>,
     /// Pool relay information
-    pub relays: Vec<Relay>,
+    pub relays: Vec<ApiRelay>,
     /// Pool metadata (URL and hash)
-    pub pool_metadata: Option<PoolMetadata>,
+    pub pool_metadata: Option<ApiPoolMetadata>,
     /// Optional retirement epoch
     pub retirement_epoch: Option<u64>,
 }
 
-/// Pool relay information
+/// Pool relay information (for API/JSON output)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
-pub enum Relay {
+pub enum ApiRelay {
     SingleHostAddr {
         port: Option<u16>,
         ipv4: Option<String>,
@@ -270,9 +589,9 @@ pub enum Relay {
     },
 }
 
-/// Pool metadata anchor
+/// Pool metadata anchor (for API/JSON output)
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PoolMetadata {
+pub struct ApiPoolMetadata {
     /// IPFS or HTTP(S) URL
     pub url: String,
     /// Hex-encoded hash
@@ -539,12 +858,12 @@ impl StreamingSnapshotParser {
             ));
         }
 
-        // Parse VState [3][1][0][0] for DReps
+        // Parse VState [3][1][0][0] for DReps, which also skips committee_state and dormant_epoch.
+        // TODO: We may need to return to these later if we implement committee tracking.
         let dreps = Self::parse_vstate(&mut decoder).context("Failed to parse VState for DReps")?;
 
-        // Skip PState [3][1][0][1] for now (pools)
-        decoder.skip().context("Failed to skip PState")?;
-        let pools = Vec::new(); // TODO: Parse from PState
+        // Parse PState [3][1][0][1] for pools
+        let pools = Self::parse_pstate(&mut decoder).context("Failed to parse PState for pools")?;
 
         // Skip DState [3][1][0][2] for now (accounts/delegations)
         decoder.skip().context("Failed to skip DState")?;
@@ -672,6 +991,168 @@ impl StreamingSnapshotParser {
         }
 
         Ok(dreps)
+    }
+
+    /// Parse PState to extract stake pools
+    /// PState = [pools_map, future_pools_map, retiring_map, deposits_map]
+    fn parse_pstate(decoder: &mut Decoder) -> Result<Vec<PoolInfo>> {
+        // Parse PState array
+        let pstate_len = decoder
+            .array()
+            .context("Failed to parse PState array")?
+            .ok_or_else(|| anyhow!("PState must be a definite-length array"))?;
+
+        if pstate_len < 1 {
+            return Err(anyhow!(
+                "PState array too short: expected at least 1 element, got {}",
+                pstate_len
+            ));
+        }
+
+        // Parse pools map [0]: PoolId (Hash<28>) -> PoolParams
+        // Note: Maps might be tagged with CBOR tag 258 (set)
+        if matches!(decoder.datatype()?, Type::Tag) {
+            decoder.tag()?; // skip tag if present
+        }
+
+        let mut pools_map = BTreeMap::new();
+        match decoder.map()? {
+            Some(pool_count) => {
+                // Definite-length map
+                for i in 0..pool_count {
+                    let pool_id: Hash<28> =
+                        decoder.decode().context(format!("Failed to decode pool ID #{}", i))?;
+                    let params: super::pool_params::PoolParams = decoder
+                        .decode()
+                        .context(format!("Failed to decode pool params for pool #{}", i))?;
+                    pools_map.insert(pool_id, params);
+                }
+            }
+            None => {
+                // Indefinite-length map
+                let mut count = 0;
+                loop {
+                    match decoder.datatype()? {
+                        Type::Break => {
+                            decoder.skip()?;
+                            break;
+                        }
+                        _ => {
+                            let pool_id: Hash<28> = decoder
+                                .decode()
+                                .context(format!("Failed to decode pool ID #{}", count))?;
+                            let params: super::pool_params::PoolParams = decoder.decode().context(
+                                format!("Failed to decode pool params for pool #{}", count),
+                            )?;
+                            pools_map.insert(pool_id, params);
+                            count += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Parse future pools map [1]: PoolId -> PoolParams
+        if matches!(decoder.datatype()?, Type::Tag) {
+            decoder.tag()?;
+        }
+        let _pools_updates: BTreeMap<Hash<28>, super::pool_params::PoolParams> =
+            decoder.decode()?;
+
+        // Parse retiring map [2]: PoolId -> Epoch
+        if matches!(decoder.datatype()?, Type::Tag) {
+            decoder.tag()?;
+        }
+        let pools_retirements: BTreeMap<Hash<28>, Epoch> = decoder.decode()?;
+
+        // Convert to PoolInfo for API compatibility
+        let pools = pools_map
+            .into_iter()
+            .map(|(pool_id, params)| {
+                // Convert relay types from ledger format to API format
+                let relays: Vec<ApiRelay> = params
+                    .relays
+                    .iter()
+                    .map(|relay| match relay {
+                        Relay::SingleHostAddr(port, ipv4, ipv6) => {
+                            let port_opt = match port {
+                                Nullable::Some(p) => Some(*p as u16),
+                                _ => None,
+                            };
+                            let ipv4_opt = match ipv4 {
+                                Nullable::Some(bytes) if bytes.0.len() == 4 => Some(format!(
+                                    "{}.{}.{}.{}",
+                                    bytes.0[0], bytes.0[1], bytes.0[2], bytes.0[3]
+                                )),
+                                _ => None,
+                            };
+                            let ipv6_opt = match ipv6 {
+                                Nullable::Some(bytes) if bytes.0.len() == 16 => {
+                                    // Convert big-endian byte array to IPv6 string
+                                    let b = &bytes.0;
+                                    let addr = std::net::Ipv6Addr::from([
+                                        b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], b[8], b[9],
+                                        b[10], b[11], b[12], b[13], b[14], b[15],
+                                    ]);
+                                    Some(addr.to_string())
+                                }
+                                _ => None,
+                            };
+                            ApiRelay::SingleHostAddr {
+                                port: port_opt,
+                                ipv4: ipv4_opt,
+                                ipv6: ipv6_opt,
+                            }
+                        }
+                        Relay::SingleHostName(port, hostname) => {
+                            let port_opt = match port {
+                                Nullable::Some(p) => Some(*p as u16),
+                                _ => None,
+                            };
+                            ApiRelay::SingleHostName {
+                                port: port_opt,
+                                dns_name: hostname.clone(),
+                            }
+                        }
+                        Relay::MultiHostName(hostname) => ApiRelay::MultiHostName {
+                            dns_name: hostname.clone(),
+                        },
+                    })
+                    .collect();
+
+                // Convert metadata from ledger format to API format
+                let pool_metadata = match &params.metadata {
+                    Nullable::Some(meta) => Some(ApiPoolMetadata {
+                        url: meta.url.clone(),
+                        hash: meta.hash.to_string(),
+                    }),
+                    _ => None,
+                };
+
+                // Look up retirement epoch
+                let retirement_epoch = pools_retirements.get(&pool_id).copied();
+
+                PoolInfo {
+                    pool_id: pool_id.to_string(),
+                    vrf_key_hash: params.vrf.to_string(),
+                    pledge: params.pledge,
+                    cost: params.cost,
+                    margin: (params.margin.numerator as f64) / (params.margin.denominator as f64),
+                    reward_account: hex::encode(&params.reward_account.0),
+                    pool_owners: params.owners.iter().map(|h| h.to_string()).collect(),
+                    relays,
+                    pool_metadata,
+                    retirement_epoch,
+                }
+            })
+            .collect();
+
+        // Skip any remaining PState elements (like deposits)
+        for i in 3..pstate_len {
+            decoder.skip().context(format!("Failed to skip PState[{}]", i))?;
+        }
+
+        Ok(pools)
     }
 
     /// Parse optional anchor: None or Some([url, data_hash])
@@ -878,11 +1359,6 @@ impl StreamingSnapshotParser {
                 break;
             }
 
-            // Progress reporting every million UTXOs
-            if count > 0 && count % 1000000 == 0 {
-                eprintln!("Parsed {} UTXOs...", count);
-            }
-
             // Parse key: TransactionInput (array [tx_hash, output_index])
             if decoder.array().is_err() {
                 break;
@@ -890,8 +1366,7 @@ impl StreamingSnapshotParser {
 
             let tx_hash_bytes = match decoder.bytes() {
                 Ok(b) => b,
-                Err(e) => {
-                    eprintln!("Warning: failed to parse tx_hash: {}", e);
+                Err(_e) => {
                     errors += 1;
                     decoder.skip().ok(); // skip remaining TxIn fields and value
                     continue;
@@ -900,8 +1375,7 @@ impl StreamingSnapshotParser {
 
             let output_index = match decoder.u64() {
                 Ok(idx) => idx,
-                Err(e) => {
-                    eprintln!("Warning: failed to parse output_index: {}", e);
+                Err(_e) => {
                     errors += 1;
                     decoder.skip().ok(); // skip value
                     continue;
@@ -924,8 +1398,7 @@ impl StreamingSnapshotParser {
                     callbacks.on_utxo(utxo)?;
                     count += 1;
                 }
-                Err(e) => {
-                    eprintln!("Warning: failed to parse UTXO value: {}", e);
+                Err(_e) => {
                     errors += 1;
                 }
             }

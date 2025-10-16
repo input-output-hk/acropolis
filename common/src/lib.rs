@@ -5,6 +5,7 @@ pub mod calculations;
 pub mod cip19;
 pub mod crypto;
 pub mod genesis_values;
+pub mod hash;
 pub mod ledger_state;
 pub mod math;
 pub mod messages;

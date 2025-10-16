@@ -14,7 +14,7 @@ mod error;
 mod parser;
 mod snapshot;
 pub mod streaming_snapshot;
-pub mod hash;
+pub mod pool_params;
 
 // Re-export error types
 pub use error::SnapshotError;
