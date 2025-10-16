@@ -318,6 +318,8 @@ impl Default for UTXODelta {
 /// Key hash used for pool IDs etc.
 pub type KeyHash = Vec<u8>;
 
+pub type PoolId = Vec<u8>;
+
 /// Script identifier
 pub type ScriptHash = KeyHash;
 

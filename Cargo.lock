@@ -48,6 +48,7 @@ dependencies = [
  "config",
  "csv",
  "dashmap",
+ "fjall",
  "hex",
  "imbl",
  "itertools 0.14.0",
