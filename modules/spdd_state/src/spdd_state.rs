@@ -3,6 +3,7 @@
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::spdd::{SPDDStateQuery, SPDDStateQueryResponse, DEFAULT_SPDD_QUERY_TOPIC},
+    rest_helper::handle_rest_with_query_parameters,
 };
 use anyhow::Result;
 use caryatid_sdk::{module, Context, Module};
@@ -12,8 +13,11 @@ use tokio::sync::Mutex;
 use tracing::{error, info, info_span, Instrument};
 mod state;
 use state::State;
+mod rest;
+use rest::handle_spdd;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.spo.distribution";
+const DEFAULT_HANDLE_SPDD_TOPIC: (&str, &str) = ("handle-topic-spdd", "rest.get.spdd");
 const DEFAULT_STORE_SPDD: (&str, bool) = ("store-spdd", false);
 
 /// SPDD State module
@@ -32,6 +36,12 @@ impl SPDDState {
             config.get_string("subscribe-topic").unwrap_or(DEFAULT_SUBSCRIBE_TOPIC.to_string());
         info!("Creating subscriber on '{subscribe_topic}'");
 
+        // REST topic (not included in BF)
+        let handle_spdd_topic = config
+            .get_string(DEFAULT_HANDLE_SPDD_TOPIC.0)
+            .unwrap_or(DEFAULT_HANDLE_SPDD_TOPIC.1.to_string());
+        info!("Creating request handler on '{}'", handle_spdd_topic);
+
         // Query topic
         let spdd_query_topic = config
             .get_string(DEFAULT_SPDD_QUERY_TOPIC.0)
@@ -42,6 +52,12 @@ impl SPDDState {
 
         let state_opt = if store_spdd {
             let state = Arc::new(Mutex::new(State::new()));
+
+            // Register /spdd REST endpoint
+            let state_rest = state.clone();
+            handle_rest_with_query_parameters(context.clone(), &handle_spdd_topic, move |params| {
+                handle_spdd(state_rest.clone(), params)
+            });
 
             // Subscribe for spdd messages from accounts_state
             let state_handler = state.clone();
