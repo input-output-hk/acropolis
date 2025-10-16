@@ -160,7 +160,12 @@ fn main() {
             if !callbacks.sample_dreps.is_empty() {
                 println!("Sample DReps (first 3):");
                 for (i, drep) in callbacks.sample_dreps.iter().enumerate() {
-                    print!("  {}: {} (deposit: {} lovelace)", i + 1, drep.drep_id, drep.deposit);
+                    print!(
+                        "  {}: {} (deposit: {} lovelace)",
+                        i + 1,
+                        drep.drep_id,
+                        drep.deposit
+                    );
                     if let Some(anchor) = &drep.anchor {
                         println!(" - {}", anchor.url);
                     } else {

@@ -24,9 +24,160 @@ use anyhow::{anyhow, Context, Result};
 use minicbor::data::Type;
 use minicbor::Decoder;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::io::Read;
+
+use super::hash::{AddrKeyhash, Hash, ScriptHash};
+
+// -----------------------------------------------------------------------------
+// Cardano Ledger Types (for decoding with minicbor)
+// -----------------------------------------------------------------------------
+
+pub type Epoch = u64;
+pub type Lovelace = u64;
+
+/// Stake credential - can be a key hash or script hash
+/// Order matters for Ord/PartialOrd - ScriptHash must come first for compatibility with Haskell
+#[derive(Serialize, Deserialize, Debug, PartialEq, PartialOrd, Eq, Ord, Clone, Hash)]
+pub enum StakeCredential {
+    ScriptHash(ScriptHash),
+    AddrKeyhash(AddrKeyhash),
+}
+
+impl<'b, C> minicbor::decode::Decode<'b, C> for StakeCredential {
+    fn decode(d: &mut minicbor::Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        d.array()?;
+        let variant = d.u16()?;
+
+        match variant {
+            0 => Ok(StakeCredential::AddrKeyhash(d.decode_with(ctx)?)),
+            1 => Ok(StakeCredential::ScriptHash(d.decode_with(ctx)?)),
+            _ => Err(minicbor::decode::Error::message(
+                "invalid variant id for StakeCredential",
+            )),
+        }
+    }
+}
+
+impl<C> minicbor::encode::Encode<C> for StakeCredential {
+    fn encode<W: minicbor::encode::Write>(
+        &self,
+        e: &mut minicbor::Encoder<W>,
+        ctx: &mut C,
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        match self {
+            StakeCredential::AddrKeyhash(a) => {
+                e.array(2)?;
+                e.encode_with(0, ctx)?;
+                e.encode_with(a, ctx)?;
+
+                Ok(())
+            }
+            StakeCredential::ScriptHash(a) => {
+                e.array(2)?;
+                e.encode_with(1, ctx)?;
+                e.encode_with(a, ctx)?;
+
+                Ok(())
+            }
+        }
+    }
+}
+
+/// Maybe type (optional with explicit encoding)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StrictMaybe<T> {
+    Nothing,
+    Just(T),
+}
+
+impl<'b, C, T> minicbor::Decode<'b, C> for StrictMaybe<T>
+where
+    T: minicbor::Decode<'b, C>,
+{
+    fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        match d.datatype()? {
+            Type::Array | Type::ArrayIndef => {
+                let len = d.array()?;
+                if len == Some(0) {
+                    Ok(StrictMaybe::Nothing)
+                } else {
+                    let value = T::decode(d, ctx)?;
+                    Ok(StrictMaybe::Just(value))
+                }
+            }
+            _ => Err(minicbor::decode::Error::message("Expected array for Maybe")),
+        }
+    }
+}
+
+/// Anchor (URL + content hash)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Anchor {
+    pub url: String,
+    pub content_hash: Hash<32>,
+}
+
+impl<'b, C> minicbor::Decode<'b, C> for Anchor {
+    fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        d.array()?;
+        // URL can be either bytes or text string
+        let url = match d.datatype()? {
+            Type::Bytes => {
+                let url_bytes = d.bytes()?;
+                String::from_utf8_lossy(url_bytes).to_string()
+            }
+            Type::String => d.str()?.to_string(),
+            _ => {
+                return Err(minicbor::decode::Error::message(
+                    "Expected bytes or string for URL",
+                ))
+            }
+        };
+        let content_hash = Hash::<32>::decode(d, ctx)?;
+        Ok(Anchor { url, content_hash })
+    }
+}
+
+/// Set type (encoded as array)
+pub type Set<T> = Vec<T>;
+
+/// DRep state from ledger
+#[derive(Debug, Clone)]
+pub struct DRepState {
+    pub expiry: Epoch,
+    pub anchor: StrictMaybe<Anchor>,
+    pub deposit: Lovelace,
+    pub delegators: Set<StakeCredential>,
+}
+
+impl<'b, C> minicbor::Decode<'b, C> for DRepState {
+    fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        // DRepState might be tagged or just an array - check what we have
+        if matches!(d.datatype()?, Type::Tag) {
+            d.tag()?; // skip the tag
+        }
+
+        d.array()?;
+        let expiry = d.u64()?;
+        let anchor = StrictMaybe::<Anchor>::decode(d, ctx)?;
+        let deposit = d.u64()?;
+
+        // Delegators set might be tagged (CBOR tag 258 for sets)
+        if matches!(d.datatype()?, Type::Tag) {
+            d.tag()?; // skip the tag
+        }
+        let delegators = Set::<StakeCredential>::decode(d, ctx)?;
+
+        Ok(DRepState {
+            expiry,
+            anchor,
+            deposit,
+            delegators,
+        })
+    }
+}
 
 // -----------------------------------------------------------------------------
 // Data Structures (based on OpenAPI schema)
@@ -136,7 +287,7 @@ pub struct DRepInfo {
     /// Lovelace deposit amount
     pub deposit: u64,
     /// Optional anchor (URL and hash)
-    pub anchor: Option<Anchor>,
+    pub anchor: Option<AnchorInfo>,
 }
 
 /// Governance proposal
@@ -151,12 +302,12 @@ pub struct GovernanceProposal {
     /// Governance action type
     pub gov_action: String,
     /// Anchor information
-    pub anchor: Anchor,
+    pub anchor: AnchorInfo,
 }
 
-/// Anchor information (reference URL and data hash)
+/// Anchor information (reference URL and data hash) - for OpenAPI compatibility
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Anchor {
+pub struct AnchorInfo {
     /// IPFS or HTTP(S) URL containing anchor data
     pub url: String,
     /// Hex-encoded hash of the anchor data
@@ -486,114 +637,34 @@ impl StreamingSnapshotParser {
             ));
         }
 
-        // Parse DReps map [0]: drep_credential -> (deposit, anchor_option)
-        let dreps_map_len = decoder.map().context("Failed to parse DReps map")?;
+        // Parse DReps map [0]: StakeCredential -> DRepState
+        // Using minicbor's Decode trait - much simpler than manual parsing!
+        let dreps_map: BTreeMap<StakeCredential, DRepState> = decoder.decode()?;
 
-        let mut dreps = Vec::new();
+        // Convert to DRepInfo for API compatibility
+        let dreps = dreps_map
+            .into_iter()
+            .map(|(cred, state)| {
+                let drep_id = match cred {
+                    StakeCredential::AddrKeyhash(hash) => format!("drep_{}", hash),
+                    StakeCredential::ScriptHash(hash) => format!("drep_script_{}", hash),
+                };
 
-        // Handle both definite and indefinite length maps
-        let limit = dreps_map_len.unwrap_or(u64::MAX);
+                let anchor = match state.anchor {
+                    StrictMaybe::Just(a) => Some(AnchorInfo {
+                        url: a.url,
+                        data_hash: a.content_hash.to_string(),
+                    }),
+                    StrictMaybe::Nothing => None,
+                };
 
-        for _ in 0..limit {
-            // Check for break in indefinite map
-            if dreps_map_len.is_none() && matches!(decoder.datatype(), Ok(Type::Break)) {
-                decoder.skip().ok(); // consume break
-                break;
-            }
-            // Parse DRep credential (key) - can be bytes or array [tag, hash]
-            let drep_credential = match decoder.datatype() {
-                Ok(Type::Bytes) => {
-                    // Simple bytes credential
-                    match decoder.bytes() {
-                        Ok(bytes) => bytes.to_vec(),
-                        Err(e) => {
-                            eprintln!("Warning: failed to parse DRep credential bytes: {}", e);
-                            decoder.skip().ok(); // skip key
-                            decoder.skip().ok(); // skip value
-                            continue;
-                        }
-                    }
+                DRepInfo {
+                    drep_id,
+                    deposit: state.deposit,
+                    anchor,
                 }
-                Ok(Type::Array) | Ok(Type::ArrayIndef) => {
-                    // Tagged credential: [tag, hash]
-                    match decoder.array() {
-                        Ok(_) => {
-                            // Skip tag
-                            decoder.skip().ok();
-                            // Get hash bytes
-                            match decoder.bytes() {
-                                Ok(bytes) => bytes.to_vec(),
-                                Err(e) => {
-                                    eprintln!(
-                                        "Warning: failed to parse DRep credential hash: {}",
-                                        e
-                                    );
-                                    decoder.skip().ok(); // skip value
-                                    continue;
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            eprintln!("Warning: failed to parse DRep credential array: {}", e);
-                            decoder.skip().ok(); // skip key
-                            decoder.skip().ok(); // skip value
-                            continue;
-                        }
-                    }
-                }
-                _ => {
-                    eprintln!("Warning: unexpected DRep credential type");
-                    decoder.skip().ok(); // skip key
-                    decoder.skip().ok(); // skip value
-                    continue;
-                }
-            };
-
-            // Parse DRep value: array [deposit, anchor_option]
-            match decoder.array() {
-                Ok(Some(len)) if len >= 1 => {
-                    // Parse deposit amount
-                    let deposit = match decoder.u64() {
-                        Ok(d) => d,
-                        Err(e) => {
-                            eprintln!("Warning: failed to parse DRep deposit: {}", e);
-                            // Skip remaining array elements
-                            for _ in 1..len {
-                                decoder.skip().ok();
-                            }
-                            continue;
-                        }
-                    };
-
-                    // Parse optional anchor (if present)
-                    let anchor = if len >= 2 {
-                        Self::parse_anchor_option(decoder).ok().flatten()
-                    } else {
-                        None
-                    };
-
-                    // Skip any remaining fields
-                    for _ in 2..len {
-                        decoder.skip().ok();
-                    }
-
-                    // Create DRep info with hex-encoded credential
-                    dreps.push(DRepInfo {
-                        drep_id: format!("drep_{}", hex::encode(&drep_credential)),
-                        deposit,
-                        anchor,
-                    });
-                }
-                Ok(_) => {
-                    eprintln!("Warning: DRep value has unexpected format");
-                    decoder.skip().ok();
-                }
-                Err(e) => {
-                    eprintln!("Warning: failed to parse DRep value array: {}", e);
-                    decoder.skip().ok();
-                }
-            }
-        }
+            })
+            .collect();
 
         // Skip committee_state [1] and dormant_epoch [2] if present
         for i in 1..vstate_len {
@@ -604,7 +675,9 @@ impl StreamingSnapshotParser {
     }
 
     /// Parse optional anchor: None or Some([url, data_hash])
-    fn parse_anchor_option(decoder: &mut Decoder) -> Result<Option<Anchor>> {
+    /// DEPRECATED: Now using minicbor::Decode trait instead
+    #[allow(dead_code)]
+    fn parse_anchor_option(decoder: &mut Decoder) -> Result<Option<AnchorInfo>> {
         // Check if it's an array (Some) or something else (None)
         match decoder.datatype()? {
             Type::Array | Type::ArrayIndef => {
@@ -630,7 +703,7 @@ impl StreamingSnapshotParser {
                     }
                 }
 
-                Ok(Some(Anchor { url, data_hash }))
+                Ok(Some(AnchorInfo { url, data_hash }))
             }
             _ => {
                 // Not an array, skip it (represents None)
