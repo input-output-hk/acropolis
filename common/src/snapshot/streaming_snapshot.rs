@@ -14,6 +14,11 @@
 //! - Stake accounts (bulk callback with delegations and rewards)
 //! - DReps (bulk callback with governance info)
 //! - Proposals (bulk callback with active governance actions)
+//!
+//! Parses CBOR dumps from Cardano Haskell node's GetCBOR ledger-state query.
+//! These snapshots represent the internal `NewEpochState` type and are not formally
+//! specified - see: https://github.com/IntersectMBO/cardano-ledger/blob/33e90ea03447b44a389985ca2b158568e5f4ad65/eras/shelley/impl/src/Cardano/Ledger/Shelley/LedgerState/Types.hs#L121-L131
+//!
 
 use anyhow::{anyhow, Context, Result};
 use minicbor::data::Type;
@@ -365,12 +370,33 @@ impl StreamingSnapshotParser {
             ));
         }
 
-        // Skip CertState [3][1][0] entirely for now
-        // TODO: Parse CertState to extract pools, DReps, and accounts
-        decoder.skip().context("Failed to skip CertState")?;
+        // Parse CertState [3][1][0] to extract DReps and pools
+        // CertState (ARRAY) - DReps, pools, accounts
+        //       - [0] VotingState - DReps at [3][1][0][0][0]
+        //       - [1] PoolState - pools at [3][1][0][1][0]
+        //       - [2] DelegationState - accounts at [3][1][0][2][0][0]
+        // CertState = [VState, PState, DState]
+        let cert_state_len = decoder
+            .array()
+            .context("Failed to parse CertState array")?
+            .ok_or_else(|| anyhow!("CertState must be a definite-length array"))?;
 
-        let dreps = Vec::new(); // TODO: Parse from CertState
-        let pools = Vec::new(); // TODO: Parse from CertState
+        if cert_state_len < 3 {
+            return Err(anyhow!(
+                "CertState array too short: expected at least 3 elements, got {}",
+                cert_state_len
+            ));
+        }
+
+        // Parse VState [3][1][0][0] for DReps
+        let dreps = Self::parse_vstate(&mut decoder).context("Failed to parse VState for DReps")?;
+
+        // Skip PState [3][1][0][1] for now (pools)
+        decoder.skip().context("Failed to skip PState")?;
+        let pools = Vec::new(); // TODO: Parse from PState
+
+        // Skip DState [3][1][0][2] for now (accounts/delegations)
+        decoder.skip().context("Failed to skip DState")?;
 
         // Navigate to UTxOState [3][1][1]
         let utxo_state_len = decoder
@@ -444,10 +470,180 @@ impl StreamingSnapshotParser {
         Ok(delegations)
     }
 
-    /// Parse DReps from VState
+    /// Parse VState to extract DReps
+    /// VState = [dreps_map, committee_state, dormant_epoch]
+    fn parse_vstate(decoder: &mut Decoder) -> Result<Vec<DRepInfo>> {
+        // Parse VState array
+        let vstate_len = decoder
+            .array()
+            .context("Failed to parse VState array")?
+            .ok_or_else(|| anyhow!("VState must be a definite-length array"))?;
+
+        if vstate_len < 1 {
+            return Err(anyhow!(
+                "VState array too short: expected at least 1 element, got {}",
+                vstate_len
+            ));
+        }
+
+        // Parse DReps map [0]: drep_credential -> (deposit, anchor_option)
+        let dreps_map_len = decoder.map().context("Failed to parse DReps map")?;
+
+        let mut dreps = Vec::new();
+
+        // Handle both definite and indefinite length maps
+        let limit = dreps_map_len.unwrap_or(u64::MAX);
+
+        for _ in 0..limit {
+            // Check for break in indefinite map
+            if dreps_map_len.is_none() && matches!(decoder.datatype(), Ok(Type::Break)) {
+                decoder.skip().ok(); // consume break
+                break;
+            }
+            // Parse DRep credential (key) - can be bytes or array [tag, hash]
+            let drep_credential = match decoder.datatype() {
+                Ok(Type::Bytes) => {
+                    // Simple bytes credential
+                    match decoder.bytes() {
+                        Ok(bytes) => bytes.to_vec(),
+                        Err(e) => {
+                            eprintln!("Warning: failed to parse DRep credential bytes: {}", e);
+                            decoder.skip().ok(); // skip key
+                            decoder.skip().ok(); // skip value
+                            continue;
+                        }
+                    }
+                }
+                Ok(Type::Array) | Ok(Type::ArrayIndef) => {
+                    // Tagged credential: [tag, hash]
+                    match decoder.array() {
+                        Ok(_) => {
+                            // Skip tag
+                            decoder.skip().ok();
+                            // Get hash bytes
+                            match decoder.bytes() {
+                                Ok(bytes) => bytes.to_vec(),
+                                Err(e) => {
+                                    eprintln!(
+                                        "Warning: failed to parse DRep credential hash: {}",
+                                        e
+                                    );
+                                    decoder.skip().ok(); // skip value
+                                    continue;
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Warning: failed to parse DRep credential array: {}", e);
+                            decoder.skip().ok(); // skip key
+                            decoder.skip().ok(); // skip value
+                            continue;
+                        }
+                    }
+                }
+                _ => {
+                    eprintln!("Warning: unexpected DRep credential type");
+                    decoder.skip().ok(); // skip key
+                    decoder.skip().ok(); // skip value
+                    continue;
+                }
+            };
+
+            // Parse DRep value: array [deposit, anchor_option]
+            match decoder.array() {
+                Ok(Some(len)) if len >= 1 => {
+                    // Parse deposit amount
+                    let deposit = match decoder.u64() {
+                        Ok(d) => d,
+                        Err(e) => {
+                            eprintln!("Warning: failed to parse DRep deposit: {}", e);
+                            // Skip remaining array elements
+                            for _ in 1..len {
+                                decoder.skip().ok();
+                            }
+                            continue;
+                        }
+                    };
+
+                    // Parse optional anchor (if present)
+                    let anchor = if len >= 2 {
+                        Self::parse_anchor_option(decoder).ok().flatten()
+                    } else {
+                        None
+                    };
+
+                    // Skip any remaining fields
+                    for _ in 2..len {
+                        decoder.skip().ok();
+                    }
+
+                    // Create DRep info with hex-encoded credential
+                    dreps.push(DRepInfo {
+                        drep_id: format!("drep_{}", hex::encode(&drep_credential)),
+                        deposit,
+                        anchor,
+                    });
+                }
+                Ok(_) => {
+                    eprintln!("Warning: DRep value has unexpected format");
+                    decoder.skip().ok();
+                }
+                Err(e) => {
+                    eprintln!("Warning: failed to parse DRep value array: {}", e);
+                    decoder.skip().ok();
+                }
+            }
+        }
+
+        // Skip committee_state [1] and dormant_epoch [2] if present
+        for i in 1..vstate_len {
+            decoder.skip().context(format!("Failed to skip VState[{}]", i))?;
+        }
+
+        Ok(dreps)
+    }
+
+    /// Parse optional anchor: None or Some([url, data_hash])
+    fn parse_anchor_option(decoder: &mut Decoder) -> Result<Option<Anchor>> {
+        // Check if it's an array (Some) or something else (None)
+        match decoder.datatype()? {
+            Type::Array | Type::ArrayIndef => {
+                let arr_len = decoder.array().context("Failed to parse anchor array")?;
+
+                if arr_len == Some(0) {
+                    // Empty array means None
+                    return Ok(None);
+                }
+
+                // Parse [url, data_hash]
+                let url_bytes = decoder.bytes().context("Failed to parse anchor URL")?;
+                let url = String::from_utf8_lossy(url_bytes).to_string();
+
+                let data_hash_bytes =
+                    decoder.bytes().context("Failed to parse anchor data hash")?;
+                let data_hash = hex::encode(data_hash_bytes);
+
+                // Skip any remaining fields
+                if let Some(len) = arr_len {
+                    for _ in 2..len {
+                        decoder.skip().ok();
+                    }
+                }
+
+                Ok(Some(Anchor { url, data_hash }))
+            }
+            _ => {
+                // Not an array, skip it (represents None)
+                decoder.skip().context("Failed to skip non-array anchor")?;
+                Ok(None)
+            }
+        }
+    }
+
+    /// Parse DReps from VState (old stub - replaced by parse_vstate)
+    #[allow(dead_code)]
     fn parse_dreps(_decoder: &mut Decoder) -> Result<Vec<DRepInfo>> {
-        // TODO: Implement full DRep parsing from VState structure
-        // For now, skip VState and return empty vec
+        // This function is kept for compatibility but is no longer used
         Ok(Vec::new())
     }
 

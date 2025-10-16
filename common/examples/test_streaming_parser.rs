@@ -20,6 +20,7 @@ struct CountingCallbacks {
     drep_count: usize,
     proposal_count: usize,
     sample_utxos: Vec<UtxoEntry>,
+    sample_dreps: Vec<DRepInfo>,
 }
 
 impl Default for CountingCallbacks {
@@ -32,6 +33,7 @@ impl Default for CountingCallbacks {
             drep_count: 0,
             proposal_count: 0,
             sample_utxos: Vec::new(),
+            sample_dreps: Vec::new(),
         }
     }
 }
@@ -64,6 +66,8 @@ impl StakeCallback for CountingCallbacks {
 impl DRepCallback for CountingCallbacks {
     fn on_dreps(&mut self, dreps: Vec<DRepInfo>) -> Result<()> {
         self.drep_count = dreps.len();
+        // Keep first 3 for display
+        self.sample_dreps = dreps.into_iter().take(3).collect();
         Ok(())
     }
 }
@@ -148,6 +152,20 @@ fn main() {
                         &utxo.address[..32],
                         utxo.value
                     );
+                }
+                println!();
+            }
+
+            // Show sample DReps
+            if !callbacks.sample_dreps.is_empty() {
+                println!("Sample DReps (first 3):");
+                for (i, drep) in callbacks.sample_dreps.iter().enumerate() {
+                    print!("  {}: {} (deposit: {} lovelace)", i + 1, drep.drep_id, drep.deposit);
+                    if let Some(anchor) = &drep.anchor {
+                        println!(" - {}", anchor.url);
+                    } else {
+                        println!();
+                    }
                 }
                 println!();
             }

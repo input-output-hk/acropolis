@@ -1,7 +1,7 @@
 //! Amaru/Haskell node snapshot format parser
 //!
 //! Parses CBOR dumps from Cardano Haskell node's GetCBOR ledger-state query.
-//! These snapshots represent the internal `EpochState` type and are not formally
+//! These snapshots represent the internal `NewEpochState` type and are not formally
 //! specified - see: https://github.com/IntersectMBO/cardano-ledger/blob/33e90ea03447b44a389985ca2b158568e5f4ad65/eras/shelley/impl/src/Cardano/Ledger/Shelley/LedgerState/Types.hs#L121-L131
 //!
 //! This implementation focuses on extracting minimal metadata and high-value fields
