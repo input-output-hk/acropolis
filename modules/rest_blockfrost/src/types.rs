@@ -4,9 +4,11 @@ use acropolis_common::{
     protocol_params::{Nonce, NonceVariant, ProtocolParams},
     queries::governance::DRepActionUpdate,
     rest_helper::ToCheckedF64,
+    serialization::{DisplayFromBech32, PoolPrefix},
     AssetAddressEntry, AssetMetadataStandard, AssetMintRecord, KeyHash, PolicyAsset,
     PoolEpochState, PoolUpdateAction, Relay, TxHash, Vote,
 };
+use anyhow::Result;
 use num_traits::ToPrimitive;
 use rust_decimal::Decimal;
 use serde::Serialize;
@@ -48,6 +50,26 @@ impl From<EpochActivityMessage> for EpochActivityRest {
             active_stake: None,
         }
     }
+}
+
+// REST response structure for /epochs/{number}/stakes
+#[serde_as]
+#[derive(Serialize)]
+pub struct SPDDByEpochItemRest {
+    pub stake_address: String,
+    #[serde_as(as = "DisplayFromBech32<PoolPrefix>")]
+    pub pool_id: KeyHash,
+    #[serde_as(as = "DisplayFromStr")]
+    pub amount: u64,
+}
+
+// REST response structure for /epochs/{number}/stakes/{pool_id}
+#[serde_as]
+#[derive(Serialize)]
+pub struct SPDDByEpochAndPoolItemRest {
+    pub stake_address: String,
+    #[serde_as(as = "DisplayFromStr")]
+    pub amount: u64,
 }
 
 // REST response structure for /governance/dreps

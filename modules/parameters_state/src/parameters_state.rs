@@ -196,6 +196,11 @@ impl ParametersState {
                             }
                         }
                     }
+                    ParametersStateQuery::GetNetworkName => {
+                        ParametersStateQueryResponse::NetworkName(
+                            lock.get_current_state().network_name.clone(),
+                        )
+                    }
                 };
                 Arc::new(Message::StateQueryResponse(StateQueryResponse::Parameters(
                     response,

@@ -326,6 +326,24 @@ impl StakeAddressMap {
         spo_stakes.iter().map(|entry| (entry.key().clone(), entry.value().clone())).collect()
     }
 
+    /// Dump current Stake Pool Delegation Distribution State
+    /// <PoolId -> (Stake Key, Active Stakes Amount)>
+    pub fn dump_spdd_state(&self) -> HashMap<KeyHash, Vec<(KeyHash, u64)>> {
+        let entries: Vec<_> = self
+            .inner
+            .par_iter()
+            .filter_map(|(key, sas)| {
+                sas.delegated_spo.as_ref().map(|spo| (spo.clone(), (key.clone(), sas.utxo_value)))
+            })
+            .collect();
+
+        let mut result: HashMap<KeyHash, Vec<(KeyHash, u64)>> = HashMap::new();
+        for (spo, entry) in entries {
+            result.entry(spo).or_default().push(entry);
+        }
+        result
+    }
+
     /// Derive the DRep Delegation Distribution (DRDD) - the total amount
     /// delegated to each DRep, including the special "abstain" and "no confidence" dreps.
     pub fn generate_drdd(
