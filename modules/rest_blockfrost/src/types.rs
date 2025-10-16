@@ -806,3 +806,48 @@ impl TryFrom<&AssetAddressEntry> for AssetAddressRest {
         })
     }
 }
+
+#[derive(Serialize)]
+pub struct AddressInfoREST {
+    pub address: String,
+    pub amount: AmountList,
+    pub stake_address: Option<String>,
+    #[serde(rename = "type")]
+    pub address_type: String,
+    pub script: bool,
+}
+
+#[derive(Serialize)]
+pub struct AmountEntry {
+    unit: String,
+    quantity: String,
+}
+
+#[derive(Serialize)]
+pub struct AmountList(pub Vec<AmountEntry>);
+
+impl From<acropolis_common::Value> for AmountList {
+    fn from(value: acropolis_common::Value) -> Self {
+        let mut out = Vec::new();
+
+        out.push(AmountEntry {
+            unit: "lovelace".to_string(),
+            quantity: value.coin().to_string(),
+        });
+
+        for (policy_id, assets) in value.assets {
+            for asset in assets {
+                out.push(AmountEntry {
+                    unit: format!(
+                        "{}{}",
+                        hex::encode(&policy_id),
+                        hex::encode(&asset.name.as_slice())
+                    ),
+                    quantity: asset.amount.to_string(),
+                });
+            }
+        }
+
+        Self(out)
+    }
+}

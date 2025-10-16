@@ -17,6 +17,7 @@ dependencies = [
  "caryatid_module_rest_server",
  "caryatid_sdk",
  "chrono",
+ "crc",
  "cryptoxide 0.5.1",
  "dashmap",
  "fraction",
@@ -58,6 +59,26 @@ dependencies = [
  "serde_with 3.14.1",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "acropolis_module_address_state"
+version = "0.1.0"
+dependencies = [
+ "acropolis_common",
+ "anyhow",
+ "async-trait",
+ "caryatid_sdk",
+ "config",
+ "fjall",
+ "hex",
+ "imbl",
+ "minicbor 0.26.5",
+ "serde_cbor",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -367,6 +388,7 @@ version = "0.1.0"
 dependencies = [
  "acropolis_common",
  "acropolis_module_accounts_state",
+ "acropolis_module_address_state",
  "acropolis_module_assets_state",
  "acropolis_module_block_unpacker",
  "acropolis_module_drdd_state",

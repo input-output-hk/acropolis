@@ -4,13 +4,79 @@
 use crate::cip19::{VarIntDecoder, VarIntEncoder};
 use crate::types::{KeyHash, ScriptHash};
 use anyhow::{anyhow, bail, Result};
+use crc::{Crc, CRC_32_ISO_HDLC};
+use minicbor::data::IanaTag;
 use serde_with::{hex::Hex, serde_as};
 
 /// a Byron-era address
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ByronAddress {
     /// Raw payload
     pub payload: Vec<u8>,
+}
+
+impl ByronAddress {
+    fn compute_crc32(&self) -> u32 {
+        const CRC32: Crc<u32> = Crc::<u32>::new(&CRC_32_ISO_HDLC);
+        CRC32.checksum(&self.payload)
+    }
+
+    pub fn to_string(&self) -> Result<String> {
+        let crc = self.compute_crc32();
+
+        let mut buf = Vec::new();
+        {
+            let mut enc = minicbor::Encoder::new(&mut buf);
+            enc.array(2)?;
+            enc.tag(IanaTag::Cbor)?;
+            enc.bytes(&self.payload)?;
+            enc.u32(crc)?;
+        }
+
+        Ok(bs58::encode(buf).into_string())
+    }
+
+    pub fn from_string(s: &str) -> Result<Self> {
+        let bytes = bs58::decode(s).into_vec()?;
+        let mut dec = minicbor::Decoder::new(&bytes);
+
+        let len = dec.array()?.unwrap_or(0);
+        if len != 2 {
+            anyhow::bail!("Invalid Byron address CBOR array length");
+        }
+
+        let tag = dec.tag()?;
+        if tag != IanaTag::Cbor.into() {
+            anyhow::bail!("Invalid Byron address CBOR tag, expected 24");
+        }
+
+        let payload = dec.bytes()?.to_vec();
+        let crc = dec.u32()?;
+
+        let address = ByronAddress { payload };
+        let computed = address.compute_crc32();
+
+        if crc != computed {
+            anyhow::bail!("Byron address CRC mismatch");
+        }
+
+        Ok(address)
+    }
+
+    pub fn to_bytes_key(&self) -> Result<Vec<u8>> {
+        let crc = self.compute_crc32();
+
+        let mut buf = Vec::new();
+        {
+            let mut enc = minicbor::Encoder::new(&mut buf);
+            enc.array(2)?;
+            enc.tag(minicbor::data::IanaTag::Cbor)?;
+            enc.bytes(&self.payload)?;
+            enc.u32(crc)?;
+        }
+
+        Ok(buf)
+    }
 }
 
 /// Address network identifier
@@ -170,11 +236,85 @@ impl ShelleyAddress {
         data.extend(delegation_hash);
         Ok(bech32::encode::<bech32::Bech32>(hrp, &data)?)
     }
+
+    pub fn to_bytes_key(&self) -> Result<Vec<u8>> {
+        let network_bits = match self.network {
+            AddressNetwork::Main => 1u8,
+            AddressNetwork::Test => 0u8,
+        };
+
+        let (payment_hash, payment_bits): (&Vec<u8>, u8) = match &self.payment {
+            ShelleyAddressPaymentPart::PaymentKeyHash(data) => (data, 0),
+            ShelleyAddressPaymentPart::ScriptHash(data) => (data, 1),
+        };
+
+        let mut data = Vec::new();
+
+        match &self.delegation {
+            ShelleyAddressDelegationPart::None => {
+                let header = network_bits | (payment_bits << 4) | (3 << 5);
+                data.push(header);
+                data.extend(payment_hash);
+            }
+            ShelleyAddressDelegationPart::StakeKeyHash(hash) => {
+                let header = network_bits | (payment_bits << 4) | (0 << 5);
+                data.push(header);
+                data.extend(payment_hash);
+                data.extend(hash);
+            }
+            ShelleyAddressDelegationPart::ScriptHash(hash) => {
+                let header = network_bits | (payment_bits << 4) | (1 << 5);
+                data.push(header);
+                data.extend(payment_hash);
+                data.extend(hash);
+            }
+            ShelleyAddressDelegationPart::Pointer(pointer) => {
+                let header = network_bits | (payment_bits << 4) | (2 << 5);
+                data.push(header);
+                data.extend(payment_hash);
+
+                let mut encoder = VarIntEncoder::new();
+                encoder.push(pointer.slot);
+                encoder.push(pointer.tx_index);
+                encoder.push(pointer.cert_index);
+                data.extend(encoder.to_vec());
+            }
+        }
+
+        Ok(data)
+    }
+
+    pub fn stake_address_string(&self) -> Result<Option<String>> {
+        let network_bit = match self.network {
+            AddressNetwork::Main => 1,
+            AddressNetwork::Test => 0,
+        };
+
+        match &self.delegation {
+            ShelleyAddressDelegationPart::StakeKeyHash(key_hash) => {
+                let mut data = Vec::with_capacity(29);
+                data.push(network_bit | (0b1110 << 4));
+                data.extend_from_slice(key_hash);
+                let stake = StakeAddress::from_binary(&data)?.to_string()?;
+                Ok(Some(stake))
+            }
+            ShelleyAddressDelegationPart::ScriptHash(script_hash) => {
+                let mut data = Vec::with_capacity(29);
+                data.push(network_bit | (0b1111 << 4));
+                data.extend_from_slice(script_hash);
+                let stake = StakeAddress::from_binary(&data)?.to_string()?;
+                Ok(Some(stake))
+            }
+            // TODO: Use chain store to resolve pointer delegation addresses
+            ShelleyAddressDelegationPart::Pointer(_pointer) => Ok(None),
+            ShelleyAddressDelegationPart::None => Ok(None),
+        }
+    }
 }
 
 /// Payload of a stake address
 #[serde_as]
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum StakeAddressPayload {
     /// Stake key
     StakeKeyHash(#[serde_as(as = "Hex")] Vec<u8>),
@@ -196,7 +336,7 @@ impl StakeAddressPayload {
 }
 
 /// A stake address
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct StakeAddress {
     /// Network id
     pub network: AddressNetwork,
@@ -271,10 +411,28 @@ impl StakeAddress {
         data.extend(stake_hash);
         Ok(bech32::encode::<bech32::Bech32>(hrp, &data)?)
     }
+
+    pub fn to_bytes_key(&self) -> Result<Vec<u8>> {
+        let mut out = Vec::new();
+        let (bits, hash): (u8, &[u8]) = match &self.payload {
+            StakeAddressPayload::StakeKeyHash(h) => (0b1110, h),
+            StakeAddressPayload::ScriptHash(h) => (0b1111, h),
+        };
+
+        let net_bit = match self.network {
+            AddressNetwork::Main => 1,
+            AddressNetwork::Test => 0,
+        };
+
+        let header = net_bit | (bits << 4);
+        out.push(header);
+        out.extend_from_slice(hash);
+        Ok(out)
+    }
 }
 
 /// A Cardano address
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum Address {
     None,
     Byron(ByronAddress),
@@ -306,10 +464,9 @@ impl Address {
         } else if text.starts_with("stake1") || text.starts_with("stake_test1") {
             Ok(Self::Stake(StakeAddress::from_string(text)?))
         } else {
-            if let Ok(bytes) = bs58::decode(text).into_vec() {
-                Ok(Self::Byron(ByronAddress { payload: bytes }))
-            } else {
-                Ok(Self::None)
+            match ByronAddress::from_string(text) {
+                Ok(byron) => Ok(Self::Byron(byron)),
+                Err(_) => Ok(Self::None),
             }
         }
     }
@@ -318,9 +475,44 @@ impl Address {
     pub fn to_string(&self) -> Result<String> {
         match self {
             Self::None => Err(anyhow!("No address")),
-            Self::Byron(byron) => Ok(bs58::encode(&byron.payload).into_string()),
+            Self::Byron(byron) => byron.to_string(),
             Self::Shelley(shelley) => shelley.to_string(),
             Self::Stake(stake) => stake.to_string(),
+        }
+    }
+
+    pub fn to_bytes_key(&self) -> Result<Vec<u8>> {
+        match self {
+            Address::Byron(b) => b.to_bytes_key(),
+
+            Address::Shelley(s) => s.to_bytes_key(),
+
+            Address::Stake(stake) => stake.to_bytes_key(),
+
+            Address::None => Err(anyhow!("No address to convert")),
+        }
+    }
+
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Address::Byron(_) => "byron",
+            Address::Shelley(_) => "shelley",
+            Address::Stake(_) => "stake",
+            Address::None => "none",
+        }
+    }
+
+    pub fn is_script(&self) -> bool {
+        match self {
+            Address::Shelley(shelley) => match shelley.payment {
+                ShelleyAddressPaymentPart::PaymentKeyHash(_) => false,
+                ShelleyAddressPaymentPart::ScriptHash(_) => true,
+            },
+            Address::Stake(stake) => match stake.payload {
+                StakeAddressPayload::StakeKeyHash(_) => false,
+                StakeAddressPayload::ScriptHash(_) => true,
+            },
+            Address::Byron(_) | Address::None => false,
         }
     }
 }
@@ -336,7 +528,7 @@ mod tests {
         let payload = vec![42];
         let address = Address::Byron(ByronAddress { payload });
         let text = address.to_string().unwrap();
-        assert_eq!(text, "j");
+        assert_eq!(text, "8MMy4x9jE734Gz");
 
         let unpacked = Address::from_string(&text).unwrap();
         assert_eq!(address, unpacked);
@@ -544,6 +736,30 @@ mod tests {
 
         let unpacked = Address::from_string(&text).unwrap();
         assert_eq!(address, unpacked);
+    }
+
+    #[test]
+    fn shelley_to_stake_address_string_mainnet() {
+        let normal_address = ShelleyAddress::from_string("addr1q82peck5fynytkgjsp9vnpul59zswsd4jqnzafd0mfzykma625r684xsx574ltpznecr9cnc7n9e2hfq9lyart3h5hpszffds5").expect("valid normal address");
+        let script_address = ShelleyAddress::from_string("addr1zx0whlxaw4ksygvuljw8jxqlw906tlql06ern0gtvvzhh0c6409492020k6xml8uvwn34wrexagjh5fsk5xk96jyxk2qhlj6gf").expect("valid script address");
+
+        let normal_stake_address = normal_address
+            .stake_address_string()
+            .expect("stake_address_string should not fail")
+            .expect("normal address should have stake credential");
+        let script_stake_address = script_address
+            .stake_address_string()
+            .expect("stake_address_string should not fail")
+            .expect("script address should have stake credential");
+
+        assert_eq!(
+            normal_stake_address,
+            "stake1uxa92par6ngr202l4s3fuupjufu0fju4t5szljw34cm6tscq40449"
+        );
+        assert_eq!(
+            script_stake_address,
+            "stake1uyd2hj6j4848mdrdln7x8fc6hpunw5ft6yct2rtzafzrt9qh0m28h"
+        );
     }
 
     #[test]
