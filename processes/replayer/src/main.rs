@@ -24,6 +24,7 @@ use acropolis_module_stake_delta_filter::StakeDeltaFilter;
 use acropolis_module_tx_unpacker::TxUnpacker;
 use acropolis_module_upstream_chain_fetcher::UpstreamChainFetcher;
 use acropolis_module_utxo_state::UTXOState;
+use acropolis_module_rest_blockfrost::BlockfrostREST;
 
 use caryatid_module_clock::Clock;
 use caryatid_module_rest_server::RESTServer;
@@ -91,6 +92,7 @@ fn setup_governance_replay(process: &mut dyn ModuleRegistry<Message>) {
     ParametersState::register(process);
 
     Playback::register(process);
+    BlockfrostREST::register(process);
 
     Clock::<Message>::register(process);
     RESTServer::<Message>::register(process);

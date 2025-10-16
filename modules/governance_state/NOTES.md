@@ -108,9 +108,14 @@ And then the final ratio is:
 So, the formula is the same and the difference between bootstrap period and normal operation is the way 
 how not voted SPOs are treated:
 * HardFork voting -- same as in bootstrap, all non-voted SPOs are 'No';
-* Normal voting with SPO as 'DefaultNoConfidence' -- no-confidence as 'Yes', otherwise as 'Abstain'
+* Normal voting with SPO as 'DefaultNoConfidence' -- no-confidence as 'Yes', otherwise as 'No'
 * Normal voting with SPO as 'DefaultAbstain' -- counted as 'Abstain'
 * Normal voting with normal SPO -- counted as 'No'
+
+Open question: (TODO) do we have default votes for SPOs?
+
+No traces of different count of SPO active stake and total stake.
+Let's consider them the same for the moment.
 
 ```
 -- Compute the dRep ratio yes/(yes + no), where

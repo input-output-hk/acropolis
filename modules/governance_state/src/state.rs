@@ -27,6 +27,8 @@ pub struct State {
 
     current_era: Era,
     drep_stake: HashMap<DRepCredential, Lovelace>,
+    drep_no_confidence: u64,
+    drep_abstain: u64,
     spo_stake: HashMap<KeyHash, DelegatedStake>,
 
     alonzo_babbage_voting: AlonzoBabbageVoting,
@@ -51,6 +53,8 @@ impl State {
             conway_voting: ConwayVoting::new(verification_output_file),
 
             drep_stake: HashMap::new(),
+            drep_no_confidence: 0,
+            drep_abstain: 0,
             spo_stake: HashMap::new(),
         }
     }
@@ -91,6 +95,8 @@ impl State {
     ) -> Result<()> {
         self.drep_stake_messages_count += 1;
         self.drep_stake = HashMap::from_iter(drep_message.drdd.dreps.iter().cloned());
+        self.drep_no_confidence = drep_message.drdd.no_confidence;
+        self.drep_abstain = drep_message.drdd.abstain;
         self.spo_stake = HashMap::from_iter(spo_message.spos.iter().cloned());
 
         Ok(())
@@ -161,7 +167,11 @@ impl State {
         let spo_stake = self.spo_stake.iter().map(|(_sp, ds)| ds.live).sum();
 
         Ok(VotingRegistrationState::new(
-            spo_stake, spo_stake, drep_stake, committee,
+            spo_stake,
+            drep_stake,
+            self.drep_no_confidence,
+            self.drep_abstain,
+            committee,
         ))
     }
 

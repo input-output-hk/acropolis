@@ -26,6 +26,7 @@ fraction = "0.15"
 hex = { workspace = true }
 lf-queue = "0.1.0"
 num-rational = { version = "0.4.2", features = ["serde"] }
+regex = "1"
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_with = { workspace = true, features = ["base64"] }

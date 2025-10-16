@@ -12,10 +12,13 @@ use anyhow::{anyhow, bail, Error, Result};
 use bech32::{Bech32, Hrp};
 use bitmask_enum::bitmask;
 use hex::decode;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_with::{hex::Hex, serde_as};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
+use std::str::FromStr;
+use std::num::ParseIntError;
 use std::fmt::{Display, Formatter};
 use std::ops::Neg;
 
@@ -1451,6 +1454,18 @@ impl GovernanceAction {
             Self::Information => None,
         }
     }
+
+    pub fn get_action_name(&self) -> &str {
+        match &self {
+            GovernanceAction::ParameterChange(_) => "ParameterChange",
+            GovernanceAction::HardForkInitiation(_) => "HardForkInitiation",
+            GovernanceAction::TreasuryWithdrawals(_) => "TreasuryWithdrawals",
+            GovernanceAction::NoConfidence(_) => "NoConfidence",
+            GovernanceAction::UpdateCommittee(_) => "UpdateCommittee",
+            GovernanceAction::NewConstitution(_) => "NewConstitution",
+            GovernanceAction::Information => "Information",
+        }
+    }
 }
 
 #[derive(
@@ -1515,45 +1530,96 @@ pub struct VotingProcedures {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct VotesCount {
-    pub committee: u64,
-    pub drep: u64,
-    pub pool: u64,
+pub struct VoteCount {
+    pub yes: u64,
+    pub no: u64,
+    pub abstain: u64
 }
 
-impl VotesCount {
+impl VoteCount {
     pub fn zero() -> Self {
         Self {
-            committee: 0,
-            drep: 0,
-            pool: 0,
+            yes: 0,
+            no: 0,
+            abstain: 0
         }
     }
 
-    pub fn infinity() -> Self {
-        Self {
-            committee: u64::MAX,
-            drep: u64::MAX,
-            pool: u64::MAX,
-        }
-    }
-
-    pub fn majorizes(&self, v: &VotesCount) -> bool {
-        self.committee >= v.committee && self.drep >= v.drep && self.pool >= v.pool
+    pub fn total(&self) -> u64 {
+        self.yes + self.no + self.abstain
     }
 }
 
-impl Display for VotesCount {
+impl Display for VoteCount {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "c{}:d{}:p{}", self.committee, self.drep, self.pool)
+        write!(f, "{}/{}/{}", self.yes, self.no, self.abstain)
+    }
+}
+
+impl FromStr for VoteCount {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        let re = Regex::new(r"(\\d+)/(\\d+)/(\\d+)$").unwrap();
+        let caps = re.captures(s).ok_or_else(|| anyhow!("Invalid VoteCount string: '{s}'"))?;
+
+        let yes = u64::from_str(&caps[1])?;
+        let no = u64::from_str(&caps[2])?;
+        let abstain = u64::from_str(&caps[3])?;
+
+        Ok(VoteCount { yes, no, abstain })
+    }
+}
+
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct VoteResult<E: FromStr + Display> {
+    pub committee: E,
+    pub drep: E,
+    pub pool: E,
+}
+
+impl <E: FromStr + Display> VoteResult<E> {
+    pub fn new(committee: E, drep: E, pool: E) -> Self {
+        Self { committee, drep, pool }
+    }
+}
+
+impl <E: FromStr + Display> Display for VoteResult<E> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "c{}:d{}:s{}", self.committee, self.drep, self.pool)
+    }
+}
+
+impl<E: FromStr + Display> FromStr for VoteResult<E> {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        // Regex for capturing each section
+        let Ok(re) = Regex::new(r"^c([^:]+):d([^:]+):s([^:]+)$") else {
+            bail!("Cannot parse redex");
+        };
+        let caps = re.captures(s).ok_or_else(|| anyhow!("Invalid VoteResult string: '{s}'"))?;
+
+        let Ok(committee) = E::from_str(&caps[1]) else {
+            bail!("Incorrect committee value {}", &caps[1]);
+        };
+        let Ok(drep) = E::from_str(&caps[2]) else {
+            bail!("Incorrect DRep value {}", &caps[2]);
+        };
+        let Ok(pool) = E::from_str(&caps[3]) else {
+            bail!("Incorrect SPO value {}", &caps[3]);
+        };
+
+        Ok(VoteResult { committee, drep, pool })
     }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct VotingOutcome {
     pub procedure: ProposalProcedure,
-    pub votes_cast: VotesCount,
-    pub votes_threshold: VotesCount,
+    pub votes_cast: VoteResult<VoteCount>,
+    pub votes_threshold: VoteResult<RationalNumber>,
     pub accepted: bool,
 }
 

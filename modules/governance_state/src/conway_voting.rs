@@ -3,8 +3,8 @@ use acropolis_common::protocol_params::ConwayParams;
 use acropolis_common::{
     BlockInfo, DRepCredential, DelegatedStake, EnactStateElem, GovActionId, GovernanceAction,
     GovernanceOutcome, GovernanceOutcomeVariant, KeyHash, Lovelace, ProposalProcedure,
-    SingleVoterVotes, TreasuryWithdrawalsAction, TxHash, Vote, Voter, VotesCount, VotingOutcome,
-    VotingProcedure,
+    SingleVoterVotes, TreasuryWithdrawalsAction, TxHash, Vote, Voter, VoteCount, VoteResult,
+    VotingOutcome, VotingProcedure,
 };
 use anyhow::{anyhow, bail, Result};
 use hex::ToHex;
@@ -14,7 +14,7 @@ use std::io::Write;
 use std::ops::Range;
 use tracing::{debug, error, info};
 
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ActionStatus {
     voting_epochs: Range<u64>,
     ratification_epoch: Option<u64>,
@@ -66,6 +66,10 @@ impl ConwayVoting {
             votes_count: 0,
             verification_output_file,
         }
+    }
+
+    pub fn is_bootstrap(&self) -> Result<bool> {
+        self.bootstrap.ok_or_else(|| anyhow!("ConwayVoting::is_bootstrap is not set"))
     }
 
     pub fn get_conway_params(&self) -> Result<&ConwayParams> {
@@ -166,11 +170,11 @@ impl ConwayVoting {
             .get(action_id)
             .ok_or_else(|| anyhow!("action {} not found", action_id))?;
         let conway_params = self.get_conway_params()?;
-        let bootstrap = self.bootstrap.ok_or_else(|| anyhow!("'bootstrap' param not set"))?;
-        let threshold = voting_state.get_action_thresholds(proposal, conway_params, bootstrap)?;
+        let threshold = voting_state.get_action_thresholds(proposal, conway_params);
 
-        let votes = self.get_actual_votes(action_id, drep_stake, spo_stake);
-        let voted = votes.majorizes(&threshold);
+        let votes = self.get_actual_votes(action_id, drep_stake, spo_stake)?;
+        let bootstrap = self.is_bootstrap()?;
+        let voted = voting_state.compare_votes(proposal, bootstrap, &votes, &threshold)?;
         let previous_ok = match proposal.gov_action.get_previous_action_id() {
             Some(act) => self.action_status.get(&act).map(|x| x.is_accepted()).unwrap_or(false),
             None => true,
@@ -197,41 +201,52 @@ impl ConwayVoting {
         Ok(())
     }
 
-    /// Returns actual votes: (Pool votes, DRep votes, committee votes)
+    /// Returns actual cast votes. Specific rules (how to treat registered, but not voted
+    /// voters) are not applied at this stage.
     fn get_actual_votes(
         &self,
         action_id: &GovActionId,
         drep_stake: &HashMap<DRepCredential, Lovelace>,
         spo_stake: &HashMap<KeyHash, DelegatedStake>,
-    ) -> VotesCount {
-        let mut votes = VotesCount::zero();
-        if let Some(all_votes) = self.votes.get(&action_id) {
-            for (voter, (_hash, voting_proc)) in all_votes.iter() {
-                if voting_proc.vote != Vote::Yes {
-                    // TODO: correctly count abstain votes + count vote pools
-                    continue;
-                }
+    ) -> Result<VoteResult<VoteCount>> {
+        let mut votes = VoteResult::<VoteCount> {
+            committee: VoteCount::zero(),
+            drep: VoteCount::zero(),
+            pool: VoteCount::zero(),
+        };
 
-                match voter {
-                    Voter::ConstitutionalCommitteeKey(_) => votes.committee += 1,
-                    Voter::ConstitutionalCommitteeScript(_) => votes.committee += 1,
-                    Voter::DRepKey(key) => {
-                        drep_stake
-                            .get(&DRepCredential::AddrKeyHash(key.clone()))
-                            .inspect(|v| votes.drep += *v);
-                    }
-                    Voter::DRepScript(script) => {
-                        drep_stake
-                            .get(&DRepCredential::ScriptHash(script.clone()))
-                            .inspect(|v| votes.drep += *v);
-                    }
-                    Voter::StakePoolKey(pool) => {
-                        spo_stake.get(pool).inspect(|ds| votes.pool += ds.live);
-                    }
+        let all_votes = self.votes.get(&action_id)
+            .ok_or_else(|| anyhow!("Governance action {action_id} missing."))?;
+
+        for (voter, (_hash, voting_proc)) in all_votes.iter() {
+            let (vc, vd, vp) = match voting_proc.vote {
+                Vote::Yes => (&mut votes.committee.yes, &mut votes.drep.yes, &mut votes.pool.yes),
+                Vote::No => (&mut votes.committee.no, &mut votes.drep.no, &mut votes.pool.no),
+                Vote::Abstain => (
+                    &mut votes.committee.abstain, &mut votes.drep.abstain, &mut votes.pool.abstain
+                ),
+            };
+
+            match voter {
+                Voter::ConstitutionalCommitteeKey(_) => *vc += 1,
+                Voter::ConstitutionalCommitteeScript(_) => *vc += 1,
+                Voter::DRepKey(key) => {
+                    drep_stake
+                        .get(&DRepCredential::AddrKeyHash(key.clone()))
+                        .inspect(|v| *vd += *v);
+                }
+                Voter::DRepScript(script) => {
+                    drep_stake
+                        .get(&DRepCredential::ScriptHash(script.clone()))
+                        .inspect(|v| *vd += *v);
+                }
+                Voter::StakePoolKey(pool) => {
+                    spo_stake.get(pool).inspect(|ds| *vp += ds.live);
                 }
             }
         }
-        votes
+
+        Ok(votes)
     }
 
     /// Checks whether action is expired at the beginning of new_epoch
@@ -309,18 +324,6 @@ impl ConwayVoting {
         )
     }
 
-    fn get_action_name(action: &GovernanceAction) -> &str {
-        match action {
-            GovernanceAction::ParameterChange(_) => "ParameterChange",
-            GovernanceAction::HardForkInitiation(_) => "HardForkInitiation",
-            GovernanceAction::TreasuryWithdrawals(_) => "TreasuryWithdrawals",
-            GovernanceAction::NoConfidence(_) => "NoConfidence",
-            GovernanceAction::UpdateCommittee(_) => "UpdateCommittee",
-            GovernanceAction::NewConstitution(_) => "NewConstitution",
-            GovernanceAction::Information => "Information",
-        }
-    }
-
     fn prepare_quotes(input: &str) -> String {
         input.replace("\"", "\"\"")
     }
@@ -367,7 +370,7 @@ impl ConwayVoting {
             };
             let txid: String = elem.voting.procedure.gov_action_id.transaction_id.encode_hex();
             let idx = elem.voting.procedure.gov_action_id.action_index;
-            let ptype = Self::get_action_name(&elem.voting.procedure.gov_action);
+            let ptype = elem.voting.procedure.gov_action.get_action_name();
             let proc = Self::prepare_quotes(&format!("{:?}", &elem.voting.procedure.gov_action));
             let cast = &elem.voting.votes_cast;
             let threshold = &elem.voting.votes_threshold;
@@ -508,12 +511,20 @@ impl ConwayVoting {
 mod tests {
     use super::*;
     use acropolis_common::Anchor;
+    use acropolis_common::ledger_state::VotingState;
+    use acropolis_common::rational_number::RationalNumber;
 
-    fn create_governance_outcome(id: u8) -> GovernanceOutcome {
-        let votes = VotesCount {
-            committee: 1,
-            drep: 1,
-            pool: 1,
+    fn create_governance_outcome(id: u8, accepted: bool) -> GovernanceOutcome {
+        let votes = VoteResult::<VoteCount> {
+            committee: VoteCount::zero(),
+            drep: VoteCount::zero(),
+            pool: VoteCount::zero(),
+        };
+
+        let votes_th = VoteResult::<RationalNumber> {
+            committee: RationalNumber::ONE,
+            drep: RationalNumber::ONE,
+            pool: RationalNumber::ONE,
         };
 
         let v = VotingOutcome {
@@ -531,8 +542,8 @@ mod tests {
                 },
             },
             votes_cast: votes.clone(),
-            votes_threshold: votes.clone(),
-            accepted: true,
+            votes_threshold: votes_th.clone(),
+            accepted,
         };
 
         GovernanceOutcome {
@@ -541,10 +552,11 @@ mod tests {
         }
     }
 
+    /// Simple test for general mechanics of action_status processing
     #[test]
-    fn test_outcomes_queue() -> Result<()> {
+    fn test_outcomes_action_status() -> Result<()> {
         let mut voting = ConwayVoting::new(None);
-        let oc1 = create_governance_outcome(1);
+        let oc1 = create_governance_outcome(1, true);
         voting.action_status.insert(
             oc1.voting.procedure.gov_action_id.clone(),
             ActionStatus {
@@ -570,29 +582,59 @@ mod tests {
             Some(2)
         );
 
-        let oc2 = create_governance_outcome(2);
+        let oc2 = create_governance_outcome(2, false);
+        let as2 = ActionStatus {
+            voting_epochs: 0..5,
+            ratification_epoch: None,
+            enactment_epoch: None,
+            expiration_epoch: None,
+        };
         voting.action_status.insert(
             oc2.voting.procedure.gov_action_id.clone(),
-            ActionStatus {
-                voting_epochs: 0..5,
-                ratification_epoch: None,
-                enactment_epoch: None,
-                expiration_epoch: None,
-            },
+            as2.clone(),
         );
-        voting.update_action_status_with_outcomes(2, &vec![oc2.clone()])?;
+        match voting.update_action_status_with_outcomes(2, &vec![oc2.clone()]) {
+            Err(e) => assert_eq!(
+                e.to_string(),
+                "Impossible outcome: gov_action1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq\
+                     qqqqqqqqqy9ddhkc votes 0..5, not ended at 2".to_string()
+            ),
+            Ok(()) => panic!("Action should not be successful."),
+        }
         assert_eq!(
-            voting
+            *voting
                 .action_status
                 .get(&oc2.voting.procedure.gov_action_id)
-                .unwrap()
-                .ratification_epoch,
-            Some(2)
+                .unwrap(),
+            as2
         );
+        voting.update_action_status_with_outcomes(5, &vec![oc2.clone()])?;
         assert_eq!(
-            voting.action_status.get(&oc2.voting.procedure.gov_action_id).unwrap().enactment_epoch,
-            Some(3)
+            voting.action_status.get(&oc2.voting.procedure.gov_action_id).unwrap().expiration_epoch,
+            Some(5)
         );
+        Ok(())
+    }
+
+    const MAINNET_EPOCH_POOL_STATS_JSON: &[u8] = include_bytes!("../data/epoch_pool_stats.json");
+
+    #[test]
+    fn test_mainnet_voting_up_573() -> Result<()> {
+        let epoch_pool_stats = serde_json::from_slice::<Vec<(u64, u64, u64, u64, u64)>
+        >(MAINNET_EPOCH_POOL_STATS_JSON)?;
+
+        //let config =
+
+        for vstate_raw in epoch_pool_stats {
+            let epoch = vstate_raw.0;
+            let vstate = VotingRegistrationState::new(
+                vstate_raw.1,
+                vstate_raw.2,
+                vstate_raw.3,
+                vstate_raw.4,
+                7
+            );
+        }
         Ok(())
     }
 
