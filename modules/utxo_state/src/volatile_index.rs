@@ -1,16 +1,15 @@
 //! Index of volatile UTXOs
 //! Maps volatile blocks to UTXOs created or spent in that block
+use acropolis_common::UTxOIdentifier;
 use std::collections::VecDeque;
 use tracing::error;
-
-use crate::state::UTXOKey;
 
 pub struct VolatileIndex {
     /// First block number represented in the index VecDeque
     first_block: u64,
 
     /// List of UTXOs for each block number
-    blocks: VecDeque<Vec<UTXOKey>>,
+    blocks: VecDeque<Vec<UTxOIdentifier>>,
 }
 
 impl VolatileIndex {
@@ -43,7 +42,7 @@ impl VolatileIndex {
     }
 
     /// Add a UTXO to the current last block
-    pub fn add_utxo(&mut self, utxo: &UTXOKey) {
+    pub fn add_utxo(&mut self, utxo: &UTxOIdentifier) {
         if let Some(last) = self.blocks.back_mut() {
             last.push(utxo.clone());
         }
@@ -51,8 +50,8 @@ impl VolatileIndex {
 
     /// Prune all blocks before the given boundary, returning a vector of
     /// UTXOs to delete
-    pub fn prune_before(&mut self, boundary: u64) -> Vec<UTXOKey> {
-        let mut utxos = Vec::<UTXOKey>::new();
+    pub fn prune_before(&mut self, boundary: u64) -> Vec<UTxOIdentifier> {
+        let mut utxos = Vec::<UTxOIdentifier>::new();
 
         // Remove blocks before boundary, calling back for all UTXOs in them
         while self.first_block < boundary {
@@ -72,8 +71,8 @@ impl VolatileIndex {
 
     /// Prune all blocks at or after the given boundary returning a vector of
     /// UTXOs to delete
-    pub fn prune_on_or_after(&mut self, boundary: u64) -> Vec<UTXOKey> {
-        let mut utxos = Vec::<UTXOKey>::new();
+    pub fn prune_on_or_after(&mut self, boundary: u64) -> Vec<UTxOIdentifier> {
+        let mut utxos = Vec::<UTxOIdentifier>::new();
 
         if self.first_block == 0 {
             return utxos;
@@ -143,47 +142,47 @@ mod tests {
         assert_eq!(1, index.first_block);
         assert_eq!(2, index.blocks.len());
 
-        let utxo = UTXOKey::new(&[42], 42);
+        let utxo = UTxOIdentifier::new(42, 42, 42);
         index.add_utxo(&utxo);
 
         assert!(index.blocks[0].is_empty());
         assert!(!index.blocks[1].is_empty());
-        assert_eq!(42, index.blocks[1][0].index);
+        assert_eq!(42, index.blocks[1][0].output_index());
     }
 
     #[test]
     fn prune_before_deletes_and_calls_back_with_utxos() {
         let mut index = VolatileIndex::new();
         index.add_block(1);
-        index.add_utxo(&UTXOKey::new(&[1], 1));
-        index.add_utxo(&UTXOKey::new(&[2], 2));
+        index.add_utxo(&UTxOIdentifier::new(1, 1, 1));
+        index.add_utxo(&UTxOIdentifier::new(2, 2, 2));
         index.add_block(2);
-        index.add_utxo(&UTXOKey::new(&[3], 3));
+        index.add_utxo(&UTxOIdentifier::new(3, 3, 3));
 
         let pruned = index.prune_before(2);
         assert_eq!(2, index.first_block);
         assert_eq!(1, index.blocks.len());
         assert_eq!(2, pruned.len());
-        assert_eq!(1, pruned[0].index);
-        assert_eq!(2, pruned[1].index);
+        assert_eq!(1, pruned[0].output_index());
+        assert_eq!(2, pruned[1].output_index());
     }
 
     #[test]
     fn prune_on_or_after_deletes_and_calls_back_with_utxos() {
         let mut index = VolatileIndex::new();
         index.add_block(1);
-        index.add_utxo(&UTXOKey::new(&[1], 1));
-        index.add_utxo(&UTXOKey::new(&[2], 2));
+        index.add_utxo(&UTxOIdentifier::new(1, 1, 1));
+        index.add_utxo(&UTxOIdentifier::new(2, 2, 2));
         index.add_block(2);
-        index.add_utxo(&UTXOKey::new(&[3], 3));
+        index.add_utxo(&UTxOIdentifier::new(3, 3, 3));
         let pruned = index.prune_on_or_after(1);
         assert_eq!(1, index.first_block);
         assert_eq!(0, index.blocks.len());
         assert_eq!(3, pruned.len());
 
         // Note reverse order of blocks
-        assert_eq!(3, pruned[0].index);
-        assert_eq!(1, pruned[1].index);
-        assert_eq!(2, pruned[2].index);
+        assert_eq!(3, pruned[0].output_index());
+        assert_eq!(1, pruned[1].output_index());
+        assert_eq!(2, pruned[2].output_index());
     }
 }

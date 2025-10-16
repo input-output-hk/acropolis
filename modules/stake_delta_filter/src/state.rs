@@ -12,9 +12,11 @@ use acropolis_common::{
 };
 use anyhow::Result;
 use serde_with::serde_as;
-use std::{collections::HashMap, fs, io::Write, sync::Arc};
+use std::collections::HashMap;
+use std::{fs, io::Write, sync::Arc};
 use tracing::info;
 
+#[allow(dead_code)]
 #[serde_as]
 #[derive(Default, serde::Serialize, serde::Deserialize)]
 pub struct PointerOccurrence {

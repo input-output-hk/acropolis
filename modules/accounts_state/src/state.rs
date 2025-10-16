@@ -1,9 +1,9 @@
 //! Acropolis AccountsState: State storage
 use crate::monetary::calculate_monetary_change;
-use crate::rewards::{RewardsResult, RewardsState};
+use crate::rewards::{calculate_rewards, RewardsResult};
 use crate::snapshot::Snapshot;
+use crate::verifier::Verifier;
 use acropolis_common::queries::accounts::OptimalPoolSizing;
-use acropolis_common::PoolLiveStakeInfo;
 use acropolis_common::{
     math::update_value_with_delta,
     messages::{
@@ -13,23 +13,29 @@ use acropolis_common::{
     },
     protocol_params::ProtocolParams,
     stake_addresses::{StakeAddressMap, StakeAddressState},
-    DRepChoice, DRepCredential, DelegatedStake, InstantaneousRewardSource,
-    InstantaneousRewardTarget, KeyHash, Lovelace, MoveInstantaneousReward, PoolRegistration, Pot,
-    SPORewards, StakeAddress, StakeCredential, StakeRewardDelta, TxCertificate,
+    BlockInfo, DRepChoice, DRepCredential, DelegatedStake, InstantaneousRewardSource,
+    InstantaneousRewardTarget, KeyHash, Lovelace, MoveInstantaneousReward, PoolLiveStakeInfo,
+    PoolRegistration, Pot, SPORewards, StakeAddress, StakeCredential, StakeRewardDelta,
+    TxCertificate,
 };
 use anyhow::Result;
 use imbl::OrdMap;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::mem::take;
-use std::sync::{Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex};
 use tokio::task::{spawn_blocking, JoinHandle};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, warn, Level};
 
 const DEFAULT_KEY_DEPOSIT: u64 = 2_000_000;
 const DEFAULT_POOL_DEPOSIT: u64 = 500_000_000;
 
+/// Stability window = slots into epoch at which Haskell node starts the rewards calculation
+// We need this because of a Shelley-era bug where stake deregistrations were still counted
+// up to the point of start of the calculation, rather than point of snapshot
+const STABILITY_WINDOW_SLOT: u64 = 4 * 2160 * 20; // TODO configure from genesis?
+
 /// Global 'pot' account state
-#[derive(Debug, Default, Clone, serde::Serialize)]
+#[derive(Debug, Default, PartialEq, Clone, serde::Serialize)]
 pub struct Pots {
     /// Unallocated reserves
     pub reserves: Lovelace,
@@ -41,18 +47,60 @@ pub struct Pots {
     pub deposits: Lovelace,
 }
 
+/// State for rewards calculation
+#[derive(Debug, Default, Clone)]
+pub struct EpochSnapshots {
+    /// Latest snapshot (epoch i)
+    pub mark: Arc<Snapshot>,
+
+    /// Previous snapshot (epoch i-1)
+    pub set: Arc<Snapshot>,
+
+    /// One before that (epoch i-2)
+    pub go: Arc<Snapshot>,
+}
+
+impl EpochSnapshots {
+    /// Push a new snapshot
+    pub fn push(&mut self, latest: Snapshot) {
+        self.go = self.set.clone();
+        self.set = self.mark.clone();
+        self.mark = Arc::new(latest);
+    }
+}
+
+/// Registration change kind
+#[derive(Debug, Clone)]
+pub enum RegistrationChangeKind {
+    Registered,
+    Deregistered,
+}
+
+/// Registration change on a stake address
+#[derive(Debug, Clone)]
+pub struct RegistrationChange {
+    /// Stake address hash
+    address: KeyHash,
+
+    /// Change type
+    kind: RegistrationChangeKind,
+}
+
 /// Overall state - stored per block
 #[derive(Debug, Default, Clone)]
 pub struct State {
     /// Map of active SPOs by operator ID
     spos: OrdMap<KeyHash, PoolRegistration>,
 
+    /// List of SPOs (by operator ID) retiring in the current epoch
+    retiring_spos: Vec<KeyHash>,
+
     /// Map of staking address values
     /// Wrapped in an Arc so it doesn't get cloned in full by StateHistory
     stake_addresses: Arc<Mutex<StakeAddressMap>>,
 
-    /// Reward state - short history of snapshots
-    rewards_state: RewardsState,
+    /// Short history of snapshots
+    epoch_snapshots: EpochSnapshots,
 
     /// Global account pots
     pots: Pots,
@@ -63,17 +111,26 @@ pub struct State {
     /// Protocol parameters that apply during this epoch
     protocol_parameters: Option<ProtocolParams>,
 
+    /// Protocol parameters that applied in the previous epoch
+    previous_protocol_parameters: Option<ProtocolParams>,
+
     /// Pool refunds to apply next epoch (list of reward accounts to refund to)
     pool_refunds: Vec<KeyHash>,
 
-    // Stake address refunds to apply next epoch
+    /// Stake address refunds to apply next epoch
     stake_refunds: Vec<(KeyHash, Lovelace)>,
 
-    // MIRs to pay next epoch
+    /// MIRs to pay next epoch
     mirs: Vec<MoveInstantaneousReward>,
 
-    // Task for rewards calculation if necessary
+    /// Addresses registration changes in current epoch
+    current_epoch_registration_changes: Arc<Mutex<Vec<RegistrationChange>>>,
+
+    /// Task for rewards calculation if necessary
     epoch_rewards_task: Arc<Mutex<Option<JoinHandle<Result<RewardsResult>>>>>,
+
+    /// Signaller to start the above - delayed in early Shelley to replicate bug
+    start_rewards_tx: Option<mpsc::Sender<()>>,
 }
 
 impl State {
@@ -102,7 +159,7 @@ impl State {
         .clone();
 
         let total_supply =
-            shelly_params.max_lovelace_supply - self.rewards_state.mark.pots.reserves;
+            shelly_params.max_lovelace_supply - self.epoch_snapshots.mark.pots.reserves;
         let nopt = shelly_params.protocol_params.stake_pool_target_num as u64;
         Some(OptimalPoolSizing { total_supply, nopt })
     }
@@ -151,6 +208,17 @@ impl State {
         stake_addresses.get_accounts_balances_map(stake_keys)
     }
 
+    /// Sum total_active_stake for delegators of all spos in the latest snapshot
+    pub fn get_latest_snapshot_account_balances(&self) -> u64 {
+        let mut total_active_stake: u64 = 0;
+        for spo in self.epoch_snapshots.mark.spos.iter() {
+            for delegator in spo.1.delegators.iter() {
+                total_active_stake += delegator.1;
+            }
+        }
+        total_active_stake
+    }
+
     /// Map stake_keys to their delegated DRep
     pub fn get_drep_delegations_map(
         &self,
@@ -180,16 +248,21 @@ impl State {
     /// Process entry into a new epoch
     ///   epoch: Number of epoch we are entering
     ///   total_fees: Total fees taken in previous epoch
+    ///   total_blocks: Total blocks minted (both SPO and OBFT)
     ///   spo_block_counts: Count of blocks minted by operator ID in previous epoch
+    ///   verifier: Verifier against Haskell node output
     // Follows the general scheme in https://docs.cardano.org/about-cardano/learn/pledging-rewards
     fn enter_epoch(
         &mut self,
         epoch: u64,
         total_fees: u64,
         spo_block_counts: HashMap<KeyHash, usize>,
+        verifier: &Verifier,
     ) -> Result<Vec<StakeRewardDelta>> {
         // TODO HACK! Investigate why this differs to our calculated reserves after AVVM
         // 13,887,515,255 - as we enter 208 (Shelley)
+        // TODO this will only work in Mainnet - need to know when Shelley starts across networks
+        // and the reserves value, if we can't properly calculate it
         if epoch == 208 {
             // Fix reserves to that given in the CF Java implementation:
             // https://github.com/cardano-foundation/cf-java-rewards-calculation/blob/b05eddf495af6dc12d96c49718f27c34fa2042b1/calculation/src/main/java/org/cardanofoundation/rewards/calculation/config/NetworkConfig.java#L45C57-L45C74
@@ -203,72 +276,180 @@ impl State {
             );
         }
 
-        // Get Shelley parameters, silently return if too early in the chain so no
+        // Get previous Shelley parameters, silently return if too early in the chain so no
         // rewards to calculate
-        let shelley_params = match &self.protocol_parameters {
+        // In the first epoch of Shelley, there are no previous_protocol_parameters, so we
+        // have to use the genesis parameters we just received
+        let shelley_params = match &self.previous_protocol_parameters {
             Some(ProtocolParams {
                 shelley: Some(sp), ..
             }) => sp,
-            _ => return Ok(vec![]),
+            _ => match &self.protocol_parameters {
+                Some(ProtocolParams {
+                    shelley: Some(sp), ..
+                }) => sp,
+                _ => return Ok(vec![]),
+            },
         }
         .clone();
 
+        info!(
+            epoch,
+            reserves = self.pots.reserves,
+            treasury = self.pots.treasury,
+            "Entering"
+        );
+
         // Filter the block counts for SPOs that are registered - treating any we don't know
         // as 'OBFT' style (the legacy nodes)
-        let total_blocks: usize = spo_block_counts.values().sum();
-        let known_vrf_keys: HashSet<_> = self.spos.values().map(|spo| &spo.vrf_key_hash).collect();
-        let obft_block_count: usize = spo_block_counts
-            .iter()
-            .filter(|(vrf_key, _)| !known_vrf_keys.contains(vrf_key))
-            .map(|(_, count)| count)
-            .sum();
-        let total_non_obft_blocks = total_blocks - obft_block_count;
-        info!(total_blocks, total_non_obft_blocks, "Block counts:");
+        let total_non_obft_blocks = spo_block_counts.values().sum();
 
-        // Update the reserves and treasury (monetary.rs)
-        // TODO note using last-but-one epoch's fees for reward pot - why?
-        let monetary_change = calculate_monetary_change(
-            &shelley_params,
-            &self.pots,
-            self.rewards_state.mark.fees,
-            total_non_obft_blocks,
-        )?;
-        self.pots = monetary_change.pots;
-
-        // Pay the refunds and MIRs
+        // Pay MIRs before snapshot, so reserves is correct for total_supply in rewards
         let mut reward_deltas = Vec::<StakeRewardDelta>::new();
-        reward_deltas.extend(self.pay_pool_refunds());
-        reward_deltas.extend(self.pay_stake_refunds());
         reward_deltas.extend(self.pay_mirs());
 
-        // Capture a new snapshot and push it to state
+        // Capture a new snapshot for the end of the previous epoch and push it to state
         let snapshot = Snapshot::new(
-            epoch,
+            epoch - 1,
             &self.stake_addresses.lock().unwrap(),
             &self.spos,
             &spo_block_counts,
             &self.pots,
-            total_fees,
+            total_non_obft_blocks,
+            // Take and clear registration changes
+            std::mem::take(&mut *self.current_epoch_registration_changes.lock().unwrap()),
+            // Pass in two-previous epoch snapshot for capture of SPO reward accounts
+            self.epoch_snapshots.set.clone(), // Will become 'go' in the next line!
         );
-        self.rewards_state.push(snapshot);
+        self.epoch_snapshots.push(snapshot);
 
-        // Stop here if no blocks to pay out on
-        if total_blocks == 0 {
-            return Ok(vec![]);
-        }
+        // Pay the refunds after snapshot, so they don't appear in active_stake
+        reward_deltas.extend(self.pay_pool_refunds());
+        reward_deltas.extend(self.pay_stake_refunds());
 
-        let rs = self.rewards_state.clone();
+        // Verify pots state
+        verifier.verify_pots(epoch, &self.pots);
+
+        // Update the reserves and treasury (monetary.rs)
+        let monetary_change = calculate_monetary_change(
+            &shelley_params,
+            &self.pots,
+            total_fees,
+            total_non_obft_blocks,
+        )?;
+        self.pots = monetary_change.pots;
+
+        info!(
+            epoch,
+            reserves = self.pots.reserves,
+            treasury = self.pots.treasury,
+            "After monetary change"
+        );
+
+        // Set up background task for rewards, capturing and emptying current deregistrations
+        let performance = self.epoch_snapshots.mark.clone();
+        let staking = self.epoch_snapshots.go.clone();
+
+        // Calculate the sets of net registrations and deregistrations which happened between
+        // staking and now
+        // Note: We do this to save memory - although the 'mark' snapshot contains the
+        // current registration status of each address, it is segmented by SPO and there's
+        // no way to search by address (they may move SPO in between), so this saves another
+        // huge map.  If the snapshot was ever changed to store addresses in a way where an
+        // individual could be looked up, this could be simplified - but you still need to
+        // handle the Shelley bug part!
+        let mut registrations: HashSet<KeyHash> = HashSet::new();
+        let mut deregistrations: HashSet<KeyHash> = HashSet::new();
+        Self::apply_registration_changes(
+            &self.epoch_snapshots.set.registration_changes,
+            &mut registrations,
+            &mut deregistrations,
+        );
+        Self::apply_registration_changes(
+            &self.epoch_snapshots.mark.registration_changes,
+            &mut registrations,
+            &mut deregistrations,
+        );
+
+        let (start_rewards_tx, start_rewards_rx) = mpsc::channel::<()>();
+        let current_epoch_registration_changes = self.current_epoch_registration_changes.clone();
         self.epoch_rewards_task = Arc::new(Mutex::new(Some(spawn_blocking(move || {
-            // Calculate reward payouts
-            rs.calculate_rewards(
-                epoch,
+            // Wait for start signal
+            let _ = start_rewards_rx.recv();
+
+            // Additional deregistrations from current epoch - early Shelley bug
+            // TODO - make optional, turn off after Allegra
+            Self::apply_registration_changes(
+                &current_epoch_registration_changes.lock().unwrap(),
+                &mut registrations,
+                &mut deregistrations,
+            );
+
+            if tracing::enabled!(Level::DEBUG) {
+                registrations.iter().for_each(|k| debug!("Registration {}", hex::encode(k)));
+                deregistrations.iter().for_each(|k| debug!("Deregistration {}", hex::encode(k)));
+            }
+
+            // Calculate reward payouts for previous epoch
+            calculate_rewards(
+                epoch - 1,
+                performance,
+                staking,
                 &shelley_params,
-                total_blocks,
                 monetary_change.stake_rewards,
+                &registrations,
+                &deregistrations,
             )
         }))));
 
+        // Delay starting calculation until 4k into epoch, to capture late deregistrations
+        // wrongly counted in early Shelley, and also to put them out of reach of rollbacks
+        self.start_rewards_tx = Some(start_rewards_tx);
+
+        // Now retire the SPOs fully
+        // TODO - wipe any delegations to retired pools
+        for id in self.retiring_spos.drain(..) {
+            self.spos.remove(&id);
+        }
+
         Ok(reward_deltas)
+    }
+
+    /// Apply a registration change set to a deregistrations list
+    /// registrations gets all registrations still in effect at the end of the changes
+    /// deregistrations likewise for net deregistrations
+    fn apply_registration_changes(
+        changes: &Vec<RegistrationChange>,
+        registrations: &mut HashSet<KeyHash>,
+        deregistrations: &mut HashSet<KeyHash>,
+    ) {
+        for change in changes {
+            match change.kind {
+                RegistrationChangeKind::Registered => {
+                    registrations.insert(change.address.clone());
+                    deregistrations.remove(&change.address);
+                }
+                RegistrationChangeKind::Deregistered => {
+                    registrations.remove(&change.address);
+                    deregistrations.insert(change.address.clone());
+                }
+            };
+        }
+    }
+
+    /// Notify of a new block
+    pub fn notify_block(&mut self, block: &BlockInfo) {
+        // Is the rewards task blocked on us reaching the 4 * k block?
+        if let Some(tx) = &self.start_rewards_tx {
+            if block.epoch_slot >= STABILITY_WINDOW_SLOT {
+                info!(
+                    "Starting rewards calculation at block {}, epoch slot {}",
+                    block.number, block.epoch_slot
+                );
+                let _ = tx.send(());
+                self.start_rewards_tx = None;
+            }
+        }
     }
 
     /// Pay pool refunds
@@ -441,36 +622,25 @@ impl State {
 
         if different {
             info!("New parameter set: {:?}", params_msg.params);
+            self.previous_protocol_parameters = self.protocol_parameters.clone();
+            self.protocol_parameters = Some(params_msg.params.clone());
         }
 
-        self.protocol_parameters = Some(params_msg.params.clone());
         Ok(())
     }
 
-    /// Handle an EpochActivityMessage giving total fees and block counts by VRF key for
+    /// Handle an EpochActivityMessage giving total fees and block counts by SPO for
     /// the just-ended epoch
     /// This also returns SPO rewards for publishing to the SPDD topic (For epoch N)
     /// and stake reward deltas for publishing to the StakeRewardDeltas topic (For epoch N)
     pub async fn handle_epoch_activity(
         &mut self,
         ea_msg: &EpochActivityMessage,
+        verifier: &Verifier,
     ) -> Result<(Vec<(KeyHash, SPORewards)>, Vec<StakeRewardDelta>)> {
         let mut spo_rewards: Vec<(KeyHash, SPORewards)> = Vec::new();
         // Collect stake addresses reward deltas
         let mut reward_deltas = Vec::<StakeRewardDelta>::new();
-
-        // Reverse map of VRF key to SPO operator ID
-        let vrf_to_operator: HashMap<KeyHash, KeyHash> =
-            self.spos.iter().map(|(id, spo)| (spo.vrf_key_hash.clone(), id.clone())).collect();
-
-        // Create a map of operator ID to block count
-        let spo_block_counts: HashMap<KeyHash, usize> = ea_msg
-            .vrf_vkey_hashes
-            .iter()
-            .filter_map(|(vrf, count)| {
-                vrf_to_operator.get(vrf).map(|operator| (operator.clone(), *count))
-            })
-            .collect();
 
         // Check previous epoch work is done
         let mut task = {
@@ -488,20 +658,27 @@ impl State {
             match task.await {
                 Ok(Ok(reward_result)) => {
                     // Collect rewards to stake addresses reward deltas
-                    reward_deltas.extend(
-                        reward_result
-                            .rewards
-                            .iter()
-                            .map(|(account, amount)| StakeRewardDelta {
-                                hash: account.clone(),
-                                delta: *amount as i64,
-                            })
-                            .collect::<Vec<_>>(),
-                    );
+                    for (_, rewards) in &reward_result.rewards {
+                        reward_deltas.extend(
+                            rewards
+                                .iter()
+                                .map(|reward| StakeRewardDelta {
+                                    hash: reward.account.clone(),
+                                    delta: reward.amount as i64,
+                                })
+                                .collect::<Vec<_>>(),
+                        );
+                    }
+
+                    // Verify them
+                    verifier.verify_rewards(reward_result.epoch, &reward_result);
+
                     // Pay the rewards
-                    for (account, amount) in reward_result.rewards {
-                        let mut stake_addresses = self.stake_addresses.lock().unwrap();
-                        stake_addresses.add_to_reward(&account, amount);
+                    let mut stake_addresses = self.stake_addresses.lock().unwrap();
+                    for (_, rewards) in reward_result.rewards {
+                        for reward in rewards {
+                            stake_addresses.add_to_reward(&reward.account, reward.amount);
+                        }
                     }
 
                     // save SPO rewards
@@ -513,11 +690,21 @@ impl State {
                 _ => (),
             }
         };
+
+        // Map block counts, filtering out SPOs we don't know (OBFT in early Shelley)
+        let spo_blocks: HashMap<KeyHash, usize> = ea_msg
+            .spo_blocks
+            .iter()
+            .filter(|(hash, _)| self.spos.contains_key(hash))
+            .map(|(hash, count)| (hash.clone(), *count))
+            .collect();
+
         // Enter epoch - note the message specifies the epoch that has just *ended*
         reward_deltas.extend(self.enter_epoch(
             ea_msg.epoch + 1,
             ea_msg.total_fees,
-            spo_block_counts,
+            spo_blocks,
+            verifier,
         )?);
 
         Ok((spo_rewards, reward_deltas))
@@ -527,7 +714,7 @@ impl State {
     /// epoch
     pub fn handle_spo_state(&mut self, spo_msg: &SPOStateMessage) -> Result<()> {
         // Capture current SPOs, mapped by operator ID
-        let mut new_spos: OrdMap<KeyHash, PoolRegistration> =
+        let new_spos: OrdMap<KeyHash, PoolRegistration> =
             spo_msg.spos.iter().cloned().map(|spo| (spo.operator.clone(), spo)).collect();
 
         // Get pool deposit amount from parameters, or default
@@ -540,6 +727,38 @@ impl State {
 
         // Check for how many new SPOs
         let new_count = new_spos.keys().filter(|id| !self.spos.contains_key(*id)).count();
+
+        // Log new ones and pledge/cost/margin changes
+        for (id, spo) in new_spos.iter() {
+            match self.spos.get(id) {
+                Some(old_spo) => {
+                    if spo.pledge != old_spo.pledge
+                        || spo.cost != old_spo.cost
+                        || spo.margin != old_spo.margin
+                    {
+                        debug!(
+                            epoch = spo_msg.epoch,
+                            pledge = spo.pledge,
+                            cost = spo.cost,
+                            margin = ?spo.margin,
+                            "Updated parameters for SPO {}",
+                            hex::encode(id)
+                        );
+                    }
+                }
+
+                _ => {
+                    debug!(
+                        epoch = spo_msg.epoch,
+                        pledge = spo.pledge,
+                        cost = spo.cost,
+                        margin = ?spo.margin,
+                        "Registered new SPO {}",
+                        hex::encode(id)
+                    );
+                }
+            }
+        }
 
         // They've each paid their deposit, so increment that (the UTXO spend is taken
         // care of in UTXOState)
@@ -567,9 +786,9 @@ impl State {
                     Err(e) => error!("Error repaying SPO deposit: {e}"),
                 }
 
-                // Remove from our list
-                new_spos.remove(id);
-                // TODO - wipe any delegations to retired pools
+                // Schedule to retire - we need them to still be in place when we count
+                // blocks for the previous epoch
+                self.retiring_spos.push(id.to_vec());
             }
         }
 
@@ -597,6 +816,12 @@ impl State {
 
             self.pots.deposits += deposit;
         }
+
+        // Add to registration changes
+        self.current_epoch_registration_changes.lock().unwrap().push(RegistrationChange {
+            address: credential.get_hash(),
+            kind: RegistrationChangeKind::Registered,
+        });
     }
 
     /// Deregister a stake address, with specified refund if known
@@ -617,6 +842,12 @@ impl State {
                 }
             };
             self.pots.deposits -= deposit;
+
+            // Add to registration changes
+            self.current_epoch_registration_changes.lock().unwrap().push(RegistrationChange {
+                address: credential.get_hash(),
+                kind: RegistrationChangeKind::Deregistered,
+            });
         }
     }
 

@@ -13,7 +13,7 @@ use acropolis_common::{
     },
     rational_number::RationalNumber,
     state_history::{StateHistory, StateHistoryStore},
-    BlockInfo, BlockStatus, Era,
+    BlockInfo, BlockStatus, Era, KeyHash,
 };
 use anyhow::Result;
 use caryatid_sdk::{module, Context, Module, Subscription};
@@ -286,9 +286,11 @@ impl SPOState {
                     span.in_scope(|| {
                         Self::check_sync(&current_block, &block_info);
                         // update epochs_history
-                        // epochs_history is keyed by spo not vrf_key_hash
-                        let spos = state
-                            .get_blocks_minted_by_spos(&epoch_activity_message.vrf_vkey_hashes);
+                        let spos: Vec<(KeyHash, usize)> = epoch_activity_message
+                            .spo_blocks
+                            .iter()
+                            .map(|(hash, count)| (hash.clone(), *count))
+                            .collect();
                         epochs_history.handle_epoch_activity(
                             block_info,
                             epoch_activity_message,
@@ -634,12 +636,19 @@ impl SPOState {
                         PoolsStateQueryResponse::PoolTotalBlocksMinted(state.get_total_blocks_minted_by_pool(&pool_id))
                     }
 
-                    PoolsStateQuery::GetPoolBlockHashes { pool_id } => {
-                        if state.is_block_hashes_enabled() {
-                            PoolsStateQueryResponse::PoolBlockHashes(state.get_pool_block_hashes(pool_id).unwrap_or_default())
-                        } else {
-                            PoolsStateQueryResponse::Error("Block hashes are not enabled".into())
-                        }
+                    PoolsStateQuery::GetBlocksByPool { pool_id } => {
+                        state
+                            .is_historical_blocks_enabled()
+                            .then(|| PoolsStateQueryResponse::BlocksByPool(state.get_blocks_by_pool(pool_id).unwrap_or_default()))
+                            .unwrap_or(PoolsStateQueryResponse::Error("Blocks are not enabled".into()))
+                    }
+
+                    PoolsStateQuery::GetBlocksByPoolAndEpoch { pool_id, epoch } => {
+                        state
+                        .is_historical_blocks_enabled()
+                        .then(|| PoolsStateQueryResponse::BlocksByPoolAndEpoch(state.get_blocks_by_pool_and_epoch(pool_id, *epoch)
+                        .unwrap_or_default()))
+                        .unwrap_or(PoolsStateQueryResponse::Error("Blocks are not enabled".into()))
                     }
 
                     PoolsStateQuery::GetPoolUpdates { pool_id } => {

@@ -25,7 +25,7 @@ publish-asset-deltas-topic = "cardano.asset.deltas"
 publish-withdrawals-topic = "cardano.withdrawals"
 publish-certificates-topic = "cardano.certificates"
 publish-governance-topic = "cardano.governance"
-publish-fees-topic = "cardano.block.fees"
+publish-block-txs-topic = "cardano.block.txs"
 
 [module.utxo-state]
 store = "memory" # "memory", "dashmap", "fjall", "fjall-async", "sled", "sled-async", "fake"
@@ -44,12 +44,14 @@ store-updates = false
 store-delegators = false
 # Enables /pools/{pool_id}/votes endpoint
 store-votes = false
-# Store block hashes, enables /pools/{pool_id}/blocks endpoints
-store-block-hashes = false
+# Store blocks, enables /pools/{pool_id}/blocks, /epochs/{number}/blocks/{pool_id}
+store-blocks = false
 # Store stake_addresses
 store-stake-addresses = false
 
 [module.spdd-state]
+# Enables active_stakes in /epochs/latest | {number} endpoints
+# Enables /epochs/{number}/{next | previous}
 store-spdd = false
 
 [module.drep-state]
@@ -81,6 +83,9 @@ write-full-cache = "false"
 store-history = false
 
 [module.accounts-state]
+# Verify against captured CSV
+verify-pots-file = "../../modules/accounts_state/test-data/pots.mainnet.csv"
+verify-rewards-files = "../../modules/accounts_state/test-data/rewards.mainnet.{}.csv"
 
 [module.assets-state]
 # Enables /assets endpoint

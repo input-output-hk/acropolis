@@ -1,6 +1,7 @@
 //! In-memory store for immutable UTXOs using standard HashMap
 
-use crate::state::{ImmutableUTXOStore, UTXOKey, UTXOValue};
+use crate::state::{ImmutableUTXOStore, UTXOValue};
+use acropolis_common::UTxOIdentifier;
 use anyhow::Result;
 use async_trait::async_trait;
 use config::Config;
@@ -11,7 +12,7 @@ use tracing::info;
 
 pub struct InMemoryImmutableUTXOStore {
     /// Map of UTXOs
-    utxos: RwLock<HashMap<UTXOKey, UTXOValue>>,
+    utxos: RwLock<HashMap<UTxOIdentifier, UTXOValue>>,
 }
 
 impl InMemoryImmutableUTXOStore {
@@ -27,19 +28,19 @@ impl InMemoryImmutableUTXOStore {
 #[async_trait]
 impl ImmutableUTXOStore for InMemoryImmutableUTXOStore {
     /// Add a UTXO
-    async fn add_utxo(&self, key: UTXOKey, value: UTXOValue) -> Result<()> {
+    async fn add_utxo(&self, key: UTxOIdentifier, value: UTXOValue) -> Result<()> {
         self.utxos.write().await.insert(key, value);
         Ok(())
     }
 
     /// Delete a UTXO
-    async fn delete_utxo(&self, key: &UTXOKey) -> Result<()> {
+    async fn delete_utxo(&self, key: &UTxOIdentifier) -> Result<()> {
         self.utxos.write().await.remove(key);
         Ok(())
     }
 
     /// Lookup a UTXO
-    async fn lookup_utxo(&self, key: &UTXOKey) -> Result<Option<UTXOValue>> {
+    async fn lookup_utxo(&self, key: &UTxOIdentifier) -> Result<Option<UTXOValue>> {
         // Essential to clone here because ref is not async safe
         Ok(self.utxos.read().await.get(key).cloned())
     }
