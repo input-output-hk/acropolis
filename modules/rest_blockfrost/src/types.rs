@@ -53,7 +53,7 @@ impl From<EpochActivityMessage> for EpochActivityRest {
 
 // REST response structure for /blocks/latest
 #[derive(Serialize)]
-pub struct BlockInfoREST<'a>(pub &'a BlockInfo);
+pub struct BlockInfoREST(pub BlockInfo);
 
 // REST response structure for /governance/dreps
 #[derive(Serialize)]

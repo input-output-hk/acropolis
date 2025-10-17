@@ -191,7 +191,7 @@ impl ChainStore {
                 };
                 let number = match block_key {
                     BlockKey::Number(number) => *number,
-                    _ => Self::get_block_number(&block)?
+                    _ => Self::get_block_number(&block)?,
                 };
                 let min_number = number + 1 + skip;
                 let max_number = min_number + limit - 1;
@@ -216,7 +216,7 @@ impl ChainStore {
                 };
                 let number = match block_key {
                     BlockKey::Number(number) => *number,
-                    _ => Self::get_block_number(&block)?
+                    _ => Self::get_block_number(&block)?,
                 };
                 let Some(max_number) = number.checked_sub(1 + skip) else {
                     return Ok(BlocksStateQueryResponse::PreviousBlocks(PreviousBlocks {

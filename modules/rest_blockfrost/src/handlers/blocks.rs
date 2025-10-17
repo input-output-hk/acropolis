@@ -5,11 +5,11 @@ use acropolis_common::{
     queries::{
         blocks::{BlockKey, BlocksStateQuery, BlocksStateQueryResponse},
         misc::Order,
-        utils::query_state,
+        utils::rest_query_state,
     },
     BlockHash,
 };
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -58,37 +58,21 @@ async fn handle_blocks_latest_blockfrost(
     let blocks_latest_msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
         BlocksStateQuery::GetLatestBlock,
     )));
-    let block_info = query_state(
+    rest_query_state(
         &context,
         &handlers_config.blocks_query_topic,
         blocks_latest_msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::LatestBlock(blocks_latest),
-            )) => Ok(blocks_latest),
+            )) => Some(Ok(Some(BlockInfoREST(blocks_latest)))),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
-            )) => {
-                return Err(anyhow::anyhow!(
-                    "Internal server error while retrieving latest block: {e}"
-                ));
-            }
-            _ => {
-                return Err(anyhow::anyhow!(
-                    "Unexpected message type while retrieving latest block"
-                ))
-            }
+            )) => Some(Err(anyhow!(e))),
+            _ => None,
         },
     )
-    .await?;
-
-    match serde_json::to_string(&BlockInfoREST(&block_info)) {
-        Ok(json) => Ok(RESTResponse::with_json(200, &json)),
-        Err(e) => Ok(RESTResponse::with_text(
-            500,
-            &format!("Internal server error while retrieving block info: {e}"),
-        )),
-    }
+    .await
 }
 
 /// Handle `/blocks/{hash_or_number}`
@@ -105,43 +89,24 @@ async fn handle_blocks_hash_number_blockfrost(
     let block_info_msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
         BlocksStateQuery::GetBlockInfo { block_key },
     )));
-    let block_info = query_state(
+    rest_query_state(
         &context,
         &handlers_config.blocks_query_topic,
         block_info_msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::BlockInfo(block_info),
-            )) => Ok(Some(block_info)),
+            )) => Some(Ok(Some(BlockInfoREST(block_info)))),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::NotFound,
-            )) => Ok(None),
+            )) => Some(Ok(None)),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
-            )) => {
-                return Err(anyhow::anyhow!(
-                    "Internal server error while retrieving block by hash or number: {e}"
-                ));
-            }
-            _ => {
-                return Err(anyhow::anyhow!(
-                    "Unexpected message type while retrieving block by hash or number"
-                ))
-            }
+            )) => Some(Err(anyhow!(e))),
+            _ => None,
         },
     )
-    .await?;
-
-    match block_info {
-        Some(block_info) => match serde_json::to_string(&BlockInfoREST(&block_info)) {
-            Ok(json) => Ok(RESTResponse::with_json(200, &json)),
-            Err(e) => Ok(RESTResponse::with_text(
-                500,
-                &format!("Internal server error while retrieving block info: {e}"),
-            )),
-        },
-        None => Ok(RESTResponse::with_text(404, "Not found")),
-    }
+    .await
 }
 
 /// Handle `/blocks/latest/txs`, `/blocks/{hash_or_number}/txs`
@@ -201,37 +166,21 @@ async fn handle_blocks_latest_transactions_blockfrost(
     let blocks_latest_txs_msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
         BlocksStateQuery::GetLatestBlockTransactions { limit, skip, order },
     )));
-    let block_txs = query_state(
+    rest_query_state(
         &context,
         &handlers_config.blocks_query_topic,
         blocks_latest_txs_msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::LatestBlockTransactions(blocks_txs),
-            )) => Ok(blocks_txs),
+            )) => Some(Ok(Some(blocks_txs))),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
-            )) => {
-                return Err(anyhow::anyhow!(
-                    "Internal server error while retrieving latest block transactions: {e}"
-                ));
-            }
-            _ => {
-                return Err(anyhow::anyhow!(
-                    "Unexpected message type while retrieving latest block transactions"
-                ))
-            }
+            )) => Some(Err(anyhow!(e))),
+            _ => None,
         },
     )
-    .await?;
-
-    match serde_json::to_string(&block_txs) {
-        Ok(json) => Ok(RESTResponse::with_json(200, &json)),
-        Err(e) => Ok(RESTResponse::with_text(
-            500,
-            &format!("Internal server error while retrieving block transactions: {e}"),
-        )),
-    }
+    .await
 }
 
 /// Handle `/blocks/{hash_or_number}/txs`
@@ -256,43 +205,24 @@ async fn handle_blocks_hash_number_transactions_blockfrost(
             order,
         },
     )));
-    let block_txs = query_state(
+    rest_query_state(
         &context,
         &handlers_config.blocks_query_topic,
         block_txs_msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::BlockTransactions(block_txs),
-            )) => Ok(Some(block_txs)),
+            )) => Some(Ok(Some(block_txs))),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::NotFound,
-            )) => Ok(None),
+            )) => Some(Ok(None)),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
-            )) => {
-                return Err(anyhow::anyhow!(
-                    "Internal server error while retrieving block transactions by hash or number: {e}"
-                ));
-            }
-            _ => {
-                return Err(anyhow::anyhow!(
-                    "Unexpected message type while retrieving block transactions by hash or number"
-                ))
-            }
+            )) => Some(Err(anyhow!(e))),
+            _ => None,
         },
     )
-    .await?;
-
-    match block_txs {
-        Some(block_txs) => match serde_json::to_string(&block_txs) {
-            Ok(json) => Ok(RESTResponse::with_json(200, &json)),
-            Err(e) => Ok(RESTResponse::with_text(
-                500,
-                &format!("Internal server error while retrieving block transactions: {e}"),
-            )),
-        },
-        None => Ok(RESTResponse::with_text(404, "Not found")),
-    }
+    .await
 }
 
 /// Handle `/blocks/latest/txs/cbor`, `/blocks/{hash_or_number}/txs/cbor`
@@ -352,37 +282,21 @@ async fn handle_blocks_latest_transactions_cbor_blockfrost(
     let blocks_latest_txs_msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
         BlocksStateQuery::GetLatestBlockTransactionsCBOR { limit, skip, order },
     )));
-    let block_txs_cbor = query_state(
+    rest_query_state(
         &context,
         &handlers_config.blocks_query_topic,
         blocks_latest_txs_msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::LatestBlockTransactionsCBOR(blocks_txs),
-            )) => Ok(blocks_txs),
+            )) => Some(Ok(Some(blocks_txs))),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
-            )) => {
-                return Err(anyhow::anyhow!(
-                    "Internal server error while retrieving latest block transactions CBOR: {e}"
-                ));
-            }
-            _ => {
-                return Err(anyhow::anyhow!(
-                    "Unexpected message type while retrieving latest block transactions CBOR"
-                ))
-            }
+            )) => Some(Err(anyhow!(e))),
+            _ => None,
         },
     )
-    .await?;
-
-    match serde_json::to_string(&block_txs_cbor) {
-        Ok(json) => Ok(RESTResponse::with_json(200, &json)),
-        Err(e) => Ok(RESTResponse::with_text(
-            500,
-            &format!("Internal server error while retrieving block transactions CBOR: {e}"),
-        )),
-    }
+    .await
 }
 
 /// Handle `/blocks/{hash_or_number}/txs/cbor`
@@ -407,43 +321,24 @@ async fn handle_blocks_hash_number_transactions_cbor_blockfrost(
             order,
         },
     )));
-    let block_txs_cbor = query_state(
+    rest_query_state(
         &context,
         &handlers_config.blocks_query_topic,
         block_txs_cbor_msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::BlockTransactionsCBOR(block_txs_cbor),
-            )) => Ok(Some(block_txs_cbor)),
+            )) => Some(Ok(Some(block_txs_cbor))),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::NotFound,
-            )) => Ok(None),
+            )) => Some(Ok(None)),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
-            )) => {
-                return Err(anyhow::anyhow!(
-                    "Internal server error while retrieving block transactions CBOR by hash or number: {e}"
-                ));
-            }
-            _ => {
-                return Err(anyhow::anyhow!(
-                    "Unexpected message type while retrieving block transactions CBOR by hash or number"
-                ))
-            }
+            )) => Some(Err(anyhow!(e))),
+            _ => None,
         },
     )
-    .await?;
-
-    match block_txs_cbor {
-        Some(block_txs_cbor) => match serde_json::to_string(&block_txs_cbor) {
-            Ok(json) => Ok(RESTResponse::with_json(200, &json)),
-            Err(e) => Ok(RESTResponse::with_text(
-                500,
-                &format!("Internal server error while retrieving block transactions CBOR: {e}"),
-            )),
-        },
-        None => Ok(RESTResponse::with_text(404, "Not found")),
-    }
+    .await
 }
 
 /// Handle `/blocks/{hash_or_number}/next`
@@ -477,43 +372,24 @@ pub async fn handle_blocks_hash_number_next_blockfrost(
             skip,
         },
     )));
-    let blocks_next = query_state(
+    rest_query_state(
         &context,
         &handlers_config.blocks_query_topic,
         blocks_next_msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::NextBlocks(blocks_next),
-            )) => Ok(Some(blocks_next)),
+            )) => Some(Ok(Some(blocks_next))),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::NotFound,
-            )) => Ok(None),
+            )) => Some(Ok(None)),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
-            )) => {
-                return Err(anyhow::anyhow!(
-                    "Internal server error while retrieving next blocks by hash or number: {e}"
-                ));
-            }
-            _ => {
-                return Err(anyhow::anyhow!(
-                    "Unexpected message type while retrieving next blocks by hash or number"
-                ))
-            }
+            )) => Some(Err(anyhow!(e))),
+            _ => None,
         },
     )
-    .await?;
-
-    match blocks_next {
-        Some(blocks_next) => match serde_json::to_string(&blocks_next) {
-            Ok(json) => Ok(RESTResponse::with_json(200, &json)),
-            Err(e) => Ok(RESTResponse::with_text(
-                500,
-                &format!("Internal server error while retrieving next blocks: {e}"),
-            )),
-        },
-        None => Ok(RESTResponse::with_text(404, "Not found")),
-    }
+    .await
 }
 
 /// Handle `/blocks/{hash_or_number}/previous`
@@ -547,43 +423,24 @@ pub async fn handle_blocks_hash_number_previous_blockfrost(
             skip,
         },
     )));
-    let blocks_previous = query_state(
+    rest_query_state(
         &context,
         &handlers_config.blocks_query_topic,
         blocks_previous_msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::PreviousBlocks(blocks_previous),
-            )) => Ok(Some(blocks_previous)),
+            )) => Some(Ok(Some(blocks_previous))),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::NotFound,
-            )) => Ok(None),
+            )) => Some(Ok(None)),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
-            )) => {
-                return Err(anyhow::anyhow!(
-                    "Internal server error while retrieving previous blocks by hash or number: {e}"
-                ));
-            }
-            _ => {
-                return Err(anyhow::anyhow!(
-                    "Unexpected message type while retrieving previous blocks by hash or number"
-                ))
-            }
+            )) => Some(Err(anyhow!(e))),
+            _ => None,
         },
     )
-    .await?;
-
-    match blocks_previous {
-        Some(blocks_previous) => match serde_json::to_string(&blocks_previous) {
-            Ok(json) => Ok(RESTResponse::with_json(200, &json)),
-            Err(e) => Ok(RESTResponse::with_text(
-                500,
-                &format!("Internal server error while retrieving previous blocks: {e}"),
-            )),
-        },
-        None => Ok(RESTResponse::with_text(404, "Not found")),
-    }
+    .await
 }
 
 /// Handle `/blocks/slot/{slot_number}`
@@ -605,43 +462,24 @@ pub async fn handle_blocks_slot_blockfrost(
     let block_slot_msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
         BlocksStateQuery::GetBlockBySlot { slot },
     )));
-    let block_info = query_state(
+    rest_query_state(
         &context,
         &handlers_config.blocks_query_topic,
         block_slot_msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::BlockBySlot(block_info),
-            )) => Ok(Some(block_info)),
+            )) => Some(Ok(Some(block_info))),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::NotFound,
-            )) => Ok(None),
+            )) => Some(Ok(None)),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
-            )) => {
-                return Err(anyhow::anyhow!(
-                    "Internal server error while retrieving block by slot: {e}"
-                ));
-            }
-            _ => {
-                return Err(anyhow::anyhow!(
-                    "Unexpected message type while retrieving block by slot"
-                ))
-            }
+            )) => Some(Err(anyhow!(e))),
+            _ => None,
         },
     )
-    .await?;
-
-    match block_info {
-        Some(block_info) => match serde_json::to_string(&BlockInfoREST(&block_info)) {
-            Ok(json) => Ok(RESTResponse::with_json(200, &json)),
-            Err(e) => Ok(RESTResponse::with_text(
-                500,
-                &format!("Internal server error while retrieving block info: {e}"),
-            )),
-        },
-        None => Ok(RESTResponse::with_text(404, "Not found")),
-    }
+    .await
 }
 
 /// Handle `/blocks/epoch/{epoch_number}/slot/{slot_number}`
@@ -668,43 +506,24 @@ pub async fn handle_blocks_epoch_slot_blockfrost(
     let block_epoch_slot_msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
         BlocksStateQuery::GetBlockByEpochSlot { epoch, slot },
     )));
-    let block_info = query_state(
+    rest_query_state(
         &context,
         &handlers_config.blocks_query_topic,
         block_epoch_slot_msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::BlockByEpochSlot(block_info),
-            )) => Ok(Some(block_info)),
+            )) => Some(Ok(Some(block_info))),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::NotFound,
-            )) => Ok(None),
+            )) => Some(Ok(None)),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
-            )) => {
-                return Err(anyhow::anyhow!(
-                    "Internal server error while retrieving block by epoch slot: {e}"
-                ));
-            }
-            _ => {
-                return Err(anyhow::anyhow!(
-                    "Unexpected message type while retrieving block by epoch slot"
-                ))
-            }
+            )) => Some(Err(anyhow!(e))),
+            _ => None,
         },
     )
-    .await?;
-
-    match block_info {
-        Some(block_info) => match serde_json::to_string(&BlockInfoREST(&block_info)) {
-            Ok(json) => Ok(RESTResponse::with_json(200, &json)),
-            Err(e) => Ok(RESTResponse::with_text(
-                500,
-                &format!("Internal server error while retrieving block info: {e}"),
-            )),
-        },
-        None => Ok(RESTResponse::with_text(404, "Not found")),
-    }
+    .await
 }
 
 /// Handle `/blocks/{hash_or_number}/addresses`
@@ -738,41 +557,22 @@ pub async fn handle_blocks_hash_number_addresses_blockfrost(
             skip,
         },
     )));
-    let block_addresses = query_state(
+    rest_query_state(
         &context,
         &handlers_config.blocks_query_topic,
         block_involved_addresses_msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::BlockInvolvedAddresses(block_addresses),
-            )) => Ok(Some(block_addresses)),
+            )) => Some(Ok(Some(block_addresses))),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::NotFound,
-            )) => Ok(None),
+            )) => Some(Ok(None)),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
-            )) => {
-                return Err(anyhow::anyhow!(
-                    "Internal server error while retrieving block addresses by hash or number: {e}"
-                ));
-            }
-            _ => {
-                return Err(anyhow::anyhow!(
-                    "Unexpected message type while retrieving block addresses by hash or number"
-                ))
-            }
+            )) => Some(Err(anyhow!(e))),
+            _ => None,
         },
     )
-    .await?;
-
-    match block_addresses {
-        Some(block_addresses) => match serde_json::to_string(&block_addresses) {
-            Ok(json) => Ok(RESTResponse::with_json(200, &json)),
-            Err(e) => Ok(RESTResponse::with_text(
-                500,
-                &format!("Internal server error while retrieving block addresses: {e}"),
-            )),
-        },
-        None => Ok(RESTResponse::with_text(404, "Not found")),
-    }
+    .await
 }
