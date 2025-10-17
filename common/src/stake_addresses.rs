@@ -40,6 +40,14 @@ pub struct StakeAddressState {
     pub delegated_drep: Option<DRepChoice>,
 }
 
+// A self-contained stake address state for exporting across module boundaries
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct AccountState {
+    /// Bech32-encoded stake address
+    pub stake_address: String,
+    pub address_state: StakeAddressState,
+}
+
 #[derive(Default, Debug)]
 pub struct StakeAddressMap {
     inner: HashMap<KeyHash, StakeAddressState>,
@@ -86,17 +94,17 @@ impl StakeAddressMap {
     }
 
     #[inline]
-    pub fn entry(&mut self, stake_key: KeyHash) -> Entry<KeyHash, StakeAddressState> {
+    pub fn entry(&'_ mut self, stake_key: KeyHash) -> Entry<'_, KeyHash, StakeAddressState> {
         self.inner.entry(stake_key)
     }
 
     #[inline]
-    pub fn values(&self) -> Values<KeyHash, StakeAddressState> {
+    pub fn values(&'_ self) -> Values<'_, KeyHash, StakeAddressState> {
         self.inner.values()
     }
 
     #[inline]
-    pub fn iter(&self) -> Iter<KeyHash, StakeAddressState> {
+    pub fn iter(&'_ self) -> Iter<'_, KeyHash, StakeAddressState> {
         self.inner.iter()
     }
 
@@ -279,7 +287,7 @@ impl StakeAddressMap {
     /// Derive the Stake Pool Delegation Distribution (SPDD) - a map of total stake values
     /// (both with and without rewards) for each active SPO
     /// And Stake Pool Reward State (rewards and delegators_count for each pool)
-    /// <PoolId -> DelegatedStake>
+    /// Key of returned map is the SPO 'operator' ID
     pub fn generate_spdd(&self) -> BTreeMap<KeyHash, DelegatedStake> {
         // Shareable Dashmap with referenced keys
         let spo_stakes = DashMap::<KeyHash, DelegatedStake>::new();
@@ -334,6 +342,7 @@ impl StakeAddressMap {
         }
         result
     }
+
 
     /// Derive the DRep Delegation Distribution (DRDD) - the total amount
     /// delegated to each DRep, including the special "abstain" and "no confidence" dreps.
