@@ -161,7 +161,7 @@ impl Verifier {
                     _ => continue,
                 };
 
-                let Ok(stake_address) = StakeAddress::from_binary(&account[1..]) else {
+                let Ok(stake_address) = StakeAddress::from_binary(&account) else {
                     error!("Bad stake address in {path} for address: {address} - skipping");
                     continue;
                 };

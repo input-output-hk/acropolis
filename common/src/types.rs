@@ -6,7 +6,7 @@ use crate::{
     address::{Address, ShelleyAddress, StakeAddress},
     protocol_params,
     rational_number::RationalNumber,
-    AddressNetwork,
+    AddressNetwork, StakeAddressPayload,
 };
 use anyhow::{anyhow, bail, Error, Result};
 use bech32::{Bech32, Hrp};
@@ -169,7 +169,7 @@ pub struct StakeAddressDelta {
 /// Stake Address Reward change
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StakeRewardDelta {
-    pub hash: KeyHash,
+    pub stake_address: StakeAddress,
     pub delta: i64,
 }
 
@@ -611,6 +611,23 @@ impl Credential {
 }
 
 pub type StakeCredential = Credential;
+
+impl StakeCredential {
+    pub fn to_stake_address(&self, network: Option<AddressNetwork>) -> StakeAddress {
+        let payload = match self {
+            StakeCredential::AddrKeyHash(hash) => StakeAddressPayload::StakeKeyHash(
+                hash.clone().try_into().expect("Invalid hash length"),
+            ),
+            StakeCredential::ScriptHash(hash) => StakeAddressPayload::ScriptHash(
+                hash.clone().try_into().expect("Invalid hash length"),
+            ),
+        };
+        StakeAddress::new(
+            network.unwrap_or(AddressNetwork::Main),
+            payload
+        )
+    }
+}
 
 /// Relay single host address
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize, Eq, PartialEq)]

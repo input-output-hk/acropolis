@@ -442,29 +442,29 @@ impl State {
             return;
         };
         let mut stake_addresses = stake_addresses.lock().unwrap();
-        stake_addresses.register_stake_address(credential);
+        stake_addresses.register_stake_address(&credential.to_stake_address(None));
     }
 
     fn deregister_stake_address(&mut self, credential: &StakeCredential) {
         let Some(stake_addresses) = self.stake_addresses.as_ref() else {
             return;
         };
-        let hash = credential.get_hash();
+        let stake_address = credential.to_stake_address(None);
         let mut stake_addresses = stake_addresses.lock().unwrap();
-        let old_spo = stake_addresses.get(&hash).map(|s| s.delegated_spo.clone()).flatten();
+        let old_spo = stake_addresses.get(&stake_address).map(|s| s.delegated_spo.clone()).flatten();
 
-        if stake_addresses.deregister_stake_address(credential) {
+        if stake_addresses.deregister_stake_address(&stake_address) {
             // update historical_spos
             if let Some(historical_spos) = self.historical_spos.as_mut() {
                 if let Some(old_spo) = old_spo.as_ref() {
                     // remove delegators from old_spo
                     if let Some(historical_spo) = historical_spos.get_mut(old_spo) {
-                        if let Some(removed) = historical_spo.remove_delegator(&hash) {
+                        if let Some(removed) = historical_spo.remove_delegator(&credential.get_hash()) {
                             if !removed {
                                 error!(
                                     "Historical SPO state for {} does not contain delegator {}",
                                     hex::encode(old_spo),
-                                    hex::encode(&hash)
+                                    hex::encode(&credential.get_hash())
                                 );
                             }
                         }
@@ -481,10 +481,11 @@ impl State {
             return;
         };
         let hash = credential.get_hash();
+        let stake_address = credential.to_stake_address(None);
         let mut stake_addresses = stake_addresses.lock().unwrap();
-        let old_spo = stake_addresses.get(&hash).map(|s| s.delegated_spo.clone()).flatten();
+        let old_spo = stake_addresses.get(&stake_address).map(|s| s.delegated_spo.clone()).flatten();
 
-        if stake_addresses.record_stake_delegation(credential, spo) {
+        if stake_addresses.record_stake_delegation(&stake_address, spo) {
             // update historical_spos
             if let Some(historical_spos) = self.historical_spos.as_mut() {
                 // Remove old delegator
@@ -661,8 +662,8 @@ impl State {
         // Handle deltas
         for delta in reward_deltas_msg.deltas.iter() {
             let mut stake_addresses = stake_addresses.lock().unwrap();
-            if let Err(e) = stake_addresses.update_reward(&delta.hash, delta.delta) {
-                error!("Updating reward account {}: {e}", hex::encode(&delta.hash));
+            if let Err(e) = stake_addresses.update_reward(&delta.stake_address, delta.delta) {
+                error!("Updating reward account {}: {e}", hex::encode(&delta.stake_address.get_hash()));
             }
         }
 

@@ -1,10 +1,13 @@
 //! Cardano address definitions for Acropolis
 // We don't use these types in the acropolis_common crate itself
 #![allow(dead_code)]
+
 use crate::cip19::{VarIntDecoder, VarIntEncoder};
 use crate::types::{KeyHash, NetworkId, ScriptHash};
 use anyhow::{anyhow, bail, Result};
 use serde_with::{hex::Hex, serde_as};
+use std::borrow::Borrow;
+use std::hash::{Hash, Hasher};
 
 /// a Byron-era address
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -174,7 +177,7 @@ impl ShelleyAddress {
 
 /// Payload of a stake address
 #[serde_as]
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, Hash)]
 pub enum StakeAddressPayload {
     /// Stake key
     StakeKeyHash(#[serde_as(as = "Hex")] Vec<u8>),
@@ -196,7 +199,7 @@ impl StakeAddressPayload {
 }
 
 /// A stake address
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StakeAddress {
     /// Network id
     pub network: AddressNetwork,
@@ -206,6 +209,10 @@ pub struct StakeAddress {
 }
 
 impl StakeAddress {
+    pub fn new(network: AddressNetwork, payload: StakeAddressPayload) -> Self {
+        StakeAddress { network, payload }
+    }
+
     /// Get either hash of the payload
     pub fn get_hash(&self) -> &[u8] {
         match &self.payload {
@@ -289,6 +296,26 @@ impl StakeAddress {
         };
 
         Ok(StakeAddress { network, payload })
+    }
+}
+
+impl Hash for StakeAddress {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.get_hash().hash(state);
+    }
+}
+
+impl PartialEq for StakeAddress {
+    fn eq(&self, other: &Self) -> bool {
+        self.get_hash() == other.get_hash()
+    }
+}
+
+impl Eq for StakeAddress {}
+
+impl Borrow<[u8]> for StakeAddress {
+    fn borrow(&self) -> &[u8] {
+        self.get_hash()
     }
 }
 
@@ -653,7 +680,7 @@ mod tests {
 
     fn testnet_script_address() -> StakeAddress {
         let binary =
-            hex::decode("e0558f3ee09b26d88fac2eddc772a9eda94cce6dbadbe9fee439bd6001").unwrap();
+            hex::decode("f0558f3ee09b26d88fac2eddc772a9eda94cce6dbadbe9fee439bd6001").unwrap();
         StakeAddress::from_binary(&binary).unwrap()
     }
 

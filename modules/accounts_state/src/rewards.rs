@@ -59,8 +59,8 @@ pub fn calculate_rewards(
     staking: Arc<Snapshot>,
     params: &ShelleyParams,
     stake_rewards: Lovelace,
-    registrations: &HashSet<KeyHash>,
-    deregistrations: &HashSet<KeyHash>,
+    registrations: &HashSet<StakeAddress>,
+    deregistrations: &HashSet<StakeAddress>,
 ) -> Result<RewardsResult> {
     let mut result = RewardsResult::default();
     result.epoch = epoch;
@@ -135,7 +135,7 @@ pub fn calculate_rewards(
 
             // Note we use the staking reward account - it could have changed
             pay_to_pool_reward_account =
-                registrations.contains(staking_spo.reward_account.get_hash())
+                registrations.contains(&staking_spo.reward_account);
         }
 
         // There was a bug in the original node from Shelley until Allegra where if multiple SPOs
@@ -237,7 +237,7 @@ fn calculate_spo_rewards(
     params: &ShelleyParams,
     staking: Arc<Snapshot>,
     pay_to_pool_reward_account: bool,
-    deregistrations: &HashSet<KeyHash>,
+    deregistrations: &HashSet<StakeAddress>,
 ) -> Vec<RewardDetail> {
     // Active stake (sigma)
     let pool_stake = BigDecimal::from(spo.total_stake);
@@ -338,7 +338,9 @@ fn calculate_spo_rewards(
         let mut delegators_paid: usize = 0;
         if !to_delegators.is_zero() {
             let total_stake = BigDecimal::from(spo.total_stake);
-            for (hash, stake) in &spo.delegators {
+            for (delegator_stake_address, stake) in &spo.delegators {
+
+                let delegator_stake_address_hash = delegator_stake_address.get_hash();
                 let proportion = BigDecimal::from(stake) / &total_stake;
 
                 // and hence how much of the total reward they get
@@ -346,38 +348,38 @@ fn calculate_spo_rewards(
                 let to_pay = reward.with_scale(0).to_u64().unwrap_or(0);
 
                 debug!("Reward stake {stake} -> proportion {proportion} of SPO rewards {to_delegators} -> {to_pay} to hash {}",
-                       hex::encode(hash));
+                       hex::encode(delegator_stake_address_hash));
 
                 // Pool owners don't get member rewards (seems unfair!)
-                if spo.pool_owners.contains(hash) {
+                if spo.pool_owners.contains(&delegator_stake_address_hash.to_vec()) {
                     debug!(
                         "Skipping pool owner reward account {}, losing {to_pay}",
-                        hex::encode(hash)
+                        hex::encode(delegator_stake_address_hash)
                     );
                     continue;
                 }
 
                 // Check pool's reward address - removing e1 prefix
-                if spo.reward_account.get_hash() == *hash {
+                if spo.reward_account.get_hash() == delegator_stake_address_hash {
                     debug!(
                         "Skipping pool reward account {}, losing {to_pay}",
-                        hex::encode(hash)
+                        hex::encode(delegator_stake_address_hash)
                     );
                     continue;
                 }
 
                 // Check if it was deregistered between staking and now
-                if deregistrations.contains(hash) {
+                if deregistrations.contains(delegator_stake_address) {
                     info!(
                         "Recently deregistered member account {}, losing {to_pay}",
-                        hex::encode(hash)
+                        hex::encode(delegator_stake_address_hash)
                     );
                     continue;
                 }
 
                 // Transfer from reserves to this account
                 rewards.push(RewardDetail {
-                    account: StakeAddress::from_stake_key_hash(hash, params.network_id.clone()),
+                    account: delegator_stake_address.clone(),
                     rtype: RewardType::Member,
                     amount: to_pay,
                 });
