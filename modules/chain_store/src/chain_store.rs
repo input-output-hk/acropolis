@@ -84,6 +84,8 @@ impl ChainStore {
         let mut new_blocks_subscription = context.subscribe(&new_blocks_topic).await?;
         let mut params_subscription = context.subscribe(&params_topic).await?;
         context.run(async move {
+            // Get promise of params message so the params queue is cleared and
+            // the message is ready as soon as possible when we need it
             let mut params_message = params_subscription.read();
             loop {
                 let Ok((_, message)) = new_blocks_subscription.read().await else {
@@ -106,6 +108,7 @@ impl ChainStore {
                                 return;
                             };
                             history.commit(block_info.number, state);
+                            // Have the next params message ready for the next epoch
                             params_message = params_subscription.read();
                         }
                     }
