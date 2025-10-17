@@ -86,17 +86,17 @@ impl StakeAddressMap {
     }
 
     #[inline]
-    pub fn entry(&mut self, stake_key: KeyHash) -> Entry<KeyHash, StakeAddressState> {
+    pub fn entry(&'_ mut self, stake_key: KeyHash) -> Entry<'_, KeyHash, StakeAddressState> {
         self.inner.entry(stake_key)
     }
 
     #[inline]
-    pub fn values(&self) -> Values<KeyHash, StakeAddressState> {
+    pub fn values(&'_ self) -> Values<'_, KeyHash, StakeAddressState> {
         self.inner.values()
     }
 
     #[inline]
-    pub fn iter(&self) -> Iter<KeyHash, StakeAddressState> {
+    pub fn iter(&'_ self) -> Iter<'_, KeyHash, StakeAddressState> {
         self.inner.iter()
     }
 

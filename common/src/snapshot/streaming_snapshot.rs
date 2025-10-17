@@ -146,7 +146,7 @@ impl<'b, C> minicbor::Decode<'b, C> for Anchor {
 pub struct Set<T>(pub Vec<T>);
 
 impl<T> Set<T> {
-    pub fn iter(&self) -> std::slice::Iter<T> {
+    pub fn iter(&self) -> std::slice::Iter<'_, T> {
         self.0.iter()
     }
 }
