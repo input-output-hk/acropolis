@@ -1,5 +1,6 @@
-use acropolis_common::{GenesisDelegate, HeavyDelegate, queries::blocks::BlockIssuer};
-use cryptoxide::hashing::blake2b::Blake2b;
+use acropolis_common::{
+    GenesisDelegate, HeavyDelegate, crypto::keyhash_224, queries::blocks::BlockIssuer,
+};
 use pallas_primitives::byron::BlockSig::DlgSig;
 use pallas_traverse::MultiEraHeader;
 use std::collections::HashMap;
@@ -12,9 +13,7 @@ pub fn map_to_block_issuer(
     match header.issuer_vkey() {
         Some(vkey) => match header {
             MultiEraHeader::ShelleyCompatible(_) => {
-                let mut context = Blake2b::<224>::new();
-                context.update_mut(&vkey);
-                let digest = context.finalize().as_slice().to_owned();
+                let digest = keyhash_224(vkey);
                 if let Some(issuer) = shelley_genesis_delegates
                     .values()
                     .find(|v| v.delegate == digest)

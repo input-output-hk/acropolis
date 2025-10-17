@@ -7,7 +7,6 @@ edition = "2024"
 acropolis_common = { path = "../common" }
 
 anyhow = { workspace = true }
-cryptoxide = "0.5.1"
 pallas = { workspace = true }
 pallas-primitives = { workspace = true }
 pallas-traverse = { workspace = true }

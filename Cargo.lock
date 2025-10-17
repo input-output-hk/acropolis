@@ -8,7 +8,6 @@ version = "0.1.0"
 dependencies = [
  "acropolis_common",
  "anyhow",
- "cryptoxide 0.5.1",
  "pallas 0.33.0",
  "pallas-primitives 0.33.0",
  "pallas-traverse 0.33.0",
