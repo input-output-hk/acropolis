@@ -18,9 +18,9 @@ async-trait = "0.1"
 bech32 = "0.11"
 bigdecimal = "0.4.8"
 bitmask-enum = "2.2"
+blake2 = "0.10"
 bs58 = "0.5"
 chrono = { workspace = true }
-crc = "3"
 gcd = "2.3"
 fraction = "0.15"
 hex = { workspace = true }
@@ -37,8 +37,7 @@ num-traits = "0.2"
 imbl = { workspace = true }
 dashmap = { workspace = true }
 rayon = "1.11.0"
-cryptoxide = "0.5.1"
-blake2 = "0.10.6"
+sha2 = "0.10"
 
 [lib]
 crate-type = ["rlib"]

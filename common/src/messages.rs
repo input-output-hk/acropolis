@@ -8,7 +8,6 @@ use crate::ledger_state::SPOState;
 use crate::protocol_params::{NonceHash, ProtocolParams};
 use crate::queries::parameters::{ParametersStateQuery, ParametersStateQueryResponse};
 use crate::queries::spdd::{SPDDStateQuery, SPDDStateQueryResponse};
-use crate::queries::utxos::{UTxOStateQuery, UTxOStateQueryResponse};
 use crate::queries::{
     accounts::{AccountsStateQuery, AccountsStateQueryResponse},
     addresses::{AddressStateQuery, AddressStateQueryResponse},
@@ -149,24 +148,16 @@ pub struct EpochActivityMessage {
     pub epoch: u64,
 
     /// Epoch start time
-    /// UNIX timestamp
     pub epoch_start_time: u64,
 
     /// Epoch end time
-    /// UNIX timestamp
     pub epoch_end_time: u64,
 
-    /// When first block of this epoch was created
+    /// First block time
     pub first_block_time: u64,
 
-    /// Block height of first block of this epoch
-    pub first_block_height: u64,
-
-    /// When last block of this epoch was created
+    /// Last block time
     pub last_block_time: u64,
-
-    /// Block height of last block of this epoch
-    pub last_block_height: u64,
 
     /// Total blocks in this epoch
     pub total_blocks: usize,
@@ -180,8 +171,9 @@ pub struct EpochActivityMessage {
     /// Total fees in this epoch
     pub total_fees: u64,
 
-    /// Map of SPO IDs to blocks produced
-    pub spo_blocks: Vec<(KeyHash, usize)>,
+    /// List of all VRF vkey hashes used on blocks (SPO indicator) and
+    /// number of blocks produced
+    pub vrf_vkey_hashes: Vec<(KeyHash, usize)>,
 
     /// Nonce
     pub nonce: Option<NonceHash>,
@@ -395,11 +387,10 @@ pub enum StateQuery {
     Mempool(MempoolStateQuery),
     Metadata(MetadataStateQuery),
     Network(NetworkStateQuery),
-    Parameters(ParametersStateQuery),
     Pools(PoolsStateQuery),
     Scripts(ScriptsStateQuery),
     Transactions(TransactionsStateQuery),
-    UTxOs(UTxOStateQuery),
+    Parameters(ParametersStateQuery),
     SPDD(SPDDStateQuery),
 }
 
@@ -415,10 +406,9 @@ pub enum StateQueryResponse {
     Mempool(MempoolStateQueryResponse),
     Metadata(MetadataStateQueryResponse),
     Network(NetworkStateQueryResponse),
-    Parameters(ParametersStateQueryResponse),
     Pools(PoolsStateQueryResponse),
     Scripts(ScriptsStateQueryResponse),
     Transactions(TransactionsStateQueryResponse),
-    UTxOs(UTxOStateQueryResponse),
+    Parameters(ParametersStateQueryResponse),
     SPDD(SPDDStateQueryResponse),
 }

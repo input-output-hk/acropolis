@@ -7,15 +7,12 @@ pub const DEFAULT_PARAMETERS_QUERY_TOPIC: (&str, &str) =
 pub enum ParametersStateQuery {
     GetLatestEpochParameters,
     GetEpochParameters { epoch_number: u64 },
-    GetNetworkName,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum ParametersStateQueryResponse {
     LatestEpochParameters(ProtocolParams),
     EpochParameters(ProtocolParams),
-    NetworkName(String),
-
     NotFound,
     Error(String),
 }

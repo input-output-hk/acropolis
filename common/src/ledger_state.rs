@@ -33,8 +33,6 @@ pub struct SPOState {
     #[n(0)]
     pub pools: BTreeMap<KeyHash, PoolRegistration>,
     #[n(1)]
-    pub updates: BTreeMap<KeyHash, PoolRegistration>,
-    #[n(2)]
     pub retiring: BTreeMap<KeyHash, u64>,
 }
 

@@ -1,20 +1,39 @@
-use crate::{Address, AddressTotals, TxIdentifier, UTxOIdentifier};
-
-pub const DEFAULT_ADDRESS_QUERY_TOPIC: (&str, &str) =
-    ("address-state-query-topic", "cardano.query.address");
-
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum AddressStateQuery {
-    GetAddressTotals { address: Address },
-    GetAddressUTxOs { address: Address },
-    GetAddressTransactions { address: Address },
+    GetAddressInfo { address_key: Vec<u8> },
+    GetAddressInfoExtended { address_key: Vec<u8> },
+    GetAddressAssetTotals { address_key: Vec<u8> },
+    GetAddressUTxOs { address_key: Vec<u8> },
+    GetAddressAssetUTxOs { address_key: Vec<u8> },
+    GetAddressTransactions { address_key: Vec<u8> },
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum AddressStateQueryResponse {
-    AddressTotals(AddressTotals),
-    AddressUTxOs(Vec<UTxOIdentifier>),
-    AddressTransactions(Vec<TxIdentifier>),
+    AddressInfo(AddressInfo),
+    AddressInfoExtended(AddressInfoExtended),
+    AddressAssetTotals(AddressAssetTotals),
+    AddressUTxOs(AddressUTxOs),
+    AddressAssetUTxOs(AddressAssetUTxOs),
+    AddressTransactions(AddressTransactions),
     NotFound,
     Error(String),
 }
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AddressInfo {}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AddressInfoExtended {}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AddressAssetTotals {}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AddressUTxOs {}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AddressAssetUTxOs {}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AddressTransactions {}
