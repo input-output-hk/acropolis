@@ -4,7 +4,7 @@
 
 This document describes the internal structure of Amaru/Haskell Cardano node snapshots obtained via the `GetCBOR` ledger-state query. These snapshots represent the `EpochState` type from the Haskell implementation.
 
-**Warning**: This structure is **not formally specified** and may change between Cardano node versions. This documentation is based on reverse-engineering the Amaru and Haslell node codebase(s) and empirical observation of Conway-era snapshots.
+**Warning**: This structure is **not formally specified** and may change between Cardano node versions. This documentation is based on reverse-engineering the Amaru and Haskell node codebase(s) and empirical observation of Conway-era snapshots.
 
 ## Source References
 

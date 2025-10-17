@@ -100,7 +100,7 @@ def derive_from_filename(snapshot_path: Path) -> Tuple[Optional[int], Optional[s
         try:
             slot = int(parts[0])
             hash_hex = parts[1]
-            if all(c in '0123456789abcdefABCDEF' for c in hash_hex):
+            if len(hash_hex) == 64 and all(c in '0123456789abcdefABCDEF' for c in hash_hex):
                 return slot, hash_hex.lower()
         except Exception:
             return None, None
