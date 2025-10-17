@@ -28,6 +28,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::io::Read;
 
+pub use crate::account::Account;
 pub use crate::hash::{AddrKeyhash, Hash, ScriptHash};
 
 // -----------------------------------------------------------------------------
@@ -534,7 +535,7 @@ pub struct AccountState {
     pub delegated_drep: Option<DelegatedDRep>,
 }
 
-/// DRep delegation target
+/// DRep delegation target (API format for JSON output)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DelegatedDRep {
@@ -545,6 +546,58 @@ pub enum DelegatedDRep {
     /// No confidence
     NoConfidence,
 }
+
+// -----------------------------------------------------------------------------
+// Ledger types for DState parsing
+// -----------------------------------------------------------------------------
+
+/// DRep credential (ledger format for CBOR decoding)
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum DRepCredential {
+    AddrKeyhash(AddrKeyhash),
+    ScriptHash(ScriptHash),
+}
+
+impl<'b, C> minicbor::Decode<'b, C> for DRepCredential {
+    fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        d.array()?;
+        let variant = d.u16()?;
+
+        match variant {
+            0 => Ok(DRepCredential::AddrKeyhash(d.decode_with(ctx)?)),
+            1 => Ok(DRepCredential::ScriptHash(d.decode_with(ctx)?)),
+            _ => Err(minicbor::decode::Error::message(
+                "invalid variant id for DRepCredential",
+            )),
+        }
+    }
+}
+
+/// DRep enum (includes AlwaysAbstain and AlwaysNoConfidence)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DRep {
+    Credential(DRepCredential),
+    AlwaysAbstain,
+    AlwaysNoConfidence,
+}
+
+impl<'b, C> minicbor::Decode<'b, C> for DRep {
+    fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        d.array()?;
+        let variant = d.u16()?;
+
+        match variant {
+            0 => Ok(DRep::Credential(d.decode_with(ctx)?)),
+            1 => Ok(DRep::AlwaysAbstain),
+            2 => Ok(DRep::AlwaysNoConfidence),
+            _ => Err(minicbor::decode::Error::message("invalid variant id for DRep")),
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Data Structures (based on OpenAPI schema)
+// -----------------------------------------------------------------------------
 
 /// Stake pool information
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -865,8 +918,86 @@ impl StreamingSnapshotParser {
         // Parse PState [3][1][0][1] for pools
         let pools = Self::parse_pstate(&mut decoder).context("Failed to parse PState for pools")?;
 
-        // Skip DState [3][1][0][2] for now (accounts/delegations)
-        decoder.skip().context("Failed to skip DState")?;
+        // Parse DState [3][1][0][2] for accounts/delegations
+        // DState is an array: [unified_rewards, fut_gen_deleg, gen_deleg, instant_rewards]
+        decoder.array().context("Failed to parse DState array")?;
+        
+        // Parse unified rewards - it's actually an array containing the map
+        // UMap structure: [rewards_map, ...]
+        let umap_len = decoder.array().context("Failed to parse UMap array")?;
+        
+        // Parse the rewards map [0]: StakeCredential -> Account
+        let accounts_map: BTreeMap<StakeCredential, Account> = decoder.decode()?;
+        
+        // Skip remaining UMap elements if any
+        if let Some(len) = umap_len {
+            for _ in 1..len {
+                decoder.skip()?;
+            }
+        }
+        
+        // Convert to AccountState for API
+        let accounts: Vec<AccountState> = accounts_map
+            .into_iter()
+            .map(|(credential, account)| {
+                // Convert StakeCredential to stake address representation
+                let stake_address = match &credential {
+                    StakeCredential::AddrKeyhash(hash) => format!("stake_key_{}", hex::encode(hash)),
+                    StakeCredential::ScriptHash(hash) => {
+                        format!("stake_script_{}", hex::encode(hash))
+                    }
+                };
+
+                // Extract rewards from rewards_and_deposit (first element of tuple)
+                let rewards = match &account.rewards_and_deposit {
+                    StrictMaybe::Just((reward, _deposit)) => *reward,
+                    StrictMaybe::Nothing => 0,
+                };
+
+                // Convert SPO delegation from StrictMaybe<PoolId> to Option<String>
+                let delegated_spo = match &account.pool {
+                    StrictMaybe::Just(pool_id) => Some(pool_id.to_string()),
+                    StrictMaybe::Nothing => None,
+                };
+
+                // Convert DRep delegation from StrictMaybe<DRep> to Option<DelegatedDRep>
+                let delegated_drep = match &account.drep {
+                    StrictMaybe::Just(drep) => {
+                        Some(match drep {
+                            crate::account::DRep::Key(hash) => {
+                                DelegatedDRep::DRep(format!("drep_key_{}", hex::encode(hash)))
+                            }
+                            crate::account::DRep::Script(hash) => {
+                                DelegatedDRep::DRep(format!("drep_script_{}", hex::encode(hash)))
+                            }
+                            crate::account::DRep::Abstain => DelegatedDRep::Abstain,
+                            crate::account::DRep::NoConfidence => DelegatedDRep::NoConfidence,
+                        })
+                    }
+                    StrictMaybe::Nothing => None,
+                };
+
+                AccountState {
+                    stake_address,
+                    utxo_value: 0, // Not available in DState, would need to aggregate from UTxOs
+                    rewards,
+                    delegated_spo,
+                    delegated_drep,
+                }
+            })
+            .collect();
+
+        // Skip remaining DState fields (fut_gen_deleg, gen_deleg, instant_rewards)
+        // The UMap already handled all its internal elements including pointers
+        
+        // Epoch State / Ledger State / Cert State / Delegation state / dsFutureGenDelegs
+        decoder.skip()?;
+
+        // Epoch State / Ledger State / Cert State / Delegation state / dsGenDelegs
+        decoder.skip()?;
+
+        // Epoch State / Ledger State / Cert State / Delegation state / dsIRewards
+        decoder.skip()?;
 
         // Navigate to UTxOState [3][1][1]
         let utxo_state_len = decoder
@@ -887,10 +1018,10 @@ impl StreamingSnapshotParser {
         // Note: We stop here after parsing UTXOs. The remaining fields (deposits, fees, gov_state, etc.)
         // would require more complex parsing. For now, the main goal is UTXO streaming.
 
-        // Emit bulk callbacks (currently empty/stub implementations)
+        // Emit bulk callbacks
         callbacks.on_pools(pools)?;
         callbacks.on_dreps(dreps)?;
-        callbacks.on_accounts(Vec::new())?; // TODO: Parse from DState
+        callbacks.on_accounts(accounts)?;
         callbacks.on_proposals(Vec::new())?; // TODO: Parse from GovState
 
         // Emit completion callback

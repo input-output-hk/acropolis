@@ -19,6 +19,7 @@ pub mod snapshot;
 pub mod stake_addresses;
 pub mod state_history;
 pub mod types;
+pub mod account;
 
 // Flattened re-exports
 pub use self::address::*;
