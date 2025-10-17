@@ -2,7 +2,7 @@
 // We don't use these types in the acropolis_common crate itself
 #![allow(dead_code)]
 use crate::cip19::{VarIntDecoder, VarIntEncoder};
-use crate::types::{KeyHash, ScriptHash};
+use crate::types::{KeyHash, NetworkId, ScriptHash};
 use anyhow::{anyhow, bail, Result};
 use serde_with::{hex::Hex, serde_as};
 
@@ -211,6 +211,14 @@ impl StakeAddress {
         match &self.payload {
             StakeAddressPayload::StakeKeyHash(hash) => hash,
             StakeAddressPayload::ScriptHash(hash) => hash,
+        }
+    }
+
+    /// Construct from a stake key hash
+    pub fn from_stake_key_hash(hash: &KeyHash, network_id: NetworkId) -> StakeAddress {
+        StakeAddress {
+            network: network_id.into(),
+            payload: StakeAddressPayload::StakeKeyHash(hash.to_vec()),
         }
     }
 

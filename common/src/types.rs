@@ -6,6 +6,7 @@ use crate::{
     address::{Address, ShelleyAddress, StakeAddress},
     protocol_params,
     rational_number::RationalNumber,
+    AddressNetwork,
 };
 use anyhow::{anyhow, bail, Error, Result};
 use bech32::{Bech32, Hrp};
@@ -23,6 +24,16 @@ pub enum NetworkId {
     Testnet,
     #[default]
     Mainnet,
+}
+
+// TODO: Would really like to consolidate NetworkId and AddressNetwork at some point
+impl From<NetworkId> for AddressNetwork {
+    fn from(network_id: NetworkId) -> Self {
+        match network_id {
+            NetworkId::Mainnet => AddressNetwork::Main,
+            NetworkId::Testnet => AddressNetwork::Test,
+        }
+    }
 }
 
 /// Protocol era

@@ -327,7 +327,7 @@ fn calculate_spo_rewards(
             .with_scale(0);
         let costs = &fixed_cost + &margin_cost;
 
-        // Pay the delegators - split remainder in proportional to delegated stake,
+        // Pay the delegators - split the remainder proportional to the delegated stake,
         // * as it was 2 epochs ago *
 
         // You'd think this was just (pool_rewards - costs) here, but the Haskell code recalculates
@@ -377,7 +377,7 @@ fn calculate_spo_rewards(
 
                 // Transfer from reserves to this account
                 rewards.push(RewardDetail {
-                    account: spo.reward_account.clone(),
+                    account: StakeAddress::from_stake_key_hash(hash, params.network_id.clone()),
                     rtype: RewardType::Member,
                     amount: to_pay,
                 });
