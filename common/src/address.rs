@@ -735,7 +735,7 @@ mod tests {
         assert_eq!(decoded.network, AddressNetwork::Test);
         assert_eq!(
             match decoded.payload {
-                StakeAddressPayload::StakeKeyHash(key) => hex::encode(&key),
+                StakeAddressPayload::ScriptHash(key) => hex::encode(&key),
                 _ => "SCRIPT".to_string(),
             },
             "558f3ee09b26d88fac2eddc772a9eda94cce6dbadbe9fee439bd6001"
