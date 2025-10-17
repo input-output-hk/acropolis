@@ -902,16 +902,7 @@ impl StreamingSnapshotParser {
             decoder.skip().context(format!("Failed to skip AccountState[{}]", i))?;
         }
 
-        // Emit metadata callback
-        callbacks.on_metadata(SnapshotMetadata {
-            epoch,
-            pot_balances: PotBalances {
-                reserves,
-                treasury,
-                deposits: 0, // Will be updated from UTxOState
-            },
-            utxo_count: None, // Unknown until we traverse
-        })?;
+        // Note: We defer the on_metadata callback until after we parse deposits from UTxOState[1]
 
         // Navigate to LedgerState [3][1]
         let ledger_state_len = decoder
@@ -1046,16 +1037,37 @@ impl StreamingSnapshotParser {
         }
 
         // Stream UTXOs [3][1][1][0] with per-entry callback
-        Self::stream_utxos(&mut decoder, callbacks).context("Failed to stream UTXOs")?;
+        let utxo_count =
+            Self::stream_utxos(&mut decoder, callbacks).context("Failed to stream UTXOs")?;
 
-        // Note: We stop here after parsing UTXOs. The remaining fields (deposits, fees, gov_state, etc.)
-        // would require more complex parsing. For now, the main goal is UTXO streaming.
+        // Parse deposits field [3][1][1][1]
+        let deposits = if utxo_state_len >= 2 {
+            decoder.u64().context("Failed to parse deposits from UTxOState[1]")?
+        } else {
+            0 // If UTxOState is too short, default to 0
+        };
+
+        // Skip remaining UTxOState fields (fees, gov_state, donations) if present
+        for i in 2..utxo_state_len {
+            decoder.skip().context(format!("Failed to skip UTxOState[{}]", i))?;
+        }
 
         // Emit bulk callbacks
         callbacks.on_pools(pools)?;
         callbacks.on_dreps(dreps)?;
         callbacks.on_accounts(accounts)?;
         callbacks.on_proposals(Vec::new())?; // TODO: Parse from GovState
+
+        // Emit metadata callback with accurate deposits and utxo count
+        callbacks.on_metadata(SnapshotMetadata {
+            epoch,
+            pot_balances: PotBalances {
+                reserves,
+                treasury,
+                deposits,
+            },
+            utxo_count: Some(utxo_count),
+        })?;
 
         // Emit completion callback
         callbacks.on_complete()?;
@@ -1410,7 +1422,7 @@ impl StreamingSnapshotParser {
         }
     }
 
-    fn stream_utxos<C: UtxoCallback>(decoder: &mut Decoder, callbacks: &mut C) -> Result<()> {
+    fn stream_utxos<C: UtxoCallback>(decoder: &mut Decoder, callbacks: &mut C) -> Result<u64> {
         // Parse the UTXO map
         let map_len = decoder.map().context("Failed to parse UTxOs map")?;
 
@@ -1423,6 +1435,7 @@ impl StreamingSnapshotParser {
         for _ in 0..limit {
             // Check for break in indefinite map
             if map_len.is_none() && matches!(decoder.datatype(), Ok(Type::Break)) {
+                decoder.skip()?; // Consume the break marker
                 break;
             }
 
@@ -1479,7 +1492,7 @@ impl StreamingSnapshotParser {
             );
         }
 
-        Ok(())
+        Ok(count)
     }
 }
 

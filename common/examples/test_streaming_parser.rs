@@ -55,7 +55,7 @@ impl UtxoCallback for CountingCallbacks {
                     self.utxo_count,
                     &utxo.tx_hash[..16],
                     utxo.output_index,
-                    &utxo.address[..32],
+                    &utxo.address[..utxo.address.len().min(32)],
                     utxo.value
                 );
             }

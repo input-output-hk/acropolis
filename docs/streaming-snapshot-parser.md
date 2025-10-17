@@ -98,12 +98,12 @@ NewEpochState = [
 
 ### Callback Invocation Order
 
-1. **on_metadata()**: Called first with epoch, treasury, reserves
-2. **on_utxo()**: Called once per UTXO (streaming, memory-efficient)
-3. **on_pools()**: Called once with all stake pool data (bulk)
-4. **on_accounts()**: Called once with all stake accounts (bulk)
-5. **on_dreps()**: Called once with all DReps (bulk)
-6. **on_proposals()**: Called once with all proposals (bulk)
+1. **on_utxo()**: Called once per UTXO (streaming, memory-efficient)
+2. **on_pools()**: Called once with all stake pool data (bulk)
+3. **on_accounts()**: Called once with all stake accounts (bulk)
+4. **on_dreps()**: Called once with all DReps (bulk)
+5. **on_proposals()**: Called once with all proposals (bulk)
+6. **on_metadata()**: Called after all data with epoch, treasury, reserves, and deposits
 7. **on_complete()**: Called last when parsing finishes
 
 ## Usage Example
