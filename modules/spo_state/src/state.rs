@@ -681,7 +681,7 @@ mod tests {
     use crate::test_utils::*;
     use acropolis_common::{
         state_history::{StateHistory, StateHistoryStore},
-        PoolRetirement, Ratio, TxCertificate, TxHash,
+        PoolRetirement, Ratio, StakeAddress, TxCertificate, TxHash,
     };
     use tokio::sync::Mutex;
 
@@ -721,7 +721,7 @@ mod tests {
                         numerator: 0,
                         denominator: 0,
                     },
-                    reward_account: vec![0],
+                    reward_account: StakeAddress::default(),
                     pool_owners: vec![vec![0]],
                     relays: vec![],
                     pool_metadata: None,
@@ -870,7 +870,7 @@ mod tests {
                         numerator: 0,
                         denominator: 0,
                     },
-                    reward_account: vec![0],
+                    reward_account: StakeAddress::default(),
                     pool_owners: vec![vec![0]],
                     relays: vec![],
                     pool_metadata: None,
@@ -926,7 +926,7 @@ mod tests {
                         numerator: 0,
                         denominator: 0,
                     },
-                    reward_account: vec![0],
+                    reward_account: StakeAddress::default(),
                     pool_owners: vec![vec![0]],
                     relays: vec![],
                     pool_metadata: None,
@@ -1044,7 +1044,7 @@ mod tests {
                         numerator: 0,
                         denominator: 0,
                     },
-                    reward_account: vec![0],
+                    reward_account: StakeAddress::default(),
                     pool_owners: vec![vec![0]],
                     relays: vec![],
                     pool_metadata: None,
@@ -1094,7 +1094,7 @@ mod tests {
                         numerator: 0,
                         denominator: 0,
                     },
-                    reward_account: vec![0],
+                    reward_account: StakeAddress::default(),
                     pool_owners: vec![vec![0]],
                     relays: vec![],
                     pool_metadata: None,

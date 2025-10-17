@@ -2,8 +2,8 @@
 
 use crate::snapshot::{Snapshot, SnapshotSPO};
 use acropolis_common::{
-    protocol_params::ShelleyParams, rational_number::RationalNumber, KeyHash, Lovelace,
-    RewardAccount, SPORewards,
+    protocol_params::ShelleyParams, rational_number::RationalNumber, KeyHash, Lovelace, SPORewards,
+    StakeAddress,
 };
 use anyhow::{bail, Result};
 use bigdecimal::{BigDecimal, One, ToPrimitive, Zero};
@@ -24,7 +24,7 @@ pub enum RewardType {
 #[derive(Debug, Clone)]
 pub struct RewardDetail {
     /// Account reward paid to
-    pub account: RewardAccount,
+    pub account: StakeAddress,
 
     /// Type of reward
     pub rtype: RewardType,
@@ -130,11 +130,12 @@ pub fn calculate_rewards(
         if !pay_to_pool_reward_account {
             debug!(
                 "Checking old reward account {}",
-                hex::encode(&staking_spo.reward_account)
+                hex::encode(&staking_spo.reward_account.get_hash())
             );
 
             // Note we use the staking reward account - it could have changed
-            pay_to_pool_reward_account = registrations.contains(&staking_spo.reward_account)
+            pay_to_pool_reward_account =
+                registrations.contains(staking_spo.reward_account.get_hash())
         }
 
         // There was a bug in the original node from Shelley until Allegra where if multiple SPOs
@@ -155,7 +156,7 @@ pub fn calculate_rewards(
                         warn!("Shelley shared reward account bug: Dropping reward to {} in favour of {} on shared account {}",
                               hex::encode(&operator_id),
                               hex::encode(&other_id),
-                              hex::encode(&staking_spo.reward_account));
+                              hex::encode(&staking_spo.reward_account.get_hash()));
                         break;
                     }
                 }
@@ -326,7 +327,7 @@ fn calculate_spo_rewards(
             .with_scale(0);
         let costs = &fixed_cost + &margin_cost;
 
-        // Pay the delegators - split remainder in proportional to delegated stake,
+        // Pay the delegators - split the remainder proportional to the delegated stake,
         // * as it was 2 epochs ago *
 
         // You'd think this was just (pool_rewards - costs) here, but the Haskell code recalculates
@@ -357,8 +358,7 @@ fn calculate_spo_rewards(
                 }
 
                 // Check pool's reward address - removing e1 prefix
-                // TODO use StakeAddress.get_hash()
-                if spo.reward_account[1..] == *hash {
+                if spo.reward_account.get_hash() == *hash {
                     debug!(
                         "Skipping pool reward account {}, losing {to_pay}",
                         hex::encode(hash)
@@ -377,7 +377,7 @@ fn calculate_spo_rewards(
 
                 // Transfer from reserves to this account
                 rewards.push(RewardDetail {
-                    account: hash.clone(),
+                    account: StakeAddress::from_stake_key_hash(hash, params.network_id.clone()),
                     rtype: RewardType::Member,
                     amount: to_pay,
                 });
@@ -394,8 +394,7 @@ fn calculate_spo_rewards(
 
     if pay_to_pool_reward_account {
         rewards.push(RewardDetail {
-            // TODO Hack to remove e1 header - needs resolving properly with StakeAddress
-            account: RewardAccount::from(&spo.reward_account[1..]),
+            account: spo.reward_account.clone(),
             rtype: RewardType::Leader,
             amount: spo_benefit,
         });
@@ -403,7 +402,7 @@ fn calculate_spo_rewards(
         info!(
             "SPO {}'s reward account {} not paid {}",
             hex::encode(&operator_id),
-            hex::encode(&spo.reward_account),
+            hex::encode(spo.reward_account.get_hash()),
             spo_benefit,
         );
     }

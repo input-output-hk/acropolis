@@ -6,6 +6,7 @@ use crate::{
     address::{Address, ShelleyAddress, StakeAddress},
     protocol_params,
     rational_number::RationalNumber,
+    AddressNetwork,
 };
 use anyhow::{anyhow, bail, Error, Result};
 use bech32::{Bech32, Hrp};
@@ -23,6 +24,16 @@ pub enum NetworkId {
     Testnet,
     #[default]
     Mainnet,
+}
+
+// TODO: Would really like to consolidate NetworkId and AddressNetwork at some point
+impl From<NetworkId> for AddressNetwork {
+    fn from(network_id: NetworkId) -> Self {
+        match network_id {
+            NetworkId::Mainnet => AddressNetwork::Main,
+            NetworkId::Testnet => AddressNetwork::Test,
+        }
+    }
 }
 
 /// Protocol era
@@ -755,8 +766,6 @@ pub struct PoolMetadata {
     pub hash: DataHash,
 }
 
-pub type RewardAccount = Vec<u8>;
-
 /// Pool registration with position
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PoolRegistrationWithPos {
@@ -802,9 +811,8 @@ pub struct PoolRegistration {
     pub margin: Ratio,
 
     /// Reward account
-    #[serde_as(as = "Hex")]
     #[n(5)]
-    pub reward_account: RewardAccount,
+    pub reward_account: StakeAddress,
 
     /// Pool owners by their key hash
     #[serde_as(as = "Vec<Hex>")]
@@ -1679,7 +1687,7 @@ pub struct VotingOutcome {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProposalProcedure {
     pub deposit: Lovelace,
-    pub reward_account: RewardAccount,
+    pub reward_account: StakeAddress,
     pub gov_action_id: GovActionId,
     pub gov_action: GovernanceAction,
     pub anchor: Anchor,
@@ -1979,7 +1987,7 @@ mod tests {
 
         let proposal = ProposalProcedure {
             deposit: 9876,
-            reward_account: vec![7, 4, 6, 7],
+            reward_account: StakeAddress::default(),
             gov_action_id,
             gov_action,
             anchor: Anchor {

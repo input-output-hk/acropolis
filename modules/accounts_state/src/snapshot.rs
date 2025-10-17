@@ -1,12 +1,13 @@
 //! Acropolis AccountsState: snapshot for rewards calculations
 
 use crate::state::{Pots, RegistrationChange};
-use acropolis_common::stake_addresses::StakeAddressMap;
-use acropolis_common::{KeyHash, Lovelace, PoolRegistration, Ratio, RewardAccount, StakeAddress};
+use acropolis_common::{
+    stake_addresses::StakeAddressMap, KeyHash, Lovelace, PoolRegistration, Ratio, StakeAddress,
+};
 use imbl::OrdMap;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tracing::{debug, error, info};
+use tracing::{debug, info};
 
 /// SPO data for stake snapshot
 #[derive(Debug, Default)]
@@ -30,7 +31,7 @@ pub struct SnapshotSPO {
     pub blocks_produced: usize,
 
     /// Reward account
-    pub reward_account: RewardAccount,
+    pub reward_account: StakeAddress,
 
     /// Is the reward account from two epochs ago registered at the time of this snapshot?
     pub two_previous_reward_account_is_registered: bool,
@@ -86,27 +87,16 @@ impl Snapshot {
 
             // Check if the reward account from two epochs ago is still registered
             // TODO should spo.reward_account be a StakeAddress to begin with?
-            let two_previous_reward_account_is_registered =
-                match two_previous_snapshot.spos.get(spo_id) {
-                    Some(old_spo) => match StakeAddress::from_binary(&old_spo.reward_account) {
-                        Ok(spo_reward_address) => {
-                            let spo_reward_hash = spo_reward_address.get_hash();
-                            stake_addresses
-                                .get(spo_reward_hash)
-                                .map(|sas| sas.registered)
-                                .unwrap_or(false)
-                        }
-                        Err(e) => {
-                            error!(
-                                "Can't decode reward address for SPO {}: {e}",
-                                hex::encode(&spo_id)
-                            );
-
-                            false
-                        }
-                    },
-                    None => false,
-                };
+            let two_previous_reward_account_is_registered = match two_previous_snapshot
+                .spos
+                .get(spo_id)
+            {
+                Some(old_spo) => {
+                    let spo_reward_hash = old_spo.reward_account.get_hash();
+                    stake_addresses.get(spo_reward_hash).map(|sas| sas.registered).unwrap_or(false)
+                }
+                None => false,
+            };
 
             // Add the new one
             snapshot.spos.insert(

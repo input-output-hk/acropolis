@@ -15,8 +15,7 @@ use acropolis_common::{
     stake_addresses::{StakeAddressMap, StakeAddressState},
     BlockInfo, DRepChoice, DRepCredential, DelegatedStake, InstantaneousRewardSource,
     InstantaneousRewardTarget, KeyHash, Lovelace, MoveInstantaneousReward, PoolLiveStakeInfo,
-    PoolRegistration, Pot, SPORewards, StakeAddress, StakeCredential, StakeRewardDelta,
-    TxCertificate,
+    PoolRegistration, Pot, SPORewards, StakeCredential, StakeRewardDelta, TxCertificate,
 };
 use anyhow::Result;
 use imbl::OrdMap;
@@ -668,7 +667,7 @@ impl State {
                             rewards
                                 .iter()
                                 .map(|reward| StakeRewardDelta {
-                                    hash: reward.account.clone(),
+                                    hash: reward.account.get_hash().to_vec(),
                                     delta: reward.amount as i64,
                                 })
                                 .collect::<Vec<_>>(),
@@ -682,7 +681,8 @@ impl State {
                     let mut stake_addresses = self.stake_addresses.lock().unwrap();
                     for (_, rewards) in reward_result.rewards {
                         for reward in rewards {
-                            stake_addresses.add_to_reward(&reward.account, reward.amount);
+                            stake_addresses
+                                .add_to_reward(&reward.account.get_hash().to_vec(), reward.amount);
                         }
                     }
 
@@ -778,30 +778,25 @@ impl State {
         self.pool_refunds = Vec::new();
         for id in &spo_msg.retired_spos {
             if let Some(retired_spo) = new_spos.get(id) {
-                match StakeAddress::from_binary(&retired_spo.reward_account) {
-                    Ok(stake_address) => {
-                        let keyhash = stake_address.get_hash();
-                        debug!(
-                            "SPO {} has retired - refunding their deposit to {}",
-                            hex::encode(id),
-                            hex::encode(keyhash)
-                        );
-                        self.pool_refunds.push(keyhash.to_vec());
-                    }
-                    Err(e) => error!("Error repaying SPO deposit: {e}"),
-                }
-
-                // Schedule to retire - we need them to still be in place when we count
-                // blocks for the previous epoch
-                self.retiring_spos.push(id.to_vec());
+                let key_hash = &retired_spo.reward_account.get_hash();
+                debug!(
+                    "SPO {} has retired - refunding their deposit to {}",
+                    hex::encode(id),
+                    hex::encode(key_hash)
+                );
+                self.pool_refunds.push(key_hash.to_vec());
             }
+
+            // Schedule to retire - we need them to still be in place when we count
+            // blocks for the previous epoch
+            self.retiring_spos.push(id.to_vec());
         }
 
         self.spos = new_spos;
         Ok(())
     }
 
-    /// Register a stake address, with specified deposit if known
+    /// Register a stake address, with a specified deposit if known
     fn register_stake_address(&mut self, credential: &StakeCredential, deposit: Option<Lovelace>) {
         // Stake addresses can be registered after being used in UTXOs
         let mut stake_addresses = self.stake_addresses.lock().unwrap();
@@ -1077,7 +1072,7 @@ mod tests {
                             numerator: 1,
                             denominator: 20,
                         },
-                        reward_account: Vec::new(),
+                        reward_account: StakeAddress::default(),
                         pool_owners: Vec::new(),
                         relays: Vec::new(),
                         pool_metadata: None,
@@ -1091,7 +1086,7 @@ mod tests {
                             numerator: 1,
                             denominator: 10,
                         },
-                        reward_account: Vec::new(),
+                        reward_account: StakeAddress::default(),
                         pool_owners: Vec::new(),
                         relays: Vec::new(),
                         pool_metadata: None,

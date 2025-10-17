@@ -245,7 +245,7 @@ pub fn map_certificate(
                             numerator: margin.numerator,
                             denominator: margin.denominator,
                         },
-                        reward_account: reward_account.to_vec(),
+                        reward_account: StakeAddress::from_binary(reward_account)?,
                         pool_owners: pool_owners.into_iter().map(|v| v.to_vec()).collect(),
                         relays: relays.into_iter().map(|relay| map_relay(relay)).collect(),
                         pool_metadata: match pool_metadata {
@@ -347,7 +347,7 @@ pub fn map_certificate(
                                 numerator: margin.numerator,
                                 denominator: margin.denominator,
                             },
-                            reward_account: reward_account.to_vec(),
+                            reward_account: StakeAddress::from_binary(reward_account)?,
                             pool_owners: pool_owners.into_iter().map(|v| v.to_vec()).collect(),
                             relays: relays.into_iter().map(|relay| map_relay(relay)).collect(),
                             pool_metadata: match pool_metadata {
@@ -804,7 +804,7 @@ pub fn map_governance_proposals_procedures(
 ) -> Result<ProposalProcedure> {
     Ok(ProposalProcedure {
         deposit: prop.deposit,
-        reward_account: prop.reward_account.to_vec(),
+        reward_account: StakeAddress::from_binary(&prop.reward_account)?,
         gov_action_id: gov_action_id.clone(),
         gov_action: map_governance_action(&prop.gov_action)?,
         anchor: map_anchor(&prop.anchor),
