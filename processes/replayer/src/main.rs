@@ -5,7 +5,7 @@ use anyhow::Result;
 use caryatid_process::Process;
 use caryatid_sdk::ModuleRegistry;
 use config::{Config, Environment, File};
-use std::{env, sync::Arc};
+use std::sync::Arc;
 use tracing::info;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{filter, fmt, EnvFilter, Registry};
@@ -97,8 +97,31 @@ fn setup_governance_replay(process: &mut dyn ModuleRegistry<Message>) {
     Spy::<Message>::register(process);
 }
 
+#[derive(Debug, clap::Parser)]
+#[command(
+    name = "acropolis_process_omnibus",
+    group(clap::ArgGroup::new("mode").required(true).args(&["governance_collect", "governance_replay", "alonzo_governance_collect"])),
+)]
+struct Args {
+    #[arg(long, value_name = "PATH", default_value_t = option_env!("ACROPOLIS_REPLAYER_DEFAULT_CONFIG").unwrap_or("replayer.toml").to_string())]
+    config: String,
+
+    // FIXME: typically, these should be real [`clap::Command`] commands, not
+    // flags, but @michalrus kept `--` for backwards compatibility.
+    #[arg(long)]
+    governance_collect: bool,
+
+    #[arg(long)]
+    governance_replay: bool,
+
+    #[arg(long)]
+    alonzo_governance_collect: bool,
+}
+
 #[tokio::main]
 pub async fn main() -> Result<()> {
+    let args = <self::Args as clap::Parser>::parse();
+
     // Initialise tracing
     let fmt_layer = fmt::layer()
         .with_filter(EnvFilter::from_default_env().add_directive(filter::LevelFilter::INFO.into()))
@@ -108,13 +131,10 @@ pub async fn main() -> Result<()> {
 
     info!("Acropolis omnibus process");
 
-    let mut args = env::args();
-    let _executable_name = args.next();
-
     // Read the config
     let config = Arc::new(
         Config::builder()
-            .add_source(File::with_name("replayer"))
+            .add_source(File::with_name(&args.config))
             .add_source(Environment::with_prefix("ACROPOLIS"))
             .build()
             .unwrap(),
@@ -123,22 +143,14 @@ pub async fn main() -> Result<()> {
     // Create the process
     let mut process = Process::<Message>::create(config).await;
 
-    if let Some(key) = args.next() {
-        match key.as_str() {
-            "--governance-collect" => setup_governance_collect(&mut process),
-            "--governance-replay" => setup_governance_replay(&mut process),
-            "--alonzo-governance-collect" => setup_alonzo_governance_collect(&mut process),
-            a => {
-                tracing::error!(
-                    "Unknown command line argument: {a}, \
-                    expected --governance-collect or --governance-replay"
-                );
-                return Ok(());
-            }
-        }
+    if args.governance_collect {
+        setup_governance_collect(&mut process)
+    } else if args.governance_replay {
+        setup_governance_replay(&mut process)
+    } else if args.alonzo_governance_collect {
+        setup_alonzo_governance_collect(&mut process)
     } else {
-        tracing::error!("Please, specify command: command line must have at least one argument");
-        return Ok(());
+        unreachable!()
     }
 
     // Run it
