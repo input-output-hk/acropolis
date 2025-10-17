@@ -2,7 +2,7 @@
 
 ## Overview
 
-The `streaming_snapshot.rs` module provides a **callback-based streaming parser** for Cardano snapshots designed specifically for the **bootstrap process**. Unlike the existing `snapshot.rs` parser which focuses on sampling and metadata extraction, this parser navigates the full `NewEpochState` structure and invokes user-provided callbacks for different data types.
+The `streaming_snapshot.rs` module provides a **callback-based streaming parser** for Cardano snapshots designed specifically for the **bootstrap process**. This parser navigates the full `NewEpochState` structure and invokes user-provided callbacks for different data types.
 
 ## Use Case
 
@@ -175,16 +175,15 @@ impl PoolCallback for MessageBusPublisher {
 - **Bech32 encoding**: `encode_address_bech32()` currently returns hex placeholder
 - **DRep delegations**: Not yet extracted from stake credentials
 
-## Comparison with Existing Parser
+## Parser Design
 
-| Feature | `snapshot.rs` (Amaru) | `streaming_snapshot.rs` (New) |
-|---------|----------------------|-------------------------------|
-| **Primary Use** | Sampling, metadata extraction | Bootstrap state distribution |
-| **UTXO Processing** | Sample N or count all | Stream all with callbacks |
-| **Output Style** | Return values | Callback invocation |
-| **Memory Usage** | Lower (stops early) | Higher (full parse) |
-| **Extensibility** | Fixed output types | Trait-based callbacks |
-| **Pool/DRep Data** | Counts only | Full details (TODO) |
+The streaming snapshot parser is designed for:
+- **Primary Use**: Bootstrap state distribution
+- **UTXO Processing**: Stream all with per-entry callbacks
+- **Output Style**: Callback invocation (trait-based)
+- **Memory Usage**: Efficient streaming (processes one UTXO at a time)
+- **Extensibility**: Trait-based callbacks for flexibility
+- **Pool/DRep/Account Data**: Full details with bulk callbacks
 
 ## Integration Path
 

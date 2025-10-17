@@ -24,7 +24,7 @@ use anyhow::{anyhow, Context, Result};
 use minicbor::data::Type;
 use minicbor::Decoder;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::Read;
 
@@ -590,7 +590,9 @@ impl<'b, C> minicbor::Decode<'b, C> for DRep {
             0 => Ok(DRep::Credential(d.decode_with(ctx)?)),
             1 => Ok(DRep::AlwaysAbstain),
             2 => Ok(DRep::AlwaysNoConfidence),
-            _ => Err(minicbor::decode::Error::message("invalid variant id for DRep")),
+            _ => Err(minicbor::decode::Error::message(
+                "invalid variant id for DRep",
+            )),
         }
     }
 }
@@ -921,28 +923,30 @@ impl StreamingSnapshotParser {
         // Parse DState [3][1][0][2] for accounts/delegations
         // DState is an array: [unified_rewards, fut_gen_deleg, gen_deleg, instant_rewards]
         decoder.array().context("Failed to parse DState array")?;
-        
+
         // Parse unified rewards - it's actually an array containing the map
         // UMap structure: [rewards_map, ...]
         let umap_len = decoder.array().context("Failed to parse UMap array")?;
-        
+
         // Parse the rewards map [0]: StakeCredential -> Account
         let accounts_map: BTreeMap<StakeCredential, Account> = decoder.decode()?;
-        
+
         // Skip remaining UMap elements if any
         if let Some(len) = umap_len {
             for _ in 1..len {
                 decoder.skip()?;
             }
         }
-        
+
         // Convert to AccountState for API
         let accounts: Vec<AccountState> = accounts_map
             .into_iter()
             .map(|(credential, account)| {
                 // Convert StakeCredential to stake address representation
                 let stake_address = match &credential {
-                    StakeCredential::AddrKeyhash(hash) => format!("stake_key_{}", hex::encode(hash)),
+                    StakeCredential::AddrKeyhash(hash) => {
+                        format!("stake_key_{}", hex::encode(hash))
+                    }
                     StakeCredential::ScriptHash(hash) => {
                         format!("stake_script_{}", hex::encode(hash))
                     }
@@ -962,18 +966,16 @@ impl StreamingSnapshotParser {
 
                 // Convert DRep delegation from StrictMaybe<DRep> to Option<DelegatedDRep>
                 let delegated_drep = match &account.drep {
-                    StrictMaybe::Just(drep) => {
-                        Some(match drep {
-                            crate::account::DRep::Key(hash) => {
-                                DelegatedDRep::DRep(format!("drep_key_{}", hex::encode(hash)))
-                            }
-                            crate::account::DRep::Script(hash) => {
-                                DelegatedDRep::DRep(format!("drep_script_{}", hex::encode(hash)))
-                            }
-                            crate::account::DRep::Abstain => DelegatedDRep::Abstain,
-                            crate::account::DRep::NoConfidence => DelegatedDRep::NoConfidence,
-                        })
-                    }
+                    StrictMaybe::Just(drep) => Some(match drep {
+                        crate::account::DRep::Key(hash) => {
+                            DelegatedDRep::DRep(format!("drep_key_{}", hex::encode(hash)))
+                        }
+                        crate::account::DRep::Script(hash) => {
+                            DelegatedDRep::DRep(format!("drep_script_{}", hex::encode(hash)))
+                        }
+                        crate::account::DRep::Abstain => DelegatedDRep::Abstain,
+                        crate::account::DRep::NoConfidence => DelegatedDRep::NoConfidence,
+                    }),
                     StrictMaybe::Nothing => None,
                 };
 
@@ -989,7 +991,7 @@ impl StreamingSnapshotParser {
 
         // Skip remaining DState fields (fut_gen_deleg, gen_deleg, instant_rewards)
         // The UMap already handled all its internal elements including pointers
-        
+
         // Epoch State / Ledger State / Cert State / Delegation state / dsFutureGenDelegs
         decoder.skip()?;
 
@@ -1028,47 +1030,6 @@ impl StreamingSnapshotParser {
         callbacks.on_complete()?;
 
         Ok(())
-    }
-
-    /// Parse rewards map: stake_credential -> lovelace
-    /// TODO: This will be used when rewards are parsed from DState
-    #[allow(dead_code)]
-    fn parse_rewards_map(decoder: &mut Decoder) -> Result<HashMap<Vec<u8>, u64>> {
-        let mut rewards = HashMap::new();
-
-        let map_len = decoder
-            .map()
-            .context("Failed to parse rewards map")?
-            .ok_or_else(|| anyhow!("Rewards map must be definite-length"))?;
-
-        for _ in 0..map_len {
-            let credential = decoder.bytes().context("Failed to parse reward credential")?.to_vec();
-            let amount = decoder.u64().context("Failed to parse reward amount")?;
-            rewards.insert(credential, amount);
-        }
-
-        Ok(rewards)
-    }
-
-    /// Parse delegations map: stake_credential -> pool_id
-    /// TODO: This will be used when delegations are parsed from DState
-    #[allow(dead_code)]
-    fn parse_delegations_map(decoder: &mut Decoder) -> Result<HashMap<Vec<u8>, Vec<u8>>> {
-        let mut delegations = HashMap::new();
-
-        let map_len = decoder
-            .map()
-            .context("Failed to parse delegations map")?
-            .ok_or_else(|| anyhow!("Delegations map must be definite-length"))?;
-
-        for _ in 0..map_len {
-            let credential =
-                decoder.bytes().context("Failed to parse delegation credential")?.to_vec();
-            let pool_id = decoder.bytes().context("Failed to parse pool ID")?.to_vec();
-            delegations.insert(credential, pool_id);
-        }
-
-        Ok(delegations)
     }
 
     /// Parse VState to extract DReps
@@ -1286,65 +1247,9 @@ impl StreamingSnapshotParser {
         Ok(pools)
     }
 
-    /// Parse optional anchor: None or Some([url, data_hash])
-    /// DEPRECATED: Now using minicbor::Decode trait instead
-    #[allow(dead_code)]
-    fn parse_anchor_option(decoder: &mut Decoder) -> Result<Option<AnchorInfo>> {
-        // Check if it's an array (Some) or something else (None)
-        match decoder.datatype()? {
-            Type::Array | Type::ArrayIndef => {
-                let arr_len = decoder.array().context("Failed to parse anchor array")?;
-
-                if arr_len == Some(0) {
-                    // Empty array means None
-                    return Ok(None);
-                }
-
-                // Parse [url, data_hash]
-                let url_bytes = decoder.bytes().context("Failed to parse anchor URL")?;
-                let url = String::from_utf8_lossy(url_bytes).to_string();
-
-                let data_hash_bytes =
-                    decoder.bytes().context("Failed to parse anchor data hash")?;
-                let data_hash = hex::encode(data_hash_bytes);
-
-                // Skip any remaining fields
-                if let Some(len) = arr_len {
-                    for _ in 2..len {
-                        decoder.skip().ok();
-                    }
-                }
-
-                Ok(Some(AnchorInfo { url, data_hash }))
-            }
-            _ => {
-                // Not an array, skip it (represents None)
-                decoder.skip().context("Failed to skip non-array anchor")?;
-                Ok(None)
-            }
-        }
-    }
-
-    /// Parse DReps from VState (old stub - replaced by parse_vstate)
-    #[allow(dead_code)]
-    fn parse_dreps(_decoder: &mut Decoder) -> Result<Vec<DRepInfo>> {
-        // This function is kept for compatibility but is no longer used
-        Ok(Vec::new())
-    }
-
-    /// Parse stake pools from PState
-    fn parse_pools(_decoder: &mut Decoder) -> Result<Vec<PoolInfo>> {
-        // TODO: Implement full pool parsing from PState structure
-        // For now, skip PState and return empty vec
-        Ok(Vec::new())
-    }
-
     /// Stream UTXOs with per-entry callback
     ///
-    /// Note: This uses the existing parse_all_utxos function from snapshot.rs
-    /// which has proven robust UTXO parsing logic. We just wrap it with our callback.
     /// Parse a single TxOut from the CBOR decoder
-    /// This is copied from snapshot.rs parse_transaction_output logic
     fn parse_transaction_output(dec: &mut Decoder) -> Result<(String, u64)> {
         // TxOut is typically an array [address, value, ...]
         // or a map for Conway with optional fields

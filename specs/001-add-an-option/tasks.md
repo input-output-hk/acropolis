@@ -8,10 +8,10 @@ Date: 2025-10-10 | Branch: cet-add-snapshot-parser
 - [ ] Add CLI entrypoint in `processes/omnibus` for snapshot operations
   - [ ] Subcommands: `summary`, `sections`, `bootstrap`
   - [ ] Flags: `--file <path>`, `--params`, `--governance`, `--pools`, `--accounts`, `--utxo`
-- [ ] Add common library module `common/src/snapshot.rs`
-  - [ ] API: `snapshot_summary(path) -> Result<String>`
-  - [ ] API: `snapshot_sections(path, sections) -> Result<String>`
-  - [ ] API: `snapshot_bootstrap(path) -> Result<()>` (stub)
+- [x] Add streaming snapshot parser `common/src/snapshot/streaming_snapshot.rs`
+  - [x] Callback-based API for bootstrap process
+  - [x] Parse UTXOs, pools, accounts, DReps from Conway snapshots
+  - [x] Trait-based extensibility for state distribution
 - [ ] Deterministic stdout/stderr formatting helpers
 
 Deliverable: CLI prints summary/sections placeholders; exits without starting the runtime process.

@@ -60,7 +60,7 @@ specs/[###-feature]/
 
 **Structure Decision**: Use existing workspace structure. New/updated code primarily in:
 
-- `common/src/snapshot.rs`: Conway+ snapshot parsing & display utilities (human-readable formatting, progress hooks, streaming UTxO reader).
+- `common/src/snapshot/streaming_snapshot.rs`: Conway+ snapshot parsing & display utilities (callback-based streaming parser for bootstrap).
 - `processes/omnibus` (or relevant CLI): Add option/command to invoke parsing and optional bootstrap; ensure deterministic stdout/stderr.
 - `modules/*`: No structural changes; bootstrap dispatch uses existing bus; add handlers only if needed to accept bootstrap messages in tests.
 

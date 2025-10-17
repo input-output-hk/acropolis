@@ -80,7 +80,6 @@ impl<C> minicbor::encode::Encode<C> for DRep {
     }
 }
 
-
 #[derive(Debug)]
 pub struct Account {
     pub rewards_and_deposit: StrictMaybe<(Lovelace, Lovelace)>,
