@@ -111,7 +111,7 @@ mod tests {
     use acropolis_common::NetworkId;
     use acropolis_common::{
         protocol_params::{Nonce, NonceVariant, ProtocolVersion, ShelleyProtocolParams},
-        types::GenesisDelegate,
+        GenesisDelegate,
     };
     use chrono::{DateTime, Utc};
     use std::collections::HashMap;
