@@ -10,6 +10,7 @@ use tracing_subscriber;
 
 // External modules
 use acropolis_module_accounts_state::AccountsState;
+use acropolis_module_address_state::AddressState;
 use acropolis_module_assets_state::AssetsState;
 use acropolis_module_block_unpacker::BlockUnpacker;
 use acropolis_module_drdd_state::DRDDState;
@@ -99,6 +100,7 @@ pub async fn main() -> Result<()> {
     StakeDeltaFilter::register(&mut process);
     EpochsState::register(&mut process);
     AccountsState::register(&mut process);
+    AddressState::register(&mut process);
     AssetsState::register(&mut process);
     BlockfrostREST::register(&mut process);
     SPDDState::register(&mut process);
