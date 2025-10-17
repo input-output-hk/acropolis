@@ -43,7 +43,6 @@ pub struct StakeAddressState {
 // A self-contained stake address state for exporting across module boundaries
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct AccountState {
-    /// Bech32-encoded stake address
     pub stake_address: String,
     pub address_state: StakeAddressState,
 }
@@ -342,7 +341,6 @@ impl StakeAddressMap {
         }
         result
     }
-
 
     /// Derive the DRep Delegation Distribution (DRDD) - the total amount
     /// delegated to each DRep, including the special "abstain" and "no confidence" dreps.
