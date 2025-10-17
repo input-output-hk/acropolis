@@ -34,6 +34,7 @@ caryatid_module_rest_server = { workspace = true }
 caryatid_module_spy = { workspace = true }
 
 anyhow = { workspace = true }
+clap = { workspace = true }
 config = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3.20", features = ["registry", "env-filter"] }
