@@ -286,7 +286,7 @@ impl StakeAddressMap {
     /// Derive the Stake Pool Delegation Distribution (SPDD) - a map of total stake values
     /// (both with and without rewards) for each active SPO
     /// And Stake Pool Reward State (rewards and delegators_count for each pool)
-    /// Key of returned map is the SPO 'operator' ID
+    /// <PoolId -> DelegatedStake>;Key of returned map is the SPO 'operator' ID
     pub fn generate_spdd(&self) -> BTreeMap<KeyHash, DelegatedStake> {
         // Shareable Dashmap with referenced keys
         let spo_stakes = DashMap::<KeyHash, DelegatedStake>::new();

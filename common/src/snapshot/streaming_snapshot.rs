@@ -592,7 +592,7 @@ pub struct UtxoEntry {
     pub tx_hash: String,
     /// Output index
     pub output_index: u64,
-    /// Bech32-encoded Cardano address
+    /// Hex encoded Cardano addresses
     pub address: String,
     /// Lovelace amount
     pub value: u64,
@@ -894,8 +894,8 @@ impl StreamingSnapshotParser {
         // Parse treasury and reserves (can be negative in CBOR, so decode as i64 first)
         let treasury_i64: i64 = decoder.decode().context("Failed to parse treasury")?;
         let reserves_i64: i64 = decoder.decode().context("Failed to parse reserves")?;
-        let treasury = treasury_i64 as u64;
-        let reserves = reserves_i64 as u64;
+        let treasury = u64::try_from(treasury_i64).map_err(|_| anyhow!("treasury was negative"))?;
+        let reserves = u64::try_from(reserves_i64).map_err(|_| anyhow!("reserves was negative"))?;
 
         // Skip any remaining AccountState fields
         for i in 2..account_state_len {
@@ -1307,7 +1307,7 @@ impl StreamingSnapshotParser {
 
                 // Element 0: Address (bytes)
                 let address_bytes = dec.bytes().context("Failed to parse address bytes")?;
-                let address = hex::encode(address_bytes);
+                let hex_address = hex::encode(address_bytes);
 
                 // Element 1: Value (coin or map)
                 let value = match dec.datatype().context("Failed to read value datatype")? {
@@ -1335,7 +1335,7 @@ impl StreamingSnapshotParser {
                     }
                 }
 
-                Ok((address, value))
+                Ok((hex_address, value))
             }
             Type::Map | Type::MapIndef => {
                 // Map format (Conway with optional fields)
