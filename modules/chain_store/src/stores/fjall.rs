@@ -57,11 +57,11 @@ impl super::Store for FjallStore {
         let mut batch = self.keyspace.batch();
         self.blocks.insert(&mut batch, info, &raw);
         for (index, hash) in tx_hashes.iter().enumerate() {
-            let tx_ref = StoredTransaction::BlockReference {
+            let block_ref = BlockReference {
                 block_hash: info.hash.to_vec(),
                 index,
             };
-            self.txs.insert_tx(&mut batch, *hash, tx_ref);
+            self.txs.insert_tx(&mut batch, *hash, block_ref);
         }
 
         batch.commit()?;
@@ -173,14 +173,9 @@ impl FjallBlockStore {
     fn get_by_number_range(&self, min_number: u64, max_number: u64) -> Result<Vec<Block>> {
         let min_number_bytes = min_number.to_be_bytes();
         let max_number_bytes = max_number.to_be_bytes();
-        let mut hashes = vec![];
+        let mut blocks = vec![];
         for res in self.block_hashes_by_number.range(min_number_bytes..=max_number_bytes) {
             let (_, hash) = res?;
-            hashes.push(hash);
-        }
-
-        let mut blocks = vec![];
-        for hash in hashes {
             if let Some(block) = self.get_by_hash(&hash)? {
                 blocks.push(block);
             }
@@ -221,26 +216,18 @@ impl FjallTXStore {
         Ok(Self { txs })
     }
 
-    fn insert_tx(&self, batch: &mut Batch, hash: TxHash, tx: StoredTransaction) {
-        let bytes = minicbor::to_vec(tx).expect("infallible");
+    fn insert_tx(&self, batch: &mut Batch, hash: TxHash, block_ref: BlockReference) {
+        let bytes = minicbor::to_vec(block_ref).expect("infallible");
         batch.insert(&self.txs, hash.as_ref(), bytes);
     }
 }
 
 #[derive(minicbor::Decode, minicbor::Encode)]
-enum StoredTransaction {
+struct BlockReference {
     #[n(0)]
-    BlockReference {
-        #[n(0)]
-        block_hash: Vec<u8>,
-        #[n(1)]
-        index: usize,
-    },
+    block_hash: Vec<u8>,
     #[n(1)]
-    Inline {
-        #[n(0)]
-        bytes: Vec<u8>,
-    },
+    index: usize,
 }
 
 #[cfg(test)]
