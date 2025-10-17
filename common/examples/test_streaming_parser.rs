@@ -104,10 +104,10 @@ impl StakeCallback for CountingCallbacks {
                     "  Account #{}: {} (utxo: {}, rewards: {}, pool: {:?}, drep: {:?})",
                     i + 1,
                     &account.stake_address[..32],
-                    account.utxo_value,
-                    account.rewards,
-                    account.delegated_spo.as_ref().map(|s| &s[..16]),
-                    account.delegated_drep
+                    account.address_state.utxo_value,
+                    account.address_state.rewards,
+                    account.address_state.delegated_spo.as_ref().map(|s| &s[..16]),
+                    account.address_state.delegated_drep
                 );
             }
         }
@@ -275,8 +275,8 @@ fn main() {
                         "  {}: {} (utxo: {}, rewards: {})",
                         i + 1,
                         &account.stake_address[..32],
-                        account.utxo_value,
-                        account.rewards
+                        account.address_state.utxo_value,
+                        account.address_state.rewards
                     );
                 }
                 println!();

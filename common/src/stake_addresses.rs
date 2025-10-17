@@ -40,6 +40,14 @@ pub struct StakeAddressState {
     pub delegated_drep: Option<DRepChoice>,
 }
 
+// A self-contained stake address state for exporting across module boundaries
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct AccountState {
+    /// Bech32-encoded stake address
+    pub stake_address: String,
+    pub address_state: StakeAddressState,
+}
+
 #[derive(Default, Debug)]
 pub struct StakeAddressMap {
     inner: HashMap<KeyHash, StakeAddressState>,

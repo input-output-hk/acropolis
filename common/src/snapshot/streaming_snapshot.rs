@@ -30,6 +30,7 @@ use std::io::Read;
 
 pub use crate::account::Account;
 pub use crate::hash::{AddrKeyhash, Hash, ScriptHash};
+pub use crate::stake_addresses::{AccountState, StakeAddressState};
 
 // -----------------------------------------------------------------------------
 // Cardano Ledger Types (for decoding with minicbor)
@@ -520,33 +521,6 @@ pub struct UtxoEntry {
     pub script_ref: Option<String>,
 }
 
-/// Stake account state (delegations and rewards)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AccountState {
-    /// Bech32-encoded stake address
-    pub stake_address: String,
-    /// Combined Lovelace amount of all UTXOs
-    pub utxo_value: u64,
-    /// Lovelace amount in reward account
-    pub rewards: u64,
-    /// Hex-encoded pool ID delegation (if any)
-    pub delegated_spo: Option<String>,
-    /// DRep delegation (if any)
-    pub delegated_drep: Option<DelegatedDRep>,
-}
-
-/// DRep delegation target (API format for JSON output)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DelegatedDRep {
-    /// Bech32-encoded DRep ID
-    DRep(String),
-    /// Abstain from voting
-    Abstain,
-    /// No confidence
-    NoConfidence,
-}
-
 // -----------------------------------------------------------------------------
 // Ledger types for DState parsing
 // -----------------------------------------------------------------------------
@@ -958,33 +932,37 @@ impl StreamingSnapshotParser {
                     StrictMaybe::Nothing => 0,
                 };
 
-                // Convert SPO delegation from StrictMaybe<PoolId> to Option<String>
+                // Convert SPO delegation from StrictMaybe<PoolId> to Option<KeyHash>
+                // PoolId is Hash<28>, we need to convert to Vec<u8>
                 let delegated_spo = match &account.pool {
-                    StrictMaybe::Just(pool_id) => Some(pool_id.to_string()),
+                    StrictMaybe::Just(pool_id) => Some(pool_id.as_ref().to_vec()),
                     StrictMaybe::Nothing => None,
                 };
 
-                // Convert DRep delegation from StrictMaybe<DRep> to Option<DelegatedDRep>
+                // Convert DRep delegation from StrictMaybe<DRep> to Option<DRepChoice>
                 let delegated_drep = match &account.drep {
                     StrictMaybe::Just(drep) => Some(match drep {
                         crate::account::DRep::Key(hash) => {
-                            DelegatedDRep::DRep(format!("drep_key_{}", hex::encode(hash)))
+                            crate::DRepChoice::Key(hash.as_ref().to_vec())
                         }
                         crate::account::DRep::Script(hash) => {
-                            DelegatedDRep::DRep(format!("drep_script_{}", hex::encode(hash)))
+                            crate::DRepChoice::Script(hash.as_ref().to_vec())
                         }
-                        crate::account::DRep::Abstain => DelegatedDRep::Abstain,
-                        crate::account::DRep::NoConfidence => DelegatedDRep::NoConfidence,
+                        crate::account::DRep::Abstain => crate::DRepChoice::Abstain,
+                        crate::account::DRep::NoConfidence => crate::DRepChoice::NoConfidence,
                     }),
                     StrictMaybe::Nothing => None,
                 };
 
                 AccountState {
                     stake_address,
-                    utxo_value: 0, // Not available in DState, would need to aggregate from UTxOs
-                    rewards,
-                    delegated_spo,
-                    delegated_drep,
+                    address_state: StakeAddressState {
+                        registered: false, // Accounts are registered by SPOState
+                        utxo_value: 0, // Not available in DState, would need to aggregate from UTxOs
+                        rewards,
+                        delegated_spo,
+                        delegated_drep,
+                    },
                 }
             })
             .collect();

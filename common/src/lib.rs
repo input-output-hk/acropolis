@@ -1,5 +1,6 @@
 // Acropolis common library - main library exports
 
+pub mod account;
 pub mod address;
 pub mod calculations;
 pub mod cip19;
@@ -19,7 +20,6 @@ pub mod snapshot;
 pub mod stake_addresses;
 pub mod state_history;
 pub mod types;
-pub mod account;
 
 // Flattened re-exports
 pub use self::address::*;
