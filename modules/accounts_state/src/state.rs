@@ -222,8 +222,8 @@ impl State {
     /// Map stake_keys to their delegated DRep
     pub fn get_drep_delegations_map(
         &self,
-        stake_keys: &[Vec<u8>],
-    ) -> Option<HashMap<Vec<u8>, Option<DRepChoice>>> {
+        stake_keys: &[KeyHash],
+    ) -> Option<HashMap<KeyHash, Option<DRepChoice>>> {
         let stake_addresses = self.stake_addresses.lock().ok()?; // If lock fails, return None
         stake_addresses.get_drep_delegations_map(stake_keys)
     }
