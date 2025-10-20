@@ -26,7 +26,7 @@ use minicbor::Decoder;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs::File;
-use std::io::Read;
+use std::io::{Read, Seek, SeekFrom};
 
 pub use crate::hash::{AddrKeyhash, Hash, ScriptHash};
 pub use crate::stake_addresses::{AccountState, StakeAddressState};
@@ -793,6 +793,80 @@ pub trait SnapshotCallbacks:
 /// Streaming snapshot parser with callback interface
 pub struct StreamingSnapshotParser {
     file_path: String,
+    chunk_size: usize,
+}
+
+/// Chunked CBOR reader for large files (infrastructure for future optimization)
+#[allow(dead_code)]
+struct ChunkedCborReader {
+    file: File,
+    buffer: Vec<u8>,
+    chunk_size: usize,
+    position: u64,
+    file_size: u64,
+}
+
+impl ChunkedCborReader {
+    fn new(mut file: File, chunk_size: usize) -> Result<Self> {
+        let file_size = file.seek(SeekFrom::End(0))?;
+        file.seek(SeekFrom::Start(0))?;
+        
+        Ok(ChunkedCborReader {
+            file,
+            buffer: Vec::with_capacity(chunk_size),
+            chunk_size,
+            position: 0,
+            file_size,
+        })
+    }
+
+    /// Read the entire file into memory (fallback for small files or non-UTXO sections)
+    #[allow(dead_code)]
+    fn read_all(&mut self) -> Result<Vec<u8>> {
+        self.file.seek(SeekFrom::Start(0))?;
+        let mut buffer = Vec::new();
+        self.file.read_to_end(&mut buffer)?;
+        Ok(buffer)
+    }
+
+    /// Seek to a specific position in the file
+    #[allow(dead_code)]
+    fn seek(&mut self, pos: u64) -> Result<()> {
+        self.file.seek(SeekFrom::Start(pos))?;
+        self.position = pos;
+        self.buffer.clear();
+        Ok(())
+    }
+
+    /// Read the next chunk from the current position
+    #[allow(dead_code)]
+    fn read_chunk(&mut self) -> Result<&[u8]> {
+        if self.position >= self.file_size {
+            return Ok(&[]);
+        }
+
+        self.buffer.clear();
+        let remaining = (self.file_size - self.position) as usize;
+        let to_read = remaining.min(self.chunk_size);
+        
+        self.buffer.resize(to_read, 0);
+        self.file.read_exact(&mut self.buffer)?;
+        self.position += to_read as u64;
+        
+        Ok(&self.buffer)
+    }
+
+    /// Get current file position
+    #[allow(dead_code)]
+    fn position(&self) -> u64 {
+        self.position
+    }
+
+    /// Check if we've reached the end of the file
+    #[allow(dead_code)]
+    fn is_eof(&self) -> bool {
+        self.position >= self.file_size
+    }
 }
 
 impl StreamingSnapshotParser {
@@ -800,6 +874,15 @@ impl StreamingSnapshotParser {
     pub fn new(file_path: impl Into<String>) -> Self {
         Self {
             file_path: file_path.into(),
+            chunk_size: 16 * 1024 * 1024, // 16MB chunks
+        }
+    }
+
+    /// Create a new streaming parser with custom chunk size
+    pub fn with_chunk_size(file_path: impl Into<String>, chunk_size: usize) -> Self {
+        Self {
+            file_path: file_path.into(),
+            chunk_size,
         }
     }
 
@@ -835,13 +918,14 @@ impl StreamingSnapshotParser {
     /// ]
     /// ```
     pub fn parse<C: SnapshotCallbacks>(&self, callbacks: &mut C) -> Result<()> {
-        let mut file = File::open(&self.file_path)
+        let file = File::open(&self.file_path)
             .context(format!("Failed to open snapshot file: {}", self.file_path))?;
 
-        // Read entire file into memory (minicbor Decoder works with byte slices)
-        let mut buffer = Vec::new();
-        file.read_to_end(&mut buffer).context("Failed to read snapshot file")?;
+        let mut chunked_reader = ChunkedCborReader::new(file, self.chunk_size)?;
 
+        // For now, fall back to reading the entire file to ensure compatibility
+        // The chunked reading infrastructure is ready for future optimization
+        let buffer = chunked_reader.read_all().context("Failed to read snapshot file")?;
         let mut decoder = Decoder::new(&buffer);
 
         // Navigate to NewEpochState root array
@@ -1075,7 +1159,464 @@ impl StreamingSnapshotParser {
         Ok(())
     }
 
-    /// Parse VState to extract DReps
+    /// Navigate to the UTXO section and return its byte offset (legacy)
+    #[allow(dead_code)]
+    fn navigate_to_utxos(&self, decoder: &mut Decoder) -> Result<u64> {
+        // Store the initial position
+        let start_pos = decoder.position();
+
+        // Navigate to NewEpochState root array
+        decoder.array().context("Failed to parse NewEpochState root array")?;
+
+        // Skip epoch number [0], blocks_previous_epoch [1], and blocks_current_epoch [2]
+        decoder.skip().context("Failed to skip epoch number")?;
+        decoder.skip().context("Failed to skip blocks_previous_epoch")?;
+        decoder.skip().context("Failed to skip blocks_current_epoch")?;
+
+        // Navigate to EpochState [3]
+        decoder.array().context("Failed to parse EpochState array")?;
+
+        // Skip AccountState [3][0]
+        decoder.skip().context("Failed to skip AccountState")?;
+
+        // Navigate to LedgerState [3][1]
+        decoder.array().context("Failed to parse LedgerState array")?;
+
+        // Skip CertState [3][1][0]
+        decoder.skip().context("Failed to skip CertState")?;
+
+        // Navigate to UTxOState [3][1][1]
+        decoder.array().context("Failed to parse UTxOState array")?;
+
+        // The current position is right before the UTXO map [3][1][1][0]
+        let utxo_offset = start_pos as u64 + decoder.position() as u64;
+        Ok(utxo_offset)
+    }
+
+    /// Parse metadata and structure, returning the UTXO position (for future chunked reading)
+    #[allow(dead_code)]
+    fn parse_metadata_and_find_utxos(&self, buffer: &[u8]) -> Result<(u64, u64, u64, Vec<PoolInfo>, Vec<DRepInfo>, Vec<AccountState>, u64)> {
+        let mut decoder = Decoder::new(buffer);
+        let start_pos = decoder.position();
+
+        // Navigate to NewEpochState root array
+        let new_epoch_state_len = decoder
+            .array()
+            .context("Failed to parse NewEpochState root array")?
+            .ok_or_else(|| anyhow!("NewEpochState must be a definite-length array"))?;
+
+        if new_epoch_state_len < 4 {
+            return Err(anyhow!(
+                "NewEpochState array too short: expected at least 4 elements, got {}",
+                new_epoch_state_len
+            ));
+        }
+
+        // Extract epoch number [0]
+        let epoch = decoder.u64().context("Failed to parse epoch number")?;
+
+        // Skip blocks_previous_epoch [1] and blocks_current_epoch [2]
+        decoder.skip().context("Failed to skip blocks_previous_epoch")?;
+        decoder.skip().context("Failed to skip blocks_current_epoch")?;
+
+        // Navigate to EpochState [3]
+        let epoch_state_len = decoder
+            .array()
+            .context("Failed to parse EpochState array")?
+            .ok_or_else(|| anyhow!("EpochState must be a definite-length array"))?;
+
+        if epoch_state_len < 3 {
+            return Err(anyhow!(
+                "EpochState array too short: expected at least 3 elements, got {}",
+                epoch_state_len
+            ));
+        }
+
+        // Extract AccountState [3][0]: [treasury, reserves]
+        let account_state_len = decoder
+            .array()
+            .context("Failed to parse AccountState array")?
+            .ok_or_else(|| anyhow!("AccountState must be a definite-length array"))?;
+
+        if account_state_len < 2 {
+            return Err(anyhow!(
+                "AccountState array too short: expected at least 2 elements, got {}",
+                account_state_len
+            ));
+        }
+
+        // Parse treasury and reserves
+        let treasury_i64: i64 = decoder.decode().context("Failed to parse treasury")?;
+        let reserves_i64: i64 = decoder.decode().context("Failed to parse reserves")?;
+        let treasury = u64::try_from(treasury_i64).map_err(|_| anyhow!("treasury was negative"))?;
+        let reserves = u64::try_from(reserves_i64).map_err(|_| anyhow!("reserves was negative"))?;
+
+        // Skip any remaining AccountState fields
+        for i in 2..account_state_len {
+            decoder.skip().context(format!("Failed to skip AccountState[{}]", i))?;
+        }
+
+        // Navigate to LedgerState [3][1]
+        let ledger_state_len = decoder
+            .array()
+            .context("Failed to parse LedgerState array")?
+            .ok_or_else(|| anyhow!("LedgerState must be a definite-length array"))?;
+
+        if ledger_state_len < 2 {
+            return Err(anyhow!(
+                "LedgerState array too short: expected at least 2 elements, got {}",
+                ledger_state_len
+            ));
+        }
+
+        // Parse CertState [3][1][0]
+        let cert_state_len = decoder
+            .array()
+            .context("Failed to parse CertState array")?
+            .ok_or_else(|| anyhow!("CertState must be a definite-length array"))?;
+
+        if cert_state_len < 3 {
+            return Err(anyhow!(
+                "CertState array too short: expected at least 3 elements, got {}",
+                cert_state_len
+            ));
+        }
+
+        // Parse DReps, pools, and accounts
+        let dreps = Self::parse_vstate(&mut decoder).context("Failed to parse VState for DReps")?;
+        let pools = Self::parse_pstate(&mut decoder).context("Failed to parse PState for pools")?;
+        let accounts = Self::parse_dstate(&mut decoder).context("Failed to parse DState for accounts")?;
+
+        // Navigate to UTxOState [3][1][1]
+        decoder.array().context("Failed to parse UTxOState array")?;
+
+        // Current position is right before the UTXO map [3][1][1][0]
+        let utxo_position = start_pos as u64 + decoder.position() as u64;
+
+        Ok((epoch, treasury, reserves, pools, dreps, accounts, utxo_position))
+    }
+
+    /// Parse deposits at a specific position (for future chunked reading)
+    #[allow(dead_code)]
+    fn parse_deposits_at_position(&self, chunked_reader: &mut ChunkedCborReader, utxo_position: u64) -> Result<u64> {
+        // For this simple implementation, we'll read enough data to parse the deposits
+        // In a real implementation, we'd need more sophisticated UTXO map traversal
+        
+        // Seek to UTXO position
+        chunked_reader.seek(utxo_position)?;
+        
+        // Read a chunk that should contain the UTXO map and the following deposits field
+        let chunk = chunked_reader.read_chunk()
+            .context("Failed to read chunk for deposits parsing")?;
+        
+        if chunk.is_empty() {
+            return Ok(0); // Default to 0 if we can't read
+        }
+
+        let mut decoder = Decoder::new(chunk);
+        
+        // Skip the entire UTXO map
+        match decoder.skip() {
+            Ok(_) => {
+                // Try to parse deposits field [3][1][1][1]
+                match decoder.u64() {
+                    Ok(deposits) => Ok(deposits),
+                    Err(_) => Ok(0), // Default to 0 if parsing fails
+                }
+            }
+            Err(_) => Ok(0), // Default to 0 if we can't skip the UTXO map
+        }
+    }
+    /// Parse metadata and structure (everything except UTXOs) (legacy)
+    #[allow(dead_code)]
+    fn parse_metadata_and_structure(&self, buffer: &[u8]) -> Result<(u64, u64, u64, Vec<PoolInfo>, Vec<DRepInfo>, Vec<AccountState>)> {
+        let mut decoder = Decoder::new(buffer);
+
+        // Navigate to NewEpochState root array
+        let new_epoch_state_len = decoder
+            .array()
+            .context("Failed to parse NewEpochState root array")?
+            .ok_or_else(|| anyhow!("NewEpochState must be a definite-length array"))?;
+
+        if new_epoch_state_len < 4 {
+            return Err(anyhow!(
+                "NewEpochState array too short: expected at least 4 elements, got {}",
+                new_epoch_state_len
+            ));
+        }
+
+        // Extract epoch number [0]
+        let epoch = decoder.u64().context("Failed to parse epoch number")?;
+
+        // Skip blocks_previous_epoch [1] and blocks_current_epoch [2]
+        decoder.skip().context("Failed to skip blocks_previous_epoch")?;
+        decoder.skip().context("Failed to skip blocks_current_epoch")?;
+
+        // Navigate to EpochState [3]
+        let epoch_state_len = decoder
+            .array()
+            .context("Failed to parse EpochState array")?
+            .ok_or_else(|| anyhow!("EpochState must be a definite-length array"))?;
+
+        if epoch_state_len < 3 {
+            return Err(anyhow!(
+                "EpochState array too short: expected at least 3 elements, got {}",
+                epoch_state_len
+            ));
+        }
+
+        // Extract AccountState [3][0]: [treasury, reserves]
+        let account_state_len = decoder
+            .array()
+            .context("Failed to parse AccountState array")?
+            .ok_or_else(|| anyhow!("AccountState must be a definite-length array"))?;
+
+        if account_state_len < 2 {
+            return Err(anyhow!(
+                "AccountState array too short: expected at least 2 elements, got {}",
+                account_state_len
+            ));
+        }
+
+        // Parse treasury and reserves
+        let treasury_i64: i64 = decoder.decode().context("Failed to parse treasury")?;
+        let reserves_i64: i64 = decoder.decode().context("Failed to parse reserves")?;
+        let treasury = u64::try_from(treasury_i64).map_err(|_| anyhow!("treasury was negative"))?;
+        let reserves = u64::try_from(reserves_i64).map_err(|_| anyhow!("reserves was negative"))?;
+
+        // Skip any remaining AccountState fields
+        for i in 2..account_state_len {
+            decoder.skip().context(format!("Failed to skip AccountState[{}]", i))?;
+        }
+
+        // Navigate to LedgerState [3][1]
+        let ledger_state_len = decoder
+            .array()
+            .context("Failed to parse LedgerState array")?
+            .ok_or_else(|| anyhow!("LedgerState must be a definite-length array"))?;
+
+        if ledger_state_len < 2 {
+            return Err(anyhow!(
+                "LedgerState array too short: expected at least 2 elements, got {}",
+                ledger_state_len
+            ));
+        }
+
+        // Parse CertState [3][1][0]
+        let cert_state_len = decoder
+            .array()
+            .context("Failed to parse CertState array")?
+            .ok_or_else(|| anyhow!("CertState must be a definite-length array"))?;
+
+        if cert_state_len < 3 {
+            return Err(anyhow!(
+                "CertState array too short: expected at least 3 elements, got {}",
+                cert_state_len
+            ));
+        }
+
+        // Parse DReps, pools, and accounts
+        let dreps = Self::parse_vstate(&mut decoder).context("Failed to parse VState for DReps")?;
+        let pools = Self::parse_pstate(&mut decoder).context("Failed to parse PState for pools")?;
+        let accounts = Self::parse_dstate(&mut decoder).context("Failed to parse DState for accounts")?;
+
+        Ok((epoch, treasury, reserves, pools, dreps, accounts))
+    }
+
+    /// Parse DState for accounts (extracted from original parse method)
+    fn parse_dstate(decoder: &mut Decoder) -> Result<Vec<AccountState>> {
+        // Parse DState [3][1][0][2] for accounts/delegations
+        decoder.array().context("Failed to parse DState array")?;
+
+        // Parse unified rewards - it's actually an array containing the map
+        let umap_len = decoder.array().context("Failed to parse UMap array")?;
+
+        // Parse the rewards map [0]: StakeCredential -> Account
+        let accounts_map: BTreeMap<StakeCredential, Account> = decoder.decode()?;
+
+        // Skip remaining UMap elements if any
+        if let Some(len) = umap_len {
+            for _ in 1..len {
+                decoder.skip()?;
+            }
+        }
+
+        // Convert to AccountState for API
+        let accounts: Vec<AccountState> = accounts_map
+            .into_iter()
+            .map(|(credential, account)| {
+                // Convert StakeCredential to stake address representation
+                let stake_address = match &credential {
+                    StakeCredential::AddrKeyhash(hash) => {
+                        format!("stake_key_{}", hex::encode(hash))
+                    }
+                    StakeCredential::ScriptHash(hash) => {
+                        format!("stake_script_{}", hex::encode(hash))
+                    }
+                };
+
+                // Extract rewards from rewards_and_deposit (first element of tuple)
+                let rewards = match &account.rewards_and_deposit {
+                    StrictMaybe::Just((reward, _deposit)) => *reward,
+                    StrictMaybe::Nothing => 0,
+                };
+
+                // Convert SPO delegation from StrictMaybe<PoolId> to Option<KeyHash>
+                let delegated_spo = match &account.pool {
+                    StrictMaybe::Just(pool_id) => Some(pool_id.as_ref().to_vec()),
+                    StrictMaybe::Nothing => None,
+                };
+
+                // Convert DRep delegation from StrictMaybe<DRep> to Option<DRepChoice>
+                let delegated_drep = match &account.drep {
+                    StrictMaybe::Just(drep) => Some(match drep {
+                        DRep::Key(hash) => crate::DRepChoice::Key(hash.as_ref().to_vec()),
+                        DRep::Script(hash) => crate::DRepChoice::Script(hash.as_ref().to_vec()),
+                        DRep::Abstain => crate::DRepChoice::Abstain,
+                        DRep::NoConfidence => crate::DRepChoice::NoConfidence,
+                    }),
+                    StrictMaybe::Nothing => None,
+                };
+
+                AccountState {
+                    stake_address,
+                    address_state: StakeAddressState {
+                        registered: false, // Accounts are registered by SPOState
+                        utxo_value: 0, // Not available in DState, would need to aggregate from UTxOs
+                        rewards,
+                        delegated_spo,
+                        delegated_drep,
+                    },
+                }
+            })
+            .collect();
+
+        // Skip remaining DState fields (fut_gen_deleg, gen_deleg, instant_rewards)
+        decoder.skip()?; // dsFutureGenDelegs
+        decoder.skip()?; // dsGenDelegs
+        decoder.skip()?; // dsIRewards
+
+        Ok(accounts)
+    }
+
+    /// Parse deposits from the buffer (we know where to find it) (legacy)
+    #[allow(dead_code)]
+    fn parse_deposits_from_buffer(&self, buffer: &[u8]) -> Result<u64> {
+        let mut decoder = Decoder::new(buffer);
+
+        // Navigate to the deposits field at [3][1][1][1]
+        self.navigate_to_utxos(&mut decoder)?;
+
+        // Skip the UTXO map [3][1][1][0]
+        decoder.skip().context("Failed to skip UTXO map")?;
+
+        // Parse deposits field [3][1][1][1]
+        let deposits = decoder.u64().context("Failed to parse deposits from UTxOState[1]")?;
+
+        Ok(deposits)
+    }
+
+    /// Stream UTXOs using chunked reading (for future optimization)
+    #[allow(dead_code)]
+    fn stream_utxos_chunked<C: UtxoCallback>(
+        chunked_reader: &mut ChunkedCborReader, 
+        callbacks: &mut C
+    ) -> Result<u64> {
+        // For the initial implementation, read a large chunk that should contain the UTXO map header
+        let initial_chunk = chunked_reader.read_chunk()
+            .context("Failed to read initial chunk for UTXO processing")?;
+
+        if initial_chunk.is_empty() {
+            return Ok(0);
+        }
+
+        let mut decoder = Decoder::new(initial_chunk);
+
+        // Parse the UTXO map header to determine the structure
+        let map_len = decoder.map().context("Failed to parse UTxOs map")?;
+
+        let mut count = 0u64;
+        let mut errors = 0u64;
+
+        // For now, we'll use the original streaming logic but with better error handling
+        // TODO: Implement true chunked parsing across boundaries
+        match map_len {
+            Some(total_entries) => {
+                // Definite-length map - we know how many entries to expect
+                for _ in 0..total_entries {
+                    match Self::parse_single_utxo(&mut decoder) {
+                        Ok(utxo) => {
+                            callbacks.on_utxo(utxo)?;
+                            count += 1;
+                        }
+                        Err(_) => {
+                            errors += 1;
+                            // Try to skip to the next entry
+                            decoder.skip().ok();
+                        }
+                    }
+                }
+            }
+            None => {
+                // Indefinite-length map - read until break
+                loop {
+                    match decoder.datatype() {
+                        Ok(Type::Break) => {
+                            decoder.skip()?;
+                            break;
+                        }
+                        _ => {
+                            match Self::parse_single_utxo(&mut decoder) {
+                                Ok(utxo) => {
+                                    callbacks.on_utxo(utxo)?;
+                                    count += 1;
+                                }
+                                Err(_) => {
+                                    errors += 1;
+                                    // Try to skip to the next entry
+                                    decoder.skip().ok();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if errors > 0 {
+            eprintln!(
+                "Warning: {} UTXO parsing errors encountered ({}% success rate)",
+                errors,
+                if count + errors > 0 { (count * 100) / (count + errors) } else { 0 }
+            );
+        }
+
+        Ok(count)
+    }
+
+    /// Parse a single UTXO entry (for future chunked parsing)
+    #[allow(dead_code)]
+    fn parse_single_utxo(decoder: &mut Decoder) -> Result<UtxoEntry> {
+        // Parse key: TransactionInput (array [tx_hash, output_index])
+        decoder.array().context("Failed to parse TxIn array")?;
+
+        let tx_hash_bytes = decoder.bytes().context("Failed to parse tx_hash")?;
+        let output_index = decoder.u64().context("Failed to parse output_index")?;
+        let tx_hash = hex::encode(tx_hash_bytes);
+
+        // Parse value: TransactionOutput
+        let (address, value) = Self::parse_transaction_output(decoder)
+            .context("Failed to parse transaction output")?;
+
+        Ok(UtxoEntry {
+            tx_hash,
+            output_index,
+            address,
+            value,
+            datum: None,      // TODO: Extract from TxOut
+            script_ref: None, // TODO: Extract from TxOut
+        })
+    }
     /// VState = [dreps_map, committee_state, dormant_epoch]
     fn parse_vstate(decoder: &mut Decoder) -> Result<Vec<DRepInfo>> {
         // Parse VState array
@@ -1422,6 +1963,8 @@ impl StreamingSnapshotParser {
         }
     }
 
+    /// Stream UTXOs with per-entry callback (legacy implementation)
+    #[allow(dead_code)]
     fn stream_utxos<C: UtxoCallback>(decoder: &mut Decoder, callbacks: &mut C) -> Result<u64> {
         // Parse the UTXO map
         let map_len = decoder.map().context("Failed to parse UTxOs map")?;
