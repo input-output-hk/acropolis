@@ -16,7 +16,13 @@ if (Number.isNaN(START_EPOCH)) {
 
 async function pause() {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-    await new Promise<void>((resolve) => {
+
+    return new Promise<void>((resolve) => {
+        rl.on("SIGINT", () => {
+            rl.close();
+            process.exit(0);
+        });
+
         rl.question("Press Enter to continue or Ctrl+C to stop...", () => {
             rl.close();
             resolve();
@@ -129,7 +135,11 @@ async function run() {
             if (!keepGoing) break;
         } catch (err: any) {
             if (err.message.startsWith("HTTP")) {
-                console.log(`Reached end of available epochs (${err.message}).`);
+                if (epoch == START_EPOCH) {
+                    console.log(`store-spdd=false or sync has not reached epoch ${START_EPOCH}.`);
+                } else {
+                    console.log(`Reached end of available epochs (${err.message}).`);
+                }
                 break;
             }
             console.error(`Stopping at epoch ${epoch}: ${err.message}`);
