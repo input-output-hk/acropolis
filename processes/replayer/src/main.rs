@@ -99,7 +99,7 @@ fn setup_governance_replay(process: &mut dyn ModuleRegistry<Message>) {
 
 #[derive(Debug, clap::Parser)]
 #[command(
-    name = "acropolis_process_omnibus",
+    name = "acropolis_process_replayer",
     group(clap::ArgGroup::new("mode").required(true).args(&["governance_collect", "governance_replay", "alonzo_governance_collect"])),
 )]
 struct Args {
