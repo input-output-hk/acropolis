@@ -377,7 +377,7 @@ impl StakeAddressMap {
         if sas.registered {
             error!(
                 "Stake address {} registered when already registered",
-                hex::encode(stake_address.get_hash())
+                stake_address
             );
             false
         } else {
@@ -397,15 +397,12 @@ impl StakeAddressMap {
             } else {
                 error!(
                     "Deregistration of unregistered stake address {}",
-                    hex::encode(stake_address.get_hash())
+                    stake_address
                 );
                 false
             }
         } else {
-            error!(
-                "Deregistration of unknown stake address {}",
-                hex::encode(stake_address.get_hash())
-            );
+            error!("Deregistration of unknown stake address {}", stake_address);
             false
         }
     }
@@ -419,14 +416,14 @@ impl StakeAddressMap {
             } else {
                 error!(
                     "Unregistered stake address in stake delegation: {}",
-                    hex::encode(stake_address.get_hash())
+                    stake_address
                 );
                 false
             }
         } else {
             error!(
                 "Unknown stake address in stake delegation: {}",
-                hex::encode(stake_address.get_hash())
+                stake_address
             );
             false
         }
@@ -445,14 +442,14 @@ impl StakeAddressMap {
             } else {
                 error!(
                     "Unregistered stake address in DRep delegation: {}",
-                    hex::encode(stake_address.get_hash())
+                    stake_address
                 );
                 false
             }
         } else {
             error!(
                 "Unknown stake address in drep delegation: {}",
-                hex::encode(stake_address.get_hash())
+                stake_address
             );
             false
         }
@@ -470,10 +467,7 @@ impl StakeAddressMap {
         };
 
         if let Err(e) = update_value_with_delta(&mut sas.rewards, amount as i64) {
-            error!(
-                "Adding to reward account {}: {e}",
-                hex::encode(stake_address.get_hash())
-            );
+            error!("Adding to reward account {}: {e}", stake_address);
         }
     }
 
@@ -486,10 +480,7 @@ impl StakeAddressMap {
         // stake or drep delegation, but we need to track them in case they are later
         let sas = self.entry(stake_address.clone()).or_default();
         if let Err(e) = update_value_with_delta(&mut sas.utxo_value, stake_delta.delta) {
-            error!(
-                "Applying delta to stake address {}: {e}",
-                hex::encode(stake_address.get_hash())
-            );
+            error!("Applying delta to stake address {}: {e}", stake_address);
         }
     }
 
@@ -504,20 +495,14 @@ impl StakeAddressMap {
                 if let Err(e) =
                     update_value_with_delta(&mut sas.rewards, -(withdrawal.value as i64))
                 {
-                    error!(
-                        "Withdrawing from stake address {}: {e}",
-                        hex::encode(stake_address.get_hash())
-                    );
+                    error!("Withdrawing from stake address {}: {e}", stake_address);
                 } else {
                     // Update the stake address
                     self.insert(stake_address.clone(), sas);
                 }
             }
         } else {
-            error!(
-                "Unknown stake address in withdrawal: {}",
-                hex::encode(stake_address.get_hash())
-            );
+            error!("Unknown stake address in withdrawal: {}", stake_address);
         }
     }
 

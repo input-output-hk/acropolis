@@ -86,7 +86,6 @@ impl Snapshot {
             let blocks_produced = spo_block_counts.get(spo_id).copied().unwrap_or(0);
 
             // Check if the reward account from two epochs ago is still registered
-            // TODO should spo.reward_account be a StakeAddress to begin with?
             let two_previous_reward_account_is_registered =
                 match two_previous_snapshot.spos.get(spo_id) {
                     Some(old_spo) => stake_addresses
@@ -130,7 +129,7 @@ impl Snapshot {
                             epoch,
                             "SPO {} for hash {} retired?  Ignored",
                             hex::encode(spo_id),
-                            hex::encode(stake_address.get_hash())
+                            stake_address
                         );
                         continue;
                     }
@@ -186,9 +185,9 @@ impl Snapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use acropolis_common::stake_addresses::StakeAddressState;
     use acropolis_common::AddressNetwork::Main;
     use acropolis_common::{StakeAddress, StakeAddressPayload};
-    use acropolis_common::stake_addresses::StakeAddressState;
 
     // Helper function to create stake addresses for testing
     fn create_test_stake_address(id: u8) -> StakeAddress {
@@ -196,7 +195,9 @@ mod tests {
         hash[0] = id;
         StakeAddress {
             network: Main,
-            payload: StakeAddressPayload::StakeKeyHash(hash.try_into().expect("Invalid hash length")),
+            payload: StakeAddressPayload::StakeKeyHash(
+                hash.try_into().expect("Invalid hash length"),
+            ),
         }
     }
 

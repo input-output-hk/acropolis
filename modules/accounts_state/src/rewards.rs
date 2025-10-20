@@ -128,14 +128,10 @@ pub fn calculate_rewards(
         // Also, to handle the early Shelley timing bug, we allow it if it was registered
         // during the current epoch
         if !pay_to_pool_reward_account {
-            debug!(
-                "Checking old reward account {}",
-                hex::encode(&staking_spo.reward_account.get_hash())
-            );
+            debug!("Checking old reward account {}", staking_spo.reward_account);
 
             // Note we use the staking reward account - it could have changed
-            pay_to_pool_reward_account =
-                registrations.contains(&staking_spo.reward_account);
+            pay_to_pool_reward_account = registrations.contains(&staking_spo.reward_account);
         }
 
         // There was a bug in the original node from Shelley until Allegra where if multiple SPOs
@@ -156,7 +152,7 @@ pub fn calculate_rewards(
                         warn!("Shelley shared reward account bug: Dropping reward to {} in favour of {} on shared account {}",
                               hex::encode(&operator_id),
                               hex::encode(&other_id),
-                              hex::encode(&staking_spo.reward_account.get_hash()));
+                              staking_spo.reward_account);
                         break;
                     }
                 }
@@ -332,14 +328,13 @@ fn calculate_spo_rewards(
 
         // You'd think this was just (pool_rewards - costs) here, but the Haskell code recalculates
         // the margin without the relative_owner_stake term !?
-        // Note keeping fractional part, which is non-obvious
+        // Note keeping the fractional part, which is non-obvious
         let to_delegators = (&pool_rewards - &fixed_cost) * (BigDecimal::one() - &margin);
         let mut total_paid: u64 = 0;
         let mut delegators_paid: usize = 0;
         if !to_delegators.is_zero() {
             let total_stake = BigDecimal::from(spo.total_stake);
             for (delegator_stake_address, stake) in &spo.delegators {
-
                 let delegator_stake_address_hash = delegator_stake_address.get_hash();
                 let proportion = BigDecimal::from(stake) / &total_stake;
 
@@ -348,13 +343,13 @@ fn calculate_spo_rewards(
                 let to_pay = reward.with_scale(0).to_u64().unwrap_or(0);
 
                 debug!("Reward stake {stake} -> proportion {proportion} of SPO rewards {to_delegators} -> {to_pay} to hash {}",
-                       hex::encode(delegator_stake_address_hash));
+                       delegator_stake_address);
 
                 // Pool owners don't get member rewards (seems unfair!)
                 if spo.pool_owners.contains(&delegator_stake_address_hash.to_vec()) {
                     debug!(
                         "Skipping pool owner reward account {}, losing {to_pay}",
-                        hex::encode(delegator_stake_address_hash)
+                        delegator_stake_address
                     );
                     continue;
                 }
@@ -363,7 +358,7 @@ fn calculate_spo_rewards(
                 if spo.reward_account.get_hash() == delegator_stake_address_hash {
                     debug!(
                         "Skipping pool reward account {}, losing {to_pay}",
-                        hex::encode(delegator_stake_address_hash)
+                        delegator_stake_address
                     );
                     continue;
                 }
@@ -372,7 +367,7 @@ fn calculate_spo_rewards(
                 if deregistrations.contains(delegator_stake_address) {
                     info!(
                         "Recently deregistered member account {}, losing {to_pay}",
-                        hex::encode(delegator_stake_address_hash)
+                        delegator_stake_address
                     );
                     continue;
                 }
@@ -404,7 +399,7 @@ fn calculate_spo_rewards(
         info!(
             "SPO {}'s reward account {} not paid {}",
             hex::encode(&operator_id),
-            hex::encode(spo.reward_account.get_hash()),
+            spo.reward_account,
             spo_benefit,
         );
     }

@@ -218,7 +218,7 @@ impl Verifier {
                                     error!(
                                         "Missing reward: SPO {} account {} {:?} {}",
                                         hex::encode(&expected_spo.0),
-                                        hex::encode(&expected.account.get_hash()),
+                                        expected.account,
                                         expected.rtype,
                                         expected.amount
                                     );
@@ -228,7 +228,7 @@ impl Verifier {
                                     error!(
                                         "Extra reward: SPO {} account {} {:?} {}",
                                         hex::encode(&actual_spo.0),
-                                        hex::encode(&actual.account.get_hash()),
+                                        actual.account,
                                         actual.rtype,
                                         actual.amount
                                     );
@@ -238,7 +238,7 @@ impl Verifier {
                                     if expected.amount != actual.amount {
                                         error!("Different reward: SPO {} account {} {:?} expected {}, actual {} ({})",
                                                hex::encode(&expected_spo.0),
-                                               hex::encode(&expected.account.get_hash()),
+                                               expected.account,
                                                expected.rtype,
                                                expected.amount,
                                                actual.amount,
@@ -248,7 +248,7 @@ impl Verifier {
                                         debug!(
                                             "Reward match: SPO {} account {} {:?} {}",
                                             hex::encode(&expected_spo.0),
-                                            hex::encode(&expected.account.get_hash()),
+                                            expected.account,
                                             expected.rtype,
                                             expected.amount
                                         );

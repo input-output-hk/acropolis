@@ -7,6 +7,7 @@ use crate::types::{KeyHash, NetworkId, ScriptHash};
 use anyhow::{anyhow, bail, Result};
 use serde_with::{hex::Hex, serde_as};
 use std::borrow::Borrow;
+use std::fmt::{Display, Formatter};
 use std::hash::{Hash, Hasher};
 
 /// a Byron-era address
@@ -199,7 +200,7 @@ impl StakeAddressPayload {
 }
 
 /// A stake address
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Eq, serde::Serialize, serde::Deserialize)]
 pub struct StakeAddress {
     /// Network id
     pub network: AddressNetwork,
@@ -299,23 +300,29 @@ impl StakeAddress {
     }
 }
 
+impl Display for StakeAddress {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.to_string().unwrap())
+    }
+}
+
 impl Hash for StakeAddress {
     fn hash<H: Hasher>(&self, state: &mut H) {
+        self.network.hash(state);
+        std::mem::discriminant(&self.payload).hash(state);
         self.get_hash().hash(state);
+    }
+}
+
+impl Borrow<[u8]> for StakeAddress {
+    fn borrow(&self) -> &[u8] {
+        self.get_hash()
     }
 }
 
 impl PartialEq for StakeAddress {
     fn eq(&self, other: &Self) -> bool {
-        self.get_hash() == other.get_hash()
-    }
-}
-
-impl Eq for StakeAddress {}
-
-impl Borrow<[u8]> for StakeAddress {
-    fn borrow(&self) -> &[u8] {
-        self.get_hash()
+        self.network == other.network && self.payload == other.payload
     }
 }
 
