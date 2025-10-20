@@ -228,7 +228,7 @@ mod tests {
     #[test]
     fn test_store_spdd_state() {
         let mut spdd_store =
-            SPDDStore::new(std::path::Path::new(DB_PATH), 0).expect("Failed to create SPDD store");
+            SPDDStore::new(std::path::Path::new(DB_PATH), 1).expect("Failed to create SPDD store");
         let mut spdd_state: HashMap<PoolId, Vec<(AddrKeyhash, u64)>> = HashMap::new();
         spdd_state.insert(
             vec![0x01; 28],
