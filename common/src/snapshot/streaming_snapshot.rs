@@ -797,178 +797,17 @@ pub struct StreamingSnapshotParser {
 }
 
 /// Chunked CBOR reader for large files (infrastructure for future optimization)
-#[allow(dead_code)]
 struct ChunkedCborReader {
     file: File,
-    buffer: Vec<u8>,
-    chunk_size: usize,
-    position: u64,
     file_size: u64,
 }
 
 impl ChunkedCborReader {
-    fn new(mut file: File, chunk_size: usize) -> Result<Self> {
+    fn new(mut file: File, _chunk_size: usize) -> Result<Self> {
         let file_size = file.seek(SeekFrom::End(0))?;
         file.seek(SeekFrom::Start(0))?;
 
-        Ok(ChunkedCborReader {
-            file,
-            buffer: Vec::with_capacity(chunk_size),
-            chunk_size,
-            position: 0,
-            file_size,
-        })
-    }
-
-    /// Read the entire file into memory (fallback for small files or non-UTXO sections)
-    #[allow(dead_code)]
-    fn read_all(&mut self) -> Result<Vec<u8>> {
-        self.file.seek(SeekFrom::Start(0))?;
-        let mut buffer = Vec::new();
-        self.file.read_to_end(&mut buffer)?;
-        Ok(buffer)
-    }
-
-    /// Seek to a specific position in the file
-    #[allow(dead_code)]
-    fn seek(&mut self, pos: u64) -> Result<()> {
-        self.file.seek(SeekFrom::Start(pos))?;
-        self.position = pos;
-        self.buffer.clear();
-        Ok(())
-    }
-
-    /// Read the next chunk from the current position
-    #[allow(dead_code)]
-    fn read_chunk(&mut self) -> Result<&[u8]> {
-        if self.position >= self.file_size {
-            return Ok(&[]);
-        }
-
-        self.buffer.clear();
-        let remaining = (self.file_size - self.position) as usize;
-        let to_read = remaining.min(self.chunk_size);
-
-        self.buffer.resize(to_read, 0);
-        self.file.read_exact(&mut self.buffer)?;
-        self.position += to_read as u64;
-
-        Ok(&self.buffer)
-    }
-
-    /// Get current file position
-    #[allow(dead_code)]
-    fn position(&self) -> u64 {
-        self.position
-    }
-
-    /// Read the next chunk with CBOR boundary detection
-    #[allow(dead_code)]
-    fn read_chunk_with_cbor_boundaries(&mut self) -> Result<Option<Vec<u8>>> {
-        if self.position >= self.file_size {
-            return Ok(None);
-        }
-
-        // Read initial chunk
-        let bytes_to_read = self.chunk_size.min((self.file_size - self.position) as usize);
-        if bytes_to_read == 0 {
-            return Ok(None);
-        }
-
-        let mut chunk = vec![0u8; bytes_to_read];
-        self.file.read_exact(&mut chunk)?;
-
-        // If this is the last chunk or we read everything, return as-is
-        if self.position + bytes_to_read as u64 >= self.file_size {
-            self.position += bytes_to_read as u64;
-            return Ok(Some(chunk));
-        }
-
-        // Find a safe CBOR boundary to split the chunk
-        if let Some(boundary_offset) = self.find_cbor_boundary(&chunk) {
-            // Trim to the boundary
-            chunk.truncate(boundary_offset);
-
-            // Seek back to the boundary position
-            let actual_bytes_read = boundary_offset;
-            self.file.seek(SeekFrom::Start(self.position + actual_bytes_read as u64))?;
-            self.position += actual_bytes_read as u64;
-
-            Ok(Some(chunk))
-        } else {
-            // No safe boundary found, return the full chunk (might split CBOR items)
-            self.position += bytes_to_read as u64;
-            Ok(Some(chunk))
-        }
-    }
-
-    /// Find a safe CBOR boundary within the chunk
-    /// Returns the offset where we can safely split, or None if no boundary found
-    #[allow(dead_code)]
-    fn find_cbor_boundary(&self, data: &[u8]) -> Option<usize> {
-        // Look for CBOR item boundaries by examining the last ~1KB of the chunk
-        // This is a heuristic - we look for patterns that suggest complete CBOR items
-        let search_start = if data.len() > 1024 {
-            data.len() - 1024
-        } else {
-            0
-        };
-
-        for i in (search_start..data.len().saturating_sub(8)).rev() {
-            // Look for CBOR map end patterns or complete item patterns
-            if self.is_likely_cbor_boundary(&data[i..]) {
-                return Some(i);
-            }
-        }
-
-        None
-    }
-
-    /// Check if this position looks like a CBOR item boundary
-    #[allow(dead_code)]
-    fn is_likely_cbor_boundary(&self, data: &[u8]) -> bool {
-        if data.len() < 4 {
-            return false;
-        }
-
-        // Check for CBOR major type patterns that suggest item boundaries
-        let first_byte = data[0];
-        let major_type = (first_byte >> 5) & 0x07;
-        let additional_info = first_byte & 0x1f;
-
-        match major_type {
-            // Positive integers, negative integers, byte strings, text strings
-            0..=3 => {
-                // Check if this looks like a complete item by examining length encoding
-                if additional_info < 24 {
-                    return true; // Direct encoding, likely complete
-                } else if additional_info == 24 && data.len() >= 2 {
-                    return true; // 1-byte length follows
-                } else if additional_info == 25 && data.len() >= 3 {
-                    return true; // 2-byte length follows
-                } else if additional_info == 26 && data.len() >= 5 {
-                    return true; // 4-byte length follows
-                }
-            }
-            // Arrays and maps
-            4 | 5 => {
-                // These are container types - boundary detection is harder
-                return false;
-            }
-            // Tags and floats/simple values
-            6 | 7 => {
-                return additional_info < 24; // Simple cases only
-            }
-            _ => return false,
-        }
-
-        false
-    }
-
-    /// Check if we've reached the end of the file
-    #[allow(dead_code)]
-    fn is_eof(&self) -> bool {
-        self.position >= self.file_size
+        Ok(ChunkedCborReader { file, file_size })
     }
 }
 
@@ -1244,7 +1083,7 @@ impl StreamingSnapshotParser {
 
         // TRUE STREAMING: Process UTXOs one by one with minimal memory usage
         utxo_file.seek(SeekFrom::Start(utxo_file_position))?;
-        let utxo_count = Self::stream_utxos_true_streaming(&mut utxo_file, callbacks)
+        let utxo_count = Self::stream_utxos(&mut utxo_file, callbacks)
             .context("Failed to stream UTXOs with true streaming")?;
 
         // For chunked reading, we'll parse deposits from the metadata buffer if possible
@@ -1273,40 +1112,6 @@ impl StreamingSnapshotParser {
         callbacks.on_complete()?;
 
         Ok(())
-    }
-
-    /// Navigate to the UTXO section and return its byte offset (legacy)
-    #[allow(dead_code)]
-    fn navigate_to_utxos(&self, decoder: &mut Decoder) -> Result<u64> {
-        // Store the initial position
-        let start_pos = decoder.position();
-
-        // Navigate to NewEpochState root array
-        decoder.array().context("Failed to parse NewEpochState root array")?;
-
-        // Skip epoch number [0], blocks_previous_epoch [1], and blocks_current_epoch [2]
-        decoder.skip().context("Failed to skip epoch number")?;
-        decoder.skip().context("Failed to skip blocks_previous_epoch")?;
-        decoder.skip().context("Failed to skip blocks_current_epoch")?;
-
-        // Navigate to EpochState [3]
-        decoder.array().context("Failed to parse EpochState array")?;
-
-        // Skip AccountState [3][0]
-        decoder.skip().context("Failed to skip AccountState")?;
-
-        // Navigate to LedgerState [3][1]
-        decoder.array().context("Failed to parse LedgerState array")?;
-
-        // Skip CertState [3][1][0]
-        decoder.skip().context("Failed to skip CertState")?;
-
-        // Navigate to UTxOState [3][1][1]
-        decoder.array().context("Failed to parse UTxOState array")?;
-
-        // The current position is right before the UTXO map [3][1][1][0]
-        let utxo_offset = start_pos as u64 + decoder.position() as u64;
-        Ok(utxo_offset)
     }
 
     /// Parse metadata and structure, returning the UTXO position (for future chunked reading)
@@ -1432,41 +1237,6 @@ impl StreamingSnapshotParser {
         ))
     }
 
-    /// Parse deposits at a specific position (for future chunked reading)
-    #[allow(dead_code)]
-    fn parse_deposits_at_position(
-        &self,
-        chunked_reader: &mut ChunkedCborReader,
-        utxo_position: u64,
-    ) -> Result<u64> {
-        // For this simple implementation, we'll read enough data to parse the deposits
-        // In a real implementation, we'd need more sophisticated UTXO map traversal
-
-        // Seek to UTXO position
-        chunked_reader.seek(utxo_position)?;
-
-        // Read a chunk that should contain the UTXO map and the following deposits field
-        let chunk =
-            chunked_reader.read_chunk().context("Failed to read chunk for deposits parsing")?;
-
-        if chunk.is_empty() {
-            return Ok(0); // Default to 0 if we can't read
-        }
-
-        let mut decoder = Decoder::new(chunk);
-
-        // Skip the entire UTXO map
-        match decoder.skip() {
-            Ok(_) => {
-                // Try to parse deposits field [3][1][1][1]
-                match decoder.u64() {
-                    Ok(deposits) => Ok(deposits),
-                    Err(_) => Ok(0), // Default to 0 if parsing fails
-                }
-            }
-            Err(_) => Ok(0), // Default to 0 if we can't skip the UTXO map
-        }
-    }
     /// Parse metadata and structure (everything except UTXOs) (legacy)
     #[allow(dead_code)]
     fn parse_metadata_and_structure(
@@ -1650,33 +1420,10 @@ impl StreamingSnapshotParser {
         Ok(accounts)
     }
 
-    /// Parse deposits from the buffer (we know where to find it) (legacy)
-    #[allow(dead_code)]
-    fn parse_deposits_from_buffer(&self, buffer: &[u8]) -> Result<u64> {
-        let mut decoder = Decoder::new(buffer);
-
-        // Navigate to the deposits field at [3][1][1][1]
-        self.navigate_to_utxos(&mut decoder)?;
-
-        // Skip the UTXO map [3][1][1][0]
-        decoder.skip().context("Failed to skip UTXO map")?;
-
-        // Parse deposits field [3][1][1][1]
-        let deposits = decoder.u64().context("Failed to parse deposits from UTxOState[1]")?;
-
-        Ok(deposits)
-    }
-
-    /// TRUE STREAMING: Process UTXOs with chunked buffering and incremental parsing
-    fn stream_utxos_true_streaming<C: UtxoCallback>(
-        file: &mut File,
-        callbacks: &mut C,
-    ) -> Result<u64> {
-        println!("🚀 OPTIMIZED STREAMING: Balanced memory vs performance (64MB buffer)");
-
+    /// STREAMING: Process UTXOs with chunked buffering and incremental parsing
+    fn stream_utxos<C: UtxoCallback>(file: &mut File, callbacks: &mut C) -> Result<u64> {
         // OPTIMIZED: Balance between memory usage and performance
         // Based on experiment: avg=194 bytes, max=22KB per entry
-        // Strategy: Use larger buffers for better I/O efficiency
 
         const READ_CHUNK_SIZE: usize = 16 * 1024 * 1024; // 16MB read chunks for I/O efficiency
         const PARSE_BUFFER_SIZE: usize = 64 * 1024 * 1024; // 64MB parse buffer (vs 2.1GB)
@@ -1696,11 +1443,11 @@ impl StreamingSnapshotParser {
         let mut decoder = Decoder::new(&buffer);
         let map_len = match decoder.map()? {
             Some(len) => {
-                println!("  📊 Found CBOR map with {} UTXO entries", len);
+                // Found CBOR map with "len" UTXO entries
                 len
             }
             None => {
-                println!("  📊 Found indefinite-length CBOR map");
+                // indefinite-length CBOR map
                 u64::MAX
             }
         };
@@ -2207,81 +1954,6 @@ impl StreamingSnapshotParser {
             }
             _ => Err(anyhow!("unexpected TxOut type")),
         }
-    }
-
-    /// Stream UTXOs with per-entry callback (legacy implementation)
-    #[allow(dead_code)]
-    fn stream_utxos<C: UtxoCallback>(decoder: &mut Decoder, callbacks: &mut C) -> Result<u64> {
-        // Parse the UTXO map
-        let map_len = decoder.map().context("Failed to parse UTxOs map")?;
-
-        let mut count = 0u64;
-        let mut errors = 0u64;
-
-        // Determine iteration limit (all entries for definite map, unlimited for indefinite)
-        let limit = map_len.unwrap_or(u64::MAX);
-
-        for _ in 0..limit {
-            // Check for break in indefinite map
-            if map_len.is_none() && matches!(decoder.datatype(), Ok(Type::Break)) {
-                decoder.skip()?; // Consume the break marker
-                break;
-            }
-
-            // Parse key: TransactionInput (array [tx_hash, output_index])
-            if decoder.array().is_err() {
-                break;
-            }
-
-            let tx_hash_bytes = match decoder.bytes() {
-                Ok(b) => b,
-                Err(_e) => {
-                    errors += 1;
-                    decoder.skip().ok(); // skip remaining TxIn fields and value
-                    continue;
-                }
-            };
-
-            let output_index = match decoder.u64() {
-                Ok(idx) => idx,
-                Err(_e) => {
-                    errors += 1;
-                    decoder.skip().ok(); // skip value
-                    continue;
-                }
-            };
-
-            let tx_hash = hex::encode(tx_hash_bytes);
-
-            // Parse value: TransactionOutput using proven logic
-            match Self::parse_transaction_output(decoder) {
-                Ok((address, value)) => {
-                    let utxo = UtxoEntry {
-                        tx_hash,
-                        output_index,
-                        address,
-                        value,
-                        datum: None,      // TODO: Extract from TxOut
-                        script_ref: None, // TODO: Extract from TxOut
-                    };
-                    callbacks.on_utxo(utxo)?;
-                    count += 1;
-                }
-                Err(_e) => {
-                    errors += 1;
-                }
-            }
-        }
-
-        if errors > 0 {
-            eprintln!(
-                "Warning: {} UTXO parsing errors encountered ({}% success rate)",
-                errors,
-                (count * 100) / (count + errors)
-            );
-        }
-
-        Ok(count)
     }
 }
 
