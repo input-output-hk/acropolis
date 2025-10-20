@@ -56,6 +56,31 @@ All data structures are derived from the **OpenAPI schema** (`API/openapi.yaml`)
 - **AccountState**: Stake address, UTXO value, rewards, SPO delegation, DRep delegation
 - **DRepInfo**: DRep ID, deposit, anchor (URL + hash)
 - **GovernanceProposal**: Deposit, proposer, action ID, action type, anchor
+- **PoolBlockProduction**: Pool ID, block count, epoch (block production statistics per pool)
+
+### Block Production Statistics
+
+The parser extracts **block production statistics** from the `NewEpochState` structure:
+
+- **blocks_previous_epoch**: Pool block production data from elements `[1]` (previous epoch)
+- **blocks_current_epoch**: Pool block production data from elements `[2]` (current epoch)
+
+**CBOR Structure**: Block production data is stored as indefinite-length CBOR maps where:
+- **Keys**: Pool IDs (28-byte stake pool identifiers)  
+- **Values**: u8 block counts (number of blocks produced by each pool)
+
+**Data Structure**: `PoolBlockProduction` contains:
+- `pool_id`: Hex-encoded pool identifier
+- `block_count`: Number of blocks produced by this pool
+- `epoch`: Epoch number when blocks were produced
+
+**Example parsing results**:
+```
+📦 Block production previous epoch: 1,075 pools produced 21,449 blocks total
+📦 Block production current epoch: 1,037 pools produced 20,803 blocks total
+```
+
+**Important**: This data represents **aggregate statistics** per pool, not individual block details. Individual block hashes, timestamps, and slot numbers are not available in the snapshot.
 
 ### NewEpochState Navigation
 
@@ -103,7 +128,7 @@ NewEpochState = [
 3. **on_accounts()**: Called once with all stake accounts (bulk)
 4. **on_dreps()**: Called once with all DReps (bulk)
 5. **on_proposals()**: Called once with all proposals (bulk)
-6. **on_metadata()**: Called after all data with epoch, treasury, reserves, and deposits
+6. **on_metadata()**: Called after all data with epoch, treasury, reserves, deposits, and block counts
 7. **on_complete()**: Called last when parsing finishes
 
 ## Usage Example
@@ -209,11 +234,39 @@ cargo test --package acropolis_common snapshot
 
 The `test_collecting_callbacks` test validates the trait implementation and callback invocation.
 
+### Example Usage
+
+The `test_streaming_parser.rs` example demonstrates the streaming parser with block parsing:
+
+```bash
+make snap-test-streaming
+```
+
+**Example Output**:
+```
+🔄 Parsing snapshot...
+📊 Epoch: 507
+💰 Treasury: 1,528,154,947 ADA
+🏛️ Reserves: 7,816,251,180 ADA
+🏊 Accounts: 1,344,662
+🗳️ DReps: 278
+🏊 Pools: 3,095
+💳 UTXOs: 11,199,911 (2.4M UTXOs/sec)
+💸 Fees: 156,471,928 ADA
+🏛️ Proposals: 1
+📦 Block production previous epoch: 1,075 pools produced 21,449 blocks total
+📦 Block production current epoch: 1,037 pools produced 20,803 blocks total
+✅ Parsing complete!
+```
+
+The example shows real block production statistics from Conway era epoch 507, where 1,075 pools produced 21,449 blocks in the previous epoch and 1,037 pools produced 20,803 blocks in the current epoch.
+
 ## Future Enhancements
 
-1. **Governance proposal parsing**: Parse GovState from UTxOState[3] for proposal data
-2. **Bech32 address encoding**: Add optional Bech32 encoding for addresses (currently hex)
-3. **Memory-mapped I/O**: Use `memmap2` for even lower memory usage
-4. **Progress callbacks**: Add progress tracking for long parses
-5. **Selective parsing**: Allow skipping sections (e.g., "UTXOs only")
-6. **Parallel processing**: Parse different sections concurrently
+1. **Individual block details**: Access individual block hashes, timestamps, slots (would require different data source)
+2. **Governance proposal parsing**: Parse GovState from UTxOState[3] for proposal data
+3. **Bech32 address encoding**: Add optional Bech32 encoding for addresses (currently hex)
+4. **Memory-mapped I/O**: Use `memmap2` for even lower memory usage
+5. **Progress callbacks**: Add progress tracking for long parses
+6. **Selective parsing**: Allow skipping sections (e.g., "UTXOs only")
+7. **Parallel processing**: Parse different sections concurrently

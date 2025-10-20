@@ -739,6 +739,10 @@ pub struct SnapshotMetadata {
     pub pot_balances: PotBalances,
     /// Total number of UTXOs (for progress tracking)
     pub utxo_count: Option<u64>,
+    /// Block production statistics for previous epoch
+    pub blocks_previous_epoch: Vec<crate::types::PoolBlockProduction>,
+    /// Block production statistics for current epoch
+    pub blocks_current_epoch: Vec<crate::types::PoolBlockProduction>,
 }
 
 // -----------------------------------------------------------------------------
@@ -896,9 +900,12 @@ impl StreamingSnapshotParser {
         // Extract epoch number [0]
         let epoch = decoder.u64().context("Failed to parse epoch number")?;
 
-        // Skip blocks_previous_epoch [1] and blocks_current_epoch [2]
-        decoder.skip().context("Failed to skip blocks_previous_epoch")?;
-        decoder.skip().context("Failed to skip blocks_current_epoch")?;
+        // Parse blocks_previous_epoch [1] and blocks_current_epoch [2]
+        let blocks_previous_epoch =
+            Self::parse_blocks_with_epoch(&mut decoder, epoch.saturating_sub(1))
+                .context("Failed to parse blocks_previous_epoch")?;
+        let blocks_current_epoch = Self::parse_blocks_with_epoch(&mut decoder, epoch)
+            .context("Failed to parse blocks_current_epoch")?;
 
         // Navigate to EpochState [3]
         let epoch_state_len = decoder
@@ -1106,6 +1113,8 @@ impl StreamingSnapshotParser {
                 deposits,
             },
             utxo_count: Some(utxo_count),
+            blocks_previous_epoch,
+            blocks_current_epoch,
         })?;
 
         // Emit completion callback
@@ -1126,6 +1135,8 @@ impl StreamingSnapshotParser {
         Vec<PoolInfo>,
         Vec<DRepInfo>,
         Vec<AccountState>,
+        Vec<crate::types::PoolBlockProduction>,
+        Vec<crate::types::PoolBlockProduction>,
         u64,
     )> {
         let mut decoder = Decoder::new(buffer);
@@ -1147,9 +1158,12 @@ impl StreamingSnapshotParser {
         // Extract epoch number [0]
         let epoch = decoder.u64().context("Failed to parse epoch number")?;
 
-        // Skip blocks_previous_epoch [1] and blocks_current_epoch [2]
-        decoder.skip().context("Failed to skip blocks_previous_epoch")?;
-        decoder.skip().context("Failed to skip blocks_current_epoch")?;
+        // Parse blocks_previous_epoch [1] and blocks_current_epoch [2]
+        let blocks_previous_epoch =
+            Self::parse_blocks_with_epoch(&mut decoder, epoch.saturating_sub(1))
+                .context("Failed to parse blocks_previous_epoch")?;
+        let blocks_current_epoch = Self::parse_blocks_with_epoch(&mut decoder, epoch)
+            .context("Failed to parse blocks_current_epoch")?;
 
         // Navigate to EpochState [3]
         let epoch_state_len = decoder
@@ -1233,6 +1247,8 @@ impl StreamingSnapshotParser {
             pools,
             dreps,
             accounts,
+            blocks_previous_epoch,
+            blocks_current_epoch,
             utxo_position,
         ))
     }
@@ -1249,6 +1265,8 @@ impl StreamingSnapshotParser {
         Vec<PoolInfo>,
         Vec<DRepInfo>,
         Vec<AccountState>,
+        Vec<crate::types::PoolBlockProduction>,
+        Vec<crate::types::PoolBlockProduction>,
     )> {
         let mut decoder = Decoder::new(buffer);
 
@@ -1268,9 +1286,12 @@ impl StreamingSnapshotParser {
         // Extract epoch number [0]
         let epoch = decoder.u64().context("Failed to parse epoch number")?;
 
-        // Skip blocks_previous_epoch [1] and blocks_current_epoch [2]
-        decoder.skip().context("Failed to skip blocks_previous_epoch")?;
-        decoder.skip().context("Failed to skip blocks_current_epoch")?;
+        // Parse blocks_previous_epoch [1] and blocks_current_epoch [2]
+        let blocks_previous_epoch =
+            Self::parse_blocks_with_epoch(&mut decoder, epoch.saturating_sub(1))
+                .context("Failed to parse blocks_previous_epoch")?;
+        let blocks_current_epoch = Self::parse_blocks_with_epoch(&mut decoder, epoch)
+            .context("Failed to parse blocks_current_epoch")?;
 
         // Navigate to EpochState [3]
         let epoch_state_len = decoder
@@ -1341,7 +1362,16 @@ impl StreamingSnapshotParser {
         let accounts =
             Self::parse_dstate(&mut decoder).context("Failed to parse DState for accounts")?;
 
-        Ok((epoch, treasury, reserves, pools, dreps, accounts))
+        Ok((
+            epoch,
+            treasury,
+            reserves,
+            pools,
+            dreps,
+            accounts,
+            blocks_previous_epoch,
+            blocks_current_epoch,
+        ))
     }
 
     /// Parse DState for accounts (extracted from original parse method)
@@ -1585,6 +1615,148 @@ impl StreamingSnapshotParser {
         );
 
         Ok(utxo_count)
+    }
+
+    /// Parse a single block production entry from a map (producer pool ID -> block count)
+    /// The CBOR structure maps pool IDs to block counts (not individual blocks)
+    fn parse_single_block_production_entry(
+        decoder: &mut Decoder,
+        epoch: u64,
+    ) -> Result<crate::types::PoolBlockProduction> {
+        use crate::types::PoolBlockProduction;
+
+        // Parse the pool ID (key) - stored as bytes (28 bytes for pool ID)
+        let pool_id_bytes = decoder.bytes().context("Failed to parse pool ID bytes")?;
+
+        // Parse the block count (value) - how many blocks this pool produced
+        let block_count = decoder.u8().context("Failed to parse block count")?;
+
+        // Convert pool ID bytes to hex string
+        let pool_id = hex::encode(pool_id_bytes);
+
+        Ok(PoolBlockProduction {
+            pool_id,
+            block_count,
+            epoch,
+        })
+    }
+
+    /// Parse blocks from the CBOR decoder (either previous or current epoch blocks)
+    fn parse_blocks_with_epoch(
+        decoder: &mut Decoder,
+        epoch: u64,
+    ) -> Result<Vec<crate::types::PoolBlockProduction>> {
+        // Blocks are typically encoded as an array or map
+        match decoder.datatype().context("Failed to read blocks datatype")? {
+            Type::Array | Type::ArrayIndef => {
+                let len = decoder.array().context("Failed to parse blocks array")?;
+                let blocks = Vec::new();
+
+                // Handle definite-length array
+                if let Some(block_count) = len {
+                    for _i in 0..block_count {
+                        // Each block might be encoded as an array or map
+                        // For now, skip individual blocks since we don't know the exact format
+                        // This is a placeholder - the actual format needs to be determined from real data
+                        decoder.skip().context("Failed to skip block entry")?;
+                    }
+                } else {
+                    // Indefinite-length array
+                    eprintln!("📦 Processing indefinite-length blocks array");
+                    let mut count = 0;
+                    loop {
+                        match decoder.datatype()? {
+                            Type::Break => {
+                                decoder.skip()?;
+                                eprintln!("📦 Found array break after {} entries", count);
+                                break;
+                            }
+                            entry_type => {
+                                eprintln!("  Block #{}: {:?}", count + 1, entry_type);
+                                decoder.skip().context("Failed to skip block entry")?;
+                                count += 1;
+                            }
+                        }
+                    }
+                }
+
+                Ok(blocks)
+            }
+            Type::Map | Type::MapIndef => {
+                // Blocks are stored as a map: PoolID -> block_count (u8)
+                let len = decoder.map().context("Failed to parse blocks map")?;
+
+                let mut block_productions = Vec::new();
+
+                // Parse map content
+                if let Some(entry_count) = len {
+                    for _i in 0..entry_count {
+                        // Parse pool ID -> block count
+                        match Self::parse_single_block_production_entry(decoder, epoch) {
+                            Ok(production) => {
+                                block_productions.push(production);
+                            }
+                            Err(_) => {
+                                // Skip failed entries
+                                decoder.skip().context("Failed to skip map key")?;
+                                decoder.skip().context("Failed to skip map value")?;
+                            }
+                        }
+                    }
+                } else {
+                    // Indefinite map
+                    loop {
+                        match decoder.datatype()? {
+                            Type::Break => {
+                                decoder.skip()?;
+                                break;
+                            }
+                            _ => {
+                                match Self::parse_single_block_production_entry(decoder, epoch) {
+                                    Ok(production) => {
+                                        block_productions.push(production);
+                                    }
+                                    Err(_) => {
+                                        // Skip failed entries
+                                        decoder.skip().context("Failed to skip map key")?;
+                                        decoder.skip().context("Failed to skip map value")?;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Ok(block_productions)
+            }
+            simple_type => {
+                // If it's a simple value or other type, skip it for now
+                // Try to get more details about simple types
+                match simple_type {
+                    Type::U8 | Type::U16 | Type::U32 | Type::U64 => {
+                        let value = decoder.u64().context("Failed to read block integer value")?;
+                        eprintln!("📦 Block data is integer: {}", value);
+                    }
+                    Type::Bytes => {
+                        let bytes = decoder.bytes().context("Failed to read block bytes")?;
+                        eprintln!("📦 Block data is {} bytes", bytes.len());
+                    }
+                    Type::String => {
+                        let text = decoder.str().context("Failed to read block text")?;
+                        eprintln!("📦 Block data is text: '{}'", text);
+                    }
+                    Type::Null => {
+                        decoder.skip()?;
+                        eprintln!("📦 Block data is null");
+                    }
+                    _ => {
+                        decoder.skip().context("Failed to skip blocks value")?;
+                    }
+                }
+
+                Ok(Vec::new())
+            }
+        }
     }
 
     /// Parse a single UTXO entry from the streaming buffer
@@ -2036,6 +2208,8 @@ mod tests {
                     deposits: 500000,
                 },
                 utxo_count: Some(100),
+                blocks_previous_epoch: Vec::new(),
+                blocks_current_epoch: Vec::new(),
             })
             .unwrap();
 

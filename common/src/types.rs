@@ -81,6 +81,19 @@ impl Display for Era {
     }
 }
 
+/// Block production statistics for a stake pool in a specific epoch
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PoolBlockProduction {
+    /// Pool ID that produced the blocks
+    pub pool_id: String,
+
+    /// Number of blocks produced by this pool in the epoch
+    pub block_count: u8,
+
+    /// Epoch number
+    pub epoch: u64,
+}
+
 /// Block status
 #[derive(Debug, Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum BlockStatus {

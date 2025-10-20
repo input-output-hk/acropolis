@@ -176,6 +176,84 @@ impl ProposalCallback for CountingCallbacks {
 
 impl SnapshotCallbacks for CountingCallbacks {
     fn on_metadata(&mut self, metadata: SnapshotMetadata) -> Result<()> {
+        eprintln!("📊 Snapshot Metadata:");
+        eprintln!("  • Epoch: {}", metadata.epoch);
+        eprintln!(
+            "  • Treasury: {} ADA",
+            metadata.pot_balances.treasury as f64 / 1_000_000.0
+        );
+        eprintln!(
+            "  • Reserves: {} ADA",
+            metadata.pot_balances.reserves as f64 / 1_000_000.0
+        );
+        eprintln!(
+            "  • Deposits: {} ADA",
+            metadata.pot_balances.deposits as f64 / 1_000_000.0
+        );
+        if let Some(count) = metadata.utxo_count {
+            eprintln!("  • UTXO count: {}", count);
+        }
+        // Calculate total blocks produced
+        let total_blocks_previous: u32 =
+            metadata.blocks_previous_epoch.iter().map(|p| p.block_count as u32).sum();
+        let total_blocks_current: u32 =
+            metadata.blocks_current_epoch.iter().map(|p| p.block_count as u32).sum();
+
+        eprintln!(
+            "  • Block production previous epoch: {} pools produced {} blocks total",
+            metadata.blocks_previous_epoch.len(),
+            total_blocks_previous
+        );
+        eprintln!(
+            "  • Block production current epoch: {} pools produced {} blocks total",
+            metadata.blocks_current_epoch.len(),
+            total_blocks_current
+        );
+
+        // Show top block producers if any
+        if !metadata.blocks_previous_epoch.is_empty() {
+            eprintln!("  📦 Previous epoch top producers (first 3):");
+            let mut sorted_previous = metadata.blocks_previous_epoch.clone();
+            sorted_previous.sort_by(|a, b| b.block_count.cmp(&a.block_count));
+            for (i, production) in sorted_previous.iter().take(3).enumerate() {
+                eprintln!(
+                    "    [{}] Pool {} produced {} blocks (epoch {})",
+                    i + 1,
+                    &production.pool_id[..16],
+                    production.block_count,
+                    production.epoch
+                );
+            }
+            if metadata.blocks_previous_epoch.len() > 3 {
+                eprintln!(
+                    "    ... and {} more pools",
+                    metadata.blocks_previous_epoch.len() - 3
+                );
+            }
+        }
+
+        if !metadata.blocks_current_epoch.is_empty() {
+            eprintln!("  📦 Current epoch top producers (first 3):");
+            let mut sorted_current = metadata.blocks_current_epoch.clone();
+            sorted_current.sort_by(|a, b| b.block_count.cmp(&a.block_count));
+            for (i, production) in sorted_current.iter().take(3).enumerate() {
+                eprintln!(
+                    "    [{}] Pool {} produced {} blocks (epoch {})",
+                    i + 1,
+                    &production.pool_id[..16],
+                    production.block_count,
+                    production.epoch
+                );
+            }
+            if metadata.blocks_current_epoch.len() > 3 {
+                eprintln!(
+                    "    ... and {} more pools",
+                    metadata.blocks_current_epoch.len() - 3
+                );
+            }
+        }
+        eprintln!();
+
         self.metadata = Some(metadata);
         Ok(())
     }
@@ -195,9 +273,10 @@ fn main() {
     }
 
     let snapshot_path = &args[1];
-    println!("Streaming Snapshot Parser Test");
-    println!("================================");
+    println!("🚀 Streaming Snapshot Parser Test with Block Parsing");
+    println!("====================================================");
     println!("Snapshot: {}", snapshot_path);
+    println!("Features: UTXOs, Pools, Accounts, DReps, Proposals, and 📦 BLOCKS!");
     println!();
 
     // Create parser and callbacks
@@ -216,7 +295,7 @@ fn main() {
 
             // Display results
             if let Some(metadata) = &callbacks.metadata {
-                println!("Metadata:");
+                println!("📊 Final Metadata Summary:");
                 println!("  Epoch: {}", metadata.epoch);
                 println!("  Treasury: {} lovelace", metadata.pot_balances.treasury);
                 println!("  Reserves: {} lovelace", metadata.pot_balances.reserves);
@@ -224,10 +303,24 @@ fn main() {
                 if let Some(count) = metadata.utxo_count {
                     println!("  UTXO Count (metadata): {}", count);
                 }
+                let total_blocks_previous: u32 =
+                    metadata.blocks_previous_epoch.iter().map(|p| p.block_count as u32).sum();
+                let total_blocks_current: u32 =
+                    metadata.blocks_current_epoch.iter().map(|p| p.block_count as u32).sum();
+                println!(
+                    "  📦 Block production previous epoch: {} pools, {} blocks total",
+                    metadata.blocks_previous_epoch.len(),
+                    total_blocks_previous
+                );
+                println!(
+                    "  📦 Block production current epoch: {} pools, {} blocks total",
+                    metadata.blocks_current_epoch.len(),
+                    total_blocks_current
+                );
                 println!();
             }
 
-            println!("Parsed Data:");
+            println!("📈 Parsed Data Summary:");
             println!("  UTXOs: {}", callbacks.utxo_count);
             println!("  Stake Pools: {}", callbacks.pool_count);
             println!("  Stake Accounts: {}", callbacks.account_count);
