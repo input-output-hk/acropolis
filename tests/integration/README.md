@@ -15,6 +15,7 @@ If you do not currently operate a mainnet DB Sync server, Demeter provides free 
 
 3. Enable SPDD storage in `omnibus.toml`
 ```toml
+[module.spdd-state]
 store-spdd = true
 ```
 

@@ -46,7 +46,7 @@ async function queryDbSync(client: Client, epoch: number) {
 
 async function queryAcropolis(epoch: number) {
     const { data, status } = await axios.get(`${ACROPOLIS_URL}/spdd?epoch=${epoch}`, {
-        validateStatus: () => true, // don't throw automatically
+        validateStatus: () => true,
     });
 
     if (status !== 200) {
@@ -78,7 +78,7 @@ async function validateEpoch(db: Client, epoch: number) {
     const dbTotal = dbPools.reduce((acc, p) => acc + BigInt(p.stake), 0n);
     const apiTotal = spddPools.reduce((acc, p) => acc + p.stake, 0n);
 
-    if (dbTotal != apiTotal) {
+    if (dbTotal !== apiTotal) {
         console.log(
             `❌ Total active stake mismatch for epoch ${epoch}:\n   DB: ${dbTotal}\n   SPDD: ${apiTotal}`
         );
@@ -98,7 +98,7 @@ async function validateEpoch(db: Client, epoch: number) {
         else matched++;
     }
 
-    // Extra pools in Acropolis SPDD which do not exist in DBSync
+    // Extra pools in Acropolis SPDD which do not exist in DB Sync
     for (const { pool_id } of spddPools) {
         if (!dbMap.has(pool_id)) extra.push(pool_id);
     }
