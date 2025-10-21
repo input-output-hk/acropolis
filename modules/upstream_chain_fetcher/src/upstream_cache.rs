@@ -1,7 +1,4 @@
-use acropolis_common::{
-    messages::RawBlockMessage,
-    BlockInfo,
-};
+use acropolis_common::{messages::RawBlockMessage, BlockInfo};
 use anyhow::{anyhow, bail, Result};
 use std::{
     fs::File,
@@ -169,10 +166,7 @@ impl Storage for FileStorage {
 #[cfg(test)]
 mod test {
     use crate::upstream_cache::{Storage, UpstreamCacheImpl, UpstreamCacheRecord};
-    use acropolis_common::{
-        messages::RawBlockMessage,
-        BlockHash, BlockInfo, BlockStatus, Era,
-    };
+    use acropolis_common::{messages::RawBlockMessage, BlockHash, BlockInfo, BlockStatus, Era};
     use anyhow::Result;
     use std::{collections::HashMap, sync::Arc};
 

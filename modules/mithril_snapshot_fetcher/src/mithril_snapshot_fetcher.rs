@@ -3,7 +3,7 @@
 
 use acropolis_common::{
     genesis_values::GenesisValues,
-    messages::{RawBlockMessage, CardanoMessage, Message},
+    messages::{CardanoMessage, Message, RawBlockMessage},
     BlockInfo, BlockStatus, Era,
 };
 use anyhow::{anyhow, bail, Result};
@@ -354,7 +354,9 @@ impl MithrilSnapshotFetcher {
                             CardanoMessage::BlockAvailable(message),
                         ));
 
-                        context.message_bus.publish(&block_topic, Arc::new(message_enum))
+                        context
+                            .message_bus
+                            .publish(&block_topic, Arc::new(message_enum))
                             .await
                             .unwrap_or_else(|e| error!("Failed to publish block message: {e}"));
 

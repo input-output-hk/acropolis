@@ -50,8 +50,7 @@ static GLOBAL: Jemalloc = Jemalloc;
 #[tokio::main]
 pub async fn main() -> Result<()> {
     // Standard logging using RUST_LOG for log levels default to INFO for events only
-    let fmt_layer = fmt::layer()
-        .with_filter(EnvFilter::from_default_env());
+    let fmt_layer = fmt::layer().with_filter(EnvFilter::from_default_env());
 
     // TODO disabled this filter because it prevents debugging - investigate
     //.add_directive(filter::LevelFilter::INFO.into()))
