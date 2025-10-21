@@ -1,19 +1,9 @@
 //! Acropolis SPOState: State storage
 
-use acropolis_common::{
-    crypto::keyhash_224,
-    ledger_state::SPOState,
-    messages::{
-        CardanoMessage, Message, SPOStateMessage, StakeAddressDeltasMessage,
-        StakeRewardDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
-    },
-    params::TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH,
-    queries::governance::VoteRecord,
-    stake_addresses::StakeAddressMap,
-    BlockInfo, KeyHash, PoolMetadata, PoolRegistration, PoolRegistrationWithPos, PoolRetirement,
-    PoolRetirementWithPos, PoolUpdateEvent, Relay, StakeCredential, TxCertificate, TxHash, Voter,
-    VotingProcedures,
-};
+use acropolis_common::{crypto::keyhash_224, ledger_state::SPOState, messages::{
+    CardanoMessage, Message, SPOStateMessage, StakeAddressDeltasMessage,
+    StakeRewardDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
+}, params::TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH, queries::governance::VoteRecord, stake_addresses::StakeAddressMap, BlockInfo, KeyHash, PoolMetadata, PoolRegistration, PoolRegistrationWithPos, PoolRetirement, PoolRetirementWithPos, PoolUpdateEvent, Relay, StakeAddress, StakeCredential, TxCertificate, TxHash, Voter, VotingProcedures};
 use anyhow::Result;
 use imbl::HashMap;
 use std::sync::{Arc, Mutex};
@@ -190,7 +180,7 @@ impl State {
             .get(pool_operator)
             .map(|s| s.delegators.clone())
             .flatten()
-            .map(|s| s.into_iter().collect::<Vec<KeyHash>>());
+            .map(|s| s.into_iter().collect::<Vec<StakeAddress>>());
         let Some(delegators) = delegators else {
             return None;
         };
@@ -459,7 +449,7 @@ impl State {
                 if let Some(old_spo) = old_spo.as_ref() {
                     // remove delegators from old_spo
                     if let Some(historical_spo) = historical_spos.get_mut(old_spo) {
-                        if let Some(removed) = historical_spo.remove_delegator(&credential.get_hash()) {
+                        if let Some(removed) = historical_spo.remove_delegator(&credential.to_stake_address(None)) {
                             if !removed {
                                 error!(
                                     "Historical SPO state for {} does not contain delegator {}",
@@ -492,7 +482,7 @@ impl State {
                 if let Some(old_spo) = old_spo.as_ref() {
                     match historical_spos.get_mut(old_spo) {
                         Some(historical_spo) => {
-                            if let Some(removed) = historical_spo.remove_delegator(&hash) {
+                            if let Some(removed) = historical_spo.remove_delegator(&stake_address) {
                                 if !removed {
                                     error!(
                                         "Historical SPO state for {} does not contain delegator {}",
@@ -512,7 +502,7 @@ impl State {
                 let historical_spo = historical_spos
                     .entry(spo.clone())
                     .or_insert_with(|| HistoricalSPOState::new(&self.store_config));
-                if let Some(added) = historical_spo.add_delegator(&hash) {
+                if let Some(added) = historical_spo.add_delegator(&stake_address) {
                     if !added {
                         error!(
                             "Historical SPO state for {} already contains delegator {}",
@@ -682,9 +672,33 @@ mod tests {
     use crate::test_utils::*;
     use acropolis_common::{
         state_history::{StateHistory, StateHistoryStore},
-        PoolRetirement, Ratio, StakeAddress, TxCertificate, TxHash,
+        Credential, PoolRetirement, Ratio, StakeAddress, TxCertificate, TxHash,
     };
     use tokio::sync::Mutex;
+
+    fn pool_owners_from_bytes(owners: Vec<Vec<u8>>) -> Vec<Credential> {
+        owners
+            .into_iter()
+            .map(|bytes| Credential::AddrKeyHash(bytes))
+            .collect()
+    }
+
+    fn default_pool_registration(operator: Vec<u8>) -> PoolRegistration {
+        PoolRegistration {
+            operator: operator.clone(),
+            vrf_key_hash: vec![0],
+            pledge: 0,
+            cost: 0,
+            margin: Ratio {
+                numerator: 0,
+                denominator: 0,
+            },
+            reward_account: StakeAddress::default(),
+            pool_owners: pool_owners_from_bytes(vec![operator]),
+            relays: vec![],
+            pool_metadata: None,
+        }
+    }
 
     #[test]
     fn get_returns_none_on_empty_state() {
@@ -713,20 +727,7 @@ mod tests {
         let mut msg = new_certs_msg();
         msg.certificates.push(TxCertificate::PoolRegistrationWithPos(
             PoolRegistrationWithPos {
-                reg: PoolRegistration {
-                    operator: vec![0],
-                    vrf_key_hash: vec![0],
-                    pledge: 0,
-                    cost: 0,
-                    margin: Ratio {
-                        numerator: 0,
-                        denominator: 0,
-                    },
-                    reward_account: StakeAddress::default(),
-                    pool_owners: vec![vec![0]],
-                    relays: vec![],
-                    pool_metadata: None,
-                },
+                reg: default_pool_registration(vec![0]),
                 tx_hash: TxHash::default(),
                 cert_index: 1,
             },
@@ -862,20 +863,7 @@ mod tests {
         let mut msg = new_certs_msg();
         msg.certificates.push(TxCertificate::PoolRegistrationWithPos(
             PoolRegistrationWithPos {
-                reg: PoolRegistration {
-                    operator: vec![0],
-                    vrf_key_hash: vec![0],
-                    pledge: 0,
-                    cost: 0,
-                    margin: Ratio {
-                        numerator: 0,
-                        denominator: 0,
-                    },
-                    reward_account: StakeAddress::default(),
-                    pool_owners: vec![vec![0]],
-                    relays: vec![],
-                    pool_metadata: None,
-                },
+                reg: default_pool_registration(vec![0]),
                 tx_hash: TxHash::default(),
                 cert_index: 0,
             },
@@ -918,20 +906,7 @@ mod tests {
         let mut msg = new_certs_msg();
         msg.certificates.push(TxCertificate::PoolRegistrationWithPos(
             PoolRegistrationWithPos {
-                reg: PoolRegistration {
-                    operator: vec![0],
-                    vrf_key_hash: vec![0],
-                    pledge: 0,
-                    cost: 0,
-                    margin: Ratio {
-                        numerator: 0,
-                        denominator: 0,
-                    },
-                    reward_account: StakeAddress::default(),
-                    pool_owners: vec![vec![0]],
-                    relays: vec![],
-                    pool_metadata: None,
-                },
+                reg: default_pool_registration(vec![0]),
                 tx_hash: TxHash::default(),
                 cert_index: 0,
             },
@@ -1036,20 +1011,7 @@ mod tests {
         let spo_id = keyhash_224(&vec![1 as u8]);
         msg.certificates.push(TxCertificate::PoolRegistrationWithPos(
             PoolRegistrationWithPos {
-                reg: PoolRegistration {
-                    operator: spo_id.clone(),
-                    vrf_key_hash: keyhash_224(&vec![0]),
-                    pledge: 0,
-                    cost: 0,
-                    margin: Ratio {
-                        numerator: 0,
-                        denominator: 0,
-                    },
-                    reward_account: StakeAddress::default(),
-                    pool_owners: vec![vec![0]],
-                    relays: vec![],
-                    pool_metadata: None,
-                },
+                reg: default_pool_registration(spo_id.clone()),
                 tx_hash: TxHash::default(),
                 cert_index: 0,
             },
@@ -1086,20 +1048,7 @@ mod tests {
         let spo_id = keyhash_224(&vec![1 as u8]);
         msg.certificates.push(TxCertificate::PoolRegistrationWithPos(
             PoolRegistrationWithPos {
-                reg: PoolRegistration {
-                    operator: spo_id.clone(),
-                    vrf_key_hash: keyhash_224(&vec![0]),
-                    pledge: 0,
-                    cost: 0,
-                    margin: Ratio {
-                        numerator: 0,
-                        denominator: 0,
-                    },
-                    reward_account: StakeAddress::default(),
-                    pool_owners: vec![vec![0]],
-                    relays: vec![],
-                    pool_metadata: None,
-                },
+                reg: default_pool_registration(spo_id.clone()),
                 tx_hash: TxHash::default(),
                 cert_index: 0,
             },

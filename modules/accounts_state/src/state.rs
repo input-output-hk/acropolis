@@ -135,8 +135,8 @@ pub struct State {
 
 impl State {
     /// Get the stake address state for a give stake key
-    pub fn get_stake_state(&self, stake_key: &KeyHash) -> Option<StakeAddressState> {
-        self.stake_addresses.lock().unwrap().get(stake_key.as_slice())
+    pub fn get_stake_state(&self, stake_key: &StakeAddress) -> Option<StakeAddressState> {
+        self.stake_addresses.lock().unwrap().get(stake_key)
     }
 
     /// Get the current pot balances
@@ -187,14 +187,14 @@ impl State {
     /// Map stake_keys to their utxo_values
     pub fn get_accounts_utxo_values_map(
         &self,
-        stake_keys: &[Vec<u8>],
+        stake_keys: &[StakeAddress],
     ) -> Option<HashMap<Vec<u8>, u64>> {
         let stake_addresses = self.stake_addresses.lock().ok()?; // If lock fails, return None
         stake_addresses.get_accounts_utxo_values_map(stake_keys)
     }
 
     /// Sum stake_keys utxo_values
-    pub fn get_accounts_utxo_values_sum(&self, stake_keys: &[Vec<u8>]) -> Option<u64> {
+    pub fn get_accounts_utxo_values_sum(&self, stake_keys: &[StakeAddress]) -> Option<u64> {
         let stake_addresses = self.stake_addresses.lock().ok()?; // If lock fails, return None
         stake_addresses.get_accounts_utxo_values_sum(stake_keys)
     }
@@ -202,7 +202,7 @@ impl State {
     /// Map stake_keys to their total balances (utxo + rewards)
     pub fn get_accounts_balances_map(
         &self,
-        stake_keys: &[Vec<u8>],
+        stake_keys: &[StakeAddress],
     ) -> Option<HashMap<Vec<u8>, u64>> {
         let stake_addresses = self.stake_addresses.lock().ok()?; // If lock fails, return None
         stake_addresses.get_accounts_balances_map(stake_keys)
@@ -222,14 +222,14 @@ impl State {
     /// Map stake_keys to their delegated DRep
     pub fn get_drep_delegations_map(
         &self,
-        stake_keys: &[KeyHash],
+        stake_keys: &[StakeAddress],
     ) -> Option<HashMap<KeyHash, Option<DRepChoice>>> {
         let stake_addresses = self.stake_addresses.lock().ok()?; // If lock fails, return None
         stake_addresses.get_drep_delegations_map(stake_keys)
     }
 
     /// Sum stake_keys balances (utxo + rewards)
-    pub fn get_account_balances_sum(&self, stake_keys: &[Vec<u8>]) -> Option<u64> {
+    pub fn get_account_balances_sum(&self, stake_keys: &[StakeAddress]) -> Option<u64> {
         let stake_addresses = self.stake_addresses.lock().ok()?; // If lock fails, return None
         stake_addresses.get_account_balances_sum(stake_keys)
     }

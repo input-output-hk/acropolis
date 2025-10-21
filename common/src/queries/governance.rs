@@ -1,9 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{
-    Anchor, Credential, DRepCredential, GovActionId, Lovelace, ProposalProcedure, TxHash, Vote,
-    Voter, VotingProcedure,
-};
+use crate::{Anchor, Credential, DRepCredential, GovActionId, Lovelace, ProposalProcedure, TxHash, Vote, Voter, VotingProcedure};
 
 pub const DEFAULT_DREPS_QUERY_TOPIC: (&str, &str) =
     ("drep-state-query-topic", "cardano.query.dreps");

@@ -3,7 +3,8 @@
 #![allow(dead_code)]
 
 use crate::cip19::{VarIntDecoder, VarIntEncoder};
-use crate::types::{KeyHash, NetworkId, ScriptHash};
+use crate::types::{KeyHash, ScriptHash};
+use crate::Credential;
 use anyhow::{anyhow, bail, Result};
 use serde_with::{hex::Hex, serde_as};
 use std::borrow::Borrow;
@@ -181,7 +182,7 @@ impl ShelleyAddress {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, Hash)]
 pub enum StakeAddressPayload {
     /// Stake key
-    StakeKeyHash(#[serde_as(as = "Hex")] Vec<u8>),
+    StakeKeyHash(#[serde_as(as = "Hex")] KeyHash),
 
     /// Script hash
     ScriptHash(#[serde_as(as = "Hex")] ScriptHash),
@@ -214,7 +215,6 @@ impl StakeAddress {
         StakeAddress { network, payload }
     }
 
-    /// Get either hash of the payload
     pub fn get_hash(&self) -> &[u8] {
         match &self.payload {
             StakeAddressPayload::StakeKeyHash(hash) => hash,
@@ -222,11 +222,10 @@ impl StakeAddress {
         }
     }
 
-    /// Construct from a stake key hash
-    pub fn from_stake_key_hash(hash: &KeyHash, network_id: NetworkId) -> StakeAddress {
-        StakeAddress {
-            network: network_id.into(),
-            payload: StakeAddressPayload::StakeKeyHash(hash.to_vec()),
+    pub fn get_credential(&self) -> Credential {
+        match &self.payload {
+            StakeAddressPayload::StakeKeyHash(hash) => Credential::AddrKeyHash(hash.clone()),
+            StakeAddressPayload::ScriptHash(hash) => Credential::ScriptHash(hash.clone()),
         }
     }
 

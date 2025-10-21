@@ -246,7 +246,7 @@ pub fn map_certificate(
                             denominator: margin.denominator,
                         },
                         reward_account: StakeAddress::from_binary(reward_account)?,
-                        pool_owners: pool_owners.into_iter().map(|v| v.to_vec()).collect(),
+                        pool_owners: pool_owners.into_iter().map(|v| Credential::AddrKeyHash(v.to_vec())).collect(),
                         relays: relays.into_iter().map(|relay| map_relay(relay)).collect(),
                         pool_metadata: match pool_metadata {
                             Nullable::Some(md) => Some(PoolMetadata {
@@ -348,7 +348,7 @@ pub fn map_certificate(
                                 denominator: margin.denominator,
                             },
                             reward_account: StakeAddress::from_binary(reward_account)?,
-                            pool_owners: pool_owners.into_iter().map(|v| v.to_vec()).collect(),
+                            pool_owners: pool_owners.into_iter().map(|v| Credential::AddrKeyHash(v.to_vec())).collect(),
                             relays: relays.into_iter().map(|relay| map_relay(relay)).collect(),
                             pool_metadata: match pool_metadata {
                                 Nullable::Some(md) => Some(PoolMetadata {

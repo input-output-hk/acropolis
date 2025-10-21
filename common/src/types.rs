@@ -500,16 +500,27 @@ pub struct PotDelta {
     pub delta: LovelaceDelta,
 }
 
-/// General credential
 #[derive(
-    Debug, Clone, Ord, Eq, PartialEq, PartialOrd, Hash, serde::Serialize, serde::Deserialize,
+    Debug,
+    Clone,
+    Ord,
+    Eq,
+    PartialEq,
+    PartialOrd,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    minicbor::Decode,
+    minicbor::Encode,
 )]
 pub enum Credential {
     /// Address key hash
-    AddrKeyHash(KeyHash),
+    #[n(0)]
+    AddrKeyHash(#[n(0)] KeyHash),
 
     /// Script hash
-    ScriptHash(KeyHash),
+    #[n(1)]
+    ScriptHash(#[n(0)] KeyHash),
 }
 
 impl Credential {
@@ -622,10 +633,7 @@ impl StakeCredential {
                 hash.clone().try_into().expect("Invalid hash length"),
             ),
         };
-        StakeAddress::new(
-            network.unwrap_or(AddressNetwork::Main),
-            payload
-        )
+        StakeAddress::new(network.unwrap_or(AddressNetwork::Main), payload)
     }
 }
 
@@ -739,9 +747,9 @@ pub struct PoolRegistration {
     pub reward_account: StakeAddress,
 
     /// Pool owners by their key hash
-    #[serde_as(as = "Vec<Hex>")]
+    // #[serde_as(as = "Vec<Hex>")]
     #[n(6)]
-    pub pool_owners: Vec<KeyHash>,
+    pub pool_owners: Vec<Credential>,
 
     // Relays
     #[n(7)]

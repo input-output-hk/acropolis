@@ -1,10 +1,8 @@
 use std::{
-    borrow::Borrow,
     collections::{
         hash_map::{Entry, Iter, Values},
         BTreeMap, HashMap,
     },
-    hash::Hash,
     sync::atomic::AtomicU64,
 };
 
@@ -54,20 +52,12 @@ impl StakeAddressMap {
     }
 
     #[inline]
-    pub fn get<K>(&self, stake_address: &K) -> Option<StakeAddressState>
-    where
-        StakeAddress: Borrow<K>,
-        K: Hash + Eq + ?Sized,
-    {
+    pub fn get(&self, stake_address: &StakeAddress) -> Option<StakeAddressState> {
         self.inner.get(stake_address).cloned()
     }
 
     #[inline]
-    pub fn get_mut<K>(&mut self, stake_address: &K) -> Option<&mut StakeAddressState>
-    where
-        StakeAddress: Borrow<K>,
-        K: Hash + Eq + ?Sized,
-    {
+    pub fn get_mut(&mut self, stake_address: &StakeAddress) -> Option<&mut StakeAddressState> {
         self.inner.get_mut(stake_address)
     }
 
@@ -86,17 +76,20 @@ impl StakeAddressMap {
     }
 
     #[inline]
-    pub fn entry(&mut self, stake_address: StakeAddress) -> Entry<StakeAddress, StakeAddressState> {
+    pub fn entry(
+        &mut self,
+        stake_address: StakeAddress,
+    ) -> Entry<'_, StakeAddress, StakeAddressState> {
         self.inner.entry(stake_address)
     }
 
     #[inline]
-    pub fn values(&self) -> Values<StakeAddress, StakeAddressState> {
+    pub fn values(&self) -> Values<'_, StakeAddress, StakeAddressState> {
         self.inner.values()
     }
 
     #[inline]
-    pub fn iter(&self) -> Iter<StakeAddress, StakeAddressState> {
+    pub fn iter(&self) -> Iter<'_, StakeAddress, StakeAddressState> {
         self.inner.iter()
     }
 
@@ -207,14 +200,14 @@ impl StakeAddressMap {
     /// Return None if any of the stake_keys are not found
     pub fn get_accounts_utxo_values_map(
         &self,
-        stake_keys: &[Vec<u8>],
+        stake_addresses: &[StakeAddress],
     ) -> Option<HashMap<Vec<u8>, u64>> {
         let mut map = HashMap::new();
 
-        for key in stake_keys {
-            let account = self.get(key.as_slice())?;
+        for stake_address in stake_addresses {
+            let account = self.get(stake_address)?;
             let utxo_value = account.utxo_value;
-            map.insert(key.clone(), utxo_value);
+            map.insert(stake_address.to_binary().clone(), utxo_value);
         }
 
         Some(map)
@@ -224,14 +217,14 @@ impl StakeAddressMap {
     /// Return None if any of the stake_addresses are not found
     pub fn get_accounts_balances_map(
         &self,
-        stake_keys: &[Vec<u8>],
+        stake_addresses: &[StakeAddress],
     ) -> Option<HashMap<Vec<u8>, u64>> {
         let mut map = HashMap::new();
 
-        for stake_key in stake_keys {
-            let account = self.get(stake_key.as_slice())?;
+        for stake_address in stake_addresses {
+            let account = self.get(stake_address)?;
             let balance = account.utxo_value + account.rewards;
-            map.insert(stake_key.clone(), balance);
+            map.insert(stake_address.to_binary().clone(), balance);
         }
 
         Some(map)
@@ -241,25 +234,25 @@ impl StakeAddressMap {
     /// Return None if any of the stake_addresses are not found
     pub fn get_drep_delegations_map(
         &self,
-        stake_keys: &[Vec<u8>],
+        stake_addresses: &[StakeAddress],
     ) -> Option<HashMap<Vec<u8>, Option<DRepChoice>>> {
         let mut map = HashMap::new();
 
-        for stake_key in stake_keys {
-            let account = self.get(stake_key.as_slice())?;
+        for stake_address in stake_addresses {
+            let account = self.get(stake_address)?;
             let maybe_drep = account.delegated_drep.clone();
-            map.insert(stake_key.clone(), maybe_drep);
+            map.insert(stake_address.to_binary().clone(), maybe_drep);
         }
 
         Some(map)
     }
 
-    /// Sum stake_keys utxo_values
-    /// Return None if any of the stake_keys are not found
-    pub fn get_accounts_utxo_values_sum(&self, stake_keys: &[Vec<u8>]) -> Option<u64> {
+    /// Sum stake_addresss utxo_values
+    /// Return None if any of the stake_addresss are not found
+    pub fn get_accounts_utxo_values_sum(&self, stake_addresses: &[StakeAddress]) -> Option<u64> {
         let mut total = 0;
-        for address in stake_keys {
-            let account = self.get(address.as_slice())?;
+        for address in stake_addresses {
+            let account = self.get(address)?;
             total += account.utxo_value;
         }
         Some(total)
@@ -267,10 +260,10 @@ impl StakeAddressMap {
 
     /// Sum stake_addresses balances (utxo + rewards)
     /// Return None if any of stake_addresses are not found
-    pub fn get_account_balances_sum(&self, stake_keys: &[Vec<u8>]) -> Option<u64> {
+    pub fn get_account_balances_sum(&self, stake_addresses: &[StakeAddress]) -> Option<u64> {
         let mut total = 0;
-        for stake_key in stake_keys {
-            let account = self.get(stake_key.as_slice())?;
+        for stake_address in stake_addresses {
+            let account = self.get(stake_address)?;
             total += account.utxo_value + account.rewards;
         }
         Some(total)
@@ -1213,18 +1206,19 @@ mod tests {
                 delta: 2000,
             });
 
-            let keys = vec![addr1.get_hash().to_vec(), addr2.get_hash().to_vec()];
+            let keys = vec![addr1.clone(), addr2.clone()];
             let map = stake_addresses.get_accounts_utxo_values_map(&keys).unwrap();
 
             assert_eq!(map.len(), 2);
-            assert_eq!(map.get(addr1.get_hash()).copied().unwrap(), 1000);
-            assert_eq!(map.get(addr2.get_hash()).copied().unwrap(), 2000);
+            assert_eq!(map.get(&addr1.to_binary()).copied().unwrap(), 1000);
+            assert_eq!(map.get(&addr2.to_binary()).copied().unwrap(), 2000);
         }
 
         #[test]
         fn test_get_accounts_utxo_values_map_missing_account() {
             let mut stake_addresses = StakeAddressMap::new();
             let addr1 = create_stake_address(&STAKE_KEY_HASH);
+            let addr2 = create_stake_address(&STAKE_KEY_HASH_2);
 
             stake_addresses.register_stake_address(&addr1);
             stake_addresses.process_stake_delta(&StakeAddressDelta {
@@ -1232,7 +1226,7 @@ mod tests {
                 delta: 1000,
             });
 
-            let keys = vec![addr1.get_hash().to_vec(), STAKE_KEY_HASH_2.to_vec()];
+            let keys = vec![addr1, addr2];
 
             assert!(stake_addresses.get_accounts_utxo_values_map(&keys).is_none());
         }
@@ -1241,7 +1235,7 @@ mod tests {
         fn test_get_accounts_utxo_values_map_empty_list() {
             let stake_addresses = StakeAddressMap::new();
 
-            let keys: Vec<Vec<u8>> = vec![];
+            let keys: Vec<StakeAddress> = vec![];
             let map = stake_addresses.get_accounts_utxo_values_map(&keys).unwrap();
 
             assert!(map.is_empty());
@@ -1268,7 +1262,7 @@ mod tests {
                 delta: 2000,
             });
 
-            let keys = vec![addr1.get_hash().to_vec(), addr2.get_hash().to_vec()];
+            let keys = vec![addr1, addr2];
             let sum = stake_addresses.get_accounts_utxo_values_sum(&keys).unwrap();
 
             assert_eq!(sum, 3000);
@@ -1286,7 +1280,7 @@ mod tests {
                 delta: 1000,
             });
 
-            let keys = vec![addr1.get_hash().to_vec(), addr2.get_hash().to_vec()];
+            let keys = vec![addr1, addr2];
 
             assert!(stake_addresses.get_accounts_utxo_values_sum(&keys).is_none());
         }
@@ -1295,7 +1289,7 @@ mod tests {
         fn test_get_accounts_utxo_values_sum_empty_list() {
             let stake_addresses = StakeAddressMap::new();
 
-            let keys: Vec<Vec<u8>> = vec![];
+            let keys: Vec<StakeAddress> = vec![];
             let sum = stake_addresses.get_accounts_utxo_values_sum(&keys).unwrap();
 
             assert_eq!(sum, 0);
@@ -1326,18 +1320,19 @@ mod tests {
                 delta: 2000,
             });
 
-            let addresses = vec![addr1.get_hash().to_vec(), addr2.get_hash().to_vec()];
+            let addresses = vec![addr1.clone(), addr2.clone()];
             let map = stake_addresses.get_accounts_balances_map(&addresses).unwrap();
 
             assert_eq!(map.len(), 2);
-            assert_eq!(map.get(addr1.get_hash()).copied().unwrap(), 1100);
-            assert_eq!(map.get(addr2.get_hash()).copied().unwrap(), 2000);
+            assert_eq!(map.get(&addr1.to_binary()).copied().unwrap(), 1100);
+            assert_eq!(map.get(&addr2.to_binary()).copied().unwrap(), 2000);
         }
 
         #[test]
         fn test_get_accounts_balances_map_missing_account() {
             let mut stake_addresses = StakeAddressMap::new();
             let addr1 = create_stake_address(&STAKE_KEY_HASH);
+            let addr2 = create_stake_address(&STAKE_KEY_HASH_2);
 
             stake_addresses.register_stake_address(&addr1);
             stake_addresses.process_stake_delta(&StakeAddressDelta {
@@ -1345,7 +1340,7 @@ mod tests {
                 delta: 1000,
             });
 
-            let addresses = vec![addr1.to_binary(), STAKE_KEY_HASH_2.to_vec()];
+            let addresses = vec![addr1, addr2];
 
             assert!(stake_addresses.get_accounts_balances_map(&addresses).is_none());
         }
@@ -1354,7 +1349,7 @@ mod tests {
         fn test_get_accounts_balances_map_empty_list() {
             let stake_addresses = StakeAddressMap::new();
 
-            let addresses: Vec<Vec<u8>> = vec![];
+            let addresses: Vec<StakeAddress> = vec![];
             let map = stake_addresses.get_accounts_balances_map(&addresses).unwrap();
 
             assert!(map.is_empty());
@@ -1381,7 +1376,7 @@ mod tests {
                 delta: 2000,
             });
 
-            let addresses = vec![addr1.get_hash().to_vec(), addr2.get_hash().to_vec()];
+            let addresses = vec![addr1, addr2];
             let sum = stake_addresses.get_account_balances_sum(&addresses).unwrap();
 
             assert_eq!(sum, 3100);
@@ -1399,7 +1394,7 @@ mod tests {
                 delta: 1000,
             });
 
-            let addresses = vec![addr1.get_hash().to_vec(), addr2.get_hash().to_vec()];
+            let addresses = vec![addr1, addr2];
 
             assert!(stake_addresses.get_account_balances_sum(&addresses).is_none());
         }
@@ -1433,34 +1428,31 @@ mod tests {
             stake_addresses.record_drep_delegation(&addr1, &DRepChoice::Abstain);
             stake_addresses.record_drep_delegation(&addr2, &DRepChoice::Key(DREP_HASH.to_vec()));
 
-            let addresses = vec![
-                addr1.get_hash().to_vec(),
-                addr2.get_hash().to_vec(),
-                addr3.get_hash().to_vec(),
-            ];
+            let addresses = vec![addr1.clone(), addr2.clone(), addr3.clone()];
             let map = stake_addresses.get_drep_delegations_map(&addresses).unwrap();
 
             assert_eq!(map.len(), 3);
             assert_eq!(
-                map.get(addr1.get_hash()).unwrap(),
+                map.get(&addr1.to_binary()).unwrap(),
                 &Some(DRepChoice::Abstain)
             );
             assert_eq!(
-                map.get(addr2.get_hash()).unwrap(),
+                map.get(&addr2.to_binary()).unwrap(),
                 &Some(DRepChoice::Key(DREP_HASH.to_vec()))
             );
-            assert_eq!(map.get(addr3.get_hash()).unwrap(), &None);
+            assert_eq!(map.get(&addr3.to_binary()).unwrap(), &None);
         }
 
         #[test]
         fn test_get_drep_delegations_map_missing_account() {
             let mut stake_addresses = StakeAddressMap::new();
             let addr1 = create_stake_address(&STAKE_KEY_HASH);
+            let addr2 = create_stake_address(&STAKE_KEY_HASH_2);
 
             stake_addresses.register_stake_address(&addr1);
             stake_addresses.record_drep_delegation(&addr1, &DRepChoice::NoConfidence);
 
-            let addresses = vec![addr1.to_binary(), STAKE_KEY_HASH_2.to_vec()];
+            let addresses = vec![addr1, addr2];
 
             assert!(stake_addresses.get_drep_delegations_map(&addresses).is_none());
         }
@@ -1469,7 +1461,7 @@ mod tests {
         fn test_get_drep_delegations_map_empty_list() {
             let stake_addresses = StakeAddressMap::new();
 
-            let addresses: Vec<Vec<u8>> = vec![];
+            let addresses: Vec<StakeAddress> = vec![];
             let map = stake_addresses.get_drep_delegations_map(&addresses).unwrap();
 
             assert!(map.is_empty());

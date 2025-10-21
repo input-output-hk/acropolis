@@ -4,14 +4,10 @@ use crate::types::{
     DRepInfoREST, DRepMetadataREST, DRepUpdateREST, DRepVoteREST, DRepsListREST, ProposalVoteREST,
     VoterRoleREST,
 };
-use acropolis_common::{
-    messages::{Message, RESTResponse, StateQuery, StateQueryResponse},
-    queries::{
-        accounts::{AccountsStateQuery, AccountsStateQueryResponse},
-        governance::{GovernanceStateQuery, GovernanceStateQueryResponse},
-    },
-    Credential, GovActionId, TxHash, Voter,
-};
+use acropolis_common::{messages::{Message, RESTResponse, StateQuery, StateQueryResponse}, queries::{
+    accounts::{AccountsStateQuery, AccountsStateQueryResponse},
+    governance::{GovernanceStateQuery, GovernanceStateQueryResponse},
+}, Credential, GovActionId, StakeAddress, TxHash, Voter};
 use anyhow::Result;
 use caryatid_sdk::Context;
 use reqwest::Client;
@@ -99,16 +95,11 @@ pub async fn handle_single_drep_blockfrost(
         )) => {
             let active = !response.info.retired && !response.info.expired;
 
-            let accounts = response
-                .delegators
-                .iter()
-                .map(|addr| addr.get_hash()) // or `get_hash()` if using StakeCredential
-                .collect();
+            let stake_addresses =
+                response.delegators.iter().map(|addr| addr.to_stake_address(None)).collect();
 
             let sum_msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
-                AccountsStateQuery::GetAccountsBalancesSum {
-                    stake_keys: accounts,
-                },
+                AccountsStateQuery::GetAccountsBalancesSum { stake_addresses },
             )));
 
             let raw_sum =
@@ -197,7 +188,7 @@ pub async fn handle_drep_delegators_blockfrost(
         Message::StateQueryResponse(StateQueryResponse::Governance(
             GovernanceStateQueryResponse::DRepDelegators(delegators),
         )) => {
-            let mut stake_keys = Vec::new();
+            let mut stake_addresses: Vec<StakeAddress> = Vec::new();
             let mut stake_key_to_bech32 = HashMap::new();
 
             for addr in &delegators.addresses {
@@ -212,12 +203,14 @@ pub async fn handle_drep_delegators_blockfrost(
                 };
 
                 let hash = addr.get_hash();
-                stake_keys.push(hash.clone());
+                // TODO: NETWORK ID
+                let stake_address = addr.to_stake_address(None);
+                stake_addresses.push(stake_address.clone());
                 stake_key_to_bech32.insert(hash, bech32);
             }
 
             let msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
-                AccountsStateQuery::GetAccountsUtxoValuesMap { stake_keys },
+                AccountsStateQuery::GetAccountsUtxoValuesMap { stake_addresses },
             )));
 
             let raw_msg =

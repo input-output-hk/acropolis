@@ -335,7 +335,7 @@ fn calculate_spo_rewards(
         if !to_delegators.is_zero() {
             let total_stake = BigDecimal::from(spo.total_stake);
             for (delegator_stake_address, stake) in &spo.delegators {
-                let delegator_stake_address_hash = delegator_stake_address.get_hash();
+                let delegator_credential = delegator_stake_address.get_credential();
                 let proportion = BigDecimal::from(stake) / &total_stake;
 
                 // and hence how much of the total reward they get
@@ -346,7 +346,7 @@ fn calculate_spo_rewards(
                        delegator_stake_address);
 
                 // Pool owners don't get member rewards (seems unfair!)
-                if spo.pool_owners.contains(&delegator_stake_address_hash.to_vec()) {
+                if spo.pool_owners.contains(&delegator_credential) {
                     debug!(
                         "Skipping pool owner reward account {}, losing {to_pay}",
                         delegator_stake_address
@@ -355,7 +355,7 @@ fn calculate_spo_rewards(
                 }
 
                 // Check pool's reward address - removing e1 prefix
-                if spo.reward_account.get_hash() == delegator_stake_address_hash {
+                if spo.reward_account == *delegator_stake_address {
                     debug!(
                         "Skipping pool reward account {}, losing {to_pay}",
                         delegator_stake_address

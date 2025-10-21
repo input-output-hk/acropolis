@@ -445,8 +445,8 @@ impl AccountsState {
                 };
 
                 let response = match query {
-                    AccountsStateQuery::GetAccountInfo { stake_key } => {
-                        if let Some(account) = state.get_stake_state(stake_key) {
+                    AccountsStateQuery::GetAccountInfo { stake_address } => {
+                        if let Some(account) = state.get_stake_state(stake_address) {
                             AccountsStateQueryResponse::AccountInfo(AccountInfo {
                                 utxo_value: account.utxo_value,
                                 rewards: account.rewards,
@@ -482,8 +482,8 @@ impl AccountsState {
                         })
                     }
 
-                    AccountsStateQuery::GetAccountsDrepDelegationsMap { stake_keys } => match state
-                        .get_drep_delegations_map(stake_keys)
+                    AccountsStateQuery::GetAccountsDrepDelegationsMap { stake_addresses } => match state
+                        .get_drep_delegations_map(stake_addresses)
                     {
                         Some(map) => AccountsStateQueryResponse::AccountsDrepDelegationsMap(map),
                         None => AccountsStateQueryResponse::Error(
@@ -497,8 +497,8 @@ impl AccountsState {
                         )
                     }
 
-                    AccountsStateQuery::GetAccountsUtxoValuesMap { stake_keys } => {
-                        match state.get_accounts_utxo_values_map(stake_keys) {
+                    AccountsStateQuery::GetAccountsUtxoValuesMap { stake_addresses } => {
+                        match state.get_accounts_utxo_values_map(stake_addresses) {
                             Some(map) => AccountsStateQueryResponse::AccountsUtxoValuesMap(map),
                             None => AccountsStateQueryResponse::Error(
                                 "One or more accounts not found".to_string(),
@@ -506,8 +506,8 @@ impl AccountsState {
                         }
                     }
 
-                    AccountsStateQuery::GetAccountsUtxoValuesSum { stake_keys } => {
-                        match state.get_accounts_utxo_values_sum(stake_keys) {
+                    AccountsStateQuery::GetAccountsUtxoValuesSum { stake_addresses } => {
+                        match state.get_accounts_utxo_values_sum(stake_addresses) {
                             Some(sum) => AccountsStateQueryResponse::AccountsUtxoValuesSum(sum),
                             None => AccountsStateQueryResponse::Error(
                                 "One or more accounts not found".to_string(),
@@ -515,8 +515,8 @@ impl AccountsState {
                         }
                     }
 
-                    AccountsStateQuery::GetAccountsBalancesMap { stake_keys } => {
-                        match state.get_accounts_balances_map(stake_keys) {
+                    AccountsStateQuery::GetAccountsBalancesMap { stake_addresses } => {
+                        match state.get_accounts_balances_map(stake_addresses) {
                             Some(map) => AccountsStateQueryResponse::AccountsBalancesMap(map),
                             None => AccountsStateQueryResponse::Error(
                                 "One or more accounts not found".to_string(),
@@ -530,8 +530,8 @@ impl AccountsState {
                         )
                     }
 
-                    AccountsStateQuery::GetAccountsBalancesSum { stake_keys } => {
-                        match state.get_account_balances_sum(stake_keys) {
+                    AccountsStateQuery::GetAccountsBalancesSum { stake_addresses } => {
+                        match state.get_account_balances_sum(stake_addresses) {
                             Some(sum) => AccountsStateQueryResponse::AccountsBalancesSum(sum),
                             None => AccountsStateQueryResponse::Error(
                                 "One or more accounts not found".to_string(),

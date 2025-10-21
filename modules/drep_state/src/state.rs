@@ -4,7 +4,7 @@ use acropolis_common::{messages::{Message, StateQuery, StateQueryResponse}, quer
     accounts::{AccountsStateQuery, AccountsStateQueryResponse, DEFAULT_ACCOUNTS_QUERY_TOPIC},
     get_query_topic,
     governance::{DRepActionUpdate, DRepUpdateEvent, VoteRecord},
-}, Anchor, Credential, DRepChoice, DRepCredential, KeyHash, Lovelace, StakeCredential, TxCertificate, TxHash, Voter, VotingProcedures};
+}, Anchor, Credential, DRepChoice, DRepCredential, KeyHash, Lovelace, StakeAddress, StakeCredential, TxCertificate, TxHash, Voter, VotingProcedures};
 use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
 use serde_with::serde_as;
@@ -469,7 +469,9 @@ impl State {
         context: &Arc<Context<Message>>,
         delegators: Vec<(&StakeCredential, &DRepChoice)>,
     ) -> Result<()> {
-        let stake_keys: Vec<_> = delegators.iter().map(|(sc, _)| sc.get_hash()).collect();
+        let stake_keys: Vec<KeyHash> = delegators.iter().map(|(sc, _)| sc.get_hash()).collect();
+        // TODO: USE NETWORK ID
+        let stake_addresses: Vec<StakeAddress> = delegators.iter().map(|(k, _) | k.to_stake_address(None) ).collect();
         let stake_key_to_input: HashMap<KeyHash, _> = delegators
             .iter()
             .zip(&stake_keys)
@@ -477,7 +479,7 @@ impl State {
             .collect();
 
         let msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
-            AccountsStateQuery::GetAccountsDrepDelegationsMap { stake_keys },
+            AccountsStateQuery::GetAccountsDrepDelegationsMap { stake_addresses },
         )));
 
         let accounts_query_topic = get_query_topic(context.clone(), DEFAULT_ACCOUNTS_QUERY_TOPIC);
