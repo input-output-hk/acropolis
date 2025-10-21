@@ -16,17 +16,45 @@ This is ok, mainnet Cardano scanners detect this and show latest vote.
 Other names: 'Gov Action Validity', 'govActionLifetime',
 updated in governance_action_validity_period parameter (measured in epochs).
 That is, if proposal is published in epoch E, then voting is finished at
-the end of epoch E+governance_action_validity_period.
+the end of epoch E+governance_action_validity_period+1.
+
+In another words, each action is granted 'govActionLifetime' full
+epochs for voting (P is proposal, E is expiration, govActionLifetime is 6):
+
+'---P--|-----|-----|-----|-----|-----|-----|E'
+
+For +1 origin see e.g. `cardano-node/cardano-testnet/src/Testnet/Components/Query.hs`:
+
+```
+-- | Obtains the @govActionLifetime@ from the protocol parameters.
+-- The @govActionLifetime@ or governance action maximum lifetime in epochs is
+-- the number of epochs such that a governance action submitted during an epoch @e@
+-- expires if it is still not ratified as of the end of epoch: @e + govActionLifetime + 1@.
+```
 
 Default value (6) is taken from Conway Genesis, which is (in turn) taken from
 Cardano book:
 https://book.world.dev.cardano.org/environments/mainnet/conway-genesis.json
 
+So, if voting starts at 529, gov_action_lifetime is 6, then the last epoch
+when votes have meaning is 535. At the 535/536 transition all votes expire.
+
 ### Ratification process.
 Ratification checked at epoch boundary. 
-If ratified, deposits returned immediately, actions take place at E+1/E+2
-boundary.
+If ratified at E/E+1 transition, actions take place at E+1/E+2 boundary. 
+Rewards are paid at E+1/E+2 transition (?)
 Deposits transferred to reward account.
+
+### Bootstrap period (Chang sub-era of Conway)
+
+Conway era is split into two parts: Chang (9.0 protocol version) and 
+Plomin (10.0 protocol version). The first ("Chang") epoch has limited 
+governance ("bootstrap governance"):
+
+* DReps may vote only for Info actions, they don't count for other actions.
+* Only Info, ParameterChange and HardFork actions are allowed.
+
+https://docs.cardano.org/about-cardano/evolution/upgrades/chang
 
 ### Genesis blocks
 * Conway genesis: committee key hashes have prefix 'scriptHash-' (I believe,
@@ -74,6 +102,7 @@ epoch. Special message?
 total. Need info about voting registration.
 * DRep::epoch -- it's written that it's epoch, which has ended. But I receive
 messages with this epoch in its beginning. Need to sort out.
+* Implement bootstrap period (resolved).
 * What if voting length changes during voting process? E.g.:
    (a) epoch 100 voting starts, voting length is 10 epochs
    (b) epoch 107 voting length change to 3 enacts (e.g., because some earlier successful vote)

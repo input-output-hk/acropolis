@@ -1537,7 +1537,7 @@ pub struct ParameterChangeAction {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct HardForkInitiationAction {
     pub previous_action_id: Option<GovActionId>,
-    pub protocol_version: (u64, u64),
+    pub protocol_version: protocol_params::ProtocolVersion,
 }
 
 #[serde_as]
@@ -1578,6 +1578,32 @@ pub enum GovernanceAction {
     UpdateCommittee(UpdateCommitteeAction),
     NewConstitution(NewConstitutionAction),
     Information,
+}
+
+impl GovernanceAction {
+    pub fn get_previous_action_id(&self) -> Option<GovActionId> {
+        match &self {
+            Self::ParameterChange(ParameterChangeAction {
+                previous_action_id: prev,
+                ..
+            }) => prev.clone(),
+            Self::HardForkInitiation(HardForkInitiationAction {
+                previous_action_id: prev,
+                ..
+            }) => prev.clone(),
+            Self::TreasuryWithdrawals(_) => None,
+            Self::NoConfidence(prev) => prev.clone(),
+            Self::UpdateCommittee(UpdateCommitteeAction {
+                previous_action_id: prev,
+                ..
+            }) => prev.clone(),
+            Self::NewConstitution(NewConstitutionAction {
+                previous_action_id: prev,
+                ..
+            }) => prev.clone(),
+            Self::Information => None,
+        }
+    }
 }
 
 #[derive(
@@ -1657,6 +1683,14 @@ impl VotesCount {
         }
     }
 
+    pub fn infinity() -> Self {
+        Self {
+            committee: u64::MAX,
+            drep: u64::MAX,
+            pool: u64::MAX,
+        }
+    }
+
     pub fn majorizes(&self, v: &VotesCount) -> bool {
         self.committee >= v.committee && self.drep >= v.drep && self.pool >= v.pool
     }
@@ -1698,6 +1732,7 @@ pub enum EnactStateElem {
     Params(Box<ProtocolParamUpdate>),
     Constitution(Constitution),
     Committee(CommitteeChange),
+    ProtVer(protocol_params::ProtocolVersion),
     NoConfidence,
 }
 
