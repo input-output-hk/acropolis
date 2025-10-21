@@ -1,0 +1,300 @@
+//! Acropolis historical accounts state module for Caryatid
+//! Manages optional state data needed for Blockfrost alignment
+
+use acropolis_common::queries::accounts::{
+    AccountsStateQueryResponse, DEFAULT_HISTORICAL_ACCOUNTS_QUERY_TOPIC,
+};
+use acropolis_common::{
+    messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
+    BlockInfo, BlockStatus,
+};
+use anyhow::Result;
+use caryatid_sdk::{message_bus::Subscription, module, Context, Module};
+use config::Config;
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use tracing::{error, info, info_span, Instrument};
+
+mod state;
+use state::State;
+
+use crate::state::HistoricalAccountsConfig;
+mod immutable_historical_account_store;
+mod volatile_historical_accounts;
+
+const DEFAULT_SPO_STATE_SUBSCRIBE_TOPIC: &str = "cardano.spo.state";
+const DEFAULT_TX_CERTIFICATES_SUBSCRIBE_TOPIC: &str = "cardano.certificates";
+const DEFAULT_WITHDRAWALS_SUBSCRIBE_TOPIC: &str = "cardano.withdrawals";
+const DEFAULT_ADDRESS_DELTAS_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("address-deltas-subscribe-topic", "cardano.address.delta");
+
+// Configuration defaults
+const DEFAULT_HISTORICAL_ACCOUNTS_DB_PATH: (&str, &str) = ("db-path", "./db");
+const DEFAULT_STORE_EPOCH_HISTORY: (&str, bool) = ("store-epoch-history", false);
+const DEFAULT_STORE_DELEGATION_HISTORY: (&str, bool) = ("store-delegation-history", false);
+const DEFAULT_STORE_REGISTRATION_HISTORY: (&str, bool) = ("store-registration-history", false);
+const DEFAULT_STORE_WITHDRAWAL_HISTORY: (&str, bool) = ("store-withdrawal-history", false);
+const DEFAULT_STORE_MIR_HISTORY: (&str, bool) = ("store-mir-history", false);
+const DEFAULT_STORE_ADDRESSES: (&str, bool) = ("store-addresses", false);
+
+/// Historical Accounts State module
+#[module(
+    message_type(Message),
+    name = "historical-accounts-state",
+    description = "Historical accounts state for Blockfrost compatibility"
+)]
+pub struct HistoricalAccountsState;
+
+impl HistoricalAccountsState {
+    /// Async run loop
+    async fn run(
+        state: Arc<Mutex<State>>,
+        mut spos_subscription: Box<dyn Subscription<Message>>,
+        mut certs_subscription: Box<dyn Subscription<Message>>,
+        mut withdrawals_subscription: Box<dyn Subscription<Message>>,
+        mut address_deltas_subscription: Box<dyn Subscription<Message>>,
+    ) -> Result<()> {
+        // Main loop of synchronised messages
+        loop {
+            // Get a mutable state
+            let mut state = state.lock().await;
+
+            // Read per-block topics in parallel
+            let certs_message_f = certs_subscription.read();
+            let address_deltas_message_f = address_deltas_subscription.read();
+            let withdrawals_message_f = withdrawals_subscription.read();
+            let mut current_block: Option<BlockInfo> = None;
+
+            // Use certs_message as the synchroniser
+            let (_, certs_message) = certs_message_f.await?;
+            let new_epoch = match certs_message.as_ref() {
+                Message::Cardano((block_info, _)) => {
+                    // Handle rollbacks on this topic only
+                    if block_info.status == BlockStatus::RolledBack {
+                        state.volatile.rollback_before(block_info.number);
+                    }
+
+                    current_block = Some(block_info.clone());
+                    block_info.new_epoch && block_info.epoch > 0
+                }
+                _ => false,
+            };
+
+            // Read from epoch-boundary messages only when it's a new epoch
+            if new_epoch {
+                let spos_message_f = spos_subscription.read();
+
+                // Handle SPOs
+                let (_, message) = spos_message_f.await?;
+                match message.as_ref() {
+                    Message::Cardano((
+                        block_info,
+                        CardanoMessage::StakeRewardDeltas(rewards_msg),
+                    )) => {
+                        let span =
+                            info_span!("account_state.handle_spo_state", block = block_info.number);
+                        async {
+                            Self::check_sync(&current_block, &block_info);
+                            state
+                                .handle_rewards(rewards_msg)
+                                .inspect_err(|e| error!("SPOState handling error: {e:#}"))
+                                .ok();
+                        }
+                        .instrument(span)
+                        .await;
+                    }
+
+                    _ => error!("Unexpected message type: {message:?}"),
+                }
+            }
+
+            // Now handle the certs_message properly
+            match certs_message.as_ref() {
+                Message::Cardano((block_info, CardanoMessage::TxCertificates(tx_certs_msg))) => {
+                    let span = info_span!("account_state.handle_certs", block = block_info.number);
+                    async {
+                        Self::check_sync(&current_block, &block_info);
+                        state
+                            .handle_tx_certificates(tx_certs_msg)
+                            .inspect_err(|e| error!("TxCertificates handling error: {e:#}"))
+                            .ok();
+                    }
+                    .instrument(span)
+                    .await;
+                }
+
+                _ => error!("Unexpected message type: {certs_message:?}"),
+            }
+
+            // Handle withdrawals
+            let (_, message) = withdrawals_message_f.await?;
+            match message.as_ref() {
+                Message::Cardano((block_info, CardanoMessage::Withdrawals(withdrawals_msg))) => {
+                    let span = info_span!(
+                        "account_state.handle_withdrawals",
+                        block = block_info.number
+                    );
+                    async {
+                        Self::check_sync(&current_block, &block_info);
+                        state
+                            .handle_withdrawals(withdrawals_msg)
+                            .inspect_err(|e| error!("Withdrawals handling error: {e:#}"))
+                            .ok();
+                    }
+                    .instrument(span)
+                    .await;
+                }
+
+                _ => error!("Unexpected message type: {message:?}"),
+            }
+
+            // Handle address deltas
+            let (_, message) = address_deltas_message_f.await?;
+            match message.as_ref() {
+                Message::Cardano((block_info, CardanoMessage::AddressDeltas(deltas_msg))) => {
+                    let span = info_span!(
+                        "account_state.handle_stake_deltas",
+                        block = block_info.number
+                    );
+                    async {
+                        Self::check_sync(&current_block, &block_info);
+                        state
+                            .handle_address_deltas(deltas_msg)
+                            .inspect_err(|e| error!("StakeAddressDeltas handling error: {e:#}"))
+                            .ok();
+                    }
+                    .instrument(span)
+                    .await;
+                }
+
+                _ => error!("Unexpected message type: {message:?}"),
+            }
+        }
+    }
+
+    /// Check for synchronisation
+    fn check_sync(expected: &Option<BlockInfo>, actual: &BlockInfo) {
+        if let Some(ref block) = expected {
+            if block.number != actual.number {
+                error!(
+                    expected = block.number,
+                    actual = actual.number,
+                    "Messages out of sync"
+                );
+            }
+        }
+    }
+
+    /// Async initialisation
+    pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
+        // Get configuration
+
+        // Subscription topics
+        let tx_certificates_topic = config
+            .get_string("tx-certificates-topic")
+            .unwrap_or(DEFAULT_TX_CERTIFICATES_SUBSCRIBE_TOPIC.to_string());
+        info!("Creating Tx certificates subscriber on '{tx_certificates_topic}'");
+
+        let withdrawals_topic = config
+            .get_string("withdrawals-topic")
+            .unwrap_or(DEFAULT_WITHDRAWALS_SUBSCRIBE_TOPIC.to_string());
+        info!("Creating withdrawals subscriber on '{withdrawals_topic}'");
+
+        let spo_topic =
+            config.get_string("spo-topic").unwrap_or(DEFAULT_SPO_STATE_SUBSCRIBE_TOPIC.to_string());
+
+        let address_deltas_topic = config
+            .get_string(DEFAULT_ADDRESS_DELTAS_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_ADDRESS_DELTAS_SUBSCRIBE_TOPIC.1.to_string());
+
+        // Storage options
+        let db_path = config
+            .get_string(DEFAULT_HISTORICAL_ACCOUNTS_DB_PATH.0)
+            .unwrap_or(DEFAULT_HISTORICAL_ACCOUNTS_DB_PATH.1.to_string());
+        let store_epoch_history =
+            config.get_bool(DEFAULT_STORE_EPOCH_HISTORY.0).unwrap_or(DEFAULT_STORE_EPOCH_HISTORY.1);
+        let store_delegation_history = config
+            .get_bool(DEFAULT_STORE_DELEGATION_HISTORY.0)
+            .unwrap_or(DEFAULT_STORE_DELEGATION_HISTORY.1);
+        let store_registration_history = config
+            .get_bool(DEFAULT_STORE_REGISTRATION_HISTORY.0)
+            .unwrap_or(DEFAULT_STORE_REGISTRATION_HISTORY.1);
+        let store_withdrawal_history = config
+            .get_bool(DEFAULT_STORE_WITHDRAWAL_HISTORY.0)
+            .unwrap_or(DEFAULT_STORE_WITHDRAWAL_HISTORY.1);
+        let store_mir_history =
+            config.get_bool(DEFAULT_STORE_MIR_HISTORY.0).unwrap_or(DEFAULT_STORE_MIR_HISTORY.1);
+        let store_addresses =
+            config.get_bool(DEFAULT_STORE_ADDRESSES.0).unwrap_or(DEFAULT_STORE_ADDRESSES.1);
+
+        // Query topics
+        let historical_accounts_query_topic = config
+            .get_string(DEFAULT_HISTORICAL_ACCOUNTS_QUERY_TOPIC.0)
+            .unwrap_or(DEFAULT_HISTORICAL_ACCOUNTS_QUERY_TOPIC.1.to_string());
+        info!(
+            "Creating query handler on '{}'",
+            historical_accounts_query_topic
+        );
+
+        let storage_config = HistoricalAccountsConfig {
+            db_path,
+            skip_until: None,
+            store_epoch_history,
+            store_delegation_history,
+            store_registration_history,
+            store_withdrawal_history,
+            store_mir_history,
+            store_addresses,
+        };
+
+        // Initalize state
+        let state = State::new(storage_config).await?;
+        let state_mutex = Arc::new(Mutex::new(state));
+        let state_query = state_mutex.clone();
+
+        context.handle(&historical_accounts_query_topic, move |message| {
+            let state = state_query.clone();
+            async move {
+                let Message::StateQuery(StateQuery::Accounts(query)) = message.as_ref() else {
+                    return Arc::new(Message::StateQueryResponse(StateQueryResponse::Accounts(
+                        AccountsStateQueryResponse::Error(
+                            "Invalid message for accounts-state".into(),
+                        ),
+                    )));
+                };
+
+                let response = match query {
+                    _ => AccountsStateQueryResponse::Error(format!(
+                        "Unimplemented query variant: {:?}",
+                        query
+                    )),
+                };
+
+                Arc::new(Message::StateQueryResponse(StateQueryResponse::Accounts(
+                    response,
+                )))
+            }
+        });
+
+        // Subscribe
+        let spos_subscription = context.subscribe(&spo_topic).await?;
+        let certs_subscription = context.subscribe(&tx_certificates_topic).await?;
+        let withdrawals_subscription = context.subscribe(&withdrawals_topic).await?;
+        let address_deltas_subscription = context.subscribe(&address_deltas_topic).await?;
+
+        // Start run task
+        context.run(async move {
+            Self::run(
+                state_mutex,
+                spos_subscription,
+                certs_subscription,
+                withdrawals_subscription,
+                address_deltas_subscription,
+            )
+            .await
+            .unwrap_or_else(|e| error!("Failed: {e}"));
+        });
+
+        Ok(())
+    }
+}

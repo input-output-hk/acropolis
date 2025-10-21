@@ -194,6 +194,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "acropolis_module_historical_accounts_state"
+version = "0.1.0"
+dependencies = [
+ "acropolis_common",
+ "anyhow",
+ "bigdecimal",
+ "caryatid_sdk",
+ "chrono",
+ "config",
+ "csv",
+ "dashmap",
+ "fjall",
+ "hex",
+ "imbl",
+ "itertools 0.14.0",
+ "rayon",
+ "serde",
+ "serde_json",
+ "serde_with 3.14.1",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "acropolis_module_mithril_snapshot_fetcher"
 version = "0.1.0"
 dependencies = [
@@ -396,6 +420,7 @@ dependencies = [
  "acropolis_module_epochs_state",
  "acropolis_module_genesis_bootstrapper",
  "acropolis_module_governance_state",
+ "acropolis_module_historical_accounts_state",
  "acropolis_module_mithril_snapshot_fetcher",
  "acropolis_module_parameters_state",
  "acropolis_module_rest_blockfrost",

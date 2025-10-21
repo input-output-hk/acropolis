@@ -54,6 +54,8 @@ store-stake-addresses = false
 # Enables /epochs/{number}/{next | previous}
 store-spdd = false
 
+[module.historical-accounts-state]
+
 [module.drep-state]
 # Enables /governance/dreps/{drep_id} endpoint (Requires store-delegators to be enabled)
 store-info = false
