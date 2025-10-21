@@ -27,6 +27,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
+use tracing::info;
 
 pub use crate::hash::{AddrKeyhash, Hash, ScriptHash};
 pub use crate::stake_addresses::{AccountState, StakeAddressState};
@@ -1534,7 +1535,6 @@ impl StreamingSnapshotParser {
                 // Check for indefinite map break
                 if map_len == u64::MAX {
                     if matches!(entry_decoder.datatype(), Ok(Type::Break)) {
-                        println!("  ✅ Found indefinite map break");
                         entries_processed = map_len; // Exit outer loop
                         break;
                     }
@@ -1557,8 +1557,8 @@ impl StreamingSnapshotParser {
                         // Progress reporting - less frequent for better performance
                         if utxo_count % 1000000 == 0 {
                             let buffer_usage = buffer.len();
-                            println!(
-                                "    🔄 Streamed {} UTXOs, buffer: {} MB, max entry: {} bytes",
+                            info!(
+                                "    Streamed {} UTXOs, buffer: {} MB, max entry: {} bytes",
                                 utxo_count,
                                 buffer_usage / 1024 / 1024,
                                 max_single_entry_size
@@ -1615,23 +1615,19 @@ impl StreamingSnapshotParser {
             }
         }
 
-        println!("  🎯 TRUE STREAMING RESULTS:");
-        println!("    • UTXOs processed: {}", utxo_count);
-        println!(
+        info!("  🎯 STREAMING RESULTS:");
+        info!("    • UTXOs processed: {}", utxo_count);
+        info!(
             "    • Total data streamed: {:.2} MB",
             total_bytes_processed as f64 / 1024.0 / 1024.0
         );
-        println!(
+        info!(
             "    • Peak buffer usage: {} MB (vs 2.1GB before!)",
             PARSE_BUFFER_SIZE / 1024 / 1024
         );
-        println!(
+        info!(
             "    • Largest single entry: {} bytes",
             max_single_entry_size
-        );
-        println!(
-            "    • Memory reduction: ~{}x smaller",
-            (2100 * 1024) / (PARSE_BUFFER_SIZE / 1024)
         );
 
         Ok(utxo_count)
@@ -1682,17 +1678,17 @@ impl StreamingSnapshotParser {
                     }
                 } else {
                     // Indefinite-length array
-                    eprintln!("📦 Processing indefinite-length blocks array");
+                    info!("📦 Processing indefinite-length blocks array");
                     let mut count = 0;
                     loop {
                         match decoder.datatype()? {
                             Type::Break => {
                                 decoder.skip()?;
-                                eprintln!("📦 Found array break after {} entries", count);
+                                info!("📦 Found array break after {} entries", count);
                                 break;
                             }
                             entry_type => {
-                                eprintln!("  Block #{}: {:?}", count + 1, entry_type);
+                                info!("  Block #{}: {:?}", count + 1, entry_type);
                                 decoder.skip().context("Failed to skip block entry")?;
                                 count += 1;
                             }
@@ -1755,19 +1751,19 @@ impl StreamingSnapshotParser {
                 match simple_type {
                     Type::U8 | Type::U16 | Type::U32 | Type::U64 => {
                         let value = decoder.u64().context("Failed to read block integer value")?;
-                        eprintln!("📦 Block data is integer: {}", value);
+                        info!("📦 Block data is integer: {}", value);
                     }
                     Type::Bytes => {
                         let bytes = decoder.bytes().context("Failed to read block bytes")?;
-                        eprintln!("📦 Block data is {} bytes", bytes.len());
+                        info!("📦 Block data is {} bytes", bytes.len());
                     }
                     Type::String => {
                         let text = decoder.str().context("Failed to read block text")?;
-                        eprintln!("📦 Block data is text: '{}'", text);
+                        info!("📦 Block data is text: '{}'", text);
                     }
                     Type::Null => {
                         decoder.skip()?;
-                        eprintln!("📦 Block data is null");
+                        info!("📦 Block data is null");
                     }
                     _ => {
                         decoder.skip().context("Failed to skip blocks value")?;
@@ -1939,7 +1935,7 @@ impl StreamingSnapshotParser {
                     .map(|relay| match relay {
                         Relay::SingleHostAddr(port, ipv4, ipv6) => {
                             let port_opt = match port {
-                                Nullable::Some(p) => Some(*p as u16),
+                                Nullable::Some(p) => u16::try_from(*p).ok(),
                                 _ => None,
                             };
                             let ipv4_opt = match ipv4 {
