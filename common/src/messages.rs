@@ -26,6 +26,7 @@ use crate::queries::{
 };
 
 use crate::types::*;
+use crate::validation::ValidationStatus;
 
 // Caryatid core messages which we re-export
 pub use caryatid_module_clock::messages::ClockTickMessage;
@@ -277,6 +278,7 @@ pub struct SPOStateMessage {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum CardanoMessage {
     BlockAvailable(RawBlockMessage),         // Block body available
+    BlockValidation(ValidationStatus),       // Result of a block validation
     SnapshotComplete,                        // Mithril snapshot loaded
     ReceivedTxs(RawTxsMessage),              // Transaction available
     GenesisComplete(GenesisCompleteMessage), // Genesis UTXOs done + genesis params

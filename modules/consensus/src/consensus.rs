@@ -1,12 +1,16 @@
 //! Acropolis consensus module for Caryatid
 //! Maintains a favoured chain based on offered options from multiple sources
 
-use acropolis_common::messages::{CardanoMessage, Message};
+use acropolis_common::{
+    messages::{CardanoMessage, Message},
+    validation::ValidationStatus
+};
 use anyhow::Result;
 use caryatid_sdk::{module, Context, Module};
 use config::Config;
 use std::sync::Arc;
 use tracing::{error, info, info_span, Instrument};
+use futures::future::try_join_all;
 
 const DEFAULT_SUBSCRIBE_BLOCKS_TOPIC: &str = "cardano.block.available";
 const DEFAULT_PUBLISH_BLOCKS_TOPIC: &str = "cardano.block.proposed";
@@ -34,10 +38,19 @@ impl Consensus {
             .unwrap_or(DEFAULT_PUBLISH_BLOCKS_TOPIC.to_string());
         info!("Publishing blocks on '{publish_blocks_topic}'");
 
+        let validator_topics: Vec<String> = config.get::<Vec<String>>("validators")
+            .unwrap_or_default();
+        for topic in &validator_topics {
+            info!("Validator: {topic}");
+        }
+
+        // Subscribe for incoming blocks
         let mut subscription = context.subscribe(&subscribe_blocks_topic).await?;
 
-        // TODO Subscribe for validation errors
-        // TODO Reject and rollback blocks if validation fails
+        // Subscribe all the validators
+        let mut validator_subscriptions: Vec<_> = try_join_all(
+            validator_topics.iter().map(|topic| context.subscribe(topic))
+        ).await?;
 
         context.clone().run(async move {
             loop {
@@ -50,11 +63,55 @@ impl Consensus {
 
                         async {
                             // TODO Actually decide on favoured chain!
+
+                            // Send to downstreams to validate
                             context
                                 .message_bus
                                 .publish(&publish_blocks_topic, message.clone())
                                 .await
                                 .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+
+                            // Read validation responses from all validators in parallel
+                            let results: Vec<_> = try_join_all(
+                                validator_subscriptions
+                                    .iter_mut()
+                                    .map(|s| s.read()))
+                                .await
+                                .unwrap_or_else(|e| {
+                                    error!("Failed to read validations: {e}");
+                                    vec![]
+                                });
+
+                            // All must be positive!
+                            let all_say_go = results
+                                .iter()
+                                .fold(true, |all_ok, (_topic, msg)| {
+                                    match msg.as_ref() {
+                                        Message::Cardano(
+                                            (block_info,
+                                             CardanoMessage::BlockValidation(status))) => {
+                                            match status {
+                                                ValidationStatus::Go => all_ok && true,
+                                                ValidationStatus::NoGo(err) => {
+                                                    error!(block = block_info.number,
+                                                           ?err,
+                                                           "Validation failure");
+                                                    false
+                                                }
+                                            }
+                                        }
+
+                                        _ => {
+                                            error!("Unexpected validation message type: {msg:?}");
+                                            false
+                                        }
+                                    }
+                                });
+
+                            if !all_say_go {
+                                error!(block = block_info.number, "Validation rejected block");
+                                // TODO Consequences:  rollback, blacklist source
+                            }
                         }
                         .instrument(span)
                             .await;

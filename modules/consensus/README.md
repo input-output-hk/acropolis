@@ -1,13 +1,14 @@
 # Consensus module
 
-The consensus module takes proposed blocks from (optionally multiple) upstream
-sources and decides which chain to favour, passing on blocks on the favoured chain
+The consensus module takes proposed blocks from a (later, multiple) upstream
+source and decides which chain to favour, passing on blocks on the favoured chain
 to other validation and storage modules downstream
 
 ## Configuration
 
-The following is the default configuration - if the defaults are OK,
-everything except the section header can be left out.
+The following is the default configuration - these are the default
+topics so they can be left out if they are OK.  The validators *must*
+be configured - if empty, no validation is performed
 
 ```toml
 [module.consensus]
@@ -16,7 +17,27 @@ everything except the section header can be left out.
 subscribe-blocks-topic = "cardano.block.available"
 publish-blocks-topic = "cardano.block.proposed"
 
+# Validation result topics
+validators = [
+           "cardano.validation.vrf",
+           "cardano.validation.kes",
+           "cardano.validation.utxo"
+           ...
+]
+
 ```
+
+## Validation
+
+The consensus module passes on blocks it receives from upstream (currently only a
+single source) and sends them out as 'proposed' blocks for validation.  It then listens
+on all of the `validators` topics for BlockValidation messages, which give a Go / NoGo
+for the block.  The model is a NASA flight control desk, and like thre, a single NoGo
+is enough to stop the block.
+
+At the moment the module simply logs the validation failure.  Once it is actually operating
+consensus across multiple sources, it will use this and the length of chain to choose the best
+chain.
 
 ## Messages
 

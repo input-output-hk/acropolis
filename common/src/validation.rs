@@ -28,16 +28,3 @@ pub enum ValidationStatus {
     // Error
     NoGo(ValidationError),
 }
-
-/// Result of validation of a block
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ValidationResult {
-
-    // Block this applies to (safety check)
-    pub block_number: u64,
-
-    // Status
-    pub status: ValidationStatus,
-}
-
-

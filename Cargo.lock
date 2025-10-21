@@ -118,6 +118,7 @@ dependencies = [
  "anyhow",
  "caryatid_sdk",
  "config",
+ "futures",
  "pallas",
  "tokio",
  "tracing",
