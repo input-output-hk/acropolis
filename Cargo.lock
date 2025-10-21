@@ -209,6 +209,7 @@ dependencies = [
  "hex",
  "imbl",
  "itertools 0.14.0",
+ "minicbor 0.26.5",
  "rayon",
  "serde",
  "serde_json",

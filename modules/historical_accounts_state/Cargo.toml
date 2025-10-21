@@ -18,6 +18,7 @@ bigdecimal = "0.4.8"
 chrono = { workspace = true }
 config = { workspace = true }
 dashmap = { workspace = true }
+minicbor = { version = "0.26.0", features = ["std", "derive"] }
 hex = { workspace = true }
 imbl = { workspace = true }
 serde = { workspace = true }

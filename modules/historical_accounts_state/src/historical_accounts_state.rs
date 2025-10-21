@@ -12,12 +12,13 @@ use anyhow::Result;
 use caryatid_sdk::{message_bus::Subscription, module, Context, Module};
 use config::Config;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::{mpsc, Mutex};
 use tracing::{error, info, info_span, Instrument};
 
 mod state;
 use state::State;
 
+use crate::immutable_historical_account_store::ImmutableHistoricalAccountStore;
 use crate::state::HistoricalAccountsConfig;
 mod immutable_historical_account_store;
 mod volatile_historical_accounts;
@@ -27,6 +28,8 @@ const DEFAULT_TX_CERTIFICATES_SUBSCRIBE_TOPIC: &str = "cardano.certificates";
 const DEFAULT_WITHDRAWALS_SUBSCRIBE_TOPIC: &str = "cardano.withdrawals";
 const DEFAULT_ADDRESS_DELTAS_SUBSCRIBE_TOPIC: (&str, &str) =
     ("address-deltas-subscribe-topic", "cardano.address.delta");
+const DEFAULT_PARAMETERS_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("parameters-subscribe-topic", "cardano.protocol.parameters");
 
 // Configuration defaults
 const DEFAULT_HISTORICAL_ACCOUNTS_DB_PATH: (&str, &str) = ("db-path", "./db");
@@ -53,7 +56,25 @@ impl HistoricalAccountsState {
         mut certs_subscription: Box<dyn Subscription<Message>>,
         mut withdrawals_subscription: Box<dyn Subscription<Message>>,
         mut address_deltas_subscription: Box<dyn Subscription<Message>>,
+        mut params_subscription: Box<dyn Subscription<Message>>,
     ) -> Result<()> {
+        let _ = params_subscription.read().await?;
+        info!("Consumed initial genesis params from params_subscription");
+
+        // Background task to persist epochs sequentialy
+        const MAX_PENDING_PERSISTS: usize = 1;
+        let (persist_tx, mut persist_rx) = mpsc::channel::<(
+            u64,
+            Arc<ImmutableHistoricalAccountStore>,
+            HistoricalAccountsConfig,
+        )>(MAX_PENDING_PERSISTS);
+        tokio::spawn(async move {
+            while let Some((epoch, store, config)) = persist_rx.recv().await {
+                if let Err(e) = store.persist_epoch(epoch, &config).await {
+                    error!("failed to persist epoch {epoch}: {e}");
+                }
+            }
+        });
         // Main loop of synchronised messages
         loop {
             // Get a mutable state
@@ -207,25 +228,9 @@ impl HistoricalAccountsState {
             .get_string(DEFAULT_ADDRESS_DELTAS_SUBSCRIBE_TOPIC.0)
             .unwrap_or(DEFAULT_ADDRESS_DELTAS_SUBSCRIBE_TOPIC.1.to_string());
 
-        // Storage options
-        let db_path = config
-            .get_string(DEFAULT_HISTORICAL_ACCOUNTS_DB_PATH.0)
-            .unwrap_or(DEFAULT_HISTORICAL_ACCOUNTS_DB_PATH.1.to_string());
-        let store_epoch_history =
-            config.get_bool(DEFAULT_STORE_EPOCH_HISTORY.0).unwrap_or(DEFAULT_STORE_EPOCH_HISTORY.1);
-        let store_delegation_history = config
-            .get_bool(DEFAULT_STORE_DELEGATION_HISTORY.0)
-            .unwrap_or(DEFAULT_STORE_DELEGATION_HISTORY.1);
-        let store_registration_history = config
-            .get_bool(DEFAULT_STORE_REGISTRATION_HISTORY.0)
-            .unwrap_or(DEFAULT_STORE_REGISTRATION_HISTORY.1);
-        let store_withdrawal_history = config
-            .get_bool(DEFAULT_STORE_WITHDRAWAL_HISTORY.0)
-            .unwrap_or(DEFAULT_STORE_WITHDRAWAL_HISTORY.1);
-        let store_mir_history =
-            config.get_bool(DEFAULT_STORE_MIR_HISTORY.0).unwrap_or(DEFAULT_STORE_MIR_HISTORY.1);
-        let store_addresses =
-            config.get_bool(DEFAULT_STORE_ADDRESSES.0).unwrap_or(DEFAULT_STORE_ADDRESSES.1);
+        let params_topic = config
+            .get_string(DEFAULT_PARAMETERS_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_PARAMETERS_SUBSCRIBE_TOPIC.1.to_string());
 
         // Query topics
         let historical_accounts_query_topic = config
@@ -237,14 +242,28 @@ impl HistoricalAccountsState {
         );
 
         let storage_config = HistoricalAccountsConfig {
-            db_path,
+            db_path: config
+                .get_string(DEFAULT_HISTORICAL_ACCOUNTS_DB_PATH.0)
+                .unwrap_or(DEFAULT_HISTORICAL_ACCOUNTS_DB_PATH.1.to_string()),
             skip_until: None,
-            store_epoch_history,
-            store_delegation_history,
-            store_registration_history,
-            store_withdrawal_history,
-            store_mir_history,
-            store_addresses,
+            store_epoch_history: config
+                .get_bool(DEFAULT_STORE_EPOCH_HISTORY.0)
+                .unwrap_or(DEFAULT_STORE_EPOCH_HISTORY.1),
+            store_delegation_history: config
+                .get_bool(DEFAULT_STORE_DELEGATION_HISTORY.0)
+                .unwrap_or(DEFAULT_STORE_DELEGATION_HISTORY.1),
+            store_registration_history: config
+                .get_bool(DEFAULT_STORE_REGISTRATION_HISTORY.0)
+                .unwrap_or(DEFAULT_STORE_REGISTRATION_HISTORY.1),
+            store_withdrawal_history: config
+                .get_bool(DEFAULT_STORE_WITHDRAWAL_HISTORY.0)
+                .unwrap_or(DEFAULT_STORE_WITHDRAWAL_HISTORY.1),
+            store_mir_history: config
+                .get_bool(DEFAULT_STORE_MIR_HISTORY.0)
+                .unwrap_or(DEFAULT_STORE_MIR_HISTORY.1),
+            store_addresses: config
+                .get_bool(DEFAULT_STORE_ADDRESSES.0)
+                .unwrap_or(DEFAULT_STORE_ADDRESSES.1),
         };
 
         // Initalize state
@@ -253,7 +272,7 @@ impl HistoricalAccountsState {
         let state_query = state_mutex.clone();
 
         context.handle(&historical_accounts_query_topic, move |message| {
-            let state = state_query.clone();
+            let _state = state_query.clone();
             async move {
                 let Message::StateQuery(StateQuery::Accounts(query)) = message.as_ref() else {
                     return Arc::new(Message::StateQueryResponse(StateQueryResponse::Accounts(
@@ -281,6 +300,7 @@ impl HistoricalAccountsState {
         let certs_subscription = context.subscribe(&tx_certificates_topic).await?;
         let withdrawals_subscription = context.subscribe(&withdrawals_topic).await?;
         let address_deltas_subscription = context.subscribe(&address_deltas_topic).await?;
+        let params_subscription = context.subscribe(&params_topic).await?;
 
         // Start run task
         context.run(async move {
@@ -290,6 +310,7 @@ impl HistoricalAccountsState {
                 certs_subscription,
                 withdrawals_subscription,
                 address_deltas_subscription,
+                params_subscription,
             )
             .await
             .unwrap_or_else(|e| error!("Failed: {e}"));

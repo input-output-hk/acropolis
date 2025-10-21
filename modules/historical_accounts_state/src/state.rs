@@ -27,30 +27,41 @@ pub struct AccountEntry {
     pub addresses: Option<Vec<ShelleyAddress>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, minicbor::Decode, minicbor::Encode)]
 pub struct ActiveStakeHistory {
+    #[n(0)]
     pub active_epoch: u32,
+    #[n(1)]
     pub amount: u64,
+    #[n(2)]
     pub pool: PoolId,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, minicbor::Decode, minicbor::Encode)]
 pub struct DelegationUpdate {
+    #[n(0)]
     active_epoch: u32,
+    #[n(1)]
     tx_hash: TxIdentifier,
+    #[n(2)]
     amount: u64,
+    #[n(3)]
     pool: PoolId,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, minicbor::Decode, minicbor::Encode)]
 pub struct RegistrationUpdate {
+    #[n(0)]
     tx_hash: TxIdentifier,
+    #[n(1)]
     deregistered: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, minicbor::Decode, minicbor::Encode)]
 pub struct AccountWithdrawal {
+    #[n(0)]
     tx_hash: TxIdentifier,
+    #[n(1)]
     amount: u64,
 }
 
@@ -95,19 +106,19 @@ impl State {
         })
     }
 
-    pub fn handle_rewards(&mut self, reward_deltas: &StakeRewardDeltasMessage) -> Result<()> {
+    pub fn handle_rewards(&mut self, _reward_deltas: &StakeRewardDeltasMessage) -> Result<()> {
         Ok(())
     }
 
-    pub fn handle_tx_certificates(&mut self, tx_certs: &TxCertificatesMessage) -> Result<()> {
+    pub fn handle_tx_certificates(&mut self, _tx_certs: &TxCertificatesMessage) -> Result<()> {
         Ok(())
     }
 
-    pub fn handle_address_deltas(&mut self, address_deltas: &AddressDeltasMessage) -> Result<()> {
+    pub fn handle_address_deltas(&mut self, _address_deltas: &AddressDeltasMessage) -> Result<()> {
         Ok(())
     }
 
-    pub fn handle_withdrawals(&mut self, withdrawals: &WithdrawalsMessage) -> Result<()> {
+    pub fn handle_withdrawals(&mut self, _withdrawals: &WithdrawalsMessage) -> Result<()> {
         Ok(())
     }
 }
