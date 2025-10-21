@@ -26,16 +26,6 @@ pub enum NetworkId {
     Mainnet,
 }
 
-// TODO: Would really like to consolidate NetworkId and AddressNetwork at some point
-impl From<NetworkId> for AddressNetwork {
-    fn from(network_id: NetworkId) -> Self {
-        match network_id {
-            NetworkId::Mainnet => AddressNetwork::Main,
-            NetworkId::Testnet => AddressNetwork::Test,
-        }
-    }
-}
-
 /// Protocol era
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,

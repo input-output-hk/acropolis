@@ -114,7 +114,7 @@ impl Verifier {
         match (&left.rtype, &right.rtype) {
             (RewardType::Leader, RewardType::Member) => Ordering::Less,
             (RewardType::Member, RewardType::Leader) => Ordering::Greater,
-            _ => left.account.get_hash().cmp(&right.account.get_hash()),
+            _ => left.account.get_credential().cmp(&right.account.get_credential()),
         }
     }
 

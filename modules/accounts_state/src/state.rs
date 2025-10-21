@@ -386,12 +386,8 @@ impl State {
             );
 
             if tracing::enabled!(Level::DEBUG) {
-                registrations
-                    .iter()
-                    .for_each(|addr| debug!("Registration {}", hex::encode(addr.get_hash())));
-                deregistrations
-                    .iter()
-                    .for_each(|addr| debug!("Deregistration {}", hex::encode(addr.get_hash())));
+                registrations.iter().for_each(|addr| debug!("Registration {}", addr));
+                deregistrations.iter().for_each(|addr| debug!("Deregistration {}", addr));
             }
 
             // Calculate reward payouts for previous epoch
@@ -490,7 +486,7 @@ impl State {
             } else {
                 warn!(
                     "SPO reward account {} deregistered - paying refund to treasury",
-                    hex::encode(stake_address.get_hash())
+                    stake_address
                 );
                 self.pots.treasury += deposit;
             }
@@ -566,10 +562,7 @@ impl State {
                             delta: *value,
                         });
                         if let Err(e) = update_value_with_delta(&mut sas.rewards, *value) {
-                            error!(
-                                "MIR to stake address {}: {e}",
-                                hex::encode(stake_address.get_hash())
-                            );
+                            error!("MIR to stake address {}: {e}", stake_address);
                         }
 
                         // Update the source
@@ -783,7 +776,7 @@ impl State {
                 debug!(
                     "SPO {} has retired - refunding their deposit to {}",
                     hex::encode(id),
-                    hex::encode(retired_spo.reward_account.get_hash())
+                    retired_spo.reward_account
                 );
                 self.pool_refunds.push(retired_spo.reward_account.clone()); // Store full StakeAddress
             }
@@ -799,7 +792,8 @@ impl State {
 
     /// Register a stake address, with a specified deposit if known
     fn register_stake_address(&mut self, credential: &StakeCredential, deposit: Option<Lovelace>) {
-        let stake_address = credential.to_stake_address(None); // Convert credential to full address
+        // TODO: Handle network
+        let stake_address = credential.to_stake_address(None);
 
         // Stake addresses can be registered after being used in UTXOs
         let mut stake_addresses = self.stake_addresses.lock().unwrap();
@@ -829,7 +823,8 @@ impl State {
 
     /// Deregister a stake address, with specified refund if known
     fn deregister_stake_address(&mut self, credential: &StakeCredential, refund: Option<Lovelace>) {
-        let stake_address = credential.to_stake_address(None); // Convert credential to full address
+        // TODO: Handle network
+        let stake_address = credential.to_stake_address(None);
 
         // Check if it existed
         let mut stake_addresses = self.stake_addresses.lock().unwrap();
@@ -865,7 +860,8 @@ impl State {
 
     /// Record a stake delegation
     fn record_stake_delegation(&mut self, credential: &StakeCredential, spo: &KeyHash) {
-        let stake_address = credential.to_stake_address(None); // Convert credential to full address
+        // TODO: Handle network
+        let stake_address = credential.to_stake_address(None);
         let mut stake_addresses = self.stake_addresses.lock().unwrap();
         stake_addresses.record_stake_delegation(&stake_address, spo);
     }
@@ -878,7 +874,8 @@ impl State {
 
     /// record a drep delegation
     fn record_drep_delegation(&mut self, credential: &StakeCredential, drep: &DRepChoice) {
-        let stake_address = credential.to_stake_address(None); // Convert credential to full address
+        // TODO: Handle network
+        let stake_address = credential.to_stake_address(None);
         let mut stake_addresses = self.stake_addresses.lock().unwrap();
         stake_addresses.record_drep_delegation(&stake_address, drep);
     }
