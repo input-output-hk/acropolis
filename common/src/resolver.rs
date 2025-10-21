@@ -83,6 +83,11 @@ pub struct Registry {
 impl Registry {
     /// Register a file for memory-mapped access in the registry.
     pub fn register_file(&self, store: StoreId, object: ObjectId, file: &File) -> Result<()> {
+        // SAFETY: This is safe because:
+        // 1. We assume the file is stable (not truncated/modified during use)
+        // 2. The mmap is wrapped in Arc for safe sharing across threads
+        // 3. All access is bounds-checked in the resolve() method
+        // 4. The file reference ensures the file descriptor stays valid
         let mmap = unsafe { Mmap::map(file) }.context("mmap failed")?;
         self.map.insert((store, object), Backing::Mmap(Arc::new(mmap)));
         Ok(())
