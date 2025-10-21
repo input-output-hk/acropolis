@@ -47,7 +47,7 @@ const DEFAULT_WITHDRAWALS_SUBSCRIBE_TOPIC: (&str, &str) =
 const DEFAULT_GOVERNANCE_SUBSCRIBE_TOPIC: (&str, &str) =
     ("governance-subscribe-topic", "cardano.governance");
 const DEFAULT_BLOCKS_SUBSCRIBE_TOPIC: (&str, &str) =
-    ("blocks-subscribe-topic", "cardano.block.available");
+    ("blocks-subscribe-topic", "cardano.block.proposed");
 const DEFAULT_EPOCH_ACTIVITY_SUBSCRIBE_TOPIC: (&str, &str) =
     ("epoch-activity-subscribe-topic", "cardano.epoch.activity");
 const DEFAULT_SPDD_SUBSCRIBE_TOPIC: (&str, &str) =

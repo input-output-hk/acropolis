@@ -15,6 +15,8 @@ sync-point = "snapshot"
 node-address = "backbone.cardano.iog.io:3001"
 magic-number = 764824073
 
+[module.consensus]
+
 [module.block-unpacker]
 
 [module.rest-blockfrost]

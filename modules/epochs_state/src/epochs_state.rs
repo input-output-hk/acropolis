@@ -34,7 +34,7 @@ const DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC: (&str, &str) = (
     "cardano.sequence.bootstrapped",
 );
 const DEFAULT_BLOCKS_SUBSCRIBE_TOPIC: (&str, &str) =
-    ("blocks-subscribe-topic", "cardano.block.available");
+    ("blocks-subscribe-topic", "cardano.block.proposed");
 const DEFAULT_BLOCK_TXS_SUBSCRIBE_TOPIC: (&str, &str) =
     ("block-txs-subscribe-topic", "cardano.block.txs");
 const DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC: (&str, &str) = (

@@ -13,6 +13,7 @@ use acropolis_module_accounts_state::AccountsState;
 use acropolis_module_address_state::AddressState;
 use acropolis_module_assets_state::AssetsState;
 use acropolis_module_block_unpacker::BlockUnpacker;
+use acropolis_module_consensus::Consensus;
 use acropolis_module_drdd_state::DRDDState;
 use acropolis_module_drep_state::DRepState;
 use acropolis_module_epochs_state::EpochsState;
@@ -50,8 +51,11 @@ static GLOBAL: Jemalloc = Jemalloc;
 pub async fn main() -> Result<()> {
     // Standard logging using RUST_LOG for log levels default to INFO for events only
     let fmt_layer = fmt::layer()
-        .with_filter(EnvFilter::from_default_env().add_directive(filter::LevelFilter::INFO.into()))
-        .with_filter(filter::filter_fn(|meta| meta.is_event()));
+        .with_filter(EnvFilter::from_default_env());
+
+    // TODO disabled this filter because it prevents debugging - investigate
+    //.add_directive(filter::LevelFilter::INFO.into()))
+    //        .with_filter(filter::filter_fn(|meta| meta.is_event()));
 
     // Only turn on tracing if some OTEL environment variables exist
     if std::env::vars().any(|(name, _)| name.starts_with("OTEL_")) {
@@ -105,6 +109,7 @@ pub async fn main() -> Result<()> {
     BlockfrostREST::register(&mut process);
     SPDDState::register(&mut process);
     DRDDState::register(&mut process);
+    Consensus::register(&mut process);
 
     Clock::<Message>::register(&mut process);
     RESTServer::<Message>::register(&mut process);

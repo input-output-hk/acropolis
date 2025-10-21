@@ -9,7 +9,7 @@ use pallas::ledger::traverse::MultiEraBlock;
 use std::sync::Arc;
 use tracing::{debug, error, info, info_span, Instrument};
 
-const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.block.available";
+const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.block.proposed";
 const DEFAULT_PUBLISH_TOPIC: &str = "cardano.txs";
 
 /// Block unpacker module
