@@ -26,7 +26,7 @@ pub enum ValidationStatus {
     Go,
 
     // Error
-    Error(ValidationError),
+    NoGo(ValidationError),
 }
 
 /// Result of validation of a block
