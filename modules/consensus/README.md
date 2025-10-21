@@ -32,7 +32,7 @@ validators = [
 The consensus module passes on blocks it receives from upstream (currently only a
 single source) and sends them out as 'proposed' blocks for validation.  It then listens
 on all of the `validators` topics for BlockValidation messages, which give a Go / NoGo
-for the block.  The model is a NASA flight control desk, and like thre, a single NoGo
+for the block.  The model is a NASA flight control desk, and like there, a single NoGo
 is enough to stop the block.
 
 At the moment the module simply logs the validation failure.  Once it is actually operating
