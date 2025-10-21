@@ -15,8 +15,10 @@ async fn fetch_bytes(client: &reqwest::Client, url: &str) -> Result<Vec<u8>> {
     if let Ok(path) = env::var("ACROPOLIS_OFFLINE_MIRROR") {
         if let Ok(file) = File::open(&path) {
             if let Ok(map) = from_reader::<_, HashMap<String, String>>(file) {
-                if let Some(s) = map.get(url) {
-                    return Ok(s.as_bytes().to_vec());
+                if let Some(path) = map.get(url) {
+                    if let Ok(bytes) = fs::read(&Path::new(path).to_path_buf()) {
+                        return Ok(bytes);
+                    }
                 }
             }
         }

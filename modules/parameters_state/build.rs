@@ -14,9 +14,12 @@ fn fetch_text(url: &str) -> Result<String, Box<dyn std::error::Error>> {
     if let Ok(path) = env::var("ACROPOLIS_OFFLINE_MIRROR") {
         if !path.is_empty() {
             if let Ok(file) = File::open(path) {
-                let map: HashMap<String, String> = from_reader(file)?;
-                if let Some(s) = map.get(url) {
-                    return Ok(s.clone());
+                if let Ok(map) = from_reader::<_, HashMap<String, String>>(file) {
+                    if let Some(path_str) = map.get(url) {
+                        if let Ok(s) = fs::read_to_string(&Path::new(path_str).to_path_buf()) {
+                            return Ok(s);
+                        }
+                    }
                 }
             }
         }
