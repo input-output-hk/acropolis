@@ -1,5 +1,6 @@
 use crate::state::State;
 use acropolis_common::serialization::Bech32WithHrp;
+use acropolis_common::DelegatedStake;
 use acropolis_common::{extract_strict_query_params, messages::RESTResponse};
 use anyhow::Result;
 use std::{collections::HashMap, sync::Arc};
@@ -30,7 +31,7 @@ pub async fn handle_spdd(
     };
 
     if let Some(spdd) = spdd_opt {
-        let spdd: HashMap<_, _> = spdd
+        let spdd: HashMap<String, DelegatedStake> = spdd
             .iter()
             .map(|(k, v)| {
                 (

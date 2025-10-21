@@ -8,6 +8,7 @@ use acropolis_common::{
     BlockInfo, BlockStatus,
 };
 use anyhow::Result;
+use bigdecimal::Zero;
 use caryatid_sdk::{message_bus::Subscription, module, Context, Module};
 use config::Config;
 use std::sync::Arc;
@@ -438,15 +439,6 @@ impl AccountsState {
             .max(0) as u64;
         info!("SPDD retention epochs: {:?}", spdd_retention_epochs);
 
-        if spdd_retention_epochs > 0 {
-            info!("SPDD database path: {}", spdd_db_path);
-            info!(
-                "SPDD retention: {} epochs (~{} GB max)",
-                spdd_retention_epochs,
-                (spdd_retention_epochs as f64 * 0.12).ceil()
-            )
-        }
-
         // Query topics
         let accounts_query_topic = config
             .get_string(DEFAULT_ACCOUNTS_QUERY_TOPIC.0)
@@ -475,7 +467,7 @@ impl AccountsState {
         let history_tick = history.clone();
 
         // Spdd store
-        let spdd_store = if spdd_retention_epochs > 0 {
+        let spdd_store = if !spdd_retention_epochs.is_zero() {
             Some(Arc::new(Mutex::new(SPDDStore::load(
                 std::path::Path::new(&spdd_db_path),
                 spdd_retention_epochs,
