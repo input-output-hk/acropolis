@@ -12,6 +12,7 @@ use tracing_subscriber;
 use acropolis_module_accounts_state::AccountsState;
 use acropolis_module_assets_state::AssetsState;
 use acropolis_module_block_unpacker::BlockUnpacker;
+use acropolis_module_block_vrf_validator::BlockVRFValidator;
 use acropolis_module_drdd_state::DRDDState;
 use acropolis_module_drep_state::DRepState;
 use acropolis_module_epochs_state::EpochsState;
@@ -98,6 +99,7 @@ pub async fn main() -> Result<()> {
     ParametersState::register(&mut process);
     StakeDeltaFilter::register(&mut process);
     EpochsState::register(&mut process);
+    BlockVRFValidator::register(&mut process);
     AccountsState::register(&mut process);
     AssetsState::register(&mut process);
     BlockfrostREST::register(&mut process);

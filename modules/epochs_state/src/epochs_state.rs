@@ -16,17 +16,18 @@ use config::Config;
 use pallas::ledger::traverse::MultiEraHeader;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{error, info, info_span};
+use tracing::{error, info, info_span, Instrument};
 
 mod epoch_activity_publisher;
+mod epoch_nonces_publisher;
 mod epochs_history;
 mod state;
 mod store_config;
 use state::State;
 
 use crate::{
-    epoch_activity_publisher::EpochActivityPublisher, epochs_history::EpochsHistoryState,
-    store_config::StoreConfig,
+    epoch_activity_publisher::EpochActivityPublisher, epoch_nonces_publisher::EpochNoncesPublisher,
+    epochs_history::EpochsHistoryState, store_config::StoreConfig,
 };
 
 const DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC: (&str, &str) = (
@@ -44,6 +45,8 @@ const DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC: (&str, &str) = (
 
 const DEFAULT_EPOCH_ACTIVITY_PUBLISH_TOPIC: (&str, &str) =
     ("epoch-activity-publish-topic", "cardano.epoch.activity");
+const DEFAULT_EPOCH_NONCES_PUBLISH_TOPIC: (&str, &str) =
+    ("epoch-nonces-publish-topic", "cardano.epoch.nonces");
 
 /// Epochs State module
 #[module(
@@ -63,6 +66,7 @@ impl EpochsState {
         mut block_txs_subscription: Box<dyn Subscription<Message>>,
         mut protocol_parameters_subscription: Box<dyn Subscription<Message>>,
         mut epoch_activity_publisher: EpochActivityPublisher,
+        mut epoch_nonces_publisher: EpochNoncesPublisher,
     ) -> Result<()> {
         let (_, bootstrapped_message) = bootstrapped_subscription.read().await?;
         let genesis = match bootstrapped_message.as_ref() {
@@ -134,27 +138,36 @@ impl EpochsState {
                         // update epochs history
                         epochs_history.handle_epoch_activity(&block_info, &ea);
                         // publish epoch activity message
-                        epoch_activity_publisher
-                            .publish(Arc::new(Message::Cardano((
-                                block_info.clone(),
-                                CardanoMessage::EpochActivity(ea),
-                            ))))
-                            .await
-                            .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+                        epoch_activity_publisher.publish(&block_info, ea).await.unwrap_or_else(
+                            |e| error!("Failed to publish epoch activity messages: {e}"),
+                        );
                     }
 
                     let span = info_span!(
                         "epochs_state.handle_block_header",
                         block = block_info.number
                     );
-                    span.in_scope(|| {
+                    async {
                         if let Some(header) = header.as_ref() {
                             match state.handle_block_header(&genesis, &block_info, &header) {
-                                Ok(()) => {}
+                                Ok(()) => {
+                                    if is_new_epoch {
+                                        if let Some(nonces) = state.get_nonces() {
+                                            epoch_nonces_publisher
+                                                .publish(&block_info, nonces)
+                                                .await
+                                                .unwrap_or_else(|e| {
+                                                    error!("Failed to publish epoch nonces: {e}")
+                                                });
+                                        }
+                                    }
+                                }
                                 Err(e) => error!("Error handling block header: {e}"),
                             }
                         }
-                    });
+                    }
+                    .instrument(span)
+                    .await;
 
                     let span = info_span!("epochs_state.handle_mint", block = block_info.number);
                     span.in_scope(|| {
@@ -218,7 +231,12 @@ impl EpochsState {
         let epoch_activity_publish_topic = config
             .get_string(DEFAULT_EPOCH_ACTIVITY_PUBLISH_TOPIC.0)
             .unwrap_or(DEFAULT_EPOCH_ACTIVITY_PUBLISH_TOPIC.1.to_string());
-        info!("Publishing on '{epoch_activity_publish_topic}'");
+        info!("Publishing EpochActivityMessage on '{epoch_activity_publish_topic}'");
+
+        let epoch_nonces_publish_topic = config
+            .get_string(DEFAULT_EPOCH_NONCES_PUBLISH_TOPIC.0)
+            .unwrap_or(DEFAULT_EPOCH_NONCES_PUBLISH_TOPIC.1.to_string());
+        info!("Publishing EpochNoncesMessage on '{epoch_nonces_publish_topic}'");
 
         // query topic
         let epochs_query_topic = config
@@ -250,6 +268,8 @@ impl EpochsState {
         // Publisher
         let epoch_activity_publisher =
             EpochActivityPublisher::new(context.clone(), epoch_activity_publish_topic);
+        let epoch_nonces_publisher =
+            EpochNoncesPublisher::new(context.clone(), epoch_nonces_publish_topic);
 
         // handle epochs query
         context.handle(&epochs_query_topic, move |message| {
@@ -348,6 +368,7 @@ impl EpochsState {
                 block_txs_subscription,
                 protocol_parameters_subscription,
                 epoch_activity_publisher,
+                epoch_nonces_publisher,
             )
             .await
             .unwrap_or_else(|e| error!("Failed: {e}"));

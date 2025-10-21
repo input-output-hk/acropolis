@@ -427,6 +427,9 @@ impl TxOutRef {
     }
 }
 
+/// Slot
+pub type Slot = u64;
+
 /// Block Hash
 pub type BlockHash = [u8; 32];
 

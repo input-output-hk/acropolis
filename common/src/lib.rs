@@ -5,6 +5,7 @@ pub mod calculations;
 pub mod cip19;
 pub mod crypto;
 pub mod genesis_values;
+pub mod hash;
 pub mod ledger_state;
 pub mod math;
 pub mod messages;
@@ -17,6 +18,7 @@ pub mod serialization;
 pub mod stake_addresses;
 pub mod state_history;
 pub mod types;
+pub mod vrf;
 
 // Flattened re-exports
 pub use self::address::*;

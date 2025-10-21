@@ -1,4 +1,4 @@
-//! Acropolis epoch activity counter: state storage
+//! Acropolis epochs_state: state storage
 
 use acropolis_common::{
     crypto::keyhash_224,
@@ -89,7 +89,7 @@ impl State {
         }
     }
 
-    // Handle a block header
+    /// Handle a block header
     pub fn handle_block_header(
         &mut self,
         genesis: &GenesisValues,
@@ -177,8 +177,7 @@ impl State {
             };
 
             self.nonces = Some(new_nonces);
-        };
-
+        }
         Ok(())
     }
 
@@ -232,6 +231,10 @@ impl State {
         self.epoch_fees = 0;
 
         epoch_activity
+    }
+
+    pub fn get_nonces(&self) -> Option<Nonces> {
+        self.nonces.clone()
     }
 
     pub fn get_epoch_info(&self) -> EpochActivityMessage {
@@ -684,6 +687,22 @@ mod tests {
         let block = make_new_epoch_block(209);
         let block_header = MultiEraHeader::decode(1, None, &e_210_first_block_header_cbor).unwrap();
         assert!(state.handle_block_header(&genesis_value, &block, &block_header).is_ok());
+        println!(
+            "block header leader vrf output: {:?}",
+            block_header.leader_vrf_output().unwrap()
+        );
+        println!(
+            "block header leader vrf output length: {:?}",
+            block_header.leader_vrf_output().unwrap().len()
+        );
+        println!(
+            "block header nonce vrf output: {:?}",
+            block_header.nonce_vrf_output().unwrap()
+        );
+        println!(
+            "block header nonce vrf output length: {:?}",
+            block_header.nonce_vrf_output().unwrap().len()
+        );
 
         let nonces = state.nonces.unwrap();
         let evolved = Nonce::from(
