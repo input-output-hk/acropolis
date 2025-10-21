@@ -23,7 +23,7 @@ use crate::state::HistoricalAccountsConfig;
 mod immutable_historical_account_store;
 mod volatile_historical_accounts;
 
-const DEFAULT_SPO_STATE_SUBSCRIBE_TOPIC: &str = "cardano.spo.state";
+const DEFAULT_REWARDS_SUBSCRIBE_TOPIC: &str = "cardano.stake.reward.deltas";
 const DEFAULT_TX_CERTIFICATES_SUBSCRIBE_TOPIC: &str = "cardano.certificates";
 const DEFAULT_WITHDRAWALS_SUBSCRIBE_TOPIC: &str = "cardano.withdrawals";
 const DEFAULT_ADDRESS_DELTAS_SUBSCRIBE_TOPIC: (&str, &str) =
@@ -33,7 +33,8 @@ const DEFAULT_PARAMETERS_SUBSCRIBE_TOPIC: (&str, &str) =
 
 // Configuration defaults
 const DEFAULT_HISTORICAL_ACCOUNTS_DB_PATH: (&str, &str) = ("db-path", "./db");
-const DEFAULT_STORE_EPOCH_HISTORY: (&str, bool) = ("store-epoch-history", false);
+const DEFAULT_STORE_REWARDS_HISTORY: (&str, bool) = ("store-rewards-history", false);
+const DEFAULT_STORE_ACTIVE_STAKE_HISTORY: (&str, bool) = ("store-active-stake-history", false);
 const DEFAULT_STORE_DELEGATION_HISTORY: (&str, bool) = ("store-delegation-history", false);
 const DEFAULT_STORE_REGISTRATION_HISTORY: (&str, bool) = ("store-registration-history", false);
 const DEFAULT_STORE_WITHDRAWAL_HISTORY: (&str, bool) = ("store-withdrawal-history", false);
@@ -51,8 +52,8 @@ pub struct HistoricalAccountsState;
 impl HistoricalAccountsState {
     /// Async run loop
     async fn run(
-        state: Arc<Mutex<State>>,
-        mut spos_subscription: Box<dyn Subscription<Message>>,
+        state_mutex: Arc<Mutex<State>>,
+        mut rewards_subscription: Box<dyn Subscription<Message>>,
         mut certs_subscription: Box<dyn Subscription<Message>>,
         mut withdrawals_subscription: Box<dyn Subscription<Message>>,
         mut address_deltas_subscription: Box<dyn Subscription<Message>>,
@@ -61,7 +62,7 @@ impl HistoricalAccountsState {
         let _ = params_subscription.read().await?;
         info!("Consumed initial genesis params from params_subscription");
 
-        // Background task to persist epochs sequentialy
+        // Background task to persist epochs sequentially
         const MAX_PENDING_PERSISTS: usize = 1;
         let (persist_tx, mut persist_rx) = mpsc::channel::<(
             u64,
@@ -78,7 +79,7 @@ impl HistoricalAccountsState {
         // Main loop of synchronised messages
         loop {
             // Get a mutable state
-            let mut state = state.lock().await;
+            let mut state = state_mutex.lock().await;
 
             // Read per-block topics in parallel
             let certs_message_f = certs_subscription.read();
@@ -93,6 +94,7 @@ impl HistoricalAccountsState {
                     // Handle rollbacks on this topic only
                     if block_info.status == BlockStatus::RolledBack {
                         state.volatile.rollback_before(block_info.number);
+                        state.volatile.next_block();
                     }
 
                     current_block = Some(block_info.clone());
@@ -103,22 +105,34 @@ impl HistoricalAccountsState {
 
             // Read from epoch-boundary messages only when it's a new epoch
             if new_epoch {
-                let spos_message_f = spos_subscription.read();
+                let (_, message) = params_subscription.read().await?;
+                if let Message::Cardano((ref block_info, CardanoMessage::ProtocolParams(params))) =
+                    message.as_ref()
+                {
+                    Self::check_sync(&current_block, &block_info);
+                    let mut state = state_mutex.lock().await;
+                    state.volatile.start_new_epoch(block_info.number);
+                    if let Some(shelley) = &params.params.shelley {
+                        state.volatile.update_k(shelley.security_param);
+                    }
+                }
 
-                // Handle SPOs
-                let (_, message) = spos_message_f.await?;
+                // Handle rewards
+                let (_, message) = rewards_subscription.read().await?;
                 match message.as_ref() {
                     Message::Cardano((
                         block_info,
                         CardanoMessage::StakeRewardDeltas(rewards_msg),
                     )) => {
-                        let span =
-                            info_span!("account_state.handle_spo_state", block = block_info.number);
+                        let span = info_span!(
+                            "histoical_account_state.handle_reward_deltas",
+                            block = block_info.number
+                        );
                         async {
                             Self::check_sync(&current_block, &block_info);
                             state
                                 .handle_rewards(rewards_msg)
-                                .inspect_err(|e| error!("SPOState handling error: {e:#}"))
+                                .inspect_err(|e| error!("Reward deltas handling error: {e:#}"))
                                 .ok();
                         }
                         .instrument(span)
@@ -132,7 +146,10 @@ impl HistoricalAccountsState {
             // Now handle the certs_message properly
             match certs_message.as_ref() {
                 Message::Cardano((block_info, CardanoMessage::TxCertificates(tx_certs_msg))) => {
-                    let span = info_span!("account_state.handle_certs", block = block_info.number);
+                    let span = info_span!(
+                        "histoical_account_state.handle_certs",
+                        block = block_info.number
+                    );
                     async {
                         Self::check_sync(&current_block, &block_info);
                         state
@@ -152,7 +169,7 @@ impl HistoricalAccountsState {
             match message.as_ref() {
                 Message::Cardano((block_info, CardanoMessage::Withdrawals(withdrawals_msg))) => {
                     let span = info_span!(
-                        "account_state.handle_withdrawals",
+                        "histoical_account_state.handle_withdrawals",
                         block = block_info.number
                     );
                     async {
@@ -174,18 +191,38 @@ impl HistoricalAccountsState {
             match message.as_ref() {
                 Message::Cardano((block_info, CardanoMessage::AddressDeltas(deltas_msg))) => {
                     let span = info_span!(
-                        "account_state.handle_stake_deltas",
+                        "histoical_account_state.handle_address_deltas",
                         block = block_info.number
                     );
                     async {
                         Self::check_sync(&current_block, &block_info);
                         state
                             .handle_address_deltas(deltas_msg)
-                            .inspect_err(|e| error!("StakeAddressDeltas handling error: {e:#}"))
+                            .inspect_err(|e| error!("AddressDeltas handling error: {e:#}"))
                             .ok();
                     }
                     .instrument(span)
                     .await;
+
+                    let should_prune = state.ready_to_prune(block_info);
+                    if should_prune {
+                        state.prune_volatile().await;
+                        if let Err(e) = persist_tx
+                            .send((
+                                block_info.epoch,
+                                state.immutable.clone(),
+                                state.config.clone(),
+                            ))
+                            .await
+                        {
+                            panic!("persistence worker crashed: {e}");
+                        }
+                    }
+
+                    {
+                        let mut state = state_mutex.lock().await;
+                        state.volatile.next_block();
+                    }
                 }
 
                 _ => error!("Unexpected message type: {message:?}"),
@@ -221,8 +258,9 @@ impl HistoricalAccountsState {
             .unwrap_or(DEFAULT_WITHDRAWALS_SUBSCRIBE_TOPIC.to_string());
         info!("Creating withdrawals subscriber on '{withdrawals_topic}'");
 
-        let spo_topic =
-            config.get_string("spo-topic").unwrap_or(DEFAULT_SPO_STATE_SUBSCRIBE_TOPIC.to_string());
+        let rewards_topic = config
+            .get_string("rewards-topic")
+            .unwrap_or(DEFAULT_REWARDS_SUBSCRIBE_TOPIC.to_string());
 
         let address_deltas_topic = config
             .get_string(DEFAULT_ADDRESS_DELTAS_SUBSCRIBE_TOPIC.0)
@@ -246,9 +284,12 @@ impl HistoricalAccountsState {
                 .get_string(DEFAULT_HISTORICAL_ACCOUNTS_DB_PATH.0)
                 .unwrap_or(DEFAULT_HISTORICAL_ACCOUNTS_DB_PATH.1.to_string()),
             skip_until: None,
-            store_epoch_history: config
-                .get_bool(DEFAULT_STORE_EPOCH_HISTORY.0)
-                .unwrap_or(DEFAULT_STORE_EPOCH_HISTORY.1),
+            store_rewards_history: config
+                .get_bool(DEFAULT_STORE_REWARDS_HISTORY.0)
+                .unwrap_or(DEFAULT_STORE_REWARDS_HISTORY.1),
+            store_active_stake_history: config
+                .get_bool(DEFAULT_STORE_ACTIVE_STAKE_HISTORY.0)
+                .unwrap_or(DEFAULT_STORE_ACTIVE_STAKE_HISTORY.1),
             store_delegation_history: config
                 .get_bool(DEFAULT_STORE_DELEGATION_HISTORY.0)
                 .unwrap_or(DEFAULT_STORE_DELEGATION_HISTORY.1),
@@ -296,7 +337,7 @@ impl HistoricalAccountsState {
         });
 
         // Subscribe
-        let spos_subscription = context.subscribe(&spo_topic).await?;
+        let rewards_subscription = context.subscribe(&rewards_topic).await?;
         let certs_subscription = context.subscribe(&tx_certificates_topic).await?;
         let withdrawals_subscription = context.subscribe(&withdrawals_topic).await?;
         let address_deltas_subscription = context.subscribe(&address_deltas_topic).await?;
@@ -306,7 +347,7 @@ impl HistoricalAccountsState {
         context.run(async move {
             Self::run(
                 state_mutex,
-                spos_subscription,
+                rewards_subscription,
                 certs_subscription,
                 withdrawals_subscription,
                 address_deltas_subscription,

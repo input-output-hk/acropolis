@@ -7,7 +7,7 @@ use acropolis_common::{
     messages::{
         AddressDeltasMessage, StakeRewardDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
     },
-    PoolId, ShelleyAddress, TxIdentifier,
+    BlockInfo, PoolId, ShelleyAddress, StakeAddress, TxIdentifier,
 };
 
 use crate::{
@@ -19,12 +19,25 @@ use anyhow::Result;
 
 #[derive(Debug, Default, Clone)]
 pub struct AccountEntry {
+    pub reward_history: Option<Vec<RewardHistory>>,
     pub active_stake_history: Option<Vec<ActiveStakeHistory>>,
     pub delegation_history: Option<Vec<DelegationUpdate>>,
     pub registration_history: Option<Vec<RegistrationUpdate>>,
     pub withdrawal_history: Option<Vec<AccountWithdrawal>>,
     pub mir_history: Option<Vec<AccountWithdrawal>>,
     pub addresses: Option<Vec<ShelleyAddress>>,
+}
+
+#[derive(Debug, Clone, minicbor::Decode, minicbor::Encode)]
+pub struct RewardHistory {
+    #[n(0)]
+    pub epoch: u32,
+    #[n(1)]
+    pub amount: u64,
+    #[n(2)]
+    pub pool: PoolId,
+    #[n(3)]
+    pub is_owner: bool,
 }
 
 #[derive(Debug, Clone, minicbor::Decode, minicbor::Encode)]
@@ -70,7 +83,8 @@ pub struct HistoricalAccountsConfig {
     pub db_path: String,
     pub skip_until: Option<u64>,
 
-    pub store_epoch_history: bool,
+    pub store_rewards_history: bool,
+    pub store_active_stake_history: bool,
     pub store_delegation_history: bool,
     pub store_registration_history: bool,
     pub store_withdrawal_history: bool,
@@ -106,6 +120,17 @@ impl State {
         })
     }
 
+    pub async fn prune_volatile(&mut self) {
+        let drained = self.volatile.prune_volatile();
+        self.immutable.update_immutable(drained).await;
+    }
+
+    pub fn ready_to_prune(&self, block_info: &BlockInfo) -> bool {
+        block_info.epoch > 0
+            && Some(block_info.epoch) != self.volatile.last_persisted_epoch
+            && block_info.number > self.volatile.epoch_start_block + self.volatile.security_param_k
+    }
+
     pub fn handle_rewards(&mut self, _reward_deltas: &StakeRewardDeltasMessage) -> Result<()> {
         Ok(())
     }
@@ -120,5 +145,42 @@ impl State {
 
     pub fn handle_withdrawals(&mut self, _withdrawals: &WithdrawalsMessage) -> Result<()> {
         Ok(())
+    }
+
+    pub fn _get_reward_history(&self, _account: StakeAddress) -> Result<Vec<RewardHistory>> {
+        Ok(Vec::new())
+    }
+
+    pub fn _get_active_stake_history(
+        &self,
+        _account: StakeAddress,
+    ) -> Result<Vec<ActiveStakeHistory>> {
+        Ok(Vec::new())
+    }
+
+    pub fn _get_delegation_history(&self, _account: StakeAddress) -> Result<Vec<DelegationUpdate>> {
+        Ok(Vec::new())
+    }
+
+    pub fn _get_registration_history(
+        &self,
+        _account: StakeAddress,
+    ) -> Result<Vec<RegistrationUpdate>> {
+        Ok(Vec::new())
+    }
+
+    pub fn _get_withdrawal_history(
+        &self,
+        _account: StakeAddress,
+    ) -> Result<Vec<AccountWithdrawal>> {
+        Ok(Vec::new())
+    }
+
+    pub fn _get_mir_history(&self, _account: StakeAddress) -> Result<Vec<AccountWithdrawal>> {
+        Ok(Vec::new())
+    }
+
+    pub fn _get_addresses(&self, _account: StakeAddress) -> Result<Vec<ShelleyAddress>> {
+        Ok(Vec::new())
     }
 }
