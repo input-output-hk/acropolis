@@ -600,11 +600,11 @@ pub struct PotDelta {
     Debug, Clone, Ord, Eq, PartialEq, PartialOrd, Hash, serde::Serialize, serde::Deserialize,
 )]
 pub enum Credential {
+    /// Script hash. NOTE: Order matters when parsing Haskell Node Snapshot data.
+    ScriptHash(KeyHash),
+
     /// Address key hash
     AddrKeyHash(KeyHash),
-
-    /// Script hash
-    ScriptHash(KeyHash),
 }
 
 impl Credential {

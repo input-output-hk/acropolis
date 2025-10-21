@@ -30,6 +30,7 @@ use std::io::{Read, Seek, SeekFrom};
 
 pub use crate::hash::{AddrKeyhash, Hash, ScriptHash};
 pub use crate::stake_addresses::{AccountState, StakeAddressState};
+pub use crate::StakeCredential;
 
 // -----------------------------------------------------------------------------
 // Cardano Ledger Types (for decoding with minicbor)
@@ -38,22 +39,41 @@ pub use crate::stake_addresses::{AccountState, StakeAddressState};
 pub type Epoch = u64;
 pub type Lovelace = u64;
 
+/*
+ * This was replaced with the StakeCredential defined in types.rs, but the implementation here is much
+ * cleaner for parsing CBOR files from Haskell Node, using hash.rs types. For CBOR parsing, we need to
+ * change the decode from using d.decode_with(ctx) (which expects arrays) tousing d.bytes() which
+ * expects raw bytes.
 /// Stake credential - can be a key hash or script hash
 /// Order matters for Ord/PartialOrd - ScriptHash must come first for compatibility with Haskell
 #[derive(Serialize, Deserialize, Debug, PartialEq, PartialOrd, Eq, Ord, Clone, Hash)]
 pub enum StakeCredential {
     ScriptHash(ScriptHash),
-    AddrKeyhash(AddrKeyhash),
+    AddrKeyhash(AddrKeyhash), // NOTE: lower case h from hash.rs version
 }
+*/
 
 impl<'b, C> minicbor::decode::Decode<'b, C> for StakeCredential {
-    fn decode(d: &mut minicbor::Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+    fn decode(
+        d: &mut minicbor::Decoder<'b>,
+        _ctx: &mut C,
+    ) -> Result<Self, minicbor::decode::Error> {
         d.array()?;
         let variant = d.u16()?;
 
         match variant {
-            0 => Ok(StakeCredential::AddrKeyhash(d.decode_with(ctx)?)),
-            1 => Ok(StakeCredential::ScriptHash(d.decode_with(ctx)?)),
+            0 => {
+                // ScriptHash variant (first in enum) - decode bytes directly
+                let bytes = d.bytes()?;
+                let key_hash = bytes.to_vec();
+                Ok(StakeCredential::ScriptHash(key_hash))
+            }
+            1 => {
+                // AddrKeyHash variant (second in enum) - decode bytes directly
+                let bytes = d.bytes()?;
+                let key_hash = bytes.to_vec();
+                Ok(StakeCredential::AddrKeyHash(key_hash))
+            }
             _ => Err(minicbor::decode::Error::message(
                 "invalid variant id for StakeCredential",
             )),
@@ -68,18 +88,18 @@ impl<C> minicbor::encode::Encode<C> for StakeCredential {
         ctx: &mut C,
     ) -> Result<(), minicbor::encode::Error<W::Error>> {
         match self {
-            StakeCredential::AddrKeyhash(a) => {
+            StakeCredential::ScriptHash(key_hash) => {
+                // ScriptHash is variant 0 (first in enum)
                 e.array(2)?;
                 e.encode_with(0, ctx)?;
-                e.encode_with(a, ctx)?;
-
+                e.encode_with(key_hash, ctx)?;
                 Ok(())
             }
-            StakeCredential::ScriptHash(a) => {
+            StakeCredential::AddrKeyHash(key_hash) => {
+                // AddrKeyHash is variant 1 (second in enum)
                 e.array(2)?;
                 e.encode_with(1, ctx)?;
-                e.encode_with(a, ctx)?;
-
+                e.encode_with(key_hash, ctx)?;
                 Ok(())
             }
         }
@@ -1009,7 +1029,7 @@ impl StreamingSnapshotParser {
             .map(|(credential, account)| {
                 // Convert StakeCredential to stake address representation
                 let stake_address = match &credential {
-                    StakeCredential::AddrKeyhash(hash) => {
+                    StakeCredential::AddrKeyHash(hash) => {
                         format!("stake_key_{}", hex::encode(hash))
                     }
                     StakeCredential::ScriptHash(hash) => {
@@ -1398,7 +1418,7 @@ impl StreamingSnapshotParser {
             .map(|(credential, account)| {
                 // Convert StakeCredential to stake address representation
                 let stake_address = match &credential {
-                    StakeCredential::AddrKeyhash(hash) => {
+                    StakeCredential::AddrKeyHash(hash) => {
                         format!("stake_key_{}", hex::encode(hash))
                     }
                     StakeCredential::ScriptHash(hash) => {
@@ -1806,8 +1826,10 @@ impl StreamingSnapshotParser {
             .into_iter()
             .map(|(cred, state)| {
                 let drep_id = match cred {
-                    StakeCredential::AddrKeyhash(hash) => format!("drep_{}", hash),
-                    StakeCredential::ScriptHash(hash) => format!("drep_script_{}", hash),
+                    StakeCredential::AddrKeyHash(hash) => format!("drep_{}", hex::encode(hash)),
+                    StakeCredential::ScriptHash(hash) => {
+                        format!("drep_script_{}", hex::encode(hash))
+                    }
                 };
 
                 let anchor = match state.anchor {
