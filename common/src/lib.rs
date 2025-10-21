@@ -13,6 +13,7 @@ pub mod params;
 pub mod protocol_params;
 pub mod queries;
 pub mod rational_number;
+pub mod resolver;
 pub mod rest_helper;
 pub mod serialization;
 pub mod snapshot;
