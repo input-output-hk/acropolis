@@ -9,24 +9,27 @@ use tracing::{error, info};
 mod state;
 use state::State;
 mod assert_header;
+mod ouroboros;
 
 const DEFAULT_VALIDATION_VRF_PUBLISHER_TOPIC: (&str, &str) =
     ("validation-vrf-publisher-topic", "cardano.validation.vrf");
+const DEFAULT_VALIDATION_KES_PUBLISHER_TOPIC: (&str, &str) =
+    ("validation-kes-publisher-topic", "cardano.validation.kes");
 const DEFAULT_BLOCK_HEADER_SUBSCRIBE_TOPIC: (&str, &str) =
     ("block-header-subscribe-topic", "cardano.block.header");
 const DEFAULT_EPOCH_NONCES_SUBSCRIBE_TOPIC: (&str, &str) =
     ("epoch-nonces-subscribe-topic", "cardano.epoch.nonces");
 
-/// Block VRF Validator module
+/// Block Validator module
 #[module(
     message_type(Message),
-    name = "block-vrf-validator",
-    description = "Validate the VRF calculation in the block header"
+    name = "block-validator",
+    description = "Validate the block header"
 )]
 
-pub struct BlockVRFValidator;
+pub struct BlockValidator;
 
-impl BlockVRFValidator {
+impl BlockValidator {
     async fn run() -> Result<()> {
         Ok(())
     }
@@ -36,7 +39,7 @@ impl BlockVRFValidator {
         let validation_vrf_publisher_topic = config
             .get_string(DEFAULT_VALIDATION_VRF_PUBLISHER_TOPIC.0)
             .unwrap_or(DEFAULT_VALIDATION_VRF_PUBLISHER_TOPIC.1.to_string());
-        info!("Creating publisher on '{validation_vrf_publisher_topic}'");
+        info!("Creating validation VRF publisher on '{validation_vrf_publisher_topic}'");
 
         // Subscribe topics
         let block_headers_subscribe_topic = config

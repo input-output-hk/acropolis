@@ -33,10 +33,8 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with 3.14.1",
- "thiserror 2.0.17",
  "tokio",
  "tracing",
- "vrf_dalek",
 ]
 
 [[package]]
@@ -112,21 +110,24 @@ dependencies = [
 ]
 
 [[package]]
-name = "acropolis_module_block_vrf_validator"
+name = "acropolis_module_block_validator"
 version = "0.1.0"
 dependencies = [
  "acropolis_common",
  "anyhow",
+ "blake2 0.10.6",
  "caryatid_sdk",
  "config",
  "hex",
  "imbl",
+ "kes-summed-ed25519 0.2.1 (git+https://github.com/txpipe/kes?rev=f69fb357d46f6a18925543d785850059569d7e78)",
  "pallas",
  "serde",
  "serde_json",
  "thiserror 2.0.17",
  "tokio",
  "tracing",
+ "vrf_dalek",
 ]
 
 [[package]]
@@ -411,7 +412,7 @@ dependencies = [
  "acropolis_module_address_state",
  "acropolis_module_assets_state",
  "acropolis_module_block_unpacker",
- "acropolis_module_block_vrf_validator",
+ "acropolis_module_block_validator",
  "acropolis_module_drdd_state",
  "acropolis_module_drep_state",
  "acropolis_module_epochs_state",
@@ -3180,6 +3181,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "kes-summed-ed25519"
+version = "0.2.1"
+source = "git+https://github.com/txpipe/kes?rev=f69fb357d46f6a18925543d785850059569d7e78#f69fb357d46f6a18925543d785850059569d7e78"
+dependencies = [
+ "blake2 0.10.6",
+ "ed25519-dalek",
+ "rand_core 0.6.4",
+ "thiserror 1.0.69",
+ "zeroize",
+]
+
+[[package]]
 name = "lapin"
 version = "2.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3505,7 +3518,7 @@ dependencies = [
  "ed25519-dalek",
  "fixed",
  "hex",
- "kes-summed-ed25519",
+ "kes-summed-ed25519 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "mithril-build-script",
  "mithril-stm",
  "nom 8.0.0",

@@ -39,8 +39,6 @@ dashmap = { workspace = true }
 rayon = "1.11.0"
 cryptoxide = "0.5.1"
 blake2 = "0.10.6"
-vrf_dalek = { git = "https://github.com/txpipe/vrf", rev = "044b45a1a919ba9d9c2471fc5c4d441f13086676" }
-thiserror = "2.0.17"
 
 [lib]
 crate-type = ["rlib"]

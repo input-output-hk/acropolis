@@ -1,7 +1,7 @@
-use std::array::TryFromSliceError;
-
-use acropolis_common::{crypto::keyhash_256, protocol_params::Nonce, vrf, KeyHash, Slot};
+use crate::ouroboros::vrf;
+use acropolis_common::{crypto::keyhash_256, protocol_params::Nonce, KeyHash, Slot};
 use pallas::ledger::primitives::babbage::{derive_tagged_vrf_output, VrfDerivation};
+use std::array::TryFromSliceError;
 use thiserror::Error;
 
 #[derive(Error, Debug, serde::Serialize, serde::Deserialize)]
