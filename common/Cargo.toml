@@ -39,6 +39,7 @@ dashmap = { workspace = true }
 rayon = "1.11.0"
 cryptoxide = "0.5.1"
 blake2 = "0.10.6"
+thiserror = "2.0.17"
 
 [lib]
 crate-type = ["rlib"]
