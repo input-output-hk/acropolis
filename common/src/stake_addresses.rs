@@ -279,7 +279,7 @@ impl StakeAddressMap {
     /// Derive the Stake Pool Delegation Distribution (SPDD) - a map of total stake values
     /// (both with and without rewards) for each active SPO
     /// And Stake Pool Reward State (rewards and delegators_count for each pool)
-    /// Key of returned map is the SPO 'operator' ID
+    /// <PoolId -> DelegatedStake>
     pub fn generate_spdd(&self) -> BTreeMap<KeyHash, DelegatedStake> {
         // Shareable Dashmap with referenced keys
         let spo_stakes = DashMap::<KeyHash, DelegatedStake>::new();
@@ -315,6 +315,24 @@ impl StakeAddressMap {
 
         // Collect into a plain BTreeMap, so that it is ordered on output
         spo_stakes.iter().map(|entry| (entry.key().clone(), entry.value().clone())).collect()
+    }
+
+    /// Dump current Stake Pool Delegation Distribution State
+    /// <PoolId -> (Stake Key, Active Stakes Amount)>
+    pub fn dump_spdd_state(&self) -> HashMap<KeyHash, Vec<(KeyHash, u64)>> {
+        let entries: Vec<_> = self
+            .inner
+            .par_iter()
+            .filter_map(|(key, sas)| {
+                sas.delegated_spo.as_ref().map(|spo| (spo.clone(), (key.clone(), sas.utxo_value)))
+            })
+            .collect();
+
+        let mut result: HashMap<KeyHash, Vec<(KeyHash, u64)>> = HashMap::new();
+        for (spo, entry) in entries {
+            result.entry(spo).or_default().push(entry);
+        }
+        result
     }
 
     /// Derive the DRep Delegation Distribution (DRDD) - the total amount
