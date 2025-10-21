@@ -31,18 +31,14 @@ use crate::types::*;
 pub use caryatid_module_clock::messages::ClockTickMessage;
 pub use caryatid_module_rest_server::messages::{GetRESTResponse, RESTRequest, RESTResponse};
 
-/// Block header message
+/// Raw block data message
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct BlockHeaderMessage {
-    /// Raw Data
-    pub raw: Vec<u8>,
-}
+pub struct RawBlockMessage {
+    /// Header raw data
+    pub header: Vec<u8>,
 
-/// Block body message
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct BlockBodyMessage {
-    /// Raw Data
-    pub raw: Vec<u8>,
+    /// Body raw data
+    pub body: Vec<u8>,
 }
 
 /// Snapshot completion message
@@ -280,8 +276,7 @@ pub struct SPOStateMessage {
 /// Cardano message enum
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum CardanoMessage {
-    BlockHeader(BlockHeaderMessage),         // Block header available
-    BlockBody(BlockBodyMessage),             // Block body available
+    BlockAvailable(RawBlockMessage),         // Block body available
     SnapshotComplete,                        // Mithril snapshot loaded
     ReceivedTxs(RawTxsMessage),              // Transaction available
     GenesisComplete(GenesisCompleteMessage), // Genesis UTXOs done + genesis params

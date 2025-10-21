@@ -9,7 +9,7 @@ use pallas::ledger::traverse::MultiEraBlock;
 use std::sync::Arc;
 use tracing::{debug, error, info, info_span, Instrument};
 
-const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.block.body";
+const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.block.available";
 const DEFAULT_PUBLISH_TOPIC: &str = "cardano.txs";
 
 /// Block unpacker module
@@ -42,9 +42,9 @@ impl BlockUnpacker {
                     return;
                 };
                 match message.as_ref() {
-                    Message::Cardano((block_info, CardanoMessage::BlockBody(body_msg))) => {
+                    Message::Cardano((block_info, CardanoMessage::BlockAvailable(block_msg))) => {
                         // Parse the body
-                        match MultiEraBlock::decode(&body_msg.raw) {
+                        match MultiEraBlock::decode(&block_msg.body) {
                             Ok(block) => {
                                 let span = info_span!("block_unpacker", block = block_info.number);
 

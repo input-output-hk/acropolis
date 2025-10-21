@@ -1,5 +1,5 @@
 use acropolis_common::{
-    messages::{BlockBodyMessage, BlockHeaderMessage},
+    messages::RawBlockMessage,
     BlockInfo,
 };
 use anyhow::{anyhow, bail, Result};
@@ -13,8 +13,7 @@ use std::{
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct UpstreamCacheRecord {
     pub id: BlockInfo,
-    pub hdr: Arc<BlockHeaderMessage>,
-    pub body: Arc<BlockBodyMessage>,
+    pub message: Arc<RawBlockMessage>,
 }
 
 pub trait Storage {
@@ -171,7 +170,7 @@ impl Storage for FileStorage {
 mod test {
     use crate::upstream_cache::{Storage, UpstreamCacheImpl, UpstreamCacheRecord};
     use acropolis_common::{
-        messages::{BlockBodyMessage, BlockHeaderMessage},
+        messages::RawBlockMessage,
         BlockHash, BlockInfo, BlockStatus, Era,
     };
     use anyhow::Result;
@@ -194,11 +193,9 @@ mod test {
     fn ucr(n: u64, hdr: usize, body: usize) -> UpstreamCacheRecord {
         UpstreamCacheRecord {
             id: blk(n),
-            hdr: Arc::new(BlockHeaderMessage {
-                raw: vec![hdr as u8],
-            }),
-            body: Arc::new(BlockBodyMessage {
-                raw: vec![body as u8],
+            message: Arc::new(RawBlockMessage {
+                header: vec![hdr as u8],
+                body: vec![body as u8],
             }),
         }
     }
@@ -259,8 +256,8 @@ mod test {
         for n in 0..11 {
             let record = cache.read_record()?.unwrap();
             assert_eq!(record.id.number, perm[n]);
-            assert_eq!(record.hdr.raw, vec![n as u8]);
-            assert_eq!(record.body.raw, vec![(n + 100) as u8]);
+            assert_eq!(record.message.header, vec![n as u8]);
+            assert_eq!(record.message.body, vec![(n + 100) as u8]);
 
             cache.next_record()?;
         }
