@@ -14,22 +14,12 @@ acropolis_common = { path = "../../common" }
 caryatid_sdk = { workspace = true }
 
 anyhow = { workspace = true }
-bigdecimal = "0.4.8"
-chrono = { workspace = true }
 config = { workspace = true }
-dashmap = { workspace = true }
 minicbor = { version = "0.26.0", features = ["std", "derive"] }
 hex = { workspace = true }
-imbl = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
-serde_with = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 fjall = "2.11.2"
-rayon = "1.10.0"
-csv = "1.3.1"
-itertools = "0.14.0"
 
 [lib]
 path = "src/historical_accounts_state.rs"
