@@ -1,3 +1,4 @@
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{fmt, ops::Deref, str::FromStr};
 
 /// data that is a cryptographic [`struct@Hash`] of `BYTES` long.
@@ -6,6 +7,30 @@ use std::{fmt, ops::Deref, str::FromStr};
 /// hash). Or 28 bytes long (as used in addresses)
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Hash<const BYTES: usize>([u8; BYTES]);
+
+// Implement Serialize/Deserialize manually since generic const arrays don't auto-derive
+impl<const BYTES: usize> Serialize for Hash<BYTES> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&hex::encode(&self.0))
+    }
+}
+
+impl<'de, const BYTES: usize> Deserialize<'de> for Hash<BYTES> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s: String = Deserialize::deserialize(deserializer)?;
+        s.parse().map_err(serde::de::Error::custom)
+    }
+}
+
+// Type aliases for common hash sizes
+pub type ScriptHash = Hash<28>;
+pub type AddrKeyhash = Hash<28>;
 
 impl<const BYTES: usize> Hash<BYTES> {
     #[inline]
