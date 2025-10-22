@@ -64,7 +64,7 @@ impl Consensus {
                         async {
                             // TODO Actually decide on favoured chain!
 
-                            // Send to downstreams to validate
+                            // Send to all validators and state modules
                             context
                                 .message_bus
                                 .publish(&publish_blocks_topic, message.clone())
