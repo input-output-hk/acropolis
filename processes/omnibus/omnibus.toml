@@ -99,7 +99,7 @@ store-spdd-history = false
 spdd-db-path = "./spdd_db"
 # Number of epochs to retain in SPDD history
 # Example: 73
-spdd-retention-epochs = "none"
+spdd-retention-epochs = 0
 # Verify against captured CSV
 verify-pots-file = "../../modules/accounts_state/test-data/pots.mainnet.csv"
 verify-rewards-files = "../../modules/accounts_state/test-data/rewards.mainnet.{}.csv"
