@@ -54,35 +54,34 @@ pub struct ActiveStakeHistory {
 #[derive(Debug, Clone, minicbor::Decode, minicbor::Encode)]
 pub struct DelegationUpdate {
     #[n(0)]
-    active_epoch: u32,
+    pub active_epoch: u32,
     #[n(1)]
-    tx_hash: TxIdentifier,
+    pub tx_identifier: TxIdentifier,
     #[n(2)]
-    amount: u64,
+    pub amount: u64,
     #[n(3)]
-    pool: PoolId,
+    pub pool: PoolId,
 }
 
 #[derive(Debug, Clone, minicbor::Decode, minicbor::Encode)]
 pub struct RegistrationUpdate {
     #[n(0)]
-    tx_identifier: TxIdentifier,
+    pub tx_identifier: TxIdentifier,
     #[n(1)]
-    deregistered: bool,
+    pub deregistered: bool,
 }
 
 #[derive(Debug, Clone, minicbor::Decode, minicbor::Encode)]
 pub struct AccountWithdrawal {
     #[n(0)]
-    tx_identifier: TxIdentifier,
+    pub tx_identifier: TxIdentifier,
     #[n(1)]
-    amount: u64,
+    pub amount: u64,
 }
 
 #[derive(Debug, Clone)]
 pub struct HistoricalAccountsConfig {
     pub db_path: String,
-    pub skip_until: Option<u64>,
 
     pub store_rewards_history: bool,
     pub store_active_stake_history: bool,
@@ -91,6 +90,18 @@ pub struct HistoricalAccountsConfig {
     pub store_withdrawal_history: bool,
     pub store_mir_history: bool,
     pub store_addresses: bool,
+}
+
+impl HistoricalAccountsConfig {
+    pub fn any_enabled(&self) -> bool {
+        self.store_rewards_history
+            || self.store_active_stake_history
+            || self.store_delegation_history
+            || self.store_registration_history
+            || self.store_withdrawal_history
+            || self.store_mir_history
+            || self.store_addresses
+    }
 }
 
 /// Overall state - stored per block
@@ -110,9 +121,6 @@ impl State {
         };
 
         let store = Arc::new(ImmutableHistoricalAccountStore::new(&db_path)?);
-
-        let mut config = config.clone();
-        config.skip_until = store.get_last_epoch_stored().await?;
 
         Ok(Self {
             config,
@@ -225,34 +233,37 @@ impl State {
 
     pub fn _get_active_stake_history(
         &self,
-        _account: StakeAddress,
+        _account: StakeCredential,
     ) -> Result<Vec<ActiveStakeHistory>> {
         Ok(Vec::new())
     }
 
-    pub fn _get_delegation_history(&self, _account: StakeAddress) -> Result<Vec<DelegationUpdate>> {
+    pub fn _get_delegation_history(
+        &self,
+        _account: StakeCredential,
+    ) -> Result<Vec<DelegationUpdate>> {
         Ok(Vec::new())
     }
 
     pub fn _get_registration_history(
         &self,
-        _account: StakeAddress,
+        _account: StakeCredential,
     ) -> Result<Vec<RegistrationUpdate>> {
         Ok(Vec::new())
     }
 
     pub fn _get_withdrawal_history(
         &self,
-        _account: StakeAddress,
+        _account: StakeCredential,
     ) -> Result<Vec<AccountWithdrawal>> {
         Ok(Vec::new())
     }
 
-    pub fn _get_mir_history(&self, _account: StakeAddress) -> Result<Vec<AccountWithdrawal>> {
+    pub fn _get_mir_history(&self, _account: StakeCredential) -> Result<Vec<AccountWithdrawal>> {
         Ok(Vec::new())
     }
 
-    pub fn _get_addresses(&self, _account: StakeAddress) -> Result<Vec<ShelleyAddress>> {
+    pub fn _get_addresses(&self, _account: StakeCredential) -> Result<Vec<ShelleyAddress>> {
         Ok(Vec::new())
     }
 

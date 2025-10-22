@@ -1474,7 +1474,7 @@ mod tests {
             DRepDelegationDistribution {
                 abstain: 10_000,
                 no_confidence: 100_000,
-                dreps: vec![(drep_addr_cred, 1_000_100), (drep_script_cred, 2_001_000),],
+                dreps: vec![(drep_script_cred, 2_001_000), (drep_addr_cred, 1_000_100)],
             }
         );
 

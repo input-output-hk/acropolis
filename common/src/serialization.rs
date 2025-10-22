@@ -28,6 +28,13 @@ where
     }
 }
 
+pub trait Bech32Conversion {
+    fn to_bech32(&self) -> Result<String, anyhow::Error>;
+    fn from_bech32(s: &str) -> Result<Self, anyhow::Error>
+    where
+        Self: Sized;
+}
+
 // Marker types for different HRP prefixes
 pub struct PoolPrefix;
 pub struct StakePrefix;

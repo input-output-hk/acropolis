@@ -4,22 +4,14 @@ use acropolis_common::{ShelleyAddress, StakeCredential};
 use anyhow::Result;
 use fjall::{Keyspace, Partition, PartitionCreateOptions};
 use minicbor::{decode, to_vec};
-use tokio::{sync::Mutex, task};
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use tokio::sync::Mutex;
 use tracing::{debug, error, info};
 
 use crate::state::{
     AccountEntry, AccountWithdrawal, ActiveStakeHistory, DelegationUpdate,
     HistoricalAccountsConfig, RegistrationUpdate, RewardHistory,
 };
-
-// Metadata keys which store the last epoch saved in each partition
-const ACCOUNT_REWARDS_HISTORY_COUNTER: &[u8] = b"rewards_history_epoch_last";
-const ACCOUNT_ACTIVE_STAKE_HISTORY_COUNTER: &[u8] = b"active_stake_history_epoch_last";
-const ACCOUNT_DELEGATION_HISTORY_COUNTER: &[u8] = b"delegation_history_epoch_last";
-const ACCOUNT_REGISTRATION_HISTORY_COUNTER: &[u8] = b"registration_history_epoch_last";
-const ACCOUNT_WITHDRAWAL_HISTORY_COUNTER: &[u8] = b"withdrawal_history_epoch_last";
-const ACCOUNT_MIR_HISTORY_COUNTER: &[u8] = b"mir_history_epoch_last";
-const ACCOUNT_ADDRESSES_COUNTER: &[u8] = b"addresses_epoch_last";
 
 pub struct ImmutableHistoricalAccountStore {
     rewards_history: Partition,
@@ -35,31 +27,22 @@ pub struct ImmutableHistoricalAccountStore {
 
 impl ImmutableHistoricalAccountStore {
     pub fn new(path: impl AsRef<Path>) -> Result<Self> {
-        let cfg = fjall::Config::new(path).max_write_buffer_size(512 * 1024 * 1024);
+        let cfg = fjall::Config::new(path).max_write_buffer_size(512 * 1024 * 1024).temporary(true);
         let keyspace = Keyspace::open(cfg)?;
 
-        let rewards_history = keyspace
-            .open_partition("account_rewards_history", PartitionCreateOptions::default())?;
-        let active_stake_history = keyspace.open_partition(
-            "account_active_stake_history",
-            PartitionCreateOptions::default(),
-        )?;
-        let delegation_history = keyspace.open_partition(
-            "account_delegation_history",
-            PartitionCreateOptions::default(),
-        )?;
-        let registration_history = keyspace.open_partition(
-            "account_registration_history",
-            PartitionCreateOptions::default(),
-        )?;
-        let withdrawal_history = keyspace.open_partition(
-            "account_withdrawal_history",
-            PartitionCreateOptions::default(),
-        )?;
+        let rewards_history =
+            keyspace.open_partition("rewards_history", PartitionCreateOptions::default())?;
+        let active_stake_history =
+            keyspace.open_partition("active_stake_history", PartitionCreateOptions::default())?;
+        let delegation_history =
+            keyspace.open_partition("delegation_history", PartitionCreateOptions::default())?;
+        let registration_history =
+            keyspace.open_partition("registration_history", PartitionCreateOptions::default())?;
+        let withdrawal_history =
+            keyspace.open_partition("withdrawal_history", PartitionCreateOptions::default())?;
         let mir_history =
-            keyspace.open_partition("account_mir_history", PartitionCreateOptions::default())?;
-        let addresses =
-            keyspace.open_partition("account_addresses", PartitionCreateOptions::default())?;
+            keyspace.open_partition("mir_history", PartitionCreateOptions::default())?;
+        let addresses = keyspace.open_partition("addresses", PartitionCreateOptions::default())?;
 
         Ok(Self {
             rewards_history,
@@ -78,63 +61,9 @@ impl ImmutableHistoricalAccountStore {
     /// and addresses into their respective Fjall partitions for an entire epoch.
     /// Skips any partitions that have already stored the given epoch.
     /// All writes are batched and committed atomically, preventing on-disk corruption in case of failure.
-    pub async fn persist_epoch(&self, epoch: u64, config: &HistoricalAccountsConfig) -> Result<()> {
-        let persist_rewards_history = config.store_rewards_history
-            && !self
-                .epoch_exists(
-                    self.rewards_history.clone(),
-                    ACCOUNT_REWARDS_HISTORY_COUNTER,
-                    epoch,
-                )
-                .await?;
-        let persist_active_stake_history = config.store_active_stake_history
-            && !self
-                .epoch_exists(
-                    self.active_stake_history.clone(),
-                    ACCOUNT_ACTIVE_STAKE_HISTORY_COUNTER,
-                    epoch,
-                )
-                .await?;
-        let persist_delegation_history = config.store_delegation_history
-            && !self
-                .epoch_exists(
-                    self.delegation_history.clone(),
-                    ACCOUNT_DELEGATION_HISTORY_COUNTER,
-                    epoch,
-                )
-                .await?;
-        let persist_registration_history = config.store_registration_history
-            && !self
-                .epoch_exists(
-                    self.registration_history.clone(),
-                    ACCOUNT_REGISTRATION_HISTORY_COUNTER,
-                    epoch,
-                )
-                .await?;
-        let persist_withdrawal_history = config.store_withdrawal_history
-            && !self
-                .epoch_exists(
-                    self.withdrawal_history.clone(),
-                    ACCOUNT_WITHDRAWAL_HISTORY_COUNTER,
-                    epoch,
-                )
-                .await?;
-        let persist_mir_history = config.store_mir_history
-            && !self
-                .epoch_exists(self.mir_history.clone(), ACCOUNT_MIR_HISTORY_COUNTER, epoch)
-                .await?;
-        let persist_addresses = config.store_addresses
-            && !self.epoch_exists(self.addresses.clone(), ACCOUNT_ADDRESSES_COUNTER, epoch).await?;
-
-        if !(persist_rewards_history
-            || persist_active_stake_history
-            || persist_delegation_history
-            || persist_registration_history
-            || persist_withdrawal_history
-            || persist_mir_history
-            || persist_addresses)
-        {
-            debug!("no persistence needed for epoch {epoch} (already persisted or disabled)",);
+    pub async fn persist_epoch(&self, epoch: u32, config: &HistoricalAccountsConfig) -> Result<()> {
+        if !config.any_enabled() {
+            debug!("no persistence needed for epoch {epoch} (disabled)",);
             return Ok(());
         }
 
@@ -146,187 +75,68 @@ impl ImmutableHistoricalAccountStore {
         let mut batch = self.keyspace.batch();
         let mut change_count = 0;
 
-        for block_map in drained_blocks.into_iter() {
-            if block_map.is_empty() {
-                continue;
+        for (account, entry) in Self::merge_block_deltas(drained_blocks) {
+            let epoch_key = Self::make_epoch_key(&account, epoch);
+            change_count += 1;
+
+            // Persist rewards
+            if config.store_rewards_history {
+                batch.insert(
+                    &self.rewards_history,
+                    &epoch_key,
+                    to_vec(&entry.reward_history)?,
+                );
             }
 
-            for (account, entry) in block_map {
-                change_count += 1;
-                let account_key = account.get_hash();
+            // Persist active stake
+            if config.store_active_stake_history {
+                batch.insert(
+                    &self.active_stake_history,
+                    &epoch_key,
+                    to_vec(&entry.active_stake_history)?,
+                );
+            }
 
-                // Persist rewards
-                if persist_rewards_history {
-                    let mut live: Vec<RewardHistory> = self
-                        .rewards_history
-                        .get(&account_key)?
-                        .map(|bytes| decode(&bytes))
-                        .transpose()?
-                        .unwrap_or_default();
-
-                    if let Some(rewards) = &entry.reward_history {
-                        for reward in rewards {
-                            live.push(reward.clone())
-                        }
-                    }
-
-                    batch.insert(&self.rewards_history, &account_key, to_vec(&live)?);
-                }
-
-                // Persist active stake
-                if persist_active_stake_history {
-                    let mut live: Vec<ActiveStakeHistory> = self
-                        .active_stake_history
-                        .get(&account_key)?
-                        .map(|bytes| decode(&bytes))
-                        .transpose()?
-                        .unwrap_or_default();
-
-                    if let Some(deltas) = &entry.active_stake_history {
-                        for delta in deltas {
-                            live.push(delta.clone());
-                        }
-                    }
-
-                    batch.insert(&self.active_stake_history, &account_key, to_vec(&live)?);
-                }
-
-                // Persist registrations
-                if persist_registration_history {
-                    let mut live: Vec<RegistrationUpdate> = self
-                        .registration_history
-                        .get(&account_key)?
-                        .map(|bytes| decode(&bytes))
-                        .transpose()?
-                        .unwrap_or_default();
-
-                    if let Some(updates) = &entry.registration_history {
-                        live.extend(updates.iter().cloned());
-                    }
-
-                    batch.insert(&self.registration_history, &account_key, to_vec(&live)?);
-                }
-
-                // Persist delegations
-                if persist_delegation_history {
-                    let mut live: Vec<DelegationUpdate> = self
-                        .delegation_history
-                        .get(&account_key)?
-                        .map(|bytes| decode(&bytes))
-                        .transpose()?
-                        .unwrap_or_default();
-
-                    if let Some(updates) = &entry.delegation_history {
-                        live.extend(updates.iter().cloned());
-                    }
-
-                    batch.insert(&self.delegation_history, &account_key, to_vec(&live)?);
-                }
-
-                // Persist withdrawals
-                if persist_withdrawal_history {
-                    let mut live: Vec<AccountWithdrawal> = self
-                        .withdrawal_history
-                        .get(&account_key)?
-                        .map(|bytes| decode(&bytes))
-                        .transpose()?
-                        .unwrap_or_default();
-
-                    if let Some(updates) = &entry.withdrawal_history {
-                        live.extend(updates.iter().cloned());
-                    }
-
-                    batch.insert(&self.withdrawal_history, &account_key, to_vec(&live)?);
-                }
-
-                // Persist MIRs
-                if persist_mir_history {
-                    let mut live: Vec<AccountWithdrawal> = self
-                        .mir_history
-                        .get(&account_key)?
-                        .map(|bytes| decode(&bytes))
-                        .transpose()?
-                        .unwrap_or_default();
-
-                    if let Some(updates) = &entry.mir_history {
-                        live.extend(updates.iter().cloned());
-                    }
-
-                    batch.insert(&self.mir_history, &account_key, to_vec(&live)?);
-                }
-
-                // Persist new addresses
-                if persist_addresses {
-                    let mut live: Vec<ShelleyAddress> = self
-                        .addresses
-                        .get(&account_key)?
-                        .map(|bytes| decode(&bytes))
-                        .transpose()?
-                        .unwrap_or_default();
-
-                    if let Some(updates) = &entry.addresses {
-                        live.extend(updates.iter().cloned());
-                    }
-
-                    batch.insert(&self.addresses, &account_key, to_vec(&live)?);
+            // Persist account delegation updates
+            if config.store_delegation_history {
+                if let Some(updates) = &entry.delegation_history {
+                    batch.insert(&self.delegation_history, &epoch_key, to_vec(&updates)?);
                 }
             }
-        }
 
-        // Metadata markers
-        if persist_rewards_history {
-            batch.insert(
-                &self.rewards_history,
-                ACCOUNT_REWARDS_HISTORY_COUNTER,
-                &epoch.to_le_bytes(),
-            );
-        }
-        if persist_active_stake_history {
-            batch.insert(
-                &self.active_stake_history,
-                ACCOUNT_ACTIVE_STAKE_HISTORY_COUNTER,
-                &epoch.to_le_bytes(),
-            );
-        }
-        if persist_delegation_history {
-            batch.insert(
-                &self.delegation_history,
-                ACCOUNT_DELEGATION_HISTORY_COUNTER,
-                &epoch.to_le_bytes(),
-            );
-        }
-        if persist_registration_history {
-            batch.insert(
-                &self.registration_history,
-                ACCOUNT_REGISTRATION_HISTORY_COUNTER,
-                &epoch.to_le_bytes(),
-            );
-        }
-        if persist_withdrawal_history {
-            batch.insert(
-                &self.withdrawal_history,
-                ACCOUNT_WITHDRAWAL_HISTORY_COUNTER,
-                &epoch.to_le_bytes(),
-            );
-        }
-        if persist_mir_history {
-            batch.insert(
-                &self.mir_history,
-                ACCOUNT_MIR_HISTORY_COUNTER,
-                &epoch.to_le_bytes(),
-            );
-        }
-        if persist_addresses {
-            batch.insert(
-                &self.addresses,
-                ACCOUNT_ADDRESSES_COUNTER,
-                &epoch.to_le_bytes(),
-            );
+            // Persist account registration updates
+            if config.store_registration_history {
+                if let Some(updates) = &entry.registration_history {
+                    batch.insert(&self.registration_history, &epoch_key, to_vec(&updates)?);
+                }
+            }
+
+            // Persist withdrawal updates
+            if config.store_withdrawal_history {
+                if let Some(updates) = &entry.withdrawal_history {
+                    batch.insert(&self.withdrawal_history, &epoch_key, to_vec(&updates)?);
+                }
+            }
+
+            // Persist MIR updates
+            if config.store_mir_history {
+                if let Some(updates) = &entry.mir_history {
+                    batch.insert(&self.mir_history, &epoch_key, to_vec(&updates)?);
+                }
+            }
+
+            // Persist address updates
+            // TODO: Deduplicate addresses across epochs
+            if config.store_addresses {
+                if let Some(updates) = &entry.addresses {
+                    batch.insert(&self.addresses, &epoch_key, to_vec(&updates)?);
+                }
+            }
         }
 
         match batch.commit() {
             Ok(_) => {
-                info!("committed {change_count} address changes for epoch {epoch}");
+                info!("committed {change_count} account changes for epoch {epoch}");
                 Ok(())
             }
             Err(e) => {
@@ -345,286 +155,183 @@ impl ImmutableHistoricalAccountStore {
         &self,
         account: &StakeCredential,
     ) -> Result<Option<Vec<RewardHistory>>> {
-        let key = account.get_hash();
+        let mut immutable_rewards =
+            self.collect_partition::<RewardHistory>(&self.rewards_history, &account.get_hash())?;
 
-        let mut live: Vec<RewardHistory> = self
-            .rewards_history
-            .get(&key)?
-            .map(|bytes| decode(&bytes))
-            .transpose()?
-            .unwrap_or_default();
+        self.merge_pending(
+            account,
+            |e| e.reward_history.as_ref(),
+            &mut immutable_rewards,
+        )
+        .await;
 
-        let pending = self.pending.lock().await;
-        for block_map in pending.iter() {
-            if let Some(entry) = block_map.get(account) {
-                if let Some(deltas) = &entry.reward_history {
-                    for delta in deltas {
-                        live.push(delta.clone());
-                    }
-                }
-            }
-        }
-
-        if live.is_empty() {
-            Ok(None)
-        } else {
-            let vec: Vec<_> = live.into_iter().collect();
-            Ok(Some(vec))
-        }
+        Ok((!immutable_rewards.is_empty()).then_some(immutable_rewards))
     }
 
     pub async fn _get_active_stake_history(
         &self,
         account: &StakeCredential,
     ) -> Result<Option<Vec<ActiveStakeHistory>>> {
-        let key = account.get_hash();
+        let mut immutable_active_stake = self.collect_partition::<ActiveStakeHistory>(
+            &self.active_stake_history,
+            &account.get_hash(),
+        )?;
 
-        let mut live: Vec<ActiveStakeHistory> = self
-            .active_stake_history
-            .get(&key)?
-            .map(|bytes| decode(&bytes))
-            .transpose()?
-            .unwrap_or_default();
+        self.merge_pending(
+            account,
+            |e| e.active_stake_history.as_ref(),
+            &mut immutable_active_stake,
+        )
+        .await;
 
-        let pending = self.pending.lock().await;
-        for block_map in pending.iter() {
-            if let Some(entry) = block_map.get(account) {
-                if let Some(deltas) = &entry.active_stake_history {
-                    for delta in deltas {
-                        live.push(delta.clone());
-                    }
-                }
-            }
-        }
-
-        if live.is_empty() {
-            Ok(None)
-        } else {
-            let vec: Vec<_> = live.into_iter().collect();
-            Ok(Some(vec))
-        }
+        Ok((!immutable_active_stake.is_empty()).then_some(immutable_active_stake))
     }
 
     pub async fn _get_delegation_history(
         &self,
         account: &StakeCredential,
     ) -> Result<Option<Vec<DelegationUpdate>>> {
-        let key = account.get_hash();
-        let mut live: Vec<DelegationUpdate> = self
-            .delegation_history
-            .get(&key)?
-            .map(|bytes| decode(&bytes))
-            .transpose()?
-            .unwrap_or_default();
+        let mut immutable_delegations = self
+            .collect_partition::<DelegationUpdate>(&self.delegation_history, &account.get_hash())?;
 
-        let pending = self.pending.lock().await;
-        for block_map in pending.iter() {
-            if let Some(entry) = block_map.get(account) {
-                if let Some(updates) = &entry.delegation_history {
-                    live.extend(updates.iter().cloned());
-                }
-            }
-        }
+        self.merge_pending(
+            account,
+            |e| e.delegation_history.as_ref(),
+            &mut immutable_delegations,
+        )
+        .await;
 
-        if live.is_empty() {
-            Ok(None)
-        } else {
-            Ok(Some(live))
-        }
+        Ok((!immutable_delegations.is_empty()).then_some(immutable_delegations))
     }
 
     pub async fn _get_registration_history(
         &self,
         account: &StakeCredential,
     ) -> Result<Option<Vec<RegistrationUpdate>>> {
-        let key = account.get_hash();
-        let mut live: Vec<RegistrationUpdate> = self
-            .registration_history
-            .get(&key)?
-            .map(|bytes| decode(&bytes))
-            .transpose()?
-            .unwrap_or_default();
+        let mut immutable_registrations = self.collect_partition::<RegistrationUpdate>(
+            &self.registration_history,
+            &account.get_hash(),
+        )?;
 
-        let pending = self.pending.lock().await;
-        for block_map in pending.iter() {
-            if let Some(entry) = block_map.get(account) {
-                if let Some(updates) = &entry.registration_history {
-                    live.extend(updates.iter().cloned());
-                }
-            }
-        }
+        self.merge_pending(
+            account,
+            |e| e.registration_history.as_ref(),
+            &mut immutable_registrations,
+        )
+        .await;
 
-        if live.is_empty() {
-            Ok(None)
-        } else {
-            Ok(Some(live))
-        }
+        Ok((!immutable_registrations.is_empty()).then_some(immutable_registrations))
     }
 
     pub async fn _get_withdrawal_history(
         &self,
         account: &StakeCredential,
     ) -> Result<Option<Vec<AccountWithdrawal>>> {
-        let key = account.get_hash();
-        let mut live: Vec<AccountWithdrawal> = self
-            .withdrawal_history
-            .get(&key)?
-            .map(|bytes| decode(&bytes))
-            .transpose()?
-            .unwrap_or_default();
+        let mut immutable_withdrawals = self.collect_partition::<AccountWithdrawal>(
+            &self.withdrawal_history,
+            &account.get_hash(),
+        )?;
 
-        let pending = self.pending.lock().await;
-        for block_map in pending.iter() {
-            if let Some(entry) = block_map.get(account) {
-                if let Some(updates) = &entry.withdrawal_history {
-                    live.extend(updates.iter().cloned());
-                }
-            }
-        }
+        self.merge_pending(
+            account,
+            |e| e.withdrawal_history.as_ref(),
+            &mut immutable_withdrawals,
+        )
+        .await;
 
-        if live.is_empty() {
-            Ok(None)
-        } else {
-            Ok(Some(live))
-        }
+        Ok((!immutable_withdrawals.is_empty()).then_some(immutable_withdrawals))
     }
 
     pub async fn _get_mir_history(
         &self,
         account: &StakeCredential,
     ) -> Result<Option<Vec<AccountWithdrawal>>> {
-        let key = account.get_hash();
-        let mut live: Vec<AccountWithdrawal> = self
-            .mir_history
-            .get(&key)?
-            .map(|bytes| decode(&bytes))
-            .transpose()?
-            .unwrap_or_default();
+        let mut immutable_mirs =
+            self.collect_partition::<AccountWithdrawal>(&self.mir_history, &account.get_hash())?;
 
-        let pending = self.pending.lock().await;
-        for block_map in pending.iter() {
-            if let Some(entry) = block_map.get(account) {
-                if let Some(updates) = &entry.mir_history {
-                    live.extend(updates.iter().cloned());
-                }
-            }
-        }
+        self.merge_pending(account, |e| e.mir_history.as_ref(), &mut immutable_mirs).await;
 
-        if live.is_empty() {
-            Ok(None)
-        } else {
-            Ok(Some(live))
-        }
+        Ok((!immutable_mirs.is_empty()).then_some(immutable_mirs))
     }
 
     pub async fn _get_addresses(
         &self,
         account: &StakeCredential,
     ) -> Result<Option<Vec<ShelleyAddress>>> {
-        let key = account.get_hash();
-        let mut live: Vec<ShelleyAddress> = self
-            .mir_history
-            .get(&key)?
-            .map(|bytes| decode(&bytes))
-            .transpose()?
-            .unwrap_or_default();
+        let mut immutable_addresses =
+            self.collect_partition::<ShelleyAddress>(&self.addresses, &account.get_hash())?;
 
-        let pending = self.pending.lock().await;
-        for block_map in pending.iter() {
+        self.merge_pending(account, |e| e.addresses.as_ref(), &mut immutable_addresses).await;
+
+        Ok((!immutable_addresses.is_empty()).then_some(immutable_addresses))
+    }
+
+    fn merge_block_deltas(
+        block_deltas: Vec<HashMap<StakeCredential, AccountEntry>>,
+    ) -> HashMap<StakeCredential, AccountEntry> {
+        block_deltas.into_par_iter().reduce(HashMap::new, |mut acc, block_map| {
+            for (cred, entry) in block_map {
+                let agg_entry = acc.entry(cred).or_default();
+
+                Self::extend_opt_vec(&mut agg_entry.reward_history, entry.reward_history);
+                Self::extend_opt_vec(
+                    &mut agg_entry.active_stake_history,
+                    entry.active_stake_history,
+                );
+                Self::extend_opt_vec(&mut agg_entry.delegation_history, entry.delegation_history);
+                Self::extend_opt_vec(
+                    &mut agg_entry.registration_history,
+                    entry.registration_history,
+                );
+                Self::extend_opt_vec(&mut agg_entry.withdrawal_history, entry.withdrawal_history);
+                Self::extend_opt_vec(&mut agg_entry.mir_history, entry.mir_history);
+                Self::extend_opt_vec(&mut agg_entry.addresses, entry.addresses);
+            }
+            acc
+        })
+    }
+
+    #[allow(dead_code)]
+    fn collect_partition<T>(&self, partition: &Partition, prefix: &[u8]) -> Result<Vec<T>>
+    where
+        T: for<'a> minicbor::Decode<'a, ()>,
+    {
+        let mut out = Vec::new();
+        for result in partition.prefix(prefix) {
+            let (_key, bytes) = result?;
+            let vals: Vec<T> = decode(&bytes)?;
+            out.extend(vals);
+        }
+        Ok(out)
+    }
+
+    #[allow(dead_code)]
+    async fn merge_pending<T, F>(&self, account: &StakeCredential, f: F, out: &mut Vec<T>)
+    where
+        F: Fn(&AccountEntry) -> Option<&Vec<T>>,
+        T: Clone,
+    {
+        for block_map in self.pending.lock().await.iter() {
             if let Some(entry) = block_map.get(account) {
-                if let Some(updates) = &entry.addresses {
-                    live.extend(updates.iter().cloned());
+                if let Some(data) = f(entry) {
+                    out.extend(data.iter().cloned());
                 }
             }
         }
-
-        if live.is_empty() {
-            Ok(None)
-        } else {
-            Ok(Some(live))
-        }
     }
 
-    pub async fn get_last_epoch_stored(&self) -> Result<Option<u64>> {
-        let read_marker = |partition: Partition, key: &'static [u8]| async move {
-            task::spawn_blocking(move || {
-                Ok::<_, anyhow::Error>(match partition.get(key)? {
-                    Some(bytes) if bytes.len() == 8 => {
-                        let mut arr = [0u8; 8];
-                        arr.copy_from_slice(&bytes);
-                        let val = u64::from_le_bytes(arr);
-                        if val == u64::MAX {
-                            None
-                        } else {
-                            Some(val)
-                        }
-                    }
-                    _ => None,
-                })
-            })
-            .await?
-        };
-
-        let ash = read_marker(
-            self.active_stake_history.clone(),
-            ACCOUNT_ACTIVE_STAKE_HISTORY_COUNTER,
-        )
-        .await?;
-        let dh = read_marker(
-            self.delegation_history.clone(),
-            ACCOUNT_DELEGATION_HISTORY_COUNTER,
-        )
-        .await?;
-        let rh = read_marker(
-            self.registration_history.clone(),
-            ACCOUNT_REGISTRATION_HISTORY_COUNTER,
-        )
-        .await?;
-        let wh = read_marker(
-            self.withdrawal_history.clone(),
-            ACCOUNT_WITHDRAWAL_HISTORY_COUNTER,
-        )
-        .await?;
-        let mh = read_marker(self.mir_history.clone(), ACCOUNT_MIR_HISTORY_COUNTER).await?;
-        let a = read_marker(self.addresses.clone(), ACCOUNT_ADDRESSES_COUNTER).await?;
-        let min_epoch = [ash, dh, rh, wh, mh, a].into_iter().flatten().min();
-
-        if let Some(epoch) = min_epoch {
-            info!("last epoch already stored across partitions: {epoch}");
-        } else {
-            info!("no epoch markers found across partitions");
-        }
-
-        Ok(min_epoch)
+    fn make_epoch_key(account: &StakeCredential, epoch: u32) -> [u8; 32] {
+        let mut key = [0u8; 32];
+        key[..28].copy_from_slice(&account.get_hash());
+        key[28..32].copy_from_slice(&epoch.to_be_bytes());
+        key
     }
 
-    async fn epoch_exists(
-        &self,
-        partition: Partition,
-        key: &'static [u8],
-        epoch: u64,
-    ) -> Result<bool> {
-        let exists = task::spawn_blocking(move || -> Result<bool> {
-            let bytes = match partition.get(key)? {
-                Some(b) if b.len() == 8 => b,
-                _ => return Ok(false),
-            };
-
-            let mut arr = [0u8; 8];
-            arr.copy_from_slice(&bytes);
-            let last_epoch = u64::from_le_bytes(arr);
-
-            Ok(epoch <= last_epoch)
-        })
-        .await??;
-
-        if exists {
-            let key_name = std::str::from_utf8(key)
-                .map(|s| s.to_string())
-                .unwrap_or_else(|_| format!("{:?}", key));
-            info!("epoch {epoch} already stored for {key_name}");
+    fn extend_opt_vec<T>(target: &mut Option<Vec<T>>, src: Option<Vec<T>>) {
+        if let Some(mut v) = src {
+            if !v.is_empty() {
+                target.get_or_insert_with(Vec::new).append(&mut v);
+            }
         }
-
-        Ok(exists)
     }
 }

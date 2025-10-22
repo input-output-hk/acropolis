@@ -18,6 +18,8 @@ async-trait = "0.1"
 bech32 = "0.11"
 bigdecimal = "0.4.8"
 bitmask-enum = "2.2"
+blake2 = "0.10.6"
+bytes = { version = "1", features = ["serde"] }
 bs58 = "0.5"
 chrono = { workspace = true }
 crc = "3"
@@ -25,10 +27,12 @@ gcd = "2.3"
 fraction = "0.15"
 hex = { workspace = true }
 lf-queue = "0.1.0"
+memmap2 = "0.9"
 num-rational = { version = "0.4.2", features = ["serde"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_with = { workspace = true, features = ["base64"] }
+tempfile = "3"
 tokio = { workspace = true }
 tracing = { workspace = true }
 futures = "0.3.31"
@@ -38,7 +42,9 @@ imbl = { workspace = true }
 dashmap = { workspace = true }
 rayon = "1.11.0"
 cryptoxide = "0.5.1"
-blake2 = "0.10.6"
+sha2 = "0.10.8"
+caryatid_process.workspace = true
+config.workspace = true
 
 [lib]
 crate-type = ["rlib"]

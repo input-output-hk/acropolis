@@ -65,7 +65,7 @@ impl HistoricalAccountsState {
         // Background task to persist epochs sequentially
         const MAX_PENDING_PERSISTS: usize = 1;
         let (persist_tx, mut persist_rx) = mpsc::channel::<(
-            u64,
+            u32,
             Arc<ImmutableHistoricalAccountStore>,
             HistoricalAccountsConfig,
         )>(MAX_PENDING_PERSISTS);
@@ -81,10 +81,11 @@ impl HistoricalAccountsState {
             // Get a mutable state
             let mut state = state_mutex.lock().await;
 
-            // Read per-block topics in parallel
+            // Create all per-block message futures upfront before processing messages sequentially
             let certs_message_f = certs_subscription.read();
             let address_deltas_message_f = address_deltas_subscription.read();
             let withdrawals_message_f = withdrawals_subscription.read();
+
             let mut current_block: Option<BlockInfo> = None;
 
             // Use certs_message as the synchroniser
@@ -125,7 +126,7 @@ impl HistoricalAccountsState {
                         CardanoMessage::StakeRewardDeltas(rewards_msg),
                     )) => {
                         let span = info_span!(
-                            "histoical_account_state.handle_reward_deltas",
+                            "historical_account_state.handle_reward_deltas",
                             block = block_info.number
                         );
                         async {
@@ -147,7 +148,7 @@ impl HistoricalAccountsState {
             match certs_message.as_ref() {
                 Message::Cardano((block_info, CardanoMessage::TxCertificates(tx_certs_msg))) => {
                     let span = info_span!(
-                        "histoical_account_state.handle_certs",
+                        "historical_account_state.handle_certs",
                         block = block_info.number
                     );
                     async {
@@ -169,7 +170,7 @@ impl HistoricalAccountsState {
             match message.as_ref() {
                 Message::Cardano((block_info, CardanoMessage::Withdrawals(withdrawals_msg))) => {
                     let span = info_span!(
-                        "histoical_account_state.handle_withdrawals",
+                        "historical_account_state.handle_withdrawals",
                         block = block_info.number
                     );
                     async {
@@ -191,7 +192,7 @@ impl HistoricalAccountsState {
             match message.as_ref() {
                 Message::Cardano((block_info, CardanoMessage::AddressDeltas(deltas_msg))) => {
                     let span = info_span!(
-                        "histoical_account_state.handle_address_deltas",
+                        "historical_account_state.handle_address_deltas",
                         block = block_info.number
                     );
                     async {
@@ -209,7 +210,7 @@ impl HistoricalAccountsState {
                         state.prune_volatile().await;
                         if let Err(e) = persist_tx
                             .send((
-                                block_info.epoch,
+                                block_info.epoch as u32,
                                 state.immutable.clone(),
                                 state.config.clone(),
                             ))
@@ -283,7 +284,6 @@ impl HistoricalAccountsState {
             db_path: config
                 .get_string(DEFAULT_HISTORICAL_ACCOUNTS_DB_PATH.0)
                 .unwrap_or(DEFAULT_HISTORICAL_ACCOUNTS_DB_PATH.1.to_string()),
-            skip_until: None,
             store_rewards_history: config
                 .get_bool(DEFAULT_STORE_REWARDS_HISTORY.0)
                 .unwrap_or(DEFAULT_STORE_REWARDS_HISTORY.1),
