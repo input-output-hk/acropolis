@@ -78,7 +78,7 @@ impl EpochsHistoryState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acropolis_common::{BlockHash, BlockStatus, Era};
+    use acropolis_common::{BlockHash, BlockStatus, Era, NetworkId};
 
     fn make_block(epoch: u64) -> BlockInfo {
         BlockInfo {
@@ -89,6 +89,7 @@ mod tests {
             epoch,
             epoch_slot: 99,
             new_epoch: false,
+            network_id: NetworkId::default(),
             timestamp: 99999,
             era: Era::Conway,
         }

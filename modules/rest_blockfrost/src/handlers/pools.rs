@@ -667,7 +667,7 @@ async fn handle_pools_spo_blockfrost(
             stake_addresses: pool_info
                 .pool_owners
                 .iter()
-                .map(|owner| owner.to_stake_address(None))
+                .map(|owner| owner.to_stake_address(handlers_config.network_id.clone().into()))
                 .collect(),
         },
     )));

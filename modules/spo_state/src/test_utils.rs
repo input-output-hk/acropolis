@@ -1,9 +1,6 @@
-use acropolis_common::{
-    messages::{
-        EpochActivityMessage, SPORewardsMessage, SPOStakeDistributionMessage, TxCertificatesMessage,
-    },
-    BlockHash, BlockInfo, BlockStatus, Era, TxCertificate,
-};
+use acropolis_common::{messages::{
+    EpochActivityMessage, SPORewardsMessage, SPOStakeDistributionMessage, TxCertificatesMessage,
+}, BlockHash, BlockInfo, BlockStatus, Era, NetworkId, TxCertificate};
 
 use crate::store_config::StoreConfig;
 
@@ -68,6 +65,7 @@ pub fn new_block(epoch: u64) -> BlockInfo {
         epoch,
         epoch_slot: 0,
         new_epoch: true,
+        network_id: NetworkId::default(),
         timestamp: epoch,
         era: Era::Byron,
     }

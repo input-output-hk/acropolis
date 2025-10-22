@@ -4,10 +4,14 @@ use crate::types::{
     DRepInfoREST, DRepMetadataREST, DRepUpdateREST, DRepVoteREST, DRepsListREST, ProposalVoteREST,
     VoterRoleREST,
 };
-use acropolis_common::{messages::{Message, RESTResponse, StateQuery, StateQueryResponse}, queries::{
-    accounts::{AccountsStateQuery, AccountsStateQueryResponse},
-    governance::{GovernanceStateQuery, GovernanceStateQueryResponse},
-}, Credential, GovActionId, StakeAddress, TxHash, Voter};
+use acropolis_common::{
+    messages::{Message, RESTResponse, StateQuery, StateQueryResponse},
+    queries::{
+        accounts::{AccountsStateQuery, AccountsStateQueryResponse},
+        governance::{GovernanceStateQuery, GovernanceStateQueryResponse},
+    },
+    Credential, GovActionId, StakeAddress, TxHash, Voter,
+};
 use anyhow::Result;
 use caryatid_sdk::Context;
 use reqwest::Client;
@@ -95,8 +99,11 @@ pub async fn handle_single_drep_blockfrost(
         )) => {
             let active = !response.info.retired && !response.info.expired;
 
-            let stake_addresses =
-                response.delegators.iter().map(|addr| addr.to_stake_address(None)).collect();
+            let stake_addresses = response
+                .delegators
+                .iter()
+                .map(|addr| addr.to_stake_address(handlers_config.network_id.clone().into()))
+                .collect();
 
             let sum_msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
                 AccountsStateQuery::GetAccountsBalancesSum { stake_addresses },
@@ -203,8 +210,8 @@ pub async fn handle_drep_delegators_blockfrost(
                 };
 
                 let hash = addr.get_hash();
-                // TODO: NETWORK ID
-                let stake_address = addr.to_stake_address(None);
+                let stake_address =
+                    addr.to_stake_address(handlers_config.network_id.clone().into());
                 stake_addresses.push(stake_address.clone());
                 stake_key_to_bech32.insert(hash, bech32);
             }

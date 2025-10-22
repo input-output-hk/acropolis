@@ -528,10 +528,10 @@ mod tests {
 
     fn create_stake_address(hash: &[u8]) -> StakeAddress {
         StakeAddress::new(
-            AddressNetwork::Main,
             StakeAddressPayload::StakeKeyHash(
                 hash.to_vec().try_into().expect("Invalid hash length"),
             ),
+            AddressNetwork::Main,
         )
     }
 

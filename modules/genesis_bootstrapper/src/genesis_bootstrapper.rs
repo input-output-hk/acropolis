@@ -7,8 +7,8 @@ use acropolis_common::{
         CardanoMessage, GenesisCompleteMessage, GenesisUTxOsMessage, Message, PotDeltasMessage,
         UTXODeltasMessage,
     },
-    Address, BlockHash, BlockInfo, BlockStatus, ByronAddress, Era, Lovelace, LovelaceDelta, Pot,
-    PotDelta, TxIdentifier, TxOutRef, TxOutput, UTXODelta, UTxOIdentifier, Value,
+    Address, BlockHash, BlockInfo, BlockStatus, ByronAddress, Era, Lovelace, LovelaceDelta,
+    NetworkId, Pot, PotDelta, TxIdentifier, TxOutRef, TxOutput, UTXODelta, UTxOIdentifier, Value,
 };
 use anyhow::Result;
 use blake2::{digest::consts::U32, Blake2b, Digest};
@@ -128,6 +128,7 @@ impl GenesisBootstrapper {
                     hash: BlockHash::default(),
                     epoch: 0,
                     epoch_slot: 0,
+                    network_id: NetworkId::from(network_name),
                     new_epoch: false,
                     timestamp: byron_genesis.start_time,
                     era: Era::Byron,

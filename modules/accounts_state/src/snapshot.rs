@@ -165,12 +165,12 @@ impl Snapshot {
             return 0;
         };
 
-        let addr_set: std::collections::HashSet<_> = addresses.iter().collect();
+        let address_set: std::collections::HashSet<_> = addresses.iter().collect();
         snapshot_spo
             .delegators
             .iter()
-            .filter_map(|(addr, amount)| {
-                if addr_set.contains(&addr.get_credential()) {
+            .filter_map(|(address, amount)| {
+                if address_set.contains(&address.get_credential()) {
                     Some(*amount)
                 } else {
                     None

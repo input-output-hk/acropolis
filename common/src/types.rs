@@ -26,6 +26,16 @@ pub enum NetworkId {
     Mainnet,
 }
 
+impl From<String> for NetworkId {
+    fn from(s: String) -> Self {
+        match s.as_str() {
+            "testnet" => NetworkId::Testnet,
+            "mainnet" => NetworkId::Mainnet,
+            _ => NetworkId::Mainnet,
+        }
+    }
+}
+
 /// Protocol era
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
@@ -119,6 +129,9 @@ pub struct BlockInfo {
     /// UNIX timestamp
     #[serde(default)]
     pub timestamp: u64,
+
+    /// Network ID
+    pub network_id: NetworkId,
 
     /// Protocol era
     pub era: Era,
@@ -614,7 +627,7 @@ impl Credential {
 pub type StakeCredential = Credential;
 
 impl StakeCredential {
-    pub fn to_stake_address(&self, network: Option<AddressNetwork>) -> StakeAddress {
+    pub fn to_stake_address(&self, network: AddressNetwork) -> StakeAddress {
         let payload = match self {
             StakeCredential::AddrKeyHash(hash) => StakeAddressPayload::StakeKeyHash(
                 hash.clone().try_into().expect("Invalid hash length"),
@@ -623,7 +636,7 @@ impl StakeCredential {
                 hash.clone().try_into().expect("Invalid hash length"),
             ),
         };
-        StakeAddress::new(network.unwrap_or(AddressNetwork::Main), payload)
+        StakeAddress::new(payload, network)
     }
 }
 

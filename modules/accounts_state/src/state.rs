@@ -14,9 +14,9 @@ use acropolis_common::{
     protocol_params::ProtocolParams,
     stake_addresses::{StakeAddressMap, StakeAddressState},
     BlockInfo, DRepChoice, DRepCredential, DelegatedStake, InstantaneousRewardSource,
-    InstantaneousRewardTarget, KeyHash, Lovelace, MoveInstantaneousReward, PoolLiveStakeInfo,
-    PoolRegistration, Pot, SPORewards, StakeAddress, StakeCredential, StakeRewardDelta,
-    TxCertificate,
+    InstantaneousRewardTarget, KeyHash, Lovelace, MoveInstantaneousReward, NetworkId,
+    PoolLiveStakeInfo, PoolRegistration, Pot, SPORewards, StakeAddress, StakeCredential,
+    StakeRewardDelta, TxCertificate,
 };
 use anyhow::Result;
 use imbl::OrdMap;
@@ -94,6 +94,9 @@ pub struct State {
 
     /// List of SPOs (by operator ID) retiring in the current epoch
     retiring_spos: Vec<KeyHash>,
+
+    /// Network ID
+    network_id: NetworkId,
 
     /// Map of staking address values
     /// Wrapped in an Arc so it doesn't get cloned in full by StateHistory
@@ -550,7 +553,8 @@ impl State {
                     // Transfer to (in theory also from) stake addresses from (to) a pot
                     let mut total_value: u64 = 0;
                     for (credential, value) in deltas.iter() {
-                        let stake_address = credential.to_stake_address(None); // Need to convert credential to address
+                        let stake_address =
+                            credential.to_stake_address(self.network_id.clone().into());
 
                         // Get old stake address state, or create one
                         let mut stake_addresses = self.stake_addresses.lock().unwrap();
@@ -792,8 +796,8 @@ impl State {
 
     /// Register a stake address, with a specified deposit if known
     fn register_stake_address(&mut self, credential: &StakeCredential, deposit: Option<Lovelace>) {
-        // TODO: Handle network
-        let stake_address = credential.to_stake_address(None);
+
+        let stake_address = credential.to_stake_address(self.network_id.clone().into());
 
         // Stake addresses can be registered after being used in UTXOs
         let mut stake_addresses = self.stake_addresses.lock().unwrap();
@@ -823,8 +827,8 @@ impl State {
 
     /// Deregister a stake address, with specified refund if known
     fn deregister_stake_address(&mut self, credential: &StakeCredential, refund: Option<Lovelace>) {
-        // TODO: Handle network
-        let stake_address = credential.to_stake_address(None);
+
+        let stake_address = credential.to_stake_address(self.network_id.clone().into());
 
         // Check if it existed
         let mut stake_addresses = self.stake_addresses.lock().unwrap();
@@ -860,8 +864,8 @@ impl State {
 
     /// Record a stake delegation
     fn record_stake_delegation(&mut self, credential: &StakeCredential, spo: &KeyHash) {
-        // TODO: Handle network
-        let stake_address = credential.to_stake_address(None);
+
+        let stake_address = credential.to_stake_address(self.network_id.clone().into());
         let mut stake_addresses = self.stake_addresses.lock().unwrap();
         stake_addresses.record_stake_delegation(&stake_address, spo);
     }
@@ -874,8 +878,8 @@ impl State {
 
     /// record a drep delegation
     fn record_drep_delegation(&mut self, credential: &StakeCredential, drep: &DRepChoice) {
-        // TODO: Handle network
-        let stake_address = credential.to_stake_address(None);
+
+        let stake_address = credential.to_stake_address(self.network_id.clone().into());
         let mut stake_addresses = self.stake_addresses.lock().unwrap();
         stake_addresses.record_drep_delegation(&stake_address, drep);
     }

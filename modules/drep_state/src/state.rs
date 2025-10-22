@@ -4,7 +4,7 @@ use acropolis_common::{messages::{Message, StateQuery, StateQueryResponse}, quer
     accounts::{AccountsStateQuery, AccountsStateQueryResponse, DEFAULT_ACCOUNTS_QUERY_TOPIC},
     get_query_topic,
     governance::{DRepActionUpdate, DRepUpdateEvent, VoteRecord},
-}, Anchor, Credential, DRepChoice, DRepCredential, KeyHash, Lovelace, StakeAddress, StakeCredential, TxCertificate, TxHash, Voter, VotingProcedures};
+}, Anchor, Credential, DRepChoice, DRepCredential, KeyHash, Lovelace, NetworkId, StakeAddress, StakeCredential, TxCertificate, TxHash, Voter, VotingProcedures};
 use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
 use serde_with::serde_as;
@@ -89,6 +89,7 @@ impl DRepStorageConfig {
 pub struct State {
     pub config: DRepStorageConfig,
     pub dreps: HashMap<DRepCredential, DRepRecord>,
+    pub network_id: NetworkId,
     pub historical_dreps: Option<HashMap<DRepCredential, HistoricalDRepState>>,
 }
 
@@ -97,6 +98,7 @@ impl State {
         Self {
             config,
             dreps: HashMap::new(),
+            network_id: NetworkId::default(),
             historical_dreps: if config.any_enabled() {
                 Some(HashMap::new())
             } else {
@@ -470,8 +472,7 @@ impl State {
         delegators: Vec<(&StakeCredential, &DRepChoice)>,
     ) -> Result<()> {
         let stake_keys: Vec<KeyHash> = delegators.iter().map(|(sc, _)| sc.get_hash()).collect();
-        // TODO: USE NETWORK ID
-        let stake_addresses: Vec<StakeAddress> = delegators.iter().map(|(k, _) | k.to_stake_address(None) ).collect();
+        let stake_addresses: Vec<StakeAddress> = delegators.iter().map(|(k, _) | k.to_stake_address(self.network_id.clone().into()) ).collect();
         let stake_key_to_input: HashMap<KeyHash, _> = delegators
             .iter()
             .zip(&stake_keys)

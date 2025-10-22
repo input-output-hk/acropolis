@@ -1,9 +1,19 @@
 //! Acropolis SPOState: State storage
 
-use acropolis_common::{crypto::keyhash_224, ledger_state::SPOState, messages::{
-    CardanoMessage, Message, SPOStateMessage, StakeAddressDeltasMessage,
-    StakeRewardDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
-}, params::TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH, queries::governance::VoteRecord, stake_addresses::StakeAddressMap, BlockInfo, KeyHash, PoolMetadata, PoolRegistration, PoolRegistrationWithPos, PoolRetirement, PoolRetirementWithPos, PoolUpdateEvent, Relay, StakeAddress, StakeCredential, TxCertificate, TxHash, Voter, VotingProcedures};
+use acropolis_common::{
+    crypto::keyhash_224,
+    ledger_state::SPOState,
+    messages::{
+        CardanoMessage, Message, SPOStateMessage, StakeAddressDeltasMessage,
+        StakeRewardDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
+    },
+    params::TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH,
+    queries::governance::VoteRecord,
+    stake_addresses::StakeAddressMap,
+    BlockInfo, KeyHash, NetworkId, PoolMetadata, PoolRegistration, PoolRegistrationWithPos,
+    PoolRetirement, PoolRetirementWithPos, PoolUpdateEvent, Relay, StakeAddress, StakeCredential,
+    TxCertificate, TxHash, Voter, VotingProcedures,
+};
 use anyhow::Result;
 use imbl::HashMap;
 use std::sync::{Arc, Mutex};
@@ -19,6 +29,8 @@ pub struct State {
     block: u64,
 
     epoch: u64,
+
+    network_id: NetworkId,
 
     spos: HashMap<Vec<u8>, PoolRegistration>,
 
@@ -48,6 +60,7 @@ impl State {
             pending_updates: HashMap::new(),
             pending_deregistrations: HashMap::new(),
             total_blocks_minted: HashMap::new(),
+            network_id: NetworkId::default(),
             historical_spos: if config.store_historical_state() {
                 Some(HashMap::new())
             } else {
@@ -98,6 +111,7 @@ impl From<SPOState> for State {
             store_config: StoreConfig::default(),
             block: 0,
             epoch: 0,
+            network_id: NetworkId::default(),
             spos,
             pending_updates: value.updates.into(),
             pending_deregistrations,
@@ -432,16 +446,18 @@ impl State {
             return;
         };
         let mut stake_addresses = stake_addresses.lock().unwrap();
-        stake_addresses.register_stake_address(&credential.to_stake_address(None));
+        stake_addresses
+            .register_stake_address(&credential.to_stake_address(self.network_id.clone().into()));
     }
 
     fn deregister_stake_address(&mut self, credential: &StakeCredential) {
         let Some(stake_addresses) = self.stake_addresses.as_ref() else {
             return;
         };
-        let stake_address = credential.to_stake_address(None);
+        let stake_address = credential.to_stake_address(self.network_id.clone().into());
         let mut stake_addresses = stake_addresses.lock().unwrap();
-        let old_spo = stake_addresses.get(&stake_address).map(|s| s.delegated_spo.clone()).flatten();
+        let old_spo =
+            stake_addresses.get(&stake_address).map(|s| s.delegated_spo.clone()).flatten();
 
         if stake_addresses.deregister_stake_address(&stake_address) {
             // update historical_spos
@@ -449,7 +465,9 @@ impl State {
                 if let Some(old_spo) = old_spo.as_ref() {
                     // remove delegators from old_spo
                     if let Some(historical_spo) = historical_spos.get_mut(old_spo) {
-                        if let Some(removed) = historical_spo.remove_delegator(&credential.to_stake_address(None)) {
+                        if let Some(removed) = historical_spo.remove_delegator(
+                            &credential.to_stake_address(self.network_id.clone().into()),
+                        ) {
                             if !removed {
                                 error!(
                                     "Historical SPO state for {} does not contain delegator {}",
@@ -471,9 +489,10 @@ impl State {
             return;
         };
         let hash = credential.get_hash();
-        let stake_address = credential.to_stake_address(None);
+        let stake_address = credential.to_stake_address(self.network_id.clone().into());
         let mut stake_addresses = stake_addresses.lock().unwrap();
-        let old_spo = stake_addresses.get(&stake_address).map(|s| s.delegated_spo.clone()).flatten();
+        let old_spo =
+            stake_addresses.get(&stake_address).map(|s| s.delegated_spo.clone()).flatten();
 
         if stake_addresses.record_stake_delegation(&stake_address, spo) {
             // update historical_spos
@@ -653,7 +672,10 @@ impl State {
         for delta in reward_deltas_msg.deltas.iter() {
             let mut stake_addresses = stake_addresses.lock().unwrap();
             if let Err(e) = stake_addresses.update_reward(&delta.stake_address, delta.delta) {
-                error!("Updating reward account {}: {e}", hex::encode(&delta.stake_address.get_hash()));
+                error!(
+                    "Updating reward account {}: {e}",
+                    hex::encode(&delta.stake_address.get_hash())
+                );
             }
         }
 
@@ -677,10 +699,7 @@ mod tests {
     use tokio::sync::Mutex;
 
     fn pool_owners_from_bytes(owners: Vec<Vec<u8>>) -> Vec<Credential> {
-        owners
-            .into_iter()
-            .map(|bytes| Credential::AddrKeyHash(bytes))
-            .collect()
+        owners.into_iter().map(|bytes| Credential::AddrKeyHash(bytes)).collect()
     }
 
     fn default_pool_registration(operator: Vec<u8>) -> PoolRegistration {

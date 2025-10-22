@@ -170,10 +170,7 @@ impl Storage for FileStorage {
 #[cfg(test)]
 mod test {
     use crate::upstream_cache::{Storage, UpstreamCacheImpl, UpstreamCacheRecord};
-    use acropolis_common::{
-        messages::{BlockBodyMessage, BlockHeaderMessage},
-        BlockHash, BlockInfo, BlockStatus, Era,
-    };
+    use acropolis_common::{messages::{BlockBodyMessage, BlockHeaderMessage}, BlockHash, BlockInfo, BlockStatus, Era, NetworkId};
     use anyhow::Result;
     use std::{collections::HashMap, sync::Arc};
 
@@ -186,6 +183,7 @@ mod test {
             epoch: 0,
             epoch_slot: n,
             new_epoch: false,
+            network_id: NetworkId::default(),
             timestamp: n,
             era: Era::default(),
         }

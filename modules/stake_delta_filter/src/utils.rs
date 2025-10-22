@@ -401,8 +401,9 @@ mod test {
     use crate::*;
     use acropolis_common::{
         messages::AddressDeltasMessage, Address, AddressDelta, BlockHash, BlockInfo, BlockStatus,
-        ByronAddress, Era, ShelleyAddress, ShelleyAddressDelegationPart, ShelleyAddressPaymentPart,
-        ShelleyAddressPointer, StakeAddress, StakeAddressPayload, ValueDelta,
+        ByronAddress, Era, NetworkId, ShelleyAddress, ShelleyAddressDelegationPart,
+        ShelleyAddressPaymentPart, ShelleyAddressPointer, StakeAddress, StakeAddressPayload,
+        ValueDelta,
     };
     use bech32::{Bech32, Hrp};
 
@@ -541,6 +542,7 @@ mod test {
             epoch: 1,
             epoch_slot: 14243,
             new_epoch: true,
+            network_id: NetworkId::default(),
             timestamp: 2498243,
             era: Era::Conway,
         };
