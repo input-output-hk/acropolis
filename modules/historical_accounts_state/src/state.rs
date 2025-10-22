@@ -91,6 +91,18 @@ pub struct HistoricalAccountsConfig {
     pub store_addresses: bool,
 }
 
+impl HistoricalAccountsConfig {
+    pub fn any_enabled(&self) -> bool {
+        self.store_rewards_history
+            || self.store_active_stake_history
+            || self.store_delegation_history
+            || self.store_registration_history
+            || self.store_withdrawal_history
+            || self.store_mir_history
+            || self.store_addresses
+    }
+}
+
 /// Overall state - stored per block
 #[derive(Clone)]
 pub struct State {
