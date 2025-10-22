@@ -269,7 +269,7 @@ mod tests {
         crypto::keyhash_224,
         protocol_params::{Nonce, NonceHash},
         state_history::{StateHistory, StateHistoryStore},
-        BlockHash, BlockInfo, BlockStatus, Era, NetworkId,
+        BlockHash, BlockInfo, BlockStatus, Era,
     };
     use tokio::sync::Mutex;
 
@@ -281,7 +281,6 @@ mod tests {
             hash: BlockHash::default(),
             epoch,
             epoch_slot: 99,
-            network_id: NetworkId::default(),
             new_epoch: false,
             timestamp: 99999,
             era: Era::Shelley,
@@ -296,7 +295,6 @@ mod tests {
             hash: BlockHash::default(),
             epoch,
             epoch_slot: 99,
-            network_id: NetworkId::default(),
             new_epoch: true,
             timestamp: 99999,
             era: Era::Shelley,
@@ -311,7 +309,6 @@ mod tests {
             hash: BlockHash::default(),
             epoch,
             epoch_slot: 99,
-            network_id: NetworkId::default(),
             new_epoch: false,
             timestamp: 99999,
             era: Era::Conway,

@@ -7,8 +7,7 @@ use acropolis_common::{
         AddressDeltasMessage, CardanoMessage, Message, StakeAddressDeltasMessage,
         TxCertificatesMessage,
     },
-    Address, BlockInfo, ShelleyAddressPointer, StakeAddress, StakeAddressPayload, StakeCredential,
-    TxCertificate,
+    Address, BlockInfo, ShelleyAddressPointer, TxCertificate,
 };
 use anyhow::Result;
 use serde_with::serde_as;
@@ -93,17 +92,7 @@ impl State {
                         cert_index: reg.cert_index,
                     };
 
-                    let stake_address = StakeAddress {
-                        network: self.params.network.clone(),
-                        payload: match &reg.stake_credential {
-                            StakeCredential::ScriptHash(h) => {
-                                StakeAddressPayload::ScriptHash(h.clone())
-                            }
-                            StakeCredential::AddrKeyHash(k) => {
-                                StakeAddressPayload::StakeKeyHash(k.clone())
-                            }
-                        },
-                    };
+                    let stake_address = reg.stake_address.clone();
 
                     // Sets pointer; updates max processed slot
                     self.pointer_cache.set_pointer(ptr, stake_address, block.slot);

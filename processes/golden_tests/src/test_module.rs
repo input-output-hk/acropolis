@@ -1,7 +1,7 @@
 use acropolis_common::{ledger_state::LedgerState, messages::{
     CardanoMessage, Message, RawTxsMessage, SnapshotDumpMessage, SnapshotMessage,
     SnapshotStateMessage,
-}, BlockHash, BlockInfo, BlockStatus, Era, NetworkId};
+}, BlockHash, BlockInfo, BlockStatus, Era};
 use anyhow::{Context as AnyhowContext, Result};
 use caryatid_sdk::{module, Context, Module};
 use config::Config;
@@ -43,7 +43,6 @@ impl TestModule {
                 slot: 1,
                 number: 1,
                 hash: BlockHash::default(),
-                network_id: NetworkId::default(),
                 epoch: 1,
                 epoch_slot: 1,
                 new_epoch: false,

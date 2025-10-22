@@ -54,7 +54,7 @@ impl<S: Clone + Default> StateHistory<S> {
 
     /// Get the current state assuming any rollback has been done
     /// Cloned for modification - call commit() when done
-    pub fn get_current_state(&self) -> S {
+    pub fn  get_current_state(&self) -> S {
         self.history.back().map(|entry| entry.state.clone()).unwrap_or_default()
     }
 

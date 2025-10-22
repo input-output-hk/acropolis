@@ -9,12 +9,9 @@ use acropolis_common::queries::{
     pools::DEFAULT_POOLS_QUERY_TOPIC,
     spdd::DEFAULT_SPDD_QUERY_TOPIC,
 };
-use acropolis_common::NetworkId;
 use config::Config;
 
 const DEFAULT_EXTERNAL_API_TIMEOUT: (&str, i64) = ("external_api_timeout", 3); // 3 seconds
-
-const DEFAULT_NETWORK_ID: (&str, &str) = ("network", "mainnet");
 
 #[derive(Clone)]
 pub struct HandlersConfig {
@@ -28,7 +25,6 @@ pub struct HandlersConfig {
     pub parameters_query_topic: String,
     pub external_api_timeout: u64,
     pub offchain_token_registry_url: String,
-    pub network_id: NetworkId,
 }
 
 impl From<Arc<Config>> for HandlersConfig {
@@ -73,11 +69,6 @@ impl From<Arc<Config>> for HandlersConfig {
             .get_string(DEFAULT_OFFCHAIN_TOKEN_REGISTRY_URL.0)
             .unwrap_or(DEFAULT_OFFCHAIN_TOKEN_REGISTRY_URL.1.to_string());
 
-        let network_id = config
-            .get_string(DEFAULT_NETWORK_ID.0)
-            .unwrap_or(DEFAULT_NETWORK_ID.1.to_string())
-            .into();
-
         Self {
             accounts_query_topic,
             assets_query_topic,
@@ -89,7 +80,6 @@ impl From<Arc<Config>> for HandlersConfig {
             parameters_query_topic,
             external_api_timeout,
             offchain_token_registry_url,
-            network_id,
         }
     }
 }

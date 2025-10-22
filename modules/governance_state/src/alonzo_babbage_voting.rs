@@ -113,7 +113,7 @@ mod tests {
     use crate::alonzo_babbage_voting::AlonzoBabbageVoting;
     use acropolis_common::{
         rational_number::rational_number_from_f32, AlonzoBabbageUpdateProposal,
-        AlonzoBabbageVotingOutcome, BlockHash, BlockInfo, BlockStatus, GenesisKeyhash, NetworkId,
+        AlonzoBabbageVotingOutcome, BlockHash, BlockInfo, BlockStatus, GenesisKeyhash,
         ProtocolParamUpdate,
     };
     use anyhow::Result;
@@ -154,7 +154,6 @@ mod tests {
                 epoch,
                 epoch_slot: 0,
                 era: era.try_into()?,
-                network_id: NetworkId::default(),
                 new_epoch: new_epoch != 0,
                 timestamp: 0,
                 hash: BlockHash::default(),

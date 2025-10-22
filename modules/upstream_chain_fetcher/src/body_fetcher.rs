@@ -1,7 +1,7 @@
 //! Acropolis Miniprotocols module for Caryatid
 //! Multi-connection, block body fetching part of the client (in separate thread).
 
-use acropolis_common::{messages::{BlockBodyMessage, BlockHeaderMessage}, BlockInfo, BlockStatus, Era, NetworkId};
+use acropolis_common::{messages::{BlockBodyMessage, BlockHeaderMessage}, BlockInfo, BlockStatus, Era};
 use anyhow::{bail, Result};
 use crossbeam::channel::{Receiver, TryRecvError};
 use pallas::{
@@ -108,7 +108,6 @@ impl BodyFetcher {
             None => true,
         };
         let timestamp = self.cfg.slot_to_timestamp(slot);
-        let network_id = NetworkId::from(self.cfg.network_id.clone());
 
         Ok(BlockInfo {
             status: if rolled_back {
@@ -121,7 +120,6 @@ impl BodyFetcher {
             hash,
             epoch,
             epoch_slot,
-            network_id,
             new_epoch,
             timestamp,
             era,

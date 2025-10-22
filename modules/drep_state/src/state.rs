@@ -1,10 +1,15 @@
 //! Acropolis DRepState: State storage
 
-use acropolis_common::{messages::{Message, StateQuery, StateQueryResponse}, queries::{
-    accounts::{AccountsStateQuery, AccountsStateQueryResponse, DEFAULT_ACCOUNTS_QUERY_TOPIC},
-    get_query_topic,
-    governance::{DRepActionUpdate, DRepUpdateEvent, VoteRecord},
-}, Anchor, Credential, DRepChoice, DRepCredential, KeyHash, Lovelace, NetworkId, StakeAddress, StakeCredential, TxCertificate, TxHash, Voter, VotingProcedures};
+use acropolis_common::{
+    messages::{Message, StateQuery, StateQueryResponse},
+    queries::{
+        accounts::{AccountsStateQuery, AccountsStateQueryResponse, DEFAULT_ACCOUNTS_QUERY_TOPIC},
+        get_query_topic,
+        governance::{DRepActionUpdate, DRepUpdateEvent, VoteRecord},
+    },
+    Anchor, DRepChoice, DRepCredential, KeyHash, Lovelace,
+    StakeAddress, TxCertificate, TxHash, Voter, VotingProcedures,
+};
 use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
 use serde_with::serde_as;
@@ -33,7 +38,7 @@ pub struct HistoricalDRepState {
     // - StakeAndVoteDelegation
     // - StakeRegistrationAndVoteDelegation
     // - StakeRegistrationAndStakeAndVoteDelegation
-    pub delegators: Option<Vec<Credential>>,
+    pub delegators: Option<Vec<StakeAddress>>,
 
     // Populated from voting_procedures in GovernanceProceduresMessage
     pub votes: Option<Vec<VoteRecord>>,
@@ -89,7 +94,6 @@ impl DRepStorageConfig {
 pub struct State {
     pub config: DRepStorageConfig,
     pub dreps: HashMap<DRepCredential, DRepRecord>,
-    pub network_id: NetworkId,
     pub historical_dreps: Option<HashMap<DRepCredential, HistoricalDRepState>>,
 }
 
@@ -98,7 +102,6 @@ impl State {
         Self {
             config,
             dreps: HashMap::new(),
-            network_id: NetworkId::default(),
             historical_dreps: if config.any_enabled() {
                 Some(HashMap::new())
             } else {
@@ -149,7 +152,7 @@ impl State {
     pub fn get_drep_delegators(
         &self,
         credential: &DRepCredential,
-    ) -> Result<Option<&Vec<Credential>>, &'static str> {
+    ) -> Result<Option<&Vec<StakeAddress>>, &'static str> {
         let hist = self
             .historical_dreps
             .as_ref()
@@ -225,7 +228,9 @@ impl State {
 
         for tx_cert in tx_certs {
             if store_delegators {
-                if let Some((cred, drep)) = Self::extract_delegation_fields(tx_cert) {
+                if let Some((cred, drep)) =
+                    Self::extract_delegation_fields(tx_cert)
+                {
                     batched_delegators.push((cred, drep));
                     continue;
                 }
@@ -469,15 +474,12 @@ impl State {
     async fn update_delegators(
         &mut self,
         context: &Arc<Context<Message>>,
-        delegators: Vec<(&StakeCredential, &DRepChoice)>,
+        delegators: Vec<(StakeAddress, &DRepChoice)>,
     ) -> Result<()> {
-        let stake_keys: Vec<KeyHash> = delegators.iter().map(|(sc, _)| sc.get_hash()).collect();
-        let stake_addresses: Vec<StakeAddress> = delegators.iter().map(|(k, _) | k.to_stake_address(self.network_id.clone().into()) ).collect();
-        let stake_key_to_input: HashMap<KeyHash, _> = delegators
-            .iter()
-            .zip(&stake_keys)
-            .map(|((sc, drep), key)| (key.clone(), (*sc, *drep)))
-            .collect();
+        let stake_addresses = delegators.iter().map(|(addr, _)| (addr).clone()).collect();
+
+        let stake_key_to_input: HashMap<KeyHash, _> =
+            delegators.iter().map(|(addr, drep)| (addr.get_hash().to_vec(), (addr, *drep))).collect();
 
         let msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
             AccountsStateQuery::GetAccountsDrepDelegationsMap { stake_addresses },
@@ -513,7 +515,7 @@ impl State {
                     if old_drep_cred != new_drep_cred {
                         self.update_historical(&old_drep_cred, false, |entry| {
                             if let Some(delegators) = entry.delegators.as_mut() {
-                                delegators.retain(|s| s != delegator);
+                                delegators.retain(|s| s.to_binary() != delegator.to_binary());
                             }
                         })?;
                     }
@@ -523,7 +525,7 @@ impl State {
             // Add delegator to new DRep
             match self.update_historical(&new_drep_cred, true, |entry| {
                 if let Some(delegators) = entry.delegators.as_mut() {
-                    if !delegators.contains(delegator) {
+                    if !delegators.contains(&delegator) {
                         delegators.push(delegator.clone());
                     }
                 }
@@ -536,13 +538,21 @@ impl State {
         Ok(())
     }
 
-    fn extract_delegation_fields(cert: &TxCertificate) -> Option<(&StakeCredential, &DRepChoice)> {
+    fn extract_delegation_fields(
+        cert: &TxCertificate,
+    ) -> Option<(StakeAddress, &DRepChoice)> {
         match cert {
-            TxCertificate::VoteDelegation(d) => Some((&d.credential, &d.drep)),
-            TxCertificate::StakeAndVoteDelegation(d) => Some((&d.credential, &d.drep)),
-            TxCertificate::StakeRegistrationAndVoteDelegation(d) => Some((&d.credential, &d.drep)),
+            TxCertificate::VoteDelegation(d) => {
+                Some((d.stake_address.clone(), &d.drep))
+            }
+            TxCertificate::StakeAndVoteDelegation(d) => {
+                Some((d.stake_address.clone(), &d.drep))
+            }
+            TxCertificate::StakeRegistrationAndVoteDelegation(d) => {
+                Some((d.stake_address.clone(), &d.drep))
+            }
             TxCertificate::StakeRegistrationAndStakeAndVoteDelegation(d) => {
-                Some((&d.credential, &d.drep))
+                Some((d.stake_address.clone(), &d.drep))
             }
             _ => None,
         }

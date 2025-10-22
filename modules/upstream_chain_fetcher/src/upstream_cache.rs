@@ -151,8 +151,7 @@ impl Storage for FileStorage {
 
         let file = File::open(&name)?;
         let reader = BufReader::new(file);
-        match serde_json::from_reader::<BufReader<std::fs::File>, Vec<UpstreamCacheRecord>>(reader)
-        {
+        match serde_json::from_reader::<BufReader<File>, Vec<UpstreamCacheRecord>>(reader) {
             Ok(res) => Ok(res.clone()),
             Err(err) => Err(anyhow!(
                 "Error reading upstream cache chunk JSON from {name}: '{err}'"
@@ -170,7 +169,10 @@ impl Storage for FileStorage {
 #[cfg(test)]
 mod test {
     use crate::upstream_cache::{Storage, UpstreamCacheImpl, UpstreamCacheRecord};
-    use acropolis_common::{messages::{BlockBodyMessage, BlockHeaderMessage}, BlockHash, BlockInfo, BlockStatus, Era, NetworkId};
+    use acropolis_common::{
+        messages::{BlockBodyMessage, BlockHeaderMessage},
+        BlockHash, BlockInfo, BlockStatus, Era,
+    };
     use anyhow::Result;
     use std::{collections::HashMap, sync::Arc};
 
@@ -183,7 +185,6 @@ mod test {
             epoch: 0,
             epoch_slot: n,
             new_epoch: false,
-            network_id: NetworkId::default(),
             timestamp: n,
             era: Era::default(),
         }

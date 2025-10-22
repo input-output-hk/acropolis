@@ -373,7 +373,7 @@ impl State {
 mod tests {
     use super::*;
     use crate::InMemoryImmutableUTXOStore;
-    use acropolis_common::{AssetName, BlockHash, ByronAddress, Era, NativeAsset, NetworkId, Value};
+    use acropolis_common::{AssetName, BlockHash, ByronAddress, Era, NativeAsset, Value};
     use config::Config;
     use tokio::sync::Mutex;
 
@@ -394,7 +394,6 @@ mod tests {
             epoch_slot: slot,
             new_epoch: false,
             timestamp: slot,
-            network_id: NetworkId::default(),
             era: Era::Byron,
         }
     }

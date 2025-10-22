@@ -4,7 +4,7 @@
 use acropolis_common::{
     genesis_values::GenesisValues,
     messages::{BlockBodyMessage, BlockHeaderMessage, CardanoMessage, Message},
-    BlockInfo, BlockStatus, Era, NetworkId,
+    BlockInfo, BlockStatus, Era,
 };
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{module, Context, Module};
@@ -45,7 +45,6 @@ const DEFAULT_PAUSE: (&str, PauseType) = ("pause", PauseType::NoPause);
 const DEFAULT_DOWNLOAD_MAX_AGE: &str = "download-max-age";
 const DEFAULT_DIRECTORY: &str = "downloads";
 const SNAPSHOT_METADATA_FILE: &str = "snapshot_metadata.json";
-const DEFAULT_NETWORK_ID: &str = "mainnet";
 
 /// Mithril feedback receiver
 struct FeedbackLogger {
@@ -308,12 +307,6 @@ impl MithrilSnapshotFetcher {
 
                         let timestamp = genesis.slot_to_timestamp(slot);
 
-                        let network_id = NetworkId::from(
-                            config
-                                .get_string("network-id")
-                                .unwrap_or(DEFAULT_NETWORK_ID.to_string()),
-                        );
-
                         let era = match block.era() {
                             PallasEra::Byron => Era::Byron,
                             PallasEra::Shelley => Era::Shelley,
@@ -335,7 +328,6 @@ impl MithrilSnapshotFetcher {
                             epoch,
                             epoch_slot,
                             new_epoch,
-                            network_id,
                             timestamp,
                             era,
                         };

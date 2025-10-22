@@ -1,7 +1,6 @@
 use crate::UpstreamCacheRecord;
 use acropolis_common::genesis_values::GenesisValues;
 use acropolis_common::messages::{CardanoMessage, Message};
-use acropolis_common::NetworkId;
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::Context;
 use config::Config;

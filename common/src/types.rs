@@ -130,9 +130,6 @@ pub struct BlockInfo {
     #[serde(default)]
     pub timestamp: u64,
 
-    /// Network ID
-    pub network_id: NetworkId,
-
     /// Protocol era
     pub era: Era,
 }
@@ -752,7 +749,7 @@ pub struct PoolRegistration {
     /// Pool owners by their key hash
     // #[serde_as(as = "Vec<Hex>")]
     #[n(6)]
-    pub pool_owners: Vec<Credential>,
+    pub pool_owners: Vec<StakeAddress>,
 
     // Relays
     #[n(7)]
@@ -837,8 +834,8 @@ pub struct PoolEpochState {
 /// Stake delegation data
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StakeDelegation {
-    /// Stake credential
-    pub credential: StakeCredential,
+    /// Stake address
+    pub stake_address: StakeAddress,
 
     /// Pool ID to delegate to
     pub operator: KeyHash,
@@ -907,8 +904,8 @@ pub struct MoveInstantaneousReward {
 /// Register stake (Conway version) = 'reg_cert'
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Registration {
-    /// Stake credential
-    pub credential: StakeCredential,
+    /// Stake address
+    pub stake_address: StakeAddress,
 
     /// Deposit paid
     pub deposit: Lovelace,
@@ -917,8 +914,8 @@ pub struct Registration {
 /// Deregister stake (Conway version) = 'unreg_cert'
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Deregistration {
-    /// Stake credential
-    pub credential: StakeCredential,
+    /// Stake address
+    pub stake_address: StakeAddress,
 
     /// Deposit to be refunded
     pub refund: Lovelace,
@@ -943,8 +940,8 @@ pub enum DRepChoice {
 /// Vote delegation (simple, existing registration) = vote_deleg_cert
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct VoteDelegation {
-    /// Stake credential
-    pub credential: StakeCredential,
+    /// Stake address
+    pub stake_address: StakeAddress,
 
     // DRep choice
     pub drep: DRepChoice,
@@ -953,8 +950,8 @@ pub struct VoteDelegation {
 /// Stake+vote delegation (to SPO and DRep) = stake_vote_deleg_cert
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StakeAndVoteDelegation {
-    /// Stake credential
-    pub credential: StakeCredential,
+    /// Stake address
+    pub stake_address: StakeAddress,
 
     /// Pool
     pub operator: KeyHash,
@@ -966,8 +963,8 @@ pub struct StakeAndVoteDelegation {
 /// Stake delegation to SPO + registration = stake_reg_deleg_cert
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StakeRegistrationAndDelegation {
-    /// Stake credential
-    pub credential: StakeCredential,
+    /// Stake address
+    pub stake_address: StakeAddress,
 
     /// Pool
     pub operator: KeyHash,
@@ -979,8 +976,8 @@ pub struct StakeRegistrationAndDelegation {
 /// Vote delegation to DRep + registration = vote_reg_deleg_cert
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StakeRegistrationAndVoteDelegation {
-    /// Stake credential
-    pub credential: StakeCredential,
+    /// Stake address
+    pub stake_address: StakeAddress,
 
     /// DRep choice
     pub drep: DRepChoice,
@@ -995,7 +992,7 @@ pub struct StakeRegistrationAndVoteDelegation {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StakeRegistrationAndStakeAndVoteDelegation {
     /// Stake credential
-    pub credential: StakeCredential,
+    pub stake_address: StakeAddress,
 
     /// Pool
     pub operator: KeyHash,
@@ -1673,8 +1670,8 @@ pub struct GovernanceOutcome {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct StakeCredentialWithPos {
-    pub stake_credential: StakeCredential,
+pub struct StakeAddressWithPos {
+    pub stake_address: StakeAddress,
     pub tx_index: u64,
     pub cert_index: u64,
 }
@@ -1686,10 +1683,10 @@ pub enum TxCertificate {
     None(()),
 
     /// Stake registration
-    StakeRegistration(StakeCredentialWithPos),
+    StakeRegistration(StakeAddressWithPos),
 
     /// Stake de-registration
-    StakeDeregistration(StakeCredential),
+    StakeDeregistration(StakeAddress),
 
     /// Stake Delegation to a pool
     StakeDelegation(StakeDelegation),
