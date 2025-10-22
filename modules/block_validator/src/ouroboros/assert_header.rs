@@ -5,11 +5,11 @@ use std::array::TryFromSliceError;
 use thiserror::Error;
 
 #[derive(Error, Debug, serde::Serialize, serde::Deserialize)]
-pub enum AssertHeaderError {
+pub enum BlockHeaderValidationError {
     #[error("{0}")]
-    KnownLeaderVrf(#[from] AssertKnownLeaderVrfError),
+    KnownLeaderVrf(#[from] KnownLeaderVrfError),
     #[error("{0}")]
-    VrfProof(#[from] AssertVrfProofError),
+    VrfProof(#[from] VrfProofError),
 }
 
 /// AssertKnownLeaderVrfError
@@ -20,12 +20,12 @@ pub enum AssertHeaderError {
     hex::encode(&registered_vrf[0..7]),
     hex::encode(&declared_vrf[0..7]),
 )]
-pub struct AssertKnownLeaderVrfError {
+pub struct KnownLeaderVrfError {
     registered_vrf: KeyHash,
     declared_vrf: KeyHash,
 }
 
-impl AssertKnownLeaderVrfError {
+impl KnownLeaderVrfError {
     /// Asserts that the declared VRF credentials advertised in a block do indeed match those
     /// registered for the corresponding leader.
     pub fn new(registered_vrf_hash: &KeyHash, vrf_vkey: &[u8]) -> Result<(), Self> {
@@ -43,7 +43,7 @@ impl AssertKnownLeaderVrfError {
 // ------------------------------------------------------------ assert_vrf_proof
 
 #[derive(Error, Debug, serde::Serialize, serde::Deserialize)]
-pub enum AssertVrfProofError {
+pub enum VrfProofError {
     #[error("Malformed VRF proof: {0}")]
     MalformedProof(#[from] vrf::ProofFromBytesError),
 
@@ -55,8 +55,8 @@ pub enum AssertVrfProofError {
 
     #[error(
         "Mismatch between the declared VRF proof hash in block ({}) and the computed one ({}).",
-        hex::encode(&.declared[0..7]),
-        hex::encode(&.computed[0..7]),
+        hex::encode(&declared[0..7]),
+        hex::encode(&computed[0..7]),
     )]
     ProofMismatch {
         // this is Proof Hash (sha512 hash)
@@ -66,8 +66,8 @@ pub enum AssertVrfProofError {
 
     #[error(
         "Mismatch between the declared VRF output in block ({}) and the computed one ({}).",
-        hex::encode(&.declared[0..7]),
-        hex::encode(&.computed.as_slice()[0..7]),
+        hex::encode(&declared[0..7]),
+        hex::encode(&computed[0..7]),
     )]
     OutputMismatch {
         declared: Vec<u8>,
@@ -75,13 +75,13 @@ pub enum AssertVrfProofError {
     },
 }
 
-impl From<TryFromSliceError> for AssertVrfProofError {
+impl From<TryFromSliceError> for VrfProofError {
     fn from(_: TryFromSliceError) -> Self {
         Self::TryFromSliceError
     }
 }
 
-impl PartialEq for AssertVrfProofError {
+impl PartialEq for VrfProofError {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::MalformedProof(l0), Self::MalformedProof(r0)) => l0 == r0,
@@ -114,16 +114,17 @@ impl PartialEq for AssertVrfProofError {
     }
 }
 
-impl AssertVrfProofError {
-    /// Assert that the VRF output from the block and its corresponding hash.
+impl VrfProofError {
+    /// Validate the VRF output from the block and its corresponding hash.
     pub fn new(
         absolute_slot: Slot,
         epoch_nonce: &Nonce,
         leader_vrf_output: &[u8],
+        // Public Key from declared_vrf_key from block header
         leader_public_key: &vrf::PublicKey,
-        // [u8; 64]
+        // must be [u8; 64]
         unsafe_vrf_proof_hash: &[u8],
-        // [u8; 80]
+        // must be [u8; 80]
         unsafe_vrf_proof: &[u8],
     ) -> Result<(), Self> {
         let input = &vrf::VrfInput::new(absolute_slot, epoch_nonce);

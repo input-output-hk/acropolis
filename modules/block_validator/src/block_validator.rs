@@ -8,7 +8,6 @@ use std::sync::Arc;
 use tracing::{error, info};
 mod state;
 use state::State;
-mod assert_header;
 mod ouroboros;
 
 const DEFAULT_VALIDATION_VRF_PUBLISHER_TOPIC: (&str, &str) =
