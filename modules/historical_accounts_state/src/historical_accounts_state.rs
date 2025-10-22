@@ -81,10 +81,11 @@ impl HistoricalAccountsState {
             // Get a mutable state
             let mut state = state_mutex.lock().await;
 
-            // Read per-block topics in parallel
+            // Create all per-block message futures before processing any new messages
             let certs_message_f = certs_subscription.read();
             let address_deltas_message_f = address_deltas_subscription.read();
             let withdrawals_message_f = withdrawals_subscription.read();
+
             let mut current_block: Option<BlockInfo> = None;
 
             // Use certs_message as the synchroniser

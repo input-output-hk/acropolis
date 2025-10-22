@@ -514,12 +514,8 @@ impl ImmutableHistoricalAccountStore {
         account: &StakeAddress,
     ) -> Result<Option<Vec<ShelleyAddress>>> {
         let key = account.to_bytes_key()?;
-        let mut live: Vec<ShelleyAddress> = self
-            .mir_history
-            .get(&key)?
-            .map(|bytes| decode(&bytes))
-            .transpose()?
-            .unwrap_or_default();
+        let mut live: Vec<ShelleyAddress> =
+            self.addresses.get(&key)?.map(|bytes| decode(&bytes)).transpose()?.unwrap_or_default();
 
         let pending = self.pending.lock().await;
         for block_map in pending.iter() {
