@@ -7,7 +7,7 @@ use acropolis_common::{
     messages::{
         AddressDeltasMessage, StakeRewardDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
     },
-    BlockInfo, PoolId, ShelleyAddress, StakeAddress, TxIdentifier,
+    BlockInfo, PoolId, ShelleyAddress, StakeAddress, StakeCredential, TxIdentifier,
 };
 
 use crate::{
@@ -161,34 +161,37 @@ impl State {
 
     pub fn _get_active_stake_history(
         &self,
-        _account: StakeAddress,
+        _account: StakeCredential,
     ) -> Result<Vec<ActiveStakeHistory>> {
         Ok(Vec::new())
     }
 
-    pub fn _get_delegation_history(&self, _account: StakeAddress) -> Result<Vec<DelegationUpdate>> {
+    pub fn _get_delegation_history(
+        &self,
+        _account: StakeCredential,
+    ) -> Result<Vec<DelegationUpdate>> {
         Ok(Vec::new())
     }
 
     pub fn _get_registration_history(
         &self,
-        _account: StakeAddress,
+        _account: StakeCredential,
     ) -> Result<Vec<RegistrationUpdate>> {
         Ok(Vec::new())
     }
 
     pub fn _get_withdrawal_history(
         &self,
-        _account: StakeAddress,
+        _account: StakeCredential,
     ) -> Result<Vec<AccountWithdrawal>> {
         Ok(Vec::new())
     }
 
-    pub fn _get_mir_history(&self, _account: StakeAddress) -> Result<Vec<AccountWithdrawal>> {
+    pub fn _get_mir_history(&self, _account: StakeCredential) -> Result<Vec<AccountWithdrawal>> {
         Ok(Vec::new())
     }
 
-    pub fn _get_addresses(&self, _account: StakeAddress) -> Result<Vec<ShelleyAddress>> {
+    pub fn _get_addresses(&self, _account: StakeCredential) -> Result<Vec<ShelleyAddress>> {
         Ok(Vec::new())
     }
 }

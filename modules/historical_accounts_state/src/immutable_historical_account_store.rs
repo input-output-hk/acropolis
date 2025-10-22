@@ -56,7 +56,8 @@ impl ImmutableHistoricalAccountStore {
         })
     }
 
-    /// Persists volatile UTxOs, transactions, and totals into their respective Fjall partitions for an entire epoch.
+    /// Persists volatile registrations, delegations, MIRs, withdrawals, rewards,
+    /// and addresses into their respective Fjall partitions for an entire epoch.
     /// Skips any partitions that have already stored the given epoch.
     /// All writes are batched and committed atomically, preventing on-disk corruption in case of failure.
     pub async fn persist_epoch(&self, epoch: u32, config: &HistoricalAccountsConfig) -> Result<()> {
@@ -299,7 +300,6 @@ impl ImmutableHistoricalAccountStore {
         }
     }
 
-    // Used for once per epoch data (rewards & active stake)
     fn make_epoch_key(account: &StakeCredential, epoch: u32) -> [u8; 32] {
         let mut key = [0u8; 32];
         key[..28].copy_from_slice(&account.get_hash());
