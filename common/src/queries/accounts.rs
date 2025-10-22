@@ -25,6 +25,8 @@ pub enum AccountsStateQuery {
 
     // Epochs-related queries
     GetActiveStakes {},
+    GetSPDDByEpoch { epoch: u64 },
+    GetSPDDByEpochAndPool { epoch: u64, pool_id: KeyHash },
 
     // Pools related queries
     GetOptimalPoolSizing,
@@ -57,6 +59,10 @@ pub enum AccountsStateQueryResponse {
 
     // Epochs-related responses
     ActiveStakes(u64),
+    /// Vec<(PoolId, StakeKey, ActiveStakeAmount)>
+    SPDDByEpoch(Vec<(KeyHash, KeyHash, u64)>),
+    /// Vec<(StakeKey, ActiveStakeAmount)>
+    SPDDByEpochAndPool(Vec<(KeyHash, u64)>),
 
     // Pools-related responses
     OptimalPoolSizing(Option<OptimalPoolSizing>),

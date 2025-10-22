@@ -1,6 +1,7 @@
 //! Acropolis transaction unpacker module for Caryatid
 //! Unpacks transaction bodies into UTXO events
 
+use acropolis_codec::*;
 use acropolis_common::{
     messages::{
         AssetDeltasMessage, BlockTxsMessage, CardanoMessage, GovernanceProceduresMessage, Message,
@@ -19,7 +20,6 @@ use pallas::ledger::primitives::KeyValuePairs;
 use pallas::ledger::{primitives, traverse, traverse::MultiEraTx};
 use tracing::{debug, error, info, info_span, Instrument};
 
-mod map_parameters;
 mod utxo_registry;
 use crate::utxo_registry::UTxORegistry;
 
@@ -183,7 +183,7 @@ impl TxUnpacker {
                                             for input in inputs {  // MultiEraInput
                                                 // Lookup and remove UTxOIdentifier from registry 
                                                 let oref = input.output_ref();
-                                                let tx_ref = TxOutRef::new(**oref.hash(), oref.index() as u16);
+                                                let tx_ref = TxOutRef::new(TxHash(**oref.hash()), oref.index() as u16);
 
                                                 match utxo_registry.consume(&tx_ref) {
                                                     Ok(tx_identifier) => {
@@ -270,7 +270,7 @@ impl TxUnpacker {
                                         if publish_certificates_topic.is_some() {
                                             let tx_hash = tx.hash();
                                             for ( cert_index, cert) in certs.iter().enumerate() {
-                                                match map_parameters::map_certificate(&cert, *tx_hash, tx_index, cert_index, network_id.clone()) {
+                                                match map_parameters::map_certificate(&cert, TxHash(*tx_hash), tx_index, cert_index, network_id.clone()) {
                                                     Ok(tx_cert) => {
                                                         certificates.push(tx_cert);
                                                     },
@@ -343,7 +343,7 @@ impl TxUnpacker {
                                         if publish_governance_procedures_topic.is_some() {
                                             if let Some(pp) = props {
                                                 // Nonempty set -- governance_message.proposal_procedures will not be empty
-                                                let mut proc_id = GovActionId { transaction_id: *tx.hash(), action_index: 0 };
+                                                let mut proc_id = GovActionId { transaction_id: TxHash(*tx.hash()), action_index: 0 };
                                                 for (action_index, pallas_governance_proposals) in pp.iter().enumerate() {
                                                     match proc_id.set_action_index(action_index)
                                                         .and_then (|proc_id| map_parameters::map_governance_proposals_procedures(&proc_id, &pallas_governance_proposals))
@@ -357,7 +357,7 @@ impl TxUnpacker {
                                             if let Some(pallas_vp) = votes {
                                                 // Nonempty set -- governance_message.voting_procedures will not be empty
                                                 match map_parameters::map_all_governance_voting_procedures(pallas_vp) {
-                                                    Ok(vp) => voting_procedures.push((*tx.hash(), vp)),
+                                                    Ok(vp) => voting_procedures.push((TxHash(*tx.hash()), vp)),
                                                     Err(e) => error!("Cannot decode governance voting procedures in slot {}: {e}", block.slot)
                                                 }
                                             }

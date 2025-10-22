@@ -603,6 +603,11 @@ impl State {
         stake_addresses.generate_spdd()
     }
 
+    pub fn dump_spdd_state(&self) -> HashMap<KeyHash, Vec<(KeyHash, u64)>> {
+        let stake_addresses = self.stake_addresses.lock().unwrap();
+        stake_addresses.dump_spdd_state()
+    }
+
     /// Derive the DRep Delegation Distribution (DRDD) - the total amount
     /// delegated to each DRep, including the special "abstain" and "no confidence" dreps.
     pub fn generate_drdd(&self) -> DRepDelegationDistribution {
@@ -1426,7 +1431,7 @@ mod tests {
             DRepDelegationDistribution {
                 abstain: 10_000,
                 no_confidence: 100_000,
-                dreps: vec![(drep_addr_cred, 1_000_100), (drep_script_cred, 2_001_000),],
+                dreps: vec![(drep_script_cred, 2_001_000), (drep_addr_cred, 1_000_100)],
             }
         );
 

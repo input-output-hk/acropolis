@@ -1,0 +1,11 @@
+{
+    "magic": "CARDANO_SNAPSHOT",
+    "version": "1.0.0",
+    "era": "conway",
+    "block_height": 1000000,
+    "block_hash": "11223344aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "sha256": "c35ac185e4d1323cdece10c6f17533c6434849791226946c715d93e874a2b768",
+    "created_at": "2025-10-08T00:00:00Z",
+    "size_bytes": 245,
+    "governance_section_present": true
+}

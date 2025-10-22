@@ -112,6 +112,40 @@ where
     })
 }
 
+// Handle a REST request with path and query parameters
+pub fn handle_rest_with_path_and_query_parameters<F, Fut>(
+    context: Arc<Context<Message>>,
+    topic: &str,
+    handler: F,
+) -> JoinHandle<()>
+where
+    F: Fn(&[&str], HashMap<String, String>) -> Fut + Send + Sync + Clone + 'static,
+    Fut: Future<Output = Result<RESTResponse>> + Send + 'static,
+{
+    let topic_owned = topic.to_string();
+    context.handle(topic, move |message: Arc<Message>| {
+        let handler = handler.clone();
+        let topic_owned = topic_owned.clone();
+        async move {
+            let response = match message.as_ref() {
+                Message::RESTRequest(request) => {
+                    let params_vec =
+                        extract_params_from_topic_and_path(&topic_owned, &request.path_elements);
+                    let params_slice: Vec<&str> = params_vec.iter().map(|s| s.as_str()).collect();
+                    let query_params = request.query_parameters.clone();
+                    match handler(&params_slice, query_params).await {
+                        Ok(response) => response,
+                        Err(error) => RESTResponse::with_text(500, &format!("{error:?}")),
+                    }
+                }
+                _ => RESTResponse::with_text(500, "Unexpected message in REST request"),
+            };
+
+            Arc::new(Message::RESTResponse(response))
+        }
+    })
+}
+
 /// Extract parameters from the request path based on the topic pattern.
 /// Skips the first 3 parts of the topic as these are never parameters
 fn extract_params_from_topic_and_path(topic: &str, path_elements: &[String]) -> Vec<String> {

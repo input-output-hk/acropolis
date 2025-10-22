@@ -87,11 +87,37 @@ fn invalid_size_desc<T: std::fmt::Display>(e: T) -> String {
 mod tests {
     use super::*;
 
+    // XXX: it’s best to leave Internet interactions to integration tests, not unit tests, so let’s provide:
+    async fn offline_fetch_pool_metadata_as_bytes(
+        url: String,
+        timeout: Duration,
+    ) -> Result<Vec<u8>> {
+        if let Ok(path) = std::env::var("ACROPOLIS_OFFLINE_MIRROR") {
+            if let Ok(file) = std::fs::File::open(&path) {
+                if let Ok(map) =
+                    serde_json::from_reader::<_, std::collections::HashMap<String, String>>(file)
+                {
+                    if let Some(path_str) = map.get(url.trim()) {
+                        if let Ok(bytes) =
+                            std::fs::read(&std::path::Path::new(path_str).to_path_buf())
+                        {
+                            return Ok(bytes);
+                        }
+                    }
+                }
+            }
+        }
+        // Fallback to network:
+        fetch_pool_metadata_as_bytes(url, timeout).await
+    }
+
     #[tokio::test]
     async fn test_fetch_pool_metadata() {
         let url = "https://raw.githubusercontent.com/Octalus/cardano/master/p.json";
         let pool_metadata =
-            fetch_pool_metadata_as_bytes(url.to_string(), Duration::from_secs(3)).await.unwrap();
+            offline_fetch_pool_metadata_as_bytes(url.to_string(), Duration::from_secs(3))
+                .await
+                .unwrap();
 
         let pool_metadata = PoolMetadataJson::try_from(pool_metadata).expect("failed to convert");
 
@@ -109,7 +135,9 @@ mod tests {
         let expected_hash_as_arr = hex::decode(expected_hash).expect("should be able to decode {}");
 
         let pool_metadata =
-            fetch_pool_metadata_as_bytes(url.to_string(), Duration::from_secs(3)).await.unwrap();
+            offline_fetch_pool_metadata_as_bytes(url.to_string(), Duration::from_secs(3))
+                .await
+                .unwrap();
 
         assert_eq!(
             verify_pool_metadata_hash(&pool_metadata, &expected_hash_as_arr),

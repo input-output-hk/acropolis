@@ -1,7 +1,9 @@
+use std::marker::PhantomData;
+
 use anyhow::anyhow;
 use bech32::{Bech32, Hrp};
-use serde::{ser::SerializeMap, Serializer};
-use serde_with::{ser::SerializeAsWrap, SerializeAs};
+use serde::{ser::SerializeMap, Deserialize, Serializer};
+use serde_with::{ser::SerializeAsWrap, DeserializeAs, SerializeAs};
 
 pub struct SerializeMapAs<KAs, VAs>(std::marker::PhantomData<(KAs, VAs)>);
 
@@ -23,6 +25,68 @@ where
             )?;
         }
         map_ser.end()
+    }
+}
+
+pub trait Bech32Conversion {
+    fn to_bech32(&self) -> Result<String, anyhow::Error>;
+    fn from_bech32(s: &str) -> Result<Self, anyhow::Error>
+    where
+        Self: Sized;
+}
+
+// Marker types for different HRP prefixes
+pub struct PoolPrefix;
+pub struct StakePrefix;
+pub struct AddrPrefix;
+
+// Trait to get HRP string from marker types
+pub trait HrpPrefix {
+    const HRP: &'static str;
+}
+
+impl HrpPrefix for PoolPrefix {
+    const HRP: &'static str = "pool";
+}
+
+impl HrpPrefix for StakePrefix {
+    const HRP: &'static str = "stake";
+}
+
+impl HrpPrefix for AddrPrefix {
+    const HRP: &'static str = "addr";
+}
+
+// Generic Bech32 converter with HRP parameter
+pub struct DisplayFromBech32<PREFIX: HrpPrefix>(PhantomData<PREFIX>);
+
+// Serialization implementation
+impl<PREFIX> SerializeAs<Vec<u8>> for DisplayFromBech32<PREFIX>
+where
+    PREFIX: HrpPrefix,
+{
+    fn serialize_as<S>(source: &Vec<u8>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let bech32_string =
+            source.to_bech32_with_hrp(PREFIX::HRP).map_err(serde::ser::Error::custom)?;
+
+        serializer.serialize_str(&bech32_string)
+    }
+}
+
+// Deserialization implementation
+impl<'de, PREFIX> DeserializeAs<'de, Vec<u8>> for DisplayFromBech32<PREFIX>
+where
+    PREFIX: HrpPrefix,
+{
+    fn deserialize_as<D>(deserializer: D) -> Result<Vec<u8>, D::Error>
+    where
+        D: serde::de::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Vec::<u8>::from_bech32_with_hrp(&s, PREFIX::HRP).map_err(serde::de::Error::custom)
     }
 }
 

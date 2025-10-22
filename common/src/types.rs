@@ -6,6 +6,7 @@ use crate::{
     address::{Address, ShelleyAddress, StakeAddress},
     protocol_params,
     rational_number::RationalNumber,
+    BlockHash, TxHash,
 };
 use anyhow::{anyhow, bail, Error, Result};
 use bech32::{Bech32, Hrp};
@@ -15,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use serde_with::{hex::Hex, serde_as};
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
-use std::ops::Neg;
+use std::ops::{AddAssign, Neg};
 use std::{cmp::Ordering, fmt};
 
 #[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -91,6 +92,19 @@ impl Display for Era {
     }
 }
 
+/// Block production statistics for a stake pool in a specific epoch
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PoolBlockProduction {
+    /// Pool ID that produced the blocks
+    pub pool_id: String,
+
+    /// Number of blocks produced by this pool in the epoch
+    pub block_count: u8,
+
+    /// Epoch number
+    pub epoch: u64,
+}
+
 /// Block status
 #[derive(Debug, Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum BlockStatus {
@@ -151,8 +165,11 @@ pub struct AddressDelta {
     /// Address
     pub address: Address,
 
+    /// UTxO causing address delta
+    pub utxo: UTxOIdentifier,
+
     /// Balance change
-    pub delta: ValueDelta,
+    pub value: ValueDelta,
 }
 
 /// Stake balance change
@@ -175,10 +192,24 @@ pub struct StakeRewardDelta {
 pub type PolicyId = [u8; 28];
 pub type NativeAssets = Vec<(PolicyId, Vec<NativeAsset>)>;
 pub type NativeAssetsDelta = Vec<(PolicyId, Vec<NativeAssetDelta>)>;
+pub type NativeAssetsMap = HashMap<PolicyId, HashMap<AssetName, u64>>;
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug,
+    Copy,
+    Clone,
+    Eq,
+    PartialEq,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    minicbor::Encode,
+    minicbor::Decode,
+)]
 pub struct AssetName {
+    #[n(0)]
     len: u8,
+    #[n(1)]
     bytes: [u8; 32],
 }
 
@@ -204,15 +235,23 @@ impl AssetName {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, serde::Serialize, serde::Deserialize, minicbor::Encode, minicbor::Decode,
+)]
 pub struct NativeAsset {
+    #[n(0)]
     pub name: AssetName,
+    #[n(1)]
     pub amount: u64,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, serde::Serialize, serde::Deserialize, minicbor::Encode, minicbor::Decode,
+)]
 pub struct NativeAssetDelta {
+    #[n(0)]
     pub name: AssetName,
+    #[n(1)]
     pub amount: i64,
 }
 
@@ -240,10 +279,55 @@ impl Value {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+impl AddAssign<&Value> for Value {
+    fn add_assign(&mut self, other: &Value) {
+        self.lovelace += other.lovelace;
+
+        for (policy_id, other_assets) in &other.assets {
+            if let Some((_, existing_assets)) =
+                self.assets.iter_mut().find(|(pid, _)| pid == policy_id)
+            {
+                for other_asset in other_assets {
+                    if let Some(existing) =
+                        existing_assets.iter_mut().find(|a| a.name == other_asset.name)
+                    {
+                        existing.amount += other_asset.amount;
+                    } else {
+                        existing_assets.push(other_asset.clone());
+                    }
+                }
+            } else {
+                self.assets.push((*policy_id, other_assets.clone()));
+            }
+        }
+    }
+}
+
+/// Hashmap representation of Value (lovelace + multiasset)
+#[derive(
+    Debug, Default, Clone, serde::Serialize, serde::Deserialize, minicbor::Encode, minicbor::Decode,
+)]
+pub struct ValueMap {
+    #[n(0)]
+    pub lovelace: u64,
+    #[n(1)]
+    pub assets: NativeAssetsMap,
+}
+
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ValueDelta {
     pub lovelace: i64,
     pub assets: NativeAssetsDelta,
+}
+
+#[derive(
+    Debug, Default, Clone, serde::Serialize, serde::Deserialize, minicbor::Encode, minicbor::Decode,
+)]
+pub struct AddressTotalsMap {
+    #[n(0)]
+    pub lovelace: i64,
+    #[n(1)]
+    pub assets: NativeAssetsMap,
 }
 
 impl ValueDelta {
@@ -328,6 +412,8 @@ impl Default for UTXODelta {
 /// Key hash used for pool IDs etc.
 pub type KeyHash = Vec<u8>;
 
+pub type PoolId = Vec<u8>;
+
 /// Script identifier
 pub type ScriptHash = KeyHash;
 
@@ -339,14 +425,21 @@ pub type GenesisKeyhash = Vec<u8>;
 /// Data hash used for metadata, anchors (SHA256)
 pub type DataHash = Vec<u8>;
 
-/// Transaction hash
-pub type TxHash = [u8; 32];
-
 /// Compact transaction identifier (block_number, tx_index).
 #[derive(
-    Debug, Default, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+    Debug,
+    Default,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    minicbor::Encode,
+    minicbor::Decode,
 )]
-pub struct TxIdentifier([u8; 6]);
+pub struct TxIdentifier(#[n(0)] [u8; 6]);
 
 impl TxIdentifier {
     pub fn new(block_number: u32, tx_index: u16) -> Self {
@@ -380,8 +473,19 @@ impl From<UTxOIdentifier> for TxIdentifier {
 }
 
 // Compact UTxO identifier (block_number, tx_index, output_index)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct UTxOIdentifier([u8; 8]);
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    minicbor::Encode,
+    minicbor::Decode,
+)]
+pub struct UTxOIdentifier(#[n(0)] [u8; 8]);
 
 impl UTxOIdentifier {
     pub fn new(block_number: u32, tx_index: u16, output_index: u16) -> Self {
@@ -436,9 +540,6 @@ impl TxOutRef {
         }
     }
 }
-
-/// Block Hash
-pub type BlockHash = [u8; 32];
 
 /// Amount of Ada, in Lovelace
 pub type Lovelace = u64;
@@ -513,13 +614,13 @@ pub struct PotDelta {
     minicbor::Encode,
 )]
 pub enum Credential {
-    /// Address key hash
+    /// Script hash. NOTE: Order matters when parsing Haskell Node Snapshot data.
     #[n(0)]
-    AddrKeyHash(#[n(0)] KeyHash),
-
-    /// Script hash
-    #[n(1)]
     ScriptHash(#[n(0)] KeyHash),
+
+    /// Address key hash
+    #[n(1)]
+    AddrKeyHash(#[n(0)] KeyHash),
 }
 
 impl Credential {
@@ -1232,6 +1333,22 @@ pub struct BlockVersionData {
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct HeavyDelegate {
+    pub cert: Vec<u8>,
+    pub delegate_pk: Vec<u8>,
+    pub issuer_pk: Vec<u8>,
+}
+
+#[serde_as]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct GenesisDelegate {
+    #[serde_as(as = "Hex")]
+    pub delegate: Vec<u8>,
+    #[serde_as(as = "Hex")]
+    pub vrf: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ProtocolConsts {
     pub k: usize,
     pub protocol_magic: u32,
@@ -1760,6 +1877,64 @@ pub struct PolicyAsset {
 pub struct AssetAddressEntry {
     pub address: ShelleyAddress,
     pub quantity: u64,
+}
+
+#[derive(
+    Debug, Default, Clone, serde::Serialize, serde::Deserialize, minicbor::Encode, minicbor::Decode,
+)]
+pub struct AddressTotals {
+    #[n(0)]
+    pub sent: ValueMap,
+    #[n(1)]
+    pub received: ValueMap,
+    #[n(2)]
+    pub tx_count: u64,
+}
+
+impl AddressTotals {
+    pub fn apply_delta(&mut self, delta: &ValueDelta) {
+        if delta.lovelace > 0 {
+            self.received.lovelace += delta.lovelace as u64;
+        } else if delta.lovelace < 0 {
+            self.sent.lovelace += (-delta.lovelace) as u64;
+        }
+
+        for (policy, assets) in &delta.assets {
+            for a in assets {
+                if a.amount > 0 {
+                    Self::apply_asset(
+                        &mut self.received.assets,
+                        *policy,
+                        a.name.clone(),
+                        a.amount as u64,
+                    );
+                } else if a.amount < 0 {
+                    Self::apply_asset(
+                        &mut self.sent.assets,
+                        *policy,
+                        a.name.clone(),
+                        a.amount.unsigned_abs(),
+                    );
+                }
+            }
+        }
+
+        self.tx_count += 1;
+    }
+
+    fn apply_asset(
+        target: &mut HashMap<[u8; 28], HashMap<AssetName, u64>>,
+        policy: [u8; 28],
+        name: AssetName,
+        amount: u64,
+    ) {
+        target
+            .entry(policy)
+            .or_default()
+            .entry(name)
+            .and_modify(|v| *v += amount)
+            .or_insert(amount);
+    }
 }
 
 #[cfg(test)]

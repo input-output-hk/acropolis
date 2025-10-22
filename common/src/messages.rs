@@ -8,6 +8,7 @@ use crate::ledger_state::SPOState;
 use crate::protocol_params::{NonceHash, ProtocolParams};
 use crate::queries::parameters::{ParametersStateQuery, ParametersStateQueryResponse};
 use crate::queries::spdd::{SPDDStateQuery, SPDDStateQueryResponse};
+use crate::queries::utxos::{UTxOStateQuery, UTxOStateQueryResponse};
 use crate::queries::{
     accounts::{AccountsStateQuery, AccountsStateQueryResponse},
     addresses::{AddressStateQuery, AddressStateQueryResponse},
@@ -24,6 +25,7 @@ use crate::queries::{
     transactions::{TransactionsStateQuery, TransactionsStateQueryResponse},
 };
 
+use crate::byte_array::*;
 use crate::types::*;
 
 // Caryatid core messages which we re-export
@@ -394,10 +396,11 @@ pub enum StateQuery {
     Mempool(MempoolStateQuery),
     Metadata(MetadataStateQuery),
     Network(NetworkStateQuery),
+    Parameters(ParametersStateQuery),
     Pools(PoolsStateQuery),
     Scripts(ScriptsStateQuery),
     Transactions(TransactionsStateQuery),
-    Parameters(ParametersStateQuery),
+    UTxOs(UTxOStateQuery),
     SPDD(SPDDStateQuery),
 }
 
@@ -413,9 +416,10 @@ pub enum StateQueryResponse {
     Mempool(MempoolStateQueryResponse),
     Metadata(MetadataStateQueryResponse),
     Network(NetworkStateQueryResponse),
+    Parameters(ParametersStateQueryResponse),
     Pools(PoolsStateQueryResponse),
     Scripts(ScriptsStateQueryResponse),
     Transactions(TransactionsStateQueryResponse),
-    Parameters(ParametersStateQueryResponse),
+    UTxOs(UTxOStateQueryResponse),
     SPDD(SPDDStateQueryResponse),
 }

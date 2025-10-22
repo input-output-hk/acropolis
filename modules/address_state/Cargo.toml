@@ -1,0 +1,32 @@
+# Acropolis address state module
+
+[package]
+name = "acropolis_module_address_state"
+version = "0.1.0"
+edition = "2021"
+authors = ["William Hankins <william@sundae.fi>"]
+description = "Address State Tracker"
+license = "Apache-2.0"
+
+[dependencies]
+acropolis_common = { path = "../../common" }
+
+caryatid_sdk = { workspace = true }
+
+anyhow = { workspace = true }
+async-trait = "0.1"
+config = { workspace = true }
+fjall = "2.7.0"
+hex = { workspace = true }
+imbl = { workspace = true }
+minicbor = { version = "0.26.0", features = ["std", "derive"] }
+serde_cbor = "0.11"
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+tracing-subscriber = { version = "0.3", features = ["fmt"] }
+
+[lib]
+path = "src/address_state.rs"

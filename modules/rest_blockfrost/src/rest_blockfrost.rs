@@ -1,10 +1,10 @@
 //! Acropolis Blockfrost-Compatible REST Module
 
-use std::{future::Future, sync::Arc};
+use std::{collections::HashMap, future::Future, sync::Arc};
 
 use acropolis_common::{
     messages::{Message, RESTResponse},
-    rest_helper::handle_rest_with_path_parameter,
+    rest_helper::{handle_rest_with_path_and_query_parameters, handle_rest_with_path_parameter},
 };
 use anyhow::Result;
 use caryatid_sdk::{module, Context, Module};
@@ -17,9 +17,23 @@ mod types;
 mod utils;
 use handlers::{
     accounts::handle_single_account_blockfrost,
+    addresses::{
+        handle_address_asset_utxos_blockfrost, handle_address_extended_blockfrost,
+        handle_address_single_blockfrost, handle_address_totals_blockfrost,
+        handle_address_transactions_blockfrost, handle_address_utxos_blockfrost,
+    },
     assets::{
         handle_asset_addresses_blockfrost, handle_asset_history_blockfrost,
-        handle_asset_transactions_blockfrost, handle_assets_list_blockfrost,
+        handle_asset_single_blockfrost, handle_asset_transactions_blockfrost,
+        handle_assets_list_blockfrost, handle_policy_assets_blockfrost,
+    },
+    blocks::{
+        handle_blocks_epoch_slot_blockfrost, handle_blocks_hash_number_addresses_blockfrost,
+        handle_blocks_hash_number_next_blockfrost, handle_blocks_hash_number_previous_blockfrost,
+        handle_blocks_latest_hash_number_blockfrost,
+        handle_blocks_latest_hash_number_transactions_blockfrost,
+        handle_blocks_latest_hash_number_transactions_cbor_blockfrost,
+        handle_blocks_slot_blockfrost,
     },
     epochs::{
         handle_epoch_info_blockfrost, handle_epoch_next_blockfrost, handle_epoch_params_blockfrost,
@@ -44,14 +58,37 @@ use handlers::{
     },
 };
 
-use crate::{
-    handlers::assets::{handle_asset_single_blockfrost, handle_policy_assets_blockfrost},
-    handlers_config::HandlersConfig,
-};
+use crate::handlers_config::HandlersConfig;
 
 // Accounts topics
 const DEFAULT_HANDLE_SINGLE_ACCOUNT_TOPIC: (&str, &str) =
     ("handle-topic-account-single", "rest.get.accounts.*");
+
+// Blocks topics
+const DEFAULT_HANDLE_BLOCKS_LATEST_HASH_NUMBER_TOPIC: (&str, &str) =
+    ("handle-blocks-latest-hash-number", "rest.get.blocks.*");
+const DEFAULT_HANDLE_BLOCKS_LATEST_HASH_NUMBER_TRANSACTIONS_TOPIC: (&str, &str) = (
+    "handle-blocks-latest-hash-number-transactions",
+    "rest.get.blocks.*.txs",
+);
+const DEFAULT_HANDLE_BLOCKS_LATEST_HASH_NUMBER_TRANSACTIONS_CBOR_TOPIC: (&str, &str) = (
+    "handle-blocks-latest-hash-number-transactions-cbor",
+    "rest.get.blocks.*.txs.cbor",
+);
+const DEFAULT_HANDLE_BLOCKS_HASH_NUMBER_NEXT_TOPIC: (&str, &str) =
+    ("handle-blocks-hash-number-next", "rest.get.blocks.*.next");
+const DEFAULT_HANDLE_BLOCKS_HASH_NUMBER_PREVIOUS_TOPIC: (&str, &str) = (
+    "handle-blocks-hash-number-previous",
+    "rest.get.blocks.*.previous",
+);
+const DEFAULT_HANDLE_BLOCKS_SLOT_TOPIC: (&str, &str) =
+    ("handle-blocks-slot", "rest.get.blocks.slot.*");
+const DEFAULT_HANDLE_BLOCKS_EPOCH_SLOT_TOPIC: (&str, &str) =
+    ("handle-blocks-epoch-slot", "rest.get.blocks.epoch.*.slot.*");
+const DEFAULT_HANDLE_BLOCKS_HASH_NUMBER_ADDRESSES_TOPIC: (&str, &str) = (
+    "handle-blocks-hash-number-addresses",
+    "rest.get.blocks.*.addresses",
+);
 
 // Governance topics
 const DEFAULT_HANDLE_DREPS_LIST_TOPIC: (&str, &str) =
@@ -153,10 +190,8 @@ const DEFAULT_HANDLE_EPOCH_POOL_BLOCKS_TOPIC: (&str, &str) = (
 // Assets topics
 const DEFAULT_HANDLE_ASSETS_LIST_TOPIC: (&str, &str) =
     ("handle-topic-assets-list", "rest.get.assets");
-const DEFAULT_HANDLE_ASSET_SINGLE_TOPIC: (&str, &str) = (
-    "handle-topic-policy-assets-asset-single",
-    "rest.get.assets.*",
-);
+const DEFAULT_HANDLE_ASSET_SINGLE_TOPIC: (&str, &str) =
+    ("handle-topic-asset-single", "rest.get.assets.*");
 const DEFAULT_HANDLE_ASSET_HISTORY_TOPIC: (&str, &str) =
     ("handle-topic-asset-history", "rest.get.assets.*.history");
 const DEFAULT_HANDLE_ASSET_TRANSACTIONS_TOPIC: (&str, &str) = (
@@ -169,6 +204,27 @@ const DEFAULT_HANDLE_ASSET_ADDRESSES_TOPIC: (&str, &str) = (
 );
 const DEFAULT_HANDLE_POLICY_ASSETS_TOPIC: (&str, &str) =
     ("handle-topic-policy-assets", "rest.get.assets.policy.*");
+
+// Addresses topics
+const DEFAULT_HANDLE_ADDRESS_SINGLE_TOPIC: (&str, &str) =
+    ("handle-topic-address-single", "rest.get.addresses.*");
+
+const DEFAULT_HANDLE_ADDRESS_EXTENDED_TOPIC: (&str, &str) = (
+    "handle-topic-address-extended",
+    "rest.get.addresses.*.extended",
+);
+const DEFAULT_HANDLE_ADDRESS_TOTALS_TOPIC: (&str, &str) =
+    ("handle-topic-address-totals", "rest.get.addresses.*.total");
+const DEFAULT_HANDLE_ADDRESS_UTXOS_TOPIC: (&str, &str) =
+    ("handle-topic-address-utxos", "rest.get.addresses.*.utxos");
+const DEFAULT_HANDLE_ADDRESS_ASSET_UTXOS_TOPIC: (&str, &str) = (
+    "handle-topic-address-asset-utxos",
+    "rest.get.addresses.*.utxos.*",
+);
+const DEFAULT_HANDLE_ADDRESS_TRANSACTIONS_TOPIC: (&str, &str) = (
+    "handle-topic-address-transactions",
+    "rest.get.addresses.*.transactions",
+);
 
 #[module(
     message_type(Message),
@@ -191,6 +247,70 @@ impl BlockfrostREST {
             DEFAULT_HANDLE_SINGLE_ACCOUNT_TOPIC,
             handlers_config.clone(),
             handle_single_account_blockfrost,
+        );
+
+        // Handler for /blocks/latest, /blocks/{hash_or_number}
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_BLOCKS_LATEST_HASH_NUMBER_TOPIC,
+            handlers_config.clone(),
+            handle_blocks_latest_hash_number_blockfrost,
+        );
+
+        // Handler for /blocks/latest/txs, /blocks/{hash_or_number}/txs
+        register_handler_with_query(
+            context.clone(),
+            DEFAULT_HANDLE_BLOCKS_LATEST_HASH_NUMBER_TRANSACTIONS_TOPIC,
+            handlers_config.clone(),
+            handle_blocks_latest_hash_number_transactions_blockfrost,
+        );
+
+        // Handler for /blocks/latest/txs/cbor, /blocks/{hash_or_number}/txs/cbor
+        register_handler_with_query(
+            context.clone(),
+            DEFAULT_HANDLE_BLOCKS_LATEST_HASH_NUMBER_TRANSACTIONS_CBOR_TOPIC,
+            handlers_config.clone(),
+            handle_blocks_latest_hash_number_transactions_cbor_blockfrost,
+        );
+
+        // Handler for /blocks/{hash_or_number}/next
+        register_handler_with_query(
+            context.clone(),
+            DEFAULT_HANDLE_BLOCKS_HASH_NUMBER_NEXT_TOPIC,
+            handlers_config.clone(),
+            handle_blocks_hash_number_next_blockfrost,
+        );
+
+        // Handler for /blocks/{hash_or_number}/previous
+        register_handler_with_query(
+            context.clone(),
+            DEFAULT_HANDLE_BLOCKS_HASH_NUMBER_PREVIOUS_TOPIC,
+            handlers_config.clone(),
+            handle_blocks_hash_number_previous_blockfrost,
+        );
+
+        // Handler for /blocks/slot/{slot_number}
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_BLOCKS_SLOT_TOPIC,
+            handlers_config.clone(),
+            handle_blocks_slot_blockfrost,
+        );
+
+        // Handler for /blocks/epoch/{epoch_number}/slot/{slot_number}
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_BLOCKS_EPOCH_SLOT_TOPIC,
+            handlers_config.clone(),
+            handle_blocks_epoch_slot_blockfrost,
+        );
+
+        // Handler for /blocks/{hash_or_number}/addresses
+        register_handler_with_query(
+            context.clone(),
+            DEFAULT_HANDLE_BLOCKS_HASH_NUMBER_ADDRESSES_TOPIC,
+            handlers_config.clone(),
+            handle_blocks_hash_number_addresses_blockfrost,
         );
 
         // Handler for /governance/dreps
@@ -473,6 +593,54 @@ impl BlockfrostREST {
             handle_policy_assets_blockfrost,
         );
 
+        // Handler for /addresses/{address}
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_ADDRESS_SINGLE_TOPIC,
+            handlers_config.clone(),
+            handle_address_single_blockfrost,
+        );
+
+        // Handler for /addresses/{address}/extended
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_ADDRESS_EXTENDED_TOPIC,
+            handlers_config.clone(),
+            handle_address_extended_blockfrost,
+        );
+
+        // Handler for /addresses/{address}/total
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_ADDRESS_TOTALS_TOPIC,
+            handlers_config.clone(),
+            handle_address_totals_blockfrost,
+        );
+
+        // Handler for /addresses/{address}/utxos
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_ADDRESS_UTXOS_TOPIC,
+            handlers_config.clone(),
+            handle_address_utxos_blockfrost,
+        );
+
+        // Handler for /addresses/{address}/utxos/{asset}
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_ADDRESS_ASSET_UTXOS_TOPIC,
+            handlers_config.clone(),
+            handle_address_asset_utxos_blockfrost,
+        );
+
+        // Handler for /addresses/{address}/transactions
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_ADDRESS_TRANSACTIONS_TOPIC,
+            handlers_config.clone(),
+            handle_address_transactions_blockfrost,
+        );
+
         Ok(())
     }
 }
@@ -502,4 +670,35 @@ fn register_handler<F, Fut>(
 
         async move { handler_fn(context, params, handlers_config).await }
     });
+}
+
+fn register_handler_with_query<F, Fut>(
+    context: Arc<Context<Message>>,
+    topic: (&str, &str),
+    handlers_config: Arc<HandlersConfig>,
+    handler_fn: F,
+) where
+    F: Fn(Arc<Context<Message>>, Vec<String>, HashMap<String, String>, Arc<HandlersConfig>) -> Fut
+        + Send
+        + Sync
+        + Clone
+        + 'static,
+    Fut: Future<Output = Result<RESTResponse>> + Send + 'static,
+{
+    let topic_name = context.config.get_string(topic.0).unwrap_or_else(|_| topic.1.to_string());
+
+    tracing::info!("Creating request handler on '{}'", topic_name);
+
+    handle_rest_with_path_and_query_parameters(
+        context.clone(),
+        &topic_name,
+        move |params, query_params| {
+            let context = context.clone();
+            let handler_fn = handler_fn.clone();
+            let params: Vec<String> = params.iter().map(|s| s.to_string()).collect();
+            let handlers_config = handlers_config.clone();
+
+            async move { handler_fn(context, params, query_params, handlers_config).await }
+        },
+    );
 }

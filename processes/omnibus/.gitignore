@@ -1,4 +1,8 @@
 downloads
 sled-immutable-utxos
+fjall-blocks
 fjall-immutable-utxos
 cache
+
+# DB files
+*_db

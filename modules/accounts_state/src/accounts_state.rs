@@ -8,6 +8,7 @@ use acropolis_common::{
     BlockInfo, BlockStatus,
 };
 use anyhow::Result;
+use bigdecimal::Zero;
 use caryatid_sdk::{message_bus::Subscription, module, Context, Module};
 use config::Config;
 use std::sync::Arc;
@@ -33,6 +34,9 @@ use acropolis_common::queries::accounts::{
 };
 use verifier::Verifier;
 
+use crate::spo_distribution_store::SPDDStore;
+mod spo_distribution_store;
+
 const DEFAULT_SPO_STATE_TOPIC: &str = "cardano.spo.state";
 const DEFAULT_EPOCH_ACTIVITY_TOPIC: &str = "cardano.epoch.activity";
 const DEFAULT_TX_CERTIFICATES_TOPIC: &str = "cardano.certificates";
@@ -46,6 +50,9 @@ const DEFAULT_SPO_REWARDS_TOPIC: &str = "cardano.spo.rewards";
 const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: &str = "cardano.protocol.parameters";
 const DEFAULT_STAKE_REWARD_DELTAS_TOPIC: &str = "cardano.stake.reward.deltas";
 
+const DEFAULT_SPDD_DB_PATH: (&str, &str) = ("spdd-db-path", "./spdd_db");
+const DEFAULT_SPDD_RETENTION_EPOCHS: (&str, u64) = ("spdd-retention-epochs", 0);
+
 /// Accounts State module
 #[module(
     message_type(Message),
@@ -58,6 +65,7 @@ impl AccountsState {
     /// Async run loop
     async fn run(
         history: Arc<Mutex<StateHistory<State>>>,
+        spdd_store: Option<Arc<Mutex<SPDDStore>>>,
         mut drep_publisher: DRepDistributionPublisher,
         mut spo_publisher: SPODistributionPublisher,
         mut spo_rewards_publisher: SPORewardsPublisher,
@@ -144,6 +152,11 @@ impl AccountsState {
                 let ea_message_f = ea_subscription.read();
                 let params_message_f = parameters_subscription.read();
 
+                let spdd_store_guard = match spdd_store.as_ref() {
+                    Some(s) => Some(s.lock().await),
+                    None => None,
+                };
+
                 // Handle DRep
                 let (_, message) = dreps_message_f.await?;
                 match message.as_ref() {
@@ -184,6 +197,17 @@ impl AccountsState {
                             let spdd = state.generate_spdd();
                             if let Err(e) = spo_publisher.publish_spdd(block_info, spdd).await {
                                 error!("Error publishing SPO stake distribution: {e:#}")
+                            }
+
+                            // if we store spdd history
+                            let spdd_state = state.dump_spdd_state();
+                            if let Some(mut spdd_store) = spdd_store_guard {
+                                // active stakes taken at beginning of epoch i is for epoch + 1
+                                if let Err(e) =
+                                    spdd_store.store_spdd(block_info.epoch + 1, spdd_state)
+                                {
+                                    error!("Error storing SPDD state: {e:#}")
+                                }
                             }
                         }
                         .instrument(span)
@@ -396,6 +420,25 @@ impl AccountsState {
             .unwrap_or(DEFAULT_STAKE_REWARD_DELTAS_TOPIC.to_string());
         info!("Creating stake reward deltas subscriber on '{stake_reward_deltas_topic}'");
 
+        let spdd_db_path =
+            config.get_string(DEFAULT_SPDD_DB_PATH.0).unwrap_or(DEFAULT_SPDD_DB_PATH.1.to_string());
+
+        // Convert to absolute path if relative
+        let spdd_db_path = if std::path::Path::new(&spdd_db_path).is_absolute() {
+            spdd_db_path
+        } else {
+            let current_dir = std::env::current_dir()
+                .map_err(|e| anyhow::anyhow!("Failed to get current directory: {}", e))?;
+            current_dir.join(&spdd_db_path).to_string_lossy().to_string()
+        };
+
+        // Get SPDD retention epochs configuration
+        let spdd_retention_epochs = config
+            .get_int(DEFAULT_SPDD_RETENTION_EPOCHS.0)
+            .unwrap_or(DEFAULT_SPDD_RETENTION_EPOCHS.1 as i64)
+            .max(0) as u64;
+        info!("SPDD retention epochs: {:?}", spdd_retention_epochs);
+
         // Query topics
         let accounts_query_topic = config
             .get_string(DEFAULT_ACCOUNTS_QUERY_TOPIC.0)
@@ -415,16 +458,28 @@ impl AccountsState {
             verifier.read_rewards(&verify_rewards_files);
         }
 
-        // Create history
+        // History
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "AccountsState",
             StateHistoryStore::default_block_store(),
         )));
-        let history_account_state = history.clone();
+        let history_query = history.clone();
         let history_tick = history.clone();
 
+        // Spdd store
+        let spdd_store = if !spdd_retention_epochs.is_zero() {
+            Some(Arc::new(Mutex::new(SPDDStore::load(
+                std::path::Path::new(&spdd_db_path),
+                spdd_retention_epochs,
+            )?)))
+        } else {
+            None
+        };
+        let spdd_store_query = spdd_store.clone();
+
         context.handle(&accounts_query_topic, move |message| {
-            let history = history_account_state.clone();
+            let history = history_query.clone();
+            let spdd_store = spdd_store_query.clone();
             async move {
                 let Message::StateQuery(StateQuery::Accounts(query)) = message.as_ref() else {
                     return Arc::new(Message::StateQueryResponse(StateQueryResponse::Accounts(
@@ -435,6 +490,10 @@ impl AccountsState {
                 };
 
                 let guard = history.lock().await;
+                let spdd_store_guard = match spdd_store.as_ref() {
+                    Some(s) => Some(s.lock().await),
+                    None => None,
+                };
                 let state = match guard.current() {
                     Some(s) => s,
                     None => {
@@ -539,6 +598,32 @@ impl AccountsState {
                         }
                     }
 
+                    AccountsStateQuery::GetSPDDByEpoch { epoch } => match spdd_store_guard {
+                        Some(spdd_store) => match spdd_store.query_by_epoch(*epoch) {
+                            Ok(result) => AccountsStateQueryResponse::SPDDByEpoch(result),
+                            Err(e) => AccountsStateQueryResponse::Error(e.to_string()),
+                        },
+                        None => AccountsStateQueryResponse::Error(
+                            "SPDD store is not enabled".to_string(),
+                        ),
+                    },
+
+                    AccountsStateQuery::GetSPDDByEpochAndPool { epoch, pool_id } => {
+                        match spdd_store_guard {
+                            Some(spdd_store) => {
+                                match spdd_store.query_by_epoch_and_pool(*epoch, pool_id) {
+                                    Ok(result) => {
+                                        AccountsStateQueryResponse::SPDDByEpochAndPool(result)
+                                    }
+                                    Err(e) => AccountsStateQueryResponse::Error(e.to_string()),
+                                }
+                            }
+                            None => AccountsStateQueryResponse::Error(
+                                "SPDD store is not enabled".to_string(),
+                            ),
+                        }
+                    }
+
                     _ => AccountsStateQueryResponse::Error(format!(
                         "Unimplemented query variant: {:?}",
                         query
@@ -595,6 +680,7 @@ impl AccountsState {
         context.run(async move {
             Self::run(
                 history,
+                spdd_store,
                 drep_publisher,
                 spo_publisher,
                 spo_rewards_publisher,
