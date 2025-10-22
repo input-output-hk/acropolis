@@ -265,9 +265,8 @@ impl TxUnpacker {
                                         }
 
                                         if publish_certificates_topic.is_some() {
-                                            let tx_hash = tx.hash();
                                             for ( cert_index, cert) in certs.iter().enumerate() {
-                                                match map_parameters::map_certificate(&cert, *tx_hash, tx_index, cert_index) {
+                                                match map_parameters::map_certificate(&cert, tx_identifier, tx_index, cert_index) {
                                                     Ok(tx_cert) => {
                                                         certificates.push(tx_cert);
                                                     },

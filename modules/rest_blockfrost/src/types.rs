@@ -403,8 +403,7 @@ impl From<Relay> for PoolRelayRest {
 #[serde_as]
 #[derive(Serialize)]
 pub struct PoolUpdateEventRest {
-    #[serde_as(as = "Hex")]
-    pub tx_hash: TxHash,
+    pub tx_hash: String,
     pub cert_index: u64,
     pub action: PoolUpdateAction,
 }
@@ -447,10 +446,9 @@ pub struct PoolInfoRest {
     pub fixed_cost: u64,
     pub reward_account: String,
     pub pool_owners: Vec<String>,
-    #[serde_as(as = "Option<Vec<Hex>>")]
-    pub registration: Option<Vec<TxHash>>,
-    #[serde_as(as = "Option<Vec<Hex>>")]
-    pub retirement: Option<Vec<TxHash>>,
+    // TODO: Query chain store module to retrieve TxHash from TxIdentifier
+    pub registration: String,
+    pub retirement: String,
 }
 
 // REST response structure for protocol params

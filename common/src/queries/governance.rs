@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use crate::{
-    Anchor, Credential, DRepCredential, GovActionId, Lovelace, ProposalProcedure, TxHash, Vote,
-    Voter, VotingProcedure,
+    Anchor, Credential, DRepCredential, GovActionId, Lovelace, ProposalProcedure, TxHash,
+    TxIdentifier, Vote, Voter, VotingProcedure,
 };
 
 pub const DEFAULT_DREPS_QUERY_TOPIC: (&str, &str) =
@@ -76,7 +76,7 @@ pub struct DRepUpdates {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DRepUpdateEvent {
-    pub tx_hash: TxHash,
+    pub tx_identifier: TxIdentifier,
     pub cert_index: u64,
     pub action: DRepActionUpdate,
 }

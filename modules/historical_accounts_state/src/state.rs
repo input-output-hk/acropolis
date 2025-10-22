@@ -7,7 +7,8 @@ use acropolis_common::{
     messages::{
         AddressDeltasMessage, StakeRewardDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
     },
-    BlockInfo, PoolId, ShelleyAddress, StakeAddress, TxIdentifier,
+    BlockInfo, MoveInstantaneousReward, PoolId, ShelleyAddress, StakeAddress, StakeCredential,
+    TxCertificate, TxIdentifier,
 };
 
 use crate::{
@@ -65,7 +66,7 @@ pub struct DelegationUpdate {
 #[derive(Debug, Clone, minicbor::Decode, minicbor::Encode)]
 pub struct RegistrationUpdate {
     #[n(0)]
-    tx_hash: TxIdentifier,
+    tx_identifier: TxIdentifier,
     #[n(1)]
     deregistered: bool,
 }
@@ -73,7 +74,7 @@ pub struct RegistrationUpdate {
 #[derive(Debug, Clone, minicbor::Decode, minicbor::Encode)]
 pub struct AccountWithdrawal {
     #[n(0)]
-    tx_hash: TxIdentifier,
+    tx_identifier: TxIdentifier,
     #[n(1)]
     amount: u64,
 }
@@ -135,7 +136,78 @@ impl State {
         Ok(())
     }
 
-    pub fn handle_tx_certificates(&mut self, _tx_certs: &TxCertificatesMessage) -> Result<()> {
+    pub fn handle_tx_certificates(&mut self, tx_certs: &TxCertificatesMessage) -> Result<()> {
+        // Handle certificates
+        for tx_cert in tx_certs.certificates.iter() {
+            match tx_cert {
+                // Pre-Conway stake registration/deregistration certs
+                TxCertificate::StakeRegistration(sc) => {
+                    self.handle_stake_registration(&sc.stake_credential, &sc.tx_identifier);
+                }
+                TxCertificate::StakeDeregistration(sc) => {
+                    self.handle_stake_deregistration(&sc.stake_credential, &sc.tx_identifier);
+                }
+
+                // Post-Conway stake registration/deregistration certs
+                TxCertificate::Registration(reg) => {
+                    self.handle_stake_registration(&reg.cert.credential, &reg.tx_identifier);
+                }
+                TxCertificate::Deregistration(dreg) => {
+                    self.handle_stake_deregistration(&dreg.cert.credential, &dreg.tx_identifier);
+                }
+
+                // Registration and delegation certs
+                TxCertificate::StakeRegistrationAndStakeAndVoteDelegation(delegation) => {
+                    self.handle_stake_registration(
+                        &delegation.cert.credential,
+                        &delegation.tx_identifier,
+                    );
+                    self.handle_stake_delegation(
+                        &delegation.cert.credential,
+                        &delegation.cert.operator,
+                        &delegation.tx_identifier,
+                    );
+                }
+                TxCertificate::StakeRegistrationAndDelegation(delegation) => {
+                    self.handle_stake_registration(
+                        &delegation.cert.credential,
+                        &delegation.tx_identifier,
+                    );
+                    self.handle_stake_delegation(
+                        &delegation.cert.credential,
+                        &delegation.cert.operator,
+                        &delegation.tx_identifier,
+                    );
+                }
+
+                // Delegation certs
+                TxCertificate::StakeDelegation(delegation) => {
+                    self.handle_stake_delegation(
+                        &delegation.cert.credential,
+                        &delegation.cert.operator,
+                        &delegation.tx_identifier,
+                    );
+                }
+                TxCertificate::StakeAndVoteDelegation(delegation) => {
+                    self.handle_stake_delegation(
+                        &delegation.cert.credential,
+                        &delegation.cert.operator,
+                        &delegation.tx_identifier,
+                    );
+                }
+                TxCertificate::StakeRegistrationAndVoteDelegation(delegation) => {
+                    self.handle_stake_registration(
+                        &delegation.cert.credential,
+                        &delegation.tx_identifier,
+                    );
+                }
+
+                // MIR certs
+                TxCertificate::MoveInstantaneousReward(mir) => self.handle_mir(mir),
+
+                _ => (),
+            };
+        }
         Ok(())
     }
 
@@ -183,4 +255,53 @@ impl State {
     pub fn _get_addresses(&self, _account: StakeAddress) -> Result<Vec<ShelleyAddress>> {
         Ok(Vec::new())
     }
+
+    fn handle_stake_registration(
+        &mut self,
+        account: &StakeCredential,
+        tx_identifier: &TxIdentifier,
+    ) {
+        let volatile = self.volatile.window.back_mut().expect("window should never be empty");
+
+        let entry = volatile.entry(account.clone()).or_default();
+
+        if let Some(registration_history) = &mut entry.registration_history {
+            registration_history.push(RegistrationUpdate {
+                tx_identifier: *tx_identifier,
+                deregistered: false,
+            });
+        } else {
+            entry.registration_history = Some(vec![RegistrationUpdate {
+                tx_identifier: *tx_identifier,
+                deregistered: false,
+            }]);
+        }
+    }
+
+    fn handle_stake_deregistration(
+        &mut self,
+        account: &StakeCredential,
+        tx_identifier: &TxIdentifier,
+    ) {
+        let volatile = self.volatile.window.back_mut().expect("window should never be empty");
+
+        let entry = volatile.entry(account.clone()).or_default();
+
+        if let Some(mut registration_history) = entry.registration_history.clone() {
+            registration_history.push(RegistrationUpdate {
+                tx_identifier: *tx_identifier,
+                deregistered: true,
+            })
+        }
+    }
+
+    fn handle_stake_delegation(
+        &mut self,
+        _account: &StakeCredential,
+        _pool: &PoolId,
+        _tx_identifier: &TxIdentifier,
+    ) {
+    }
+
+    fn handle_mir(&mut self, _mir: &MoveInstantaneousReward) {}
 }

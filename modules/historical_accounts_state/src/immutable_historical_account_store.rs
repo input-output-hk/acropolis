@@ -1,6 +1,6 @@
 use std::{collections::HashMap, path::Path};
 
-use acropolis_common::{ShelleyAddress, StakeAddress};
+use acropolis_common::{ShelleyAddress, StakeCredential};
 use anyhow::Result;
 use fjall::{Keyspace, Partition, PartitionCreateOptions};
 use minicbor::{decode, to_vec};
@@ -30,7 +30,7 @@ pub struct ImmutableHistoricalAccountStore {
     mir_history: Partition,
     addresses: Partition,
     keyspace: Keyspace,
-    pub pending: Mutex<Vec<HashMap<StakeAddress, AccountEntry>>>,
+    pub pending: Mutex<Vec<HashMap<StakeCredential, AccountEntry>>>,
 }
 
 impl ImmutableHistoricalAccountStore {
@@ -74,7 +74,8 @@ impl ImmutableHistoricalAccountStore {
         })
     }
 
-    /// Persists volatile UTxOs, transactions, and totals into their respective Fjall partitions for an entire epoch.
+    /// Persists volatile registrations, delegations, MIRs, withdrawals, rewards,
+    /// and addresses into their respective Fjall partitions for an entire epoch.
     /// Skips any partitions that have already stored the given epoch.
     /// All writes are batched and committed atomically, preventing on-disk corruption in case of failure.
     pub async fn persist_epoch(&self, epoch: u64, config: &HistoricalAccountsConfig) -> Result<()> {
@@ -152,7 +153,7 @@ impl ImmutableHistoricalAccountStore {
 
             for (account, entry) in block_map {
                 change_count += 1;
-                let account_key = account.to_bytes_key()?;
+                let account_key = account.get_hash();
 
                 // Persist rewards
                 if persist_rewards_history {
@@ -190,23 +191,7 @@ impl ImmutableHistoricalAccountStore {
                     batch.insert(&self.active_stake_history, &account_key, to_vec(&live)?);
                 }
 
-                // Persist account delegation updates
-                if persist_delegation_history {
-                    let mut live: Vec<DelegationUpdate> = self
-                        .delegation_history
-                        .get(&account_key)?
-                        .map(|bytes| decode(&bytes))
-                        .transpose()?
-                        .unwrap_or_default();
-
-                    if let Some(updates) = &entry.delegation_history {
-                        live.extend(updates.iter().cloned());
-                    }
-
-                    batch.insert(&self.delegation_history, &account_key, to_vec(&live)?);
-                }
-
-                // Persist account registration updates
+                // Persist registrations
                 if persist_registration_history {
                     let mut live: Vec<RegistrationUpdate> = self
                         .registration_history
@@ -222,7 +207,23 @@ impl ImmutableHistoricalAccountStore {
                     batch.insert(&self.registration_history, &account_key, to_vec(&live)?);
                 }
 
-                // Persist withdrawal updates
+                // Persist delegations
+                if persist_delegation_history {
+                    let mut live: Vec<DelegationUpdate> = self
+                        .delegation_history
+                        .get(&account_key)?
+                        .map(|bytes| decode(&bytes))
+                        .transpose()?
+                        .unwrap_or_default();
+
+                    if let Some(updates) = &entry.delegation_history {
+                        live.extend(updates.iter().cloned());
+                    }
+
+                    batch.insert(&self.delegation_history, &account_key, to_vec(&live)?);
+                }
+
+                // Persist withdrawals
                 if persist_withdrawal_history {
                     let mut live: Vec<AccountWithdrawal> = self
                         .withdrawal_history
@@ -238,7 +239,7 @@ impl ImmutableHistoricalAccountStore {
                     batch.insert(&self.withdrawal_history, &account_key, to_vec(&live)?);
                 }
 
-                // Persist MIR updates
+                // Persist MIRs
                 if persist_mir_history {
                     let mut live: Vec<AccountWithdrawal> = self
                         .mir_history
@@ -254,7 +255,7 @@ impl ImmutableHistoricalAccountStore {
                     batch.insert(&self.mir_history, &account_key, to_vec(&live)?);
                 }
 
-                // Persist address updates
+                // Persist new addresses
                 if persist_addresses {
                     let mut live: Vec<ShelleyAddress> = self
                         .addresses
@@ -273,6 +274,13 @@ impl ImmutableHistoricalAccountStore {
         }
 
         // Metadata markers
+        if persist_rewards_history {
+            batch.insert(
+                &self.rewards_history,
+                ACCOUNT_REWARDS_HISTORY_COUNTER,
+                &epoch.to_le_bytes(),
+            );
+        }
         if persist_active_stake_history {
             batch.insert(
                 &self.active_stake_history,
@@ -328,16 +336,16 @@ impl ImmutableHistoricalAccountStore {
         }
     }
 
-    pub async fn update_immutable(&self, drained: Vec<HashMap<StakeAddress, AccountEntry>>) {
+    pub async fn update_immutable(&self, drained: Vec<HashMap<StakeCredential, AccountEntry>>) {
         let mut pending = self.pending.lock().await;
         pending.extend(drained);
     }
 
     pub async fn _get_rewards_history(
         &self,
-        account: &StakeAddress,
+        account: &StakeCredential,
     ) -> Result<Option<Vec<RewardHistory>>> {
-        let key = account.to_bytes_key()?;
+        let key = account.get_hash();
 
         let mut live: Vec<RewardHistory> = self
             .rewards_history
@@ -367,9 +375,9 @@ impl ImmutableHistoricalAccountStore {
 
     pub async fn _get_active_stake_history(
         &self,
-        account: &StakeAddress,
+        account: &StakeCredential,
     ) -> Result<Option<Vec<ActiveStakeHistory>>> {
-        let key = account.to_bytes_key()?;
+        let key = account.get_hash();
 
         let mut live: Vec<ActiveStakeHistory> = self
             .active_stake_history
@@ -399,9 +407,9 @@ impl ImmutableHistoricalAccountStore {
 
     pub async fn _get_delegation_history(
         &self,
-        account: &StakeAddress,
+        account: &StakeCredential,
     ) -> Result<Option<Vec<DelegationUpdate>>> {
-        let key = account.to_bytes_key()?;
+        let key = account.get_hash();
         let mut live: Vec<DelegationUpdate> = self
             .delegation_history
             .get(&key)?
@@ -427,9 +435,9 @@ impl ImmutableHistoricalAccountStore {
 
     pub async fn _get_registration_history(
         &self,
-        account: &StakeAddress,
+        account: &StakeCredential,
     ) -> Result<Option<Vec<RegistrationUpdate>>> {
-        let key = account.to_bytes_key()?;
+        let key = account.get_hash();
         let mut live: Vec<RegistrationUpdate> = self
             .registration_history
             .get(&key)?
@@ -455,9 +463,9 @@ impl ImmutableHistoricalAccountStore {
 
     pub async fn _get_withdrawal_history(
         &self,
-        account: &StakeAddress,
+        account: &StakeCredential,
     ) -> Result<Option<Vec<AccountWithdrawal>>> {
-        let key = account.to_bytes_key()?;
+        let key = account.get_hash();
         let mut live: Vec<AccountWithdrawal> = self
             .withdrawal_history
             .get(&key)?
@@ -483,9 +491,9 @@ impl ImmutableHistoricalAccountStore {
 
     pub async fn _get_mir_history(
         &self,
-        account: &StakeAddress,
+        account: &StakeCredential,
     ) -> Result<Option<Vec<AccountWithdrawal>>> {
-        let key = account.to_bytes_key()?;
+        let key = account.get_hash();
         let mut live: Vec<AccountWithdrawal> = self
             .mir_history
             .get(&key)?
@@ -511,9 +519,9 @@ impl ImmutableHistoricalAccountStore {
 
     pub async fn _get_addresses(
         &self,
-        account: &StakeAddress,
+        account: &StakeCredential,
     ) -> Result<Option<Vec<ShelleyAddress>>> {
-        let key = account.to_bytes_key()?;
+        let key = account.get_hash();
         let mut live: Vec<ShelleyAddress> = self
             .mir_history
             .get(&key)?
