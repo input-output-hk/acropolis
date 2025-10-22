@@ -35,7 +35,7 @@ impl Consensus {
         info!("Creating blocks subscriber on '{subscribe_blocks_topic}'");
 
         let publish_blocks_topic = config
-            .get_string("publish-blocks topic")
+            .get_string("publish-blocks-topic")
             .unwrap_or(DEFAULT_PUBLISH_BLOCKS_TOPIC.to_string());
         info!("Publishing blocks on '{publish_blocks_topic}'");
 
