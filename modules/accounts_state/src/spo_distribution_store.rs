@@ -52,15 +52,12 @@ pub struct SPDDStore {
     /// Value: "complete"
     epoch_markers: fjall::PartitionHandle,
     /// Maximum number of epochs to retain (None = unlimited)
-    retention_epochs: Option<u64>,
+    retention_epochs: u64,
 }
 
 impl SPDDStore {
     #[allow(dead_code)]
-    pub fn new(
-        path: impl AsRef<std::path::Path>,
-        retention_epochs: Option<u64>,
-    ) -> fjall::Result<Self> {
+    pub fn new(path: impl AsRef<std::path::Path>, retention_epochs: u64) -> fjall::Result<Self> {
         let path = path.as_ref();
         if path.exists() {
             std::fs::remove_dir_all(path)?;
@@ -79,10 +76,7 @@ impl SPDDStore {
         })
     }
 
-    pub fn load(
-        path: impl AsRef<std::path::Path>,
-        retention_epochs: Option<u64>,
-    ) -> fjall::Result<Self> {
+    pub fn load(path: impl AsRef<std::path::Path>, retention_epochs: u64) -> fjall::Result<Self> {
         let path = path.as_ref();
 
         let keyspace = Config::new(path).open()?;
@@ -137,11 +131,9 @@ impl SPDDStore {
         let marker_key = encode_epoch_marker(epoch);
         self.epoch_markers.insert(marker_key, b"complete")?;
 
-        if let Some(retention) = self.retention_epochs {
-            if epoch >= retention {
-                let keep_from_epoch = epoch - retention + 1;
-                self.prune_epochs_before(keep_from_epoch)?;
-            }
+        if epoch >= self.retention_epochs {
+            let keep_from_epoch = epoch - self.retention_epochs + 1;
+            self.prune_epochs_before(keep_from_epoch)?;
         }
 
         Ok(())
@@ -235,8 +227,8 @@ mod tests {
 
     #[test]
     fn test_store_spdd_state() {
-        let mut spdd_store = SPDDStore::new(std::path::Path::new(DB_PATH), None)
-            .expect("Failed to create SPDD store");
+        let mut spdd_store =
+            SPDDStore::new(std::path::Path::new(DB_PATH), 1).expect("Failed to create SPDD store");
         let mut spdd_state: HashMap<PoolId, Vec<(AddrKeyhash, u64)>> = HashMap::new();
         spdd_state.insert(
             vec![0x01; 28],
@@ -258,7 +250,7 @@ mod tests {
 
     #[test]
     fn test_prune_old_epochs() {
-        let mut spdd_store = SPDDStore::new(std::path::Path::new("spdd_prune_test_db"), Some(2))
+        let mut spdd_store = SPDDStore::new(std::path::Path::new("spdd_prune_test_db"), 2)
             .expect("Failed to create SPDD store");
 
         for epoch in 1..=3 {
