@@ -131,7 +131,7 @@ impl UtxoCallback for SnapshotHandler {
 impl PoolCallback for SnapshotHandler {
     fn on_pools(&mut self, pools: Vec<PoolInfo>) -> Result<()> {
         info!("Received {} pools", pools.len());
-        self.pools = pools;
+        self.pools.extend(pools);
         // TODO: Publish pool data.
         Ok(())
     }
@@ -140,7 +140,7 @@ impl PoolCallback for SnapshotHandler {
 impl StakeCallback for SnapshotHandler {
     fn on_accounts(&mut self, accounts: Vec<AccountState>) -> Result<()> {
         info!("Received {} accounts", accounts.len());
-        self.accounts = accounts;
+        self.accounts.extend(accounts);
         // TODO: Publish account data.
         Ok(())
     }
@@ -149,7 +149,7 @@ impl StakeCallback for SnapshotHandler {
 impl DRepCallback for SnapshotHandler {
     fn on_dreps(&mut self, dreps: Vec<DRepInfo>) -> Result<()> {
         info!("Received {} DReps", dreps.len());
-        self.dreps = dreps;
+        self.dreps.extend(dreps);
         // TODO: Publish DRep data.
         Ok(())
     }
@@ -158,7 +158,7 @@ impl DRepCallback for SnapshotHandler {
 impl ProposalCallback for SnapshotHandler {
     fn on_proposals(&mut self, proposals: Vec<GovernanceProposal>) -> Result<()> {
         info!("Received {} proposals", proposals.len());
-        self.proposals = proposals;
+        self.proposals.extend(proposals);
         // TODO: Publish proposal data.
         Ok(())
     }
