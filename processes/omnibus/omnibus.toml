@@ -55,6 +55,13 @@ store-stake-addresses = false
 store-spdd = false
 
 [module.historical-accounts-state]
+store-rewards-history = false
+store-active-stake-history = false
+store-registration-history = true
+store-delegation-history = true
+store-mir-history = true
+store-withdrawal-history = false
+store-addresses = false
 
 [module.drep-state]
 # Enables /governance/dreps/{drep_id} endpoint (Requires store-delegators to be enabled)

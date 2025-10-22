@@ -1,6 +1,9 @@
 use std::{collections::HashMap, path::Path};
 
-use acropolis_common::{ShelleyAddress, StakeCredential};
+use acropolis_common::{
+    queries::accounts::{AccountWithdrawal, DelegationUpdate, RegistrationUpdate},
+    ShelleyAddress, StakeCredential,
+};
 use anyhow::Result;
 use fjall::{Keyspace, Partition, PartitionCreateOptions};
 use minicbor::{decode, to_vec};
@@ -8,18 +11,15 @@ use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use tokio::sync::Mutex;
 use tracing::{debug, error, info};
 
-use crate::state::{
-    AccountEntry, AccountWithdrawal, ActiveStakeHistory, DelegationUpdate,
-    HistoricalAccountsConfig, RegistrationUpdate, RewardHistory,
-};
+use crate::state::{AccountEntry, ActiveStakeHistory, HistoricalAccountsConfig, RewardHistory};
 
 pub struct ImmutableHistoricalAccountStore {
     rewards_history: Partition,
     active_stake_history: Partition,
     delegation_history: Partition,
     registration_history: Partition,
-    withdrawal_history: Partition,
     mir_history: Partition,
+    withdrawal_history: Partition,
     addresses: Partition,
     keyspace: Keyspace,
     pub pending: Mutex<Vec<HashMap<StakeCredential, AccountEntry>>>,
@@ -187,24 +187,7 @@ impl ImmutableHistoricalAccountStore {
         Ok((!immutable_active_stake.is_empty()).then_some(immutable_active_stake))
     }
 
-    pub async fn _get_delegation_history(
-        &self,
-        account: &StakeCredential,
-    ) -> Result<Option<Vec<DelegationUpdate>>> {
-        let mut immutable_delegations = self
-            .collect_partition::<DelegationUpdate>(&self.delegation_history, &account.get_hash())?;
-
-        self.merge_pending(
-            account,
-            |e| e.delegation_history.as_ref(),
-            &mut immutable_delegations,
-        )
-        .await;
-
-        Ok((!immutable_delegations.is_empty()).then_some(immutable_delegations))
-    }
-
-    pub async fn _get_registration_history(
+    pub async fn get_registration_history(
         &self,
         account: &StakeCredential,
     ) -> Result<Option<Vec<RegistrationUpdate>>> {
@@ -221,6 +204,35 @@ impl ImmutableHistoricalAccountStore {
         .await;
 
         Ok((!immutable_registrations.is_empty()).then_some(immutable_registrations))
+    }
+
+    pub async fn get_delegation_history(
+        &self,
+        account: &StakeCredential,
+    ) -> Result<Option<Vec<DelegationUpdate>>> {
+        let mut immutable_delegations = self
+            .collect_partition::<DelegationUpdate>(&self.delegation_history, &account.get_hash())?;
+
+        self.merge_pending(
+            account,
+            |e| e.delegation_history.as_ref(),
+            &mut immutable_delegations,
+        )
+        .await;
+
+        Ok((!immutable_delegations.is_empty()).then_some(immutable_delegations))
+    }
+
+    pub async fn get_mir_history(
+        &self,
+        account: &StakeCredential,
+    ) -> Result<Option<Vec<AccountWithdrawal>>> {
+        let mut immutable_mirs =
+            self.collect_partition::<AccountWithdrawal>(&self.mir_history, &account.get_hash())?;
+
+        self.merge_pending(account, |e| e.mir_history.as_ref(), &mut immutable_mirs).await;
+
+        Ok((!immutable_mirs.is_empty()).then_some(immutable_mirs))
     }
 
     pub async fn _get_withdrawal_history(
@@ -240,18 +252,6 @@ impl ImmutableHistoricalAccountStore {
         .await;
 
         Ok((!immutable_withdrawals.is_empty()).then_some(immutable_withdrawals))
-    }
-
-    pub async fn _get_mir_history(
-        &self,
-        account: &StakeCredential,
-    ) -> Result<Option<Vec<AccountWithdrawal>>> {
-        let mut immutable_mirs =
-            self.collect_partition::<AccountWithdrawal>(&self.mir_history, &account.get_hash())?;
-
-        self.merge_pending(account, |e| e.mir_history.as_ref(), &mut immutable_mirs).await;
-
-        Ok((!immutable_mirs.is_empty()).then_some(immutable_mirs))
     }
 
     pub async fn _get_addresses(

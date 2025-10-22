@@ -3,7 +3,6 @@ use std::collections::{HashMap, VecDeque};
 use acropolis_common::StakeCredential;
 
 use crate::state::AccountEntry;
-use acropolis_common::StakeCredential;
 
 #[derive(Debug, Clone)]
 pub struct VolatileHistoricalAccounts {

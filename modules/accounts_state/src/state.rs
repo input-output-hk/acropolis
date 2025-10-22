@@ -892,7 +892,7 @@ impl State {
                 }
 
                 TxCertificate::MoveInstantaneousReward(mir) => {
-                    self.handle_mir(&mir).unwrap_or_else(|e| error!("MIR failed: {e:#}"));
+                    self.handle_mir(&mir.cert).unwrap_or_else(|e| error!("MIR failed: {e:#}"));
                 }
 
                 TxCertificate::Registration(reg) => {

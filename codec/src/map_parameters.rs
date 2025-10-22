@@ -289,28 +289,31 @@ pub fn map_certificate(
                 vrf_key_hash: vrf_key_hash.to_vec(),
             })),
             alonzo::Certificate::MoveInstantaneousRewardsCert(mir) => Ok(
-                TxCertificate::MoveInstantaneousReward(MoveInstantaneousReward {
-                    source: match mir.source {
-                        alonzo::InstantaneousRewardSource::Reserves => {
-                            InstantaneousRewardSource::Reserves
-                        }
-                        alonzo::InstantaneousRewardSource::Treasury => {
-                            InstantaneousRewardSource::Treasury
-                        }
+                TxCertificate::MoveInstantaneousReward(MoveInstantaneousRewardWithPos {
+                    cert: MoveInstantaneousReward {
+                        source: match mir.source {
+                            alonzo::InstantaneousRewardSource::Reserves => {
+                                InstantaneousRewardSource::Reserves
+                            }
+                            alonzo::InstantaneousRewardSource::Treasury => {
+                                InstantaneousRewardSource::Treasury
+                            }
+                        },
+                        target: match &mir.target {
+                            alonzo::InstantaneousRewardTarget::StakeCredentials(creds) => {
+                                InstantaneousRewardTarget::StakeCredentials(
+                                    creds
+                                        .iter()
+                                        .map(|(sc, v)| (map_stake_credential(&sc), *v))
+                                        .collect(),
+                                )
+                            }
+                            alonzo::InstantaneousRewardTarget::OtherAccountingPot(n) => {
+                                InstantaneousRewardTarget::OtherAccountingPot(*n)
+                            }
+                        },
                     },
-                    target: match &mir.target {
-                        alonzo::InstantaneousRewardTarget::StakeCredentials(creds) => {
-                            InstantaneousRewardTarget::StakeCredentials(
-                                creds
-                                    .iter()
-                                    .map(|(sc, v)| (map_stake_credential(&sc), *v))
-                                    .collect(),
-                            )
-                        }
-                        alonzo::InstantaneousRewardTarget::OtherAccountingPot(n) => {
-                            InstantaneousRewardTarget::OtherAccountingPot(*n)
-                        }
-                    },
+                    tx_identifier,
                 }),
             ),
         },

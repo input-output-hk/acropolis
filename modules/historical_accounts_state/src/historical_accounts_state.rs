@@ -2,7 +2,7 @@
 //! Manages optional state data needed for Blockfrost alignment
 
 use acropolis_common::queries::accounts::{
-    AccountsStateQueryResponse, DEFAULT_HISTORICAL_ACCOUNTS_QUERY_TOPIC,
+    AccountsStateQuery, AccountsStateQueryResponse, DEFAULT_HISTORICAL_ACCOUNTS_QUERY_TOPIC,
 };
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
@@ -35,10 +35,10 @@ const DEFAULT_PARAMETERS_SUBSCRIBE_TOPIC: (&str, &str) =
 const DEFAULT_HISTORICAL_ACCOUNTS_DB_PATH: (&str, &str) = ("db-path", "./db");
 const DEFAULT_STORE_REWARDS_HISTORY: (&str, bool) = ("store-rewards-history", false);
 const DEFAULT_STORE_ACTIVE_STAKE_HISTORY: (&str, bool) = ("store-active-stake-history", false);
-const DEFAULT_STORE_DELEGATION_HISTORY: (&str, bool) = ("store-delegation-history", false);
 const DEFAULT_STORE_REGISTRATION_HISTORY: (&str, bool) = ("store-registration-history", false);
-const DEFAULT_STORE_WITHDRAWAL_HISTORY: (&str, bool) = ("store-withdrawal-history", false);
+const DEFAULT_STORE_DELEGATION_HISTORY: (&str, bool) = ("store-delegation-history", false);
 const DEFAULT_STORE_MIR_HISTORY: (&str, bool) = ("store-mir-history", false);
+const DEFAULT_STORE_WITHDRAWAL_HISTORY: (&str, bool) = ("store-withdrawal-history", false);
 const DEFAULT_STORE_ADDRESSES: (&str, bool) = ("store-addresses", false);
 
 /// Historical Accounts State module
@@ -154,7 +154,7 @@ impl HistoricalAccountsState {
                     async {
                         Self::check_sync(&current_block, &block_info);
                         state
-                            .handle_tx_certificates(tx_certs_msg)
+                            .handle_tx_certificates(tx_certs_msg, block_info.epoch as u32)
                             .inspect_err(|e| error!("TxCertificates handling error: {e:#}"))
                             .ok();
                     }
@@ -313,7 +313,7 @@ impl HistoricalAccountsState {
         let state_query = state_mutex.clone();
 
         context.handle(&historical_accounts_query_topic, move |message| {
-            let _state = state_query.clone();
+            let state = state_query.clone();
             async move {
                 let Message::StateQuery(StateQuery::Accounts(query)) = message.as_ref() else {
                     return Arc::new(Message::StateQueryResponse(StateQueryResponse::Accounts(
@@ -324,6 +324,31 @@ impl HistoricalAccountsState {
                 };
 
                 let response = match query {
+                    AccountsStateQuery::GetAccountRegistrationHistory { account } => {
+                        match state.lock().await.get_registration_history(&account).await {
+                            Ok(registrations) => {
+                                AccountsStateQueryResponse::AccountRegistrationHistory(
+                                    registrations,
+                                )
+                            }
+                            Err(e) => AccountsStateQueryResponse::Error(e.to_string()),
+                        }
+                    }
+                    AccountsStateQuery::GetAccountDelegationHistory { account } => {
+                        match state.lock().await.get_delegation_history(&account).await {
+                            Ok(delegations) => {
+                                AccountsStateQueryResponse::AccountDelegationHistory(delegations)
+                            }
+                            Err(e) => AccountsStateQueryResponse::Error(e.to_string()),
+                        }
+                    }
+                    AccountsStateQuery::GetAccountMIRHistory { account } => {
+                        match state.lock().await.get_mir_history(&account).await {
+                            Ok(mirs) => AccountsStateQueryResponse::AccountMIRHistory(mirs),
+                            Err(e) => AccountsStateQueryResponse::Error(e.to_string()),
+                        }
+                    }
+
                     _ => AccountsStateQueryResponse::Error(format!(
                         "Unimplemented query variant: {:?}",
                         query

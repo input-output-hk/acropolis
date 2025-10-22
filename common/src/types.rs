@@ -975,6 +975,12 @@ pub struct MoveInstantaneousReward {
     pub target: InstantaneousRewardTarget,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct MoveInstantaneousRewardWithPos {
+    pub cert: MoveInstantaneousReward,
+    pub tx_identifier: TxIdentifier,
+}
+
 /// Register stake (Conway version) = 'reg_cert'
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Registration {
@@ -1830,7 +1836,7 @@ pub enum TxCertificate {
     GenesisKeyDelegation(GenesisKeyDelegation),
 
     /// Move instantaneous rewards
-    MoveInstantaneousReward(MoveInstantaneousReward),
+    MoveInstantaneousReward(MoveInstantaneousRewardWithPos),
 
     /// New stake registration
     Registration(RegistrationWithPos),
