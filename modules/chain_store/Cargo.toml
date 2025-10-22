@@ -2,7 +2,7 @@
 name = "acropolis_module_chain_store"
 version = "0.1.0"
 edition = "2021"
-authors = ["Simon Gellis <simon@sundae.fi>"]
+authors = ["Simon Gellis <simon@sundae.fi>","Alex Woods <alex.woods@iohk.io>"]
 description = "Chain Store Tracker"
 license = "Apache-2.0"
 
