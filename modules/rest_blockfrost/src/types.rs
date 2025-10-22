@@ -5,9 +5,11 @@ use acropolis_common::{
     queries::blocks::BlockInfo,
     queries::governance::DRepActionUpdate,
     rest_helper::ToCheckedF64,
+    serialization::{DisplayFromBech32, PoolPrefix},
     AssetAddressEntry, AssetMetadataStandard, AssetMintRecord, KeyHash, PolicyAsset,
     PoolEpochState, PoolUpdateAction, Relay, TxHash, Vote,
 };
+use anyhow::Result;
 use num_traits::ToPrimitive;
 use rust_decimal::Decimal;
 use serde::Serialize;
@@ -54,6 +56,26 @@ impl From<EpochActivityMessage> for EpochActivityRest {
 // REST response structure for /blocks/latest
 #[derive(Serialize)]
 pub struct BlockInfoREST(pub BlockInfo);
+
+// REST response structure for /epochs/{number}/stakes
+#[serde_as]
+#[derive(Serialize)]
+pub struct SPDDByEpochItemRest {
+    pub stake_address: String,
+    #[serde_as(as = "DisplayFromBech32<PoolPrefix>")]
+    pub pool_id: KeyHash,
+    #[serde_as(as = "DisplayFromStr")]
+    pub amount: u64,
+}
+
+// REST response structure for /epochs/{number}/stakes/{pool_id}
+#[serde_as]
+#[derive(Serialize)]
+pub struct SPDDByEpochAndPoolItemRest {
+    pub stake_address: String,
+    #[serde_as(as = "DisplayFromStr")]
+    pub amount: u64,
+}
 
 // REST response structure for /governance/dreps
 #[derive(Serialize)]
@@ -787,5 +809,50 @@ impl TryFrom<&AssetAddressEntry> for AssetAddressRest {
             address: entry.address.to_string()?,
             quantity: entry.quantity.to_string(),
         })
+    }
+}
+
+#[derive(Serialize)]
+pub struct AddressInfoREST {
+    pub address: String,
+    pub amount: AmountList,
+    pub stake_address: Option<String>,
+    #[serde(rename = "type")]
+    pub address_type: String,
+    pub script: bool,
+}
+
+#[derive(Serialize)]
+pub struct AmountEntry {
+    unit: String,
+    quantity: String,
+}
+
+#[derive(Serialize)]
+pub struct AmountList(pub Vec<AmountEntry>);
+
+impl From<acropolis_common::Value> for AmountList {
+    fn from(value: acropolis_common::Value) -> Self {
+        let mut out = Vec::new();
+
+        out.push(AmountEntry {
+            unit: "lovelace".to_string(),
+            quantity: value.coin().to_string(),
+        });
+
+        for (policy_id, assets) in value.assets {
+            for asset in assets {
+                out.push(AmountEntry {
+                    unit: format!(
+                        "{}{}",
+                        hex::encode(&policy_id),
+                        hex::encode(&asset.name.as_slice())
+                    ),
+                    quantity: asset.amount.to_string(),
+                });
+            }
+        }
+
+        Self(out)
     }
 }

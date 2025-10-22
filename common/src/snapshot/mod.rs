@@ -1,0 +1,30 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright © 2025, Acropolis team.
+
+//! Cardano snapshot parsing and validation.
+//!
+//! This module provides:
+//! - Manifest parsing and validation (`parser.rs`)
+//! - Streaming callback-based parser for bootstrap (`streaming_snapshot.rs`)
+//! - Pool parameters types (`pool_params.rs`)
+//! - Error types (`error.rs`)
+
+// Submodules
+mod error;
+mod parser;
+pub mod pool_params;
+pub mod streaming_snapshot;
+
+// Re-export error types
+pub use error::SnapshotError;
+
+// Re-export parser functions
+pub use parser::{compute_sha256, parse_manifest, validate_era, validate_integrity};
+
+// Re-export streaming snapshot APIs
+pub use streaming_snapshot::{
+    AccountState, Anchor, CollectingCallbacks, DRepCallback, DRepInfo, GovernanceProposal,
+    PoolCallback, PoolInfo, PoolMetadata, PotBalances, ProposalCallback, Relay, SnapshotCallbacks,
+    SnapshotMetadata, StakeAddressState, StakeCallback, StreamingSnapshotParser, UtxoCallback,
+    UtxoEntry,
+};

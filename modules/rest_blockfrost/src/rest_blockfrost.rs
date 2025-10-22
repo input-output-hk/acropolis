@@ -17,9 +17,15 @@ mod types;
 mod utils;
 use handlers::{
     accounts::handle_single_account_blockfrost,
+    addresses::{
+        handle_address_asset_utxos_blockfrost, handle_address_extended_blockfrost,
+        handle_address_single_blockfrost, handle_address_totals_blockfrost,
+        handle_address_transactions_blockfrost, handle_address_utxos_blockfrost,
+    },
     assets::{
         handle_asset_addresses_blockfrost, handle_asset_history_blockfrost,
-        handle_asset_transactions_blockfrost, handle_assets_list_blockfrost,
+        handle_asset_single_blockfrost, handle_asset_transactions_blockfrost,
+        handle_assets_list_blockfrost, handle_policy_assets_blockfrost,
     },
     blocks::{
         handle_blocks_epoch_slot_blockfrost, handle_blocks_hash_number_addresses_blockfrost,
@@ -52,10 +58,7 @@ use handlers::{
     },
 };
 
-use crate::{
-    handlers::assets::{handle_asset_single_blockfrost, handle_policy_assets_blockfrost},
-    handlers_config::HandlersConfig,
-};
+use crate::handlers_config::HandlersConfig;
 
 // Accounts topics
 const DEFAULT_HANDLE_SINGLE_ACCOUNT_TOPIC: (&str, &str) =
@@ -187,10 +190,8 @@ const DEFAULT_HANDLE_EPOCH_POOL_BLOCKS_TOPIC: (&str, &str) = (
 // Assets topics
 const DEFAULT_HANDLE_ASSETS_LIST_TOPIC: (&str, &str) =
     ("handle-topic-assets-list", "rest.get.assets");
-const DEFAULT_HANDLE_ASSET_SINGLE_TOPIC: (&str, &str) = (
-    "handle-topic-policy-assets-asset-single",
-    "rest.get.assets.*",
-);
+const DEFAULT_HANDLE_ASSET_SINGLE_TOPIC: (&str, &str) =
+    ("handle-topic-asset-single", "rest.get.assets.*");
 const DEFAULT_HANDLE_ASSET_HISTORY_TOPIC: (&str, &str) =
     ("handle-topic-asset-history", "rest.get.assets.*.history");
 const DEFAULT_HANDLE_ASSET_TRANSACTIONS_TOPIC: (&str, &str) = (
@@ -203,6 +204,27 @@ const DEFAULT_HANDLE_ASSET_ADDRESSES_TOPIC: (&str, &str) = (
 );
 const DEFAULT_HANDLE_POLICY_ASSETS_TOPIC: (&str, &str) =
     ("handle-topic-policy-assets", "rest.get.assets.policy.*");
+
+// Addresses topics
+const DEFAULT_HANDLE_ADDRESS_SINGLE_TOPIC: (&str, &str) =
+    ("handle-topic-address-single", "rest.get.addresses.*");
+
+const DEFAULT_HANDLE_ADDRESS_EXTENDED_TOPIC: (&str, &str) = (
+    "handle-topic-address-extended",
+    "rest.get.addresses.*.extended",
+);
+const DEFAULT_HANDLE_ADDRESS_TOTALS_TOPIC: (&str, &str) =
+    ("handle-topic-address-totals", "rest.get.addresses.*.total");
+const DEFAULT_HANDLE_ADDRESS_UTXOS_TOPIC: (&str, &str) =
+    ("handle-topic-address-utxos", "rest.get.addresses.*.utxos");
+const DEFAULT_HANDLE_ADDRESS_ASSET_UTXOS_TOPIC: (&str, &str) = (
+    "handle-topic-address-asset-utxos",
+    "rest.get.addresses.*.utxos.*",
+);
+const DEFAULT_HANDLE_ADDRESS_TRANSACTIONS_TOPIC: (&str, &str) = (
+    "handle-topic-address-transactions",
+    "rest.get.addresses.*.transactions",
+);
 
 #[module(
     message_type(Message),
@@ -569,6 +591,54 @@ impl BlockfrostREST {
             DEFAULT_HANDLE_POLICY_ASSETS_TOPIC,
             handlers_config.clone(),
             handle_policy_assets_blockfrost,
+        );
+
+        // Handler for /addresses/{address}
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_ADDRESS_SINGLE_TOPIC,
+            handlers_config.clone(),
+            handle_address_single_blockfrost,
+        );
+
+        // Handler for /addresses/{address}/extended
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_ADDRESS_EXTENDED_TOPIC,
+            handlers_config.clone(),
+            handle_address_extended_blockfrost,
+        );
+
+        // Handler for /addresses/{address}/total
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_ADDRESS_TOTALS_TOPIC,
+            handlers_config.clone(),
+            handle_address_totals_blockfrost,
+        );
+
+        // Handler for /addresses/{address}/utxos
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_ADDRESS_UTXOS_TOPIC,
+            handlers_config.clone(),
+            handle_address_utxos_blockfrost,
+        );
+
+        // Handler for /addresses/{address}/utxos/{asset}
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_ADDRESS_ASSET_UTXOS_TOPIC,
+            handlers_config.clone(),
+            handle_address_asset_utxos_blockfrost,
+        );
+
+        // Handler for /addresses/{address}/transactions
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_ADDRESS_TRANSACTIONS_TOPIC,
+            handlers_config.clone(),
+            handle_address_transactions_blockfrost,
         );
 
         Ok(())

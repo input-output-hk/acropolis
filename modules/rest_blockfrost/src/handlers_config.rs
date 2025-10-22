@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use acropolis_common::queries::{
     accounts::DEFAULT_ACCOUNTS_QUERY_TOPIC,
+    addresses::DEFAULT_ADDRESS_QUERY_TOPIC,
     assets::{DEFAULT_ASSETS_QUERY_TOPIC, DEFAULT_OFFCHAIN_TOKEN_REGISTRY_URL},
     blocks::DEFAULT_BLOCKS_QUERY_TOPIC,
     epochs::DEFAULT_EPOCHS_QUERY_TOPIC,
@@ -9,6 +10,7 @@ use acropolis_common::queries::{
     parameters::DEFAULT_PARAMETERS_QUERY_TOPIC,
     pools::DEFAULT_POOLS_QUERY_TOPIC,
     spdd::DEFAULT_SPDD_QUERY_TOPIC,
+    utxos::DEFAULT_UTXOS_QUERY_TOPIC,
 };
 use config::Config;
 
@@ -17,6 +19,7 @@ const DEFAULT_EXTERNAL_API_TIMEOUT: (&str, i64) = ("external_api_timeout", 3); /
 #[derive(Clone)]
 pub struct HandlersConfig {
     pub accounts_query_topic: String,
+    pub addresses_query_topic: String,
     pub assets_query_topic: String,
     pub blocks_query_topic: String,
     pub pools_query_topic: String,
@@ -25,6 +28,7 @@ pub struct HandlersConfig {
     pub epochs_query_topic: String,
     pub spdd_query_topic: String,
     pub parameters_query_topic: String,
+    pub utxos_query_topic: String,
     pub external_api_timeout: u64,
     pub offchain_token_registry_url: String,
 }
@@ -34,6 +38,10 @@ impl From<Arc<Config>> for HandlersConfig {
         let accounts_query_topic = config
             .get_string(DEFAULT_ACCOUNTS_QUERY_TOPIC.0)
             .unwrap_or(DEFAULT_ACCOUNTS_QUERY_TOPIC.1.to_string());
+
+        let addresses_query_topic = config
+            .get_string(DEFAULT_ADDRESS_QUERY_TOPIC.0)
+            .unwrap_or(DEFAULT_ADDRESS_QUERY_TOPIC.1.to_string());
 
         let assets_query_topic = config
             .get_string(DEFAULT_ASSETS_QUERY_TOPIC.0)
@@ -63,6 +71,10 @@ impl From<Arc<Config>> for HandlersConfig {
             .get_string(DEFAULT_PARAMETERS_QUERY_TOPIC.0)
             .unwrap_or(DEFAULT_PARAMETERS_QUERY_TOPIC.1.to_string());
 
+        let utxos_query_topic = config
+            .get_string(DEFAULT_UTXOS_QUERY_TOPIC.0)
+            .unwrap_or(DEFAULT_UTXOS_QUERY_TOPIC.1.to_string());
+
         let spdd_query_topic = config
             .get_string(DEFAULT_SPDD_QUERY_TOPIC.0)
             .unwrap_or(DEFAULT_SPDD_QUERY_TOPIC.1.to_string());
@@ -77,6 +89,7 @@ impl From<Arc<Config>> for HandlersConfig {
 
         Self {
             accounts_query_topic,
+            addresses_query_topic,
             assets_query_topic,
             blocks_query_topic,
             pools_query_topic,
@@ -85,6 +98,7 @@ impl From<Arc<Config>> for HandlersConfig {
             epochs_query_topic,
             spdd_query_topic,
             parameters_query_topic,
+            utxos_query_topic,
             external_api_timeout,
             offchain_token_registry_url,
         }

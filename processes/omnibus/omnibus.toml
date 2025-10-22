@@ -83,6 +83,14 @@ write-full-cache = "false"
 store-history = false
 
 [module.accounts-state]
+# Store SPDD history
+# Enable /epochs/{number}/stakes, /epochs/{number}/stakes/{pool_id} endpoints
+store-spdd-history = false
+# SPDD database path (only used when store-spdd-history is enabled)
+spdd-db-path = "./spdd_db"
+# Number of epochs to retain in SPDD history
+# Example: 73
+spdd-retention-epochs = "none"
 # Verify against captured CSV
 verify-pots-file = "../../modules/accounts_state/test-data/pots.mainnet.csv"
 verify-rewards-files = "../../modules/accounts_state/test-data/rewards.mainnet.{}.csv"
@@ -105,6 +113,15 @@ index-by-policy = false
 [module.chain-store]
 # Clear state on start up (default true)
 clear-on-start = true
+
+[module.address-state]
+# Enables /addresses/{address}, /addresses/{address}/extended,
+# /addresses/{address}/utxos/{asset}, and /addresses/{address}/utxos endpoints
+store-info = false
+# Enables /addresses/{address}/totals endpoint
+store-totals = false
+# Enables /addresses/{address}/transactions endpoint
+store-transactions = false
 
 [module.clock]
 
