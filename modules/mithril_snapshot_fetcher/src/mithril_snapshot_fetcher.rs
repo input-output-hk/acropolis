@@ -4,7 +4,7 @@
 use acropolis_common::{
     genesis_values::GenesisValues,
     messages::{CardanoMessage, Message, RawBlockMessage},
-    BlockInfo, BlockStatus, Era,
+    BlockHash, BlockInfo, BlockStatus, Era,
 };
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{module, Context, Module};
@@ -31,7 +31,7 @@ mod pause;
 use pause::PauseType;
 
 const DEFAULT_STARTUP_TOPIC: &str = "cardano.sequence.bootstrapped";
-const DEFAULT_BLOCK_TOPIC: &str = "cardano.block.available";
+const DEFAULT_BLOCK_TOPIC: &str = "cardano.block.proposed";
 const DEFAULT_COMPLETION_TOPIC: &str = "cardano.snapshot.complete";
 
 const DEFAULT_AGGREGATOR_URL: &str =
@@ -322,7 +322,7 @@ impl MithrilSnapshotFetcher {
                             status: BlockStatus::Immutable,
                             slot,
                             number,
-                            hash: *block.hash(),
+                            hash: BlockHash(*block.hash()),
                             epoch,
                             epoch_slot,
                             new_epoch,

@@ -119,6 +119,10 @@ store-addresses = false
 # Enables /assets/{asset} endpoint (requires store-assets to be enabled)
 index-by-policy = false
 
+[module.chain-store]
+# Clear state on start up (default true)
+clear-on-start = true
+
 [module.address-state]
 # Enables /addresses/{address}, /addresses/{address}/extended,
 # /addresses/{address}/utxos/{asset}, and /addresses/{address}/utxos endpoints
