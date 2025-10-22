@@ -1,19 +1,17 @@
 use std::sync::Arc;
 
 use acropolis_common::{
-    BlockInfo, Era, BlockStatus, BlockHash, genesis_values::GenesisValues, 
+    genesis_values::GenesisValues,
+    messages::{CardanoMessage, GenesisCompleteMessage, Message},
     snapshot::{
         streaming_snapshot::{
-            SnapshotCallbacks, UtxoCallback, PoolCallback, StakeCallback, 
-            DRepCallback, ProposalCallback, UtxoEntry, PoolInfo, DRepInfo, 
-            GovernanceProposal, SnapshotMetadata
+            DRepCallback, DRepInfo, GovernanceProposal, PoolCallback, PoolInfo, ProposalCallback,
+            SnapshotCallbacks, SnapshotMetadata, StakeCallback, UtxoCallback, UtxoEntry,
         },
-        StreamingSnapshotParser
+        StreamingSnapshotParser,
     },
-    messages::{
-        CardanoMessage, GenesisCompleteMessage, Message
-    }, 
     stake_addresses::AccountState,
+    BlockHash, BlockInfo, BlockStatus, Era,
 };
 use anyhow::Result;
 use caryatid_sdk::{module, Context, Module};
@@ -29,7 +27,7 @@ const DEFAULT_COMPLETION_TOPIC: &str = "cardano.sequence.bootstrapped";
 struct SnapshotHandler {
     context: Arc<Context<Message>>,
     snapshot_topic: String,
-    
+
     // Accumulated data from callbacks
     metadata: Option<SnapshotMetadata>,
     utxo_count: u64,
@@ -59,53 +57,56 @@ impl SnapshotHandler {
             proposals: Vec::new(),
         }
     }
-    
+
     /// Build BlockInfo from accumulated metadata
     fn build_block_info(&self) -> Result<BlockInfo> {
-        let metadata = self.metadata.as_ref()
-            .ok_or_else(|| anyhow::anyhow!("No metadata available"))?;
-            
+        let metadata =
+            self.metadata.as_ref().ok_or_else(|| anyhow::anyhow!("No metadata available"))?;
+
         // Create a synthetic BlockInfo representing the snapshot state
         // This represents the last block included in the snapshot
         Ok(BlockInfo {
             status: BlockStatus::Immutable, // Snapshot blocks are immutable
-            slot: 0, // TODO: Extract from snapshot metadata if available
-            number: 0, // TODO: Extract from snapshot metadata if available
-            hash: BlockHash::default(), // TODO: Extract from snapshot metadata if available
+            slot: 0,                        // TODO: Extract from snapshot metadata if available
+            number: 0,                      // TODO: Extract from snapshot metadata if available
+            hash: BlockHash::default(),     // TODO: Extract from snapshot metadata if available
             epoch: metadata.epoch,
-            epoch_slot: 0, // TODO: Extract from snapshot metadata if available
+            epoch_slot: 0,    // TODO: Extract from snapshot metadata if available
             new_epoch: false, // Not necessarily a new epoch
-            timestamp: 0, // TODO: Extract from snapshot metadata if available
+            timestamp: 0,     // TODO: Extract from snapshot metadata if available
             era: Era::Conway, // TODO: Determine from snapshot or config
         })
     }
-    
+
     /// Build GenesisValues from snapshot data
     fn build_genesis_values(&self) -> Result<GenesisValues> {
         // TODO: These values should ideally come from the snapshot or configuration
         // For now, using defaults for Conway era
         Ok(GenesisValues {
             byron_timestamp: 1506203091, // Byron mainnet genesis timestamp
-            shelley_epoch: 208, // Shelley started at epoch 208 on mainnet
-            shelley_epoch_len: 432000, // 5 days in seconds
+            shelley_epoch: 208,          // Shelley started at epoch 208 on mainnet
+            shelley_epoch_len: 432000,   // 5 days in seconds
             shelley_genesis_hash: [
                 // Shelley mainnet genesis hash (placeholder - should be from config)
-                0x1a, 0x3d, 0x98, 0x7a, 0x95, 0xad, 0xd2, 0x3e,
-                0x4f, 0x4d, 0x2d, 0x78, 0x74, 0x9f, 0x96, 0x65,
-                0xd4, 0x1e, 0x48, 0x3e, 0xf2, 0xa2, 0x22, 0x9c,
-                0x4b, 0x0b, 0xf3, 0x9f, 0xad, 0x7d, 0x5e, 0x27,
+                0x1a, 0x3d, 0x98, 0x7a, 0x95, 0xad, 0xd2, 0x3e, 0x4f, 0x4d, 0x2d, 0x78, 0x74, 0x9f,
+                0x96, 0x65, 0xd4, 0x1e, 0x48, 0x3e, 0xf2, 0xa2, 0x22, 0x9c, 0x4b, 0x0b, 0xf3, 0x9f,
+                0xad, 0x7d, 0x5e, 0x27,
             ],
         })
     }
-    
-    async fn publish_completion(&self, block_info: BlockInfo, genesis_values: GenesisValues) -> Result<()> {
+
+    async fn publish_completion(
+        &self,
+        block_info: BlockInfo,
+        genesis_values: GenesisValues,
+    ) -> Result<()> {
         let message = Message::Cardano((
             block_info,
-            CardanoMessage::GenesisComplete(GenesisCompleteMessage { 
-                values: genesis_values 
+            CardanoMessage::GenesisComplete(GenesisCompleteMessage {
+                values: genesis_values,
             }),
         ));
-        
+
         self.context
             .message_bus
             .publish(&self.snapshot_topic, Arc::new(message))
@@ -117,7 +118,7 @@ impl SnapshotHandler {
 impl UtxoCallback for SnapshotHandler {
     fn on_utxo(&mut self, _utxo: UtxoEntry) -> Result<()> {
         self.utxo_count += 1;
-        
+
         // Log progress every million UTXOs
         if self.utxo_count % 1_000_000 == 0 {
             info!("Processed {} UTXOs", self.utxo_count);
@@ -167,17 +168,25 @@ impl SnapshotCallbacks for SnapshotHandler {
     fn on_metadata(&mut self, metadata: SnapshotMetadata) -> Result<()> {
         info!("Received snapshot metadata for epoch {}", metadata.epoch);
         info!("  - UTXOs: {:?}", metadata.utxo_count);
-        info!("  - Pot balances: treasury={}, reserves={}, deposits={}", 
-              metadata.pot_balances.treasury, 
-              metadata.pot_balances.reserves, 
-              metadata.pot_balances.deposits);
-        info!("  - Previous epoch blocks: {}", metadata.blocks_previous_epoch.len());
-        info!("  - Current epoch blocks: {}", metadata.blocks_current_epoch.len());
-        
+        info!(
+            "  - Pot balances: treasury={}, reserves={}, deposits={}",
+            metadata.pot_balances.treasury,
+            metadata.pot_balances.reserves,
+            metadata.pot_balances.deposits
+        );
+        info!(
+            "  - Previous epoch blocks: {}",
+            metadata.blocks_previous_epoch.len()
+        );
+        info!(
+            "  - Current epoch blocks: {}",
+            metadata.blocks_current_epoch.len()
+        );
+
         self.metadata = Some(metadata);
         Ok(())
     }
-    
+
     fn on_complete(&mut self) -> Result<()> {
         info!("Snapshot parsing completed");
         info!("Final statistics:");
@@ -213,7 +222,7 @@ impl SnapshotBootstrapper {
         info!("Completing with '{completion_topic}'");
 
         let mut subscription = context.subscribe(&startup_topic).await?;
-        
+
         context.clone().run(async move {
             let Ok(_) = subscription.read().await else {
                 return;
@@ -222,11 +231,9 @@ impl SnapshotBootstrapper {
 
             let span = info_span!("snapshot_bootstrapper.handle");
             async {
-                if let Err(e) = Self::process_snapshot(
-                    &file_path,
-                    context.clone(),
-                    &completion_topic,
-                ).await {
+                if let Err(e) =
+                    Self::process_snapshot(&file_path, context.clone(), &completion_topic).await
+                {
                     error!("Failed to process snapshot: {}", e);
                 }
             }
@@ -236,7 +243,7 @@ impl SnapshotBootstrapper {
 
         Ok(())
     }
-    
+
     async fn process_snapshot(
         file_path: &str,
         context: Arc<Context<Message>>,
@@ -250,7 +257,7 @@ impl SnapshotBootstrapper {
 
         // Parse the snapshot with our callback handler
         parser.parse(&mut callbacks)?;
-        
+
         let duration = start.elapsed();
         info!("✓ Parse completed successfully in {:.2?}", duration);
 
@@ -260,7 +267,7 @@ impl SnapshotBootstrapper {
 
         // Publish completion message to trigger next phase (e.g., Mithril)
         callbacks.publish_completion(block_info, genesis_values).await?;
-        
+
         info!("Snapshot bootstrap completed successfully");
         Ok(())
     }
