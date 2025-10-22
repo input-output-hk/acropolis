@@ -535,7 +535,6 @@ impl ChainStore {
 
 #[derive(Default, Debug, Clone)]
 pub struct State {
-    // Keyed on cert
     pub byron_heavy_delegates: HashMap<Vec<u8>, HeavyDelegate>,
     pub shelley_genesis_delegates: HashMap<Vec<u8>, GenesisDelegate>,
 }
