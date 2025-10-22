@@ -1,6 +1,9 @@
-use acropolis_common::{messages::{
-    EpochActivityMessage, SPORewardsMessage, SPOStakeDistributionMessage, TxCertificatesMessage,
-}, BlockHash, BlockInfo, BlockStatus, Era, TxCertificate};
+use acropolis_common::{
+    messages::{
+        EpochActivityMessage, SPORewardsMessage, SPOStakeDistributionMessage, TxCertificatesMessage,
+    },
+    BlockHash, BlockInfo, BlockStatus, Era, TxCertificate,
+};
 
 use crate::store_config::StoreConfig;
 

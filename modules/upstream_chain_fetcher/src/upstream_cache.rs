@@ -151,7 +151,8 @@ impl Storage for FileStorage {
 
         let file = File::open(&name)?;
         let reader = BufReader::new(file);
-        match serde_json::from_reader::<BufReader<File>, Vec<UpstreamCacheRecord>>(reader) {
+        match serde_json::from_reader::<BufReader<std::fs::File>, Vec<UpstreamCacheRecord>>(reader)
+        {
             Ok(res) => Ok(res.clone()),
             Err(err) => Err(anyhow!(
                 "Error reading upstream cache chunk JSON from {name}: '{err}'"

@@ -692,7 +692,7 @@ async fn handle_pools_spo_blockfrost(
     let live_pledge = live_pledge?;
 
     let pool_id = pool_info.operator.to_bech32_with_hrp("pool").unwrap();
-    let reward_account = pool_info.reward_account.to_string();
+    let reward_account = pool_info.reward_account.get_credential().to_stake_bech32();
     let Ok(reward_account) = reward_account else {
         return Ok(RESTResponse::with_text(404, "Invalid Reward Account"));
     };

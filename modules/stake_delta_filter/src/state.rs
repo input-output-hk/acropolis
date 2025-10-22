@@ -92,10 +92,8 @@ impl State {
                         cert_index: reg.cert_index,
                     };
 
-                    let stake_address = reg.stake_address.clone();
-
                     // Sets pointer; updates max processed slot
-                    self.pointer_cache.set_pointer(ptr, stake_address, block.slot);
+                    self.pointer_cache.set_pointer(ptr, reg.stake_address.clone(), block.slot);
                 }
                 _ => (),
             }

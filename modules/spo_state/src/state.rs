@@ -662,10 +662,7 @@ impl State {
         for delta in reward_deltas_msg.deltas.iter() {
             let mut stake_addresses = stake_addresses.lock().unwrap();
             if let Err(e) = stake_addresses.update_reward(&delta.stake_address, delta.delta) {
-                error!(
-                    "Updating reward account {}: {e}",
-                    hex::encode(&delta.stake_address.get_hash())
-                );
+                error!("Updating reward account {}: {e}", delta.stake_address);
             }
         }
 
@@ -684,26 +681,17 @@ mod tests {
     use crate::test_utils::*;
     use acropolis_common::{
         state_history::{StateHistory, StateHistoryStore},
-        NetworkId, PoolRetirement, Ratio, StakeAddress, StakeAddressPayload, TxCertificate, TxHash,
+        PoolRetirement, Ratio, StakeAddress, TxCertificate, TxHash,
     };
     use tokio::sync::Mutex;
 
-    fn pool_owners_from_bytes(owners: Vec<Vec<u8>>) -> Vec<StakeAddress> {
-        owners
-            .into_iter()
-            .map(|bytes| {
-                StakeAddress::new(
-                    StakeAddressPayload::StakeKeyHash(bytes),
-                    NetworkId::default().into(),
-                )
-            })
-            .collect()
-    }
-
-    fn default_pool_registration(operator: Vec<u8>) -> PoolRegistration {
+    fn default_pool_registration(
+        operator: Vec<u8>,
+        vrf_key_hash: Option<Vec<u8>>,
+    ) -> PoolRegistration {
         PoolRegistration {
             operator: operator.clone(),
-            vrf_key_hash: vec![0],
+            vrf_key_hash: vrf_key_hash.unwrap_or_else(|| vec![0]),
             pledge: 0,
             cost: 0,
             margin: Ratio {
@@ -711,7 +699,7 @@ mod tests {
                 denominator: 0,
             },
             reward_account: StakeAddress::default(),
-            pool_owners: pool_owners_from_bytes(vec![StakeAddress::default().get_hash().to_vec()]),
+            pool_owners: vec![StakeAddress::default()],
             relays: vec![],
             pool_metadata: None,
         }
@@ -744,7 +732,7 @@ mod tests {
         let mut msg = new_certs_msg();
         msg.certificates.push(TxCertificate::PoolRegistrationWithPos(
             PoolRegistrationWithPos {
-                reg: default_pool_registration(vec![0]),
+                reg: default_pool_registration(vec![0], None),
                 tx_hash: TxHash::default(),
                 cert_index: 1,
             },
@@ -880,7 +868,7 @@ mod tests {
         let mut msg = new_certs_msg();
         msg.certificates.push(TxCertificate::PoolRegistrationWithPos(
             PoolRegistrationWithPos {
-                reg: default_pool_registration(vec![0]),
+                reg: default_pool_registration(vec![0], None),
                 tx_hash: TxHash::default(),
                 cert_index: 0,
             },
@@ -923,7 +911,7 @@ mod tests {
         let mut msg = new_certs_msg();
         msg.certificates.push(TxCertificate::PoolRegistrationWithPos(
             PoolRegistrationWithPos {
-                reg: default_pool_registration(vec![0]),
+                reg: default_pool_registration(vec![0], None),
                 tx_hash: TxHash::default(),
                 cert_index: 0,
             },
@@ -1028,7 +1016,7 @@ mod tests {
         let spo_id = keyhash_224(&vec![1 as u8]);
         msg.certificates.push(TxCertificate::PoolRegistrationWithPos(
             PoolRegistrationWithPos {
-                reg: default_pool_registration(spo_id.clone()),
+                reg: default_pool_registration(spo_id.clone(), None),
                 tx_hash: TxHash::default(),
                 cert_index: 0,
             },
@@ -1065,7 +1053,7 @@ mod tests {
         let spo_id = keyhash_224(&vec![1 as u8]);
         msg.certificates.push(TxCertificate::PoolRegistrationWithPos(
             PoolRegistrationWithPos {
-                reg: default_pool_registration(spo_id.clone()),
+                reg: default_pool_registration(spo_id.clone(), None),
                 tx_hash: TxHash::default(),
                 cert_index: 0,
             },
