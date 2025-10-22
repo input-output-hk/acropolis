@@ -228,10 +228,10 @@ impl State {
 
         for tx_cert in tx_certs {
             if store_delegators {
-                if let Some((cred, drep)) =
+                if let Some((delegator, drep)) =
                     Self::extract_delegation_fields(tx_cert)
                 {
-                    batched_delegators.push((cred, drep));
+                    batched_delegators.push((delegator, drep));
                     continue;
                 }
             }
@@ -477,9 +477,8 @@ impl State {
         delegators: Vec<(StakeAddress, &DRepChoice)>,
     ) -> Result<()> {
         let stake_addresses = delegators.iter().map(|(addr, _)| (addr).clone()).collect();
-
         let stake_key_to_input: HashMap<KeyHash, _> =
-            delegators.iter().map(|(addr, drep)| (addr.get_hash().to_vec(), (addr, *drep))).collect();
+            delegators.iter().map(|(addr, drep)| (addr.get_credential().get_hash(), (addr, *drep))).collect();
 
         let msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
             AccountsStateQuery::GetAccountsDrepDelegationsMap { stake_addresses },
@@ -515,7 +514,7 @@ impl State {
                     if old_drep_cred != new_drep_cred {
                         self.update_historical(&old_drep_cred, false, |entry| {
                             if let Some(delegators) = entry.delegators.as_mut() {
-                                delegators.retain(|s| s.to_binary() != delegator.to_binary());
+                                delegators.retain(|s| s != delegator);
                             }
                         })?;
                     }
@@ -525,7 +524,7 @@ impl State {
             // Add delegator to new DRep
             match self.update_historical(&new_drep_cred, true, |entry| {
                 if let Some(delegators) = entry.delegators.as_mut() {
-                    if !delegators.contains(&delegator) {
+                    if !delegators.contains(delegator) {
                         delegators.push(delegator.clone());
                     }
                 }

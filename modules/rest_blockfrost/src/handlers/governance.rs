@@ -191,18 +191,27 @@ pub async fn handle_drep_delegators_blockfrost(
         Message::StateQueryResponse(StateQueryResponse::Governance(
             GovernanceStateQueryResponse::DRepDelegators(delegators),
         )) => {
-            let stake_key_to_bech32: HashMap<KeyHash, String> = delegators
+            let stake_key_to_bech32: HashMap<KeyHash, String> = match delegators
                 .addresses
                 .iter()
                 .map(|addr| {
-                    let bech32 = addr
-                        .get_credential()
+                    let credential = addr.get_credential();
+                    let bech32 = credential
                         .to_stake_bech32()
                         .map_err(|_| anyhow!("Failed to encode stake address"))?;
-                    let key_hash = addr.get_hash().to_vec();
+                    let key_hash = credential.get_hash();
                     Ok((key_hash, bech32))
                 })
-                .collect::<Result<HashMap<_, _>>>()?;
+                .collect::<Result<HashMap<_, _>>>()
+            {
+                Ok(map) => map,
+                Err(e) => {
+                    return Ok(RESTResponse::with_text(
+                        500,
+                        &format!("Internal error: {e}"),
+                    ));
+                }
+            };
 
             let msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
                 AccountsStateQuery::GetAccountsUtxoValuesMap {
