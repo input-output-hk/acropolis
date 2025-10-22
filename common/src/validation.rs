@@ -21,7 +21,7 @@ pub enum ValidationError {
 /// Validation status
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum ValidationStatus {
-    // All good
+    /// All good
     Go,
 
     // Error
