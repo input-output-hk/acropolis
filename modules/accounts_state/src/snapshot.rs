@@ -1,7 +1,7 @@
 //! Acropolis AccountsState: snapshot for rewards calculations
 
 use crate::state::{Pots, RegistrationChange};
-use acropolis_common::{stake_addresses::StakeAddressMap, Credential, KeyHash, Lovelace, PoolRegistration, Ratio, StakeAddress};
+use acropolis_common::{stake_addresses::StakeAddressMap, KeyHash, Lovelace, PoolRegistration, Ratio, StakeAddress};
 use imbl::OrdMap;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -35,7 +35,7 @@ pub struct SnapshotSPO {
     pub two_previous_reward_account_is_registered: bool,
 
     /// Pool owners
-    pub pool_owners: Vec<Credential>,
+    pub pool_owners: Vec<StakeAddress>,
 }
 
 /// Snapshot of stake distribution taken at the end of an particular epoch
@@ -159,18 +159,18 @@ impl Snapshot {
     pub fn get_stake_delegated_to_spo_by_addresses(
         &self,
         spo: &KeyHash,
-        addresses: &[Credential],
+        addresses: &[StakeAddress],
     ) -> Lovelace {
         let Some(snapshot_spo) = self.spos.get(spo) else {
             return 0;
         };
 
-        let addr_set: std::collections::HashSet<_> = addresses.iter().collect();
+        let address_set: std::collections::HashSet<_> = addresses.iter().collect();
         snapshot_spo
             .delegators
             .iter()
-            .filter_map(|(addr, amount)| {
-                if addr_set.contains(&addr.get_credential()) {
+            .filter_map(|(address, amount)| {
+                if address_set.contains(&address) {
                     Some(*amount)
                 } else {
                     None
@@ -321,9 +321,9 @@ mod tests {
 
         // Extract key hashes from stake addresses for the API call
         let addresses = vec![
-            addr2.get_credential(),
-            addr3.get_credential(),
-            addr4.get_credential(),
+            addr2,
+            addr3,
+            addr4,
         ];
         let result = snapshot.get_stake_delegated_to_spo_by_addresses(&spo1, &addresses);
         assert_eq!(result, 500);
@@ -347,7 +347,7 @@ mod tests {
         );
 
         // Extract key hash from stake address for the API call
-        let addresses = vec![addr_x.get_credential()];
+        let addresses = vec![addr_x];
         let result = snapshot.get_stake_delegated_to_spo_by_addresses(&spo1, &addresses);
         assert_eq!(result, 0);
     }

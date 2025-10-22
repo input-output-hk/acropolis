@@ -1,9 +1,19 @@
 //! Acropolis SPOState: State storage
 
-use acropolis_common::{crypto::keyhash_224, ledger_state::SPOState, messages::{
-    CardanoMessage, Message, SPOStateMessage, StakeAddressDeltasMessage,
-    StakeRewardDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
-}, params::TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH, queries::governance::VoteRecord, stake_addresses::StakeAddressMap, BlockInfo, KeyHash, PoolMetadata, PoolRegistration, PoolRegistrationWithPos, PoolRetirement, PoolRetirementWithPos, PoolUpdateEvent, Relay, StakeAddress, StakeCredential, TxCertificate, TxHash, Voter, VotingProcedures};
+use acropolis_common::{
+    crypto::keyhash_224,
+    ledger_state::SPOState,
+    messages::{
+        CardanoMessage, Message, SPOStateMessage, StakeAddressDeltasMessage,
+        StakeRewardDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
+    },
+    params::TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH,
+    queries::governance::VoteRecord,
+    stake_addresses::StakeAddressMap,
+    BlockInfo, KeyHash, PoolMetadata, PoolRegistration, PoolRegistrationWithPos, PoolRetirement,
+    PoolRetirementWithPos, PoolUpdateEvent, Relay, StakeAddress, TxCertificate, TxHash, Voter,
+    VotingProcedures,
+};
 use anyhow::Result;
 use imbl::HashMap;
 use std::sync::{Arc, Mutex};
@@ -427,21 +437,21 @@ impl State {
         }
     }
 
-    fn register_stake_address(&mut self, credential: &StakeCredential) {
+    fn register_stake_address(&mut self, stake_address: &StakeAddress) {
         let Some(stake_addresses) = self.stake_addresses.as_ref() else {
             return;
         };
         let mut stake_addresses = stake_addresses.lock().unwrap();
-        stake_addresses.register_stake_address(&credential.to_stake_address(None));
+        stake_addresses.register_stake_address(stake_address);
     }
 
-    fn deregister_stake_address(&mut self, credential: &StakeCredential) {
+    fn deregister_stake_address(&mut self, stake_address: &StakeAddress) {
         let Some(stake_addresses) = self.stake_addresses.as_ref() else {
             return;
         };
-        let stake_address = credential.to_stake_address(None);
         let mut stake_addresses = stake_addresses.lock().unwrap();
-        let old_spo = stake_addresses.get(&stake_address).map(|s| s.delegated_spo.clone()).flatten();
+        let old_spo =
+            stake_addresses.get(&stake_address).map(|s| s.delegated_spo.clone()).flatten();
 
         if stake_addresses.deregister_stake_address(&stake_address) {
             // update historical_spos
@@ -449,12 +459,12 @@ impl State {
                 if let Some(old_spo) = old_spo.as_ref() {
                     // remove delegators from old_spo
                     if let Some(historical_spo) = historical_spos.get_mut(old_spo) {
-                        if let Some(removed) = historical_spo.remove_delegator(&credential.to_stake_address(None)) {
+                        if let Some(removed) = historical_spo.remove_delegator(stake_address) {
                             if !removed {
                                 error!(
                                     "Historical SPO state for {} does not contain delegator {}",
                                     hex::encode(old_spo),
-                                    hex::encode(&credential.get_hash())
+                                    stake_address
                                 );
                             }
                         }
@@ -466,14 +476,13 @@ impl State {
 
     /// Record a stake delegation
     /// Update historical_spo_state's delegators
-    fn record_stake_delegation(&mut self, credential: &StakeCredential, spo: &KeyHash) {
+    fn record_stake_delegation(&mut self, stake_address: &StakeAddress, spo: &KeyHash) {
         let Some(stake_addresses) = self.stake_addresses.as_ref() else {
             return;
         };
-        let hash = credential.get_hash();
-        let stake_address = credential.to_stake_address(None);
         let mut stake_addresses = stake_addresses.lock().unwrap();
-        let old_spo = stake_addresses.get(&stake_address).map(|s| s.delegated_spo.clone()).flatten();
+        let old_spo =
+            stake_addresses.get(&stake_address).map(|s| s.delegated_spo.clone()).flatten();
 
         if stake_addresses.record_stake_delegation(&stake_address, spo) {
             // update historical_spos
@@ -487,7 +496,7 @@ impl State {
                                     error!(
                                         "Historical SPO state for {} does not contain delegator {}",
                                         hex::encode(old_spo),
-                                        hex::encode(&hash)
+                                        stake_address
                                     );
                                 }
                             }
@@ -507,7 +516,7 @@ impl State {
                         error!(
                             "Historical SPO state for {} already contains delegator {}",
                             hex::encode(spo),
-                            hex::encode(&hash)
+                            stake_address
                         );
                     }
                 }
@@ -539,38 +548,38 @@ impl State {
                 }
 
                 // for stake addresses
-                TxCertificate::StakeRegistration(sc_with_pos) => {
-                    self.register_stake_address(&sc_with_pos.stake_credential);
+                TxCertificate::StakeRegistration(stake_address_with_pos) => {
+                    self.register_stake_address(&stake_address_with_pos.stake_address);
                 }
-                TxCertificate::StakeDeregistration(sc) => {
-                    self.deregister_stake_address(&sc);
+                TxCertificate::StakeDeregistration(stake_address) => {
+                    self.deregister_stake_address(&stake_address);
                 }
                 TxCertificate::Registration(reg) => {
-                    self.register_stake_address(&reg.credential);
+                    self.register_stake_address(&reg.stake_address);
                     // we don't care deposite
                 }
                 TxCertificate::Deregistration(dreg) => {
-                    self.deregister_stake_address(&dreg.credential);
+                    self.deregister_stake_address(&dreg.stake_address);
                     // we don't care refund
                 }
                 TxCertificate::StakeDelegation(delegation) => {
-                    self.record_stake_delegation(&delegation.credential, &delegation.operator);
+                    self.record_stake_delegation(&delegation.stake_address, &delegation.operator);
                 }
                 TxCertificate::StakeAndVoteDelegation(delegation) => {
-                    self.record_stake_delegation(&delegation.credential, &delegation.operator);
+                    self.record_stake_delegation(&delegation.stake_address, &delegation.operator);
                     // don't care about vote delegation
                 }
                 TxCertificate::StakeRegistrationAndDelegation(delegation) => {
-                    self.register_stake_address(&delegation.credential);
-                    self.record_stake_delegation(&delegation.credential, &delegation.operator);
+                    self.register_stake_address(&delegation.stake_address);
+                    self.record_stake_delegation(&delegation.stake_address, &delegation.operator);
                 }
                 TxCertificate::StakeRegistrationAndVoteDelegation(delegation) => {
-                    self.register_stake_address(&delegation.credential);
+                    self.register_stake_address(&delegation.stake_address);
                     // don't care about vote delegation
                 }
                 TxCertificate::StakeRegistrationAndStakeAndVoteDelegation(delegation) => {
-                    self.register_stake_address(&delegation.credential);
-                    self.record_stake_delegation(&delegation.credential, &delegation.operator);
+                    self.register_stake_address(&delegation.stake_address);
+                    self.record_stake_delegation(&delegation.stake_address, &delegation.operator);
                     // don't care about vote delegation
                 }
                 _ => (),
@@ -653,7 +662,10 @@ impl State {
         for delta in reward_deltas_msg.deltas.iter() {
             let mut stake_addresses = stake_addresses.lock().unwrap();
             if let Err(e) = stake_addresses.update_reward(&delta.stake_address, delta.delta) {
-                error!("Updating reward account {}: {e}", hex::encode(&delta.stake_address.get_hash()));
+                error!(
+                    "Updating reward account {}: {e}",
+                    hex::encode(&delta.stake_address.get_hash())
+                );
             }
         }
 
@@ -672,14 +684,19 @@ mod tests {
     use crate::test_utils::*;
     use acropolis_common::{
         state_history::{StateHistory, StateHistoryStore},
-        Credential, PoolRetirement, Ratio, StakeAddress, TxCertificate, TxHash,
+        NetworkId, PoolRetirement, Ratio, StakeAddress, StakeAddressPayload, TxCertificate, TxHash,
     };
     use tokio::sync::Mutex;
 
-    fn pool_owners_from_bytes(owners: Vec<Vec<u8>>) -> Vec<Credential> {
+    fn pool_owners_from_bytes(owners: Vec<Vec<u8>>) -> Vec<StakeAddress> {
         owners
             .into_iter()
-            .map(|bytes| Credential::AddrKeyHash(bytes))
+            .map(|bytes| {
+                StakeAddress::new(
+                    StakeAddressPayload::StakeKeyHash(bytes),
+                    NetworkId::default().into(),
+                )
+            })
             .collect()
     }
 
@@ -694,7 +711,7 @@ mod tests {
                 denominator: 0,
             },
             reward_account: StakeAddress::default(),
-            pool_owners: pool_owners_from_bytes(vec![operator]),
+            pool_owners: pool_owners_from_bytes(vec![StakeAddress::default().get_hash().to_vec()]),
             relays: vec![],
             pool_metadata: None,
         }

@@ -93,6 +93,20 @@ pub fn map_stake_credential(cred: &PallasStakeCredential) -> StakeCredential {
     }
 }
 
+/// Map a PallasStakeCredential to our StakeAddress
+pub fn map_stake_address(cred: &PallasStakeCredential, network_id: NetworkId) -> StakeAddress {
+    let payload = match cred {
+        PallasStakeCredential::AddrKeyhash(key_hash) => {
+            StakeAddressPayload::StakeKeyHash(key_hash.to_vec())
+        }
+        PallasStakeCredential::ScriptHash(script_hash) => {
+            StakeAddressPayload::ScriptHash(script_hash.to_vec())
+        }
+    };
+
+    StakeAddress::new(payload, network_id.into())
+}
+
 /// Map a Pallas DRep to our DRepChoice
 pub fn map_drep(drep: &conway::DRep) -> DRepChoice {
     match drep {
@@ -203,24 +217,25 @@ pub fn map_certificate(
     tx_hash: TxHash,
     tx_index: u16,
     cert_index: usize,
+    network_id: NetworkId,
 ) -> Result<TxCertificate> {
     match cert {
         MultiEraCert::NotApplicable => Err(anyhow!("Not applicable cert!")),
 
         MultiEraCert::AlonzoCompatible(cert) => match cert.as_ref().as_ref() {
             alonzo::Certificate::StakeRegistration(cred) => {
-                Ok(TxCertificate::StakeRegistration(StakeCredentialWithPos {
-                    stake_credential: map_stake_credential(cred),
+                Ok(TxCertificate::StakeRegistration(StakeAddressWithPos {
+                    stake_address: map_stake_address(cred, network_id),
                     tx_index: tx_index.try_into().unwrap(),
                     cert_index: cert_index.try_into().unwrap(),
                 }))
             }
             alonzo::Certificate::StakeDeregistration(cred) => Ok(
-                TxCertificate::StakeDeregistration(map_stake_credential(cred)),
+                TxCertificate::StakeDeregistration(map_stake_address(cred, network_id)),
             ),
             alonzo::Certificate::StakeDelegation(cred, pool_key_hash) => {
                 Ok(TxCertificate::StakeDelegation(StakeDelegation {
-                    credential: map_stake_credential(cred),
+                    stake_address: map_stake_address(cred, network_id),
                     operator: pool_key_hash.to_vec(),
                 }))
             }
@@ -246,7 +261,15 @@ pub fn map_certificate(
                             denominator: margin.denominator,
                         },
                         reward_account: StakeAddress::from_binary(reward_account)?,
-                        pool_owners: pool_owners.into_iter().map(|v| Credential::AddrKeyHash(v.to_vec())).collect(),
+                        pool_owners: pool_owners
+                            .into_iter()
+                            .map(|v| {
+                                StakeAddress::new(
+                                    StakeAddressPayload::StakeKeyHash(v.to_vec()),
+                                    network_id.clone().into(),
+                                )
+                            })
+                            .collect(),
                         relays: relays.into_iter().map(|relay| map_relay(relay)).collect(),
                         pool_metadata: match pool_metadata {
                             Nullable::Some(md) => Some(PoolMetadata {
@@ -291,10 +314,10 @@ pub fn map_certificate(
                     },
                     target: match &mir.target {
                         alonzo::InstantaneousRewardTarget::StakeCredentials(creds) => {
-                            InstantaneousRewardTarget::StakeCredentials(
+                            InstantaneousRewardTarget::StakeAddresses(
                                 creds
                                     .iter()
-                                    .map(|(sc, v)| (map_stake_credential(&sc), *v))
+                                    .map(|(sc, v)| (map_stake_address(&sc, network_id.clone()), *v))
                                     .collect(),
                             )
                         }
@@ -310,18 +333,18 @@ pub fn map_certificate(
         MultiEraCert::Conway(cert) => {
             match cert.as_ref().as_ref() {
                 conway::Certificate::StakeRegistration(cred) => {
-                    Ok(TxCertificate::StakeRegistration(StakeCredentialWithPos {
-                        stake_credential: map_stake_credential(cred),
+                    Ok(TxCertificate::StakeRegistration(StakeAddressWithPos {
+                        stake_address: map_stake_address(cred, network_id),
                         tx_index: tx_index.try_into().unwrap(),
                         cert_index: cert_index.try_into().unwrap(),
                     }))
                 }
                 conway::Certificate::StakeDeregistration(cred) => Ok(
-                    TxCertificate::StakeDeregistration(map_stake_credential(cred)),
+                    TxCertificate::StakeDeregistration(map_stake_address(cred, network_id)),
                 ),
                 conway::Certificate::StakeDelegation(cred, pool_key_hash) => {
                     Ok(TxCertificate::StakeDelegation(StakeDelegation {
-                        credential: map_stake_credential(cred),
+                        stake_address: map_stake_address(cred, network_id),
                         operator: pool_key_hash.to_vec(),
                     }))
                 }
@@ -348,7 +371,15 @@ pub fn map_certificate(
                                 denominator: margin.denominator,
                             },
                             reward_account: StakeAddress::from_binary(reward_account)?,
-                            pool_owners: pool_owners.into_iter().map(|v| Credential::AddrKeyHash(v.to_vec())).collect(),
+                            pool_owners: pool_owners
+                                .into_iter()
+                                .map(|v| {
+                                    StakeAddress::new(
+                                        StakeAddressPayload::StakeKeyHash(v.to_vec()),
+                                        network_id.clone().into(),
+                                    )
+                                })
+                                .collect(),
                             relays: relays.into_iter().map(|relay| map_relay(relay)).collect(),
                             pool_metadata: match pool_metadata {
                                 Nullable::Some(md) => Some(PoolMetadata {
@@ -375,28 +406,28 @@ pub fn map_certificate(
 
                 conway::Certificate::Reg(cred, coin) => {
                     Ok(TxCertificate::Registration(Registration {
-                        credential: map_stake_credential(cred),
+                        stake_address: map_stake_address(cred, network_id),
                         deposit: *coin,
                     }))
                 }
 
                 conway::Certificate::UnReg(cred, coin) => {
                     Ok(TxCertificate::Deregistration(Deregistration {
-                        credential: map_stake_credential(cred),
+                        stake_address: map_stake_address(cred, network_id),
                         refund: *coin,
                     }))
                 }
 
                 conway::Certificate::VoteDeleg(cred, drep) => {
                     Ok(TxCertificate::VoteDelegation(VoteDelegation {
-                        credential: map_stake_credential(cred),
+                        stake_address: map_stake_address(cred, network_id),
                         drep: map_drep(drep),
                     }))
                 }
 
                 conway::Certificate::StakeVoteDeleg(cred, pool_key_hash, drep) => Ok(
                     TxCertificate::StakeAndVoteDelegation(StakeAndVoteDelegation {
-                        credential: map_stake_credential(cred),
+                        stake_address: map_stake_address(cred, network_id),
                         operator: pool_key_hash.to_vec(),
                         drep: map_drep(drep),
                     }),
@@ -404,7 +435,7 @@ pub fn map_certificate(
 
                 conway::Certificate::StakeRegDeleg(cred, pool_key_hash, coin) => Ok(
                     TxCertificate::StakeRegistrationAndDelegation(StakeRegistrationAndDelegation {
-                        credential: map_stake_credential(cred),
+                        stake_address: map_stake_address(cred, network_id),
                         operator: pool_key_hash.to_vec(),
                         deposit: *coin,
                     }),
@@ -413,7 +444,7 @@ pub fn map_certificate(
                 conway::Certificate::VoteRegDeleg(cred, drep, coin) => {
                     Ok(TxCertificate::StakeRegistrationAndVoteDelegation(
                         StakeRegistrationAndVoteDelegation {
-                            credential: map_stake_credential(cred),
+                            stake_address: map_stake_address(cred, network_id),
                             drep: map_drep(drep),
                             deposit: *coin,
                         },
@@ -423,7 +454,7 @@ pub fn map_certificate(
                 conway::Certificate::StakeVoteRegDeleg(cred, pool_key_hash, drep, coin) => {
                     Ok(TxCertificate::StakeRegistrationAndStakeAndVoteDelegation(
                         StakeRegistrationAndStakeAndVoteDelegation {
-                            credential: map_stake_credential(cred),
+                            stake_address: map_stake_address(cred, network_id),
                             operator: pool_key_hash.to_vec(),
                             drep: map_drep(drep),
                             deposit: *coin,

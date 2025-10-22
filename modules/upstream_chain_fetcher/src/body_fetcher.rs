@@ -1,10 +1,7 @@
 //! Acropolis Miniprotocols module for Caryatid
 //! Multi-connection, block body fetching part of the client (in separate thread).
 
-use acropolis_common::{
-    messages::{BlockBodyMessage, BlockHeaderMessage},
-    BlockInfo, BlockStatus, Era,
-};
+use acropolis_common::{messages::{BlockBodyMessage, BlockHeaderMessage}, BlockInfo, BlockStatus, Era};
 use anyhow::{bail, Result};
 use crossbeam::channel::{Receiver, TryRecvError};
 use pallas::{
