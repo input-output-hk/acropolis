@@ -241,6 +241,7 @@ dependencies = [
  "fjall",
  "hex",
  "minicbor 0.26.5",
+ "rayon",
  "tokio",
  "tracing",
 ]

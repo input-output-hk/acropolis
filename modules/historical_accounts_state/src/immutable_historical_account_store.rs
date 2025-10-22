@@ -4,6 +4,7 @@ use acropolis_common::{ShelleyAddress, StakeCredential};
 use anyhow::Result;
 use fjall::{Keyspace, Partition, PartitionCreateOptions};
 use minicbor::{decode, to_vec};
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use tokio::sync::Mutex;
 use tracing::{debug, error, info};
 
@@ -74,74 +75,68 @@ impl ImmutableHistoricalAccountStore {
         let mut batch = self.keyspace.batch();
         let mut change_count = 0;
 
-        for block_map in drained_blocks.into_iter() {
-            if block_map.is_empty() {
-                continue;
+        for (account, entry) in Self::merge_block_deltas(drained_blocks) {
+            let epoch_key = Self::make_epoch_key(&account, epoch);
+            change_count += 1;
+
+            // Persist rewards
+            if config.store_rewards_history {
+                batch.insert(
+                    &self.rewards_history,
+                    &epoch_key,
+                    to_vec(&entry.reward_history)?,
+                );
             }
 
-            for (account, entry) in block_map {
-                let epoch_key = Self::make_epoch_key(&account, epoch);
-                change_count += 1;
+            // Persist active stake
+            if config.store_active_stake_history {
+                batch.insert(
+                    &self.active_stake_history,
+                    &epoch_key,
+                    to_vec(&entry.active_stake_history)?,
+                );
+            }
 
-                // Persist rewards
-                if config.store_rewards_history {
-                    batch.insert(
-                        &self.rewards_history,
-                        &epoch_key,
-                        to_vec(&entry.reward_history)?,
-                    );
+            // Persist account delegation updates
+            if config.store_delegation_history {
+                if let Some(updates) = &entry.delegation_history {
+                    batch.insert(&self.delegation_history, &epoch_key, to_vec(&updates)?);
                 }
+            }
 
-                // Persist active stake
-                if config.store_active_stake_history {
-                    batch.insert(
-                        &self.active_stake_history,
-                        &epoch_key,
-                        to_vec(&entry.active_stake_history)?,
-                    );
+            // Persist account registration updates
+            if config.store_registration_history {
+                if let Some(updates) = &entry.registration_history {
+                    batch.insert(&self.registration_history, &epoch_key, to_vec(&updates)?);
                 }
+            }
 
-                // Persist account delegation updates
-                if config.store_delegation_history {
-                    if let Some(updates) = &entry.delegation_history {
-                        batch.insert(&self.delegation_history, &epoch_key, to_vec(&updates)?);
-                    }
+            // Persist withdrawal updates
+            if config.store_withdrawal_history {
+                if let Some(updates) = &entry.withdrawal_history {
+                    batch.insert(&self.withdrawal_history, &epoch_key, to_vec(&updates)?);
                 }
+            }
 
-                // Persist account registration updates
-                if config.store_registration_history {
-                    if let Some(updates) = &entry.registration_history {
-                        batch.insert(&self.registration_history, &epoch_key, to_vec(&updates)?);
-                    }
+            // Persist MIR updates
+            if config.store_mir_history {
+                if let Some(updates) = &entry.mir_history {
+                    batch.insert(&self.mir_history, &epoch_key, to_vec(&updates)?);
                 }
+            }
 
-                // Persist withdrawal updates
-                if config.store_withdrawal_history {
-                    if let Some(updates) = &entry.withdrawal_history {
-                        batch.insert(&self.withdrawal_history, &epoch_key, to_vec(&updates)?);
-                    }
-                }
-
-                // Persist MIR updates
-                if config.store_mir_history {
-                    if let Some(updates) = &entry.mir_history {
-                        batch.insert(&self.mir_history, &epoch_key, to_vec(&updates)?);
-                    }
-                }
-
-                // Persist address updates
-                // TODO: Deduplicate addresses across epochs
-                if config.store_addresses {
-                    if let Some(updates) = &entry.addresses {
-                        batch.insert(&self.addresses, &epoch_key, to_vec(&updates)?);
-                    }
+            // Persist address updates
+            // TODO: Deduplicate addresses across epochs
+            if config.store_addresses {
+                if let Some(updates) = &entry.addresses {
+                    batch.insert(&self.addresses, &epoch_key, to_vec(&updates)?);
                 }
             }
         }
 
         match batch.commit() {
             Ok(_) => {
-                info!("committed {change_count} address changes for epoch {epoch}");
+                info!("committed {change_count} account changes for epoch {epoch}");
                 Ok(())
             }
             Err(e) => {
@@ -271,6 +266,31 @@ impl ImmutableHistoricalAccountStore {
         Ok((!immutable_addresses.is_empty()).then_some(immutable_addresses))
     }
 
+    fn merge_block_deltas(
+        block_deltas: Vec<HashMap<StakeCredential, AccountEntry>>,
+    ) -> HashMap<StakeCredential, AccountEntry> {
+        block_deltas.into_par_iter().reduce(HashMap::new, |mut acc, block_map| {
+            for (cred, entry) in block_map {
+                let agg_entry = acc.entry(cred).or_default();
+
+                Self::extend_opt_vec(&mut agg_entry.reward_history, entry.reward_history);
+                Self::extend_opt_vec(
+                    &mut agg_entry.active_stake_history,
+                    entry.active_stake_history,
+                );
+                Self::extend_opt_vec(&mut agg_entry.delegation_history, entry.delegation_history);
+                Self::extend_opt_vec(
+                    &mut agg_entry.registration_history,
+                    entry.registration_history,
+                );
+                Self::extend_opt_vec(&mut agg_entry.withdrawal_history, entry.withdrawal_history);
+                Self::extend_opt_vec(&mut agg_entry.mir_history, entry.mir_history);
+                Self::extend_opt_vec(&mut agg_entry.addresses, entry.addresses);
+            }
+            acc
+        })
+    }
+
     #[allow(dead_code)]
     fn collect_partition<T>(&self, partition: &Partition, prefix: &[u8]) -> Result<Vec<T>>
     where
@@ -305,5 +325,13 @@ impl ImmutableHistoricalAccountStore {
         key[..28].copy_from_slice(&account.get_hash());
         key[28..32].copy_from_slice(&epoch.to_be_bytes());
         key
+    }
+
+    fn extend_opt_vec<T>(target: &mut Option<Vec<T>>, src: Option<Vec<T>>) {
+        if let Some(mut v) = src {
+            if !v.is_empty() {
+                target.get_or_insert_with(Vec::new).append(&mut v);
+            }
+        }
     }
 }
