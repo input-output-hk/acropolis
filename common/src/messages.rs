@@ -60,6 +60,12 @@ pub struct RawTxsMessage {
     pub txs: Vec<Vec<u8>>,
 }
 
+/// Bootup completion message, sent by any module that has finished its startup sequence,
+/// e.g. GenesisBootstrapper after sending all genesis UTxOs or SnapshotBootstrapper after
+/// loading a snapshot.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BootupCompleteMessage {}
+
 /// Genesis completion message
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenesisCompleteMessage {
@@ -283,7 +289,7 @@ pub struct SPOStateMessage {
 pub enum CardanoMessage {
     BlockHeader(BlockHeaderMessage),         // Block header available
     BlockBody(BlockBodyMessage),             // Block body available
-    SnapshotComplete,                        // Mithril snapshot loaded
+    SnapshotComplete,                        // Mithril or Node (file) snapshot loaded
     ReceivedTxs(RawTxsMessage),              // Transaction available
     GenesisComplete(GenesisCompleteMessage), // Genesis UTXOs done + genesis params
     GenesisUTxOs(GenesisUTxOsMessage),       // Genesis UTxOs with their UTxOIdentifiers
