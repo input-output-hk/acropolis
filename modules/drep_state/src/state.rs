@@ -7,8 +7,8 @@ use acropolis_common::{
         get_query_topic,
         governance::{DRepActionUpdate, DRepUpdateEvent, VoteRecord},
     },
-    Anchor, DRepChoice, DRepCredential, KeyHash, Lovelace,
-    StakeAddress, TxCertificate, TxHash, Voter, VotingProcedures,
+    Anchor, DRepChoice, DRepCredential, KeyHash, Lovelace, StakeAddress, TxCertificate, TxHash,
+    Voter, VotingProcedures,
 };
 use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
@@ -228,9 +228,7 @@ impl State {
 
         for tx_cert in tx_certs {
             if store_delegators {
-                if let Some((delegator, drep)) =
-                    Self::extract_delegation_fields(tx_cert)
-                {
+                if let Some((delegator, drep)) = Self::extract_delegation_fields(tx_cert) {
                     batched_delegators.push((delegator, drep));
                     continue;
                 }
@@ -477,8 +475,10 @@ impl State {
         delegators: Vec<(StakeAddress, &DRepChoice)>,
     ) -> Result<()> {
         let stake_addresses = delegators.iter().map(|(addr, _)| (addr).clone()).collect();
-        let stake_key_to_input: HashMap<KeyHash, _> =
-            delegators.iter().map(|(addr, drep)| (addr.get_credential().get_hash(), (addr, *drep))).collect();
+        let stake_key_to_input: HashMap<KeyHash, _> = delegators
+            .iter()
+            .map(|(addr, drep)| (addr.get_credential().get_hash(), (addr, *drep)))
+            .collect();
 
         let msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
             AccountsStateQuery::GetAccountsDrepDelegationsMap { stake_addresses },
@@ -537,16 +537,10 @@ impl State {
         Ok(())
     }
 
-    fn extract_delegation_fields(
-        cert: &TxCertificate,
-    ) -> Option<(StakeAddress, &DRepChoice)> {
+    fn extract_delegation_fields(cert: &TxCertificate) -> Option<(StakeAddress, &DRepChoice)> {
         match cert {
-            TxCertificate::VoteDelegation(d) => {
-                Some((d.stake_address.clone(), &d.drep))
-            }
-            TxCertificate::StakeAndVoteDelegation(d) => {
-                Some((d.stake_address.clone(), &d.drep))
-            }
+            TxCertificate::VoteDelegation(d) => Some((d.stake_address.clone(), &d.drep)),
+            TxCertificate::StakeAndVoteDelegation(d) => Some((d.stake_address.clone(), &d.drep)),
             TxCertificate::StakeRegistrationAndVoteDelegation(d) => {
                 Some((d.stake_address.clone(), &d.drep))
             }

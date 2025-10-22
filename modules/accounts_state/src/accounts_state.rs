@@ -541,14 +541,16 @@ impl AccountsState {
                         })
                     }
 
-                    AccountsStateQuery::GetAccountsDrepDelegationsMap { stake_addresses } => match state
-                        .get_drep_delegations_map(stake_addresses)
-                    {
-                        Some(map) => AccountsStateQueryResponse::AccountsDrepDelegationsMap(map),
-                        None => AccountsStateQueryResponse::Error(
-                            "Error retrieving DRep delegations map".to_string(),
-                        ),
-                    },
+                    AccountsStateQuery::GetAccountsDrepDelegationsMap { stake_addresses } => {
+                        match state.get_drep_delegations_map(stake_addresses) {
+                            Some(map) => {
+                                AccountsStateQueryResponse::AccountsDrepDelegationsMap(map)
+                            }
+                            None => AccountsStateQueryResponse::Error(
+                                "Error retrieving DRep delegations map".to_string(),
+                            ),
+                        }
+                    }
 
                     AccountsStateQuery::GetOptimalPoolSizing => {
                         AccountsStateQueryResponse::OptimalPoolSizing(

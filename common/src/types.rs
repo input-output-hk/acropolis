@@ -601,26 +601,14 @@ pub struct PotDelta {
 }
 
 #[derive(
-    Debug,
-    Clone,
-    Ord,
-    Eq,
-    PartialEq,
-    PartialOrd,
-    Hash,
-    serde::Serialize,
-    serde::Deserialize,
-    minicbor::Decode,
-    minicbor::Encode,
+    Debug, Clone, Ord, Eq, PartialEq, PartialOrd, Hash, serde::Serialize, serde::Deserialize,
 )]
 pub enum Credential {
     /// Script hash. NOTE: Order matters when parsing Haskell Node Snapshot data.
-    #[n(0)]
-    ScriptHash(#[n(0)] KeyHash),
+    ScriptHash(KeyHash),
 
     /// Address key hash
-    #[n(1)]
-    AddrKeyHash(#[n(0)] KeyHash),
+    AddrKeyHash(KeyHash),
 }
 
 impl Credential {
@@ -833,7 +821,6 @@ pub struct PoolRegistration {
     pub reward_account: StakeAddress,
 
     /// Pool owners by their key hash
-    // #[serde_as(as = "Vec<Hex>")]
     #[n(6)]
     pub pool_owners: Vec<StakeAddress>,
 

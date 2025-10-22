@@ -1,4 +1,6 @@
-use acropolis_common::{queries::governance::VoteRecord, PoolRegistration, PoolUpdateEvent, StakeAddress};
+use acropolis_common::{
+    queries::governance::VoteRecord, PoolRegistration, PoolUpdateEvent, StakeAddress,
+};
 use imbl::{HashSet, OrdMap, Vector};
 use serde::{Deserialize, Serialize};
 

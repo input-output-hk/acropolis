@@ -330,7 +330,7 @@ impl StakeAddressMap {
 
         let mut result: HashMap<KeyHash, Vec<(KeyHash, u64)>> = HashMap::new();
         for (spo, entry) in entries {
-            result.entry(spo).or_default().push(entry);
+            result.entry(spo).or_default().push((entry.0.get_credential().get_hash(), entry.1));
         }
         result
     }

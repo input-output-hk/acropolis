@@ -353,8 +353,8 @@ fn calculate_spo_rewards(
                     continue;
                 }
 
-                // Check pool's reward address - removing e1 prefix
-                if spo.reward_account == *delegator_stake_address {
+                // Check pool's reward address
+                if &spo.reward_account == delegator_stake_address {
                     debug!(
                         "Skipping pool reward account {}, losing {to_pay}",
                         delegator_stake_address

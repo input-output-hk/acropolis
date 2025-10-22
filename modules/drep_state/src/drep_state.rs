@@ -141,7 +141,6 @@ impl DRepState {
                                 context.clone(),
                                 &tx_certs_msg.certificates,
                                 block_info.epoch,
-
                             )
                             .await
                             .inspect_err(|e| error!("Certificates handling error: {e:#}"))

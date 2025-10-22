@@ -1,7 +1,9 @@
 //! Acropolis AccountsState: snapshot for rewards calculations
 
 use crate::state::{Pots, RegistrationChange};
-use acropolis_common::{stake_addresses::StakeAddressMap, KeyHash, Lovelace, PoolRegistration, Ratio, StakeAddress};
+use acropolis_common::{
+    stake_addresses::StakeAddressMap, KeyHash, Lovelace, PoolRegistration, Ratio, StakeAddress,
+};
 use imbl::OrdMap;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -320,11 +322,7 @@ mod tests {
         );
 
         // Extract key hashes from stake addresses for the API call
-        let addresses = vec![
-            addr2,
-            addr3,
-            addr4,
-        ];
+        let addresses = vec![addr2, addr3, addr4];
         let result = snapshot.get_stake_delegated_to_spo_by_addresses(&spo1, &addresses);
         assert_eq!(result, 500);
     }
