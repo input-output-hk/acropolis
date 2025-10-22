@@ -1,5 +1,6 @@
 use crate::serialization::{Bech32Conversion, Bech32WithHrp};
 use anyhow::Error;
+use hex::{FromHex, FromHexError};
 use serde_with::{hex::Hex, serde_as};
 use std::ops::Deref;
 
@@ -15,6 +16,17 @@ macro_rules! declare_byte_array_type {
         impl From<[u8; $size]> for $name {
             fn from(bytes: [u8; $size]) -> Self {
                 Self(bytes)
+            }
+        }
+
+        impl FromHex for $name {
+            type Error = FromHexError;
+
+            fn from_hex<T: AsRef<[u8]>>(hex: T) -> Result<Self, Self::Error> {
+                Ok(match Self::try_from(Vec::<u8>::from_hex(hex)?) {
+                    Ok(b) => Ok(b),
+                    Err(_) => Err(FromHexError::InvalidStringLength),
+                }?)
             }
         }
 
