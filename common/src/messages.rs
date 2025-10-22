@@ -25,6 +25,7 @@ use crate::queries::{
     transactions::{TransactionsStateQuery, TransactionsStateQueryResponse},
 };
 
+use crate::byte_array::*;
 use crate::types::*;
 
 // Caryatid core messages which we re-export
