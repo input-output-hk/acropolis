@@ -126,7 +126,7 @@ impl HistoricalAccountsState {
                         CardanoMessage::StakeRewardDeltas(rewards_msg),
                     )) => {
                         let span = info_span!(
-                            "histoical_account_state.handle_reward_deltas",
+                            "historical_account_state.handle_reward_deltas",
                             block = block_info.number
                         );
                         async {
@@ -148,7 +148,7 @@ impl HistoricalAccountsState {
             match certs_message.as_ref() {
                 Message::Cardano((block_info, CardanoMessage::TxCertificates(tx_certs_msg))) => {
                     let span = info_span!(
-                        "histoical_account_state.handle_certs",
+                        "historical_account_state.handle_certs",
                         block = block_info.number
                     );
                     async {
@@ -170,7 +170,7 @@ impl HistoricalAccountsState {
             match message.as_ref() {
                 Message::Cardano((block_info, CardanoMessage::Withdrawals(withdrawals_msg))) => {
                     let span = info_span!(
-                        "histoical_account_state.handle_withdrawals",
+                        "historical_account_state.handle_withdrawals",
                         block = block_info.number
                     );
                     async {
@@ -192,7 +192,7 @@ impl HistoricalAccountsState {
             match message.as_ref() {
                 Message::Cardano((block_info, CardanoMessage::AddressDeltas(deltas_msg))) => {
                     let span = info_span!(
-                        "histoical_account_state.handle_address_deltas",
+                        "historical_account_state.handle_address_deltas",
                         block = block_info.number
                     );
                     async {

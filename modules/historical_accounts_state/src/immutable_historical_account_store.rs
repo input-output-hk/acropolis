@@ -35,31 +35,22 @@ pub struct ImmutableHistoricalAccountStore {
 
 impl ImmutableHistoricalAccountStore {
     pub fn new(path: impl AsRef<Path>) -> Result<Self> {
-        let cfg = fjall::Config::new(path).max_write_buffer_size(512 * 1024 * 1024);
+        let cfg = fjall::Config::new(path).max_write_buffer_size(512 * 1024 * 1024).temporary(true);
         let keyspace = Keyspace::open(cfg)?;
 
-        let rewards_history = keyspace
-            .open_partition("account_rewards_history", PartitionCreateOptions::default())?;
-        let active_stake_history = keyspace.open_partition(
-            "account_active_stake_history",
-            PartitionCreateOptions::default(),
-        )?;
-        let delegation_history = keyspace.open_partition(
-            "account_delegation_history",
-            PartitionCreateOptions::default(),
-        )?;
-        let registration_history = keyspace.open_partition(
-            "account_registration_history",
-            PartitionCreateOptions::default(),
-        )?;
-        let withdrawal_history = keyspace.open_partition(
-            "account_withdrawal_history",
-            PartitionCreateOptions::default(),
-        )?;
+        let rewards_history =
+            keyspace.open_partition("rewards_history", PartitionCreateOptions::default())?;
+        let active_stake_history =
+            keyspace.open_partition("active_stake_history", PartitionCreateOptions::default())?;
+        let delegation_history =
+            keyspace.open_partition("delegation_history", PartitionCreateOptions::default())?;
+        let registration_history =
+            keyspace.open_partition("registration_history", PartitionCreateOptions::default())?;
+        let withdrawal_history =
+            keyspace.open_partition("withdrawal_history", PartitionCreateOptions::default())?;
         let mir_history =
-            keyspace.open_partition("account_mir_history", PartitionCreateOptions::default())?;
-        let addresses =
-            keyspace.open_partition("account_addresses", PartitionCreateOptions::default())?;
+            keyspace.open_partition("mir_history", PartitionCreateOptions::default())?;
+        let addresses = keyspace.open_partition("addresses", PartitionCreateOptions::default())?;
 
         Ok(Self {
             rewards_history,
