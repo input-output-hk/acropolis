@@ -283,7 +283,7 @@ pub struct SPOStateMessage {
 pub enum CardanoMessage {
     BlockHeader(BlockHeaderMessage),         // Block header available
     BlockBody(BlockBodyMessage),             // Block body available
-    SnapshotComplete,                        // Mithril snapshot loaded
+    SnapshotComplete,                        // Mithril or Node (file) snapshot loaded
     ReceivedTxs(RawTxsMessage),              // Transaction available
     GenesisComplete(GenesisCompleteMessage), // Genesis UTXOs done + genesis params
     GenesisUTxOs(GenesisUTxOsMessage),       // Genesis UTxOs with their UTxOIdentifiers
