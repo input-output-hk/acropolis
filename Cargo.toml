@@ -37,6 +37,7 @@ caryatid_module_clock = "0.12"
 caryatid_module_spy = "0.12"
 anyhow = "1.0"
 chrono = "0.4"
+clap = { version = "4.5", features = ["derive"] }
 config = "0.15.11"
 dashmap = "6.1.0"
 hex = "0.4"
