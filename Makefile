@@ -14,6 +14,7 @@ MANIFEST_SMALL ?= tests/fixtures/test-manifest.json
 # Real Cardano Haskell node snapshot (Conway era, epoch 507)
 SNAPSHOT ?= tests/fixtures/134092758.670ca68c3de580f8469677754a725e86ca72a7be381d3108569f0704a5fca327.cbor
 MANIFEST ?= tests/fixtures/134092758.670ca68c3de580f8469677754a725e86ca72a7be381d3108569f0704a5fca327.json
+SNAP_URL ?= "https://pub-b844360df4774bb092a2bb2043b888e5.r2.dev/134092758.670ca68c3de580f8469677754a725e86ca72a7be381d3108569f0704a5fca327.cbor.gz"
 
 SECTIONS_ALL := --params --governance --pools --accounts --utxo
 
@@ -58,8 +59,15 @@ fmt:
 clippy:
 	$(CARGO) clippy --workspace -- -D warnings
 
+snapshot-download: $(SNAPSHOT)
+
+$(SNAPSHOT):
+	echo "Downloading snapshot file..."
+	curl -L -f -o "$(SNAPSHOT).gz" "$(SNAP_URL)" || { echo "Download failed"; exit 1; }
+	gunzip "$(SNAPSHOT).gz"
+
 # Streaming snapshot parser test
-snap-test-streaming:
+snap-test-streaming: $(SNAPSHOT)
 	@echo "Testing Streaming Snapshot Parser"
 	@echo "=================================="
 	@echo "Snapshot: $(SNAPSHOT)"
