@@ -1,0 +1,27 @@
+[package]
+name = "acropolis_module_chain_store"
+version = "0.1.0"
+edition = "2021"
+authors = ["Simon Gellis <simon@sundae.fi>","Alex Woods <alex.woods@iohk.io>"]
+description = "Chain Store Tracker"
+license = "Apache-2.0"
+
+[dependencies]
+caryatid_sdk = "0.12"
+acropolis_common = { path = "../../common" }
+acropolis_codec = { path = "../../codec" }
+anyhow = "1.0"
+config = "0.15.11"
+fjall = "2.7.0"
+hex = "0.4"
+minicbor = { version = "0.26.0", features = ["std", "half", "derive"] }
+pallas-traverse = { workspace = true }
+tracing = "0.1.40"
+tokio.workspace = true
+imbl.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+
+[lib]
+path = "src/chain_store.rs"

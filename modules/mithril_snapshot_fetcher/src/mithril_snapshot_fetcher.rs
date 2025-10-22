@@ -4,7 +4,7 @@
 use acropolis_common::{
     genesis_values::GenesisValues,
     messages::{BlockBodyMessage, BlockHeaderMessage, CardanoMessage, Message},
-    BlockInfo, BlockStatus, Era,
+    BlockHash, BlockInfo, BlockStatus, Era,
 };
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{module, Context, Module};
@@ -324,7 +324,7 @@ impl MithrilSnapshotFetcher {
                             status: BlockStatus::Immutable,
                             slot,
                             number,
-                            hash: *block.hash(),
+                            hash: BlockHash(*block.hash()),
                             epoch,
                             epoch_slot,
                             new_epoch,

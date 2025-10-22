@@ -107,12 +107,14 @@ fn calculate_monetary_expansion(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acropolis_common::protocol_params::{
-        Nonce, NonceVariant, ProtocolVersion, ShelleyProtocolParams,
-    };
     use acropolis_common::rational_number::rational_number_from_f32;
     use acropolis_common::NetworkId;
+    use acropolis_common::{
+        protocol_params::{Nonce, NonceVariant, ProtocolVersion, ShelleyProtocolParams},
+        GenesisDelegate,
+    };
     use chrono::{DateTime, Utc};
+    use std::collections::HashMap;
 
     // Known values at start of Shelley - from Java reference and DBSync
     const EPOCH_208_RESERVES: Lovelace = 13_888_022_852_926_644;
@@ -173,6 +175,7 @@ mod tests {
             slots_per_kes_period: 129600,
             system_start: DateTime::<Utc>::default(),
             update_quorum: 5,
+            gen_delegs: HashMap::<Vec<u8>, GenesisDelegate>::new(),
         }
     }
 
