@@ -314,10 +314,10 @@ pub fn map_certificate(
                     },
                     target: match &mir.target {
                         alonzo::InstantaneousRewardTarget::StakeCredentials(creds) => {
-                            InstantaneousRewardTarget::StakeCredentials(
+                            InstantaneousRewardTarget::StakeAddresses(
                                 creds
                                     .iter()
-                                    .map(|(sc, v)| (map_stake_credential(&sc), *v))
+                                    .map(|(sc, v)| (map_stake_address(&sc, network_id.clone()), *v))
                                     .collect(),
                             )
                         }

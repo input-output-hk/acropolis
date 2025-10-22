@@ -19,7 +19,6 @@ const DEFAULT_GENESIS_COMPLETION_TOPIC: (&str, &str) =
 
 const DEFAULT_NODE_ADDRESS: (&str, &str) = ("node-address", "backbone.cardano.iog.io:3001");
 const DEFAULT_MAGIC_NUMBER: (&str, u64) = ("magic-number", 764824073);
-const DEFAULT_NETWORK_ID: (&str, &str) = ("network-id", "mainnet");
 
 const DEFAULT_SYNC_POINT: (&str, SyncPoint) = ("sync-point", SyncPoint::Snapshot);
 const DEFAULT_CACHE_DIR: (&str, &str) = ("cache-dir", "upstream-cache");
@@ -50,7 +49,6 @@ pub struct FetcherConfig {
     pub genesis_completion_topic: String,
     pub node_address: String,
     pub magic_number: u64,
-    pub network_id: String,
     pub cache_dir: String,
 
     pub genesis_values: Option<GenesisValues>,
@@ -110,9 +108,6 @@ impl FetcherConfig {
             magic_number: config
                 .get::<u64>(DEFAULT_MAGIC_NUMBER.0)
                 .unwrap_or(DEFAULT_MAGIC_NUMBER.1),
-            network_id: config
-                .get_string(DEFAULT_NETWORK_ID.0)
-                .unwrap_or(DEFAULT_NETWORK_ID.1.to_string()),
             node_address: Self::conf(&config, DEFAULT_NODE_ADDRESS),
             cache_dir: Self::conf(&config, DEFAULT_CACHE_DIR),
             genesis_values: Self::conf_genesis(&config),
@@ -145,8 +140,8 @@ pub async fn publish_message(cfg: Arc<FetcherConfig>, record: &UpstreamCacheReco
 
 pub async fn peer_connect(cfg: Arc<FetcherConfig>, role: &str) -> Result<FetchResult<PeerClient>> {
     info!(
-        "Connecting {role} to {} ({})-({}) ...",
-        cfg.node_address, cfg.network_id, cfg.magic_number
+        "Connecting {role} to {} ({}) ...",
+        cfg.node_address, cfg.magic_number
     );
 
     match PeerClient::connect(cfg.node_address.clone(), cfg.magic_number).await {
@@ -161,9 +156,8 @@ pub async fn peer_connect(cfg: Arc<FetcherConfig>, role: &str) -> Result<FetchRe
         }
 
         Err(e) => bail!(
-            "Cannot connect {role} to {} ({})-({}): {e}",
+            "Cannot connect {role} to {} ({}): {e}",
             cfg.node_address,
-            cfg.network_id,
             cfg.magic_number
         ),
     }

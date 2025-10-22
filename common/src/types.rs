@@ -623,20 +623,6 @@ impl Credential {
 
 pub type StakeCredential = Credential;
 
-impl StakeCredential {
-    pub fn to_stake_address(&self, network: AddressNetwork) -> StakeAddress {
-        let payload = match self {
-            StakeCredential::AddrKeyHash(hash) => StakeAddressPayload::StakeKeyHash(
-                hash.clone().try_into().expect("Invalid hash length"),
-            ),
-            StakeCredential::ScriptHash(hash) => StakeAddressPayload::ScriptHash(
-                hash.clone().try_into().expect("Invalid hash length"),
-            ),
-        };
-        StakeAddress::new(payload, network)
-    }
-}
-
 /// Relay single host address
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize, Eq, PartialEq)]
 pub struct SingleHostAddr {
@@ -887,7 +873,7 @@ pub enum InstantaneousRewardSource {
 /// Target of a MIR
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum InstantaneousRewardTarget {
-    StakeCredentials(Vec<(StakeCredential, i64)>),
+    StakeAddresses(Vec<(StakeAddress, i64)>),
     OtherAccountingPot(u64),
 }
 

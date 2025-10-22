@@ -14,7 +14,7 @@ use acropolis_common::{
     protocol_params::ProtocolParams,
     stake_addresses::{StakeAddressMap, StakeAddressState},
     BlockInfo, DRepChoice, DRepCredential, DelegatedStake, InstantaneousRewardSource,
-    InstantaneousRewardTarget, KeyHash, Lovelace, MoveInstantaneousReward, NetworkId,
+    InstantaneousRewardTarget, KeyHash, Lovelace, MoveInstantaneousReward,
     PoolLiveStakeInfo, PoolRegistration, Pot, SPORewards, StakeAddress, StakeRewardDelta,
     TxCertificate,
 };
@@ -94,9 +94,6 @@ pub struct State {
 
     /// List of SPOs (by operator ID) retiring in the current epoch
     retiring_spos: Vec<KeyHash>,
-
-    /// Network ID
-    network_id: NetworkId,
 
     /// Map of staking address values
     /// Wrapped in an Arc so it doesn't get cloned in full by StateHistory
@@ -549,13 +546,10 @@ impl State {
             };
 
             match &mir.target {
-                InstantaneousRewardTarget::StakeCredentials(deltas) => {
+                InstantaneousRewardTarget::StakeAddresses(deltas) => {
                     // Transfer to (in theory also from) stake addresses from (to) a pot
                     let mut total_value: u64 = 0;
-                    for (credential, value) in deltas.iter() {
-                        let stake_address =
-                            credential.to_stake_address(self.network_id.clone().into());
-
+                    for (stake_address, value) in deltas.iter() {
                         // Get old stake address state, or create one
                         let mut stake_addresses = self.stake_addresses.lock().unwrap();
                         let sas = stake_addresses.entry(stake_address.clone()).or_default();
@@ -1217,7 +1211,6 @@ mod tests {
     fn mir_transfers_to_stake_addresses() {
         let mut state = State::default();
         let stake_address = create_address(&STAKE_KEY_HASH);
-        let stake_credential = stake_address.get_credential();
 
         // Bootstrap with some in reserves
         state.pots.reserves = 100;
@@ -1244,9 +1237,9 @@ mod tests {
         // Send in a MIR reserves->{47,-5}->stake
         let mir = MoveInstantaneousReward {
             source: InstantaneousRewardSource::Reserves,
-            target: InstantaneousRewardTarget::StakeCredentials(vec![
-                (stake_credential.clone(), 47),
-                (stake_credential, -5),
+            target: InstantaneousRewardTarget::StakeAddresses(vec![
+                (stake_address.clone(), 47),
+                (stake_address.clone(), -5),
             ]),
         };
 
@@ -1266,7 +1259,6 @@ mod tests {
     fn withdrawal_transfers_from_stake_addresses() {
         let mut state = State::default();
         let stake_address = create_address(&STAKE_KEY_HASH);
-        let stake_credential = stake_address.get_credential();
 
         // Bootstrap with some in reserves
         state.pots.reserves = 100;
@@ -1294,7 +1286,7 @@ mod tests {
         // Send in a MIR reserves->42->stake
         let mir = MoveInstantaneousReward {
             source: InstantaneousRewardSource::Reserves,
-            target: InstantaneousRewardTarget::StakeCredentials(vec![(stake_credential, 42)]),
+            target: InstantaneousRewardTarget::StakeAddresses(vec![(stake_address.clone(), 42)]),
         };
 
         state.handle_mir(&mir).unwrap();
