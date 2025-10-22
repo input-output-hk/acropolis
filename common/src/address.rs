@@ -9,7 +9,6 @@ use minicbor::data::IanaTag;
 use serde_with::{hex::Hex, serde_as};
 use std::cmp::Ordering;
 
-
 /// a Byron-era address
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ByronAddress {
