@@ -46,9 +46,18 @@ use tikv_jemallocator::Jemalloc;
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
 
+#[derive(Debug, clap::Parser)]
+#[command(name = "acropolis_process_omnibus")]
+struct Args {
+    #[arg(long, value_name = "PATH", default_value_t = option_env!("ACROPOLIS_OMNIBUS_DEFAULT_CONFIG").unwrap_or("omnibus.toml").to_string())]
+    config: String,
+}
+
 /// Standard main
 #[tokio::main]
 pub async fn main() -> Result<()> {
+    let args = <self::Args as clap::Parser>::parse();
+
     // Standard logging using RUST_LOG for log levels default to INFO for events only
     let fmt_layer = fmt::layer().with_filter(EnvFilter::from_default_env());
 
@@ -80,7 +89,7 @@ pub async fn main() -> Result<()> {
     // Read the config
     let config = Arc::new(
         Config::builder()
-            .add_source(File::with_name("omnibus"))
+            .add_source(File::with_name(&args.config))
             .add_source(Environment::with_prefix("ACROPOLIS"))
             .build()
             .unwrap(),
