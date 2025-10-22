@@ -81,7 +81,6 @@ pub struct AccountWithdrawal {
 #[derive(Debug, Clone)]
 pub struct HistoricalAccountsConfig {
     pub db_path: String,
-    pub skip_until: Option<u64>,
 
     pub store_rewards_history: bool,
     pub store_active_stake_history: bool,
@@ -109,9 +108,6 @@ impl State {
         };
 
         let store = Arc::new(ImmutableHistoricalAccountStore::new(&db_path)?);
-
-        let mut config = config.clone();
-        config.skip_until = store.get_last_epoch_stored().await?;
 
         Ok(Self {
             config,

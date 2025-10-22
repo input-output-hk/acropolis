@@ -284,7 +284,6 @@ impl HistoricalAccountsState {
             db_path: config
                 .get_string(DEFAULT_HISTORICAL_ACCOUNTS_DB_PATH.0)
                 .unwrap_or(DEFAULT_HISTORICAL_ACCOUNTS_DB_PATH.1.to_string()),
-            skip_until: None,
             store_rewards_history: config
                 .get_bool(DEFAULT_STORE_REWARDS_HISTORY.0)
                 .unwrap_or(DEFAULT_STORE_REWARDS_HISTORY.1),
