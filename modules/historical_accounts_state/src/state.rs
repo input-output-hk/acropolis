@@ -53,29 +53,29 @@ pub struct ActiveStakeHistory {
 #[derive(Debug, Clone, minicbor::Decode, minicbor::Encode)]
 pub struct DelegationUpdate {
     #[n(0)]
-    active_epoch: u32,
+    pub active_epoch: u32,
     #[n(1)]
-    tx_hash: TxIdentifier,
+    pub tx_identifier: TxIdentifier,
     #[n(2)]
-    amount: u64,
+    pub amount: u64,
     #[n(3)]
-    pool: PoolId,
+    pub pool: PoolId,
 }
 
 #[derive(Debug, Clone, minicbor::Decode, minicbor::Encode)]
 pub struct RegistrationUpdate {
     #[n(0)]
-    tx_hash: TxIdentifier,
+    pub tx_identifier: TxIdentifier,
     #[n(1)]
-    deregistered: bool,
+    pub deregistered: bool,
 }
 
 #[derive(Debug, Clone, minicbor::Decode, minicbor::Encode)]
 pub struct AccountWithdrawal {
     #[n(0)]
-    tx_hash: TxIdentifier,
+    pub tx_identifier: TxIdentifier,
     #[n(1)]
-    amount: u64,
+    pub amount: u64,
 }
 
 #[derive(Debug, Clone)]

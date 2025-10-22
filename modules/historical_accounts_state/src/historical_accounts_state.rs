@@ -65,7 +65,7 @@ impl HistoricalAccountsState {
         // Background task to persist epochs sequentially
         const MAX_PENDING_PERSISTS: usize = 1;
         let (persist_tx, mut persist_rx) = mpsc::channel::<(
-            u64,
+            u32,
             Arc<ImmutableHistoricalAccountStore>,
             HistoricalAccountsConfig,
         )>(MAX_PENDING_PERSISTS);
@@ -210,7 +210,7 @@ impl HistoricalAccountsState {
                         state.prune_volatile().await;
                         if let Err(e) = persist_tx
                             .send((
-                                block_info.epoch,
+                                block_info.epoch as u32,
                                 state.immutable.clone(),
                                 state.config.clone(),
                             ))

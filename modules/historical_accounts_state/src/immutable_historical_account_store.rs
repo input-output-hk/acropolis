@@ -1,6 +1,6 @@
 use std::{collections::HashMap, path::Path};
 
-use acropolis_common::{ShelleyAddress, StakeAddress};
+use acropolis_common::{ShelleyAddress, StakeCredential};
 use anyhow::Result;
 use fjall::{Keyspace, Partition, PartitionCreateOptions};
 use minicbor::{decode, to_vec};
@@ -12,15 +12,6 @@ use crate::state::{
     HistoricalAccountsConfig, RegistrationUpdate, RewardHistory,
 };
 
-// Metadata keys which store the last epoch saved in each partition
-const ACCOUNT_REWARDS_HISTORY_COUNTER: &[u8] = b"rewards_history_epoch_last";
-const ACCOUNT_ACTIVE_STAKE_HISTORY_COUNTER: &[u8] = b"active_stake_history_epoch_last";
-const ACCOUNT_DELEGATION_HISTORY_COUNTER: &[u8] = b"delegation_history_epoch_last";
-const ACCOUNT_REGISTRATION_HISTORY_COUNTER: &[u8] = b"registration_history_epoch_last";
-const ACCOUNT_WITHDRAWAL_HISTORY_COUNTER: &[u8] = b"withdrawal_history_epoch_last";
-const ACCOUNT_MIR_HISTORY_COUNTER: &[u8] = b"mir_history_epoch_last";
-const ACCOUNT_ADDRESSES_COUNTER: &[u8] = b"addresses_epoch_last";
-
 pub struct ImmutableHistoricalAccountStore {
     rewards_history: Partition,
     active_stake_history: Partition,
@@ -30,7 +21,7 @@ pub struct ImmutableHistoricalAccountStore {
     mir_history: Partition,
     addresses: Partition,
     keyspace: Keyspace,
-    pub pending: Mutex<Vec<HashMap<StakeAddress, AccountEntry>>>,
+    pub pending: Mutex<Vec<HashMap<StakeCredential, AccountEntry>>>,
 }
 
 impl ImmutableHistoricalAccountStore {
@@ -68,7 +59,7 @@ impl ImmutableHistoricalAccountStore {
     /// Persists volatile UTxOs, transactions, and totals into their respective Fjall partitions for an entire epoch.
     /// Skips any partitions that have already stored the given epoch.
     /// All writes are batched and committed atomically, preventing on-disk corruption in case of failure.
-    pub async fn persist_epoch(&self, epoch: u64, config: &HistoricalAccountsConfig) -> Result<()> {
+    pub async fn persist_epoch(&self, epoch: u32, config: &HistoricalAccountsConfig) -> Result<()> {
         if !(config.store_rewards_history
             || config.store_active_stake_history
             || config.store_delegation_history
@@ -95,123 +86,61 @@ impl ImmutableHistoricalAccountStore {
             }
 
             for (account, entry) in block_map {
+                let epoch_key = Self::make_epoch_key(&account, epoch);
                 change_count += 1;
-                let account_key = account.to_bytes_key()?;
 
                 // Persist rewards
                 if config.store_rewards_history {
-                    let mut live: Vec<RewardHistory> = self
-                        .rewards_history
-                        .get(&account_key)?
-                        .map(|bytes| decode(&bytes))
-                        .transpose()?
-                        .unwrap_or_default();
-
-                    if let Some(rewards) = &entry.reward_history {
-                        for reward in rewards {
-                            live.push(reward.clone())
-                        }
-                    }
-
-                    batch.insert(&self.rewards_history, &account_key, to_vec(&live)?);
+                    batch.insert(
+                        &self.rewards_history,
+                        &epoch_key,
+                        to_vec(&entry.reward_history)?,
+                    );
                 }
 
                 // Persist active stake
                 if config.store_active_stake_history {
-                    let mut live: Vec<ActiveStakeHistory> = self
-                        .active_stake_history
-                        .get(&account_key)?
-                        .map(|bytes| decode(&bytes))
-                        .transpose()?
-                        .unwrap_or_default();
-
-                    if let Some(deltas) = &entry.active_stake_history {
-                        for delta in deltas {
-                            live.push(delta.clone());
-                        }
-                    }
-
-                    batch.insert(&self.active_stake_history, &account_key, to_vec(&live)?);
+                    batch.insert(
+                        &self.active_stake_history,
+                        &epoch_key,
+                        to_vec(&entry.active_stake_history)?,
+                    );
                 }
 
                 // Persist account delegation updates
                 if config.store_delegation_history {
-                    let mut live: Vec<DelegationUpdate> = self
-                        .delegation_history
-                        .get(&account_key)?
-                        .map(|bytes| decode(&bytes))
-                        .transpose()?
-                        .unwrap_or_default();
-
                     if let Some(updates) = &entry.delegation_history {
-                        live.extend(updates.iter().cloned());
+                        batch.insert(&self.delegation_history, &epoch_key, to_vec(&updates)?);
                     }
-
-                    batch.insert(&self.delegation_history, &account_key, to_vec(&live)?);
                 }
 
                 // Persist account registration updates
                 if config.store_registration_history {
-                    let mut live: Vec<RegistrationUpdate> = self
-                        .registration_history
-                        .get(&account_key)?
-                        .map(|bytes| decode(&bytes))
-                        .transpose()?
-                        .unwrap_or_default();
-
                     if let Some(updates) = &entry.registration_history {
-                        live.extend(updates.iter().cloned());
+                        batch.insert(&self.registration_history, &epoch_key, to_vec(&updates)?);
                     }
-
-                    batch.insert(&self.registration_history, &account_key, to_vec(&live)?);
                 }
 
                 // Persist withdrawal updates
                 if config.store_withdrawal_history {
-                    let mut live: Vec<AccountWithdrawal> = self
-                        .withdrawal_history
-                        .get(&account_key)?
-                        .map(|bytes| decode(&bytes))
-                        .transpose()?
-                        .unwrap_or_default();
-
                     if let Some(updates) = &entry.withdrawal_history {
-                        live.extend(updates.iter().cloned());
+                        batch.insert(&self.withdrawal_history, &epoch_key, to_vec(&updates)?);
                     }
-
-                    batch.insert(&self.withdrawal_history, &account_key, to_vec(&live)?);
                 }
 
                 // Persist MIR updates
                 if config.store_mir_history {
-                    let mut live: Vec<AccountWithdrawal> = self
-                        .mir_history
-                        .get(&account_key)?
-                        .map(|bytes| decode(&bytes))
-                        .transpose()?
-                        .unwrap_or_default();
-
                     if let Some(updates) = &entry.mir_history {
-                        live.extend(updates.iter().cloned());
+                        batch.insert(&self.mir_history, &epoch_key, to_vec(&updates)?);
                     }
-
-                    batch.insert(&self.mir_history, &account_key, to_vec(&live)?);
                 }
 
                 // Persist address updates
+                // TODO: Deduplicate addresses across epochs
                 if config.store_addresses {
-                    let mut live: Vec<ShelleyAddress> = self
-                        .addresses
-                        .get(&account_key)?
-                        .map(|bytes| decode(&bytes))
-                        .transpose()?
-                        .unwrap_or_default();
-
                     if let Some(updates) = &entry.addresses {
-                        live.extend(updates.iter().cloned());
+                        batch.insert(&self.addresses, &epoch_key, to_vec(&updates)?);
                     }
-
-                    batch.insert(&self.addresses, &account_key, to_vec(&live)?);
                 }
             }
         }
@@ -228,208 +157,219 @@ impl ImmutableHistoricalAccountStore {
         }
     }
 
-    pub async fn update_immutable(&self, drained: Vec<HashMap<StakeAddress, AccountEntry>>) {
+    pub async fn update_immutable(&self, drained: Vec<HashMap<StakeCredential, AccountEntry>>) {
         let mut pending = self.pending.lock().await;
         pending.extend(drained);
     }
 
     pub async fn _get_rewards_history(
         &self,
-        account: &StakeAddress,
+        account: &StakeCredential,
     ) -> Result<Option<Vec<RewardHistory>>> {
-        let key = account.to_bytes_key()?;
+        let account_key = account.get_hash();
 
-        let mut live: Vec<RewardHistory> = self
-            .rewards_history
-            .get(&key)?
-            .map(|bytes| decode(&bytes))
-            .transpose()?
-            .unwrap_or_default();
+        let mut immutable_rewards = Vec::<RewardHistory>::new();
 
-        let pending = self.pending.lock().await;
-        for block_map in pending.iter() {
+        for result in self.rewards_history.prefix(&account_key) {
+            let (_key, bytes) = result?;
+            let epoch_rewards: Vec<RewardHistory> = decode(&bytes)?;
+            immutable_rewards.extend(epoch_rewards);
+        }
+
+        for block_map in self.pending.lock().await.iter() {
             if let Some(entry) = block_map.get(account) {
                 if let Some(deltas) = &entry.reward_history {
-                    for delta in deltas {
-                        live.push(delta.clone());
-                    }
+                    immutable_rewards.extend(deltas.clone());
                 }
             }
         }
 
-        if live.is_empty() {
+        if immutable_rewards.is_empty() {
             Ok(None)
         } else {
-            let vec: Vec<_> = live.into_iter().collect();
-            Ok(Some(vec))
+            Ok(Some(immutable_rewards))
         }
     }
 
     pub async fn _get_active_stake_history(
         &self,
-        account: &StakeAddress,
+        account: &StakeCredential,
     ) -> Result<Option<Vec<ActiveStakeHistory>>> {
-        let key = account.to_bytes_key()?;
+        let account_key = account.get_hash();
 
-        let mut live: Vec<ActiveStakeHistory> = self
-            .active_stake_history
-            .get(&key)?
-            .map(|bytes| decode(&bytes))
-            .transpose()?
-            .unwrap_or_default();
+        let mut immutable_active_stake = Vec::<ActiveStakeHistory>::new();
 
-        let pending = self.pending.lock().await;
-        for block_map in pending.iter() {
+        for result in self.active_stake_history.prefix(&account_key) {
+            let (_key, bytes) = result?;
+            let epoch_stakes: Vec<ActiveStakeHistory> = decode(&bytes)?;
+            immutable_active_stake.extend(epoch_stakes);
+        }
+
+        for block_map in self.pending.lock().await.iter() {
             if let Some(entry) = block_map.get(account) {
                 if let Some(deltas) = &entry.active_stake_history {
-                    for delta in deltas {
-                        live.push(delta.clone());
-                    }
+                    immutable_active_stake.extend(deltas.clone());
                 }
             }
         }
 
-        if live.is_empty() {
+        if immutable_active_stake.is_empty() {
             Ok(None)
         } else {
-            let vec: Vec<_> = live.into_iter().collect();
-            Ok(Some(vec))
+            Ok(Some(immutable_active_stake))
         }
     }
 
     pub async fn _get_delegation_history(
         &self,
-        account: &StakeAddress,
+        account: &StakeCredential,
     ) -> Result<Option<Vec<DelegationUpdate>>> {
-        let key = account.to_bytes_key()?;
-        let mut live: Vec<DelegationUpdate> = self
-            .delegation_history
-            .get(&key)?
-            .map(|bytes| decode(&bytes))
-            .transpose()?
-            .unwrap_or_default();
+        let account_key = account.get_hash();
 
-        let pending = self.pending.lock().await;
-        for block_map in pending.iter() {
+        let mut immutable_delegations = Vec::<DelegationUpdate>::new();
+
+        for result in self.delegation_history.prefix(&account_key) {
+            let (_key, bytes) = result?;
+            let epoch_delegations: Vec<DelegationUpdate> = decode(&bytes)?;
+            immutable_delegations.extend(epoch_delegations);
+        }
+
+        for block_map in self.pending.lock().await.iter() {
             if let Some(entry) = block_map.get(account) {
                 if let Some(updates) = &entry.delegation_history {
-                    live.extend(updates.iter().cloned());
+                    immutable_delegations.extend(updates.iter().cloned());
                 }
             }
         }
 
-        if live.is_empty() {
+        if immutable_delegations.is_empty() {
             Ok(None)
         } else {
-            Ok(Some(live))
+            Ok(Some(immutable_delegations))
         }
     }
 
     pub async fn _get_registration_history(
         &self,
-        account: &StakeAddress,
+        account: &StakeCredential,
     ) -> Result<Option<Vec<RegistrationUpdate>>> {
-        let key = account.to_bytes_key()?;
-        let mut live: Vec<RegistrationUpdate> = self
-            .registration_history
-            .get(&key)?
-            .map(|bytes| decode(&bytes))
-            .transpose()?
-            .unwrap_or_default();
+        let account_key = account.get_hash();
 
-        let pending = self.pending.lock().await;
-        for block_map in pending.iter() {
+        let mut immutable_registrations = Vec::<RegistrationUpdate>::new();
+
+        for result in self.registration_history.prefix(&account_key) {
+            let (_key, bytes) = result?;
+            let epoch_registrations: Vec<RegistrationUpdate> = decode(&bytes)?;
+            immutable_registrations.extend(epoch_registrations);
+        }
+
+        for block_map in self.pending.lock().await.iter() {
             if let Some(entry) = block_map.get(account) {
                 if let Some(updates) = &entry.registration_history {
-                    live.extend(updates.iter().cloned());
+                    immutable_registrations.extend(updates.iter().cloned());
                 }
             }
         }
 
-        if live.is_empty() {
+        if immutable_registrations.is_empty() {
             Ok(None)
         } else {
-            Ok(Some(live))
+            Ok(Some(immutable_registrations))
         }
     }
 
     pub async fn _get_withdrawal_history(
         &self,
-        account: &StakeAddress,
+        account: &StakeCredential,
     ) -> Result<Option<Vec<AccountWithdrawal>>> {
-        let key = account.to_bytes_key()?;
-        let mut live: Vec<AccountWithdrawal> = self
-            .withdrawal_history
-            .get(&key)?
-            .map(|bytes| decode(&bytes))
-            .transpose()?
-            .unwrap_or_default();
+        let account_key = account.get_hash();
 
-        let pending = self.pending.lock().await;
-        for block_map in pending.iter() {
+        let mut immutable_withdrawals = Vec::<AccountWithdrawal>::new();
+
+        for result in self.withdrawal_history.prefix(&account_key) {
+            let (_key, bytes) = result?;
+            let epoch_withdrawals: Vec<AccountWithdrawal> = decode(&bytes)?;
+            immutable_withdrawals.extend(epoch_withdrawals);
+        }
+
+        for block_map in self.pending.lock().await.iter() {
             if let Some(entry) = block_map.get(account) {
                 if let Some(updates) = &entry.withdrawal_history {
-                    live.extend(updates.iter().cloned());
+                    immutable_withdrawals.extend(updates.iter().cloned());
                 }
             }
         }
 
-        if live.is_empty() {
+        if immutable_withdrawals.is_empty() {
             Ok(None)
         } else {
-            Ok(Some(live))
+            Ok(Some(immutable_withdrawals))
         }
     }
 
     pub async fn _get_mir_history(
         &self,
-        account: &StakeAddress,
+        account: &StakeCredential,
     ) -> Result<Option<Vec<AccountWithdrawal>>> {
-        let key = account.to_bytes_key()?;
-        let mut live: Vec<AccountWithdrawal> = self
-            .mir_history
-            .get(&key)?
-            .map(|bytes| decode(&bytes))
-            .transpose()?
-            .unwrap_or_default();
+        let account_key = account.get_hash();
 
-        let pending = self.pending.lock().await;
-        for block_map in pending.iter() {
+        let mut immutable_mirs = Vec::<AccountWithdrawal>::new();
+
+        for result in self.mir_history.prefix(&account_key) {
+            let (_key, bytes) = result?;
+            let epoch_mirs: Vec<AccountWithdrawal> = decode(&bytes)?;
+            immutable_mirs.extend(epoch_mirs);
+        }
+
+        for block_map in self.pending.lock().await.iter() {
             if let Some(entry) = block_map.get(account) {
                 if let Some(updates) = &entry.mir_history {
-                    live.extend(updates.iter().cloned());
+                    immutable_mirs.extend(updates.iter().cloned());
                 }
             }
         }
 
-        if live.is_empty() {
+        if immutable_mirs.is_empty() {
             Ok(None)
         } else {
-            Ok(Some(live))
+            Ok(Some(immutable_mirs))
         }
     }
 
     pub async fn _get_addresses(
         &self,
-        account: &StakeAddress,
+        account: &StakeCredential,
     ) -> Result<Option<Vec<ShelleyAddress>>> {
-        let key = account.to_bytes_key()?;
-        let mut live: Vec<ShelleyAddress> =
-            self.addresses.get(&key)?.map(|bytes| decode(&bytes)).transpose()?.unwrap_or_default();
+        let account_key = account.get_hash();
 
-        let pending = self.pending.lock().await;
-        for block_map in pending.iter() {
+        let mut immutable_addresses = Vec::<ShelleyAddress>::new();
+
+        for result in self.addresses.prefix(&account_key) {
+            let (_key, bytes) = result?;
+            let epoch_addresses: Vec<ShelleyAddress> = decode(&bytes)?;
+            immutable_addresses.extend(epoch_addresses);
+        }
+
+        for block_map in self.pending.lock().await.iter() {
             if let Some(entry) = block_map.get(account) {
                 if let Some(updates) = &entry.addresses {
-                    live.extend(updates.iter().cloned());
+                    immutable_addresses.extend(updates.iter().cloned());
                 }
             }
         }
 
-        if live.is_empty() {
+        if immutable_addresses.is_empty() {
             Ok(None)
         } else {
-            Ok(Some(live))
+            Ok(Some(immutable_addresses))
         }
+    }
+
+    // Used for once per epoch data (rewards & active stake)
+    fn make_epoch_key(account: &StakeCredential, epoch: u32) -> [u8; 32] {
+        let mut key = [0u8; 32];
+        key[..28].copy_from_slice(&account.get_hash());
+        key[28..32].copy_from_slice(&epoch.to_be_bytes());
+        key
     }
 }
