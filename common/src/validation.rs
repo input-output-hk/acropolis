@@ -24,6 +24,6 @@ pub enum ValidationStatus {
     /// All good
     Go,
 
-    // Error
+    /// Error
     NoGo(ValidationError),
 }
