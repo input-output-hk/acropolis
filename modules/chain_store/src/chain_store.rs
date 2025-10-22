@@ -12,12 +12,11 @@ use acropolis_common::{
     },
     queries::misc::Order,
     state_history::{StateHistory, StateHistoryStore},
-    Address, BlockHash, GenesisDelegate, HeavyDelegate, TxHash, VRFKey,
+    BechOrdAddress, BlockHash, GenesisDelegate, HeavyDelegate, TxHash, VRFKey,
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Module};
 use config::Config;
-use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -547,20 +546,5 @@ impl State {
             byron_heavy_delegates: HashMap::new(),
             shelley_genesis_delegates: HashMap::new(),
         }
-    }
-}
-
-#[derive(Eq, PartialEq)]
-struct BechOrdAddress(Address);
-
-impl Ord for BechOrdAddress {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.0.to_string().into_iter().cmp(other.0.to_string())
-    }
-}
-
-impl PartialOrd for BechOrdAddress {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
     }
 }
