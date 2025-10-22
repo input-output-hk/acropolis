@@ -57,12 +57,6 @@ pub struct RawTxsMessage {
     pub txs: Vec<Vec<u8>>,
 }
 
-/// Bootup completion message, sent by any module that has finished its startup sequence,
-/// e.g. GenesisBootstrapper after sending all genesis UTxOs or SnapshotBootstrapper after
-/// loading a snapshot.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct BootupCompleteMessage {}
-
 /// Genesis completion message
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenesisCompleteMessage {
