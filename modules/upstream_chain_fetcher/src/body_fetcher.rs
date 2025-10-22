@@ -3,7 +3,7 @@
 
 use acropolis_common::{
     messages::{BlockBodyMessage, BlockHeaderMessage},
-    BlockInfo, BlockStatus, Era,
+    BlockHash, BlockInfo, BlockStatus, Era,
 };
 use anyhow::{bail, Result};
 use crossbeam::channel::{Receiver, TryRecvError};
@@ -120,7 +120,7 @@ impl BodyFetcher {
             }, // TODO vary with 'k'
             slot,
             number,
-            hash,
+            hash: BlockHash(hash),
             epoch,
             epoch_slot,
             new_epoch,

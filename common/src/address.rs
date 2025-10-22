@@ -7,6 +7,7 @@ use anyhow::{anyhow, bail, Result};
 use crc::{Crc, CRC_32_ISO_HDLC};
 use minicbor::data::IanaTag;
 use serde_with::{hex::Hex, serde_as};
+use std::cmp::Ordering;
 
 /// a Byron-era address
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -580,6 +581,22 @@ impl Address {
             },
             Address::Byron(_) | Address::None => false,
         }
+    }
+}
+
+/// Used for ordering addresses by their bech representation
+#[derive(Eq, PartialEq)]
+pub struct BechOrdAddress(pub Address);
+
+impl Ord for BechOrdAddress {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.0.to_string().into_iter().cmp(other.0.to_string())
+    }
+}
+
+impl PartialOrd for BechOrdAddress {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }
 

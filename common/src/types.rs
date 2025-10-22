@@ -6,6 +6,7 @@ use crate::{
     address::{Address, ShelleyAddress, StakeAddress},
     protocol_params,
     rational_number::RationalNumber,
+    BlockHash, TxHash,
 };
 use anyhow::{anyhow, bail, Error, Result};
 use bech32::{Bech32, Hrp};
@@ -79,6 +80,19 @@ impl Display for Era {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self)
     }
+}
+
+/// Block production statistics for a stake pool in a specific epoch
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PoolBlockProduction {
+    /// Pool ID that produced the blocks
+    pub pool_id: String,
+
+    /// Number of blocks produced by this pool in the epoch
+    pub block_count: u8,
+
+    /// Epoch number
+    pub epoch: u64,
 }
 
 /// Block status
@@ -401,9 +415,6 @@ pub type GenesisKeyhash = Vec<u8>;
 /// Data hash used for metadata, anchors (SHA256)
 pub type DataHash = Vec<u8>;
 
-/// Transaction hash
-pub type TxHash = [u8; 32];
-
 /// Compact transaction identifier (block_number, tx_index).
 #[derive(
     Debug,
@@ -520,9 +531,6 @@ impl TxOutRef {
     }
 }
 
-/// Block Hash
-pub type BlockHash = [u8; 32];
-
 /// Amount of Ada, in Lovelace
 pub type Lovelace = u64;
 pub type LovelaceDelta = i64;
@@ -587,11 +595,11 @@ pub struct PotDelta {
     Debug, Clone, Ord, Eq, PartialEq, PartialOrd, Hash, serde::Serialize, serde::Deserialize,
 )]
 pub enum Credential {
+    /// Script hash. NOTE: Order matters when parsing Haskell Node Snapshot data.
+    ScriptHash(KeyHash),
+
     /// Address key hash
     AddrKeyHash(KeyHash),
-
-    /// Script hash
-    ScriptHash(KeyHash),
 }
 
 impl Credential {
@@ -1304,6 +1312,22 @@ pub struct BlockVersionData {
     pub update_implicit: u64,
     pub update_proposal_thd: u64,
     pub update_vote_thd: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct HeavyDelegate {
+    pub cert: Vec<u8>,
+    pub delegate_pk: Vec<u8>,
+    pub issuer_pk: Vec<u8>,
+}
+
+#[serde_as]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct GenesisDelegate {
+    #[serde_as(as = "Hex")]
+    pub delegate: Vec<u8>,
+    #[serde_as(as = "Hex")]
+    pub vrf: Vec<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]

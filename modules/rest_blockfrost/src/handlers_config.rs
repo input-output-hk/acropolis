@@ -4,6 +4,7 @@ use acropolis_common::queries::{
     accounts::DEFAULT_ACCOUNTS_QUERY_TOPIC,
     addresses::DEFAULT_ADDRESS_QUERY_TOPIC,
     assets::{DEFAULT_ASSETS_QUERY_TOPIC, DEFAULT_OFFCHAIN_TOKEN_REGISTRY_URL},
+    blocks::DEFAULT_BLOCKS_QUERY_TOPIC,
     epochs::DEFAULT_EPOCHS_QUERY_TOPIC,
     governance::{DEFAULT_DREPS_QUERY_TOPIC, DEFAULT_GOVERNANCE_QUERY_TOPIC},
     parameters::DEFAULT_PARAMETERS_QUERY_TOPIC,
@@ -20,6 +21,7 @@ pub struct HandlersConfig {
     pub accounts_query_topic: String,
     pub addresses_query_topic: String,
     pub assets_query_topic: String,
+    pub blocks_query_topic: String,
     pub pools_query_topic: String,
     pub dreps_query_topic: String,
     pub governance_query_topic: String,
@@ -44,6 +46,10 @@ impl From<Arc<Config>> for HandlersConfig {
         let assets_query_topic = config
             .get_string(DEFAULT_ASSETS_QUERY_TOPIC.0)
             .unwrap_or(DEFAULT_ASSETS_QUERY_TOPIC.1.to_string());
+
+        let blocks_query_topic = config
+            .get_string(DEFAULT_BLOCKS_QUERY_TOPIC.0)
+            .unwrap_or(DEFAULT_BLOCKS_QUERY_TOPIC.1.to_string());
 
         let pools_query_topic = config
             .get_string(DEFAULT_POOLS_QUERY_TOPIC.0)
@@ -85,6 +91,7 @@ impl From<Arc<Config>> for HandlersConfig {
             accounts_query_topic,
             addresses_query_topic,
             assets_query_topic,
+            blocks_query_topic,
             pools_query_topic,
             dreps_query_topic,
             governance_query_topic,
