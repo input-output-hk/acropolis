@@ -95,7 +95,7 @@ impl Consensus {
                                                 block_info,
                                                 CardanoMessage::BlockValidation(status),
                                             )) => match status {
-                                                ValidationStatus::Go => all_ok && true,
+                                                ValidationStatus::Go => all_ok,
                                                 ValidationStatus::NoGo(err) => {
                                                     error!(
                                                         block = block_info.number,
