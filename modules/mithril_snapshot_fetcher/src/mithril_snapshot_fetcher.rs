@@ -31,7 +31,7 @@ mod pause;
 use pause::PauseType;
 
 const DEFAULT_STARTUP_TOPIC: &str = "cardano.sequence.bootstrapped";
-const DEFAULT_BLOCK_TOPIC: &str = "cardano.block.proposed";
+const DEFAULT_BLOCK_TOPIC: &str = "cardano.block.available";
 const DEFAULT_COMPLETION_TOPIC: &str = "cardano.snapshot.complete";
 
 const DEFAULT_AGGREGATOR_URL: &str =
@@ -239,8 +239,12 @@ impl MithrilSnapshotFetcher {
     ) -> Result<()> {
         let block_topic =
             config.get_string("block-topic").unwrap_or(DEFAULT_BLOCK_TOPIC.to_string());
+        info!("Publishing blocks on '{block_topic}'");
+
         let completion_topic =
             config.get_string("completion-topic").unwrap_or(DEFAULT_COMPLETION_TOPIC.to_string());
+        info!("Publishing completion on '{completion_topic}'");
+
         let directory = config.get_string("directory").unwrap_or(DEFAULT_DIRECTORY.to_string());
         let mut pause_constraint =
             PauseType::from_config(&config, DEFAULT_PAUSE).unwrap_or(PauseType::NoPause);
