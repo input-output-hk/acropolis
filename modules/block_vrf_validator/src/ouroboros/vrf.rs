@@ -62,8 +62,26 @@ impl VrfInput {
     /// Size of a VRF input challenge, in bytes
     pub const SIZE: usize = 32;
 
+    /// Create a new input challenge from an absolute slot, an epoch entropy (nonce) and a domain specific nonce
+    /// This is for TPraos Protocol
+    pub fn mk_seed(absolute_slot: u64, epoch_nonce: &Nonce, uc_nonce: &Nonce) -> Self {
+        let mut hasher = Blake2b::<U32>::new();
+        let mut data: Vec<u8> = Vec::<u8>::with_capacity(8 + 32);
+        data.extend_from_slice(&absolute_slot.to_be_bytes());
+        if let Some(hash) = epoch_nonce.hash {
+            data.extend_from_slice(&hash);
+        }
+        hasher.update(&data);
+        let mut seed_hash: [u8; 32] = hasher.finalize().into();
+        if let Some(uc_hash) = uc_nonce.hash.as_ref() {
+            seed_hash = xor_hash(&seed_hash, uc_hash);
+        }
+        VrfInput(seed_hash)
+    }
+
     /// Create a new input challenge from an absolute slot number and an epoch entropy (nonce) (a.k.a η0)
-    pub fn new(absolute_slot_number: u64, epoch_nonce: &Nonce) -> Self {
+    /// This is for Praos Protocol
+    pub fn mk_vrf_input(absolute_slot_number: u64, epoch_nonce: &Nonce) -> Self {
         let mut hasher = Blake2b::<U32>::new();
         let mut data = Vec::<u8>::with_capacity(8 + 32);
         data.extend_from_slice(&absolute_slot_number.to_be_bytes());
@@ -180,4 +198,12 @@ mod serde_remote {
         PkSmallOrder,
         VrfOutputInvalid,
     }
+}
+
+fn xor_hash(hash1: &[u8; 32], hash2: &[u8; 32]) -> [u8; 32] {
+    let mut result = [0u8; 32];
+    for i in 0..32 {
+        result[i] = hash1[i] ^ hash2[i];
+    }
+    result
 }

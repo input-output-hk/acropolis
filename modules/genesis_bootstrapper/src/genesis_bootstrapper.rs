@@ -2,7 +2,7 @@
 //! Reads genesis files and outputs initial UTXO events
 
 use acropolis_common::{
-    genesis_values::GenesisValues,
+    genesis_values::{GenesisDelegs, GenesisValues},
     messages::{
         CardanoMessage, GenesisCompleteMessage, GenesisUTxOsMessage, Message, PotDeltasMessage,
         UTXODeltasMessage,
@@ -205,6 +205,22 @@ impl GenesisBootstrapper {
                     shelley_epoch: shelley_start_epoch,
                     shelley_epoch_len: shelley_genesis.epoch_length.unwrap() as u64,
                     shelley_genesis_hash,
+                    genesis_delegs: GenesisDelegs::from(
+                        shelley_genesis
+                            .gen_delegs
+                            .unwrap()
+                            .iter()
+                            .map(|(key, value)| {
+                                (
+                                    key.to_string(),
+                                    (
+                                        value.delegate.as_ref().unwrap().to_string(),
+                                        value.vrf.as_ref().unwrap().to_string(),
+                                    ),
+                                )
+                            })
+                            .collect::<Vec<(String, (String, String))>>(),
+                    ),
                 };
 
                 // Send completion message

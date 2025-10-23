@@ -7,6 +7,7 @@ use config::Config;
 use pallas::network::facades;
 use pallas::network::facades::PeerClient;
 use serde::Deserialize;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use tracing::{error, info};
 
@@ -94,6 +95,8 @@ impl FetcherConfig {
             shelley_epoch,
             shelley_epoch_len,
             shelley_genesis_hash,
+            // TODO: load genesis keys from config
+            genesis_keys: BTreeMap::new(),
         })
     }
 

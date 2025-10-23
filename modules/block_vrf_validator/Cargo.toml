@@ -1,7 +1,7 @@
 # Acropolis Block VRF Validator
 
 [package]
-name = "acropolis_module_block_validator"
+name = "acropolis_module_block_vrf_validator"
 version = "0.1.0"
 edition = "2021"
 authors = ["Golddy <golddy@sundae.fi>"]
@@ -26,8 +26,7 @@ pallas = { workspace = true }
 
 # The vrf crate has not been fully tested in production environments and still has several upstream issues that are open PRs but not merged yet.
 vrf_dalek = { git = "https://github.com/txpipe/vrf", rev = "044b45a1a919ba9d9c2471fc5c4d441f13086676" }
-kes-summed-ed25519 = { git = "https://github.com/txpipe/kes", rev = "f69fb357d46f6a18925543d785850059569d7e78" }
 blake2 = "0.10.6"
 
 [lib]
-path = "src/block_validator.rs"
+path = "src/block_vrf_validator.rs"

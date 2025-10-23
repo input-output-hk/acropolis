@@ -264,6 +264,34 @@ impl From<NonceHash> for Nonce {
     }
 }
 
+impl Nonce {
+    pub fn from_number(n: u64) -> Self {
+        let mut hasher = Blake2b::<U32>::new();
+        hasher.update(&n.to_be_bytes());
+        let hash: NonceHash = hasher.finalize().into();
+        Self::from(hash)
+    }
+
+    pub fn neutral() -> Self {
+        Self {
+            tag: NonceVariant::NeutralNonce,
+            hash: None,
+        }
+    }
+
+    /// Seed constant for eta (randomness/entropy) computation
+    /// Used when generating the epoch nonce
+    pub fn seed_eta() -> Self {
+        Self::from_number(0)
+    }
+
+    /// Seed constant for leader (L) computation  
+    /// Used when determining if a stake pool is the slot leader
+    pub fn seed_l() -> Self {
+        Self::from_number(1)
+    }
+}
+
 #[derive(
     Default, Debug, PartialEq, Eq, PartialOrd, Ord, Clone, serde::Serialize, serde::Deserialize,
 )]
