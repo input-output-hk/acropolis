@@ -993,7 +993,7 @@ mod tests {
     use acropolis_common::{
         protocol_params::ConwayParams, rational_number::RationalNumber, AddressNetwork, Anchor,
         Committee, Constitution, CostModel, DRepVotingThresholds, PoolVotingThresholds, Pot,
-        PotDelta, Ratio, Registration, StakeAddress, StakeAddressDelta, StakeAddressPayload,
+        PotDelta, Ratio, Registration, StakeAddress, StakeAddressDelta, StakeCredential,
         StakeAndVoteDelegation, StakeRegistrationAndStakeAndVoteDelegation,
         StakeRegistrationAndVoteDelegation, VoteDelegation, Withdrawal,
     };
@@ -1004,7 +1004,7 @@ mod tests {
         full_hash[..hash.len().min(28)].copy_from_slice(&hash[..hash.len().min(28)]);
         StakeAddress {
             network: AddressNetwork::Main,
-            payload: StakeAddressPayload::StakeKeyHash(full_hash),
+            credential: StakeCredential::AddrKeyHash(full_hash),
         }
     }
 
