@@ -25,6 +25,7 @@ members = [
     "modules/historical_accounts_state",    # Tracks historical account information
     "modules/consensus",                    # Chooses favoured chain across multiple options
     "modules/chain_store",                  # Tracks historical information about blocks and TXs
+    "modules/tx_submitter",                 # Submits TXs to peers
 
     # Process builds
     "processes/omnibus",      # All-inclusive omnibus process

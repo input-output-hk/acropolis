@@ -398,6 +398,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "acropolis_module_tx_submitter"
+version = "0.1.0"
+dependencies = [
+ "acropolis_common",
+ "anyhow",
+ "caryatid_sdk",
+ "config",
+ "hex",
+ "pallas 0.33.0",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "acropolis_module_tx_unpacker"
 version = "0.2.1"
 dependencies = [

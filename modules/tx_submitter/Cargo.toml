@@ -1,0 +1,22 @@
+[package]
+name = "acropolis_module_tx_submitter"
+version = "0.1.0"
+edition = "2024"
+authors = ["Simon Gellis <simon@sundae.fi>"]
+description = "TX submission module for Acropolis"
+license = "Apache-2.0"
+
+[dependencies]
+acropolis_common = { path = "../../common" }
+
+caryatid_sdk = { workspace = true }
+
+anyhow = { workspace = true }
+config = { workspace = true }
+hex = { workspace = true }
+pallas = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+[lib]
+path = "src/tx_submitter.rs"
