@@ -10,10 +10,13 @@ use caryatid_sdk::{module, Context, Module};
 use config::Config;
 use futures::future::try_join_all;
 use std::sync::Arc;
+use std::time::Duration;
+use tokio::time::timeout;
 use tracing::{error, info, info_span, Instrument};
 
 const DEFAULT_SUBSCRIBE_BLOCKS_TOPIC: &str = "cardano.block.available";
 const DEFAULT_PUBLISH_BLOCKS_TOPIC: &str = "cardano.block.proposed";
+const DEFAULT_VALIDATION_TIMEOUT: i64 = 60; // seconds
 
 /// Consensus module
 /// Parameterised by the outer message enum used on the bus
@@ -45,6 +48,11 @@ impl Consensus {
             info!("Validator: {topic}");
         }
 
+        let validation_timeout = Duration::from_secs(
+            config.get_int("validation-timeout").unwrap_or(DEFAULT_VALIDATION_TIMEOUT) as u64,
+        );
+        info!("Validation timeout {validation_timeout:?}");
+
         // Subscribe for incoming blocks
         let mut subscription = context.subscribe(&subscribe_blocks_topic).await?;
 
@@ -55,6 +63,7 @@ impl Consensus {
         context.clone().run(async move {
             loop {
                 let Ok((_, message)) = subscription.read().await else {
+                    error!("Block message read failed");
                     return;
                 };
                 match message.as_ref() {
@@ -72,38 +81,49 @@ impl Consensus {
                                 .unwrap_or_else(|e| error!("Failed to publish: {e}"));
 
                             // Read validation responses from all validators in parallel
-                            let results: Vec<_> =
-                                try_join_all(validator_subscriptions.iter_mut().map(|s| s.read()))
-                                    .await
-                                    .unwrap_or_else(|e| {
-                                        error!("Failed to read validations: {e}");
-                                        vec![]
-                                    });
+                            // and check they are all positive, with a safety timeout
+                            let all_say_go = match timeout(
+                                validation_timeout,
+                                try_join_all(validator_subscriptions.iter_mut().map(|s| s.read())),
+                            )
+                            .await
+                            {
+                                Ok(Ok(results)) => {
+                                    results.iter().fold(true, |all_ok, (_topic, msg)| {
+                                        match msg.as_ref() {
+                                            Message::Cardano((
+                                                block_info,
+                                                CardanoMessage::BlockValidation(status),
+                                            )) => match status {
+                                                ValidationStatus::Go => all_ok && true,
+                                                ValidationStatus::NoGo(err) => {
+                                                    error!(
+                                                        block = block_info.number,
+                                                        ?err,
+                                                        "Validation failure"
+                                                    );
+                                                    false
+                                                }
+                                            },
 
-                            // All must be positive!
-                            let all_say_go = results.iter().fold(true, |all_ok, (_topic, msg)| {
-                                match msg.as_ref() {
-                                    Message::Cardano((
-                                        block_info,
-                                        CardanoMessage::BlockValidation(status),
-                                    )) => match status {
-                                        ValidationStatus::Go => all_ok && true,
-                                        ValidationStatus::NoGo(err) => {
-                                            error!(
-                                                block = block_info.number,
-                                                ?err,
-                                                "Validation failure"
-                                            );
-                                            false
+                                            _ => {
+                                                error!(
+                                                    "Unexpected validation message type: {msg:?}"
+                                                );
+                                                false
+                                            }
                                         }
-                                    },
-
-                                    _ => {
-                                        error!("Unexpected validation message type: {msg:?}");
-                                        false
-                                    }
+                                    })
                                 }
-                            });
+                                Ok(Err(e)) => {
+                                    error!("Failed to read validations: {e}");
+                                    false
+                                }
+                                Err(_) => {
+                                    error!("Timeout waiting for validation responses");
+                                    false
+                                }
+                            };
 
                             if !all_say_go {
                                 error!(block = block_info.number, "Validation rejected block");
