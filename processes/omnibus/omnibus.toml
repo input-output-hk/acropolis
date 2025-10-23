@@ -35,6 +35,7 @@ publish-withdrawals-topic = "cardano.withdrawals"
 publish-certificates-topic = "cardano.certificates"
 publish-governance-topic = "cardano.governance"
 publish-block-txs-topic = "cardano.block.txs"
+network-name = "mainnet"
 
 [module.utxo-state]
 store = "memory" # "memory", "dashmap", "fjall", "fjall-async", "sled", "sled-async", "fake"
@@ -62,6 +63,8 @@ store-stake-addresses = false
 # Enables active_stakes in /epochs/latest | {number} endpoints
 # Enables /epochs/{number}/{next | previous}
 store-spdd = false
+
+[module.historical-accounts-state]
 
 [module.drep-state]
 # Enables /governance/dreps/{drep_id} endpoint (Requires store-delegators to be enabled)
