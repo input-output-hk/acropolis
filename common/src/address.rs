@@ -84,12 +84,24 @@ impl ByronAddress {
 }
 
 /// Address network identifier
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    minicbor::Encode,
+    minicbor::Decode,
+)]
 pub enum AddressNetwork {
     /// Mainnet
+    #[n(0)]
     Main,
 
     /// Testnet
+    #[n(1)]
     Test,
 }
 
@@ -109,13 +121,25 @@ impl Default for AddressNetwork {
 }
 
 /// A Shelley-era address - payment part
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    minicbor::Encode,
+    minicbor::Decode,
+)]
 pub enum ShelleyAddressPaymentPart {
     /// Payment to a key
-    PaymentKeyHash(KeyHash),
+    #[n(0)]
+    PaymentKeyHash(#[n(0)] KeyHash),
 
     /// Payment to a script
-    ScriptHash(ScriptHash),
+    #[n(1)]
+    ScriptHash(#[n(0)] ScriptHash),
 }
 
 impl Default for ShelleyAddressPaymentPart {
@@ -125,32 +149,60 @@ impl Default for ShelleyAddressPaymentPart {
 }
 
 /// Delegation pointer
-#[derive(Debug, Default, Clone, Hash, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug,
+    Default,
+    Clone,
+    Hash,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    minicbor::Encode,
+    minicbor::Decode,
+)]
 pub struct ShelleyAddressPointer {
     /// Slot number
+    #[n(0)]
     pub slot: u64,
 
     /// Transaction index within the slot
+    #[n(1)]
     pub tx_index: u64,
 
     /// Certificate index within the transaction
+    #[n(2)]
     pub cert_index: u64,
 }
 
 /// A Shelley-era address - delegation part
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    minicbor::Encode,
+    minicbor::Decode,
+)]
 pub enum ShelleyAddressDelegationPart {
     /// No delegation (enterprise addresses)
+    #[n(0)]
     None,
 
     /// Delegation to stake key
-    StakeKeyHash(Vec<u8>),
+    #[n(1)]
+    StakeKeyHash(#[n(0)] Vec<u8>),
 
     /// Delegation to script key
-    ScriptHash(ScriptHash),
+    #[n(2)]
+    ScriptHash(#[n(0)] ScriptHash),
 
     /// Delegation to pointer
-    Pointer(ShelleyAddressPointer),
+    #[n(3)]
+    Pointer(#[n(0)] ShelleyAddressPointer),
 }
 
 impl Default for ShelleyAddressDelegationPart {
@@ -160,15 +212,29 @@ impl Default for ShelleyAddressDelegationPart {
 }
 
 /// A Shelley-era address
-#[derive(Debug, Default, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug,
+    Default,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    minicbor::Encode,
+    minicbor::Decode,
+)]
 pub struct ShelleyAddress {
     /// Network id
+    #[n(0)]
     pub network: AddressNetwork,
 
     /// Payment part
+    #[n(1)]
     pub payment: ShelleyAddressPaymentPart,
 
     /// Delegation part
+    #[n(2)]
     pub delegation: ShelleyAddressDelegationPart,
 }
 

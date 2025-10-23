@@ -5,6 +5,11 @@ use crate::{DRepChoice, KeyHash, PoolLiveStakeInfo, StakeAddress};
 pub const DEFAULT_ACCOUNTS_QUERY_TOPIC: (&str, &str) =
     ("accounts-state-query-topic", "cardano.query.accounts");
 
+pub const DEFAULT_HISTORICAL_ACCOUNTS_QUERY_TOPIC: (&str, &str) = (
+    "historical-accounts-state-query-topic",
+    "cardano.query.historical.accounts",
+);
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum AccountsStateQuery {
     GetAccountInfo { stake_address: StakeAddress },
