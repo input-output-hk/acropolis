@@ -208,7 +208,7 @@ impl MithrilSnapshotFetcher {
         // Download the snapshot
         fs::create_dir_all(&directory)?;
         let dir = Path::new(&directory);
-        client.cardano_database().download_unpack(&snapshot, &dir).await?;
+        client.cardano_database().download_unpack(&snapshot, dir).await?;
 
         // Register download
         if let Err(e) = client.cardano_database().add_statistics(&snapshot).await {
@@ -281,9 +281,8 @@ impl MithrilSnapshotFetcher {
                         }
 
                         // Skip EBBs
-                        match block {
-                            MultiEraBlock::EpochBoundary(_) => return Ok::<(), anyhow::Error>(()),
-                            _ => {}
+                        if let MultiEraBlock::EpochBoundary(_) = block {
+                            return Ok(());
                         }
 
                         // Error and ignore any out of sequence
@@ -424,9 +423,8 @@ impl MithrilSnapshotFetcher {
                 delay = (delay * 2).min(60);
             }
 
-            match Self::process_snapshot(context, config, genesis).await {
-                Err(e) => error!("Failed to process Mithril snapshot: {e}"),
-                _ => {}
+            if let Err(e) = Self::process_snapshot(context, config, genesis).await {
+                error!("Failed to process Mithril snapshot: {e}");
             }
         });
 
