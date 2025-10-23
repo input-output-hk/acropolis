@@ -30,7 +30,8 @@ jobs:
             --package acropolis_codec \
             --package acropolis_module_assets_state \
             --package acropolis_module_drdd_state \
-            --package acropolis_module_snapshot_bootstrapper
+            --package acropolis_module_snapshot_bootstrapper \
+            --package acropolis_module_utxo_state
 
       - name: Run Build
         run: cargo build --verbose

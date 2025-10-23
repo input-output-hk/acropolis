@@ -61,7 +61,7 @@ impl AddressDeltaObserver for AddressDeltaPublisher {
                 Message::Cardano((block.clone(), CardanoMessage::AddressDeltas(message)));
             self.context
                 .message_bus
-                .publish(&topic, Arc::new(message_enum))
+                .publish(topic, Arc::new(message_enum))
                 .await
                 .unwrap_or_else(|e| error!("Failed to publish: {e}"));
         }
