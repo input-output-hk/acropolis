@@ -3,8 +3,8 @@
 
 use acropolis_common::{
     genesis_values::GenesisValues,
-    messages::{BlockBodyMessage, BlockHeaderMessage, CardanoMessage, Message},
-    BlockInfo, BlockStatus, Era,
+    messages::{CardanoMessage, Message, RawBlockMessage},
+    BlockHash, BlockInfo, BlockStatus, Era,
 };
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{module, Context, Module};
@@ -24,15 +24,14 @@ use std::path::Path;
 use std::sync::Arc;
 use std::thread::sleep;
 use std::time::Duration as SystemDuration;
-use tokio::{join, sync::Mutex};
+use tokio::sync::Mutex;
 use tracing::{debug, error, info, info_span, Instrument};
 
 mod pause;
 use pause::PauseType;
 
 const DEFAULT_STARTUP_TOPIC: &str = "cardano.sequence.bootstrapped";
-const DEFAULT_HEADER_TOPIC: &str = "cardano.block.header";
-const DEFAULT_BODY_TOPIC: &str = "cardano.block.body";
+const DEFAULT_BLOCK_TOPIC: &str = "cardano.block.available";
 const DEFAULT_COMPLETION_TOPIC: &str = "cardano.snapshot.complete";
 
 const DEFAULT_AGGREGATOR_URL: &str =
@@ -238,11 +237,14 @@ impl MithrilSnapshotFetcher {
         config: Arc<Config>,
         genesis: GenesisValues,
     ) -> Result<()> {
-        let header_topic =
-            config.get_string("header-topic").unwrap_or(DEFAULT_HEADER_TOPIC.to_string());
-        let body_topic = config.get_string("body-topic").unwrap_or(DEFAULT_BODY_TOPIC.to_string());
+        let block_topic =
+            config.get_string("block-topic").unwrap_or(DEFAULT_BLOCK_TOPIC.to_string());
+        info!("Publishing blocks on '{block_topic}'");
+
         let completion_topic =
             config.get_string("completion-topic").unwrap_or(DEFAULT_COMPLETION_TOPIC.to_string());
+        info!("Publishing completion on '{completion_topic}'");
+
         let directory = config.get_string("directory").unwrap_or(DEFAULT_DIRECTORY.to_string());
         let mut pause_constraint =
             PauseType::from_config(&config, DEFAULT_PAUSE).unwrap_or(PauseType::NoPause);
@@ -324,7 +326,7 @@ impl MithrilSnapshotFetcher {
                             status: BlockStatus::Immutable,
                             slot,
                             number,
-                            hash: *block.hash(),
+                            hash: BlockHash(*block.hash()),
                             epoch,
                             epoch_slot,
                             new_epoch,
@@ -345,33 +347,22 @@ impl MithrilSnapshotFetcher {
                             }
                         }
 
-                        // Send the block header message
-                        let header = block.header();
-                        let header_message = BlockHeaderMessage {
-                            raw: header.cbor().to_vec(),
+                        // Send the block message
+                        let message = RawBlockMessage {
+                            header: block.header().cbor().to_vec(),
+                            body: raw_block,
                         };
 
-                        let header_message_enum = Message::Cardano((
+                        let message_enum = Message::Cardano((
                             block_info.clone(),
-                            CardanoMessage::BlockHeader(header_message),
+                            CardanoMessage::BlockAvailable(message),
                         ));
-                        let header_future = context
+
+                        context
                             .message_bus
-                            .publish(&header_topic, Arc::new(header_message_enum));
-
-                        // Send the block body message
-                        let body_message = BlockBodyMessage { raw: raw_block };
-
-                        let body_message_enum = Message::Cardano((
-                            block_info.clone(),
-                            CardanoMessage::BlockBody(body_message),
-                        ));
-                        let body_future =
-                            context.message_bus.publish(&body_topic, Arc::new(body_message_enum));
-
-                        let (header_result, body_result) = join!(header_future, body_future);
-                        header_result.unwrap_or_else(|e| error!("Failed to publish header: {e}"));
-                        body_result.unwrap_or_else(|e| error!("Failed to publish body: {e}"));
+                            .publish(&block_topic, Arc::new(message_enum))
+                            .await
+                            .unwrap_or_else(|e| error!("Failed to publish block message: {e}"));
 
                         last_block_info = Some(block_info);
                         Ok::<(), anyhow::Error>(())

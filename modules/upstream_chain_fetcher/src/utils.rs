@@ -1,5 +1,5 @@
 use crate::UpstreamCacheRecord;
-use acropolis_common::genesis_values::GenesisValues;
+use acropolis_common::genesis_values::{GenesisDelegs, GenesisValues};
 use acropolis_common::messages::{CardanoMessage, Message};
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::Context;
@@ -11,8 +11,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use tracing::{error, info};
 
-const DEFAULT_HEADER_TOPIC: (&str, &str) = ("header-topic", "cardano.block.header");
-const DEFAULT_BODY_TOPIC: (&str, &str) = ("body-topic", "cardano.block.body");
+const DEFAULT_BLOCK_TOPIC: (&str, &str) = ("block-topic", "cardano.block.available");
 const DEFAULT_SNAPSHOT_COMPLETION_TOPIC: (&str, &str) =
     ("snapshot-completion-topic", "cardano.snapshot.complete");
 const DEFAULT_GENESIS_COMPLETION_TOPIC: (&str, &str) =
@@ -43,8 +42,7 @@ pub enum SyncPoint {
 
 pub struct FetcherConfig {
     pub context: Arc<Context<Message>>,
-    pub header_topic: String,
-    pub body_topic: String,
+    pub block_topic: String,
     pub sync_point: SyncPoint,
     pub snapshot_completion_topic: String,
     pub genesis_completion_topic: String,
@@ -96,15 +94,14 @@ impl FetcherConfig {
             shelley_epoch_len,
             shelley_genesis_hash,
             // TODO: load genesis keys from config
-            genesis_keys: BTreeMap::new(),
+            genesis_delegs: GenesisDelegs::from(vec![]),
         })
     }
 
     pub fn new(context: Arc<Context<Message>>, config: Arc<Config>) -> Result<Self> {
         Ok(Self {
             context,
-            header_topic: Self::conf(&config, DEFAULT_HEADER_TOPIC),
-            body_topic: Self::conf(&config, DEFAULT_BODY_TOPIC),
+            block_topic: Self::conf(&config, DEFAULT_BLOCK_TOPIC),
             snapshot_completion_topic: Self::conf(&config, DEFAULT_SNAPSHOT_COMPLETION_TOPIC),
             genesis_completion_topic: Self::conf(&config, DEFAULT_GENESIS_COMPLETION_TOPIC),
             sync_point: Self::conf_enum::<SyncPoint>(&config, DEFAULT_SYNC_POINT)?,
@@ -127,18 +124,12 @@ impl FetcherConfig {
 }
 
 pub async fn publish_message(cfg: Arc<FetcherConfig>, record: &UpstreamCacheRecord) -> Result<()> {
-    let header_msg = Arc::new(Message::Cardano((
+    let message = Arc::new(Message::Cardano((
         record.id.clone(),
-        CardanoMessage::BlockHeader((*record.hdr).clone()),
+        CardanoMessage::BlockAvailable((*record.message).clone()),
     )));
 
-    let body_msg = Arc::new(Message::Cardano((
-        record.id.clone(),
-        CardanoMessage::BlockBody((*record.body).clone()),
-    )));
-
-    cfg.context.message_bus.publish(&cfg.header_topic, header_msg).await?;
-    cfg.context.message_bus.publish(&cfg.body_topic, body_msg).await
+    cfg.context.message_bus.publish(&cfg.block_topic, message).await
 }
 
 pub async fn peer_connect(cfg: Arc<FetcherConfig>, role: &str) -> Result<FetchResult<PeerClient>> {

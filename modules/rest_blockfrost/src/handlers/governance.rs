@@ -10,9 +10,9 @@ use acropolis_common::{
         accounts::{AccountsStateQuery, AccountsStateQueryResponse},
         governance::{GovernanceStateQuery, GovernanceStateQueryResponse},
     },
-    Credential, GovActionId, TxHash, Voter,
+    Credential, GovActionId, KeyHash, TxHash, Voter,
 };
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
 use reqwest::Client;
 use serde_json::Value;
@@ -99,16 +99,10 @@ pub async fn handle_single_drep_blockfrost(
         )) => {
             let active = !response.info.retired && !response.info.expired;
 
-            let accounts = response
-                .delegators
-                .iter()
-                .map(|addr| addr.get_hash()) // or `get_hash()` if using StakeCredential
-                .collect();
+            let stake_addresses = response.delegators.clone();
 
             let sum_msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
-                AccountsStateQuery::GetAccountsBalancesSum {
-                    stake_keys: accounts,
-                },
+                AccountsStateQuery::GetAccountsBalancesSum { stake_addresses },
             )));
 
             let raw_sum =
@@ -197,27 +191,32 @@ pub async fn handle_drep_delegators_blockfrost(
         Message::StateQueryResponse(StateQueryResponse::Governance(
             GovernanceStateQueryResponse::DRepDelegators(delegators),
         )) => {
-            let mut stake_keys = Vec::new();
-            let mut stake_key_to_bech32 = HashMap::new();
-
-            for addr in &delegators.addresses {
-                let bech32 = match addr.to_stake_bech32() {
-                    Ok(b) => b,
-                    Err(_) => {
-                        return Ok(RESTResponse::with_text(
-                            500,
-                            "Internal error: failed to encode stake address",
-                        ));
-                    }
-                };
-
-                let hash = addr.get_hash();
-                stake_keys.push(hash.clone());
-                stake_key_to_bech32.insert(hash, bech32);
-            }
+            let stake_key_to_bech32: HashMap<KeyHash, String> = match delegators
+                .addresses
+                .iter()
+                .map(|addr| {
+                    let credential = addr.get_credential();
+                    let bech32 = credential
+                        .to_stake_bech32()
+                        .map_err(|_| anyhow!("Failed to encode stake address"))?;
+                    let key_hash = credential.get_hash();
+                    Ok((key_hash, bech32))
+                })
+                .collect::<Result<HashMap<_, _>>>()
+            {
+                Ok(map) => map,
+                Err(e) => {
+                    return Ok(RESTResponse::with_text(
+                        500,
+                        &format!("Internal error: {e}"),
+                    ));
+                }
+            };
 
             let msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
-                AccountsStateQuery::GetAccountsUtxoValuesMap { stake_keys },
+                AccountsStateQuery::GetAccountsUtxoValuesMap {
+                    stake_addresses: delegators.addresses.clone(),
+                },
             )));
 
             let raw_msg =

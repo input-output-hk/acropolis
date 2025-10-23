@@ -1,7 +1,7 @@
 //! Acropolis Block VRF Validator module for Caryatid
 //! Validate the VRF calculation in the block header
 use acropolis_common::{
-    messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
+    messages::{CardanoMessage, Message},
     state_history::{StateHistory, StateHistoryStore},
     BlockStatus, Era,
 };
@@ -14,8 +14,6 @@ use tokio::sync::Mutex;
 use tracing::{error, info, info_span};
 mod state;
 use state::State;
-
-use crate::ouroboros::vrf_validation::validate_vrf;
 mod ouroboros;
 
 const DEFAULT_VALIDATION_VRF_PUBLISHER_TOPIC: (&str, &str) =
@@ -31,8 +29,8 @@ const DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC: (&str, &str) = (
     "protocol-parameters-subscribe-topic",
     "cardano.protocol.parameters",
 );
-const DEFAULT_BLOCK_HEADER_SUBSCRIBE_TOPIC: (&str, &str) =
-    ("block-header-subscribe-topic", "cardano.block.header");
+const DEFAULT_BLOCKS_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("blocks-subscribe-topic", "cardano.block.proposed");
 const DEFAULT_EPOCH_NONCES_SUBSCRIBE_TOPIC: (&str, &str) =
     ("epoch-nonces-subscribe-topic", "cardano.epoch.nonces");
 /// Block VRF Validator module
@@ -49,7 +47,7 @@ impl BlockVrfValidator {
         history: Arc<Mutex<StateHistory<State>>>,
         mut bootstrapped_subscription: Box<dyn Subscription<Message>>,
         mut protocol_parameters_subscription: Box<dyn Subscription<Message>>,
-        mut block_headers_subscription: Box<dyn Subscription<Message>>,
+        mut blocks_subscription: Box<dyn Subscription<Message>>,
         mut epoch_nonces_subscription: Box<dyn Subscription<Message>>,
     ) -> Result<()> {
         let (_, bootstrapped_message) = bootstrapped_subscription.read().await?;
@@ -68,10 +66,9 @@ impl BlockVrfValidator {
             let mut state = history.lock().await.get_or_init_with(|| State::new());
 
             // Read both topics in parallel
-            let block_headers_message_f = block_headers_subscription.read();
-            let (_, message) = block_headers_message_f.await?;
+            let (_, message) = blocks_subscription.read().await?;
             match message.as_ref() {
-                Message::Cardano((block_info, CardanoMessage::BlockHeader(header_msg))) => {
+                Message::Cardano((block_info, CardanoMessage::BlockAvailable(block_msg))) => {
                     // handle rollback here
                     if block_info.status == BlockStatus::RolledBack {
                         state = history.lock().await.get_rolled_back_state(block_info.number);
@@ -106,7 +103,7 @@ impl BlockVrfValidator {
                     );
                     let mut header = None;
                     span.in_scope(|| {
-                        header = match MultiEraHeader::decode(variant, None, &header_msg.raw) {
+                        header = match MultiEraHeader::decode(variant, None, &block_msg.header) {
                             Ok(header) => Some(header),
                             Err(e) => {
                                 error!("Can't decode header {}: {e}", block_info.slot);
@@ -147,10 +144,10 @@ impl BlockVrfValidator {
             .unwrap_or(DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC.1.to_string());
         info!("Creating subscriber for protocol parameters on '{protocol_parameters_subscribe_topic}'");
 
-        let block_headers_subscribe_topic = config
-            .get_string(DEFAULT_BLOCK_HEADER_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_BLOCK_HEADER_SUBSCRIBE_TOPIC.1.to_string());
-        info!("Creating block headers subscription on '{block_headers_subscribe_topic}'");
+        let blocks_subscribe_topic = config
+            .get_string(DEFAULT_BLOCKS_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_BLOCKS_SUBSCRIBE_TOPIC.1.to_string());
+        info!("Creating blocks subscription on '{blocks_subscribe_topic}'");
 
         let epoch_nonces_subscribe_topic = config
             .get_string(DEFAULT_EPOCH_NONCES_SUBSCRIBE_TOPIC.0)
@@ -161,7 +158,7 @@ impl BlockVrfValidator {
         let bootstrapped_subscription = context.subscribe(&bootstrapped_subscribe_topic).await?;
         let protocol_parameters_subscription =
             context.subscribe(&protocol_parameters_subscribe_topic).await?;
-        let block_headers_subscription = context.subscribe(&block_headers_subscribe_topic).await?;
+        let blocks_subscription = context.subscribe(&blocks_subscribe_topic).await?;
         let epoch_nonces_subscription = context.subscribe(&epoch_nonces_subscribe_topic).await?;
 
         // state history
@@ -176,7 +173,7 @@ impl BlockVrfValidator {
                 history,
                 bootstrapped_subscription,
                 protocol_parameters_subscription,
-                block_headers_subscription,
+                blocks_subscription,
                 epoch_nonces_subscription,
             )
             .await

@@ -47,7 +47,7 @@ pub fn is_overlay_slot(epoch_slot: u64, decentralisation_param: RationalNumber) 
 ///
 /// # Arguments
 /// * `epoch_slot` - The slot number delta of the block in the current epoch
-/// * `genesis_keys` - Set of genesis node key hashes
+/// * `genesis_delegs` - Set of genesis node key hashes and their delegations
 /// * `decentralisation_param` - The decentralization parameter
 /// * `active_slots_coeff` - The active slot coefficient
 ///
@@ -89,7 +89,7 @@ pub fn classify_overlay_slot(
 ///
 /// # Arguments
 /// * `epoch_slot` - The slot number delta of the block in the current epoch
-/// * `genesis_keys` - Set of genesis node key hashes and their delegations
+/// * `genesis_delegs` - Set of genesis node key hashes and their delegations
 /// * `decentralisation_param` - The decentralization parameter
 /// * `active_slots_coeff` - The active slot coefficient
 ///

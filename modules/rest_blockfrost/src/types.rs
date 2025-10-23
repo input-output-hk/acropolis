@@ -2,6 +2,7 @@ use crate::cost_models::{PLUTUS_V1, PLUTUS_V2, PLUTUS_V3};
 use acropolis_common::{
     messages::EpochActivityMessage,
     protocol_params::{Nonce, NonceVariant, ProtocolParams},
+    queries::blocks::BlockInfo,
     queries::governance::DRepActionUpdate,
     rest_helper::ToCheckedF64,
     serialization::{DisplayFromBech32, PoolPrefix},
@@ -51,6 +52,10 @@ impl From<EpochActivityMessage> for EpochActivityRest {
         }
     }
 }
+
+// REST response structure for /blocks/latest
+#[derive(Serialize)]
+pub struct BlockInfoREST(pub BlockInfo);
 
 // REST response structure for /epochs/{number}/stakes
 #[serde_as]
