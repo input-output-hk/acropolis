@@ -14,6 +14,7 @@ use acropolis_module_address_state::AddressState;
 use acropolis_module_assets_state::AssetsState;
 use acropolis_module_block_unpacker::BlockUnpacker;
 use acropolis_module_chain_store::ChainStore;
+use acropolis_module_consensus::Consensus;
 use acropolis_module_drdd_state::DRDDState;
 use acropolis_module_drep_state::DRepState;
 use acropolis_module_epochs_state::EpochsState;
@@ -117,6 +118,7 @@ pub async fn main() -> Result<()> {
     BlockfrostREST::register(&mut process);
     SPDDState::register(&mut process);
     DRDDState::register(&mut process);
+    Consensus::register(&mut process);
     ChainStore::register(&mut process);
 
     Clock::<Message>::register(&mut process);

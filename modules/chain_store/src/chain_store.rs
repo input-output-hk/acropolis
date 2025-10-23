@@ -120,11 +120,11 @@ impl ChainStore {
     }
 
     fn handle_new_block(store: &Arc<dyn Store>, message: &Message) -> Result<()> {
-        let Message::Cardano((info, CardanoMessage::BlockBody(body))) = message else {
+        let Message::Cardano((info, CardanoMessage::BlockAvailable(raw_block))) = message else {
             bail!("Unexpected message type: {message:?}");
         };
 
-        store.insert_block(info, &body.raw)
+        store.insert_block(info, &raw_block.body)
     }
 
     fn handle_blocks_query(
