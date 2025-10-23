@@ -80,9 +80,6 @@ impl HistoricalAccountsState {
         });
         // Main loop of synchronised messages
         loop {
-            // Get a mutable state
-            let mut state = state_mutex.lock().await;
-
             // Create all per-block message futures upfront before processing messages sequentially
             let certs_message_f = certs_subscription.read();
             let address_deltas_message_f = address_deltas_subscription.read();
@@ -95,6 +92,7 @@ impl HistoricalAccountsState {
             let new_epoch = match certs_message.as_ref() {
                 Message::Cardano((block_info, _)) => {
                     // Handle rollbacks on this topic only
+                    let mut state = state_mutex.lock().await;
                     if block_info.status == BlockStatus::RolledBack {
                         state.volatile.rollback_before(block_info.number);
                         state.volatile.next_block();
@@ -133,6 +131,7 @@ impl HistoricalAccountsState {
                         );
                         async {
                             Self::check_sync(&current_block, &block_info);
+                            let mut state = state_mutex.lock().await;
                             state
                                 .handle_rewards(rewards_msg)
                                 .inspect_err(|e| error!("Reward deltas handling error: {e:#}"))
@@ -155,6 +154,7 @@ impl HistoricalAccountsState {
                     );
                     async {
                         Self::check_sync(&current_block, &block_info);
+                        let mut state = state_mutex.lock().await;
                         state
                             .handle_tx_certificates(tx_certs_msg)
                             .inspect_err(|e| error!("TxCertificates handling error: {e:#}"))
@@ -177,6 +177,7 @@ impl HistoricalAccountsState {
                     );
                     async {
                         Self::check_sync(&current_block, &block_info);
+                        let mut state = state_mutex.lock().await;
                         state
                             .handle_withdrawals(withdrawals_msg)
                             .inspect_err(|e| error!("Withdrawals handling error: {e:#}"))
@@ -199,6 +200,7 @@ impl HistoricalAccountsState {
                     );
                     async {
                         Self::check_sync(&current_block, &block_info);
+                        let mut state = state_mutex.lock().await;
                         state
                             .handle_address_deltas(deltas_msg)
                             .inspect_err(|e| error!("AddressDeltas handling error: {e:#}"))
@@ -207,17 +209,22 @@ impl HistoricalAccountsState {
                     .instrument(span)
                     .await;
 
-                    let should_prune = state.ready_to_prune(block_info);
+                    let (should_prune, imm, cfg, epoch) = {
+                        let state = state_mutex.lock().await;
+                        (
+                            state.ready_to_prune(&block_info),
+                            state.immutable.clone(),
+                            state.config.clone(),
+                            block_info.epoch,
+                        )
+                    };
+
                     if should_prune {
-                        state.prune_volatile().await;
-                        if let Err(e) = persist_tx
-                            .send((
-                                block_info.epoch as u32,
-                                state.immutable.clone(),
-                                state.config.clone(),
-                            ))
-                            .await
                         {
+                            let mut state = state_mutex.lock().await;
+                            state.prune_volatile().await;
+                        }
+                        if let Err(e) = persist_tx.send((epoch as u32, imm, cfg)).await {
                             panic!("persistence worker crashed: {e}");
                         }
                     }
