@@ -57,7 +57,7 @@ impl FjallImmutableUTXOStore {
     fn should_flush(&self) -> bool {
         let count = self.write_counter.fetch_add(1, Ordering::Relaxed) + 1;
         let threshold = self.flush_every.load(Ordering::Relaxed);
-        threshold != 0 && count % threshold == 0
+        threshold != 0 && count.is_multiple_of(threshold)
     }
 }
 

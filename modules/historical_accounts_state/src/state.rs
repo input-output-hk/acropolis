@@ -8,8 +8,8 @@ use acropolis_common::{
         AddressDeltasMessage, StakeRewardDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
     },
     queries::accounts::{AccountWithdrawal, DelegationUpdate, RegistrationUpdate},
-    BlockInfo, InstantaneousRewardTarget, PoolId, ShelleyAddress, StakeCredential, TxCertificate,
-    TxIdentifier,
+    BlockInfo, InstantaneousRewardTarget, PoolId, ShelleyAddress, StakeAddress, StakeCredential,
+    TxCertificate, TxIdentifier,
 };
 use tracing::warn;
 
@@ -129,14 +129,14 @@ impl State {
                 // Pre-Conway stake registration/deregistration certs
                 TxCertificate::StakeRegistration(sc) => {
                     self.handle_stake_registration_change(
-                        &sc.stake_credential,
+                        &sc.stake_address,
                         &sc.tx_identifier,
                         false,
                     );
                 }
                 TxCertificate::StakeDeregistration(sc) => {
                     self.handle_stake_registration_change(
-                        &sc.stake_credential,
+                        &sc.stake_address,
                         &sc.tx_identifier,
                         true,
                     );
@@ -145,14 +145,14 @@ impl State {
                 // Post-Conway stake registration/deregistration certs
                 TxCertificate::Registration(reg) => {
                     self.handle_stake_registration_change(
-                        &reg.cert.credential,
+                        &reg.cert.stake_address,
                         &reg.tx_identifier,
                         false,
                     );
                 }
                 TxCertificate::Deregistration(dreg) => {
                     self.handle_stake_registration_change(
-                        &dreg.cert.credential,
+                        &dreg.cert.stake_address,
                         &dreg.tx_identifier,
                         true,
                     );
@@ -161,12 +161,12 @@ impl State {
                 // Registration and delegation certs
                 TxCertificate::StakeRegistrationAndStakeAndVoteDelegation(delegation) => {
                     self.handle_stake_registration_change(
-                        &delegation.cert.credential,
+                        &delegation.cert.stake_address,
                         &delegation.tx_identifier,
                         false,
                     );
                     self.handle_stake_delegation(
-                        &delegation.cert.credential,
+                        &delegation.cert.stake_address,
                         &delegation.cert.operator,
                         &delegation.tx_identifier,
                         epoch,
@@ -174,12 +174,12 @@ impl State {
                 }
                 TxCertificate::StakeRegistrationAndDelegation(delegation) => {
                     self.handle_stake_registration_change(
-                        &delegation.cert.credential,
+                        &delegation.cert.stake_address,
                         &delegation.tx_identifier,
                         false,
                     );
                     self.handle_stake_delegation(
-                        &delegation.cert.credential,
+                        &delegation.cert.stake_address,
                         &delegation.cert.operator,
                         &delegation.tx_identifier,
                         epoch,
@@ -189,7 +189,7 @@ impl State {
                 // Delegation certs
                 TxCertificate::StakeDelegation(delegation) => {
                     self.handle_stake_delegation(
-                        &delegation.cert.credential,
+                        &delegation.cert.stake_address,
                         &delegation.cert.operator,
                         &delegation.tx_identifier,
                         epoch,
@@ -197,7 +197,7 @@ impl State {
                 }
                 TxCertificate::StakeAndVoteDelegation(delegation) => {
                     self.handle_stake_delegation(
-                        &delegation.cert.credential,
+                        &delegation.cert.stake_address,
                         &delegation.cert.operator,
                         &delegation.tx_identifier,
                         epoch,
@@ -205,7 +205,7 @@ impl State {
                 }
                 TxCertificate::StakeRegistrationAndVoteDelegation(delegation) => {
                     self.handle_stake_registration_change(
-                        &delegation.cert.credential,
+                        &delegation.cert.stake_address,
                         &delegation.tx_identifier,
                         false,
                     );
@@ -239,14 +239,14 @@ impl State {
 
     pub async fn _get_active_stake_history(
         &self,
-        _account: &StakeCredential,
+        _account: &StakeAddress,
     ) -> Result<Vec<ActiveStakeHistory>> {
         Ok(Vec::new())
     }
 
     pub async fn get_registration_history(
         &self,
-        account: &StakeCredential,
+        account: &StakeAddress,
     ) -> Result<Vec<RegistrationUpdate>> {
         let mut registrations =
             self.immutable.get_registration_history(&account).await?.unwrap_or_default();
@@ -262,7 +262,7 @@ impl State {
 
     pub async fn get_delegation_history(
         &self,
-        account: &StakeCredential,
+        account: &StakeAddress,
     ) -> Result<Vec<DelegationUpdate>> {
         let mut delegations =
             self.immutable.get_delegation_history(&account).await?.unwrap_or_default();
@@ -276,10 +276,7 @@ impl State {
         Ok(delegations)
     }
 
-    pub async fn get_mir_history(
-        &self,
-        account: &StakeCredential,
-    ) -> Result<Vec<AccountWithdrawal>> {
+    pub async fn get_mir_history(&self, account: &StakeAddress) -> Result<Vec<AccountWithdrawal>> {
         let mut mirs = self.immutable.get_mir_history(&account).await?.unwrap_or_default();
 
         self.merge_volatile_history(&account, |e| e.mir_history.as_ref(), &mut mirs);
@@ -289,18 +286,18 @@ impl State {
 
     pub async fn _get_withdrawal_history(
         &self,
-        _account: &StakeCredential,
+        _account: &StakeAddress,
     ) -> Result<Vec<AccountWithdrawal>> {
         Ok(Vec::new())
     }
 
-    pub async fn _get_addresses(&self, _account: StakeCredential) -> Result<Vec<ShelleyAddress>> {
+    pub async fn _get_addresses(&self, _account: StakeAddress) -> Result<Vec<ShelleyAddress>> {
         Ok(Vec::new())
     }
 
     fn handle_stake_registration_change(
         &mut self,
-        account: &StakeCredential,
+        account: &StakeAddress,
         tx_identifier: &TxIdentifier,
         deregistered: bool,
     ) {
@@ -315,7 +312,7 @@ impl State {
 
     fn handle_stake_delegation(
         &mut self,
-        account: &StakeCredential,
+        account: &StakeAddress,
         pool: &PoolId,
         tx_identifier: &TxIdentifier,
         epoch: u32,
@@ -334,7 +331,7 @@ impl State {
     fn handle_mir(&mut self, mir: &InstantaneousRewardTarget, tx_identifier: &TxIdentifier) {
         let volatile = self.volatile.window.back_mut().expect("window should never be empty");
 
-        if let InstantaneousRewardTarget::StakeCredentials(payments) = mir {
+        if let InstantaneousRewardTarget::StakeAddresses(payments) = mir {
             for (account, amount) in payments {
                 if *amount <= 0 {
                     warn!(
@@ -355,7 +352,7 @@ impl State {
         }
     }
 
-    fn merge_volatile_history<T, F>(&self, account: &StakeCredential, f: F, out: &mut Vec<T>)
+    fn merge_volatile_history<T, F>(&self, account: &StakeAddress, f: F, out: &mut Vec<T>)
     where
         F: Fn(&AccountEntry) -> Option<&Vec<T>>,
         T: Clone,

@@ -2,7 +2,7 @@ use std::{collections::HashMap, path::Path};
 
 use acropolis_common::{
     queries::accounts::{AccountWithdrawal, DelegationUpdate, RegistrationUpdate},
-    ShelleyAddress, StakeCredential,
+    ShelleyAddress, StakeAddress,
 };
 use anyhow::Result;
 use fjall::{Keyspace, Partition, PartitionCreateOptions};
@@ -22,7 +22,7 @@ pub struct ImmutableHistoricalAccountStore {
     withdrawal_history: Partition,
     addresses: Partition,
     keyspace: Keyspace,
-    pub pending: Mutex<Vec<HashMap<StakeCredential, AccountEntry>>>,
+    pub pending: Mutex<Vec<HashMap<StakeAddress, AccountEntry>>>,
 }
 
 impl ImmutableHistoricalAccountStore {
@@ -146,14 +146,14 @@ impl ImmutableHistoricalAccountStore {
         }
     }
 
-    pub async fn update_immutable(&self, drained: Vec<HashMap<StakeCredential, AccountEntry>>) {
+    pub async fn update_immutable(&self, drained: Vec<HashMap<StakeAddress, AccountEntry>>) {
         let mut pending = self.pending.lock().await;
         pending.extend(drained);
     }
 
     pub async fn _get_rewards_history(
         &self,
-        account: &StakeCredential,
+        account: &StakeAddress,
     ) -> Result<Option<Vec<RewardHistory>>> {
         let mut immutable_rewards =
             self.collect_partition::<RewardHistory>(&self.rewards_history, &account.get_hash())?;
@@ -170,7 +170,7 @@ impl ImmutableHistoricalAccountStore {
 
     pub async fn _get_active_stake_history(
         &self,
-        account: &StakeCredential,
+        account: &StakeAddress,
     ) -> Result<Option<Vec<ActiveStakeHistory>>> {
         let mut immutable_active_stake = self.collect_partition::<ActiveStakeHistory>(
             &self.active_stake_history,
@@ -189,7 +189,7 @@ impl ImmutableHistoricalAccountStore {
 
     pub async fn get_registration_history(
         &self,
-        account: &StakeCredential,
+        account: &StakeAddress,
     ) -> Result<Option<Vec<RegistrationUpdate>>> {
         let mut immutable_registrations = self.collect_partition::<RegistrationUpdate>(
             &self.registration_history,
@@ -208,7 +208,7 @@ impl ImmutableHistoricalAccountStore {
 
     pub async fn get_delegation_history(
         &self,
-        account: &StakeCredential,
+        account: &StakeAddress,
     ) -> Result<Option<Vec<DelegationUpdate>>> {
         let mut immutable_delegations = self
             .collect_partition::<DelegationUpdate>(&self.delegation_history, &account.get_hash())?;
@@ -225,7 +225,7 @@ impl ImmutableHistoricalAccountStore {
 
     pub async fn get_mir_history(
         &self,
-        account: &StakeCredential,
+        account: &StakeAddress,
     ) -> Result<Option<Vec<AccountWithdrawal>>> {
         let mut immutable_mirs =
             self.collect_partition::<AccountWithdrawal>(&self.mir_history, &account.get_hash())?;
@@ -237,7 +237,7 @@ impl ImmutableHistoricalAccountStore {
 
     pub async fn _get_withdrawal_history(
         &self,
-        account: &StakeCredential,
+        account: &StakeAddress,
     ) -> Result<Option<Vec<AccountWithdrawal>>> {
         let mut immutable_withdrawals = self.collect_partition::<AccountWithdrawal>(
             &self.withdrawal_history,
@@ -256,7 +256,7 @@ impl ImmutableHistoricalAccountStore {
 
     pub async fn _get_addresses(
         &self,
-        account: &StakeCredential,
+        account: &StakeAddress,
     ) -> Result<Option<Vec<ShelleyAddress>>> {
         let mut immutable_addresses =
             self.collect_partition::<ShelleyAddress>(&self.addresses, &account.get_hash())?;
@@ -267,11 +267,11 @@ impl ImmutableHistoricalAccountStore {
     }
 
     fn merge_block_deltas(
-        block_deltas: Vec<HashMap<StakeCredential, AccountEntry>>,
-    ) -> HashMap<StakeCredential, AccountEntry> {
+        block_deltas: Vec<HashMap<StakeAddress, AccountEntry>>,
+    ) -> HashMap<StakeAddress, AccountEntry> {
         block_deltas.into_par_iter().reduce(HashMap::new, |mut acc, block_map| {
-            for (cred, entry) in block_map {
-                let agg_entry = acc.entry(cred).or_default();
+            for (accont, entry) in block_map {
+                let agg_entry = acc.entry(accont).or_default();
 
                 Self::extend_opt_vec(&mut agg_entry.reward_history, entry.reward_history);
                 Self::extend_opt_vec(
@@ -306,7 +306,7 @@ impl ImmutableHistoricalAccountStore {
     }
 
     #[allow(dead_code)]
-    async fn merge_pending<T, F>(&self, account: &StakeCredential, f: F, out: &mut Vec<T>)
+    async fn merge_pending<T, F>(&self, account: &StakeAddress, f: F, out: &mut Vec<T>)
     where
         F: Fn(&AccountEntry) -> Option<&Vec<T>>,
         T: Clone,
@@ -320,9 +320,9 @@ impl ImmutableHistoricalAccountStore {
         }
     }
 
-    fn make_epoch_key(account: &StakeCredential, epoch: u32) -> [u8; 32] {
+    fn make_epoch_key(account: &StakeAddress, epoch: u32) -> [u8; 32] {
         let mut key = [0u8; 32];
-        key[..28].copy_from_slice(&account.get_hash());
+        key[..28].copy_from_slice(&account.get_credential().get_hash());
         key[28..32].copy_from_slice(&epoch.to_be_bytes());
         key
     }

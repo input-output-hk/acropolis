@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    Anchor, Credential, DRepCredential, GovActionId, Lovelace, ProposalProcedure, TxHash,
+    Anchor, DRepCredential, GovActionId, Lovelace, ProposalProcedure, StakeAddress, TxHash,
     TxIdentifier, Vote, Voter, VotingProcedure,
 };
 
@@ -27,6 +27,7 @@ pub enum GovernanceStateQuery {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[allow(clippy::large_enum_variant)]
 pub enum GovernanceStateQueryResponse {
     DRepsList(DRepsList),
     DRepInfoWithDelegators(DRepInfoWithDelegators),
@@ -61,12 +62,12 @@ pub struct DRepInfo {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DRepInfoWithDelegators {
     pub info: DRepInfo,
-    pub delegators: Vec<Credential>,
+    pub delegators: Vec<StakeAddress>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DRepDelegatorAddresses {
-    pub addresses: Vec<Credential>,
+    pub addresses: Vec<StakeAddress>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

@@ -665,7 +665,7 @@ async fn handle_pools_spo_blockfrost(
     // Query owner accounts balance sum from accounts_state
     let live_pledge_msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
         AccountsStateQuery::GetAccountsUtxoValuesSum {
-            stake_keys: pool_info.pool_owners.clone(),
+            stake_addresses: pool_info.pool_owners.clone(),
         },
     )));
 
@@ -693,14 +693,14 @@ async fn handle_pools_spo_blockfrost(
     let live_pledge = live_pledge?;
 
     let pool_id = pool_info.operator.to_bech32_with_hrp("pool").unwrap();
-    let reward_account = pool_info.reward_account.to_bech32_with_hrp("stake");
+    let reward_account = pool_info.reward_account.get_credential().to_stake_bech32();
     let Ok(reward_account) = reward_account else {
         return Ok(RESTResponse::with_text(404, "Invalid Reward Account"));
     };
     let pool_owners = pool_info
         .pool_owners
         .iter()
-        .map(|owner| owner.to_bech32_with_hrp("stake"))
+        .map(|owner| owner.get_credential().to_stake_bech32())
         .collect::<Result<Vec<String>, _>>();
     let Ok(pool_owners) = pool_owners else {
         return Ok(RESTResponse::with_text(404, "Invalid Pool Owners"));

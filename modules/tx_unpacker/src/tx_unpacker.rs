@@ -103,6 +103,9 @@ impl TxUnpacker {
             info!("Publishing block txs on '{topic}'");
         }
 
+        let network_id: NetworkId =
+            config.get_string("network-id").unwrap_or("mainnet".to_string()).into();
+
         // Initialize UTxORegistry
         let mut utxo_registry = UTxORegistry::default();
 
@@ -266,7 +269,7 @@ impl TxUnpacker {
 
                                         if publish_certificates_topic.is_some() {
                                             for ( cert_index, cert) in certs.iter().enumerate() {
-                                                match map_parameters::map_certificate(&cert, tx_identifier, tx_index, cert_index) {
+                                                match map_parameters::map_certificate(&cert, tx_identifier, tx_index, cert_index, network_id.clone()) {
                                                     Ok(tx_cert) => {
                                                         certificates.push(tx_cert);
                                                     },

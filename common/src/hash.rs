@@ -14,7 +14,7 @@ impl<const BYTES: usize> Serialize for Hash<BYTES> {
     where
         S: Serializer,
     {
-        serializer.serialize_str(&hex::encode(&self.0))
+        serializer.serialize_str(&hex::encode(self.0))
     }
 }
 

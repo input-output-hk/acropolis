@@ -75,7 +75,7 @@ impl LedgerState {
             let entry = entry.with_context(|| "failed to read directory entry")?;
             let path = entry.path();
 
-            if path.is_file() && path.extension().map_or(false, |ext| ext == "cbor") {
+            if path.is_file() && path.extension().is_some_and(|ext| ext == "cbor") {
                 self.load_cbor_file(&path)
                     .with_context(|| format!("failed to load CBOR file: {}", path.display()))?;
             }
