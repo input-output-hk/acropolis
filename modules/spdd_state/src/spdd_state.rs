@@ -142,9 +142,9 @@ impl SPDDState {
                     }
                 };
 
-                return Arc::new(Message::StateQueryResponse(StateQueryResponse::SPDD(
+                Arc::new(Message::StateQueryResponse(StateQueryResponse::SPDD(
                     response,
-                )));
+                )))
             }
         });
 
