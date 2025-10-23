@@ -9,8 +9,8 @@ use anyhow::Result;
 use blake2::{digest::consts::U32, Blake2b, Digest};
 use chrono::{DateTime, Utc};
 use serde_with::{hex::Hex, serde_as};
-use std::collections::HashMap;
 use std::ops::Deref;
+use std::{collections::HashMap, fmt::Display};
 
 #[derive(Debug, Default, PartialEq, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtocolParams {
@@ -251,6 +251,15 @@ pub type NonceHash = [u8; 32];
 pub struct Nonce {
     pub tag: NonceVariant,
     pub hash: Option<NonceHash>,
+}
+
+impl Display for Nonce {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.hash {
+            Some(hash) => write!(f, "{}", hex::encode(hash)),
+            None => write!(f, "NeutralNonce"),
+        }
+    }
 }
 
 impl Default for Nonce {

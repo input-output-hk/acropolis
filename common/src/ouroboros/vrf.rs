@@ -13,7 +13,7 @@ use crate::protocol_params::Nonce;
 /// A VRF public key
 #[derive(Debug, PartialEq)]
 pub struct PublicKey(PublicKey03);
-
+pub type PublicKeyHash = [u8; PublicKey::HASH_SIZE];
 impl PublicKey {
     /// Size of a VRF public key, in bytes.
     pub const SIZE: usize = 32;
@@ -63,8 +63,26 @@ impl VrfInput {
     /// Size of a VRF input challenge, in bytes
     pub const SIZE: usize = 32;
 
-    /// Create a new input challenge from an absolute slot, an epoch entropy (nonce) and a domain specific nonce
-    /// This is for TPraos Protocol
+    /// TPraos: Construct a seed to use in the VRF computation.
+    ///
+    /// This seed is used for VRF proofs in the Praos consensus protocol.
+    /// It combines the slot number and epoch nonce, optionally with a
+    /// universal constant for domain separation.
+    ///
+    /// # Arguments
+    ///
+    /// * `uc_nonce` - Universal constant nonce (domain separator)
+    ///   - Use `seed_eta()` for randomness/eta computation
+    ///   - Use `seed_l()` for leader election computation  
+    /// * `slot` - The slot number
+    /// * `e_nonce` - The epoch nonce (randomness from the epoch)
+    ///
+    /// # Returns
+    ///
+    /// A `Seed` that can be used for VRF computation
+    ///
+    /// https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/libs/cardano-protocol-tpraos/src/Cardano/Protocol/TPraos/BHeader.hs#L405
+    ///
     pub fn mk_seed(absolute_slot: u64, epoch_nonce: &Nonce, uc_nonce: &Nonce) -> Self {
         let mut hasher = Blake2b::<U32>::new();
         let mut data: Vec<u8> = Vec::<u8>::with_capacity(8 + 32);
@@ -80,8 +98,17 @@ impl VrfInput {
         VrfInput(seed_hash)
     }
 
-    /// Create a new input challenge from an absolute slot number and an epoch entropy (nonce) (a.k.a η0)
-    /// This is for Praos Protocol
+    /// Praos: Construct VRF input from slot and epoch nonce
+    ///
+    /// # Arguments
+    /// * `slot` - Current slot number
+    /// * `epoch_nonce` - Epoch nonce (randomness for this epoch)
+    ///
+    /// # Returns
+    /// 32-byte input for VRF function
+    /// 
+    /// https://github.com/IntersectMBO/ouroboros-consensus/blob/e3c52b7c583bdb6708fac4fdaa8bf0b9588f5a88/ouroboros-consensus-protocol/src/ouroboros-consensus-protocol/Ouroboros/Consensus/Protocol/Praos/VRF.hs#L67
+    /// 
     pub fn mk_vrf_input(absolute_slot_number: u64, epoch_nonce: &Nonce) -> Self {
         let mut hasher = Blake2b::<U32>::new();
         let mut data = Vec::<u8>::with_capacity(8 + 32);

@@ -14,7 +14,11 @@ use anyhow::Result;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OBftSlot {
+    /// Not an overlay slot - any pool can compete with VRF threshold
+    NotOverlay,
+    /// Overlay slot but no block should be produced (rare edge case)
     NonActiveSlot,
+    /// Active overlay slot reserved for specific genesis key
     ActiveSlot(GenesisKey, GenDeleg),
 }
 
@@ -59,6 +63,10 @@ pub fn classify_overlay_slot(
     decentralisation_param: RationalNumber,
     active_slots_coeff: RationalNumber,
 ) -> Result<OBftSlot> {
+    if genesis_delegs.as_ref().is_empty() {
+        return Ok(OBftSlot::NotOverlay);
+    }
+
     let d = decentralisation_param.to_checked_f64("decentralisation_param").map_err(|e| {
         anyhow::anyhow!("Failed to convert decentralisation parameter to f64: {}", e)
     })?;
@@ -96,6 +104,11 @@ pub fn classify_overlay_slot(
 /// # Returns
 /// * `Some(OBftSlot)` if the slot is in the overlay schedule
 /// * `None` if the slot is not in the overlay schedule
+///
+/// # Panics
+/// `ShelleyParamsError` if:
+/// - decentralisation_param is not a valid rational number
+/// - active_slots_coeff is not a valid rational number
 pub fn lookup_in_overlay_schedule(
     epoch_slot: u64,
     genesis_delegs: &GenesisDelegs,
