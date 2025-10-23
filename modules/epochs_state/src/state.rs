@@ -269,7 +269,7 @@ mod tests {
 
     use super::*;
     use acropolis_common::{
-        crypto::{keyhash_224, keyhash_256},
+        crypto::keyhash_224,
         protocol_params::{Nonce, NonceHash},
         state_history::{StateHistory, StateHistoryStore},
         BlockHash, BlockInfo, BlockStatus, Era,
@@ -522,21 +522,6 @@ mod tests {
         let block_header = MultiEraHeader::decode(1, None, &e_208_first_block_header_cbor).unwrap();
         assert!(state.handle_block_header(&genesis_value, &block, &block_header).is_ok());
 
-        println!("slot: {:?}", block_header.slot());
-        println!(
-            "issuer vkey: {:?}",
-            hex::encode(keyhash_224(block_header.issuer_vkey().unwrap()))
-        );
-        println!(
-            "vrf vkey: {:?}",
-            hex::encode(keyhash_256(block_header.vrf_vkey().unwrap()))
-        );
-
-        println!(
-            "leader vrf output: {:?}",
-            block_header.leader_vrf_output().unwrap().len()
-        );
-
         let nonces = state.nonces.unwrap();
         let evolved = Nonce::from(
             NonceHash::try_from(
@@ -702,22 +687,6 @@ mod tests {
         let block = make_new_epoch_block(209);
         let block_header = MultiEraHeader::decode(1, None, &e_210_first_block_header_cbor).unwrap();
         assert!(state.handle_block_header(&genesis_value, &block, &block_header).is_ok());
-        println!(
-            "block header leader vrf output: {:?}",
-            block_header.leader_vrf_output().unwrap()
-        );
-        println!(
-            "block header leader vrf output length: {:?}",
-            block_header.leader_vrf_output().unwrap().len()
-        );
-        println!(
-            "block header nonce vrf output: {:?}",
-            block_header.nonce_vrf_output().unwrap()
-        );
-        println!(
-            "block header nonce vrf output length: {:?}",
-            block_header.nonce_vrf_output().unwrap().len()
-        );
 
         let nonces = state.nonces.unwrap();
         let evolved = Nonce::from(

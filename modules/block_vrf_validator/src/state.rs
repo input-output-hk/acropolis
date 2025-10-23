@@ -3,7 +3,7 @@
 use acropolis_common::{
     genesis_values::GenesisValues,
     messages::ProtocolParamsMessage,
-    ouroboros::vrf_validation::{self, VrfValidationError},
+    ouroboros::vrf_validation::VrfValidationError,
     protocol_params::{PraosParams, ShelleyParams},
     BlockInfo,
 };
@@ -47,23 +47,15 @@ impl State {
         }
 
         let Some(shelley_params) = self.shelly_params.as_ref() else {
-            return Err(VrfValidationError::ShelleyParams(
+            return Err(VrfValidationError::InvalidShelleyParams(
                 "Shelley Params are not set".to_string(),
             ));
         };
         let Some(praos_params) = self.praos_params.as_ref() else {
-            return Err(VrfValidationError::ShelleyParams(
+            return Err(VrfValidationError::InvalidShelleyParams(
                 "Praos Params are not set".to_string(),
             ));
         };
-
-        vrf_validation::validate_vrf(
-            block_info,
-            header,
-            shelley_params,
-            praos_params,
-            &genesis.genesis_delegs,
-        )?;
 
         Ok(())
     }

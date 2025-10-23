@@ -1,52 +1,152 @@
-use crate::{hash::Hash, protocol_params::Nonce};
-use blake2::{digest::consts::U32, Blake2b, Digest};
+use crate::ouroboros::overlay_shedule::OBftSlot;
+use crate::ouroboros::vrf_validation::{
+    TPraosBadLeaderVrfProofError, TPraosBadNonceVrfProofError, VrfValidation, VrfValidationError,
+    WrongGenesisLeaderVrfKeyError,
+};
+use crate::ouroboros::{overlay_shedule, vrf};
+use crate::protocol_params::Nonce;
+use crate::rational_number::RationalNumber;
+use crate::{genesis_values::GenesisDelegs, protocol_params::PraosParams, BlockInfo};
+use anyhow::Result;
+use pallas::ledger::primitives::VrfCert;
+use pallas::ledger::traverse::MultiEraHeader;
 
-pub type Seed = Hash<32>;
+pub fn validate_vrf_tpraos<'a>(
+    block_info: &'a BlockInfo,
+    header: &'a MultiEraHeader,
+    praos_params: &'a PraosParams,
+    epoch_nonce: &'a Nonce,
+    decentralisation_param: RationalNumber,
+    genesis_delegs: &'a GenesisDelegs,
+) -> Result<Vec<VrfValidation<'a>>, VrfValidationError> {
+    let active_slots_coeff = praos_params.active_slots_coeff;
 
-/// Construct a seed to use in the VRF computation.
-///
-/// This seed is used for VRF proofs in the Praos consensus protocol.
-/// It combines the slot number and epoch nonce, optionally with a
-/// universal constant for domain separation.
-///
-/// # Arguments
-///
-/// * `uc_nonce` - Universal constant nonce (domain separator)
-///   - Use `seed_eta()` for randomness/eta computation
-///   - Use `seed_l()` for leader election computation  
-/// * `slot` - The slot number
-/// * `e_nonce` - The epoch nonce (randomness from the epoch)
-///
-/// # Returns
-///
-/// A `Seed` that can be used for VRF computation
-///
-/// https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/libs/cardano-protocol-tpraos/src/Cardano/Protocol/TPraos/BHeader.hs#L405
-///
-pub fn mk_seed(uc_nonce: &Nonce, slot: u64, epoch_nonce: &Nonce) -> Seed {
-    // 8 bytes for slot + optionally 32 bytes for epoch nonce
-    let mut data = Vec::with_capacity(8 + 32);
-    data.extend_from_slice(&slot.to_be_bytes());
-    if let Some(e_hash) = epoch_nonce.hash {
-        data.extend_from_slice(&e_hash);
+    // first look up for overlay slot
+    let obft_slot = overlay_shedule::lookup_in_overlay_schedule(
+        block_info.epoch_slot,
+        genesis_delegs,
+        decentralisation_param,
+        active_slots_coeff,
+    )
+    .map_err(|e| VrfValidationError::InvalidShelleyParams(e.to_string()))?;
+
+    match obft_slot {
+        None => {
+            // Regular Praos/TPraos rules apply
+            Ok(vec![])
+        }
+        Some(OBftSlot::ActiveSlot(genesis_key, gen_deleg)) => {
+            // The given genesis key has authority to produce a block in this
+            // slot. Check whether we're its delegate.
+            let Some(vrf_vkey) = header.vrf_vkey() else {
+                return Ok(vec![Box::new(|| Err(VrfValidationError::MissingVrfVkey))]);
+            };
+            let declared_vrf_key: &[u8; vrf::PublicKey::HASH_SIZE] = vrf_vkey
+                .try_into()
+                .map_err(|_| VrfValidationError::TryFromSlice("Invalid Vrf Key".to_string()))?;
+            let nonce_vrf_cert =
+                nonce_vrf_cert(header).ok_or(VrfValidationError::TPraosMissingNonceVrfCert)?;
+            let leader_vrf_cert =
+                leader_vrf_cert(header).ok_or(VrfValidationError::TPraosMissingLeaderVrfCert)?;
+
+            Ok(vec![
+                Box::new(move || {
+                    WrongGenesisLeaderVrfKeyError::new(&genesis_key, &gen_deleg, vrf_vkey)?;
+                    Ok(())
+                }),
+                Box::new(move || {
+                    TPraosBadNonceVrfProofError::new(
+                        block_info.slot,
+                        epoch_nonce,
+                        &vrf::PublicKey::from(declared_vrf_key),
+                        &nonce_vrf_cert.0.to_vec()[..],
+                        &nonce_vrf_cert.1.to_vec()[..],
+                    )?;
+                    Ok(())
+                }),
+                Box::new(move || {
+                    TPraosBadLeaderVrfProofError::new(
+                        block_info.slot,
+                        epoch_nonce,
+                        &vrf::PublicKey::from(declared_vrf_key),
+                        &leader_vrf_cert.0.to_vec()[..],
+                        &leader_vrf_cert.1.to_vec()[..],
+                    )?;
+                    Ok(())
+                }),
+            ])
+        }
+        Some(OBftSlot::NonActiveSlot) => {
+            // This is a non-active slot; nobody may produce a block
+            Ok(vec![])
+        }
     }
-    let mut hasher = Blake2b::<U32>::new();
-    hasher.update(data);
-    let seed_hash: [u8; 32] = hasher.finalize().into();
-
-    // XOR with universal constant if provided
-    let final_hash = match uc_nonce.hash.as_ref() {
-        Some(uc_hash) => xor_hash(&seed_hash, uc_hash),
-        None => seed_hash,
-    };
-
-    Seed::from(final_hash)
 }
 
-fn xor_hash(hash1: &[u8; 32], hash2: &[u8; 32]) -> [u8; 32] {
-    let mut result = [0u8; 32];
-    for i in 0..32 {
-        result[i] = hash1[i] ^ hash2[i];
+fn nonce_vrf_cert<'a>(header: &'a MultiEraHeader) -> Option<&'a VrfCert> {
+    match header {
+        MultiEraHeader::ShelleyCompatible(x) => Some(&x.header_body.nonce_vrf),
+        _ => None,
     }
-    result
+}
+
+fn leader_vrf_cert<'a>(header: &'a MultiEraHeader) -> Option<&'a VrfCert> {
+    match header {
+        MultiEraHeader::ShelleyCompatible(x) => Some(&x.header_body.leader_vrf),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        genesis_values::GenesisValues, protocol_params::NonceHash, BlockHash, BlockStatus, Era,
+    };
+
+    use super::*;
+
+    #[test]
+    fn test_4490511_block() {
+        let genesis_value = GenesisValues::mainnet();
+        let praos_params = PraosParams::mainnet();
+        let epoch_nonce = Nonce::from(
+            NonceHash::try_from(
+                hex::decode("1a3be38bcbb7911969283716ad7aa550250226b76a61fc51cc9a9a35d9276d81")
+                    .unwrap()
+                    .as_slice(),
+            )
+            .unwrap(),
+        );
+        let decentralisation_param = RationalNumber::from(1);
+
+        let block_header_4490511: Vec<u8> =
+            hex::decode(include_str!("./data/4490511.cbor")).unwrap();
+        let block_header = MultiEraHeader::decode(1, None, &block_header_4490511).unwrap();
+        let block_info = BlockInfo {
+            status: BlockStatus::Immutable,
+            slot: 4492800,
+            hash: BlockHash::try_from(
+                hex::decode("aa83acbf5904c0edfe4d79b3689d3d00fcfc553cf360fd2229b98d464c28e9de")
+                    .unwrap(),
+            )
+            .unwrap(),
+            timestamp: 1596059091,
+            number: 4490511,
+            epoch: 208,
+            epoch_slot: 0,
+            new_epoch: true,
+            era: Era::Shelley,
+        };
+        let vrf_validations = validate_vrf_tpraos(
+            &block_info,
+            &block_header,
+            &praos_params,
+            &epoch_nonce,
+            decentralisation_param,
+            &genesis_value.genesis_delegs,
+        )
+        .unwrap();
+        let result = vrf_validations.iter().try_for_each(|assert| assert());
+        assert!(result.is_ok());
+    }
 }

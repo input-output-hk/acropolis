@@ -1,16 +1,9 @@
-use crate::ouroboros::{overlay_shedule, vrf};
+use crate::genesis_values::{GenDeleg, GenesisKey};
+use crate::ouroboros::vrf;
 use crate::PoolId;
-use crate::{
-    crypto::keyhash_256,
-    genesis_values::GenesisDelegs,
-    protocol_params::{Nonce, PraosParams, ShelleyParams},
-    BlockInfo, KeyHash, Slot,
-};
+use crate::{crypto::keyhash_256, protocol_params::Nonce, KeyHash, Slot};
 use anyhow::Result;
-use pallas::ledger::{
-    primitives::babbage::{derive_tagged_vrf_output, VrfDerivation},
-    traverse::MultiEraHeader,
-};
+use pallas::ledger::primitives::babbage::{derive_tagged_vrf_output, VrfDerivation};
 use std::array::TryFromSliceError;
 use thiserror::Error;
 
@@ -21,9 +14,22 @@ pub enum VrfValidationError {
     /// **Cause:** The Shelley protocol parameters used to validate the block,
     #[error("{0}")]
     InvalidShelleyParams(String),
+    /// **Cause:** The VRF key is missing from the block header
+    #[error("Missing VRF Key")]
+    MissingVrfVkey,
+    /// **Cause:** The VRF Cert is missing from the block header in TPraos Protocol
+    #[error("TPraos Missing Nonce VRF Cert")]
+    TPraosMissingNonceVrfCert,
+    /// **Cause:** The Leader VRF Cert is missing from the block header in TPraos Protocol
+    #[error("TPraos Missing Leader VRF Cert")]
+    TPraosMissingLeaderVrfCert,
     /// **Cause:** Block issuer's pool ID is not registered in current stake distribution
     #[error("Unknown Pool: {}", hex::encode(&pool_id))]
     UnknownPool { pool_id: PoolId },
+    /// **Cause:** The VRF key hash in the block header doesn't match the VRF key
+    /// registered with this stake pool in the ledger state for Overlay slot
+    #[error("{0}")]
+    WrongGenesisLeaderVrfKey(#[from] WrongGenesisLeaderVrfKeyError),
     /// **Cause:** The VRF key hash in the block header doesn't match the VRF key
     /// registered with this stake pool in the ledger state
     #[error("{0}")]
@@ -48,6 +54,43 @@ pub enum VrfValidationError {
     /// The pool lost the slot lottery in Praos Protocol
     #[error("Praos VRF Leader Value Too Big")]
     PraosVrfLeaderValueTooBig,
+    /// **Cause:** Some data has incorrect bytes
+    #[error("TryFromSlice: {0}")]
+    TryFromSlice(String),
+}
+
+// ------------------------------------------------------------ WrongGenesisLeaderVrfKeyError
+
+#[derive(Error, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[error(
+    "Wrong Genesis Leader VRF Key: Genesis Key={}, Registered VRF Hash={}, Header VRF Hash={}",
+    hex::encode(&genesis_key),
+    hex::encode(&registered_vrf_hash),
+    hex::encode(&header_vrf_hash),
+)]
+pub struct WrongGenesisLeaderVrfKeyError {
+    genesis_key: GenesisKey,
+    registered_vrf_hash: KeyHash,
+    header_vrf_hash: KeyHash,
+}
+
+impl WrongGenesisLeaderVrfKeyError {
+    pub fn new(
+        genesis_key: &GenesisKey,
+        genesis_deleg: &GenDeleg,
+        vrf_vkey: &[u8],
+    ) -> Result<(), Self> {
+        let header_vrf_hash = keyhash_256(vrf_vkey);
+        let registered_vrf_hash = genesis_deleg.vrf.to_vec();
+        if !registered_vrf_hash.eq(&header_vrf_hash) {
+            return Err(Self {
+                genesis_key: genesis_key.clone(),
+                registered_vrf_hash,
+                header_vrf_hash,
+            });
+        }
+        Ok(())
+    }
 }
 
 // ------------------------------------------------------------ WrongLeaderVrfKeyError
@@ -76,7 +119,7 @@ impl WrongLeaderVrfKeyError {
             return Err(Self {
                 pool_id: pool_id.clone(),
                 registered_vrf_hash: registered_vrf_hash.clone(),
-                header_vrf_hash: header_vrf_hash,
+                header_vrf_hash,
             });
         }
         Ok(())
@@ -326,24 +369,4 @@ impl BadVrfProofError {
     }
 }
 
-pub fn validate_vrf(
-    block_info: &BlockInfo,
-    header: &MultiEraHeader,
-    shelley_params: &ShelleyParams,
-    praos_params: &PraosParams,
-    genesis_delegs: &GenesisDelegs,
-) -> Result<(), VrfValidationError> {
-    let decentralisation_param = shelley_params.protocol_params.decentralisation_param;
-    let active_slots_coeff = praos_params.active_slots_coeff;
-
-    // first look up for overlay slot
-    let obft_slot = overlay_shedule::lookup_in_overlay_schedule(
-        block_info.epoch_slot,
-        genesis_delegs,
-        decentralisation_param,
-        active_slots_coeff,
-    )
-    .map_err(|e| VrfValidationError::InvalidShelleyParams(e.to_string()))?;
-
-    Ok(())
-}
+pub type VrfValidation<'a> = Box<dyn Fn() -> Result<(), VrfValidationError> + Send + Sync + 'a>;

@@ -17,8 +17,6 @@ use state::State;
 
 const DEFAULT_VALIDATION_VRF_PUBLISHER_TOPIC: (&str, &str) =
     ("validation-vrf-publisher-topic", "cardano.validation.vrf");
-const DEFAULT_VALIDATION_KES_PUBLISHER_TOPIC: (&str, &str) =
-    ("validation-kes-publisher-topic", "cardano.validation.kes");
 
 const DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC: (&str, &str) = (
     "bootstrapped-subscribe-topic",
