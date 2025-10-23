@@ -61,11 +61,9 @@ pub async fn main() -> Result<()> {
     let args = <self::Args as clap::Parser>::parse();
 
     // Standard logging using RUST_LOG for log levels default to INFO for events only
-    let fmt_layer = fmt::layer().with_filter(EnvFilter::from_default_env());
-
-    // TODO disabled this filter because it prevents debugging - investigate
-    //.add_directive(filter::LevelFilter::INFO.into()))
-    //        .with_filter(filter::filter_fn(|meta| meta.is_event()));
+    let fmt_layer = fmt::layer()
+        .with_filter(EnvFilter::from_default_env().add_directive(filter::LevelFilter::INFO.into()))
+        .with_filter(filter::filter_fn(|meta| meta.is_event()));
 
     // Only turn on tracing if some OTEL environment variables exist
     if std::env::vars().any(|(name, _)| name.starts_with("OTEL_")) {
