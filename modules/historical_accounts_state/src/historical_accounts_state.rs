@@ -199,23 +199,20 @@ impl HistoricalAccountsState {
 
             // Prune volatile and persist if needed
             if let Some(current_block) = current_block {
-                let (should_prune, immutable, cfg) = {
+                let should_prune = {
                     let state = state_mutex.lock().await;
-                    (
-                        state.ready_to_prune(&current_block),
-                        state.immutable.clone(),
-                        state.config.clone(),
-                    )
+                    state.ready_to_prune(&current_block)
                 };
 
                 if should_prune {
-                    {
+                    let (store, cfg) = {
                         let mut state: tokio::sync::MutexGuard<'_, State> =
                             state_mutex.lock().await;
                         state.prune_volatile().await;
-                    }
-                    if let Err(e) =
-                        persist_tx.send((current_block.epoch as u32, immutable, cfg)).await
+                        (state.immutable.clone(), state.config.clone())
+                    };
+
+                    if let Err(e) = persist_tx.send((current_block.epoch as u32, store, cfg)).await
                     {
                         panic!("persistence worker crashed: {e}");
                     }
