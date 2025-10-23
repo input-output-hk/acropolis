@@ -28,6 +28,7 @@ jobs:
           cargo clippy \
             --package acropolis_common \
             --package acropolis_codec \
+            --package acropolis_module_address_state \
             --package acropolis_module_assets_state \
             --package acropolis_module_block_unpacker \
             --package acropolis_module_chain_store \
