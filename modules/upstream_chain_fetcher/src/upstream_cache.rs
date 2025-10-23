@@ -15,7 +15,7 @@ pub struct UpstreamCacheRecord {
 
 pub trait Storage {
     fn read_chunk(&mut self, chunk_no: usize) -> Result<Vec<UpstreamCacheRecord>>;
-    fn write_chunk(&mut self, chunk_no: usize, chunk: &Vec<UpstreamCacheRecord>) -> Result<()>;
+    fn write_chunk(&mut self, chunk_no: usize, chunk: &[UpstreamCacheRecord]) -> Result<()>;
 }
 
 pub struct FileStorage {
@@ -156,7 +156,7 @@ impl Storage for FileStorage {
         }
     }
 
-    fn write_chunk(&mut self, chunk_no: usize, data: &Vec<UpstreamCacheRecord>) -> Result<()> {
+    fn write_chunk(&mut self, chunk_no: usize, data: &[UpstreamCacheRecord]) -> Result<()> {
         let mut file = File::create(self.get_file_name(chunk_no))?;
         file.write_all(serde_json::to_string(data)?.as_bytes())?;
         Ok(())
@@ -204,8 +204,8 @@ mod test {
             Ok(self.rec.get(&chunk_no).unwrap_or(&vec![]).clone())
         }
 
-        fn write_chunk(&mut self, chunk_no: usize, chunk: &Vec<UpstreamCacheRecord>) -> Result<()> {
-            self.rec.insert(chunk_no, chunk.clone());
+        fn write_chunk(&mut self, chunk_no: usize, chunk: &[UpstreamCacheRecord]) -> Result<()> {
+            self.rec.insert(chunk_no, chunk.to_vec());
             Ok(())
         }
     }

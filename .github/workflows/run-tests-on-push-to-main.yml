@@ -34,11 +34,13 @@ jobs:
             --package acropolis_module_chain_store \
             --package acropolis_module_consensus \
             --package acropolis_module_drdd_state \
+            --package acropolis_module_epochs_state \
             --package acropolis_module_genesis_bootstrapper \
             --package acropolis_module_mithril_snapshot_fetcher \
             --package acropolis_module_snapshot_bootstrapper \
             --package acropolis_module_spdd_state \
             --package acropolis_module_stake_delta_filter \
+            --package acropolis_module_upstream_chain_fetcher \
             --package acropolis_module_utxo_state
 
       - name: Run Build
