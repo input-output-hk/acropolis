@@ -36,6 +36,7 @@ jobs:
             --package acropolis_module_mithril_snapshot_fetcher \
             --package acropolis_module_snapshot_bootstrapper \
             --package acropolis_module_spdd_state \
+            --package acropolis_module_stake_delta_filter \
             --package acropolis_module_utxo_state
 
       - name: Run Build
