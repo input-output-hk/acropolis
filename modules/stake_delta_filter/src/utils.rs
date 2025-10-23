@@ -401,8 +401,9 @@ mod test {
     use crate::*;
     use acropolis_common::{
         messages::AddressDeltasMessage, Address, AddressDelta, BlockHash, BlockInfo, BlockStatus,
-        ByronAddress, Era, ShelleyAddress, ShelleyAddressDelegationPart, ShelleyAddressPaymentPart,
-        ShelleyAddressPointer, StakeAddress, StakeAddressPayload, UTxOIdentifier, ValueDelta, NetworkId
+        ByronAddress, Era, NetworkId, ShelleyAddress, ShelleyAddressDelegationPart,
+        ShelleyAddressPaymentPart, ShelleyAddressPointer, StakeAddress, StakeAddressPayload,
+        UTxOIdentifier, ValueDelta,
     };
     use bech32::{Bech32, Hrp};
 

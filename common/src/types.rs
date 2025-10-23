@@ -19,7 +19,7 @@ use std::fmt::{Display, Formatter};
 use std::ops::{AddAssign, Neg};
 use std::{cmp::Ordering, fmt};
 
-/// Address network identifier
+/// Network identifier
 #[derive(
     Debug,
     Clone,

@@ -991,8 +991,8 @@ impl State {
 mod tests {
     use super::*;
     use acropolis_common::{
-        protocol_params::ConwayParams, rational_number::RationalNumber, NetworkId, Anchor,
-        Committee, Constitution, CostModel, DRepVotingThresholds, PoolVotingThresholds, Pot,
+        protocol_params::ConwayParams, rational_number::RationalNumber, Anchor, Committee,
+        Constitution, CostModel, DRepVotingThresholds, NetworkId, PoolVotingThresholds, Pot,
         PotDelta, Ratio, Registration, StakeAddress, StakeAddressDelta, StakeAddressPayload,
         StakeAndVoteDelegation, StakeRegistrationAndStakeAndVoteDelegation,
         StakeRegistrationAndVoteDelegation, VoteDelegation, Withdrawal,

@@ -490,6 +490,7 @@ impl State {
         let response = context.message_bus.request(&accounts_query_topic, msg).await?;
         let message = Arc::try_unwrap(response).unwrap_or_else(|arc| (*arc).clone());
 
+        // TODO: Ensure AccountsStateQueryResponse is for the correct block
         let result_map = match message {
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::AccountsDrepDelegationsMap(map),
