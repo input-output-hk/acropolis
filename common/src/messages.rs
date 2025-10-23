@@ -277,6 +277,7 @@ pub struct SPOStateMessage {
 
 /// Cardano message enum
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[allow(clippy::large_enum_variant)]
 pub enum CardanoMessage {
     BlockAvailable(RawBlockMessage),         // Block body available
     BlockValidation(ValidationStatus),       // Result of a block validation
@@ -402,6 +403,7 @@ pub enum StateQuery {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[allow(clippy::large_enum_variant)]
 pub enum StateQueryResponse {
     Accounts(AccountsStateQueryResponse),
     Addresses(AddressStateQueryResponse),

@@ -27,6 +27,7 @@ pub enum GovernanceStateQuery {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[allow(clippy::large_enum_variant)]
 pub enum GovernanceStateQueryResponse {
     DRepsList(DRepsList),
     DRepInfoWithDelegators(DRepInfoWithDelegators),

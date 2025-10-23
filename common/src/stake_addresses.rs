@@ -106,6 +106,11 @@ impl StakeAddressMap {
     }
 
     #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    #[inline]
     pub fn is_registered(&self, stake_address: &StakeAddress) -> bool {
         self.get(stake_address).map(|sas| sas.registered).unwrap_or(false)
     }
@@ -139,7 +144,7 @@ impl StakeAddressMap {
     }
 
     /// Get Pool's Live Stake (same order as spos)
-    pub fn get_pools_live_stakes(&self, spos: &Vec<KeyHash>) -> Vec<u64> {
+    pub fn get_pools_live_stakes(&self, spos: &[KeyHash]) -> Vec<u64> {
         let mut live_stakes_map = HashMap::<KeyHash, u64>::new();
 
         // Collect the SPO keys and UTXO
@@ -157,7 +162,7 @@ impl StakeAddressMap {
         });
 
         spos.iter()
-            .map(|pool_operator| live_stakes_map.get(pool_operator).map(|v| *v).unwrap_or(0))
+            .map(|pool_operator| live_stakes_map.get(pool_operator).copied().unwrap_or(0))
             .collect()
     }
 
@@ -314,7 +319,7 @@ impl StakeAddressMap {
             });
 
         // Collect into a plain BTreeMap, so that it is ordered on output
-        spo_stakes.iter().map(|entry| (entry.key().clone(), entry.value().clone())).collect()
+        spo_stakes.iter().map(|entry| (entry.key().clone(), *entry.value())).collect()
     }
 
     /// Dump current Stake Pool Delegation Distribution State
@@ -339,7 +344,7 @@ impl StakeAddressMap {
     /// delegated to each DRep, including the special "abstain" and "no confidence" dreps.
     pub fn generate_drdd(
         &self,
-        dreps: &Vec<(DRepCredential, Lovelace)>,
+        dreps: &[(DRepCredential, Lovelace)],
     ) -> DRepDelegationDistribution {
         let abstain = AtomicU64::new(0);
         let no_confidence = AtomicU64::new(0);

@@ -24,7 +24,7 @@ pub fn map_network(network: addresses::Network) -> Result<NetworkId> {
     match network {
         addresses::Network::Mainnet => Ok(NetworkId::Mainnet),
         addresses::Network::Testnet => Ok(NetworkId::Testnet),
-        _ => return Err(anyhow!("Unknown network in address")),
+        _ => Err(anyhow!("Unknown network in address")),
     }
 }
 
@@ -149,7 +149,7 @@ pub fn map_anchor(anchor: &conway::Anchor) -> Anchor {
 
 /// Map a Nullable Anchor to ours
 pub fn map_nullable_anchor(anchor: &Nullable<conway::Anchor>) -> Option<Anchor> {
-    map_nullable(&map_anchor, anchor)
+    map_nullable(map_anchor, anchor)
 }
 
 pub fn map_gov_action_id(pallas_action_id: &conway::GovActionId) -> Result<GovActionId> {
@@ -167,7 +167,7 @@ pub fn map_gov_action_id(pallas_action_id: &conway::GovActionId) -> Result<GovAc
 pub fn map_nullable_gov_action_id(
     id: &Nullable<conway::GovActionId>,
 ) -> Result<Option<GovActionId>> {
-    map_nullable_result(&map_gov_action_id, id)
+    map_nullable_result(map_gov_action_id, id)
 }
 
 fn map_constitution(constitution: &conway::Constitution) -> Constitution {
@@ -226,7 +226,7 @@ pub fn map_certificate(
             alonzo::Certificate::StakeRegistration(cred) => {
                 Ok(TxCertificate::StakeRegistration(StakeAddressWithPos {
                     stake_address: map_stake_address(cred, network_id),
-                    tx_index: tx_index.try_into().unwrap(),
+                    tx_index: tx_index.into(),
                     cert_index: cert_index.try_into().unwrap(),
                 }))
             }
@@ -262,7 +262,7 @@ pub fn map_certificate(
                         },
                         reward_account: StakeAddress::from_binary(reward_account)?,
                         pool_owners: pool_owners
-                            .into_iter()
+                            .iter()
                             .map(|v| {
                                 StakeAddress::new(
                                     StakeAddressPayload::StakeKeyHash(v.to_vec()),
@@ -270,7 +270,7 @@ pub fn map_certificate(
                                 )
                             })
                             .collect(),
-                        relays: relays.into_iter().map(|relay| map_relay(relay)).collect(),
+                        relays: relays.iter().map(map_relay).collect(),
                         pool_metadata: match pool_metadata {
                             Nullable::Some(md) => Some(PoolMetadata {
                                 url: md.url.clone(),
@@ -317,7 +317,7 @@ pub fn map_certificate(
                             InstantaneousRewardTarget::StakeAddresses(
                                 creds
                                     .iter()
-                                    .map(|(sc, v)| (map_stake_address(&sc, network_id.clone()), *v))
+                                    .map(|(sc, v)| (map_stake_address(sc, network_id.clone()), *v))
                                     .collect(),
                             )
                         }
@@ -335,7 +335,7 @@ pub fn map_certificate(
                 conway::Certificate::StakeRegistration(cred) => {
                     Ok(TxCertificate::StakeRegistration(StakeAddressWithPos {
                         stake_address: map_stake_address(cred, network_id),
-                        tx_index: tx_index.try_into().unwrap(),
+                        tx_index: tx_index.into(),
                         cert_index: cert_index.try_into().unwrap(),
                     }))
                 }
@@ -380,7 +380,7 @@ pub fn map_certificate(
                                     )
                                 })
                                 .collect(),
-                            relays: relays.into_iter().map(|relay| map_relay(relay)).collect(),
+                            relays: relays.iter().map(map_relay).collect(),
                             pool_metadata: match pool_metadata {
                                 Nullable::Some(md) => Some(PoolMetadata {
                                     url: md.url.clone(),
@@ -472,7 +472,7 @@ pub fn map_certificate(
                 conway::Certificate::ResignCommitteeCold(cold_cred, anchor) => {
                     Ok(TxCertificate::ResignCommitteeCold(ResignCommitteeCold {
                         cold_credential: map_stake_credential(cold_cred),
-                        anchor: map_nullable_anchor(&anchor),
+                        anchor: map_nullable_anchor(anchor),
                     }))
                 }
 
@@ -481,7 +481,7 @@ pub fn map_certificate(
                         reg: DRepRegistration {
                             credential: map_stake_credential(cred),
                             deposit: *coin,
-                            anchor: map_nullable_anchor(&anchor),
+                            anchor: map_nullable_anchor(anchor),
                         },
                         tx_hash,
                         cert_index: cert_index as u64,
@@ -503,7 +503,7 @@ pub fn map_certificate(
                     Ok(TxCertificate::DRepUpdate(DRepUpdateWithPos {
                         reg: DRepUpdate {
                             credential: map_stake_credential(cred),
-                            anchor: map_nullable_anchor(&anchor),
+                            anchor: map_nullable_anchor(anchor),
                         },
                         tx_hash,
                         cert_index: cert_index as u64,
@@ -614,20 +614,20 @@ fn map_drep_voting_thresholds(ts: &conway::DRepVotingThresholds) -> DRepVotingTh
 fn map_conway_protocol_param_update(p: &conway::ProtocolParamUpdate) -> Box<ProtocolParamUpdate> {
     Box::new(ProtocolParamUpdate {
         // Fields, common for Conway and Alonzo-compatible
-        minfee_a: p.minfee_a.clone(),
-        minfee_b: p.minfee_b.clone(),
-        max_block_body_size: p.max_block_body_size.clone(),
-        max_transaction_size: p.max_transaction_size.clone(),
-        max_block_header_size: p.max_block_header_size.clone(),
-        key_deposit: p.key_deposit.clone(),
-        pool_deposit: p.pool_deposit.clone(),
-        maximum_epoch: p.maximum_epoch.clone(),
-        desired_number_of_stake_pools: p.desired_number_of_stake_pools.clone(),
+        minfee_a: p.minfee_a,
+        minfee_b: p.minfee_b,
+        max_block_body_size: p.max_block_body_size,
+        max_transaction_size: p.max_transaction_size,
+        max_block_header_size: p.max_block_header_size,
+        key_deposit: p.key_deposit,
+        pool_deposit: p.pool_deposit,
+        maximum_epoch: p.maximum_epoch,
+        desired_number_of_stake_pools: p.desired_number_of_stake_pools,
         pool_pledge_influence: p.pool_pledge_influence.as_ref().map(&map_unit_interval),
         expansion_rate: p.expansion_rate.as_ref().map(&map_unit_interval),
         treasury_growth_rate: p.treasury_growth_rate.as_ref().map(&map_unit_interval),
-        min_pool_cost: p.min_pool_cost.clone(),
-        coins_per_utxo_byte: p.ada_per_utxo_byte.clone(),
+        min_pool_cost: p.min_pool_cost,
+        coins_per_utxo_byte: p.ada_per_utxo_byte,
         lovelace_per_utxo_word: None,
         cost_models_for_script_languages: p
             .cost_models_for_script_languages
@@ -636,19 +636,19 @@ fn map_conway_protocol_param_update(p: &conway::ProtocolParamUpdate) -> Box<Prot
         execution_costs: p.execution_costs.as_ref().map(&map_conway_execution_costs),
         max_tx_ex_units: p.max_tx_ex_units.as_ref().map(&map_ex_units),
         max_block_ex_units: p.max_block_ex_units.as_ref().map(&map_ex_units),
-        max_value_size: p.max_value_size.clone(),
-        collateral_percentage: p.collateral_percentage.clone(),
-        max_collateral_inputs: p.max_collateral_inputs.clone(),
+        max_value_size: p.max_value_size,
+        collateral_percentage: p.collateral_percentage,
+        max_collateral_inputs: p.max_collateral_inputs,
 
         // Fields, specific for Conway
         pool_voting_thresholds: p.pool_voting_thresholds.as_ref().map(&map_pool_voting_thresholds),
         drep_voting_thresholds: p.drep_voting_thresholds.as_ref().map(&map_drep_voting_thresholds),
-        min_committee_size: p.min_committee_size.clone(),
-        committee_term_limit: p.committee_term_limit.clone(),
-        governance_action_validity_period: p.governance_action_validity_period.clone(),
-        governance_action_deposit: p.governance_action_deposit.clone(),
-        drep_deposit: p.drep_deposit.clone(),
-        drep_inactivity_period: p.drep_inactivity_period.clone(),
+        min_committee_size: p.min_committee_size,
+        committee_term_limit: p.committee_term_limit,
+        governance_action_validity_period: p.governance_action_validity_period,
+        governance_action_deposit: p.governance_action_deposit,
+        drep_deposit: p.drep_deposit,
+        drep_inactivity_period: p.drep_inactivity_period,
         minfee_refscript_cost_per_byte: p
             .minfee_refscript_cost_per_byte
             .as_ref()
@@ -667,7 +667,7 @@ fn map_governance_action(action: &conway::GovAction) -> Result<GovernanceAction>
             Ok(GovernanceAction::ParameterChange(ParameterChangeAction {
                 previous_action_id: map_nullable_gov_action_id(id)?,
                 protocol_param_update: map_conway_protocol_param_update(protocol_update),
-                script_hash: map_nullable(&|x: &ScriptHash| x.to_vec(), &script),
+                script_hash: map_nullable(|x: &ScriptHash| x.to_vec(), script),
             }))
         }
 
@@ -683,7 +683,7 @@ fn map_governance_action(action: &conway::GovAction) -> Result<GovernanceAction>
                 rewards: HashMap::from_iter(
                     withdrawals.iter().map(|(account, coin)| (account.to_vec(), *coin)),
                 ),
-                script_hash: map_nullable(&|x: &ScriptHash| x.to_vec(), script),
+                script_hash: map_nullable(|x: &ScriptHash| x.to_vec(), script),
             }),
         ),
 
@@ -709,7 +709,7 @@ fn map_governance_action(action: &conway::GovAction) -> Result<GovernanceAction>
         conway::GovAction::NewConstitution(id, constitution) => {
             Ok(GovernanceAction::NewConstitution(NewConstitutionAction {
                 previous_action_id: map_nullable_gov_action_id(id)?,
-                new_constitution: map_constitution(&constitution),
+                new_constitution: map_constitution(constitution),
             }))
         }
 
@@ -731,15 +731,15 @@ pub fn map_alonzo_protocol_param_update(
         max_block_body_size: map_u32_to_u64(p.max_block_body_size),
         max_transaction_size: map_u32_to_u64(p.max_transaction_size),
         max_block_header_size: map_u32_to_u64(p.max_block_header_size),
-        key_deposit: p.key_deposit.clone(),
-        pool_deposit: p.pool_deposit.clone(),
-        maximum_epoch: p.maximum_epoch.clone(),
+        key_deposit: p.key_deposit,
+        pool_deposit: p.pool_deposit,
+        maximum_epoch: p.maximum_epoch,
         desired_number_of_stake_pools: map_u32_to_u64(p.desired_number_of_stake_pools),
         pool_pledge_influence: p.pool_pledge_influence.as_ref().map(&map_unit_interval),
         expansion_rate: p.expansion_rate.as_ref().map(&map_unit_interval),
         treasury_growth_rate: p.treasury_growth_rate.as_ref().map(&map_unit_interval),
-        min_pool_cost: p.min_pool_cost.clone(),
-        lovelace_per_utxo_word: p.ada_per_utxo_byte.clone(), // Pre Babbage (Represents cost per 8-byte word)
+        min_pool_cost: p.min_pool_cost,
+        lovelace_per_utxo_word: p.ada_per_utxo_byte, // Pre Babbage (Represents cost per 8-byte word)
         coins_per_utxo_byte: None,
         cost_models_for_script_languages: p
             .cost_models_for_script_languages
@@ -789,16 +789,16 @@ pub fn map_babbage_protocol_param_update(
         max_block_body_size: map_u32_to_u64(p.max_block_body_size),
         max_transaction_size: map_u32_to_u64(p.max_transaction_size),
         max_block_header_size: map_u32_to_u64(p.max_block_header_size),
-        key_deposit: p.key_deposit.clone(),
-        pool_deposit: p.pool_deposit.clone(),
-        maximum_epoch: p.maximum_epoch.clone(),
+        key_deposit: p.key_deposit,
+        pool_deposit: p.pool_deposit,
+        maximum_epoch: p.maximum_epoch,
         desired_number_of_stake_pools: map_u32_to_u64(p.desired_number_of_stake_pools),
         pool_pledge_influence: p.pool_pledge_influence.as_ref().map(&map_unit_interval),
         expansion_rate: p.expansion_rate.as_ref().map(&map_unit_interval),
         treasury_growth_rate: p.treasury_growth_rate.as_ref().map(&map_unit_interval),
-        min_pool_cost: p.min_pool_cost.clone(),
+        min_pool_cost: p.min_pool_cost,
         lovelace_per_utxo_word: None,
-        coins_per_utxo_byte: p.ada_per_utxo_byte.clone(),
+        coins_per_utxo_byte: p.ada_per_utxo_byte,
         cost_models_for_script_languages: p
             .cost_models_for_script_languages
             .as_ref()
@@ -899,7 +899,7 @@ pub fn map_all_governance_voting_procedures(
         {
             let action_id = map_gov_action_id(pallas_action_id)?;
             let vp =
-                map_single_governance_voting_procedure(vote_index as u32, &pallas_voting_procedure);
+                map_single_governance_voting_procedure(vote_index as u32, pallas_voting_procedure);
             single_voter.voting_procedures.insert(action_id, vp);
         }
     }

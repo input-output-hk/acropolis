@@ -292,26 +292,29 @@ impl ShelleyAddress {
 
         let mut data = Vec::new();
 
+        let build_header =
+            |variant: u8| -> u8 { network_bits | (payment_bits << 4) | (variant << 5) };
+
         match &self.delegation {
             ShelleyAddressDelegationPart::None => {
-                let header = network_bits | (payment_bits << 4) | (3 << 5);
+                let header = build_header(3);
                 data.push(header);
                 data.extend(payment_hash);
             }
             ShelleyAddressDelegationPart::StakeKeyHash(hash) => {
-                let header = network_bits | (payment_bits << 4) | (0 << 5);
+                let header = build_header(0);
                 data.push(header);
                 data.extend(payment_hash);
                 data.extend(hash);
             }
             ShelleyAddressDelegationPart::ScriptHash(hash) => {
-                let header = network_bits | (payment_bits << 4) | (1 << 5);
+                let header = build_header(1);
                 data.push(header);
                 data.extend(payment_hash);
                 data.extend(hash);
             }
             ShelleyAddressDelegationPart::Pointer(pointer) => {
-                let header = network_bits | (payment_bits << 4) | (2 << 5);
+                let header = build_header(2);
                 data.push(header);
                 data.extend(payment_hash);
 
