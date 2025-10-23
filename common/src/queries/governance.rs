@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    Anchor, Credential, DRepCredential, GovActionId, Lovelace, ProposalProcedure, TxHash, Vote,
+    Anchor, DRepCredential, GovActionId, Lovelace, ProposalProcedure, StakeAddress, TxHash, Vote,
     Voter, VotingProcedure,
 };
 
@@ -61,12 +61,12 @@ pub struct DRepInfo {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DRepInfoWithDelegators {
     pub info: DRepInfo,
-    pub delegators: Vec<Credential>,
+    pub delegators: Vec<StakeAddress>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DRepDelegatorAddresses {
-    pub addresses: Vec<Credential>,
+    pub addresses: Vec<StakeAddress>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

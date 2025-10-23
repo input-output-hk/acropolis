@@ -1,5 +1,5 @@
 use acropolis_common::{
-    queries::governance::VoteRecord, KeyHash, PoolRegistration, PoolUpdateEvent,
+    queries::governance::VoteRecord, PoolRegistration, PoolUpdateEvent, StakeAddress,
 };
 use imbl::{HashSet, OrdMap, Vector};
 use serde::{Deserialize, Serialize};
@@ -14,7 +14,7 @@ pub struct HistoricalSPOState {
     pub updates: Option<Vec<PoolUpdateEvent>>,
 
     // SPO's delegators
-    pub delegators: Option<HashSet<KeyHash>>,
+    pub delegators: Option<HashSet<StakeAddress>>,
     // SPO's votes
     pub votes: Option<Vec<VoteRecord>>,
 
@@ -51,13 +51,13 @@ impl HistoricalSPOState {
         })
     }
 
-    pub fn add_delegator(&mut self, delegator: &KeyHash) -> Option<bool> {
+    pub fn add_delegator(&mut self, delegator: &StakeAddress) -> Option<bool> {
         self.delegators
             .as_mut()
             .and_then(|delegators| Some(delegators.insert(delegator.clone()).is_some()))
     }
 
-    pub fn remove_delegator(&mut self, delegator: &KeyHash) -> Option<bool> {
+    pub fn remove_delegator(&mut self, delegator: &StakeAddress) -> Option<bool> {
         self.delegators.as_mut().and_then(|delegators| Some(delegators.remove(delegator).is_some()))
     }
 
