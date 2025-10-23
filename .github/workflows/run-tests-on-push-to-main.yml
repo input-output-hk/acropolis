@@ -28,6 +28,7 @@ jobs:
           cargo clippy \
             --package acropolis_common \
             --package acropolis_codec \
+            --package acropolis_module_assets_state \
             --package acropolis_module_drdd_state \
             --package acropolis_module_snapshot_bootstrapper
 
