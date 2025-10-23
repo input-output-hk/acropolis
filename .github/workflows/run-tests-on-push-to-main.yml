@@ -23,6 +23,11 @@ jobs:
       - name: Run Format
         run: cargo fmt --all -- --check
 
+      - name: Run Clippy
+        run: |
+          cargo clippy \
+            --package acropolis_common
+
       - name: Run Build
         run: cargo build --verbose
 

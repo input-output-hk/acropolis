@@ -812,6 +812,35 @@ pub trait SnapshotCallbacks:
 }
 
 // -----------------------------------------------------------------------------
+// Internal Types
+// -----------------------------------------------------------------------------
+
+#[expect(dead_code)]
+struct ParsedMetadata {
+    epoch: u64,
+    treasury: u64,
+    reserves: u64,
+    pools: Vec<PoolInfo>,
+    dreps: Vec<DRepInfo>,
+    accounts: Vec<AccountState>,
+    blocks_previous_epoch: Vec<crate::types::PoolBlockProduction>,
+    blocks_current_epoch: Vec<crate::types::PoolBlockProduction>,
+    utxo_position: u64,
+}
+
+#[expect(dead_code)]
+struct ParsedMetadataWithoutUtxoPosition {
+    epoch: u64,
+    treasury: u64,
+    reserves: u64,
+    pools: Vec<PoolInfo>,
+    dreps: Vec<DRepInfo>,
+    accounts: Vec<AccountState>,
+    blocks_previous_epoch: Vec<crate::types::PoolBlockProduction>,
+    blocks_current_epoch: Vec<crate::types::PoolBlockProduction>,
+}
+
+// -----------------------------------------------------------------------------
 // Streaming Parser
 // -----------------------------------------------------------------------------
 
@@ -1145,21 +1174,8 @@ impl StreamingSnapshotParser {
     }
 
     /// Parse metadata and structure, returning the UTXO position (for future chunked reading)
-    #[allow(dead_code)]
-    fn parse_metadata_and_find_utxos(
-        &self,
-        buffer: &[u8],
-    ) -> Result<(
-        u64,
-        u64,
-        u64,
-        Vec<PoolInfo>,
-        Vec<DRepInfo>,
-        Vec<AccountState>,
-        Vec<crate::types::PoolBlockProduction>,
-        Vec<crate::types::PoolBlockProduction>,
-        u64,
-    )> {
+    #[expect(dead_code)]
+    fn parse_metadata_and_find_utxos(&self, buffer: &[u8]) -> Result<ParsedMetadata> {
         let mut decoder = Decoder::new(buffer);
         let start_pos = decoder.position();
 
@@ -1261,7 +1277,7 @@ impl StreamingSnapshotParser {
         // Current position is right before the UTXO map [3][1][1][0]
         let utxo_position = start_pos as u64 + decoder.position() as u64;
 
-        Ok((
+        Ok(ParsedMetadata {
             epoch,
             treasury,
             reserves,
@@ -1271,24 +1287,15 @@ impl StreamingSnapshotParser {
             blocks_previous_epoch,
             blocks_current_epoch,
             utxo_position,
-        ))
+        })
     }
 
     /// Parse metadata and structure (everything except UTXOs) (legacy)
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     fn parse_metadata_and_structure(
         &self,
         buffer: &[u8],
-    ) -> Result<(
-        u64,
-        u64,
-        u64,
-        Vec<PoolInfo>,
-        Vec<DRepInfo>,
-        Vec<AccountState>,
-        Vec<crate::types::PoolBlockProduction>,
-        Vec<crate::types::PoolBlockProduction>,
-    )> {
+    ) -> Result<ParsedMetadataWithoutUtxoPosition> {
         let mut decoder = Decoder::new(buffer);
 
         // Navigate to NewEpochState root array
@@ -1383,7 +1390,7 @@ impl StreamingSnapshotParser {
         let accounts =
             Self::parse_dstate(&mut decoder).context("Failed to parse DState for accounts")?;
 
-        Ok((
+        Ok(ParsedMetadataWithoutUtxoPosition {
             epoch,
             treasury,
             reserves,
@@ -1392,7 +1399,7 @@ impl StreamingSnapshotParser {
             accounts,
             blocks_previous_epoch,
             blocks_current_epoch,
-        ))
+        })
     }
 
     /// Parse DState for accounts (extracted from original parse method)
@@ -1533,11 +1540,9 @@ impl StreamingSnapshotParser {
                 let position_before = entry_decoder.position();
 
                 // Check for indefinite map break
-                if map_len == u64::MAX {
-                    if matches!(entry_decoder.datatype(), Ok(Type::Break)) {
-                        entries_processed = map_len; // Exit outer loop
-                        break;
-                    }
+                if map_len == u64::MAX && matches!(entry_decoder.datatype(), Ok(Type::Break)) {
+                    entries_processed = map_len; // Exit outer loop
+                    break;
                 }
 
                 // Try to parse one UTXO entry
@@ -1555,7 +1560,7 @@ impl StreamingSnapshotParser {
                         last_good_position = bytes_consumed;
 
                         // Progress reporting - less frequent for better performance
-                        if utxo_count % 1000000 == 0 {
+                        if utxo_count.is_multiple_of(1000000) {
                             let buffer_usage = buffer.len();
                             info!(
                                 "    Streamed {} UTXOs, buffer: {} MB, max entry: {} bytes",
