@@ -1,5 +1,5 @@
 use crate::ouroboros::{overlay_shedule, vrf};
-use acropolis_common::{
+use crate::{
     crypto::keyhash_256,
     genesis_values::GenesisDelegs,
     protocol_params::{Nonce, PraosParams, ShelleyParams},

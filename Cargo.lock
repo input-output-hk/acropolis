@@ -45,6 +45,7 @@ dependencies = [
  "minicbor 0.26.5",
  "num-rational",
  "num-traits",
+ "pallas 0.33.0",
  "rayon",
  "serde",
  "serde_json",
@@ -54,6 +55,7 @@ dependencies = [
  "thiserror 2.0.17",
  "tokio",
  "tracing",
+ "vrf_dalek",
 ]
 
 [[package]]
@@ -134,7 +136,6 @@ version = "0.1.0"
 dependencies = [
  "acropolis_common",
  "anyhow",
- "blake2 0.10.6",
  "caryatid_sdk",
  "config",
  "hex",
@@ -142,10 +143,8 @@ dependencies = [
  "pallas 0.33.0",
  "serde",
  "serde_json",
- "thiserror 2.0.17",
  "tokio",
  "tracing",
- "vrf_dalek",
 ]
 
 [[package]]

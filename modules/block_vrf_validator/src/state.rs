@@ -1,15 +1,14 @@
 //! Acropolis block_vrf_validator state storage
 
 use acropolis_common::{
-    genesis_values::{GenesisDelegs, GenesisValues},
+    genesis_values::GenesisValues,
     messages::ProtocolParamsMessage,
+    ouroboros::vrf_validation::{self, VrfValidationError},
     protocol_params::{PraosParams, ShelleyParams},
     BlockInfo,
 };
 use anyhow::Result;
 use pallas::ledger::traverse::MultiEraHeader;
-
-use crate::ouroboros::vrf_validation::{self, VrfValidationError};
 
 #[derive(Default, Debug, Clone)]
 pub struct State {

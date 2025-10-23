@@ -14,7 +14,6 @@ use tokio::sync::Mutex;
 use tracing::{error, info, info_span};
 mod state;
 use state::State;
-mod ouroboros;
 
 const DEFAULT_VALIDATION_VRF_PUBLISHER_TOPIC: (&str, &str) =
     ("validation-vrf-publisher-topic", "cardano.validation.vrf");
@@ -123,8 +122,6 @@ impl BlockVrfValidator {
                 _ => error!("Unexpected message type: {message:?}"),
             }
         }
-
-        Ok(())
     }
 
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {

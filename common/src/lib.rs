@@ -10,6 +10,7 @@ pub mod hash;
 pub mod ledger_state;
 pub mod math;
 pub mod messages;
+pub mod ouroboros;
 pub mod params;
 pub mod protocol_params;
 pub mod queries;

@@ -1,7 +1,7 @@
-use acropolis_common::protocol_params::Nonce;
+use crate::{hash::Hash, protocol_params::Nonce};
 use blake2::{digest::consts::U32, Blake2b, Digest};
 
-use crate::ouroboros::types::Seed;
+pub type Seed = Hash<32>;
 
 /// Construct a seed to use in the VRF computation.
 ///

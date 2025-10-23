@@ -1,6 +1,5 @@
 use std::{array::TryFromSliceError, ops::Deref};
 
-use acropolis_common::protocol_params::Nonce;
 use anyhow::Result;
 use blake2::{digest::consts::U32, Blake2b, Digest};
 use thiserror::Error;
@@ -8,6 +7,8 @@ use vrf_dalek::{
     errors::VrfError,
     vrf03::{PublicKey03, VrfProof03},
 };
+
+use crate::protocol_params::Nonce;
 
 /// A VRF public key
 #[derive(Debug, PartialEq)]
