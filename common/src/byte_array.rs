@@ -23,10 +23,10 @@ macro_rules! declare_byte_array_type {
             type Error = FromHexError;
 
             fn from_hex<T: AsRef<[u8]>>(hex: T) -> Result<Self, Self::Error> {
-                Ok(match Self::try_from(Vec::<u8>::from_hex(hex)?) {
+                match Self::try_from(Vec::<u8>::from_hex(hex)?) {
                     Ok(b) => Ok(b),
                     Err(_) => Err(FromHexError::InvalidStringLength),
-                }?)
+                }
             }
         }
 

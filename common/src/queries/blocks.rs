@@ -155,9 +155,9 @@ impl Serialize for BlockInfo {
         state.serialize_field("fees", &self.fees)?;
         state.serialize_field(
             "block_vrf",
-            &self.block_vrf.clone().and_then(|vkey| vkey.to_bech32().ok()),
+            &self.block_vrf.and_then(|vkey| vkey.to_bech32().ok()),
         )?;
-        state.serialize_field("op_cert", &self.op_cert.clone().map(|v| hex::encode(v)))?;
+        state.serialize_field("op_cert", &self.op_cert.clone().map(hex::encode))?;
         state.serialize_field("op_cert_counter", &self.op_cert_counter)?;
         state.serialize_field("previous_block", &self.previous_block)?;
         state.serialize_field("next_block", &self.next_block)?;

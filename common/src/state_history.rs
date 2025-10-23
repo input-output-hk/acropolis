@@ -100,6 +100,11 @@ impl<S: Clone + Default> StateHistory<S> {
         self.history.len()
     }
 
+    /// Get if state history is empty
+    pub fn is_empty(&self) -> bool {
+        self.history.is_empty()
+    }
+
     /// Commit new state without checking the block number
     /// TODO: enhance block number logic to commit state without check (for bootstrapping)
     pub fn commit_forced(&mut self, state: S) {
