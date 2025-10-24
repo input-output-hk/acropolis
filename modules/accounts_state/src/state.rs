@@ -991,7 +991,10 @@ impl State {
 mod tests {
     use super::*;
     use acropolis_common::{
-        protocol_params::ConwayParams, rational_number::RationalNumber, AddressNetwork, Anchor,
+        protocol_params::ConwayParams, rational_number::RationalNumber, Anchor, Committee,
+        Constitution, CostModel, DRepVotingThresholds, NetworkId, PoolVotingThresholds, Pot,
+        PotDelta, Ratio, Registration, StakeAddress, StakeAddressDelta,
+        protocol_params::ConwayParams, rational_number::RationalNumber, Anchor,
         Committee, Constitution, CostModel, DRepVotingThresholds, PoolVotingThresholds, Pot,
         PotDelta, Ratio, Registration, StakeAddress, StakeAddressDelta, StakeCredential,
         StakeAndVoteDelegation, StakeRegistrationAndStakeAndVoteDelegation,
@@ -1003,7 +1006,7 @@ mod tests {
         let mut full_hash = vec![0u8; 28];
         full_hash[..hash.len().min(28)].copy_from_slice(&hash[..hash.len().min(28)]);
         StakeAddress {
-            network: AddressNetwork::Main,
+            network: NetworkId::Mainnet,
             credential: StakeCredential::AddrKeyHash(full_hash),
         }
     }

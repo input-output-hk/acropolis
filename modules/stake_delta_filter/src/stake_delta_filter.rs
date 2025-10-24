@@ -3,7 +3,7 @@
 
 use acropolis_common::{
     messages::{CardanoMessage, Message},
-    AddressNetwork,
+    NetworkId,
 };
 use anyhow::{anyhow, Result};
 use caryatid_sdk::{module, Context, Module};
@@ -36,7 +36,7 @@ const DEFAULT_CACHE_MODE: (&str, CacheMode) = ("cache-mode", CacheMode::Predefin
 const DEFAULT_WRITE_FULL_CACHE: (&str, bool) = ("write-full-cache", false);
 
 /// Network: currently only Main/Test. Parameter is necessary to distinguish caches.
-const DEFAULT_NETWORK: (&str, AddressNetwork) = ("network", AddressNetwork::Main);
+const DEFAULT_NETWORK: (&str, NetworkId) = ("network", NetworkId::Mainnet);
 
 /// Stake Delta Filter module
 #[module(
@@ -58,7 +58,7 @@ struct StakeDeltaFilterParams {
     address_delta_topic: String,
     stake_address_delta_topic: String,
     tx_certificates_topic: String,
-    network: AddressNetwork,
+    network: NetworkId,
 
     cache_dir: String,
     cache_mode: CacheMode,
@@ -86,9 +86,7 @@ impl StakeDeltaFilterParams {
 
     fn conf_enum<'a, T: Deserialize<'a>>(config: &Arc<Config>, keydef: (&str, T)) -> Result<T> {
         if config.get_string(keydef.0).is_ok() {
-            config
-                .get::<T>(keydef.0)
-                .or_else(|e| Err(anyhow!("cannot parse {} value: {e}", keydef.0)))
+            config.get::<T>(keydef.0).map_err(|e| anyhow!("cannot parse {} value: {e}", keydef.0))
         } else {
             Ok(keydef.1)
         }
@@ -103,7 +101,7 @@ impl StakeDeltaFilterParams {
             cache_mode: Self::conf_enum::<CacheMode>(&cfg, DEFAULT_CACHE_MODE)?,
             write_full_cache: Self::conf_enum::<bool>(&cfg, DEFAULT_WRITE_FULL_CACHE)?,
             context,
-            network: Self::conf_enum::<AddressNetwork>(&cfg, DEFAULT_NETWORK)?,
+            network: Self::conf_enum::<NetworkId>(&cfg, DEFAULT_NETWORK)?,
         };
 
         info!("Cache mode {:?}", params.cache_mode);
@@ -175,9 +173,9 @@ impl StakeDeltaFilter {
                             block = block_info.number
                         );
                         async {
-                            let msg = process_message(&cache, &delta, &block_info, None);
+                            let msg = process_message(&cache, delta, block_info, None);
                             publisher
-                                .publish(&block_info, msg)
+                                .publish(block_info, msg)
                                 .await
                                 .unwrap_or_else(|e| error!("Publish error: {e}"))
                         }
