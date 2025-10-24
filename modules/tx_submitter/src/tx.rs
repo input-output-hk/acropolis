@@ -1,8 +1,9 @@
+use acropolis_common::TxHash;
 use anyhow::Result;
 use pallas::ledger::traverse::MultiEraTx;
 
 pub struct Transaction {
-    pub id: Vec<u8>,
+    pub id: TxHash,
     pub body: Vec<u8>,
     pub era: u16,
 }
@@ -10,7 +11,7 @@ pub struct Transaction {
 impl Transaction {
     pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
         let parsed = MultiEraTx::decode(bytes)?;
-        let id = parsed.hash().to_vec();
+        let id = TxHash::from(*parsed.hash());
         let era = parsed.era().into();
         Ok(Self {
             id,

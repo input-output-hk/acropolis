@@ -171,7 +171,7 @@ impl TxQueue {
             .take(count as usize)
             .map(|tx| {
                 txsubmission::TxIdAndSize(
-                    txsubmission::EraTxId(tx.era, tx.id.clone()),
+                    txsubmission::EraTxId(tx.era, tx.id.to_vec()),
                     tx.body.len() as u32,
                 )
             })
@@ -188,7 +188,7 @@ impl TxQueue {
     pub fn tx_body(&self, id: &txsubmission::EraTxId) -> Option<txsubmission::EraTxBody> {
         self.sent
             .iter()
-            .find(|tx| tx.id == id.1)
+            .find(|tx| *tx.id == *id.1)
             .map(|tx| txsubmission::EraTxBody(tx.era, tx.body.clone()))
     }
 
