@@ -8,13 +8,18 @@ use acropolis_common::{
     messages::{Command, CommandResponse, Message},
 };
 use anyhow::{Result, bail};
-use caryatid_sdk::Context;
+use caryatid_sdk::{Context, Module, module};
 use config::Config;
 use peer::PeerConfig;
 use tokio::sync::RwLock;
 
 use crate::{peer::PeerConnection, tx::Transaction};
 
+#[module(
+    message_type(Message),
+    name = "tx-submitter",
+    description = "TX submission module"
+)]
 pub struct TxSubmitter;
 
 impl TxSubmitter {
@@ -61,7 +66,7 @@ struct SubmitterConfig {
 impl SubmitterConfig {
     pub fn parse(config: &Config) -> Result<Self> {
         let subscribe_topic =
-            config.get("subscribe-topic").unwrap_or("cardano.txs.submit").to_string();
+            config.get_string("subscribe-topic").unwrap_or("cardano.txs.submit".to_string());
         let magic = config.get("magic-number").unwrap_or(764824073);
         Ok(Self {
             subscribe_topic,

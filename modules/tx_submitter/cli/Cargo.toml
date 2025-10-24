@@ -1,0 +1,27 @@
+[package]
+name = "acropolis_module_tx_submitter_cli"
+version = "0.1.0"
+edition = "2024"
+authors = ["Simon Gellis <simon@sundae.fi>"]
+description = "CLI tool to submit transactions"
+license = "Apache-2.0"
+
+[dependencies]
+acropolis_common = { path = "../../../common" }
+acropolis_module_tx_submitter = { path = "../" }
+
+caryatid_sdk = { workspace = true }
+caryatid_process = { workspace = true}
+
+anyhow = { workspace = true }
+clap = { workspace = true }
+config = { workspace = true }
+hex = { workspace = true }
+pallas = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3.20", features = ["registry", "env-filter"] }
+
+[[bin]]
+name = "tx-submitter-cli"
+path = "src/main.rs"

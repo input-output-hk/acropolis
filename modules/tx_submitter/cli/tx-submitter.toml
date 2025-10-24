@@ -1,0 +1,17 @@
+[module.tx-submitter]
+subscribe-topic = "cli.tx.submit"
+
+[module.cli-driver]
+
+[message-bus.internal]
+class = "in-memory"
+workers = 50
+dispatch-queue-size = 1000
+worker-queue-size = 100
+bulk-block-capacity = 50
+bulk-resume-capacity = 75
+
+# Message routing
+[[message-router.route]]  # Everything is internal only
+pattern = "#"
+bus = "internal"

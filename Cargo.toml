@@ -26,6 +26,7 @@ members = [
     "modules/consensus",                    # Chooses favoured chain across multiple options
     "modules/chain_store",                  # Tracks historical information about blocks and TXs
     "modules/tx_submitter",                 # Submits TXs to peers
+    "modules/tx_submitter/cli",             # CLI wrapper for TX submitter
 
     # Process builds
     "processes/omnibus",      # All-inclusive omnibus process
@@ -42,7 +43,7 @@ caryatid_module_clock = "0.12"
 caryatid_module_spy = "0.12"
 anyhow = "1.0"
 chrono = "0.4"
-clap = { version = "4.5", features = ["derive"] }
+clap = { version = "4.5", features = ["derive", "string"] }
 config = "0.15.11"
 dashmap = "6.1.0"
 hex = "0.4"

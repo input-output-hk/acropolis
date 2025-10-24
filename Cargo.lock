@@ -412,6 +412,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "acropolis_module_tx_submitter_cli"
+version = "0.1.0"
+dependencies = [
+ "acropolis_common",
+ "acropolis_module_tx_submitter",
+ "anyhow",
+ "caryatid_process",
+ "caryatid_sdk",
+ "clap",
+ "config",
+ "hex",
+ "pallas 0.33.0",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "acropolis_module_tx_unpacker"
 version = "0.2.1"
 dependencies = [

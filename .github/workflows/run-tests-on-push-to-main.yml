@@ -41,6 +41,7 @@ jobs:
             --package acropolis_module_spdd_state \
             --package acropolis_module_stake_delta_filter \
             --package acropolis_module_tx_submitter \
+            --package acropolis_module_tx_submitter_cli \
             --package acropolis_module_upstream_chain_fetcher \
             --package acropolis_module_utxo_state
 
