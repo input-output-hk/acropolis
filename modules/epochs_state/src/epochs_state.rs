@@ -14,7 +14,7 @@ use anyhow::Result;
 use caryatid_sdk::{message_bus::Subscription, module, Context, Module};
 use config::Config;
 use pallas::ledger::traverse::MultiEraHeader;
-use std::sync::Arc;
+use std::{io::Write, sync::Arc};
 use tokio::sync::Mutex;
 use tracing::{error, info, info_span, Instrument};
 
@@ -47,6 +47,13 @@ const DEFAULT_EPOCH_ACTIVITY_PUBLISH_TOPIC: (&str, &str) =
     ("epoch-activity-publish-topic", "cardano.epoch.activity");
 const DEFAULT_EPOCH_NONCES_PUBLISH_TOPIC: (&str, &str) =
     ("epoch-nonces-publish-topic", "cardano.epoch.nonces");
+
+// store block header cbor
+fn write_header_cbor(header: &MultiEraHeader) -> Result<()> {
+    let mut file = std::fs::File::create("4576496.cbor")?;
+    file.write_all(hex::encode(header.cbor()).as_bytes())?;
+    Ok(())
+}
 
 /// Epochs State module
 #[module(
@@ -132,6 +139,12 @@ impl EpochsState {
                             }
                         };
                     });
+
+                    if let Some(header) = header.as_ref() {
+                        if block_info.number == 4576496 {
+                            write_header_cbor(header);
+                        }
+                    }
 
                     if is_new_epoch {
                         let ea = state.end_epoch(block_info);

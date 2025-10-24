@@ -1,9 +1,12 @@
 use crate::genesis_values::{GenDeleg, GenesisKey};
 use crate::ouroboros::vrf;
+use crate::rational_number::RationalNumber;
 use crate::PoolId;
 use crate::{crypto::keyhash_256, protocol_params::Nonce, KeyHash, Slot};
 use anyhow::Result;
+use dashu_int::UBig;
 use pallas::ledger::primitives::babbage::{derive_tagged_vrf_output, VrfDerivation};
+use pallas_math::math::{ExpOrdering, FixedDecimal, FixedPrecision};
 use std::array::TryFromSliceError;
 use thiserror::Error;
 
@@ -47,13 +50,9 @@ pub enum VrfValidationError {
     #[error("{0}")]
     PraosBadVrfProof(#[from] PraosBadVrfProofError),
     /// **Cause:** The VRF output is too large for this pool's stake.
-    /// The pool lost the slot lottery in TPraos Protocol
-    #[error("TPraos VRF Leader Value Too Big")]
-    TPraosVrfLeaderValueTooBig,
-    /// **Cause:** The VRF output is too large for this pool's stake.
-    /// The pool lost the slot lottery in Praos Protocol
-    #[error("Praos VRF Leader Value Too Big")]
-    PraosVrfLeaderValueTooBig,
+    /// The pool lost the slot lottery
+    #[error("VRF Leader Value Too Big")]
+    VrfLeaderValueTooBig(#[from] VrfLeaderValueTooBigError),
     /// **Cause:** Some data has incorrect bytes
     #[error("TryFromSlice: {0}")]
     TryFromSlice(String),
@@ -279,6 +278,66 @@ impl PraosBadVrfProofError {
         Ok(())
     }
 }
+
+// ------------------------------------------------------------ TPraosVrfLeaderValueTooBigError
+
+/// Reference
+/// https://github.com/IntersectMBO/ouroboros-consensus/blob/e3c52b7c583bdb6708fac4fdaa8bf0b9588f5a88/ouroboros-consensus-protocol/src/ouroboros-consensus-protocol/Ouroboros/Consensus/Protocol/TPraos.hs#L430
+/// https://github.com/IntersectMBO/ouroboros-consensus/blob/e3c52b7c583bdb6708fac4fdaa8bf0b9588f5a88/ouroboros-consensus-protocol/src/ouroboros-consensus-protocol/Ouroboros/Consensus/Protocol/Praos.hs#L527
+///
+/// Check that the certified input natural is valid for being slot leader. This means we check that
+/// p < 1 - (1 - f)^σ
+/// where p = certNat / certNatMax. (certNat is 64bytes for TPraos and 32bytes for Praos)
+
+/// let q = 1 - p and c = ln(1 - f)
+/// then p < 1 - (1 - f)^σ => 1 / (1 - p) < exp(-σ * c) => 1 / q < exp(-σ * c)
+/// Reference
+/// https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/libs/cardano-protocol-tpraos/src/Cardano/Protocol/TPraos/BHeader.hs#L331
+///
+#[derive(Error, Debug, serde::Serialize, serde::Deserialize)]
+pub enum VrfLeaderValueTooBigError {
+    #[error("VRF Leader Value Too Big")]
+    VrfLeaderValueTooBig,
+}
+
+impl VrfLeaderValueTooBigError {
+    pub fn new(
+        leader_vrf_output: &[u8],
+        leader_relative_stake: RationalNumber,
+        active_slot_coeff: RationalNumber,
+    ) -> Result<(), Self> {
+        let certified_leader_vrf = &FixedDecimal::from(leader_vrf_output);
+        let output_size_bits = leader_vrf_output.len() * 8;
+        let cert_nat_max = FixedDecimal::from(UBig::ONE << output_size_bits);
+        let leader_relative_stake = FixedDecimal::from(UBig::from(*leader_relative_stake.numer()))
+            / FixedDecimal::from(UBig::from(*leader_relative_stake.denom()));
+        let active_slot_coeff = FixedDecimal::from(UBig::from(*active_slot_coeff.numer()))
+            / FixedDecimal::from(UBig::from(*active_slot_coeff.denom()));
+
+        let denominator = &cert_nat_max - certified_leader_vrf;
+        let recip_q = &cert_nat_max / &denominator;
+        let c = (&FixedDecimal::from(1u64) - &active_slot_coeff).ln();
+        let x = -(leader_relative_stake * c);
+        let ordering = x.exp_cmp(1000, 3, &recip_q);
+        match ordering.estimation {
+            ExpOrdering::LT => Ok(()),
+            ExpOrdering::GT | ExpOrdering::UNKNOWN => Err(Self::VrfLeaderValueTooBig),
+        }
+    }
+}
+
+/// Check that the certified input natural is valid for being slot leader. This means we check that
+/// p < 1 - (1 - f)^σ
+/// where p = certNat / certNatMax. (certNat is 64bytes for TPraos and 32bytes for Praos)
+
+/// let q = 1 - p and c = ln(1 - f)
+/// then p < 1 - (1 - f)^σ => 1 / (1 - p) < exp(-σ * c) => 1 / q < exp(-σ * c)
+/// Reference
+/// https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/libs/cardano-protocol-tpraos/src/Cardano/Protocol/TPraos/BHeader.hs#L331
+///
+/// NOTE:
+/// We are using Pallas Math Library
+///
 
 // ------------------------------------------------------------ BadVrfProofError
 
