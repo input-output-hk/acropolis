@@ -12,6 +12,8 @@ bulk-block-capacity = 50
 bulk-resume-capacity = 75
 
 # Message routing
+[message-router]
+request-timeout = 300
 [[message-router.route]]  # Everything is internal only
 pattern = "#"
 bus = "internal"

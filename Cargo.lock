@@ -405,6 +405,7 @@ dependencies = [
  "anyhow",
  "caryatid_sdk",
  "config",
+ "futures",
  "hex",
  "pallas 0.33.0",
  "tokio",

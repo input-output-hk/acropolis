@@ -7,11 +7,13 @@ use acropolis_common::{
     commands::transactions::{TransactionsCommand, TransactionsCommandResponse},
     messages::{Command, CommandResponse, Message},
 };
-use anyhow::{Result, bail};
+use anyhow::{Context as _, Result, bail};
 use caryatid_sdk::{Context, Module, module};
 use config::Config;
+use futures::stream::{FuturesUnordered, StreamExt};
 use peer::PeerConfig;
 use tokio::sync::RwLock;
+use tracing::warn;
 
 use crate::{peer::PeerConnection, tx::Transaction};
 
@@ -52,10 +54,21 @@ impl TxSubmitter {
             bail!("unexpected tx request")
         };
         let tx = Arc::new(Transaction::from_bytes(cbor)?);
+        let mut waiting = FuturesUnordered::new();
         for peer in peers {
-            peer.queue(tx.clone())?;
+            let peer_name = peer.name.clone();
+            let receiver = peer.queue(tx.clone())?;
+            waiting.push(async move {
+                receiver.await.context(format!("could not send tx to {peer_name}"))
+            });
         }
-        Ok(TransactionsCommandResponse::Submitted { id: tx.id })
+        while let Some(result) = waiting.next().await {
+            match result {
+                Ok(()) => return Ok(TransactionsCommandResponse::Submitted { id: tx.id }),
+                Err(err) => warn!("{err:#}"),
+            }
+        }
+        bail!("could not send tx to any peers");
     }
 }
 
