@@ -4,6 +4,7 @@ pub mod address;
 pub mod byte_array;
 pub mod calculations;
 pub mod cip19;
+pub mod commands;
 pub mod crypto;
 pub mod genesis_values;
 pub mod hash;
