@@ -1,12 +1,12 @@
 use std::collections::{HashMap, VecDeque};
 
-use acropolis_common::StakeCredential;
+use acropolis_common::StakeAddress;
 
 use crate::state::AccountEntry;
 
 #[derive(Debug, Clone)]
 pub struct VolatileHistoricalAccounts {
-    pub window: VecDeque<HashMap<StakeCredential, AccountEntry>>,
+    pub window: VecDeque<HashMap<StakeAddress, AccountEntry>>,
     pub start_block: u64,
     pub epoch_start_block: u64,
     pub last_persisted_epoch: Option<u64>,
@@ -45,7 +45,7 @@ impl VolatileHistoricalAccounts {
         self.epoch_start_block = block_number;
     }
 
-    pub fn rollback_before(&mut self, block: u64) -> Vec<(StakeCredential, AccountEntry)> {
+    pub fn rollback_before(&mut self, block: u64) -> Vec<(StakeAddress, AccountEntry)> {
         let mut out = Vec::new();
 
         while self.start_block + self.window.len() as u64 >= block {
@@ -58,7 +58,7 @@ impl VolatileHistoricalAccounts {
         out
     }
 
-    pub fn prune_volatile(&mut self) -> Vec<HashMap<StakeCredential, AccountEntry>> {
+    pub fn prune_volatile(&mut self) -> Vec<HashMap<StakeAddress, AccountEntry>> {
         let epoch = self.last_persisted_epoch.map(|e| e + 1).unwrap_or(0);
         let blocks_to_drain = (self.epoch_start_block - self.start_block) as usize;
 
