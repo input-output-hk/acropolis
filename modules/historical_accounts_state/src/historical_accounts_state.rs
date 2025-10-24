@@ -206,10 +206,13 @@ impl HistoricalAccountsState {
                         (state.immutable.clone(), state.config.clone())
                     };
 
+                    info!("sending persist for epoch {}", current_block.epoch);
                     if let Err(e) = persist_tx.send((current_block.epoch as u32, store, cfg)).await
                     {
                         panic!("persistence worker crashed: {e}");
                     }
+
+                    info!("persist send completed");
                 }
             }
 

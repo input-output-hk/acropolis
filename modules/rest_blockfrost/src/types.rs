@@ -856,6 +856,20 @@ impl From<acropolis_common::Value> for AmountList {
 }
 
 #[derive(Serialize)]
+pub struct RegistrationUpdateREST {
+    pub tx_hash: String,
+    pub action: String,
+}
+
+#[derive(Serialize)]
+pub struct DelegationUpdateREST {
+    pub active_epoch: u32,
+    pub tx_hash: String,
+    pub amount: String,
+    pub pool_id: String,
+}
+
+#[derive(Serialize)]
 pub struct AccountWithdrawalREST {
     pub tx_hash: String,
     pub amount: String,
