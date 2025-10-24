@@ -70,12 +70,8 @@ pub fn map_address(address: &addresses::Address) -> Result<Address> {
         addresses::Address::Stake(stake_address) => Ok(Address::Stake(StakeAddress {
             network: map_network(stake_address.network())?,
             credential: match stake_address.payload() {
-                addresses::StakePayload::Stake(hash) => {
-                    StakeCredential::AddrKeyHash(hash.to_vec())
-                }
-                addresses::StakePayload::Script(hash) => {
-                    StakeCredential::ScriptHash(hash.to_vec())
-                }
+                addresses::StakePayload::Stake(hash) => StakeCredential::AddrKeyHash(hash.to_vec()),
+                addresses::StakePayload::Script(hash) => StakeCredential::ScriptHash(hash.to_vec()),
             },
         })),
     }

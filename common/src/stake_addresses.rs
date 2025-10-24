@@ -558,9 +558,7 @@ mod tests {
 
     fn create_stake_address(hash: &[u8]) -> StakeAddress {
         StakeAddress::new(
-            StakeCredential::AddrKeyHash(
-                hash.to_vec().try_into().expect("Invalid hash length"),
-            ),
+            StakeCredential::AddrKeyHash(hash.to_vec().try_into().expect("Invalid hash length")),
             NetworkId::Mainnet,
         )
     }
