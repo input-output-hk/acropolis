@@ -144,7 +144,7 @@ impl PeerWorker {
                 );
                 let mut txs = vec![];
                 for id in ids {
-                    match self.tx_queue.tx_body(&id) {
+                    match self.tx_queue.announced_tx_body(&id) {
                         Some(body) => {
                             debug!("Sending TX {}", hex::encode(id.1));
                             txs.push(body);
@@ -220,7 +220,7 @@ impl TxQueue {
         }
     }
 
-    pub fn tx_body(&self, id: &txsubmission::EraTxId) -> Option<txsubmission::EraTxBody> {
+    pub fn announced_tx_body(&self, id: &txsubmission::EraTxId) -> Option<txsubmission::EraTxBody> {
         self.sent.iter().find(|tx| *tx.tx.id == *id.1).map(|tx| tx.era_tx_body())
     }
 
@@ -228,5 +228,106 @@ impl TxQueue {
         while let Some(tx) = self.sent.pop_back() {
             self.unsent.push_front(tx);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use acropolis_common::TxHash;
+    use tokio::sync::oneshot;
+
+    use crate::{peer::QueuedTx, tx::Transaction};
+
+    use super::TxQueue;
+
+    #[test]
+    fn tx_queue_should_not_ack_unsubmitted_requests() {
+        let mut queue = TxQueue::new();
+        assert!(queue.ack(1).is_err());
+    }
+
+    #[test]
+    fn tx_queue_should_return_no_txs_when_empty() {
+        let queue = TxQueue::new();
+        assert!(queue.req(1).is_empty());
+    }
+
+    #[test]
+    fn tx_queue_should_acknowledge_request() {
+        let (done, done_rx) = oneshot::channel();
+        let tx = QueuedTx {
+            tx: Arc::new(Transaction {
+                id: TxHash::default(),
+                body: vec![],
+                era: 6,
+            }),
+            done,
+        };
+        let id = tx.tx_id_and_size().0;
+        let mut queue = TxQueue::new();
+        queue.push(tx);
+
+        // the TX hasn't been announced yet
+        assert!(queue.announced_tx_body(&id).is_none());
+        assert!(done_rx.is_empty());
+
+        // now the server requests it
+        let ids = queue.req(2);
+        assert_eq!(ids.len(), 1);
+        assert_eq!(ids[0].0.1, id.1);
+        queue.mark_requested(1);
+
+        // the TX has been announced, so the server can request the body
+        assert!(queue.announced_tx_body(&id).is_some());
+        assert!(done_rx.is_empty());
+
+        // the server acks the request. now we're done!
+        assert!(queue.ack(1).is_ok());
+        assert!(queue.announced_tx_body(&id).is_none());
+        assert!(!done_rx.is_empty());
+    }
+
+    #[test]
+    fn tx_queue_should_restart_submission_after_connection_lost() {
+        let (done, done_rx) = oneshot::channel();
+        let tx = QueuedTx {
+            tx: Arc::new(Transaction {
+                id: TxHash::default(),
+                body: vec![],
+                era: 6,
+            }),
+            done,
+        };
+        let id = tx.tx_id_and_size().0;
+        let mut queue = TxQueue::new();
+        queue.push(tx);
+
+        // the TX hasn't been announced yet
+        assert!(queue.announced_tx_body(&id).is_none());
+        assert!(done_rx.is_empty());
+
+        // now the server requests it
+        let ids = queue.req(2);
+        assert_eq!(ids.len(), 1);
+        assert_eq!(ids[0].0.1, id.1);
+        queue.mark_requested(1);
+
+        // the TX has been announced, so the server can request the body
+        assert!(queue.announced_tx_body(&id).is_some());
+        assert!(done_rx.is_empty());
+
+        // uh oh! we disconnected and reconnected before the server acked it.
+        queue.requeue_sent();
+
+        // now we pretend we never sent it
+        assert!(queue.announced_tx_body(&id).is_none());
+        assert!(done_rx.is_empty());
+
+        // and the server can request it again
+        let ids = queue.req(2);
+        assert_eq!(ids.len(), 1);
+        assert_eq!(ids[0].0.1, id.1);
     }
 }

@@ -25,8 +25,10 @@ fn default_config_path() -> PathBuf {
 
 #[derive(clap::Parser, Clone)]
 struct Args {
-    #[arg(long, value_name = "PATH", default_value = default_config_path().into_os_string())]
+    /// Path to configuration.
+    #[arg(long, default_value = default_config_path().into_os_string())]
     config: PathBuf,
+    /// File containing the raw bytes of a transaction.
     tx_file: PathBuf,
 }
 
