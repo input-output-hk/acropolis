@@ -5,11 +5,13 @@
 
 use thiserror::Error;
 
+use crate::ouroboros::vrf_validation::VrfValidationError;
+
 /// Validation error
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error)]
 pub enum ValidationError {
-    #[error("VRF failure")]
-    BadVRF,
+    #[error("VRF failure: {0}")]
+    BadVRF(#[from] VrfValidationError),
 
     #[error("KES failure")]
     BadKES,

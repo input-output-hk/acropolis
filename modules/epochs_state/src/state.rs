@@ -1,4 +1,4 @@
-//! Acropolis epoch activity counter: state storage
+//! Acropolis epochs_state: state storage
 
 use acropolis_common::{
     crypto::keyhash_224,
@@ -89,7 +89,7 @@ impl State {
         }
     }
 
-    // Handle a block header
+    /// Handle a block header
     pub fn handle_block_header(
         &mut self,
         genesis: &GenesisValues,
@@ -177,8 +177,7 @@ impl State {
             };
 
             self.nonces = Some(new_nonces);
-        };
-
+        }
         Ok(())
     }
 
@@ -232,6 +231,10 @@ impl State {
         self.epoch_fees = 0;
 
         epoch_activity
+    }
+
+    pub fn get_nonces(&self) -> Option<Nonces> {
+        self.nonces.clone()
     }
 
     pub fn get_epoch_info(&self) -> EpochActivityMessage {

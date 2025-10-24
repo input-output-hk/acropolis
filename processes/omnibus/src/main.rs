@@ -13,6 +13,7 @@ use acropolis_module_accounts_state::AccountsState;
 use acropolis_module_address_state::AddressState;
 use acropolis_module_assets_state::AssetsState;
 use acropolis_module_block_unpacker::BlockUnpacker;
+use acropolis_module_block_vrf_validator::BlockVrfValidator;
 use acropolis_module_chain_store::ChainStore;
 use acropolis_module_consensus::Consensus;
 use acropolis_module_drdd_state::DRDDState;
@@ -111,6 +112,7 @@ pub async fn main() -> Result<()> {
     ParametersState::register(&mut process);
     StakeDeltaFilter::register(&mut process);
     EpochsState::register(&mut process);
+    BlockVrfValidator::register(&mut process);
     AccountsState::register(&mut process);
     AddressState::register(&mut process);
     AssetsState::register(&mut process);

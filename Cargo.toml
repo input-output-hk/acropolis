@@ -47,6 +47,7 @@ dashmap = "6.1.0"
 hex = "0.4"
 imbl = { version = "5.0.0", features = ["serde"] }
 pallas = "0.33.0"
+pallas-math = "0.33.0"
 pallas-addresses = "0.33.0"
 pallas-crypto = "0.33.0"
 pallas-primitives = "0.33.0"

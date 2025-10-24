@@ -566,6 +566,9 @@ impl TxOutRef {
     }
 }
 
+/// Slot
+pub type Slot = u64;
+
 /// Amount of Ada, in Lovelace
 pub type Lovelace = u64;
 pub type LovelaceDelta = i64;
