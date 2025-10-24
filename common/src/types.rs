@@ -625,15 +625,16 @@ pub struct PotDelta {
     pub delta: LovelaceDelta,
 }
 
+#[serde_as]
 #[derive(
     Debug, Clone, Ord, Eq, PartialEq, PartialOrd, Hash, serde::Serialize, serde::Deserialize,
 )]
 pub enum Credential {
     /// Script hash. NOTE: Order matters when parsing Haskell Node Snapshot data.
-    ScriptHash(KeyHash),
+    ScriptHash(#[serde_as(as = "Hex")] KeyHash),
 
     /// Address key hash
-    AddrKeyHash(KeyHash),
+    AddrKeyHash(#[serde_as(as = "Hex")] KeyHash),
 }
 
 impl Credential {
