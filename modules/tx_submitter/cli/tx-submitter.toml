@@ -1,5 +1,4 @@
 [module.tx-submitter]
-subscribe-topic = "cli.tx.submit"
 
 [module.cli-driver]
 

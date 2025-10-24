@@ -106,7 +106,7 @@ impl CliDriver {
             let request = Arc::new(Message::Command(Command::Transactions(
                 TransactionsCommand::Submit { cbor: tx },
             )));
-            let response = context.request("cli.tx.submit", request).await?;
+            let response = context.request("cardano.txs.submit", request).await?;
             info!("{response:?}");
             Ok(())
         });
