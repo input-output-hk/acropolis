@@ -1,0 +1,88 @@
+name: Weekly Status Markdown
+
+on:
+  schedule:
+    - cron: "0 14 * * MON"   # Mondays 07:00 PT (14:00 UTC)
+  workflow_dispatch:
+
+jobs:
+  build-status:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write # needed to create/update issues
+      pull-requests: write # needed to post/update a PR comment
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: pip install requests
+
+      - name: Get current date
+        id: date
+        run: echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
+
+      - name: Generate weekly status markdown
+        id: gen
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: input-output-hk/acropolis
+          # --- Use ONE of the two approaches below ---
+
+          # A) Projects v2 (recommended):
+          PROJECT_OWNER: input-output-hk
+          PROJECT_NUMBER: 7
+          STATUS_DONE_VALUE: Done
+          STATUS_INPROGRESS_VALUE: In Progress
+
+          # B) Fallback via labels:
+          # DONE_LABELS: "status: done,done"
+          # INPROGRESS_LABELS: "status: in progress,in progress"
+
+          OUTPUT_PATH: artifacts/weekly_status.md
+        run: |
+          mkdir -p artifacts
+          python scripts/weekly_status_markdown.py | tee /tmp/out.md
+          echo "md<<EOF" >> $GITHUB_OUTPUT
+          cat /tmp/out.md >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Upload markdown artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: weekly-status
+          path: artifacts/weekly_status.md
+          if-no-files-found: warn
+
+      # Create GitHub Issue with weekly status
+      - name: Create Weekly Status Issue
+        if: ${{ github.event_name != 'pull_request' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            console.log('Event name:', context.eventName);
+            console.log('Checking if artifacts/weekly_status.md exists...');
+
+            const fs = require('fs');
+            if (!fs.existsSync('artifacts/weekly_status.md')) {
+              console.log('❌ artifacts/weekly_status.md not found!');
+              throw new Error('Weekly status file not found');
+            }
+
+            const content = fs.readFileSync('artifacts/weekly_status.md', 'utf8');
+            console.log('✅ File read successfully, length:', content.length);
+
+            const issue = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `📊 Weekly Status - Week of ${{ steps.date.outputs.date }}`,
+              body: content,
+              labels: ['weekly-status', 'automated']
+            });
+
+            console.log('✅ Issue created successfully:', issue.data.html_url);
