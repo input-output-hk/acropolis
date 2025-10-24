@@ -10,9 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      issues: read
-      pull-requests: read
-      # if you use org/user Projects v2, you may need: project: read
+      issues: write # needed to create/update issues
+      pull-requests: write # needed to post/update a PR comment
     steps:
       - uses: actions/checkout@v4
 
@@ -48,9 +47,9 @@ jobs:
           OUTPUT_PATH: artifacts/weekly_status.md
         run: |
           mkdir -p artifacts
-          python scripts/weekly_status_markdown.py | tee /tmp/weekly_status.md
+          python scripts/weekly_status_markdown.py | tee /tmp/out.md
           echo "md<<EOF" >> $GITHUB_OUTPUT
-          cat /tmp/weekly_status.md >> $GITHUB_OUTPUT
+          cat /tmp/out.md >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Upload markdown artifact
@@ -62,16 +61,28 @@ jobs:
 
       # Create GitHub Issue with weekly status
       - name: Create Weekly Status Issue
+        if: ${{ github.event_name != 'pull_request' }}
         uses: actions/github-script@v7
         with:
           script: |
+            console.log('Event name:', context.eventName);
+            console.log('Checking if artifacts/weekly_status.md exists...');
+
             const fs = require('fs');
+            if (!fs.existsSync('artifacts/weekly_status.md')) {
+              console.log('❌ artifacts/weekly_status.md not found!');
+              throw new Error('Weekly status file not found');
+            }
+
             const content = fs.readFileSync('artifacts/weekly_status.md', 'utf8');
-            
-            await github.rest.issues.create({
+            console.log('✅ File read successfully, length:', content.length);
+
+            const issue = await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
               title: `📊 Weekly Status - Week of ${{ steps.date.outputs.date }}`,
               body: content,
               labels: ['weekly-status', 'automated']
             });
+
+            console.log('✅ Issue created successfully:', issue.data.html_url);
