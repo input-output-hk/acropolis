@@ -6,14 +6,14 @@ on:
     branches:
       - weekly-status-dev
     paths:
-      - "scripts/weekly_confluence_markdown.py"
+      - "scripts/weekly_status_markdown.py"
       - ".github/workflows/weekly-update-dev.yml"
   # run on any PR that targets your default branch and originates from same repo
   pull_request:
     branches:
       - main
     paths:
-      - "scripts/weekly_confluence_markdown.py"
+      - "scripts/weekly_status_markdown.py"
       - ".github/workflows/weekly-update-dev.yml"
   # allow manual runs
   workflow_dispatch:
@@ -60,7 +60,7 @@ jobs:
 
           OUTPUT_PATH: artifacts/weekly_status.md
         run: |
-          python scripts/weekly_confluence_markdown.py | tee /tmp/out.md
+          python scripts/weekly_status_markdown.py | tee /tmp/out.md
           echo "md<<EOF" >> $GITHUB_OUTPUT
           cat /tmp/out.md >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
