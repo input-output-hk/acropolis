@@ -607,6 +607,12 @@ pub struct Withdrawal {
     pub value: Lovelace,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct WithdrawalWithPos {
+    pub withdrawal: Withdrawal,
+    pub tx_identifier: TxIdentifier,
+}
+
 /// Treasury pot account
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum Pot {

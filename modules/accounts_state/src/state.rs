@@ -967,7 +967,7 @@ impl State {
     pub fn handle_withdrawals(&mut self, withdrawals_msg: &WithdrawalsMessage) -> Result<()> {
         for withdrawal in withdrawals_msg.withdrawals.iter() {
             let mut stake_addresses = self.stake_addresses.lock().unwrap();
-            stake_addresses.process_withdrawal(withdrawal);
+            stake_addresses.process_withdrawal(&withdrawal.withdrawal);
         }
 
         Ok(())
@@ -1019,6 +1019,7 @@ mod tests {
         StakeRegistrationAndStakeAndVoteDelegation,
         StakeRegistrationAndStakeAndVoteDelegationWithPos, StakeRegistrationAndVoteDelegation,
         StakeRegistrationAndVoteDelegationWithPos, TxIdentifier, VoteDelegation, Withdrawal,
+        WithdrawalWithPos,
     };
 
     // Helper to create a StakeAddress from a byte slice
@@ -1331,9 +1332,12 @@ mod tests {
 
         // Withdraw most of it
         let withdrawals = WithdrawalsMessage {
-            withdrawals: vec![Withdrawal {
-                address: stake_address.clone(),
-                value: 39,
+            withdrawals: vec![WithdrawalWithPos {
+                withdrawal: Withdrawal {
+                    address: stake_address.clone(),
+                    value: 39,
+                },
+                tx_identifier: TxIdentifier::default(),
             }],
         };
 

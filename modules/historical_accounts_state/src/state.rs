@@ -226,7 +226,16 @@ impl State {
         Ok(())
     }
 
-    pub fn handle_withdrawals(&mut self, _withdrawals: &WithdrawalsMessage) -> Result<()> {
+    pub fn handle_withdrawals(&mut self, withdrawals_msg: &WithdrawalsMessage) -> Result<()> {
+        for withdrawal in &withdrawals_msg.withdrawals {
+            let volatile = self.volatile.window.back_mut().expect("window should never be empty");
+            let entry = volatile.entry(withdrawal.withdrawal.address.clone()).or_default();
+            let withdrawal_entry = AccountWithdrawal {
+                tx_identifier: withdrawal.tx_identifier,
+                amount: withdrawal.withdrawal.value,
+            };
+            entry.withdrawal_history.get_or_insert(Vec::new()).push(withdrawal_entry)
+        }
         Ok(())
     }
 
