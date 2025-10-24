@@ -7,7 +7,9 @@ use acropolis_common::{
     messages::{
         AddressDeltasMessage, StakeRewardDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
     },
-    queries::accounts::{AccountWithdrawal, DelegationUpdate, RegistrationUpdate},
+    queries::accounts::{
+        AccountWithdrawal, DelegationUpdate, RegistrationStatus, RegistrationUpdate,
+    },
     BlockInfo, InstantaneousRewardTarget, PoolId, ShelleyAddress, StakeAddress, StakeCredential,
     TxCertificate, TxIdentifier,
 };
@@ -131,14 +133,14 @@ impl State {
                     self.handle_stake_registration_change(
                         &sc.stake_address,
                         &sc.tx_identifier,
-                        false,
+                        RegistrationStatus::Registered,
                     );
                 }
                 TxCertificate::StakeDeregistration(sc) => {
                     self.handle_stake_registration_change(
                         &sc.stake_address,
                         &sc.tx_identifier,
-                        true,
+                        RegistrationStatus::Deregistered,
                     );
                 }
 
@@ -147,14 +149,14 @@ impl State {
                     self.handle_stake_registration_change(
                         &reg.cert.stake_address,
                         &reg.tx_identifier,
-                        false,
+                        RegistrationStatus::Registered,
                     );
                 }
                 TxCertificate::Deregistration(dreg) => {
                     self.handle_stake_registration_change(
                         &dreg.cert.stake_address,
                         &dreg.tx_identifier,
-                        true,
+                        RegistrationStatus::Deregistered,
                     );
                 }
 
@@ -163,7 +165,7 @@ impl State {
                     self.handle_stake_registration_change(
                         &delegation.cert.stake_address,
                         &delegation.tx_identifier,
-                        false,
+                        RegistrationStatus::Registered,
                     );
                     self.handle_stake_delegation(
                         &delegation.cert.stake_address,
@@ -176,7 +178,7 @@ impl State {
                     self.handle_stake_registration_change(
                         &delegation.cert.stake_address,
                         &delegation.tx_identifier,
-                        false,
+                        RegistrationStatus::Registered,
                     );
                     self.handle_stake_delegation(
                         &delegation.cert.stake_address,
@@ -207,7 +209,7 @@ impl State {
                     self.handle_stake_registration_change(
                         &delegation.cert.stake_address,
                         &delegation.tx_identifier,
-                        false,
+                        RegistrationStatus::Registered,
                     );
                 }
 
@@ -299,13 +301,13 @@ impl State {
         &mut self,
         account: &StakeAddress,
         tx_identifier: &TxIdentifier,
-        deregistered: bool,
+        status: RegistrationStatus,
     ) {
         let volatile = self.volatile.window.back_mut().expect("window should never be empty");
         let entry = volatile.entry(account.clone()).or_default();
         let update = RegistrationUpdate {
             tx_identifier: *tx_identifier,
-            deregistered,
+            status,
         };
         entry.registration_history.get_or_insert_with(Vec::new).push(update);
     }

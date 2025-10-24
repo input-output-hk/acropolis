@@ -270,8 +270,8 @@ impl ImmutableHistoricalAccountStore {
         block_deltas: Vec<HashMap<StakeAddress, AccountEntry>>,
     ) -> HashMap<StakeAddress, AccountEntry> {
         block_deltas.into_par_iter().reduce(HashMap::new, |mut acc, block_map| {
-            for (accont, entry) in block_map {
-                let agg_entry = acc.entry(accont).or_default();
+            for (account, entry) in block_map {
+                let agg_entry = acc.entry(account).or_default();
 
                 Self::extend_opt_vec(&mut agg_entry.reward_history, entry.reward_history);
                 Self::extend_opt_vec(
