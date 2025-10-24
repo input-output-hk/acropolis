@@ -356,29 +356,6 @@ impl ShelleyAddress {
     }
 }
 
-/// Payload of a stake address
-// #[serde_as]
-// #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, Hash)]
-// pub enum StakeAddressPayload {
-//     /// Stake key
-//     StakeKeyHash(#[serde_as(as = "Hex")] KeyHash),
-//
-//     /// Script hash
-//     ScriptHash(#[serde_as(as = "Hex")] ScriptHash),
-// }
-//
-// impl StakeAddressPayload {
-//     // Convert to string - note different encoding from when used as part of a StakeAddress
-//     pub fn to_string(&self) -> Result<String> {
-//         let (hrp, data) = match &self {
-//             Self::StakeKeyHash(data) => (bech32::Hrp::parse("stake_vkh")?, data),
-//             Self::ScriptHash(data) => (bech32::Hrp::parse("script")?, data),
-//         };
-//
-//         Ok(bech32::encode::<bech32::Bech32>(hrp, data)?)
-//     }
-// }
-
 /// A stake address
 #[derive(Debug, Clone, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct StakeAddress {
@@ -391,7 +368,10 @@ pub struct StakeAddress {
 
 impl StakeAddress {
     pub fn new(credential: StakeCredential, network: NetworkId) -> Self {
-        StakeAddress { network, credential }
+        StakeAddress {
+            network,
+            credential,
+        }
     }
 
     pub fn get_hash(&self) -> &[u8] {
@@ -434,7 +414,10 @@ impl StakeAddress {
                 _ => return Err(anyhow!("Unknown header {header} in stake address")),
             };
 
-            return Ok(StakeAddress { network, credential });
+            return Ok(StakeAddress {
+                network,
+                credential,
+            });
         }
 
         Err(anyhow!("Empty stake address data"))
@@ -474,7 +457,10 @@ impl StakeAddress {
             _ => bail!("Unknown header byte {:x} in stake address", data[0]),
         };
 
-        Ok(StakeAddress { network, credential })
+        Ok(StakeAddress {
+            network,
+            credential,
+        })
     }
 
     pub fn to_bytes_key(&self) -> Result<Vec<u8>> {
