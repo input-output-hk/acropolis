@@ -160,6 +160,7 @@ impl ConwayVoting {
     /// Checks whether action_id can be considered finally accepted
     fn is_finally_accepted(
         &self,
+        new_epoch: u64,
         voting_state: &VotingRegistrationState,
         action_id: &GovActionId,
         drep_stake: &HashMap<DRepCredential, Lovelace>,
@@ -172,7 +173,7 @@ impl ConwayVoting {
         let conway_params = self.get_conway_params()?;
         let threshold = voting_state.get_action_thresholds(proposal, conway_params);
 
-        let votes = self.get_actual_votes(action_id, drep_stake, spo_stake)?;
+        let votes = self.get_actual_votes(new_epoch, action_id, drep_stake, spo_stake)?;
         let bootstrap = self.is_bootstrap()?;
         let voted = voting_state.compare_votes(proposal, bootstrap, &votes, &threshold)?;
         let previous_ok = match proposal.gov_action.get_previous_action_id() {
@@ -181,7 +182,7 @@ impl ConwayVoting {
         };
         let accepted = previous_ok && voted;
         info!(
-            "Proposal {action_id}: votes {votes}, thresholds {threshold}, prevous_ok {previous_ok}, \
+            "Proposal {action_id}: new epoch {new_epoch}, votes {votes}, thresholds {threshold}, prevous_ok {previous_ok}, \
              voted {voted}, result {accepted}"
         );
 
@@ -205,6 +206,7 @@ impl ConwayVoting {
     /// voters) are not applied at this stage.
     fn get_actual_votes(
         &self,
+        new_epoch: u64,
         action_id: &GovActionId,
         drep_stake: &HashMap<DRepCredential, Lovelace>,
         spo_stake: &HashMap<KeyHash, DelegatedStake>,
@@ -215,8 +217,9 @@ impl ConwayVoting {
             pool: VoteCount::zero(),
         };
 
-        let all_votes = self.votes.get(&action_id)
-            .ok_or_else(|| anyhow!("Governance action {action_id} missing."))?;
+        let Some(all_votes) = self.votes.get(&action_id) else {
+            return Ok(votes)
+        };
 
         for (voter, (_hash, voting_proc)) in all_votes.iter() {
             let (vc, vd, vp) = match voting_proc.vote {
@@ -228,14 +231,28 @@ impl ConwayVoting {
             };
 
             match voter {
-                Voter::ConstitutionalCommitteeKey(_) => *vc += 1,
-                Voter::ConstitutionalCommitteeScript(_) => *vc += 1,
+                Voter::ConstitutionalCommitteeKey(_keyhash) => {
+                    *vc += 1
+                },
+                Voter::ConstitutionalCommitteeScript(_scripthash) => {
+                    *vc += 1
+                },
                 Voter::DRepKey(key) => {
+                    if tracing::enabled!(tracing::Level::DEBUG) {
+                        debug!("Vote for {action_id}, epoch start {new_epoch}: {voter} = {:?}",
+                            drep_stake.get(&DRepCredential::AddrKeyHash(key.clone()))
+                        );
+                    }
                     drep_stake
                         .get(&DRepCredential::AddrKeyHash(key.clone()))
                         .inspect(|v| *vd += *v);
                 }
                 Voter::DRepScript(script) => {
+                    if tracing::enabled!(tracing::Level::DEBUG) {
+                        debug!("Vote for {action_id}, epoch start {new_epoch}: {voter} = {:?}",
+                            drep_stake.get(&DRepCredential::ScriptHash(script.clone()))
+                        );
+                    }
                     drep_stake
                         .get(&DRepCredential::ScriptHash(script.clone()))
                         .inspect(|v| *vd += *v);
@@ -250,7 +267,7 @@ impl ConwayVoting {
     }
 
     /// Checks whether action is expired at the beginning of new_epoch
-    fn is_expired(&self, new_epoch: u64, action_id: &GovActionId) -> Result<bool> {
+    pub fn is_expired(&self, new_epoch: u64, action_id: &GovActionId) -> Result<bool> {
         info!(
             "Checking whether {} is expired at new epoch {}",
             action_id, new_epoch
@@ -294,7 +311,7 @@ impl ConwayVoting {
 
     /// Checks and updates action_id state at the start of new_epoch
     /// If the action is accepted, returns accepted ProposalProcedure.
-    fn process_one_proposal(
+    pub fn process_one_proposal(
         &mut self,
         new_epoch: u64,
         voting_state: &VotingRegistrationState,
@@ -302,7 +319,7 @@ impl ConwayVoting {
         drep_stake: &HashMap<DRepCredential, Lovelace>,
         spo_stake: &HashMap<KeyHash, DelegatedStake>,
     ) -> Result<Option<VotingOutcome>> {
-        let outcome = self.is_finally_accepted(voting_state, &action_id, drep_stake, spo_stake)?;
+        let outcome = self.is_finally_accepted(new_epoch, voting_state, &action_id, drep_stake, spo_stake)?;
         let expired = self.is_expired(new_epoch, &action_id)?;
         if outcome.accepted || expired {
             self.end_voting(&action_id)?;
@@ -359,7 +376,7 @@ impl ConwayVoting {
 
             let deposit = &elem.voting.procedure.deposit;
             let reward = hex::encode(elem.voting.procedure.reward_account.to_vec());
-            let expire = action_status.voting_epochs.end;
+            let start = action_status.voting_epochs.start;
             let ratification_info = if elem.voting.accepted {
                 format!(
                     "{:?},{:?},,",
@@ -371,15 +388,16 @@ impl ConwayVoting {
             let txid: String = elem.voting.procedure.gov_action_id.transaction_id.encode_hex();
             let idx = elem.voting.procedure.gov_action_id.action_index;
             let ptype = elem.voting.procedure.gov_action.get_action_name();
-            let proc = Self::prepare_quotes(&format!("{:?}", &elem.voting.procedure.gov_action));
+            let prop_procedure = serde_json::to_string(&elem.voting.procedure)?;
+            let proc = Self::prepare_quotes(&prop_procedure);
             let cast = &elem.voting.votes_cast;
             let threshold = &elem.voting.votes_threshold;
 
-            // id,tx_id,index,prev_gov_action_proposal,deposit,return_address,expiration,
+            // id,tx_id,index,prev_gov_action_proposal,deposit,return_address,start,
             // voting_anchor_id,type,description,param_proposal,ratified_epoch,enacted_epoch,
             // dropped_epoch,expired_epoch,votes_cast,votes_threshold
             let res = format!(
-                "{},{txid},{idx},{prev_action},{deposit},{reward},{expire},,{ptype},\"{proc}\",,\
+                "{},{txid},{idx},{prev_action},{deposit},{reward},{start},,{ptype},\"{proc}\",,\
                  {ratification_info},{cast},{threshold}\n",
                 elem.voting.procedure.gov_action_id
             );
@@ -446,7 +464,7 @@ impl ConwayVoting {
         Ok(outcome)
     }
 
-    pub fn log_conway_voting_stats(&self) {
+    pub fn log_conway_voting_stats(&self, new_epoch: u64) {
         info!("*** Current voting stats: ***");
         let mut proposal_procedures =
             self.proposals.keys().cloned().collect::<HashSet<GovActionId>>();
@@ -458,7 +476,7 @@ impl ConwayVoting {
                     format!(" {p:?} ")
                 }
             };
-            info!("{action_id}: {proposal} => {voting_procedure:?}",)
+            info!("Epoch start {new_epoch}, {action_id}: {proposal} => {voting_procedure:?}",)
         }
 
         if !proposal_procedures.is_empty() {
@@ -613,28 +631,6 @@ mod tests {
             voting.action_status.get(&oc2.voting.procedure.gov_action_id).unwrap().expiration_epoch,
             Some(5)
         );
-        Ok(())
-    }
-
-    const MAINNET_EPOCH_POOL_STATS_JSON: &[u8] = include_bytes!("../data/epoch_pool_stats.json");
-
-    #[test]
-    fn test_mainnet_voting_up_573() -> Result<()> {
-        let epoch_pool_stats = serde_json::from_slice::<Vec<(u64, u64, u64, u64, u64)>
-        >(MAINNET_EPOCH_POOL_STATS_JSON)?;
-
-        //let config =
-
-        for vstate_raw in epoch_pool_stats {
-            let epoch = vstate_raw.0;
-            let vstate = VotingRegistrationState::new(
-                vstate_raw.1,
-                vstate_raw.2,
-                vstate_raw.3,
-                vstate_raw.4,
-                7
-            );
-        }
         Ok(())
     }
 

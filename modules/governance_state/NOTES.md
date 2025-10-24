@@ -21,7 +21,7 @@ the end of epoch E+governance_action_validity_period+1.
 In another words, each action is granted 'govActionLifetime' full
 epochs for voting (P is proposal, E is expiration, govActionLifetime is 6):
 
-'---P--|-----|-----|-----|-----|-----|-----|E'
+`---P--|-----|-----|-----|-----|-----|-----|E`
 
 For +1 origin see e.g. `cardano-node/cardano-testnet/src/Testnet/Components/Query.hs`:
 

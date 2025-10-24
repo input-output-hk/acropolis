@@ -127,6 +127,7 @@ impl ParametersState {
 
                             // Commit state on params change
                             if current_params != new_params.params {
+                                info!("NPPX: [{},{}]", block.epoch, serde_json::to_string(&new_params.params)?);
                                 let mut h = history.lock().await;
                                 h.commit(block.epoch, state);
                             }

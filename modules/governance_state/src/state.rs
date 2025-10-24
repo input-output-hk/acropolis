@@ -186,6 +186,8 @@ impl State {
         output.alonzo_babbage_outcomes = self.alonzo_babbage_voting.finalize_voting(new_block)?;
 
         if self.current_era >= Era::Conway {
+            // Last chance to print actual votes; later they'll be cleaned
+            self.conway_voting.log_conway_voting_stats(new_block.epoch);
             let voting_state = self.recalculate_voting_state()?;
             let ratified = self.conway_voting.finalize_conway_voting(
                 &new_block,
@@ -203,7 +205,6 @@ impl State {
                 ratified.len()
             );
 
-            self.conway_voting.log_conway_voting_stats();
             info!(
                 "Conway voting: new epoch {}, outcomes: {ratified:?}",
                 new_block.epoch

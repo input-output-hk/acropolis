@@ -14,12 +14,10 @@ use hex::decode;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_with::{hex::Hex, serde_as};
-use std::collections::{HashMap, HashSet};
-use std::str::FromStr;
-use std::num::ParseIntError;
-use std::fmt::{Display, Formatter};
-use std::ops::{AddAssign, Neg};
-use std::{cmp::Ordering, fmt};
+use std::{
+    cmp::Ordering, collections::{HashMap, HashSet}, fmt, fmt::{Display, Formatter},
+    ops::{AddAssign, Neg}, str::FromStr
+};
 
 #[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NetworkId {
@@ -1682,7 +1680,7 @@ pub struct VotingProcedures {
     pub votes: HashMap<Voter, SingleVoterVotes>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct VoteCount {
     pub yes: u64,
     pub no: u64,
@@ -1713,7 +1711,7 @@ impl FromStr for VoteCount {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self> {
-        let re = Regex::new(r"(\\d+)/(\\d+)/(\\d+)$").unwrap();
+        let re = Regex::new(r"(\d+)/(\d+)/(\d+)$").unwrap();
         let caps = re.captures(s).ok_or_else(|| anyhow!("Invalid VoteCount string: '{s}'"))?;
 
         let yes = u64::from_str(&caps[1])?;
@@ -2090,6 +2088,26 @@ mod tests {
         };
         println!("Json: {}", serde_json::to_string(&proposal)?);
 
+        Ok(())
+    }
+
+    #[test]
+    fn parse_voting_values() -> Result<()> {
+        let count = VoteCount::from_str("0/5/1")?;
+        assert_eq!(count.yes, 0);
+        assert_eq!(count.no, 5);
+        assert_eq!(count.abstain, 1);
+
+        let counts: VoteResult<VoteCount> = VoteResult::from_str(
+            "c0/5/1:d0/1/2:s123/456/0788890"
+        )?;
+        assert_eq!(counts.committee, count);
+        assert_eq!(counts.drep.yes, 0);
+        assert_eq!(counts.drep.no, 1);
+        assert_eq!(counts.drep.abstain, 2);
+        assert_eq!(counts.pool.yes, 123);
+        assert_eq!(counts.pool.no, 456);
+        assert_eq!(counts.pool.abstain, 788890);
         Ok(())
     }
 }
