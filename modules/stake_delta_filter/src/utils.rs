@@ -403,8 +403,9 @@ mod test {
     use crate::*;
     use acropolis_common::{
         messages::AddressDeltasMessage, Address, AddressDelta, BlockHash, BlockInfo, BlockStatus,
-        ByronAddress, Era, ShelleyAddress, ShelleyAddressDelegationPart, ShelleyAddressPaymentPart,
-        ShelleyAddressPointer, StakeAddress, StakeAddressPayload, UTxOIdentifier, ValueDelta,
+        ByronAddress, Era, NetworkId, ShelleyAddress, ShelleyAddressDelegationPart,
+        ShelleyAddressPaymentPart, ShelleyAddressPointer, StakeAddress, StakeAddressPayload,
+        UTxOIdentifier, ValueDelta,
     };
     use bech32::{Bech32, Hrp};
 
@@ -417,13 +418,13 @@ mod test {
         })
     }
 
-    /// Map Pallas Network to our AddressNetwork
-    fn map_network(network: pallas::ledger::addresses::Network) -> Result<AddressNetwork> {
+    /// Map Pallas Network to our NetworkId
+    fn map_network(network: pallas::ledger::addresses::Network) -> Result<NetworkId> {
         use pallas::ledger::addresses::Network;
         match network {
-            Network::Mainnet => Ok(AddressNetwork::Main),
-            Network::Testnet => Ok(AddressNetwork::Test),
-            _ => return Err(anyhow!("Unknown network in address")),
+            Network::Mainnet => Ok(NetworkId::Mainnet),
+            Network::Testnet => Ok(NetworkId::Testnet),
+            _ => Err(anyhow!("Unknown network in address")),
         }
     }
 
