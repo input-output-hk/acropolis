@@ -854,3 +854,9 @@ impl From<acropolis_common::Value> for AmountList {
         Self(out)
     }
 }
+
+#[derive(Serialize)]
+pub struct AccountWithdrawalREST {
+    pub tx_hash: String,
+    pub amount: String,
+}

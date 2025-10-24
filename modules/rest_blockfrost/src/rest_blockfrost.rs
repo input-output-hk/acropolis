@@ -58,11 +58,17 @@ use handlers::{
     },
 };
 
-use crate::handlers_config::HandlersConfig;
+use crate::{
+    handlers::accounts::handle_account_withdrawals_blockfrost, handlers_config::HandlersConfig,
+};
 
 // Accounts topics
 const DEFAULT_HANDLE_SINGLE_ACCOUNT_TOPIC: (&str, &str) =
     ("handle-topic-account-single", "rest.get.accounts.*");
+const DEFAULT_HANDLE_ACCOUNT_WITHDRAWALS_TOPIC: (&str, &str) = (
+    "handle-topic-account-withdrawals",
+    "rest.get.accounts.*.withdrawals",
+);
 
 // Blocks topics
 const DEFAULT_HANDLE_BLOCKS_LATEST_HASH_NUMBER_TOPIC: (&str, &str) =
@@ -247,6 +253,14 @@ impl BlockfrostREST {
             DEFAULT_HANDLE_SINGLE_ACCOUNT_TOPIC,
             handlers_config.clone(),
             handle_single_account_blockfrost,
+        );
+
+        // Handler for /accounts/{stake_address}/withdrawals
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_ACCOUNT_WITHDRAWALS_TOPIC,
+            handlers_config.clone(),
+            handle_account_withdrawals_blockfrost,
         );
 
         // Handler for /blocks/latest, /blocks/{hash_or_number}
