@@ -9,7 +9,6 @@ Data sources (in priority order):
   B) Issue labels (DONE_LABELS / INPROGRESS_LABELS, comma-separated)
 
 Environment:
-  GH_TOKEN                (required) GitHub token with repo read + project read
   REPO                    (required) e.g. "input-output-hk/acropolis"
   # --- For Projects v2 (preferred) ---
   PROJECT_OWNER           (optional) e.g. "input-output-hk" (org login) or user login
@@ -396,12 +395,16 @@ def format_markdown(done_items: List[dict], inprog_items: List[dict]) -> str:
     left  = fmt(done_items)
     right = fmt(inprog_items)
 
-    # 2-column Markdown table (works well when pasted into Confluence that supports markdown)
+    # Two separate sections for easy copying to Confluence
     md = []
-    md.append("| Last week’s achievements | Plans for next week |")
-    md.append("|---|---|")
-    # replace newlines with <br> so lists render in table cells
-    md.append(f"| {left.replace(chr(10), '<br>')} | {right.replace(chr(10), '<br>')} |")
+    md.append("## Last week's achievements")
+    md.append("")
+    md.append(left)
+    md.append("")
+    md.append("## Plans for next week")  
+    md.append("")
+    md.append(right)
+
     return "\n".join(md)
 
 def main():
