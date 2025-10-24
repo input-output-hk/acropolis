@@ -15,7 +15,7 @@ use acropolis_common::{
         utils::query_state,
     },
     serialization::Bech32WithHrp,
-    NetworkId, StakeAddress, StakeAddressPayload,
+    NetworkId, StakeAddress, StakeCredential,
 };
 use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
@@ -508,7 +508,7 @@ pub async fn handle_epoch_total_stakes_blockfrost(
         .map(|(pool_id, stake_key_hash, amount)| {
             let stake_address = StakeAddress {
                 network: network.clone(),
-                payload: StakeAddressPayload::StakeKeyHash(stake_key_hash),
+                credential: StakeCredential::AddrKeyHash(stake_key_hash),
             }
             .to_string()
             .map_err(|e| anyhow::anyhow!("Failed to convert stake address to string: {e}"))?;
@@ -642,10 +642,10 @@ pub async fn handle_epoch_pool_stakes_blockfrost(
     .await?;
     let spdd_response = spdd
         .into_iter()
-        .map(|(stake_key_hash, amount)| {
+        .map(|(key_hash, amount)| {
             let stake_address = StakeAddress {
                 network: network.clone(),
-                payload: StakeAddressPayload::StakeKeyHash(stake_key_hash),
+                credential: StakeCredential::AddrKeyHash(key_hash),
             }
             .to_string()
             .map_err(|e| anyhow::anyhow!("Failed to convert stake address to string: {e}"))?;
