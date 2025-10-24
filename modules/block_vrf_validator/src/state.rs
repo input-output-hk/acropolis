@@ -2,9 +2,9 @@
 
 use acropolis_common::{
     genesis_values::GenesisValues,
-    messages::ProtocolParamsMessage,
+    messages::{EpochNoncesMessage, ProtocolParamsMessage},
     ouroboros::vrf_validation::VrfValidationError,
-    protocol_params::{PraosParams, ShelleyParams},
+    protocol_params::{Nonces, PraosParams, ShelleyParams},
     BlockInfo,
 };
 use anyhow::Result;
@@ -17,6 +17,9 @@ pub struct State {
 
     // protocol parameter for Praos and TPraos
     pub praos_params: Option<PraosParams>,
+
+    // epoch nonces
+    pub epoch_nonces: Option<Nonces>,
 }
 
 impl State {
@@ -24,6 +27,7 @@ impl State {
         Self {
             praos_params: None,
             shelly_params: None,
+            epoch_nonces: None,
         }
     }
 
@@ -33,6 +37,11 @@ impl State {
             self.shelly_params = Some(shelly_params.clone());
             self.praos_params = Some(shelly_params.into());
         }
+    }
+
+    /// Handle epoch nonces updates
+    pub fn handle_epoch_nonces(&mut self, msg: &EpochNoncesMessage) {
+        self.epoch_nonces = Some(msg.nonces.clone());
     }
 
     pub fn validate_block_vrf(

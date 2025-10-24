@@ -112,7 +112,7 @@ pub async fn main() -> Result<()> {
     ParametersState::register(&mut process);
     StakeDeltaFilter::register(&mut process);
     EpochsState::register(&mut process);
-    // BlockVrfValidator::register(&mut process);
+    BlockVrfValidator::register(&mut process);
     AccountsState::register(&mut process);
     AddressState::register(&mut process);
     AssetsState::register(&mut process);

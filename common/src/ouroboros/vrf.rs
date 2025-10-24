@@ -106,9 +106,9 @@ impl VrfInput {
     ///
     /// # Returns
     /// 32-byte input for VRF function
-    /// 
+    ///
     /// https://github.com/IntersectMBO/ouroboros-consensus/blob/e3c52b7c583bdb6708fac4fdaa8bf0b9588f5a88/ouroboros-consensus-protocol/src/ouroboros-consensus-protocol/Ouroboros/Consensus/Protocol/Praos/VRF.hs#L67
-    /// 
+    ///
     pub fn mk_vrf_input(absolute_slot_number: u64, epoch_nonce: &Nonce) -> Self {
         let mut hasher = Blake2b::<U32>::new();
         let mut data = Vec::<u8>::with_capacity(8 + 32);
@@ -173,7 +173,7 @@ impl Proof {
     }
 }
 
-#[derive(Error, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Error, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum ProofFromBytesError {
     #[error("Decompression from Edwards point failed.")]
     DecompressionFailed,
@@ -208,7 +208,7 @@ impl From<&Proof> for [u8; Proof::HASH_SIZE] {
 
 /// error that can be returned if the verification of a [`VrfProof`] fails
 /// see [`VrfProof::verify`]
-#[derive(Error, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Error, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[error("VRF proof verification failed: {:?}", .0)]
 pub struct ProofVerifyError(
     #[from]
@@ -218,7 +218,7 @@ pub struct ProofVerifyError(
 );
 
 mod serde_remote {
-    #[derive(serde::Serialize, serde::Deserialize)]
+    #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
     #[serde(remote = "super::VrfError")]
     pub enum VrfError {
         VerificationFailed,

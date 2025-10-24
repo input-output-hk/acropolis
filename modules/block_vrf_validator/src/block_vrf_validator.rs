@@ -43,8 +43,8 @@ impl BlockVrfValidator {
     async fn run(
         history: Arc<Mutex<StateHistory<State>>>,
         mut bootstrapped_subscription: Box<dyn Subscription<Message>>,
-        mut protocol_parameters_subscription: Box<dyn Subscription<Message>>,
         mut blocks_subscription: Box<dyn Subscription<Message>>,
+        mut protocol_parameters_subscription: Box<dyn Subscription<Message>>,
         mut epoch_nonces_subscription: Box<dyn Subscription<Message>>,
     ) -> Result<()> {
         let (_, bootstrapped_message) = bootstrapped_subscription.read().await?;
@@ -61,9 +61,8 @@ impl BlockVrfValidator {
         loop {
             // Get a mutable state
             let mut state = history.lock().await.get_or_init_with(|| State::new());
-
-            // Read both topics in parallel
             let (_, message) = blocks_subscription.read().await?;
+
             match message.as_ref() {
                 Message::Cardano((block_info, CardanoMessage::BlockAvailable(block_msg))) => {
                     // handle rollback here
@@ -74,13 +73,24 @@ impl BlockVrfValidator {
 
                     // read protocol parameters if new epoch
                     if is_new_epoch {
-                        let (_, protocol_parameters_msg) =
-                            protocol_parameters_subscription.read().await?;
-                        if let Message::Cardano((_, CardanoMessage::ProtocolParams(params))) =
-                            protocol_parameters_msg.as_ref()
-                        {
-                            state.handle_protocol_parameters(params);
+                        let protocol_parameters_message_f = protocol_parameters_subscription.read();
+                        let epoch_nonces_message_f = epoch_nonces_subscription.read();
+                        let (_, protocol_parameters_msg) = protocol_parameters_message_f.await?;
+                        let (_, epoch_nonces_msg) = epoch_nonces_message_f.await?;
+
+                        match protocol_parameters_msg.as_ref() {
+                            Message::Cardano((_, CardanoMessage::ProtocolParams(msg))) => {
+                                state.handle_protocol_parameters(msg);
+                            }
+                            _ => error!("Unexpected message type: {protocol_parameters_msg:?}"),
                         }
+
+                        match epoch_nonces_msg.as_ref() {
+                            Message::Cardano((_, CardanoMessage::EpochNonces(msg))) => {
+                                state.handle_epoch_nonces(msg);
+                            }
+                            _ => error!("Unexpected message type: {epoch_nonces_msg:?}"),
+                        };
                     }
 
                     // decode header
@@ -167,8 +177,8 @@ impl BlockVrfValidator {
             Self::run(
                 history,
                 bootstrapped_subscription,
-                protocol_parameters_subscription,
                 blocks_subscription,
+                protocol_parameters_subscription,
                 epoch_nonces_subscription,
             )
             .await

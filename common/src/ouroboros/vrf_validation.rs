@@ -12,7 +12,7 @@ use thiserror::Error;
 
 /// Reference
 /// https://github.com/IntersectMBO/ouroboros-consensus/blob/e3c52b7c583bdb6708fac4fdaa8bf0b9588f5a88/ouroboros-consensus-protocol/src/ouroboros-consensus-protocol/Ouroboros/Consensus/Protocol/Praos.hs#L342
-#[derive(Error, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Error, Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum VrfValidationError {
     /// **Cause:** The Shelley protocol parameters used to validate the block,
     #[error("{0}")]
@@ -60,7 +60,7 @@ pub enum VrfValidationError {
 
 // ------------------------------------------------------------ WrongGenesisLeaderVrfKeyError
 
-#[derive(Error, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Error, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[error(
     "Wrong Genesis Leader VRF Key: Genesis Key={}, Registered VRF Hash={}, Header VRF Hash={}",
     hex::encode(&genesis_key),
@@ -94,7 +94,7 @@ impl WrongGenesisLeaderVrfKeyError {
 
 // ------------------------------------------------------------ WrongLeaderVrfKeyError
 
-#[derive(Error, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Error, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[error(
     "Wrong Leader VRF Key: Pool ID={}, Registered VRF Hash={}, Header VRF Hash={}",
     hex::encode(&pool_id),
@@ -127,7 +127,7 @@ impl WrongLeaderVrfKeyError {
 
 // ------------------------------------------------------------ TPraosBadNonceVrfProofError
 
-#[derive(Error, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Error, Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum TPraosBadNonceVrfProofError {
     #[error("Bad Nonce VRF Proof: Slot={0}, Epoch Nonce={1}, Bad VRF Proof={2}")]
     BadVrfProof(Slot, Nonce, BadVrfProofError),
@@ -165,7 +165,7 @@ impl TPraosBadNonceVrfProofError {
 
 // ------------------------------------------------------------ TPraosBadLeaderVrfProofError
 
-#[derive(Error, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Error, Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum TPraosBadLeaderVrfProofError {
     #[error("Bad Leader VRF Proof: Slot={0}, Epoch Nonce={1}, Bad VRF Proof={2}")]
     BadVrfProof(Slot, Nonce, BadVrfProofError),
@@ -203,7 +203,7 @@ impl TPraosBadLeaderVrfProofError {
 
 // ------------------------------------------------------------ PraosBadVrfProofError
 
-#[derive(Error, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Error, Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum PraosBadVrfProofError {
     #[error("Bad VRF proof: Slot={0}, Epoch Nonce={1}, Bad VRF Proof={2}")]
     BadVrfProof(Slot, Nonce, BadVrfProofError),
@@ -294,7 +294,7 @@ impl PraosBadVrfProofError {
 /// Reference
 /// https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/libs/cardano-protocol-tpraos/src/Cardano/Protocol/TPraos/BHeader.hs#L331
 ///
-#[derive(Error, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Error, Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum VrfLeaderValueTooBigError {
     #[error("VRF Leader Value Too Big")]
     VrfLeaderValueTooBig,
@@ -341,7 +341,7 @@ impl VrfLeaderValueTooBigError {
 
 // ------------------------------------------------------------ BadVrfProofError
 
-#[derive(Error, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Error, Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum BadVrfProofError {
     #[error("Malformed VRF proof: {0}")]
     MalformedProof(#[from] vrf::ProofFromBytesError),
