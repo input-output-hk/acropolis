@@ -17,6 +17,9 @@ pub enum VrfValidationError {
     /// **Cause:** The Shelley protocol parameters used to validate the block,
     #[error("{0}")]
     InvalidShelleyParams(String),
+    /// **Cause:** The Issuer Key is missing from the block header
+    #[error("Missing Issuer Key")]
+    MissingIssuerKey,
     /// **Cause:** The VRF key is missing from the block header
     #[error("Missing VRF Key")]
     MissingVrfVkey,

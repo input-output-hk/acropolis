@@ -48,13 +48,6 @@ const DEFAULT_EPOCH_ACTIVITY_PUBLISH_TOPIC: (&str, &str) =
 const DEFAULT_EPOCH_NONCES_PUBLISH_TOPIC: (&str, &str) =
     ("epoch-nonces-publish-topic", "cardano.epoch.nonces");
 
-// store block header cbor
-fn write_header_cbor(header: &MultiEraHeader) -> Result<()> {
-    let mut file = std::fs::File::create("4576496.cbor")?;
-    file.write_all(hex::encode(header.cbor()).as_bytes())?;
-    Ok(())
-}
-
 /// Epochs State module
 #[module(
     message_type(Message),
@@ -139,12 +132,6 @@ impl EpochsState {
                             }
                         };
                     });
-
-                    if let Some(header) = header.as_ref() {
-                        if block_info.number == 4576496 {
-                            write_header_cbor(header);
-                        }
-                    }
 
                     if is_new_epoch {
                         let ea = state.end_epoch(block_info);

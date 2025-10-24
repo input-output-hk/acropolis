@@ -1,11 +1,13 @@
+use crate::crypto::keyhash_224;
 use crate::ouroboros::overlay_shedule::OBftSlot;
 use crate::ouroboros::vrf_validation::{
     TPraosBadLeaderVrfProofError, TPraosBadNonceVrfProofError, VrfValidation, VrfValidationError,
-    WrongGenesisLeaderVrfKeyError,
+    WrongGenesisLeaderVrfKeyError, WrongLeaderVrfKeyError,
 };
 use crate::ouroboros::{overlay_shedule, vrf};
 use crate::protocol_params::Nonce;
 use crate::rational_number::RationalNumber;
+use crate::PoolId;
 use crate::{genesis_values::GenesisDelegs, protocol_params::PraosParams, BlockInfo};
 use anyhow::Result;
 use pallas::ledger::primitives::VrfCert;
@@ -32,8 +34,45 @@ pub fn validate_vrf_tpraos<'a>(
 
     match obft_slot {
         None => {
-            // Regular Praos/TPraos rules apply
-            Ok(vec![])
+            let Some(issuer_vkey) = header.issuer_vkey() else {
+                return Ok(vec![Box::new(|| Err(VrfValidationError::MissingIssuerKey))]);
+            };
+            let pool_id: PoolId = keyhash_224(issuer_vkey);
+
+            let Some(vrf_vkey) = header.vrf_vkey() else {
+                return Ok(vec![Box::new(|| Err(VrfValidationError::MissingVrfVkey))]);
+            };
+            let declared_vrf_key: &[u8; vrf::PublicKey::HASH_SIZE] = vrf_vkey
+                .try_into()
+                .map_err(|_| VrfValidationError::TryFromSlice("Invalid Vrf Key".to_string()))?;
+            let nonce_vrf_cert =
+                nonce_vrf_cert(header).ok_or(VrfValidationError::TPraosMissingNonceVrfCert)?;
+            let leader_vrf_cert =
+                leader_vrf_cert(header).ok_or(VrfValidationError::TPraosMissingLeaderVrfCert)?;
+
+            // Regular TPraos rules apply
+            Ok(vec![
+                Box::new(move || {
+                    TPraosBadNonceVrfProofError::new(
+                        block_info.slot,
+                        epoch_nonce,
+                        &vrf::PublicKey::from(declared_vrf_key),
+                        &nonce_vrf_cert.0.to_vec()[..],
+                        &nonce_vrf_cert.1.to_vec()[..],
+                    )?;
+                    Ok(())
+                }),
+                Box::new(move || {
+                    TPraosBadLeaderVrfProofError::new(
+                        block_info.slot,
+                        epoch_nonce,
+                        &vrf::PublicKey::from(declared_vrf_key),
+                        &leader_vrf_cert.0.to_vec()[..],
+                        &leader_vrf_cert.1.to_vec()[..],
+                    )?;
+                    Ok(())
+                }),
+            ])
         }
         Some(OBftSlot::ActiveSlot(genesis_key, gen_deleg)) => {
             // The given genesis key has authority to produce a block in this
