@@ -1,0 +1,52 @@
+name: Weekly Status Markdown
+
+on:
+  schedule:
+    - cron: "0 14 * * MON"   # Mondays 07:00 PT (14:00 UTC)
+  workflow_dispatch:
+
+jobs:
+  build-status:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+      # if you use org/user Projects v2, you may need: project: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: pip install requests
+
+      - name: Generate weekly status markdown
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: input-output-hk/acropolis
+          # --- Use ONE of the two approaches below ---
+
+          # A) Projects v2 (recommended):
+          PROJECT_OWNER: input-output-hk
+          PROJECT_NUMBER: 7
+          STATUS_DONE_VALUE: Done
+          STATUS_INPROGRESS_VALUE: In Progress
+
+          # B) Fallback via labels:
+          # DONE_LABELS: "status: done,done"
+          # INPROGRESS_LABELS: "status: in progress,in progress"
+
+          OUTPUT_PATH: artifacts/weekly_status.md
+        run: |
+          python scripts/weekly_status_markdown.py
+
+      - name: Upload markdown artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: weekly-status
+          path: artifacts/weekly_status.md
+          if-no-files-found: warn
