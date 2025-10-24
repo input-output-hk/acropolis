@@ -11,10 +11,14 @@ use acropolis_common::{
         DEFAULT_BLOCKS_QUERY_TOPIC,
     },
     queries::misc::Order,
+    queries::transactions::{
+        TransactionInfo, TransactionsStateQuery, TransactionsStateQueryResponse,
+        DEFAULT_TRANSACTIONS_QUERY_TOPIC,
+    },
     state_history::{StateHistory, StateHistoryStore},
     BechOrdAddress, BlockHash, GenesisDelegate, HeavyDelegate, TxHash, VRFKey,
 };
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{module, Context, Module};
 use config::Config;
 use std::collections::{BTreeMap, HashMap};
@@ -22,7 +26,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::error;
 
-use crate::stores::{fjall::FjallStore, Block, Store};
+use crate::stores::{fjall::FjallStore, Block, Store, Tx};
 
 const DEFAULT_BLOCKS_TOPIC: &str = "cardano.block.body";
 const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: &str = "cardano.protocol.parameters";
@@ -45,6 +49,9 @@ impl ChainStore {
         let block_queries_topic = config
             .get_string(DEFAULT_BLOCKS_QUERY_TOPIC.0)
             .unwrap_or(DEFAULT_BLOCKS_QUERY_TOPIC.1.to_string());
+        let txs_queries_topic = config
+            .get_string(DEFAULT_TRANSACTIONS_QUERY_TOPIC.0)
+            .unwrap_or(DEFAULT_TRANSACTIONS_QUERY_TOPIC.1.to_string());
 
         let store_type = config.get_string("store").unwrap_or(DEFAULT_STORE.to_string());
         let store: Arc<dyn Store> = match store_type.as_str() {
@@ -77,6 +84,25 @@ impl ChainStore {
                 let res = Self::handle_blocks_query(&query_store, &state, &query)
                     .unwrap_or_else(|err| BlocksStateQueryResponse::Error(err.to_string()));
                 Arc::new(Message::StateQueryResponse(StateQueryResponse::Blocks(res)))
+            }
+        });
+
+        let query_store = store.clone();
+        context.handle(&txs_queries_topic, move |req| {
+            let query_store = query_store.clone();
+            async move {
+                let Message::StateQuery(StateQuery::Transactions(query)) = req.as_ref() else {
+                    return Arc::new(Message::StateQueryResponse(
+                        StateQueryResponse::Transactions(TransactionsStateQueryResponse::Error(
+                            "Invalid message for txs-state".into(),
+                        )),
+                    ));
+                };
+                let res = Self::handle_txs_query(&query_store, &query)
+                    .unwrap_or_else(|err| TransactionsStateQueryResponse::Error(err.to_string()));
+                Arc::new(Message::StateQueryResponse(
+                    StateQueryResponse::Transactions(res),
+                ))
             }
         });
 
@@ -515,6 +541,38 @@ impl ChainStore {
             })
             .collect();
         Ok(BlockInvolvedAddresses { addresses })
+    }
+
+    fn to_tx_info(tx: Tx) -> Result<TransactionInfo> {
+        let block = pallas_traverse::MultiEraBlock::decode(&tx.block.bytes)?;
+        let txs = block.txs();
+        let Some(tx) = txs.get(tx.index as usize) else {
+            return Err(anyhow!("Transaction not found in block for given index"));
+        };
+        Ok(TransactionInfo {
+            hash: TxHash(*tx.hash()),
+            block: BlockHash(*block.hash()),
+            block_height: block.number(),
+        })
+    }
+
+    fn handle_txs_query(
+        store: &Arc<dyn Store>,
+        query: &TransactionsStateQuery,
+    ) -> Result<TransactionsStateQueryResponse> {
+        match query {
+            TransactionsStateQuery::GetTransactionInfo { tx_hash } => {
+                let Some(tx) = store.get_tx_by_hash(tx_hash.as_ref())? else {
+                    return Ok(TransactionsStateQueryResponse::NotFound);
+                };
+                Ok(TransactionsStateQueryResponse::TransactionInfo(
+                    Self::to_tx_info(tx)?,
+                ))
+            }
+            _ => Ok(TransactionsStateQueryResponse::Error(
+                "Unimplemented".to_string(),
+            )),
+        }
     }
 
     fn handle_new_params(state: &mut State, message: Arc<Message>) -> Result<()> {

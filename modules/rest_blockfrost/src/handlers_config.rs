@@ -10,6 +10,7 @@ use acropolis_common::queries::{
     parameters::DEFAULT_PARAMETERS_QUERY_TOPIC,
     pools::DEFAULT_POOLS_QUERY_TOPIC,
     spdd::DEFAULT_SPDD_QUERY_TOPIC,
+    transactions::DEFAULT_TRANSACTIONS_QUERY_TOPIC,
     utxos::DEFAULT_UTXOS_QUERY_TOPIC,
 };
 use config::Config;
@@ -27,6 +28,7 @@ pub struct HandlersConfig {
     pub governance_query_topic: String,
     pub epochs_query_topic: String,
     pub spdd_query_topic: String,
+    pub transactions_query_topic: String,
     pub parameters_query_topic: String,
     pub utxos_query_topic: String,
     pub external_api_timeout: u64,
@@ -71,6 +73,10 @@ impl From<Arc<Config>> for HandlersConfig {
             .get_string(DEFAULT_PARAMETERS_QUERY_TOPIC.0)
             .unwrap_or(DEFAULT_PARAMETERS_QUERY_TOPIC.1.to_string());
 
+        let transactions_query_topic = config
+            .get_string(DEFAULT_TRANSACTIONS_QUERY_TOPIC.0)
+            .unwrap_or(DEFAULT_TRANSACTIONS_QUERY_TOPIC.1.to_string());
+
         let utxos_query_topic = config
             .get_string(DEFAULT_UTXOS_QUERY_TOPIC.0)
             .unwrap_or(DEFAULT_UTXOS_QUERY_TOPIC.1.to_string());
@@ -97,6 +103,7 @@ impl From<Arc<Config>> for HandlersConfig {
             governance_query_topic,
             epochs_query_topic,
             spdd_query_topic,
+            transactions_query_topic,
             parameters_query_topic,
             utxos_query_topic,
             external_api_timeout,

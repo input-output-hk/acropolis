@@ -1,6 +1,13 @@
+use crate::{BlockHash, TxHash};
+
+pub const DEFAULT_TRANSACTIONS_QUERY_TOPIC: (&str, &str) = (
+    "transactions-state-query-topic",
+    "cardano.query.transactions",
+);
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum TransactionsStateQuery {
-    GetTransactionInfo,
+    GetTransactionInfo { tx_hash: TxHash },
     GetTransactionUTxOs,
     GetTransactionStakeCertificates,
     GetTransactionDelegationCertificates,
@@ -35,7 +42,11 @@ pub enum TransactionsStateQueryResponse {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct TransactionInfo {}
+pub struct TransactionInfo {
+    pub hash: TxHash,
+    pub block: BlockHash,
+    pub block_height: u64,
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TransactionUTxOs {}
