@@ -144,10 +144,7 @@ impl HistoricalAccountsState {
 
                     Self::check_sync(&current_block, &block_info);
                     let mut state = state_mutex.lock().await;
-                    state
-                        .handle_tx_certificates(tx_certs_msg, block_info.epoch as u32)
-                        .inspect_err(|e| error!("TxCertificates handling error: {e:#}"))
-                        .ok();
+                    state.handle_tx_certificates(tx_certs_msg, block_info.epoch as u32);
                 }
 
                 _ => error!("Unexpected message type: {certs_message:?}"),
@@ -165,10 +162,7 @@ impl HistoricalAccountsState {
 
                     Self::check_sync(&current_block, &block_info);
                     let mut state = state_mutex.lock().await;
-                    state
-                        .handle_withdrawals(withdrawals_msg)
-                        .inspect_err(|e| error!("Withdrawals handling error: {e:#}"))
-                        .ok();
+                    state.handle_withdrawals(withdrawals_msg);
                 }
 
                 _ => error!("Unexpected message type: {message:?}"),
@@ -343,7 +337,14 @@ impl HistoricalAccountsState {
                             Err(e) => AccountsStateQueryResponse::Error(e.to_string()),
                         }
                     }
-
+                    AccountsStateQuery::GetAccountWithdrawalHistory { account } => {
+                        match state.lock().await.get_withdrawal_history(&account).await {
+                            Ok(withdrawals) => {
+                                AccountsStateQueryResponse::AccountWithdrawalHistory(withdrawals)
+                            }
+                            Err(e) => AccountsStateQueryResponse::Error(e.to_string()),
+                        }
+                    }
                     _ => AccountsStateQueryResponse::Error(format!(
                         "Unimplemented query variant: {:?}",
                         query

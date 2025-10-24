@@ -118,11 +118,7 @@ impl State {
         Ok(())
     }
 
-    pub fn handle_tx_certificates(
-        &mut self,
-        tx_certs: &TxCertificatesMessage,
-        epoch: u32,
-    ) -> Result<()> {
+    pub fn handle_tx_certificates(&mut self, tx_certs: &TxCertificatesMessage, epoch: u32) {
         // Handle certificates
         for tx_cert in tx_certs.certificates.iter() {
             match tx_cert {
@@ -219,24 +215,26 @@ impl State {
                 _ => (),
             };
         }
-        Ok(())
     }
 
     pub fn handle_address_deltas(&mut self, _address_deltas: &AddressDeltasMessage) -> Result<()> {
         Ok(())
     }
 
-    pub fn handle_withdrawals(&mut self, withdrawals_msg: &WithdrawalsMessage) -> Result<()> {
-        for withdrawal in &withdrawals_msg.withdrawals {
-            let volatile = self.volatile.window.back_mut().expect("window should never be empty");
-            let entry = volatile.entry(withdrawal.withdrawal.address.clone()).or_default();
-            let withdrawal_entry = AccountWithdrawal {
-                tx_identifier: withdrawal.tx_identifier,
-                amount: withdrawal.withdrawal.value,
-            };
-            entry.withdrawal_history.get_or_insert(Vec::new()).push(withdrawal_entry)
+    pub fn handle_withdrawals(&mut self, withdrawals_msg: &WithdrawalsMessage) {
+        let window = self.volatile.window.back_mut().expect("window should never be empty");
+
+        for w in &withdrawals_msg.withdrawals {
+            window
+                .entry(w.withdrawal.address.clone())
+                .or_default()
+                .withdrawal_history
+                .get_or_insert_with(Vec::new)
+                .push(AccountWithdrawal {
+                    tx_identifier: w.tx_identifier,
+                    amount: w.withdrawal.value,
+                })
         }
-        Ok(())
     }
 
     pub async fn _get_reward_history(
@@ -293,11 +291,19 @@ impl State {
         Ok(mirs)
     }
 
-    pub async fn _get_withdrawal_history(
+    pub async fn get_withdrawal_history(
         &self,
-        _account: &StakeAddress,
+        account: &StakeAddress,
     ) -> Result<Vec<AccountWithdrawal>> {
-        Ok(Vec::new())
+        let mut withdrawals =
+            self.immutable.get_withdrawal_history(&account).await?.unwrap_or_default();
+
+        self.merge_volatile_history(
+            &account,
+            |e| e.withdrawal_history.as_ref(),
+            &mut withdrawals,
+        );
+        Ok(withdrawals)
     }
 
     pub async fn _get_addresses(&self, _account: StakeAddress) -> Result<Vec<ShelleyAddress>> {

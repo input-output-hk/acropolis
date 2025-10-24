@@ -235,7 +235,7 @@ impl ImmutableHistoricalAccountStore {
         Ok((!immutable_mirs.is_empty()).then_some(immutable_mirs))
     }
 
-    pub async fn _get_withdrawal_history(
+    pub async fn get_withdrawal_history(
         &self,
         account: &StakeAddress,
     ) -> Result<Option<Vec<AccountWithdrawal>>> {
