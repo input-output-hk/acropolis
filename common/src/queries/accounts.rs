@@ -118,7 +118,17 @@ pub struct RegistrationUpdate {
     #[n(0)]
     pub tx_identifier: TxIdentifier,
     #[n(1)]
-    pub deregistered: bool,
+    pub status: RegistrationStatus,
+}
+
+#[derive(
+    Debug, Clone, serde::Serialize, serde::Deserialize, minicbor::Decode, minicbor::Encode,
+)]
+pub enum RegistrationStatus {
+    #[n(0)]
+    Registered,
+    #[n(1)]
+    Deregistered,
 }
 
 #[derive(
