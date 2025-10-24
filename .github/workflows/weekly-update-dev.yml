@@ -20,7 +20,7 @@ on:
 
 permissions:
   contents: read
-  issues: read
+  issues: write # needed to create/update issues  
   pull-requests: write # needed to post/update a PR comment
 
 concurrency:
@@ -41,6 +41,10 @@ jobs:
       - name: Install deps
         run: pip install requests
 
+      - name: Get current date
+        id: date
+        run: echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
+
       - name: Generate weekly markdown
         id: gen
         env:
@@ -48,11 +52,11 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: input-output-hk/acropolis
 
-          # ---- If you have a Projects (v2) board, uncomment and set these:
-          # PROJECT_OWNER: input-output-hk
-          # PROJECT_NUMBER: 7
-          # STATUS_DONE_VALUE: Done
-          # STATUS_INPROGRESS_VALUE: In Progress
+          # ---- Projects (v2) board integration:
+          PROJECT_OWNER: input-output-hk
+          PROJECT_NUMBER: 7
+          STATUS_DONE_VALUE: Done
+          STATUS_INPROGRESS_VALUE: In Progress
 
           # ---- Or fall back to labels during dev:
           # DONE_LABELS: "status: done,done"
@@ -60,6 +64,7 @@ jobs:
 
           OUTPUT_PATH: artifacts/weekly_status.md
         run: |
+          mkdir -p artifacts
           python scripts/weekly_status_markdown.py | tee /tmp/out.md
           echo "md<<EOF" >> $GITHUB_OUTPUT
           cat /tmp/out.md >> $GITHUB_OUTPUT
@@ -71,6 +76,23 @@ jobs:
           name: weekly-status-dev
           path: artifacts/weekly_status.md
           if-no-files-found: warn
+
+      # Create GitHub Issue with weekly status (for testing)
+      - name: Create Weekly Status Issue (DEV)
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const content = fs.readFileSync('artifacts/weekly_status.md', 'utf8');
+            
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `📊 Weekly Status (DEV TEST) - ${{ steps.date.outputs.date }}`,
+              body: content,
+              labels: ['weekly-status', 'dev-test']
+            });
 
       # Post or update a sticky PR comment with the Markdown (only on PR events)
       - name: Create/Update PR comment
