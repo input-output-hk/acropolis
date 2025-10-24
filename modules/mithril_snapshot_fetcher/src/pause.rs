@@ -52,7 +52,7 @@ impl PauseType {
                 if block_info.new_epoch {
                     return block_info.epoch == *target_epoch;
                 }
-                return false;
+                false
             }
             PauseType::Block(target_block) => block_info.number == *target_block,
             PauseType::NoPause => false,

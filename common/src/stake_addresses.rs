@@ -544,7 +544,7 @@ impl StakeAddressMap {
 
 #[cfg(test)]
 mod tests {
-    use crate::{AddressNetwork, StakeAddress, StakeAddressPayload};
+    use crate::{NetworkId, StakeAddress, StakeAddressPayload};
 
     use super::*;
 
@@ -561,7 +561,7 @@ mod tests {
             StakeAddressPayload::StakeKeyHash(
                 hash.to_vec().try_into().expect("Invalid hash length"),
             ),
-            AddressNetwork::Main,
+            NetworkId::Mainnet,
         )
     }
 

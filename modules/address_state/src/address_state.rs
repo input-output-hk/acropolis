@@ -90,7 +90,7 @@ impl AddressState {
                 if let Message::Cardano((ref block_info, CardanoMessage::ProtocolParams(params))) =
                     message.as_ref()
                 {
-                    Self::check_sync(&current_block, &block_info, "params");
+                    Self::check_sync(&current_block, block_info, "params");
                     let mut state = state_mutex.lock().await;
                     state.volatile.start_new_epoch(block_info.number);
                     if let Some(shelley) = &params.params.shelley {
@@ -209,21 +209,21 @@ impl AddressState {
                 let state = state_mutex.lock().await;
                 let response = match query {
                     AddressStateQuery::GetAddressUTxOs { address } => {
-                        match state.get_address_utxos(&address).await {
+                        match state.get_address_utxos(address).await {
                             Ok(Some(utxos)) => AddressStateQueryResponse::AddressUTxOs(utxos),
                             Ok(None) => AddressStateQueryResponse::NotFound,
                             Err(e) => AddressStateQueryResponse::Error(e.to_string()),
                         }
                     }
                     AddressStateQuery::GetAddressTransactions { address } => {
-                        match state.get_address_transactions(&address).await {
+                        match state.get_address_transactions(address).await {
                             Ok(Some(txs)) => AddressStateQueryResponse::AddressTransactions(txs),
                             Ok(None) => AddressStateQueryResponse::NotFound,
                             Err(e) => AddressStateQueryResponse::Error(e.to_string()),
                         }
                     }
                     AddressStateQuery::GetAddressTotals { address } => {
-                        match state.get_address_totals(&address).await {
+                        match state.get_address_totals(address).await {
                             Ok(totals) => AddressStateQueryResponse::AddressTotals(totals),
                             Err(e) => AddressStateQueryResponse::Error(e.to_string()),
                         }

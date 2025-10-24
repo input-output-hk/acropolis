@@ -19,11 +19,11 @@ use acropolis_common::{
 };
 use std::collections::{HashMap, HashSet};
 
-/// Map Pallas Network to our AddressNetwork
-pub fn map_network(network: addresses::Network) -> Result<AddressNetwork> {
+/// Map Pallas Network to our NetworkId
+pub fn map_network(network: addresses::Network) -> Result<NetworkId> {
     match network {
-        addresses::Network::Mainnet => Ok(AddressNetwork::Main),
-        addresses::Network::Testnet => Ok(AddressNetwork::Test),
+        addresses::Network::Mainnet => Ok(NetworkId::Mainnet),
+        addresses::Network::Testnet => Ok(NetworkId::Testnet),
         _ => Err(anyhow!("Unknown network in address")),
     }
 }

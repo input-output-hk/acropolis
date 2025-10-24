@@ -84,18 +84,15 @@ impl State {
         msg: &TxCertificatesMessage,
     ) -> Result<()> {
         for cert in msg.certificates.iter() {
-            match cert {
-                TxCertificate::StakeRegistration(reg) => {
-                    let ptr = ShelleyAddressPointer {
-                        slot: block.slot,
-                        tx_index: reg.tx_index,
-                        cert_index: reg.cert_index,
-                    };
+            if let TxCertificate::StakeRegistration(reg) = cert {
+                let ptr = ShelleyAddressPointer {
+                    slot: block.slot,
+                    tx_index: reg.tx_index,
+                    cert_index: reg.cert_index,
+                };
 
-                    // Sets pointer; updates max processed slot
-                    self.pointer_cache.set_pointer(ptr, reg.stake_address.clone(), block.slot);
-                }
-                _ => (),
+                // Sets pointer; updates max processed slot
+                self.pointer_cache.set_pointer(ptr, reg.stake_address.clone(), block.slot);
             }
         }
         Ok(())

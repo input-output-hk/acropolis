@@ -19,11 +19,28 @@ use std::fmt::{Display, Formatter};
 use std::ops::{AddAssign, Neg};
 use std::{cmp::Ordering, fmt};
 
-#[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Network identifier
+#[derive(
+    Debug,
+    Clone,
+    Default,
+    PartialEq,
+    Eq,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    minicbor::Encode,
+    minicbor::Decode,
+)]
 pub enum NetworkId {
-    Testnet,
+    /// Main
+    #[n(0)]
     #[default]
     Mainnet,
+
+    /// Test
+    #[n(1)]
+    Testnet,
 }
 
 impl From<String> for NetworkId {

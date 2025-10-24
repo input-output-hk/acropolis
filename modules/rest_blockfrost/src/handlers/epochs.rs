@@ -15,7 +15,7 @@ use acropolis_common::{
         utils::query_state,
     },
     serialization::Bech32WithHrp,
-    AddressNetwork, StakeAddress, StakeAddressPayload,
+    NetworkId, StakeAddress, StakeAddressPayload,
 };
 use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
@@ -467,8 +467,8 @@ pub async fn handle_epoch_total_stakes_blockfrost(
     .await?;
 
     let network = match current_network.as_str() {
-        "mainnet" => AddressNetwork::Main,
-        "testnet" => AddressNetwork::Test,
+        "mainnet" => NetworkId::Mainnet,
+        "testnet" => NetworkId::Testnet,
         unknown => {
             return Ok(RESTResponse::with_text(
                 500,
@@ -603,8 +603,8 @@ pub async fn handle_epoch_pool_stakes_blockfrost(
     .await?;
 
     let network = match current_network.as_str() {
-        "mainnet" => AddressNetwork::Main,
-        "testnet" => AddressNetwork::Test,
+        "mainnet" => NetworkId::Mainnet,
+        "testnet" => NetworkId::Testnet,
         unknown => {
             return Ok(RESTResponse::with_text(
                 500,
