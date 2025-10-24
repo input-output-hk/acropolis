@@ -112,7 +112,7 @@ impl GenesisBootstrapper {
                         }
                     };
                 info!("Reading genesis for '{network_name}'");
-                let shelley_genesis_hash = hash_genesis_bytes(&shelley_genesis);
+                let shelley_genesis_hash = hash_genesis_bytes(shelley_genesis);
 
                 // Read genesis data
                 let byron_genesis: ByronGenesisFile = serde_json::from_slice(byron_genesis)

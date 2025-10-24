@@ -73,7 +73,7 @@ impl FetcherConfig {
         let actual = if config.get_string(keydef.0).is_ok() {
             config
                 .get::<T>(keydef.0)
-                .or_else(|e| Err(anyhow!("cannot parse {} value: {e}", keydef.0)))?
+                .map_err(|e| anyhow!("cannot parse {} value: {e}", keydef.0))?
         } else {
             keydef.1
         };
