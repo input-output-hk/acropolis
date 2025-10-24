@@ -38,9 +38,19 @@ impl From<String> for NetworkId {
 
 /// Protocol era
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+    Debug,
+    Default,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    serde::Serialize,
+    serde::Deserialize,
 )]
 pub enum Era {
+    #[default]
     Byron,
     Shelley,
     Allegra,
@@ -48,12 +58,6 @@ pub enum Era {
     Alonzo,
     Babbage,
     Conway,
-}
-
-impl Default for Era {
-    fn default() -> Era {
-        Era::Byron
-    }
 }
 
 impl From<Era> for u8 {
@@ -230,6 +234,10 @@ impl AssetName {
         self.len as usize
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
     pub fn as_slice(&self) -> &[u8] {
         &self.bytes[..self.len as usize]
     }
@@ -347,7 +355,7 @@ impl From<&Value> for ValueDelta {
                     let nas_delta = nas
                         .iter()
                         .map(|na| NativeAssetDelta {
-                            name: na.name.clone(),
+                            name: na.name,
                             amount: na.amount as i64,
                         })
                         .collect();
@@ -636,8 +644,7 @@ impl Credential {
             Err(anyhow!(
                 "Incorrect credential {}, expected scriptHash- or keyHash- prefix",
                 credential
-            )
-            .into())
+            ))
         }
     }
 
@@ -1555,7 +1562,7 @@ pub struct Committee {
 
 impl Committee {
     pub fn is_empty(&self) -> bool {
-        return self.members.len() == 0;
+        self.members.is_empty()
     }
 }
 
@@ -1626,7 +1633,7 @@ pub enum Voter {
 impl Voter {
     pub fn to_bech32(&self, hrp: &str, buf: &[u8]) -> String {
         let voter_hrp: Hrp = Hrp::parse(hrp).unwrap();
-        bech32::encode::<Bech32>(voter_hrp, &buf)
+        bech32::encode::<Bech32>(voter_hrp, buf)
             .unwrap_or_else(|e| format!("Cannot convert {:?} to bech32: {e}", self))
     }
 }
@@ -1634,13 +1641,13 @@ impl Voter {
 impl Display for Voter {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Voter::ConstitutionalCommitteeKey(h) => write!(f, "{}", self.to_bech32("cc_hot", &h)),
+            Voter::ConstitutionalCommitteeKey(h) => write!(f, "{}", self.to_bech32("cc_hot", h)),
             Voter::ConstitutionalCommitteeScript(s) => {
-                write!(f, "{}", self.to_bech32("cc_hot_script", &s))
+                write!(f, "{}", self.to_bech32("cc_hot_script", s))
             }
-            Voter::DRepKey(k) => write!(f, "{}", self.to_bech32("drep", &k)),
-            Voter::DRepScript(s) => write!(f, "{}", self.to_bech32("drep_script", &s)),
-            Voter::StakePoolKey(k) => write!(f, "{}", self.to_bech32("pool", &k)),
+            Voter::DRepKey(k) => write!(f, "{}", self.to_bech32("drep", k)),
+            Voter::DRepScript(s) => write!(f, "{}", self.to_bech32("drep_script", s)),
+            Voter::StakePoolKey(k) => write!(f, "{}", self.to_bech32("pool", k)),
         }
     }
 }
@@ -1892,17 +1899,12 @@ impl AddressTotals {
         for (policy, assets) in &delta.assets {
             for a in assets {
                 if a.amount > 0 {
-                    Self::apply_asset(
-                        &mut self.received.assets,
-                        *policy,
-                        a.name.clone(),
-                        a.amount as u64,
-                    );
+                    Self::apply_asset(&mut self.received.assets, *policy, a.name, a.amount as u64);
                 } else if a.amount < 0 {
                     Self::apply_asset(
                         &mut self.sent.assets,
                         *policy,
-                        a.name.clone(),
+                        a.name,
                         a.amount.unsigned_abs(),
                     );
                 }

@@ -254,7 +254,7 @@ impl State {
             total_outputs: self.epoch_outputs,
             total_fees: self.epoch_fees,
             spo_blocks: self.blocks_minted.iter().map(|(k, v)| (k.clone(), *v)).collect(),
-            nonce: self.nonces.as_ref().map(|n| n.active.hash.clone()).flatten(),
+            nonce: self.nonces.as_ref().and_then(|n| n.active.hash),
         }
     }
 

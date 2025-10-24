@@ -121,10 +121,7 @@ impl State {
 
         let store = self.immutable.clone();
 
-        let mut combined: Vec<TxIdentifier> = match store.get_txs(address).await? {
-            Some(db) => db,
-            None => Vec::new(),
-        };
+        let mut combined: Vec<TxIdentifier> = store.get_txs(address).await?.unwrap_or_default();
 
         for map in self.volatile.window.iter() {
             if let Some(entry) = map.get(address) {
@@ -148,10 +145,7 @@ impl State {
 
         let store = self.immutable.clone();
 
-        let mut totals = match store.get_totals(address).await? {
-            Some(db) => db,
-            None => AddressTotals::default(),
-        };
+        let mut totals = store.get_totals(address).await?.unwrap_or_default();
 
         for map in self.volatile.window.iter() {
             if let Some(entry) = map.get(address) {

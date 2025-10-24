@@ -23,6 +23,26 @@ jobs:
       - name: Run Format
         run: cargo fmt --all -- --check
 
+      - name: Run Clippy
+        run: |
+          cargo clippy \
+            --package acropolis_common \
+            --package acropolis_codec \
+            --package acropolis_module_address_state \
+            --package acropolis_module_assets_state \
+            --package acropolis_module_block_unpacker \
+            --package acropolis_module_chain_store \
+            --package acropolis_module_consensus \
+            --package acropolis_module_drdd_state \
+            --package acropolis_module_epochs_state \
+            --package acropolis_module_genesis_bootstrapper \
+            --package acropolis_module_mithril_snapshot_fetcher \
+            --package acropolis_module_snapshot_bootstrapper \
+            --package acropolis_module_spdd_state \
+            --package acropolis_module_stake_delta_filter \
+            --package acropolis_module_upstream_chain_fetcher \
+            --package acropolis_module_utxo_state
+
       - name: Run Build
         run: cargo build --verbose
 

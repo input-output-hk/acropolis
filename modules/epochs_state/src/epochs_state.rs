@@ -134,9 +134,9 @@ impl EpochsState {
                     });
 
                     if is_new_epoch {
-                        let ea = state.end_epoch(&block_info);
+                        let ea = state.end_epoch(block_info);
                         // update epochs history
-                        epochs_history.handle_epoch_activity(&block_info, &ea);
+                        epochs_history.handle_epoch_activity(block_info, &ea);
                         // publish epoch activity message
                         epoch_activity_publisher.publish(&block_info, ea).await.unwrap_or_else(
                             |e| error!("Failed to publish epoch activity messages: {e}"),
@@ -173,7 +173,7 @@ impl EpochsState {
                     span.in_scope(|| {
                         if let Some(header) = header.as_ref() {
                             if let Some(issuer_vkey) = header.issuer_vkey() {
-                                state.handle_mint(&block_info, &issuer_vkey);
+                                state.handle_mint(block_info, issuer_vkey);
                             }
                         }
                     });
@@ -189,8 +189,8 @@ impl EpochsState {
                     let span =
                         info_span!("epochs_state.handle_block_txs", block = block_info.number);
                     span.in_scope(|| {
-                        Self::check_sync(&current_block, &block_info);
-                        state.handle_block_txs(&block_info, txs_msg);
+                        Self::check_sync(&current_block, block_info);
+                        state.handle_block_txs(block_info, txs_msg);
                     });
                 }
 
