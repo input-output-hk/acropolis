@@ -2,8 +2,8 @@
 
 use crate::snapshot::{Snapshot, SnapshotSPO};
 use acropolis_common::{
-    protocol_params::ShelleyParams, rational_number::RationalNumber, KeyHash, Lovelace,
-    RewardAccount, SPORewards,
+    protocol_params::ShelleyParams, rational_number::RationalNumber, KeyHash, Lovelace, SPORewards,
+    StakeAddress,
 };
 use anyhow::{bail, Result};
 use bigdecimal::{BigDecimal, One, ToPrimitive, Zero};
@@ -24,7 +24,7 @@ pub enum RewardType {
 #[derive(Debug, Clone)]
 pub struct RewardDetail {
     /// Account reward paid to
-    pub account: RewardAccount,
+    pub account: StakeAddress,
 
     /// Type of reward
     pub rtype: RewardType,
@@ -59,8 +59,8 @@ pub fn calculate_rewards(
     staking: Arc<Snapshot>,
     params: &ShelleyParams,
     stake_rewards: Lovelace,
-    registrations: &HashSet<KeyHash>,
-    deregistrations: &HashSet<KeyHash>,
+    registrations: &HashSet<StakeAddress>,
+    deregistrations: &HashSet<StakeAddress>,
 ) -> Result<RewardsResult> {
     let mut result = RewardsResult::default();
     result.epoch = epoch;
@@ -128,13 +128,10 @@ pub fn calculate_rewards(
         // Also, to handle the early Shelley timing bug, we allow it if it was registered
         // during the current epoch
         if !pay_to_pool_reward_account {
-            debug!(
-                "Checking old reward account {}",
-                hex::encode(&staking_spo.reward_account)
-            );
+            debug!("Checking old reward account {}", staking_spo.reward_account);
 
             // Note we use the staking reward account - it could have changed
-            pay_to_pool_reward_account = registrations.contains(&staking_spo.reward_account)
+            pay_to_pool_reward_account = registrations.contains(&staking_spo.reward_account);
         }
 
         // There was a bug in the original node from Shelley until Allegra where if multiple SPOs
@@ -155,7 +152,7 @@ pub fn calculate_rewards(
                         warn!("Shelley shared reward account bug: Dropping reward to {} in favour of {} on shared account {}",
                               hex::encode(&operator_id),
                               hex::encode(&other_id),
-                              hex::encode(&staking_spo.reward_account));
+                              staking_spo.reward_account);
                         break;
                     }
                 }
@@ -236,7 +233,7 @@ fn calculate_spo_rewards(
     params: &ShelleyParams,
     staking: Arc<Snapshot>,
     pay_to_pool_reward_account: bool,
-    deregistrations: &HashSet<KeyHash>,
+    deregistrations: &HashSet<StakeAddress>,
 ) -> Vec<RewardDetail> {
     // Active stake (sigma)
     let pool_stake = BigDecimal::from(spo.total_stake);
@@ -326,18 +323,18 @@ fn calculate_spo_rewards(
             .with_scale(0);
         let costs = &fixed_cost + &margin_cost;
 
-        // Pay the delegators - split remainder in proportional to delegated stake,
+        // Pay the delegators - split the remainder proportional to the delegated stake,
         // * as it was 2 epochs ago *
 
         // You'd think this was just (pool_rewards - costs) here, but the Haskell code recalculates
         // the margin without the relative_owner_stake term !?
-        // Note keeping fractional part, which is non-obvious
+        // Note keeping the fractional part, which is non-obvious
         let to_delegators = (&pool_rewards - &fixed_cost) * (BigDecimal::one() - &margin);
         let mut total_paid: u64 = 0;
         let mut delegators_paid: usize = 0;
         if !to_delegators.is_zero() {
             let total_stake = BigDecimal::from(spo.total_stake);
-            for (hash, stake) in &spo.delegators {
+            for (delegator_stake_address, stake) in &spo.delegators {
                 let proportion = BigDecimal::from(stake) / &total_stake;
 
                 // and hence how much of the total reward they get
@@ -345,39 +342,38 @@ fn calculate_spo_rewards(
                 let to_pay = reward.with_scale(0).to_u64().unwrap_or(0);
 
                 debug!("Reward stake {stake} -> proportion {proportion} of SPO rewards {to_delegators} -> {to_pay} to hash {}",
-                       hex::encode(hash));
+                       delegator_stake_address);
 
                 // Pool owners don't get member rewards (seems unfair!)
-                if spo.pool_owners.contains(hash) {
+                if spo.pool_owners.contains(&delegator_stake_address) {
                     debug!(
                         "Skipping pool owner reward account {}, losing {to_pay}",
-                        hex::encode(hash)
+                        delegator_stake_address
                     );
                     continue;
                 }
 
-                // Check pool's reward address - removing e1 prefix
-                // TODO use StakeAddress.get_hash()
-                if spo.reward_account[1..] == *hash {
+                // Check pool's reward address
+                if &spo.reward_account == delegator_stake_address {
                     debug!(
                         "Skipping pool reward account {}, losing {to_pay}",
-                        hex::encode(hash)
+                        delegator_stake_address
                     );
                     continue;
                 }
 
                 // Check if it was deregistered between staking and now
-                if deregistrations.contains(hash) {
+                if deregistrations.contains(delegator_stake_address) {
                     info!(
                         "Recently deregistered member account {}, losing {to_pay}",
-                        hex::encode(hash)
+                        delegator_stake_address
                     );
                     continue;
                 }
 
                 // Transfer from reserves to this account
                 rewards.push(RewardDetail {
-                    account: hash.clone(),
+                    account: delegator_stake_address.clone(),
                     rtype: RewardType::Member,
                     amount: to_pay,
                 });
@@ -394,8 +390,7 @@ fn calculate_spo_rewards(
 
     if pay_to_pool_reward_account {
         rewards.push(RewardDetail {
-            // TODO Hack to remove e1 header - needs resolving properly with StakeAddress
-            account: RewardAccount::from(&spo.reward_account[1..]),
+            account: spo.reward_account.clone(),
             rtype: RewardType::Leader,
             amount: spo_benefit,
         });
@@ -403,7 +398,7 @@ fn calculate_spo_rewards(
         info!(
             "SPO {}'s reward account {} not paid {}",
             hex::encode(&operator_id),
-            hex::encode(&spo.reward_account),
+            spo.reward_account,
             spo_benefit,
         );
     }

@@ -15,6 +15,15 @@ sync-point = "snapshot"
 node-address = "backbone.cardano.iog.io:3001"
 magic-number = 764824073
 
+[module.consensus]
+# List of validation result topics to listen on
+validators = [
+# Add these once they are actually being sent
+#           "cardano.validation.vrf",
+#           "cardano.validation.kes",
+#           "cardano.validation.utxo"
+]
+
 [module.block-unpacker]
 
 [module.rest-blockfrost]
@@ -26,6 +35,7 @@ publish-withdrawals-topic = "cardano.withdrawals"
 publish-certificates-topic = "cardano.certificates"
 publish-governance-topic = "cardano.governance"
 publish-block-txs-topic = "cardano.block.txs"
+network-name = "mainnet"
 
 [module.utxo-state]
 store = "memory" # "memory", "dashmap", "fjall", "fjall-async", "sled", "sled-async", "fake"
@@ -53,6 +63,8 @@ store-stake-addresses = false
 # Enables active_stakes in /epochs/latest | {number} endpoints
 # Enables /epochs/{number}/{next | previous}
 store-spdd = false
+
+[module.historical-accounts-state]
 
 [module.drep-state]
 # Enables /governance/dreps/{drep_id} endpoint (Requires store-delegators to be enabled)
@@ -83,14 +95,9 @@ write-full-cache = "false"
 store-history = false
 
 [module.accounts-state]
-# Store SPDD history
-# Enable /epochs/{number}/stakes, /epochs/{number}/stakes/{pool_id} endpoints
-store-spdd-history = false
-# SPDD database path (only used when store-spdd-history is enabled)
+# Enable /epochs/{number}/stakes & /epochs/{number}/stakes/{pool_id} endpoints
+spdd-retention-epochs = 0
 spdd-db-path = "./spdd_db"
-# Number of epochs to retain in SPDD history
-# Example: 73
-spdd-retention-epochs = "none"
 # Verify against captured CSV
 verify-pots-file = "../../modules/accounts_state/test-data/pots.mainnet.csv"
 verify-rewards-files = "../../modules/accounts_state/test-data/rewards.mainnet.{}.csv"

@@ -57,7 +57,7 @@ impl State {
     // we plus 2 to epoch number
     pub fn get_epoch_total_active_stakes(&self, epoch: u64) -> Option<u64> {
         if epoch <= 2 {
-            return None;
+            None
         } else {
             self.spdd_history
                 .get_by_index(epoch - 2)

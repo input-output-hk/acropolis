@@ -12,6 +12,12 @@ pub struct VarIntEncoder {
 }
 
 /// Variable-length integer encoder
+impl Default for VarIntEncoder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl VarIntEncoder {
     /// Construct
     pub fn new() -> Self {

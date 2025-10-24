@@ -86,9 +86,7 @@ impl StakeDeltaFilterParams {
 
     fn conf_enum<'a, T: Deserialize<'a>>(config: &Arc<Config>, keydef: (&str, T)) -> Result<T> {
         if config.get_string(keydef.0).is_ok() {
-            config
-                .get::<T>(keydef.0)
-                .or_else(|e| Err(anyhow!("cannot parse {} value: {e}", keydef.0)))
+            config.get::<T>(keydef.0).map_err(|e| anyhow!("cannot parse {} value: {e}", keydef.0))
         } else {
             Ok(keydef.1)
         }
@@ -175,9 +173,9 @@ impl StakeDeltaFilter {
                             block = block_info.number
                         );
                         async {
-                            let msg = process_message(&cache, &delta, &block_info, None);
+                            let msg = process_message(&cache, delta, block_info, None);
                             publisher
-                                .publish(&block_info, msg)
+                                .publish(block_info, msg)
                                 .await
                                 .unwrap_or_else(|e| error!("Publish error: {e}"))
                         }

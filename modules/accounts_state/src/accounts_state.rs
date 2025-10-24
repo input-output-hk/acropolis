@@ -8,6 +8,7 @@ use acropolis_common::{
     BlockInfo, BlockStatus,
 };
 use anyhow::Result;
+use bigdecimal::Zero;
 use caryatid_sdk::{message_bus::Subscription, module, Context, Module};
 use config::Config;
 use std::sync::Arc;
@@ -49,9 +50,8 @@ const DEFAULT_SPO_REWARDS_TOPIC: &str = "cardano.spo.rewards";
 const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: &str = "cardano.protocol.parameters";
 const DEFAULT_STAKE_REWARD_DELTAS_TOPIC: &str = "cardano.stake.reward.deltas";
 
-const DEFAULT_STORE_SPDD_HISTORY: (&str, bool) = ("store-spdd-history", false);
 const DEFAULT_SPDD_DB_PATH: (&str, &str) = ("spdd-db-path", "./spdd_db");
-const DEFAULT_SPDD_RETENTION_EPOCHS: &str = "spdd-retention-epochs";
+const DEFAULT_SPDD_RETENTION_EPOCHS: (&str, u64) = ("spdd-retention-epochs", 0);
 
 /// Accounts State module
 #[module(
@@ -420,11 +420,6 @@ impl AccountsState {
             .unwrap_or(DEFAULT_STAKE_REWARD_DELTAS_TOPIC.to_string());
         info!("Creating stake reward deltas subscriber on '{stake_reward_deltas_topic}'");
 
-        // store spdd history config
-        let store_spdd_history =
-            config.get_bool(DEFAULT_STORE_SPDD_HISTORY.0).unwrap_or(DEFAULT_STORE_SPDD_HISTORY.1);
-        info!("Store SPDD history: {}", store_spdd_history);
-
         let spdd_db_path =
             config.get_string(DEFAULT_SPDD_DB_PATH.0).unwrap_or(DEFAULT_SPDD_DB_PATH.1.to_string());
 
@@ -437,24 +432,12 @@ impl AccountsState {
             current_dir.join(&spdd_db_path).to_string_lossy().to_string()
         };
 
-        // Get retention epochs configuration (None = unlimited)
+        // Get SPDD retention epochs configuration
         let spdd_retention_epochs = config
-            .get_int(DEFAULT_SPDD_RETENTION_EPOCHS)
-            .ok()
-            .and_then(|v| if v > 0 { Some(v as u64) } else { None });
+            .get_int(DEFAULT_SPDD_RETENTION_EPOCHS.0)
+            .unwrap_or(DEFAULT_SPDD_RETENTION_EPOCHS.1 as i64)
+            .max(0) as u64;
         info!("SPDD retention epochs: {:?}", spdd_retention_epochs);
-
-        if store_spdd_history {
-            info!("SPDD database path: {}", spdd_db_path);
-            match spdd_retention_epochs {
-                Some(epochs) => info!(
-                    "SPDD retention: {} epochs (~{} GB max)",
-                    epochs,
-                    (epochs as f64 * 0.12).ceil()
-                ),
-                None => info!("SPDD retention: unlimited (no automatic pruning)"),
-            }
-        }
 
         // Query topics
         let accounts_query_topic = config
@@ -484,7 +467,7 @@ impl AccountsState {
         let history_tick = history.clone();
 
         // Spdd store
-        let spdd_store = if store_spdd_history {
+        let spdd_store = if !spdd_retention_epochs.is_zero() {
             Some(Arc::new(Mutex::new(SPDDStore::load(
                 std::path::Path::new(&spdd_db_path),
                 spdd_retention_epochs,
@@ -521,8 +504,8 @@ impl AccountsState {
                 };
 
                 let response = match query {
-                    AccountsStateQuery::GetAccountInfo { stake_key } => {
-                        if let Some(account) = state.get_stake_state(stake_key) {
+                    AccountsStateQuery::GetAccountInfo { stake_address } => {
+                        if let Some(account) = state.get_stake_state(stake_address) {
                             AccountsStateQueryResponse::AccountInfo(AccountInfo {
                                 utxo_value: account.utxo_value,
                                 rewards: account.rewards,
@@ -558,14 +541,16 @@ impl AccountsState {
                         })
                     }
 
-                    AccountsStateQuery::GetAccountsDrepDelegationsMap { stake_keys } => match state
-                        .get_drep_delegations_map(stake_keys)
-                    {
-                        Some(map) => AccountsStateQueryResponse::AccountsDrepDelegationsMap(map),
-                        None => AccountsStateQueryResponse::Error(
-                            "Error retrieving DRep delegations map".to_string(),
-                        ),
-                    },
+                    AccountsStateQuery::GetAccountsDrepDelegationsMap { stake_addresses } => {
+                        match state.get_drep_delegations_map(stake_addresses) {
+                            Some(map) => {
+                                AccountsStateQueryResponse::AccountsDrepDelegationsMap(map)
+                            }
+                            None => AccountsStateQueryResponse::Error(
+                                "Error retrieving DRep delegations map".to_string(),
+                            ),
+                        }
+                    }
 
                     AccountsStateQuery::GetOptimalPoolSizing => {
                         AccountsStateQueryResponse::OptimalPoolSizing(
@@ -573,8 +558,8 @@ impl AccountsState {
                         )
                     }
 
-                    AccountsStateQuery::GetAccountsUtxoValuesMap { stake_keys } => {
-                        match state.get_accounts_utxo_values_map(stake_keys) {
+                    AccountsStateQuery::GetAccountsUtxoValuesMap { stake_addresses } => {
+                        match state.get_accounts_utxo_values_map(stake_addresses) {
                             Some(map) => AccountsStateQueryResponse::AccountsUtxoValuesMap(map),
                             None => AccountsStateQueryResponse::Error(
                                 "One or more accounts not found".to_string(),
@@ -582,8 +567,8 @@ impl AccountsState {
                         }
                     }
 
-                    AccountsStateQuery::GetAccountsUtxoValuesSum { stake_keys } => {
-                        match state.get_accounts_utxo_values_sum(stake_keys) {
+                    AccountsStateQuery::GetAccountsUtxoValuesSum { stake_addresses } => {
+                        match state.get_accounts_utxo_values_sum(stake_addresses) {
                             Some(sum) => AccountsStateQueryResponse::AccountsUtxoValuesSum(sum),
                             None => AccountsStateQueryResponse::Error(
                                 "One or more accounts not found".to_string(),
@@ -591,8 +576,8 @@ impl AccountsState {
                         }
                     }
 
-                    AccountsStateQuery::GetAccountsBalancesMap { stake_keys } => {
-                        match state.get_accounts_balances_map(stake_keys) {
+                    AccountsStateQuery::GetAccountsBalancesMap { stake_addresses } => {
+                        match state.get_accounts_balances_map(stake_addresses) {
                             Some(map) => AccountsStateQueryResponse::AccountsBalancesMap(map),
                             None => AccountsStateQueryResponse::Error(
                                 "One or more accounts not found".to_string(),
@@ -606,8 +591,8 @@ impl AccountsState {
                         )
                     }
 
-                    AccountsStateQuery::GetAccountsBalancesSum { stake_keys } => {
-                        match state.get_account_balances_sum(stake_keys) {
+                    AccountsStateQuery::GetAccountsBalancesSum { stake_addresses } => {
+                        match state.get_account_balances_sum(stake_addresses) {
                             Some(sum) => AccountsStateQueryResponse::AccountsBalancesSum(sum),
                             None => AccountsStateQueryResponse::Error(
                                 "One or more accounts not found".to_string(),

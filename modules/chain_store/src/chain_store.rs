@@ -76,12 +76,12 @@ impl ChainStore {
                         BlocksStateQueryResponse::Error("Invalid message for blocks-state".into()),
                     )));
                 };
-                let Some(state) = query_history.lock().await.current().map(|s| s.clone()) else {
+                let Some(state) = query_history.lock().await.current().cloned() else {
                     return Arc::new(Message::StateQueryResponse(StateQueryResponse::Blocks(
                         BlocksStateQueryResponse::Error("unitialised state".to_string()),
                     )));
                 };
-                let res = Self::handle_blocks_query(&query_store, &state, &query)
+                let res = Self::handle_blocks_query(&query_store, &state, query)
                     .unwrap_or_else(|err| BlocksStateQueryResponse::Error(err.to_string()));
                 Arc::new(Message::StateQueryResponse(StateQueryResponse::Blocks(res)))
             }
@@ -121,23 +121,20 @@ impl ChainStore {
                     error!("Could not insert block: {err}");
                 }
 
-                match message.as_ref() {
-                    Message::Cardano((block_info, _)) => {
-                        if block_info.new_epoch {
-                            let Ok((_, message)) = params_message.await else {
-                                return;
-                            };
-                            let mut history = history.lock().await;
-                            let mut state = history.get_current_state();
-                            if !Self::handle_new_params(&mut state, message).is_ok() {
-                                return;
-                            };
-                            history.commit(block_info.number, state);
-                            // Have the next params message ready for the next epoch
-                            params_message = params_subscription.read();
-                        }
+                if let Message::Cardano((block_info, _)) = message.as_ref() {
+                    if block_info.new_epoch {
+                        let Ok((_, message)) = params_message.await else {
+                            return;
+                        };
+                        let mut history = history.lock().await;
+                        let mut state = history.get_current_state();
+                        if Self::handle_new_params(&mut state, message).is_err() {
+                            return;
+                        };
+                        history.commit(block_info.number, state);
+                        // Have the next params message ready for the next epoch
+                        params_message = params_subscription.read();
                     }
-                    _ => (),
                 }
             }
         });
@@ -146,11 +143,11 @@ impl ChainStore {
     }
 
     fn handle_new_block(store: &Arc<dyn Store>, message: &Message) -> Result<()> {
-        let Message::Cardano((info, CardanoMessage::BlockBody(body))) = message else {
+        let Message::Cardano((info, CardanoMessage::BlockAvailable(raw_block))) = message else {
             bail!("Unexpected message type: {message:?}");
         };
 
-        store.insert_block(info, &body.raw)
+        store.insert_block(info, &raw_block.body)
     }
 
     fn handle_blocks_query(
@@ -163,7 +160,7 @@ impl ChainStore {
                 let Some(block) = store.get_latest_block()? else {
                     return Ok(BlocksStateQueryResponse::NotFound);
                 };
-                let info = Self::to_block_info(block, store, &state, true)?;
+                let info = Self::to_block_info(block, store, state, true)?;
                 Ok(BlocksStateQueryResponse::LatestBlock(info))
             }
             BlocksStateQuery::GetLatestBlockTransactions { limit, skip, order } => {
@@ -184,21 +181,21 @@ impl ChainStore {
                 let Some(block) = Self::get_block_by_key(store, block_key)? else {
                     return Ok(BlocksStateQueryResponse::NotFound);
                 };
-                let info = Self::to_block_info(block, store, &state, false)?;
+                let info = Self::to_block_info(block, store, state, false)?;
                 Ok(BlocksStateQueryResponse::BlockInfo(info))
             }
             BlocksStateQuery::GetBlockBySlot { slot } => {
                 let Some(block) = store.get_block_by_slot(*slot)? else {
                     return Ok(BlocksStateQueryResponse::NotFound);
                 };
-                let info = Self::to_block_info(block, store, &state, false)?;
+                let info = Self::to_block_info(block, store, state, false)?;
                 Ok(BlocksStateQueryResponse::BlockBySlot(info))
             }
             BlocksStateQuery::GetBlockByEpochSlot { epoch, slot } => {
                 let Some(block) = store.get_block_by_epoch_slot(*epoch, *slot)? else {
                     return Ok(BlocksStateQueryResponse::NotFound);
                 };
-                let info = Self::to_block_info(block, store, &state, false)?;
+                let info = Self::to_block_info(block, store, state, false)?;
                 Ok(BlocksStateQueryResponse::BlockByEpochSlot(info))
             }
             BlocksStateQuery::GetNextBlocks {
@@ -211,7 +208,7 @@ impl ChainStore {
                         blocks: vec![],
                     }));
                 }
-                let Some(block) = Self::get_block_by_key(store, &block_key)? else {
+                let Some(block) = Self::get_block_by_key(store, block_key)? else {
                     return Ok(BlocksStateQueryResponse::NotFound);
                 };
                 let number = match block_key {
@@ -221,7 +218,7 @@ impl ChainStore {
                 let min_number = number + 1 + skip;
                 let max_number = min_number + limit - 1;
                 let blocks = store.get_blocks_by_number_range(min_number, max_number)?;
-                let info = Self::to_block_info_bulk(blocks, store, &state, false)?;
+                let info = Self::to_block_info_bulk(blocks, store, state, false)?;
                 Ok(BlocksStateQueryResponse::NextBlocks(NextBlocks {
                     blocks: info,
                 }))
@@ -236,7 +233,7 @@ impl ChainStore {
                         blocks: vec![],
                     }));
                 }
-                let Some(block) = Self::get_block_by_key(store, &block_key)? else {
+                let Some(block) = Self::get_block_by_key(store, block_key)? else {
                     return Ok(BlocksStateQueryResponse::NotFound);
                 };
                 let number = match block_key {
@@ -250,7 +247,7 @@ impl ChainStore {
                 };
                 let min_number = max_number.saturating_sub(limit - 1);
                 let blocks = store.get_blocks_by_number_range(min_number, max_number)?;
-                let info = Self::to_block_info_bulk(blocks, store, &state, false)?;
+                let info = Self::to_block_info_bulk(blocks, store, state, false)?;
                 Ok(BlocksStateQueryResponse::PreviousBlocks(PreviousBlocks {
                     blocks: info,
                 }))
@@ -351,7 +348,7 @@ impl ChainStore {
         is_latest: bool,
     ) -> Result<BlockInfo> {
         let blocks = vec![block];
-        let mut info = Self::to_block_info_bulk(blocks, store, &state, is_latest)?;
+        let mut info = Self::to_block_info_bulk(blocks, store, state, is_latest)?;
         Ok(info.remove(0))
     }
 
@@ -517,17 +514,13 @@ impl ChainStore {
         for tx in decoded.txs() {
             let hash = TxHash(*tx.hash());
             for output in tx.outputs() {
-                match output.address() {
-                    Ok(pallas_address) => match map_parameters::map_address(&pallas_address) {
-                        Ok(address) => {
-                            addresses
-                                .entry(BechOrdAddress(address))
-                                .or_insert_with(Vec::new)
-                                .push(hash.clone());
-                        }
-                        _ => (),
-                    },
-                    _ => (),
+                if let Ok(pallas_address) = output.address() {
+                    if let Ok(address) = map_parameters::map_address(&pallas_address) {
+                        addresses
+                            .entry(BechOrdAddress(address))
+                            .or_insert_with(Vec::new)
+                            .push(hash);
+                    }
                 }
             }
         }
@@ -576,16 +569,13 @@ impl ChainStore {
     }
 
     fn handle_new_params(state: &mut State, message: Arc<Message>) -> Result<()> {
-        match message.as_ref() {
-            Message::Cardano((_, CardanoMessage::ProtocolParams(params))) => {
-                if let Some(byron) = &params.params.byron {
-                    state.byron_heavy_delegates = byron.heavy_delegation.clone();
-                }
-                if let Some(shelley) = &params.params.shelley {
-                    state.shelley_genesis_delegates = shelley.gen_delegs.clone();
-                }
+        if let Message::Cardano((_, CardanoMessage::ProtocolParams(params))) = message.as_ref() {
+            if let Some(byron) = &params.params.byron {
+                state.byron_heavy_delegates = byron.heavy_delegation.clone();
             }
-            _ => (),
+            if let Some(shelley) = &params.params.shelley {
+                state.shelley_genesis_delegates = shelley.gen_delegs.clone();
+            }
         }
         Ok(())
     }
