@@ -186,7 +186,7 @@ impl Snapshot {
 mod tests {
     use super::*;
     use acropolis_common::stake_addresses::StakeAddressState;
-    use acropolis_common::AddressNetwork::Main;
+    use acropolis_common::NetworkId::Mainnet;
     use acropolis_common::{StakeAddress, StakeAddressPayload};
 
     // Helper function to create stake addresses for testing
@@ -194,7 +194,7 @@ mod tests {
         let mut hash = vec![0u8; 28];
         hash[0] = id;
         StakeAddress {
-            network: Main,
+            network: Mainnet,
             payload: StakeAddressPayload::StakeKeyHash(
                 hash.try_into().expect("Invalid hash length"),
             ),
