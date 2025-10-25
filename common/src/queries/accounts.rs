@@ -1,13 +1,18 @@
 use std::collections::HashMap;
 
-use crate::{DRepChoice, KeyHash, PoolLiveStakeInfo};
+use crate::{DRepChoice, KeyHash, PoolLiveStakeInfo, StakeAddress};
 
 pub const DEFAULT_ACCOUNTS_QUERY_TOPIC: (&str, &str) =
     ("accounts-state-query-topic", "cardano.query.accounts");
 
+pub const DEFAULT_HISTORICAL_ACCOUNTS_QUERY_TOPIC: (&str, &str) = (
+    "historical-accounts-state-query-topic",
+    "cardano.query.historical.accounts",
+);
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum AccountsStateQuery {
-    GetAccountInfo { stake_key: Vec<u8> },
+    GetAccountInfo { stake_address: StakeAddress },
     GetAccountRewardHistory { stake_key: Vec<u8> },
     GetAccountHistory { stake_key: Vec<u8> },
     GetAccountDelegationHistory { stake_key: Vec<u8> },
@@ -18,10 +23,10 @@ pub enum AccountsStateQuery {
     GetAccountAssets { stake_key: Vec<u8> },
     GetAccountAssetsTotals { stake_key: Vec<u8> },
     GetAccountUTxOs { stake_key: Vec<u8> },
-    GetAccountsUtxoValuesMap { stake_keys: Vec<Vec<u8>> },
-    GetAccountsUtxoValuesSum { stake_keys: Vec<Vec<u8>> },
-    GetAccountsBalancesMap { stake_keys: Vec<Vec<u8>> },
-    GetAccountsBalancesSum { stake_keys: Vec<Vec<u8>> },
+    GetAccountsUtxoValuesMap { stake_addresses: Vec<StakeAddress> },
+    GetAccountsUtxoValuesSum { stake_addresses: Vec<StakeAddress> },
+    GetAccountsBalancesMap { stake_addresses: Vec<StakeAddress> },
+    GetAccountsBalancesSum { stake_addresses: Vec<StakeAddress> },
 
     // Epochs-related queries
     GetActiveStakes {},
@@ -36,7 +41,7 @@ pub enum AccountsStateQuery {
 
     // Dreps related queries
     GetDrepDelegators { drep: DRepChoice },
-    GetAccountsDrepDelegationsMap { stake_keys: Vec<Vec<u8>> },
+    GetAccountsDrepDelegationsMap { stake_addresses: Vec<StakeAddress> },
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

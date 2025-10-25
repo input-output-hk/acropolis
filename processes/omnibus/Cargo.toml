@@ -26,7 +26,10 @@ acropolis_module_rest_blockfrost = { path = "../../modules/rest_blockfrost" }
 acropolis_module_spdd_state = { path = "../../modules/spdd_state" }
 acropolis_module_drdd_state = { path = "../../modules/drdd_state" }
 acropolis_module_assets_state = { path = "../../modules/assets_state" }
+acropolis_module_chain_store = { path = "../../modules/chain_store" }
 acropolis_module_address_state = { path = "../../modules/address_state" }
+acropolis_module_consensus = { path = "../../modules/consensus" }
+acropolis_module_historical_accounts_state = { path = "../../modules/historical_accounts_state" }
 
 caryatid_process = { workspace = true }
 caryatid_sdk = { workspace = true }
@@ -35,6 +38,7 @@ caryatid_module_rest_server = { workspace = true }
 caryatid_module_spy = { workspace = true }
 
 anyhow = { workspace = true }
+clap = { workspace = true }
 config = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3.20", features = ["registry", "env-filter"] }

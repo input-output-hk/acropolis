@@ -6,6 +6,7 @@ use crate::{
     address::{Address, ShelleyAddress, StakeAddress},
     protocol_params,
     rational_number::RationalNumber,
+    BlockHash, TxHash,
 };
 use anyhow::{anyhow, bail, Error, Result};
 use bech32::{Bech32, Hrp};
@@ -26,11 +27,31 @@ pub enum NetworkId {
     Mainnet,
 }
 
+impl From<String> for NetworkId {
+    fn from(s: String) -> Self {
+        match s.as_str() {
+            "testnet" => NetworkId::Testnet,
+            "mainnet" => NetworkId::Mainnet,
+            _ => NetworkId::Mainnet,
+        }
+    }
+}
+
 /// Protocol era
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+    Debug,
+    Default,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    serde::Serialize,
+    serde::Deserialize,
 )]
 pub enum Era {
+    #[default]
     Byron,
     Shelley,
     Allegra,
@@ -38,12 +59,6 @@ pub enum Era {
     Alonzo,
     Babbage,
     Conway,
-}
-
-impl Default for Era {
-    fn default() -> Era {
-        Era::Byron
-    }
 }
 
 impl From<Era> for u8 {
@@ -80,6 +95,19 @@ impl Display for Era {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self)
     }
+}
+
+/// Block production statistics for a stake pool in a specific epoch
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PoolBlockProduction {
+    /// Pool ID that produced the blocks
+    pub pool_id: String,
+
+    /// Number of blocks produced by this pool in the epoch
+    pub block_count: u8,
+
+    /// Epoch number
+    pub epoch: u64,
 }
 
 /// Block status
@@ -162,7 +190,7 @@ pub struct StakeAddressDelta {
 /// Stake Address Reward change
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StakeRewardDelta {
-    pub hash: KeyHash,
+    pub stake_address: StakeAddress,
     pub delta: i64,
 }
 
@@ -205,6 +233,10 @@ impl AssetName {
 
     pub fn len(&self) -> usize {
         self.len as usize
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
     }
 
     pub fn as_slice(&self) -> &[u8] {
@@ -324,7 +356,7 @@ impl From<&Value> for ValueDelta {
                     let nas_delta = nas
                         .iter()
                         .map(|na| NativeAssetDelta {
-                            name: na.name.clone(),
+                            name: na.name,
                             amount: na.amount as i64,
                         })
                         .collect();
@@ -401,9 +433,6 @@ pub type GenesisKeyhash = Vec<u8>;
 
 /// Data hash used for metadata, anchors (SHA256)
 pub type DataHash = Vec<u8>;
-
-/// Transaction hash
-pub type TxHash = [u8; 32];
 
 /// Compact transaction identifier (block_number, tx_index).
 #[derive(
@@ -521,9 +550,6 @@ impl TxOutRef {
     }
 }
 
-/// Block Hash
-pub type BlockHash = [u8; 32];
-
 /// Amount of Ada, in Lovelace
 pub type Lovelace = u64;
 pub type LovelaceDelta = i64;
@@ -583,16 +609,15 @@ pub struct PotDelta {
     pub delta: LovelaceDelta,
 }
 
-/// General credential
 #[derive(
     Debug, Clone, Ord, Eq, PartialEq, PartialOrd, Hash, serde::Serialize, serde::Deserialize,
 )]
 pub enum Credential {
+    /// Script hash. NOTE: Order matters when parsing Haskell Node Snapshot data.
+    ScriptHash(KeyHash),
+
     /// Address key hash
     AddrKeyHash(KeyHash),
-
-    /// Script hash
-    ScriptHash(KeyHash),
 }
 
 impl Credential {
@@ -617,8 +642,7 @@ impl Credential {
             Err(anyhow!(
                 "Incorrect credential {}, expected scriptHash- or keyHash- prefix",
                 credential
-            )
-            .into())
+            ))
         }
     }
 
@@ -756,8 +780,6 @@ pub struct PoolMetadata {
     pub hash: DataHash,
 }
 
-pub type RewardAccount = Vec<u8>;
-
 /// Pool registration with position
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PoolRegistrationWithPos {
@@ -803,14 +825,12 @@ pub struct PoolRegistration {
     pub margin: Ratio,
 
     /// Reward account
-    #[serde_as(as = "Hex")]
     #[n(5)]
-    pub reward_account: RewardAccount,
+    pub reward_account: StakeAddress,
 
     /// Pool owners by their key hash
-    #[serde_as(as = "Vec<Hex>")]
     #[n(6)]
-    pub pool_owners: Vec<KeyHash>,
+    pub pool_owners: Vec<StakeAddress>,
 
     // Relays
     #[n(7)]
@@ -895,8 +915,8 @@ pub struct PoolEpochState {
 /// Stake delegation data
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StakeDelegation {
-    /// Stake credential
-    pub credential: StakeCredential,
+    /// Stake address
+    pub stake_address: StakeAddress,
 
     /// Pool ID to delegate to
     pub operator: KeyHash,
@@ -948,7 +968,7 @@ pub enum InstantaneousRewardSource {
 /// Target of a MIR
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum InstantaneousRewardTarget {
-    StakeCredentials(Vec<(StakeCredential, i64)>),
+    StakeAddresses(Vec<(StakeAddress, i64)>),
     OtherAccountingPot(u64),
 }
 
@@ -965,8 +985,8 @@ pub struct MoveInstantaneousReward {
 /// Register stake (Conway version) = 'reg_cert'
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Registration {
-    /// Stake credential
-    pub credential: StakeCredential,
+    /// Stake address
+    pub stake_address: StakeAddress,
 
     /// Deposit paid
     pub deposit: Lovelace,
@@ -975,8 +995,8 @@ pub struct Registration {
 /// Deregister stake (Conway version) = 'unreg_cert'
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Deregistration {
-    /// Stake credential
-    pub credential: StakeCredential,
+    /// Stake address
+    pub stake_address: StakeAddress,
 
     /// Deposit to be refunded
     pub refund: Lovelace,
@@ -1001,8 +1021,8 @@ pub enum DRepChoice {
 /// Vote delegation (simple, existing registration) = vote_deleg_cert
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct VoteDelegation {
-    /// Stake credential
-    pub credential: StakeCredential,
+    /// Stake address
+    pub stake_address: StakeAddress,
 
     // DRep choice
     pub drep: DRepChoice,
@@ -1011,8 +1031,8 @@ pub struct VoteDelegation {
 /// Stake+vote delegation (to SPO and DRep) = stake_vote_deleg_cert
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StakeAndVoteDelegation {
-    /// Stake credential
-    pub credential: StakeCredential,
+    /// Stake address
+    pub stake_address: StakeAddress,
 
     /// Pool
     pub operator: KeyHash,
@@ -1024,8 +1044,8 @@ pub struct StakeAndVoteDelegation {
 /// Stake delegation to SPO + registration = stake_reg_deleg_cert
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StakeRegistrationAndDelegation {
-    /// Stake credential
-    pub credential: StakeCredential,
+    /// Stake address
+    pub stake_address: StakeAddress,
 
     /// Pool
     pub operator: KeyHash,
@@ -1037,8 +1057,8 @@ pub struct StakeRegistrationAndDelegation {
 /// Vote delegation to DRep + registration = vote_reg_deleg_cert
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StakeRegistrationAndVoteDelegation {
-    /// Stake credential
-    pub credential: StakeCredential,
+    /// Stake address
+    pub stake_address: StakeAddress,
 
     /// DRep choice
     pub drep: DRepChoice,
@@ -1053,7 +1073,7 @@ pub struct StakeRegistrationAndVoteDelegation {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StakeRegistrationAndStakeAndVoteDelegation {
     /// Stake credential
-    pub credential: StakeCredential,
+    pub stake_address: StakeAddress,
 
     /// Pool
     pub operator: KeyHash,
@@ -1308,6 +1328,22 @@ pub struct BlockVersionData {
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct HeavyDelegate {
+    pub cert: Vec<u8>,
+    pub delegate_pk: Vec<u8>,
+    pub issuer_pk: Vec<u8>,
+}
+
+#[serde_as]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct GenesisDelegate {
+    #[serde_as(as = "Hex")]
+    pub delegate: Vec<u8>,
+    #[serde_as(as = "Hex")]
+    pub vrf: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ProtocolConsts {
     pub k: usize,
     pub protocol_magic: u32,
@@ -1524,7 +1560,7 @@ pub struct Committee {
 
 impl Committee {
     pub fn is_empty(&self) -> bool {
-        return self.members.len() == 0;
+        self.members.is_empty()
     }
 }
 
@@ -1633,7 +1669,7 @@ pub enum Voter {
 impl Voter {
     pub fn to_bech32(&self, hrp: &str, buf: &[u8]) -> String {
         let voter_hrp: Hrp = Hrp::parse(hrp).unwrap();
-        bech32::encode::<Bech32>(voter_hrp, &buf)
+        bech32::encode::<Bech32>(voter_hrp, buf)
             .unwrap_or_else(|e| format!("Cannot convert {:?} to bech32: {e}", self))
     }
 }
@@ -1641,13 +1677,13 @@ impl Voter {
 impl Display for Voter {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Voter::ConstitutionalCommitteeKey(h) => write!(f, "{}", self.to_bech32("cc_hot", &h)),
+            Voter::ConstitutionalCommitteeKey(h) => write!(f, "{}", self.to_bech32("cc_hot", h)),
             Voter::ConstitutionalCommitteeScript(s) => {
-                write!(f, "{}", self.to_bech32("cc_hot_script", &s))
+                write!(f, "{}", self.to_bech32("cc_hot_script", s))
             }
-            Voter::DRepKey(k) => write!(f, "{}", self.to_bech32("drep", &k)),
-            Voter::DRepScript(s) => write!(f, "{}", self.to_bech32("drep_script", &s)),
-            Voter::StakePoolKey(k) => write!(f, "{}", self.to_bech32("pool", &k)),
+            Voter::DRepKey(k) => write!(f, "{}", self.to_bech32("drep", k)),
+            Voter::DRepScript(s) => write!(f, "{}", self.to_bech32("drep_script", s)),
+            Voter::StakePoolKey(k) => write!(f, "{}", self.to_bech32("pool", k)),
         }
     }
 }
@@ -1777,7 +1813,7 @@ pub struct VotingOutcome {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProposalProcedure {
     pub deposit: Lovelace,
-    pub reward_account: RewardAccount,
+    pub reward_account: StakeAddress,
     pub gov_action_id: GovActionId,
     pub gov_action: GovernanceAction,
     pub anchor: Anchor,
@@ -1829,8 +1865,8 @@ pub struct GovernanceOutcome {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct StakeCredentialWithPos {
-    pub stake_credential: StakeCredential,
+pub struct StakeAddressWithPos {
+    pub stake_address: StakeAddress,
     pub tx_index: u64,
     pub cert_index: u64,
 }
@@ -1842,10 +1878,10 @@ pub enum TxCertificate {
     None(()),
 
     /// Stake registration
-    StakeRegistration(StakeCredentialWithPos),
+    StakeRegistration(StakeAddressWithPos),
 
     /// Stake de-registration
-    StakeDeregistration(StakeCredential),
+    StakeDeregistration(StakeAddress),
 
     /// Stake Delegation to a pool
     StakeDelegation(StakeDelegation),
@@ -1959,17 +1995,12 @@ impl AddressTotals {
         for (policy, assets) in &delta.assets {
             for a in assets {
                 if a.amount > 0 {
-                    Self::apply_asset(
-                        &mut self.received.assets,
-                        *policy,
-                        a.name.clone(),
-                        a.amount as u64,
-                    );
+                    Self::apply_asset(&mut self.received.assets, *policy, a.name, a.amount as u64);
                 } else if a.amount < 0 {
                     Self::apply_asset(
                         &mut self.sent.assets,
                         *policy,
-                        a.name.clone(),
+                        a.name,
                         a.amount.unsigned_abs(),
                     );
                 }
@@ -2078,7 +2109,7 @@ mod tests {
 
         let proposal = ProposalProcedure {
             deposit: 9876,
-            reward_account: vec![7, 4, 6, 7],
+            reward_account: StakeAddress::default(),
             gov_action_id,
             gov_action,
             anchor: Anchor {

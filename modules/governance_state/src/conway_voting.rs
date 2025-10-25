@@ -375,7 +375,7 @@ impl ConwayVoting {
                 })?;
 
             let deposit = &elem.voting.procedure.deposit;
-            let reward = hex::encode(elem.voting.procedure.reward_account.to_vec());
+            let reward = hex::encode(elem.voting.procedure.reward_account.get_hash());
             let start = action_status.voting_epochs.start;
             let ratification_info = if elem.voting.accepted {
                 format!(
@@ -528,7 +528,7 @@ impl ConwayVoting {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acropolis_common::Anchor;
+    use acropolis_common::{Anchor, StakeAddress};
     use acropolis_common::ledger_state::VotingState;
     use acropolis_common::rational_number::RationalNumber;
 
@@ -548,9 +548,9 @@ mod tests {
         let v = VotingOutcome {
             procedure: ProposalProcedure {
                 deposit: 0,
-                reward_account: vec![],
+                reward_account: StakeAddress::default(),
                 gov_action_id: GovActionId {
-                    transaction_id: [0; 32],
+                    transaction_id: TxHash::default(),
                     action_index: id,
                 },
                 gov_action: GovernanceAction::Information,

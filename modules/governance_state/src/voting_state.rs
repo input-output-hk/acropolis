@@ -300,10 +300,7 @@ impl VotingRegistrationState {
 
 #[cfg(test)]
 mod tests {
-    use acropolis_common::{
-        Anchor, Constitution, HardForkInitiationAction, NewConstitutionAction,
-        protocol_params::ProtocolVersion
-    };
+    use acropolis_common::{Anchor, Constitution, HardForkInitiationAction, NewConstitutionAction, protocol_params::ProtocolVersion, StakeAddress};
     use super::*;
 
     #[test]
@@ -320,7 +317,7 @@ mod tests {
 
         let hard_fork = ProposalProcedure {
             deposit: 0,
-            reward_account: vec![],
+            reward_account: StakeAddress::default(),
             gov_action_id: Default::default(),
             gov_action: GovernanceAction::HardForkInitiation(HardForkInitiationAction{
                 previous_action_id: None,
@@ -365,7 +362,7 @@ mod tests {
 
         let constitution = ProposalProcedure {
             deposit: 0,
-            reward_account: vec![],
+            reward_account: StakeAddress::default(),
             gov_action_id: Default::default(),
             gov_action: GovernanceAction::NewConstitution(NewConstitutionAction {
                 previous_action_id: None,

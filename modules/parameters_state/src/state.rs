@@ -65,7 +65,9 @@ impl State {
         self.current_params.apply_enact_state(msg)?;
         let params_message = ProtocolParamsMessage {
             params: self.current_params.get_params(),
-        };        
+        };
+
+        info!("Enact state ended");
         
         Ok(params_message)
     }

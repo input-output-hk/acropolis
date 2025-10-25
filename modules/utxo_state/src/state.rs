@@ -98,7 +98,7 @@ impl State {
     pub async fn get_utxos_sum(&self, utxo_identifiers: &Vec<UTxOIdentifier>) -> Result<Value> {
         let mut balance = Value::new(0, Vec::new());
         for identifier in utxo_identifiers {
-            match self.lookup_utxo(&identifier).await {
+            match self.lookup_utxo(identifier).await {
                 Ok(Some(utxo)) => balance += &utxo.value,
                 Ok(None) => return Err(anyhow::anyhow!("UTxO {} does not exist", identifier)),
                 Err(e) => {
@@ -135,53 +135,49 @@ impl State {
 
     /// Observe a block for statistics and handle rollbacks
     pub async fn observe_block(&mut self, block: &BlockInfo) -> Result<()> {
-        match block.status {
-            BlockStatus::RolledBack => {
-                info!(
-                    slot = block.slot,
-                    number = block.number,
-                    "Rollback received"
-                );
+        if block.status == BlockStatus::RolledBack {
+            info!(
+                slot = block.slot,
+                number = block.number,
+                "Rollback received"
+            );
 
-                // Delete all UTXOs created in or after this block
-                let utxos = self.volatile_created.prune_on_or_after(block.number);
-                for key in utxos {
-                    if let Some(utxo) = self.volatile_utxos.remove(&key) {
-                        // Tell the observer to debit it
-                        if let Some(observer) = self.address_delta_observer.as_ref() {
-                            observer
-                                .observe_delta(&AddressDelta {
-                                    address: utxo.address.clone(),
-                                    utxo: key.clone(),
-                                    value: -ValueDelta::from(&utxo.value),
-                                })
-                                .await;
-                        }
+            // Delete all UTXOs created in or after this block
+            let utxos = self.volatile_created.prune_on_or_after(block.number);
+            for key in utxos {
+                if let Some(utxo) = self.volatile_utxos.remove(&key) {
+                    // Tell the observer to debit it
+                    if let Some(observer) = self.address_delta_observer.as_ref() {
+                        observer
+                            .observe_delta(&AddressDelta {
+                                address: utxo.address.clone(),
+                                utxo: key,
+                                value: -ValueDelta::from(&utxo.value),
+                            })
+                            .await;
                     }
                 }
-
-                // Any remaining (which were necessarily created before this block)
-                // that were spent in or after this block can be reinstated
-                let utxos = self.volatile_spent.prune_on_or_after(block.number);
-                for key in utxos {
-                    if let Some(utxo) = self.volatile_utxos.get(&key) {
-                        // Tell the observer to recredit it
-                        if let Some(observer) = self.address_delta_observer.as_ref() {
-                            observer
-                                .observe_delta(&AddressDelta {
-                                    address: utxo.address.clone(),
-                                    utxo: key.clone(),
-                                    value: ValueDelta::from(&utxo.value),
-                                })
-                                .await;
-                        }
-                    }
-                }
-
-                // Let the pruner compress the map
             }
 
-            _ => {}
+            // Any remaining (which were necessarily created before this block)
+            // that were spent in or after this block can be reinstated
+            let utxos = self.volatile_spent.prune_on_or_after(block.number);
+            for key in utxos {
+                if let Some(utxo) = self.volatile_utxos.get(&key) {
+                    // Tell the observer to recredit it
+                    if let Some(observer) = self.address_delta_observer.as_ref() {
+                        observer
+                            .observe_delta(&AddressDelta {
+                                address: utxo.address.clone(),
+                                utxo: key,
+                                value: ValueDelta::from(&utxo.value),
+                            })
+                            .await;
+                    }
+                }
+            }
+
+            // Let the pruner compress the map
         }
 
         self.last_slot = block.slot;
@@ -224,7 +220,7 @@ impl State {
                 if let Some(obs) = &self.address_delta_observer {
                     obs.observe_delta(&AddressDelta {
                         address: utxo.address.clone(),
-                        utxo: key.clone(),
+                        utxo: key,
                         value: -ValueDelta::from(&utxo.value),
                     })
                     .await;
@@ -279,7 +275,7 @@ impl State {
             BlockStatus::Volatile | BlockStatus::RolledBack => {
                 self.volatile_created.add_utxo(&key);
 
-                if self.volatile_utxos.insert(key.clone(), value).is_some() {
+                if self.volatile_utxos.insert(key, value).is_some() {
                     error!(
                         "Saw UTXO {}:{}:{} before",
                         output.utxo_identifier.block_number(),
@@ -289,7 +285,7 @@ impl State {
                 }
             }
             BlockStatus::Bootstrap | BlockStatus::Immutable => {
-                self.immutable_utxos.add_utxo(key.clone(), value).await?;
+                self.immutable_utxos.add_utxo(key, value).await?;
                 // Note we don't check for duplicates in immutable - store
                 // may double check this anyway
             }
@@ -299,7 +295,7 @@ impl State {
         if let Some(obs) = &self.address_delta_observer {
             obs.observe_delta(&AddressDelta {
                 address: output.address.clone(),
-                utxo: output.utxo_identifier.clone(),
+                utxo: output.utxo_identifier,
                 value: ValueDelta::from(&output.value),
             })
             .await;
@@ -373,11 +369,11 @@ impl State {
     pub async fn handle(&mut self, block: &BlockInfo, deltas: &UTXODeltasMessage) -> Result<()> {
         // Start the block for observer
         if let Some(observer) = self.address_delta_observer.as_mut() {
-            observer.start_block(&block).await;
+            observer.start_block(block).await;
         }
 
         // Observe block for stats and rollbacks
-        self.observe_block(&block).await?;
+        self.observe_block(block).await?;
 
         // Process the deltas
         for delta in &deltas.deltas {
@@ -385,11 +381,11 @@ impl State {
 
             match delta {
                 UTXODelta::Input(tx_input) => {
-                    self.observe_input(&tx_input, &block).await?;
+                    self.observe_input(tx_input, block).await?;
                 }
 
                 UTXODelta::Output(tx_output) => {
-                    self.observe_output(&tx_output, &block).await?;
+                    self.observe_output(tx_output, block).await?;
                 }
 
                 _ => {}
@@ -398,7 +394,7 @@ impl State {
 
         // End the block for observer
         if let Some(observer) = self.address_delta_observer.as_mut() {
-            observer.finalise_block(&block).await;
+            observer.finalise_block(block).await;
         }
 
         Ok(())

@@ -134,7 +134,7 @@ impl State {
             let evolving = Nonces::evolve(&current_nonces.evolving, &nonce_vrf_output)?;
 
             // there must be parent hash
-            let Some(parent_hash) = header.previous_hash().map(|h| *h as BlockHash) else {
+            let Some(parent_hash) = header.previous_hash().map(|h| BlockHash(*h)) else {
                 return Err(anyhow::anyhow!("Header Parent hash error"));
             };
 
@@ -251,7 +251,7 @@ impl State {
             total_outputs: self.epoch_outputs,
             total_fees: self.epoch_fees,
             spo_blocks: self.blocks_minted.iter().map(|(k, v)| (k.clone(), *v)).collect(),
-            nonce: self.nonces.as_ref().map(|n| n.active.hash.clone()).flatten(),
+            nonce: self.nonces.as_ref().and_then(|n| n.active.hash),
         }
     }
 
