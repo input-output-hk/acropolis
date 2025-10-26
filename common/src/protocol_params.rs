@@ -25,12 +25,15 @@ pub struct ProtocolParams {
 // Byron protocol parameters
 //
 
+#[serde_as]
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ByronParams {
     pub block_version_data: BlockVersionData,
     pub fts_seed: Option<Vec<u8>>,
     pub protocol_consts: ProtocolConsts,
     pub start_time: u64,
+
+    #[serde_as(as = "Vec<(_, _)>")]
     pub heavy_delegation: HashMap<Vec<u8>, HeavyDelegate>,
 }
 

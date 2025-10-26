@@ -181,7 +181,6 @@ mod tests {
             else if records.len() != 17 {
                 bail!("Wrong number of elements in csv line: {:?}", records)
             }
-            println!("Record: {:?}", records);
 
             let action_id = records.get(0).unwrap();
             let start_epoch = records.get(6).unwrap();

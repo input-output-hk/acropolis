@@ -12,17 +12,17 @@ use tracing_subscriber::{filter, fmt, EnvFilter, Registry};
 
 // External modules
 use acropolis_module_accounts_state::AccountsState;
-use acropolis_module_address_state::AddressState;
-use acropolis_module_assets_state::AssetsState;
+//use acropolis_module_address_state::AddressState;
+//use acropolis_module_assets_state::AssetsState;
 use acropolis_module_block_unpacker::BlockUnpacker;
-use acropolis_module_chain_store::ChainStore;
-use acropolis_module_consensus::Consensus;
+//use acropolis_module_chain_store::ChainStore;
+//use acropolis_module_consensus::Consensus;
 use acropolis_module_drdd_state::DRDDState;
 use acropolis_module_drep_state::DRepState;
 use acropolis_module_epochs_state::EpochsState;
 use acropolis_module_genesis_bootstrapper::GenesisBootstrapper;
 use acropolis_module_governance_state::GovernanceState;
-use acropolis_module_historical_accounts_state::HistoricalAccountsState;
+//use acropolis_module_historical_accounts_state::HistoricalAccountsState;
 use acropolis_module_mithril_snapshot_fetcher::MithrilSnapshotFetcher;
 use acropolis_module_parameters_state::ParametersState;
 use acropolis_module_spdd_state::SPDDState;
@@ -61,14 +61,14 @@ fn setup_governance_collect(process: &mut dyn ModuleRegistry<Message>) {
     StakeDeltaFilter::register(process);
     EpochsState::register(process);
     AccountsState::register(process);
-    AddressState::register(process);
-    AssetsState::register(process);
-    HistoricalAccountsState::register(process);
+    //AddressState::register(process);
+    //AssetsState::register(process);
+    //HistoricalAccountsState::register(process);
     BlockfrostREST::register(process);
     SPDDState::register(process);
     DRDDState::register(process);
-    Consensus::register(process);
-    ChainStore::register(process);
+    //Consensus::register(process);
+    //ChainStore::register(process);
 
     Recorder::register(process);
 

@@ -67,8 +67,6 @@ impl State {
             params: self.current_params.get_params(),
         };
 
-        info!("Enact state ended");
-        
         Ok(params_message)
     }
 

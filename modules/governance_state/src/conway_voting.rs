@@ -529,7 +529,6 @@ impl ConwayVoting {
 mod tests {
     use super::*;
     use acropolis_common::{Anchor, StakeAddress};
-    use acropolis_common::ledger_state::VotingState;
     use acropolis_common::rational_number::RationalNumber;
 
     fn create_governance_outcome(id: u8, accepted: bool) -> GovernanceOutcome {
@@ -570,7 +569,7 @@ mod tests {
         }
     }
 
-    /// Simple test for general mechanics of action_status processing
+    /// Simple test for general mechanics of action_status processing.
     #[test]
     fn test_outcomes_action_status() -> Result<()> {
         let mut voting = ConwayVoting::new(None);
