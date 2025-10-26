@@ -1,7 +1,6 @@
 use acropolis_common::{
-    protocol_params::{ConwayParams},
-    rational_number::RationalNumber, GovernanceAction, ProposalProcedure,
-    ProtocolParamType, ProtocolParamUpdate, VoteCount, VoteResult
+    protocol_params::ConwayParams, rational_number::RationalNumber, GovernanceAction,
+    ProposalProcedure, ProtocolParamType, ProtocolParamUpdate, VoteCount, VoteResult,
 };
 use anyhow::{bail, Result};
 use std::{cmp::max, fmt};
@@ -171,9 +170,11 @@ impl VotingRegistrationState {
                 d.hard_fork_initiation.clone(),
                 p.hard_fork_initiation.clone(),
             ),
-            GovernanceAction::TreasuryWithdrawals(_) => {
-                VoteResult::new(c.threshold.clone(), d.treasury_withdrawal.clone(), zero.clone())
-            }
+            GovernanceAction::TreasuryWithdrawals(_) => VoteResult::new(
+                c.threshold.clone(),
+                d.treasury_withdrawal.clone(),
+                zero.clone(),
+            ),
             GovernanceAction::NoConfidence(_) => VoteResult::new(
                 zero.clone(),
                 d.motion_no_confidence.clone(),
@@ -194,9 +195,11 @@ impl VotingRegistrationState {
                     )
                 }
             }
-            GovernanceAction::NewConstitution(_) => {
-                VoteResult::new(c.threshold.clone(), d.update_constitution.clone(), zero.clone())
-            }
+            GovernanceAction::NewConstitution(_) => VoteResult::new(
+                c.threshold.clone(),
+                d.update_constitution.clone(),
+                zero.clone(),
+            ),
             GovernanceAction::Information => {
                 VoteResult::new(zero.clone(), one.clone(), one.clone())
             }
@@ -210,8 +213,7 @@ impl VotingRegistrationState {
 
         if denom == 0 {
             Ok(RationalNumber::ZERO.clone())
-        }
-        else {
+        } else {
             Ok(RationalNumber::new(nom, denom))
         }
     }
@@ -225,8 +227,10 @@ impl VotingRegistrationState {
         // Only 'info', 'hardfork' and 'parameter change' actions are allowed in bootstrap period
         // committee vote thresholds
         if votes.committee.total() > self.committee_size {
-            bail!("Committee vote count {} > committee size {}",
-                votes.committee.total(), self.committee_size
+            bail!(
+                "Committee vote count {} > committee size {}",
+                votes.committee.total(),
+                self.committee_size
             );
         }
 
@@ -249,8 +253,7 @@ impl VotingRegistrationState {
             non_voted.no += self.no_confidence_dreps;
         };
 
-        if non_voted.total() + votes.drep.total() != total_dreps
-        {
+        if non_voted.total() + votes.drep.total() != total_dreps {
             bail!("Total votes (including votes from non-voted) != total dreps stake");
         }
 
@@ -260,11 +263,14 @@ impl VotingRegistrationState {
 
         // SPO vote thresholds
         // TODO: always abstain, no confidence spo's (present in Haskell code, for bootstrap)
-        let spo_ratio = RationalNumber::new(
-            votes.pool.yes, self.registered_spos - votes.pool.abstain
-        );
+        let spo_ratio =
+            RationalNumber::new(votes.pool.yes, self.registered_spos - votes.pool.abstain);
 
-        Ok(VoteResult::<RationalNumber>::new(committee_ratio, drep_ratio, spo_ratio))
+        Ok(VoteResult::<RationalNumber>::new(
+            committee_ratio,
+            drep_ratio,
+            spo_ratio,
+        ))
     }
 
     pub fn compare_votes(
@@ -272,21 +278,23 @@ impl VotingRegistrationState {
         proc: &ProposalProcedure,
         bootstrap: bool,
         votes: &VoteResult<VoteCount>,
-        threshold: &VoteResult<RationalNumber>
+        threshold: &VoteResult<RationalNumber>,
     ) -> Result<bool> {
         if bootstrap {
             match &proc.gov_action {
-                GovernanceAction::TreasuryWithdrawals(_) |
-                GovernanceAction::NewConstitution(_) |
-                GovernanceAction::UpdateCommittee(_) |
-                GovernanceAction::NoConfidence(_) => {
-                    error!("Action {} ({}) is not possible in bootstrap Conway (Chang) era.",
-                        proc.gov_action_id, &proc.gov_action.get_action_name()
+                GovernanceAction::TreasuryWithdrawals(_)
+                | GovernanceAction::NewConstitution(_)
+                | GovernanceAction::UpdateCommittee(_)
+                | GovernanceAction::NoConfidence(_) => {
+                    error!(
+                        "Action {} ({}) is not possible in bootstrap Conway (Chang) era.",
+                        proc.gov_action_id,
+                        &proc.gov_action.get_action_name()
                     );
-                    return Ok(false)
-                },
+                    return Ok(false);
+                }
 
-                _ => ()
+                _ => (),
             }
         }
 
@@ -300,8 +308,11 @@ impl VotingRegistrationState {
 
 #[cfg(test)]
 mod tests {
-    use acropolis_common::{Anchor, Constitution, HardForkInitiationAction, NewConstitutionAction, protocol_params::ProtocolVersion, StakeAddress};
     use super::*;
+    use acropolis_common::{
+        protocol_params::ProtocolVersion, Anchor, Constitution, HardForkInitiationAction,
+        NewConstitutionAction, StakeAddress,
+    };
 
     #[test]
     fn test_compare_votes_hardfork() -> Result<()> {
@@ -319,9 +330,12 @@ mod tests {
             deposit: 0,
             reward_account: StakeAddress::default(),
             gov_action_id: Default::default(),
-            gov_action: GovernanceAction::HardForkInitiation(HardForkInitiationAction{
+            gov_action: GovernanceAction::HardForkInitiation(HardForkInitiationAction {
                 previous_action_id: None,
-                protocol_version: ProtocolVersion { major: 10, minor: 0 },
+                protocol_version: ProtocolVersion {
+                    major: 10,
+                    minor: 0,
+                },
             }),
             anchor: Anchor {
                 data_hash: vec![],
@@ -329,22 +343,36 @@ mod tests {
             },
         };
 
-        let vr = VoteResult::<VoteCount>{
-            committee: VoteCount {yes: 7, no: 0, abstain: 0},
+        let vr = VoteResult::<VoteCount> {
+            committee: VoteCount {
+                yes: 7,
+                no: 0,
+                abstain: 0,
+            },
             drep: VoteCount::zero(),
-            pool: VoteCount {yes: 13444887496098977, no: 60273882920902, abstain: 797759099341505},
+            pool: VoteCount {
+                yes: 13444887496098977,
+                no: 60273882920902,
+                abstain: 797759099341505,
+            },
         };
 
         let th = VoteResult::new(
-            RationalNumber::new(2,3),
+            RationalNumber::new(2, 3),
             RationalNumber::new(3, 5),
-            RationalNumber::new(51,100)
+            RationalNumber::new(51, 100),
         );
 
-        println!("Rational votes: {:?}", voting_state.votes_to_rationals(&hard_fork, true, &vr));
+        println!(
+            "Rational votes: {:?}",
+            voting_state.votes_to_rationals(&hard_fork, true, &vr)
+        );
         println!("Thresholds: {:?}", th);
 
-        assert_eq!(voting_state.compare_votes(&hard_fork, true, &vr, &th)?, true);
+        assert_eq!(
+            voting_state.compare_votes(&hard_fork, true, &vr, &th)?,
+            true
+        );
 
         Ok(())
     }
@@ -366,10 +394,13 @@ mod tests {
             gov_action_id: Default::default(),
             gov_action: GovernanceAction::NewConstitution(NewConstitutionAction {
                 previous_action_id: None,
-                new_constitution: Constitution { anchor: Anchor {
-                    data_hash: vec![],
-                    url: "".to_string(),
-                }, guardrail_script: None },
+                new_constitution: Constitution {
+                    anchor: Anchor {
+                        data_hash: vec![],
+                        url: "".to_string(),
+                    },
+                    guardrail_script: None,
+                },
             }),
             anchor: Anchor {
                 data_hash: vec![],
@@ -379,22 +410,36 @@ mod tests {
 
         // votes c7/0/0:d2993595142272357/78507823799974/164374042176526:s0/0/0,
         // thresholds c2/3:d3/4:s0, prevous_ok true, voted true, result true
-        let vr = VoteResult::<VoteCount>{
-            committee: VoteCount {yes: 7, no: 0, abstain: 0},
-            drep: VoteCount {yes: 2993595142272357, no: 78507823799974, abstain: 166153144964868},
+        let vr = VoteResult::<VoteCount> {
+            committee: VoteCount {
+                yes: 7,
+                no: 0,
+                abstain: 0,
+            },
+            drep: VoteCount {
+                yes: 2993595142272357,
+                no: 78507823799974,
+                abstain: 166153144964868,
+            },
             pool: VoteCount::zero(),
         };
 
         let th = VoteResult::<RationalNumber> {
-            committee: RationalNumber::new(2,3),
-            drep: RationalNumber::new(3,4),
+            committee: RationalNumber::new(2, 3),
+            drep: RationalNumber::new(3, 4),
             pool: RationalNumber::ZERO,
         };
 
-        println!("Rational votes: {:?}", voting_state.votes_to_rationals(&constitution, false, &vr));
+        println!(
+            "Rational votes: {:?}",
+            voting_state.votes_to_rationals(&constitution, false, &vr)
+        );
         println!("Thresholds: {:?}", th);
 
-        assert_eq!(voting_state.compare_votes(&constitution, false, &vr, &th)?, true);
+        assert_eq!(
+            voting_state.compare_votes(&constitution, false, &vr, &th)?,
+            true
+        );
 
         Ok(())
     }

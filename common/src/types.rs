@@ -16,8 +16,12 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_with::{hex::Hex, serde_as};
 use std::{
-    cmp::Ordering, collections::{HashMap, HashSet}, fmt, fmt::{Display, Formatter},
-    ops::{AddAssign, Neg}, str::FromStr
+    cmp::Ordering,
+    collections::{HashMap, HashSet},
+    fmt,
+    fmt::{Display, Formatter},
+    ops::{AddAssign, Neg},
+    str::FromStr,
 };
 
 /// Network identifier
@@ -1737,7 +1741,7 @@ pub struct VotingProcedures {
 pub struct VoteCount {
     pub yes: u64,
     pub no: u64,
-    pub abstain: u64
+    pub abstain: u64,
 }
 
 impl VoteCount {
@@ -1745,7 +1749,7 @@ impl VoteCount {
         Self {
             yes: 0,
             no: 0,
-            abstain: 0
+            abstain: 0,
         }
     }
 
@@ -1775,7 +1779,6 @@ impl FromStr for VoteCount {
     }
 }
 
-
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct VoteResult<E: FromStr + Display> {
     pub committee: E,
@@ -1783,13 +1786,17 @@ pub struct VoteResult<E: FromStr + Display> {
     pub pool: E,
 }
 
-impl <E: FromStr + Display> VoteResult<E> {
+impl<E: FromStr + Display> VoteResult<E> {
     pub fn new(committee: E, drep: E, pool: E) -> Self {
-        Self { committee, drep, pool }
+        Self {
+            committee,
+            drep,
+            pool,
+        }
     }
 }
 
-impl <E: FromStr + Display> Display for VoteResult<E> {
+impl<E: FromStr + Display> Display for VoteResult<E> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "c{}:d{}:s{}", self.committee, self.drep, self.pool)
     }
@@ -1815,7 +1822,11 @@ impl<E: FromStr + Display> FromStr for VoteResult<E> {
             bail!("Incorrect SPO value {}", &caps[3]);
         };
 
-        Ok(VoteResult { committee, drep, pool })
+        Ok(VoteResult {
+            committee,
+            drep,
+            pool,
+        })
     }
 }
 
@@ -2146,9 +2157,7 @@ mod tests {
         assert_eq!(count.no, 5);
         assert_eq!(count.abstain, 1);
 
-        let counts: VoteResult<VoteCount> = VoteResult::from_str(
-            "c0/5/1:d0/1/2:s123/456/0788890"
-        )?;
+        let counts: VoteResult<VoteCount> = VoteResult::from_str("c0/5/1:d0/1/2:s123/456/0788890")?;
         assert_eq!(counts.committee, count);
         assert_eq!(counts.drep.yes, 0);
         assert_eq!(counts.drep.no, 1);

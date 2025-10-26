@@ -3,7 +3,7 @@ use acropolis_common::protocol_params::ConwayParams;
 use acropolis_common::{
     BlockInfo, DRepCredential, DelegatedStake, EnactStateElem, GovActionId, GovernanceAction,
     GovernanceOutcome, GovernanceOutcomeVariant, KeyHash, Lovelace, ProposalProcedure,
-    SingleVoterVotes, TreasuryWithdrawalsAction, TxHash, Vote, Voter, VoteCount, VoteResult,
+    SingleVoterVotes, TreasuryWithdrawalsAction, TxHash, Vote, VoteCount, VoteResult, Voter,
     VotingOutcome, VotingProcedure,
 };
 use anyhow::{anyhow, bail, Result};
@@ -218,28 +218,35 @@ impl ConwayVoting {
         };
 
         let Some(all_votes) = self.votes.get(&action_id) else {
-            return Ok(votes)
+            return Ok(votes);
         };
 
         for (voter, (_hash, voting_proc)) in all_votes.iter() {
             let (vc, vd, vp) = match voting_proc.vote {
-                Vote::Yes => (&mut votes.committee.yes, &mut votes.drep.yes, &mut votes.pool.yes),
-                Vote::No => (&mut votes.committee.no, &mut votes.drep.no, &mut votes.pool.no),
+                Vote::Yes => (
+                    &mut votes.committee.yes,
+                    &mut votes.drep.yes,
+                    &mut votes.pool.yes,
+                ),
+                Vote::No => (
+                    &mut votes.committee.no,
+                    &mut votes.drep.no,
+                    &mut votes.pool.no,
+                ),
                 Vote::Abstain => (
-                    &mut votes.committee.abstain, &mut votes.drep.abstain, &mut votes.pool.abstain
+                    &mut votes.committee.abstain,
+                    &mut votes.drep.abstain,
+                    &mut votes.pool.abstain,
                 ),
             };
 
             match voter {
-                Voter::ConstitutionalCommitteeKey(_keyhash) => {
-                    *vc += 1
-                },
-                Voter::ConstitutionalCommitteeScript(_scripthash) => {
-                    *vc += 1
-                },
+                Voter::ConstitutionalCommitteeKey(_keyhash) => *vc += 1,
+                Voter::ConstitutionalCommitteeScript(_scripthash) => *vc += 1,
                 Voter::DRepKey(key) => {
                     if tracing::enabled!(tracing::Level::DEBUG) {
-                        debug!("Vote for {action_id}, epoch start {new_epoch}: {voter} = {:?}",
+                        debug!(
+                            "Vote for {action_id}, epoch start {new_epoch}: {voter} = {:?}",
                             drep_stake.get(&DRepCredential::AddrKeyHash(key.clone()))
                         );
                     }
@@ -249,7 +256,8 @@ impl ConwayVoting {
                 }
                 Voter::DRepScript(script) => {
                     if tracing::enabled!(tracing::Level::DEBUG) {
-                        debug!("Vote for {action_id}, epoch start {new_epoch}: {voter} = {:?}",
+                        debug!(
+                            "Vote for {action_id}, epoch start {new_epoch}: {voter} = {:?}",
                             drep_stake.get(&DRepCredential::ScriptHash(script.clone()))
                         );
                     }
@@ -319,7 +327,8 @@ impl ConwayVoting {
         drep_stake: &HashMap<DRepCredential, Lovelace>,
         spo_stake: &HashMap<KeyHash, DelegatedStake>,
     ) -> Result<Option<VotingOutcome>> {
-        let outcome = self.is_finally_accepted(new_epoch, voting_state, &action_id, drep_stake, spo_stake)?;
+        let outcome =
+            self.is_finally_accepted(new_epoch, voting_state, &action_id, drep_stake, spo_stake)?;
         let expired = self.is_expired(new_epoch, &action_id)?;
         if outcome.accepted || expired {
             self.end_voting(&action_id)?;
@@ -528,8 +537,8 @@ impl ConwayVoting {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acropolis_common::{Anchor, StakeAddress};
     use acropolis_common::rational_number::RationalNumber;
+    use acropolis_common::{Anchor, StakeAddress};
 
     fn create_governance_outcome(id: u8, accepted: bool) -> GovernanceOutcome {
         let votes = VoteResult::<VoteCount> {
@@ -606,23 +615,18 @@ mod tests {
             enactment_epoch: None,
             expiration_epoch: None,
         };
-        voting.action_status.insert(
-            oc2.voting.procedure.gov_action_id.clone(),
-            as2.clone(),
-        );
+        voting.action_status.insert(oc2.voting.procedure.gov_action_id.clone(), as2.clone());
         match voting.update_action_status_with_outcomes(2, &vec![oc2.clone()]) {
             Err(e) => assert_eq!(
                 e.to_string(),
                 "Impossible outcome: gov_action1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq\
-                     qqqqqqqqqy9ddhkc votes 0..5, not ended at 2".to_string()
+                     qqqqqqqqqy9ddhkc votes 0..5, not ended at 2"
+                    .to_string()
             ),
             Ok(()) => panic!("Action should not be successful."),
         }
         assert_eq!(
-            *voting
-                .action_status
-                .get(&oc2.voting.procedure.gov_action_id)
-                .unwrap(),
+            *voting.action_status.get(&oc2.voting.procedure.gov_action_id).unwrap(),
             as2
         );
         voting.update_action_status_with_outcomes(5, &vec![oc2.clone()])?;

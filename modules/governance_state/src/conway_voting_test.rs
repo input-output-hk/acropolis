@@ -1,18 +1,21 @@
 #[cfg(test)]
 mod tests {
-    use std::{collections::{BTreeMap, HashMap}, ops::Bound::Included, str::FromStr};
+    use crate::conway_voting::ConwayVoting;
+    use crate::voting_state::VotingRegistrationState;
     use acropolis_common::{
-        Credential, DRepCredential, DelegatedStake, GovActionId, KeyHash, Lovelace,
-        ProposalProcedure, TxHash, Vote, VoteCount, VoteResult, Voter,
-        VotingProcedure, rational_number::RationalNumber,
-        protocol_params::ProtocolParams, SingleVoterVotes
+        protocol_params::ProtocolParams, rational_number::RationalNumber, Credential,
+        DRepCredential, DelegatedStake, GovActionId, KeyHash, Lovelace, ProposalProcedure,
+        SingleVoterVotes, TxHash, Vote, VoteCount, VoteResult, Voter, VotingProcedure,
     };
     use anyhow::{anyhow, bail, Result};
     use serde;
     use serde_json;
     use serde_with::{base64::Base64, serde_as};
-    use crate::conway_voting::ConwayVoting;
-    use crate::voting_state::VotingRegistrationState;
+    use std::{
+        collections::{BTreeMap, HashMap},
+        ops::Bound::Included,
+        str::FromStr,
+    };
 
     use tracing_subscriber::prelude::*;
     use tracing_subscriber::{filter, fmt, EnvFilter, Registry};
@@ -29,28 +32,25 @@ mod tests {
 
     #[serde_as]
     #[derive(Clone, Debug, serde::Deserialize)]
-    struct PoolRecord (
-        #[serde_as(as = "Base64")]
-        KeyHash,     // key
-        u64,         // active stake
-        u64          // live stake
+    struct PoolRecord(
+        #[serde_as(as = "Base64")] KeyHash, // key
+        u64,                                // active stake
+        u64,                                // live stake
     );
 
     #[serde_as]
     #[derive(Clone, Debug, serde::Deserialize)]
-    struct DRepRecord (
-        u8,           // id of DRep credential type (0=addr, 1=script)
-        #[serde_as(as = "Base64")]
-        KeyHash,      // DRep credential value
-        Lovelace      // value
+    struct DRepRecord(
+        u8,                                 // id of DRep credential type (0=addr, 1=script)
+        #[serde_as(as = "Base64")] KeyHash, // DRep credential value
+        Lovelace,                           // value
     );
 
     #[serde_as]
     #[derive(Clone, Debug, serde::Deserialize)]
-    struct VotingRecord (
-        u8,           // id of DRep credential type (0=addr, 1=script), or SPO (2=pool)
-        #[serde_as(as = "Base64")]
-        KeyHash       // Key
+    struct VotingRecord(
+        u8, // id of DRep credential type (0=addr, 1=script), or SPO (2=pool)
+        #[serde_as(as = "Base64")] KeyHash, // Key
     );
 
     impl VotingRecord {
@@ -62,7 +62,7 @@ mod tests {
                 2 => Ok(Voter::StakePoolKey(key)),
                 3 => Ok(Voter::ConstitutionalCommitteeKey(key)),
                 4 => Ok(Voter::ConstitutionalCommitteeScript(key)),
-                _ => bail!("Unknown voter key type {}", self.0)
+                _ => bail!("Unknown voter key type {}", self.0),
             }
         }
     }
@@ -78,47 +78,54 @@ mod tests {
     fn parse_u64_opt(s: &str) -> Result<Option<u64>> {
         if s.is_empty() {
             Ok(None)
-        }
-        else {
-            let wp = s.strip_prefix("Some(").ok_or_else(
-                || anyhow!("Does not have 'Some(' prefix {}", s)
-            )?;
-            let num = wp.strip_suffix(")").ok_or_else(
-                || anyhow!("Must have ')' suffix {}", s)
-            )?;
-            num.parse().map_err(
-                |e| anyhow!("Cannot parse value {num}, error {e}")
-            ).map(|x| Some(x))
+        } else {
+            let wp = s
+                .strip_prefix("Some(")
+                .ok_or_else(|| anyhow!("Does not have 'Some(' prefix {}", s))?;
+            let num = wp.strip_suffix(")").ok_or_else(|| anyhow!("Must have ')' suffix {}", s))?;
+            num.parse().map_err(|e| anyhow!("Cannot parse value {num}, error {e}")).map(|x| Some(x))
         }
     }
 
     fn read_pools(pools_json: &[u8]) -> Result<HashMap<u64, HashMap<KeyHash, DelegatedStake>>> {
         let pools = serde_json::from_slice::<Vec<(u64, Vec<PoolRecord>)>>(pools_json)?;
-        let res = HashMap::from_iter(pools.iter().map(|(epoch, distr)|
-            (*epoch, HashMap::from_iter(distr.iter().map(
-                |PoolRecord(id, active, live)| (id.clone(), DelegatedStake {
-                    active: *active,
-                    active_delegators_count: 0,
-                    live: *live,
-                })
-            )))
-        ));
+        let res = HashMap::from_iter(pools.iter().map(|(epoch, distr)| {
+            (
+                *epoch,
+                HashMap::from_iter(distr.iter().map(|PoolRecord(id, active, live)| {
+                    (
+                        id.clone(),
+                        DelegatedStake {
+                            active: *active,
+                            active_delegators_count: 0,
+                            live: *live,
+                        },
+                    )
+                })),
+            )
+        }));
         Ok(res)
     }
 
     fn read_dreps(dreps_json: &[u8]) -> Result<HashMap<u64, HashMap<DRepCredential, Lovelace>>> {
-        let dreps = serde_json::from_slice::<
-            Vec<(u64, Vec<DRepRecord>)>
-        >(dreps_json)?;
+        let dreps = serde_json::from_slice::<Vec<(u64, Vec<DRepRecord>)>>(dreps_json)?;
 
-        let converted = dreps.iter().map(|(epoch, distr)|
-            Ok((*epoch, HashMap::from_iter(distr.iter().map(
-                |DRepRecord(dt, key, lvl)| Ok((
-                    parse_drep_credential(*dt, key.to_vec())?,
-                    *lvl
+        let converted = dreps
+            .iter()
+            .map(|(epoch, distr)| {
+                Ok((
+                    *epoch,
+                    HashMap::from_iter(
+                        distr
+                            .iter()
+                            .map(|DRepRecord(dt, key, lvl)| {
+                                Ok((parse_drep_credential(*dt, key.to_vec())?, *lvl))
+                            })
+                            .collect::<Result<Vec<(DRepCredential, Lovelace)>>>()?,
+                    ),
                 ))
-            ).collect::<Result<Vec<(DRepCredential, Lovelace)>>>()?)))
-        ).collect::<Result<Vec<(u64, HashMap<DRepCredential, Lovelace>)>>>()?;
+            })
+            .collect::<Result<Vec<(u64, HashMap<DRepCredential, Lovelace>)>>>()?;
 
         let res = HashMap::from_iter(converted.into_iter());
 
@@ -126,21 +133,28 @@ mod tests {
     }
 
     fn map_voter_list(votes: &Vec<VotingRecord>, v: Vote) -> Result<Vec<(Voter, VotingProcedure)>> {
-        votes.iter().map(|x| Ok((x.to_voter()?, VotingProcedure {
-            vote: v.clone(),
-            anchor: None,
-            vote_index: 0,
-        }))).collect::<Result<Vec<(Voter, VotingProcedure)>>>()
+        votes
+            .iter()
+            .map(|x| {
+                Ok((
+                    x.to_voter()?,
+                    VotingProcedure {
+                        vote: v.clone(),
+                        anchor: None,
+                        vote_index: 0,
+                    },
+                ))
+            })
+            .collect::<Result<Vec<(Voter, VotingProcedure)>>>()
     }
 
     /// Reads list of votes: for each epoch, for each gov-action, three lists of voters:
     /// ([yes voters], [no voters], [abstain voters])
-    fn read_voting_state(voting_json: &[u8])
-        -> Result<HashMap<(u64, GovActionId), Vec<(Voter, VotingProcedure)>>>
-    {
-        let voting = serde_json::from_slice::<
-            Vec<(u64,String,Vec<Vec<VotingRecord>>)>
-        >(voting_json)?;
+    fn read_voting_state(
+        voting_json: &[u8],
+    ) -> Result<HashMap<(u64, GovActionId), Vec<(Voter, VotingProcedure)>>> {
+        let voting =
+            serde_json::from_slice::<Vec<(u64, String, Vec<Vec<VotingRecord>>)>>(voting_json)?;
 
         let mut voting_hash = HashMap::new();
         for (epoch, action_id, votes) in voting.iter() {
@@ -158,7 +172,7 @@ mod tests {
             if let Some(prev) = prev {
                 bail!("Epoch {epoch}, action {action_id} is already present: {prev:?}");
             }
-        };
+        }
 
         Ok(voting_hash)
     }
@@ -177,8 +191,7 @@ mod tests {
             let records = line?.iter().map(|x| x.to_owned()).collect::<Vec<String>>();
             if records.len() == 0 {
                 continue;
-            }
-            else if records.len() != 17 {
+            } else if records.len() != 17 {
                 bail!("Wrong number of elements in csv line: {:?}", records)
             }
 
@@ -190,100 +203,97 @@ mod tests {
             let count = records.get(15).unwrap();
             let threshold = records.get(16).unwrap();
 
-            test_records.push(ConwayVotingTestRecord{
+            test_records.push(ConwayVotingTestRecord {
                 action_id: GovActionId::from_bech32(action_id)?,
-                proposal_procedure: serde_json::from_slice::<ProposalProcedure>(proposal.as_bytes())?,
+                proposal_procedure: serde_json::from_slice::<ProposalProcedure>(
+                    proposal.as_bytes(),
+                )?,
                 start_epoch: u64::from_str(start_epoch)?,
                 ratification_epoch: parse_u64_opt(ratification_epoch)?,
                 expiration_epoch: parse_u64_opt(expiration_epoch)?,
                 votes_count: VoteResult::from_str(count)?,
-                votes_threshold: VoteResult::from_str(threshold)?
+                votes_threshold: VoteResult::from_str(threshold)?,
             });
         }
         Ok(test_records)
     }
 
-    fn read_protocol_params(configs_json: &[u8]) -> Result<BTreeMap
-        ::<u64, ProtocolParams>> {
-        let configs = serde_json::from_slice::<
-            Vec<(u64, ProtocolParams)>
-        >(configs_json)?;
+    fn read_protocol_params(configs_json: &[u8]) -> Result<BTreeMap<u64, ProtocolParams>> {
+        let configs = serde_json::from_slice::<Vec<(u64, ProtocolParams)>>(configs_json)?;
         Ok(BTreeMap::from_iter(configs.into_iter()))
     }
 
     #[test]
     fn test_voting_mainnet_up_573() -> Result<()> {
         let fmt_layer = fmt::layer()
-            .with_filter(EnvFilter::from_default_env().add_directive(filter::LevelFilter::INFO.into()))
+            .with_filter(
+                EnvFilter::from_default_env().add_directive(filter::LevelFilter::INFO.into()),
+            )
             .with_filter(filter::filter_fn(|meta| meta.is_event()));
         //tracing_subscriber::fmt::init();
         Registry::default().with(fmt_layer).init();
 
-        let epoch_info = serde_json::from_slice::<Vec<(u64, u64, u64, u64, u64)>>(
-            include_bytes!("../data/epoch_pool_stats.json")
-        )?;
+        let epoch_info = serde_json::from_slice::<Vec<(u64, u64, u64, u64, u64)>>(include_bytes!(
+            "../data/epoch_pool_stats.json"
+        ))?;
 
-        let epoch_info = HashMap::<u64, VotingRegistrationState>::from_iter(
-            epoch_info.iter().map(|(epoch, spos, dreps, nconf, abs)|
-                (*epoch, VotingRegistrationState::new(*spos, *dreps, *nconf, *abs, 7))
-            )
-        );
+        let epoch_info = HashMap::<u64, VotingRegistrationState>::from_iter(epoch_info.iter().map(
+            |(epoch, spos, dreps, nconf, abs)| {
+                (
+                    *epoch,
+                    VotingRegistrationState::new(*spos, *dreps, *nconf, *abs, 7),
+                )
+            },
+        ));
 
         println!("Reading pool_state");
-        let pools = read_pools(
-            include_bytes!("../data/pool_state.json")
-        )?;
+        let pools = read_pools(include_bytes!("../data/pool_state.json"))?;
 
         println!("Reading drep_state");
-        let dreps = read_dreps(
-            include_bytes!("../data/drep_state.json")
-        )?;
+        let dreps = read_dreps(include_bytes!("../data/drep_state.json"))?;
 
         println!("Reading voting_state");
-        let votes = read_voting_state(
-            include_bytes!("../data/voting_state.json")
-        )?;
+        let votes = read_voting_state(include_bytes!("../data/voting_state.json"))?;
 
         println!("Reading conway_verification");
-        let voting_test = read_voting_test_records(
-            include_bytes!("../data/conway_verification.csv")
-        )?;
+        let voting_test =
+            read_voting_test_records(include_bytes!("../data/conway_verification.csv"))?;
 
         println!("Reading configs");
-        let protocol_params = read_protocol_params(
-            include_bytes!("../data/param_state.json")
-        )?;
+        let protocol_params = read_protocol_params(include_bytes!("../data/param_state.json"))?;
 
         for record in voting_test.iter() {
-            println!("Testing epoch {}, action {}", record.start_epoch, record.action_id);
+            println!(
+                "Testing epoch {}, action {}",
+                record.start_epoch, record.action_id
+            );
 
-            let (_cfg_epoch, cfg) = protocol_params
-                .range((Included(0), Included(record.start_epoch))).last().unwrap();
+            let (_cfg_epoch, cfg) =
+                protocol_params.range((Included(0), Included(record.start_epoch))).last().unwrap();
             let shelley = cfg.shelley.as_ref().unwrap();
             let conway = cfg.conway.as_ref().unwrap();
             let bootstrap = shelley.protocol_params.protocol_version.major <= 9;
 
             let mut conway_voting = ConwayVoting::new(None);
             conway_voting.update_parameters(&cfg.conway, bootstrap);
-            conway_voting.insert_proposal_procedure(
-                record.start_epoch,
-                &record.proposal_procedure
-            )?;
+            conway_voting
+                .insert_proposal_procedure(record.start_epoch, &record.proposal_procedure)?;
 
-            for epoch in record.start_epoch .. {
+            for epoch in record.start_epoch.. {
                 println!("Testing action {} in epoch {epoch}", record.action_id);
                 let voting_state = epoch_info.get(&epoch).unwrap();
 
-                if let Some(votes) = votes.get(&(epoch+1, record.action_id.clone())) {
+                if let Some(votes) = votes.get(&(epoch + 1, record.action_id.clone())) {
                     for (voter, voteproc) in votes {
-                        let procs = HashMap::from_iter([
-                            (record.action_id.clone(), voteproc.clone())
-                        ]);
+                        let procs =
+                            HashMap::from_iter([(record.action_id.clone(), voteproc.clone())]);
                         conway_voting.insert_voting_procedure(
                             epoch,
                             voter,
                             &TxHash::default(),
-                            &SingleVoterVotes { voting_procedures: procs }
+                            &SingleVoterVotes {
+                                voting_procedures: procs,
+                            },
                         )?
                     }
                 }
@@ -296,24 +306,30 @@ mod tests {
                 );
 
                 let outcome = conway_voting.process_one_proposal(
-                    epoch, voting_state, &record.action_id, &current_drep, &current_pool
+                    epoch,
+                    voting_state,
+                    &record.action_id,
+                    &current_drep,
+                    &current_pool,
                 )?;
 
                 let Some(outcome) = outcome else {
                     assert!(epoch < record.start_epoch + conway.gov_action_lifetime as u64 + 1);
-                    continue // We don't have exact votes yet
+                    continue; // We don't have exact votes yet
                 };
 
                 assert_eq!(outcome.accepted, record.ratification_epoch.is_some());
                 assert_eq!(outcome.accepted, !record.expiration_epoch.is_some());
                 if outcome.accepted {
-                    assert_eq!(Some(epoch+2), record.ratification_epoch)
-                }
-                else {
+                    assert_eq!(Some(epoch + 2), record.ratification_epoch)
+                } else {
                     assert_eq!(Some(epoch), record.expiration_epoch)
                 }
 
-                assert_eq!(outcome.votes_threshold.committee, record.votes_threshold.committee);
+                assert_eq!(
+                    outcome.votes_threshold.committee,
+                    record.votes_threshold.committee
+                );
                 assert_eq!(outcome.votes_threshold.drep, record.votes_threshold.drep);
                 assert_eq!(outcome.votes_threshold.pool, record.votes_threshold.pool);
 
