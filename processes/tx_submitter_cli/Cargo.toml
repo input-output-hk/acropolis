@@ -1,5 +1,5 @@
 [package]
-name = "acropolis_module_tx_submitter_cli"
+name = "acropolis_process_tx_submitter_cli"
 version = "0.1.0"
 edition = "2024"
 authors = ["Simon Gellis <simon@sundae.fi>"]
@@ -7,8 +7,8 @@ description = "CLI tool to submit transactions"
 license = "Apache-2.0"
 
 [dependencies]
-acropolis_common = { path = "../../../common" }
-acropolis_module_tx_submitter = { path = "../" }
+acropolis_common = { path = "../../common" }
+acropolis_module_tx_submitter = { path = "../../modules/tx_submitter" }
 
 caryatid_sdk = { workspace = true }
 caryatid_process = { workspace = true}

@@ -26,12 +26,12 @@ members = [
     "modules/consensus",                    # Chooses favoured chain across multiple options
     "modules/chain_store",                  # Tracks historical information about blocks and TXs
     "modules/tx_submitter",                 # Submits TXs to peers
-    "modules/tx_submitter/cli",             # CLI wrapper for TX submitter
 
     # Process builds
-    "processes/omnibus",      # All-inclusive omnibus process
-    "processes/replayer",     # All-inclusive process to replay messages
-    "processes/golden_tests", # All-inclusive golden tests process
+    "processes/omnibus",            # All-inclusive omnibus process
+    "processes/replayer",           # All-inclusive process to replay messages
+    "processes/golden_tests",       # All-inclusive golden tests process
+    "processes/tx_submitter_cli",   # CLI wrapper for TX submitter
 ]
 resolver = "2"
 

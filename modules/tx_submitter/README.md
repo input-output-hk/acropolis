@@ -1,12 +1,6 @@
 # TX submission module
 
-The TX submission module implements the TXSubmission node-to-node protocol to submit transactions to a single upstream source. It can run as part of a complete Acropolis setup, or independently through its own CLI.
-
-## CLI tool
-
-```sh
-cargo run --bin tx-submitter-cli -- <tx-file>
-```
+The TX submission module implements the TXSubmission node-to-node protocol to submit transactions to a single upstream source.
 
 ## Messages
 
