@@ -808,14 +808,6 @@ pub struct PoolMetadata {
     pub hash: DataHash,
 }
 
-/// Pool registration with position
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PoolRegistrationWithPos {
-    pub cert: PoolRegistration,
-    pub tx_identifier: TxIdentifier,
-    pub cert_index: u64,
-}
-
 /// Pool registration data
 #[serde_as]
 #[derive(
@@ -867,14 +859,6 @@ pub struct PoolRegistration {
     // Metadata
     #[n(8)]
     pub pool_metadata: Option<PoolMetadata>,
-}
-
-// Pool Retirment with position
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PoolRetirementWithPos {
-    pub cert: PoolRetirement,
-    pub tx_identifier: TxIdentifier,
-    pub cert_index: u64,
 }
 
 /// Pool retirement data
@@ -950,12 +934,6 @@ pub struct StakeDelegation {
     pub operator: KeyHash,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct StakeDelegationWithPos {
-    pub cert: StakeDelegation,
-    pub tx_identifier: TxIdentifier,
-}
-
 /// SPO total delegation data (for SPDD)
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct DelegatedStake {
@@ -1016,12 +994,6 @@ pub struct MoveInstantaneousReward {
     pub target: InstantaneousRewardTarget,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct MoveInstantaneousRewardWithPos {
-    pub cert: MoveInstantaneousReward,
-    pub tx_identifier: TxIdentifier,
-}
-
 /// Register stake (Conway version) = 'reg_cert'
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Registration {
@@ -1032,13 +1004,6 @@ pub struct Registration {
     pub deposit: Lovelace,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct RegistrationWithPos {
-    pub cert: Registration,
-    pub tx_identifier: TxIdentifier,
-    pub cert_index: u64,
-}
-
 /// Deregister stake (Conway version) = 'unreg_cert'
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Deregistration {
@@ -1047,13 +1012,6 @@ pub struct Deregistration {
 
     /// Deposit to be refunded
     pub refund: Lovelace,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct DeregistrationWithPos {
-    pub cert: Deregistration,
-    pub tx_identifier: TxIdentifier,
-    pub cert_index: u64,
 }
 
 /// DRepChoice (=CDDL drep, badly named)
@@ -1095,12 +1053,6 @@ pub struct StakeAndVoteDelegation {
     pub drep: DRepChoice,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct StakeAndVoteDelegationWithPos {
-    pub cert: StakeAndVoteDelegation,
-    pub tx_identifier: TxIdentifier,
-}
-
 /// Stake delegation to SPO + registration = stake_reg_deleg_cert
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StakeRegistrationAndDelegation {
@@ -1114,12 +1066,6 @@ pub struct StakeRegistrationAndDelegation {
     pub deposit: Lovelace,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct StakeRegistrationAndDelegationWithPos {
-    pub cert: StakeRegistrationAndDelegation,
-    pub tx_identifier: TxIdentifier,
-}
-
 /// Vote delegation to DRep + registration = vote_reg_deleg_cert
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StakeRegistrationAndVoteDelegation {
@@ -1131,12 +1077,6 @@ pub struct StakeRegistrationAndVoteDelegation {
 
     // Deposit paid
     pub deposit: Lovelace,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct StakeRegistrationAndVoteDelegationWithPos {
-    pub cert: StakeRegistrationAndVoteDelegation,
-    pub tx_identifier: TxIdentifier,
 }
 
 /// All the trimmings:
@@ -1155,12 +1095,6 @@ pub struct StakeRegistrationAndStakeAndVoteDelegation {
 
     // Deposit paid
     pub deposit: Lovelace,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct StakeRegistrationAndStakeAndVoteDelegationWithPos {
-    pub cert: StakeRegistrationAndStakeAndVoteDelegation,
-    pub tx_identifier: TxIdentifier,
 }
 
 /// Anchor
@@ -1190,13 +1124,6 @@ pub struct DRepRegistration {
     pub anchor: Option<Anchor>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct DRepRegistrationWithPos {
-    pub cert: DRepRegistration,
-    pub tx_identifier: TxIdentifier,
-    pub cert_index: u64,
-}
-
 /// DRep Deregistration = unreg_drep_cert
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DRepDeregistration {
@@ -1207,13 +1134,6 @@ pub struct DRepDeregistration {
     pub refund: Lovelace,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct DRepDeregistrationWithPos {
-    pub cert: DRepDeregistration,
-    pub tx_identifier: TxIdentifier,
-    pub cert_index: u64,
-}
-
 /// DRep Update = update_drep_cert
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DRepUpdate {
@@ -1222,13 +1142,6 @@ pub struct DRepUpdate {
 
     /// Optional anchor
     pub anchor: Option<Anchor>,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct DRepUpdateWithPos {
-    pub cert: DRepUpdate,
-    pub tx_identifier: TxIdentifier,
-    pub cert_index: u64,
 }
 
 pub type CommitteeCredential = Credential;
@@ -1842,14 +1755,6 @@ pub struct GovernanceOutcome {
     /// or if the proposal does not suppose formal action, this field is
     /// `NoFormalAction`
     pub action_to_perform: GovernanceOutcomeVariant,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct StakeAddressWithPos {
-    pub stake_address: StakeAddress,
-    pub tx_identifier: TxIdentifier,
-    pub tx_index: u64,
-    pub cert_index: u64,
 }
 
 /// Certificate in a transaction
