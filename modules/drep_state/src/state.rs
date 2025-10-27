@@ -7,8 +7,8 @@ use acropolis_common::{
         get_query_topic,
         governance::{DRepActionUpdate, DRepUpdateEvent, VoteRecord},
     },
-    Anchor, DRepChoice, DRepCredential, Lovelace, StakeAddress, TxCertificate, TxHash, Voter,
-    VotingProcedures,
+    Anchor, DRepChoice, DRepCredential, Lovelace, StakeAddress, TxCertificate,
+    TxCertificateWithPos, TxHash, Voter, VotingProcedures,
 };
 use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
@@ -220,7 +220,7 @@ impl State {
     pub async fn process_certificates(
         &mut self,
         context: Arc<Context<Message>>,
-        tx_certs: &Vec<TxCertificate>,
+        tx_certs: &Vec<TxCertificateWithPos>,
         epoch: u64,
     ) -> Result<()> {
         let mut batched_delegators = Vec::new();
@@ -228,7 +228,7 @@ impl State {
 
         for tx_cert in tx_certs {
             if store_delegators {
-                if let Some((delegator, drep)) = Self::extract_delegation_fields(tx_cert) {
+                if let Some((delegator, drep)) = Self::extract_delegation_fields(&tx_cert.cert) {
                     batched_delegators.push((delegator, drep));
                     continue;
                 }
@@ -317,34 +317,34 @@ impl State {
         distribution
     }
 
-    fn process_one_cert(&mut self, tx_cert: &TxCertificate, epoch: u64) -> Result<bool> {
-        match tx_cert {
+    fn process_one_cert(&mut self, tx_cert: &TxCertificateWithPos, epoch: u64) -> Result<bool> {
+        match &tx_cert.cert {
             TxCertificate::DRepRegistration(reg) => {
-                let new = match self.dreps.get_mut(&reg.cert.credential) {
+                let new = match self.dreps.get_mut(&reg.credential) {
                     Some(drep) => {
-                        if reg.cert.deposit != 0 {
+                        if reg.deposit != 0 {
                             return Err(anyhow!(
                                 "DRep registration {:?}: replacement requires deposit = 0, got {}",
-                                reg.cert.credential,
-                                reg.cert.deposit
+                                reg.credential,
+                                reg.deposit
                             ));
                         }
-                        drep.anchor = reg.cert.anchor.clone();
+                        drep.anchor = reg.anchor.clone();
                         false
                     }
                     None => {
                         self.dreps.insert(
-                            reg.cert.credential.clone(),
-                            DRepRecord::new(reg.cert.deposit, reg.cert.anchor.clone()),
+                            reg.credential.clone(),
+                            DRepRecord::new(reg.deposit, reg.anchor.clone()),
                         );
                         true
                     }
                 };
 
                 if self.historical_dreps.is_some() {
-                    if let Err(err) = self.update_historical(&reg.cert.credential, true, |entry| {
+                    if let Err(err) = self.update_historical(&reg.credential, true, |entry| {
                         if let Some(info) = entry.info.as_mut() {
-                            info.deposit = reg.cert.deposit;
+                            info.deposit = reg.deposit;
                             info.expired = false;
                             info.retired = false;
                             info.active_epoch = Some(epoch);
@@ -352,12 +352,12 @@ impl State {
                         }
                         if let Some(updates) = entry.updates.as_mut() {
                             updates.push(DRepUpdateEvent {
-                                tx_identifier: reg.tx_identifier,
-                                cert_index: reg.cert_index,
+                                tx_identifier: tx_cert.tx_identifier,
+                                cert_index: tx_cert.cert_index,
                                 action: DRepActionUpdate::Registered,
                             });
                         }
-                        if let Some(anchor) = &reg.cert.anchor {
+                        if let Some(anchor) = &reg.anchor {
                             if let Some(inner) = entry.metadata.as_mut() {
                                 *inner = Some(anchor.clone());
                             }
@@ -372,16 +372,16 @@ impl State {
 
             TxCertificate::DRepDeregistration(reg) => {
                 // Update live state
-                if self.dreps.remove(&reg.cert.credential).is_none() {
+                if self.dreps.remove(&reg.credential).is_none() {
                     return Err(anyhow!(
                         "DRep deregistration {:?}: credential not found",
-                        reg.cert.credential
+                        reg.credential
                     ));
                 }
 
                 // Update history if enabled
                 if self.historical_dreps.is_some() {
-                    if let Err(err) = self.update_historical(&reg.cert.credential, false, |entry| {
+                    if let Err(err) = self.update_historical(&reg.credential, false, |entry| {
                         if let Some(info) = entry.info.as_mut() {
                             info.deposit = 0;
                             info.expired = false;
@@ -391,8 +391,8 @@ impl State {
                         }
                         if let Some(updates) = entry.updates.as_mut() {
                             updates.push(DRepUpdateEvent {
-                                tx_identifier: reg.tx_identifier,
-                                cert_index: reg.cert_index,
+                                tx_identifier: tx_cert.tx_identifier,
+                                cert_index: tx_cert.cert_index,
                                 action: DRepActionUpdate::Deregistered,
                             });
                         }
@@ -406,16 +406,13 @@ impl State {
 
             TxCertificate::DRepUpdate(reg) => {
                 // Update live state
-                let drep = self.dreps.get_mut(&reg.cert.credential).ok_or_else(|| {
-                    anyhow!(
-                        "DRep update {:?}: credential not found",
-                        reg.cert.credential
-                    )
+                let drep = self.dreps.get_mut(&reg.credential).ok_or_else(|| {
+                    anyhow!("DRep update {:?}: credential not found", reg.credential)
                 })?;
-                drep.anchor = reg.cert.anchor.clone();
+                drep.anchor = reg.anchor.clone();
 
                 // Update history if enabled
-                if let Err(err) = self.update_historical(&reg.cert.credential, false, |entry| {
+                if let Err(err) = self.update_historical(&reg.credential, false, |entry| {
                     if let Some(info) = entry.info.as_mut() {
                         info.expired = false;
                         info.retired = false;
@@ -423,12 +420,12 @@ impl State {
                     }
                     if let Some(updates) = entry.updates.as_mut() {
                         updates.push(DRepUpdateEvent {
-                            tx_identifier: reg.tx_identifier,
-                            cert_index: reg.cert_index,
+                            tx_identifier: tx_cert.tx_identifier,
+                            cert_index: tx_cert.cert_index,
                             action: DRepActionUpdate::Updated,
                         });
                     }
-                    if let Some(anchor) = &reg.cert.anchor {
+                    if let Some(anchor) = &reg.anchor {
                         if let Some(inner) = entry.metadata.as_mut() {
                             *inner = Some(anchor.clone());
                         }
@@ -548,12 +545,12 @@ impl State {
     fn extract_delegation_fields(cert: &TxCertificate) -> Option<(&StakeAddress, &DRepChoice)> {
         match cert {
             TxCertificate::VoteDelegation(d) => Some((&d.stake_address, &d.drep)),
-            TxCertificate::StakeAndVoteDelegation(d) => Some((&d.cert.stake_address, &d.cert.drep)),
+            TxCertificate::StakeAndVoteDelegation(d) => Some((&d.stake_address, &d.drep)),
             TxCertificate::StakeRegistrationAndVoteDelegation(d) => {
-                Some((&d.cert.stake_address, &d.cert.drep))
+                Some((&d.stake_address, &d.drep))
             }
             TxCertificate::StakeRegistrationAndStakeAndVoteDelegation(d) => {
-                Some((&d.cert.stake_address, &d.cert.drep))
+                Some((&d.stake_address, &d.drep))
             }
             _ => None,
         }
@@ -572,8 +569,8 @@ fn drep_choice_to_credential(choice: &DRepChoice) -> Option<DRepCredential> {
 mod tests {
     use crate::state::{DRepRecord, DRepStorageConfig, State};
     use acropolis_common::{
-        Anchor, Credential, DRepDeregistration, DRepDeregistrationWithPos, DRepRegistration,
-        DRepRegistrationWithPos, DRepUpdate, DRepUpdateWithPos, TxCertificate, TxIdentifier,
+        Anchor, Credential, DRepDeregistration, DRepRegistration, DRepUpdate, TxCertificate,
+        TxCertificateWithPos, TxIdentifier,
     };
 
     const CRED_1: [u8; 28] = [
@@ -588,15 +585,15 @@ mod tests {
     #[test]
     fn test_drep_process_one_certificate() {
         let tx_cred = Credential::AddrKeyHash(CRED_1.to_vec());
-        let tx_cert = TxCertificate::DRepRegistration(DRepRegistrationWithPos {
-            cert: DRepRegistration {
+        let tx_cert = TxCertificateWithPos {
+            cert: TxCertificate::DRepRegistration(DRepRegistration {
                 credential: tx_cred.clone(),
                 deposit: 500000000,
                 anchor: None,
-            },
+            }),
             tx_identifier: TxIdentifier::default(),
-            cert_index: 1,
-        });
+            cert_index: 0,
+        };
         let mut state = State::new(DRepStorageConfig::default());
         assert_eq!(state.process_one_cert(&tx_cert, 1).unwrap(), true);
         assert_eq!(state.get_count(), 1);
@@ -613,27 +610,28 @@ mod tests {
     #[test]
     fn test_drep_do_not_replace_existing_certificate() {
         let tx_cred = Credential::AddrKeyHash(CRED_1.to_vec());
-        let tx_cert = TxCertificate::DRepRegistration(DRepRegistrationWithPos {
-            cert: DRepRegistration {
+        let tx_cert = TxCertificateWithPos {
+            cert: TxCertificate::DRepRegistration(DRepRegistration {
                 credential: tx_cred.clone(),
                 deposit: 500000000,
                 anchor: None,
-            },
+            }),
             tx_identifier: TxIdentifier::default(),
-            cert_index: 1,
-        });
+            cert_index: 0,
+        };
+
         let mut state = State::new(DRepStorageConfig::default());
         assert_eq!(state.process_one_cert(&tx_cert, 1).unwrap(), true);
 
-        let bad_tx_cert = TxCertificate::DRepRegistration(DRepRegistrationWithPos {
-            cert: DRepRegistration {
+        let bad_tx_cert = TxCertificateWithPos {
+            cert: TxCertificate::DRepRegistration(DRepRegistration {
                 credential: tx_cred.clone(),
                 deposit: 600000000,
                 anchor: None,
-            },
+            }),
             tx_identifier: TxIdentifier::default(),
             cert_index: 1,
-        });
+        };
         assert!(state.process_one_cert(&bad_tx_cert, 1).is_err());
 
         assert_eq!(state.get_count(), 1);
@@ -650,15 +648,15 @@ mod tests {
     #[test]
     fn test_drep_update_certificate() {
         let tx_cred = Credential::AddrKeyHash(CRED_1.to_vec());
-        let tx_cert = TxCertificate::DRepRegistration(DRepRegistrationWithPos {
-            cert: DRepRegistration {
+        let tx_cert = TxCertificateWithPos {
+            cert: TxCertificate::DRepRegistration(DRepRegistration {
                 credential: tx_cred.clone(),
                 deposit: 500000000,
                 anchor: None,
-            },
+            }),
             tx_identifier: TxIdentifier::default(),
             cert_index: 1,
-        });
+        };
         let mut state = State::new(DRepStorageConfig::default());
         assert_eq!(state.process_one_cert(&tx_cert, 1).unwrap(), true);
 
@@ -666,14 +664,14 @@ mod tests {
             url: "https://poop.bike".into(),
             data_hash: vec![0x13, 0x37],
         };
-        let update_anchor_tx_cert = TxCertificate::DRepUpdate(DRepUpdateWithPos {
-            cert: DRepUpdate {
+        let update_anchor_tx_cert = TxCertificateWithPos {
+            cert: TxCertificate::DRepUpdate(DRepUpdate {
                 credential: tx_cred.clone(),
                 anchor: Some(anchor.clone()),
-            },
+            }),
             tx_identifier: TxIdentifier::default(),
             cert_index: 1,
-        });
+        };
 
         assert_eq!(
             state.process_one_cert(&update_anchor_tx_cert, 1).unwrap(),
@@ -694,15 +692,15 @@ mod tests {
     #[test]
     fn test_drep_do_not_update_nonexistent_certificate() {
         let tx_cred = Credential::AddrKeyHash(CRED_1.to_vec());
-        let tx_cert = TxCertificate::DRepRegistration(DRepRegistrationWithPos {
-            cert: DRepRegistration {
+        let tx_cert = TxCertificateWithPos {
+            cert: TxCertificate::DRepRegistration(DRepRegistration {
                 credential: tx_cred.clone(),
                 deposit: 500000000,
                 anchor: None,
-            },
+            }),
             tx_identifier: TxIdentifier::default(),
             cert_index: 1,
-        });
+        };
         let mut state = State::new(DRepStorageConfig::default());
         assert_eq!(state.process_one_cert(&tx_cert, 1).unwrap(), true);
 
@@ -710,14 +708,14 @@ mod tests {
             url: "https://poop.bike".into(),
             data_hash: vec![0x13, 0x37],
         };
-        let update_anchor_tx_cert = TxCertificate::DRepUpdate(DRepUpdateWithPos {
-            cert: DRepUpdate {
+        let update_anchor_tx_cert = TxCertificateWithPos {
+            cert: TxCertificate::DRepUpdate(DRepUpdate {
                 credential: Credential::AddrKeyHash(CRED_2.to_vec()),
                 anchor: Some(anchor.clone()),
-            },
+            }),
             tx_identifier: TxIdentifier::default(),
             cert_index: 1,
-        });
+        };
         assert!(state.process_one_cert(&update_anchor_tx_cert, 1).is_err());
 
         assert_eq!(state.get_count(), 1);
@@ -734,26 +732,26 @@ mod tests {
     #[test]
     fn test_drep_deregister() {
         let tx_cred = Credential::AddrKeyHash(CRED_1.to_vec());
-        let tx_cert = TxCertificate::DRepRegistration(acropolis_common::DRepRegistrationWithPos {
-            cert: DRepRegistration {
+        let tx_cert = TxCertificateWithPos {
+            cert: TxCertificate::DRepRegistration(DRepRegistration {
                 credential: tx_cred.clone(),
                 deposit: 500000000,
                 anchor: None,
-            },
+            }),
             tx_identifier: TxIdentifier::default(),
             cert_index: 1,
-        });
+        };
         let mut state = State::new(DRepStorageConfig::default());
         assert_eq!(state.process_one_cert(&tx_cert, 1).unwrap(), true);
 
-        let unregister_tx_cert = TxCertificate::DRepDeregistration(DRepDeregistrationWithPos {
-            cert: DRepDeregistration {
+        let unregister_tx_cert = TxCertificateWithPos {
+            cert: TxCertificate::DRepDeregistration(DRepDeregistration {
                 credential: tx_cred.clone(),
                 refund: 500000000,
-            },
+            }),
             tx_identifier: TxIdentifier::default(),
             cert_index: 1,
-        });
+        };
         assert_eq!(
             state.process_one_cert(&unregister_tx_cert, 1).unwrap(),
             true
@@ -765,26 +763,26 @@ mod tests {
     #[test]
     fn test_drep_do_not_deregister_nonexistent_cert() {
         let tx_cred = Credential::AddrKeyHash(CRED_1.to_vec());
-        let tx_cert = TxCertificate::DRepRegistration(acropolis_common::DRepRegistrationWithPos {
-            cert: DRepRegistration {
+        let tx_cert = TxCertificateWithPos {
+            cert: TxCertificate::DRepRegistration(DRepRegistration {
                 credential: tx_cred.clone(),
                 deposit: 500000000,
                 anchor: None,
-            },
+            }),
             tx_identifier: TxIdentifier::default(),
             cert_index: 1,
-        });
+        };
         let mut state = State::new(DRepStorageConfig::default());
         assert_eq!(state.process_one_cert(&tx_cert, 1).unwrap(), true);
 
-        let unregister_tx_cert = TxCertificate::DRepDeregistration(DRepDeregistrationWithPos {
-            cert: DRepDeregistration {
+        let unregister_tx_cert = TxCertificateWithPos {
+            cert: TxCertificate::DRepDeregistration(DRepDeregistration {
                 credential: Credential::AddrKeyHash(CRED_2.to_vec()),
                 refund: 500000000,
-            },
+            }),
             tx_identifier: TxIdentifier::default(),
             cert_index: 1,
-        });
+        };
         assert!(state.process_one_cert(&unregister_tx_cert, 1).is_err());
         assert_eq!(state.get_count(), 1);
         assert_eq!(state.get_drep(&tx_cred).unwrap().deposit, 500000000);

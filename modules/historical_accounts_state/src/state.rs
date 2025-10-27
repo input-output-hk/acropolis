@@ -127,19 +127,19 @@ impl State {
     ) -> Result<()> {
         // Handle certificates
         for tx_cert in tx_certs.certificates.iter() {
-            match tx_cert {
+            match &tx_cert.cert {
                 // Pre-Conway stake registration/deregistration certs
-                TxCertificate::StakeRegistration(sc) => {
+                TxCertificate::StakeRegistration(stake_address) => {
                     self.handle_stake_registration_change(
-                        &sc.stake_address,
-                        &sc.tx_identifier,
+                        &stake_address,
+                        &tx_cert.tx_identifier,
                         RegistrationStatus::Registered,
                     );
                 }
-                TxCertificate::StakeDeregistration(sc) => {
+                TxCertificate::StakeDeregistration(stake_address) => {
                     self.handle_stake_registration_change(
-                        &sc.stake_address,
-                        &sc.tx_identifier,
+                        &stake_address,
+                        &tx_cert.tx_identifier,
                         RegistrationStatus::Deregistered,
                     );
                 }
@@ -147,15 +147,15 @@ impl State {
                 // Post-Conway stake registration/deregistration certs
                 TxCertificate::Registration(reg) => {
                     self.handle_stake_registration_change(
-                        &reg.cert.stake_address,
-                        &reg.tx_identifier,
+                        &reg.stake_address,
+                        &tx_cert.tx_identifier,
                         RegistrationStatus::Registered,
                     );
                 }
                 TxCertificate::Deregistration(dreg) => {
                     self.handle_stake_registration_change(
-                        &dreg.cert.stake_address,
-                        &dreg.tx_identifier,
+                        &dreg.stake_address,
+                        &tx_cert.tx_identifier,
                         RegistrationStatus::Deregistered,
                     );
                 }
@@ -163,27 +163,27 @@ impl State {
                 // Registration and delegation certs
                 TxCertificate::StakeRegistrationAndStakeAndVoteDelegation(delegation) => {
                     self.handle_stake_registration_change(
-                        &delegation.cert.stake_address,
-                        &delegation.tx_identifier,
+                        &delegation.stake_address,
+                        &tx_cert.tx_identifier,
                         RegistrationStatus::Registered,
                     );
                     self.handle_stake_delegation(
-                        &delegation.cert.stake_address,
-                        &delegation.cert.operator,
-                        &delegation.tx_identifier,
+                        &delegation.stake_address,
+                        &delegation.operator,
+                        &tx_cert.tx_identifier,
                         epoch,
                     );
                 }
                 TxCertificate::StakeRegistrationAndDelegation(delegation) => {
                     self.handle_stake_registration_change(
-                        &delegation.cert.stake_address,
-                        &delegation.tx_identifier,
+                        &delegation.stake_address,
+                        &tx_cert.tx_identifier,
                         RegistrationStatus::Registered,
                     );
                     self.handle_stake_delegation(
-                        &delegation.cert.stake_address,
-                        &delegation.cert.operator,
-                        &delegation.tx_identifier,
+                        &delegation.stake_address,
+                        &delegation.operator,
+                        &tx_cert.tx_identifier,
                         epoch,
                     );
                 }
@@ -191,31 +191,31 @@ impl State {
                 // Delegation certs
                 TxCertificate::StakeDelegation(delegation) => {
                     self.handle_stake_delegation(
-                        &delegation.cert.stake_address,
-                        &delegation.cert.operator,
-                        &delegation.tx_identifier,
+                        &delegation.stake_address,
+                        &delegation.operator,
+                        &tx_cert.tx_identifier,
                         epoch,
                     );
                 }
                 TxCertificate::StakeAndVoteDelegation(delegation) => {
                     self.handle_stake_delegation(
-                        &delegation.cert.stake_address,
-                        &delegation.cert.operator,
-                        &delegation.tx_identifier,
+                        &delegation.stake_address,
+                        &delegation.operator,
+                        &tx_cert.tx_identifier,
                         epoch,
                     );
                 }
                 TxCertificate::StakeRegistrationAndVoteDelegation(delegation) => {
                     self.handle_stake_registration_change(
-                        &delegation.cert.stake_address,
-                        &delegation.tx_identifier,
+                        &delegation.stake_address,
+                        &tx_cert.tx_identifier,
                         RegistrationStatus::Registered,
                     );
                 }
 
                 // MIR certs
                 TxCertificate::MoveInstantaneousReward(mir) => {
-                    self.handle_mir(&mir.cert.target, &mir.tx_identifier);
+                    self.handle_mir(&mir.target, &tx_cert.tx_identifier);
                 }
 
                 _ => (),

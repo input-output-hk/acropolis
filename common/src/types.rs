@@ -1859,46 +1859,46 @@ pub enum TxCertificate {
     None(()),
 
     /// Stake registration
-    StakeRegistration(StakeAddressWithPos),
+    StakeRegistration(StakeAddress),
 
     /// Stake de-registration
-    StakeDeregistration(StakeAddressWithPos),
+    StakeDeregistration(StakeAddress),
 
     /// Stake Delegation to a pool
-    StakeDelegation(StakeDelegationWithPos),
+    StakeDelegation(StakeDelegation),
 
     /// Pool registration
-    PoolRegistrationWithPos(PoolRegistrationWithPos),
+    PoolRegistration(PoolRegistration),
 
     /// Pool retirement
-    PoolRetirementWithPos(PoolRetirementWithPos),
+    PoolRetirement(PoolRetirement),
 
     /// Genesis key delegation
     GenesisKeyDelegation(GenesisKeyDelegation),
 
     /// Move instantaneous rewards
-    MoveInstantaneousReward(MoveInstantaneousRewardWithPos),
+    MoveInstantaneousReward(MoveInstantaneousReward),
 
     /// New stake registration
-    Registration(RegistrationWithPos),
+    Registration(Registration),
 
     /// Stake deregistration
-    Deregistration(DeregistrationWithPos),
+    Deregistration(Deregistration),
 
     /// Vote delegation
     VoteDelegation(VoteDelegation),
 
     /// Combined stake and vote delegation
-    StakeAndVoteDelegation(StakeAndVoteDelegationWithPos),
+    StakeAndVoteDelegation(StakeAndVoteDelegation),
 
     /// Stake registration and SPO delegation
-    StakeRegistrationAndDelegation(StakeRegistrationAndDelegationWithPos),
+    StakeRegistrationAndDelegation(StakeRegistrationAndDelegation),
 
     /// Stake registration and vote delegation
-    StakeRegistrationAndVoteDelegation(StakeRegistrationAndVoteDelegationWithPos),
+    StakeRegistrationAndVoteDelegation(StakeRegistrationAndVoteDelegation),
 
     /// Stake registration and combined SPO and vote delegation
-    StakeRegistrationAndStakeAndVoteDelegation(StakeRegistrationAndStakeAndVoteDelegationWithPos),
+    StakeRegistrationAndStakeAndVoteDelegation(StakeRegistrationAndStakeAndVoteDelegation),
 
     /// Authorise a committee hot credential
     AuthCommitteeHot(AuthCommitteeHot),
@@ -1907,13 +1907,20 @@ pub enum TxCertificate {
     ResignCommitteeCold(ResignCommitteeCold),
 
     /// DRep registration
-    DRepRegistration(DRepRegistrationWithPos),
+    DRepRegistration(DRepRegistration),
 
     /// DRep deregistration
-    DRepDeregistration(DRepDeregistrationWithPos),
+    DRepDeregistration(DRepDeregistration),
 
     /// DRep update
-    DRepUpdate(DRepUpdateWithPos),
+    DRepUpdate(DRepUpdate),
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TxCertificateWithPos {
+    pub cert: TxCertificate,
+    pub tx_identifier: TxIdentifier,
+    pub cert_index: u64,
 }
 
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
