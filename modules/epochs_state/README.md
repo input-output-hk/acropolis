@@ -17,7 +17,7 @@ everything except the section header can be left out.
 [module.epochs-state]
 
 # Message topics
-subscribe-headers-topic = "cardano.block.headers"
+subscribe-blocks-topic = "cardano.block.proposed"
 subscribe-fees-topic = "cardano.fees"
 publish-topic = "cardano.epoch.activity"
 
@@ -25,9 +25,8 @@ publish-topic = "cardano.epoch.activity"
 
 ## Messages
 
-The epochs state subscribes for BlockHeaderMessages on
-`cardano.block.header` (see the [Upstream Chain
-Fetcher](../upstream_chain_fetcher) module for details).
+The epochs state subscribes for RawBlockMessages on
+`cardano.block.proposed` (see the [Consensus](../consensus) module for details).
 
 TODO subscription for fees
 

@@ -5,7 +5,7 @@ use acropolis_common::messages::{Message, RESTResponse, StateQuery, StateQueryRe
 use acropolis_common::queries::accounts::{AccountsStateQuery, AccountsStateQueryResponse};
 use acropolis_common::queries::utils::query_state;
 use acropolis_common::serialization::Bech32WithHrp;
-use acropolis_common::{Address, DRepChoice, StakeAddress, StakeAddressPayload};
+use acropolis_common::{DRepChoice, StakeAddress};
 use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
 
@@ -31,30 +31,27 @@ pub async fn handle_single_account_blockfrost(
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
-    let Some(stake_address) = params.get(0) else {
+    let Some(stake_key) = params.get(0) else {
         return Ok(RESTResponse::with_text(
             400,
             "Missing stake address parameter",
         ));
     };
 
-    // Convert Bech32 stake address to StakeCredential
-    let stake_key = match Address::from_string(&stake_address) {
-        Ok(Address::Stake(StakeAddress {
-            payload: StakeAddressPayload::StakeKeyHash(hash),
-            ..
-        })) => hash,
+    // Convert Bech32 stake address to StakeAddress
+    let stake_address = match StakeAddress::from_string(&stake_key) {
+        Ok(addr) => addr,
         _ => {
             return Ok(RESTResponse::with_text(
                 400,
-                &format!("Not a valid stake address: {stake_address}"),
+                &format!("Not a valid stake address: {stake_key}"),
             ));
         }
     };
 
     // Prepare the message
     let msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
-        AccountsStateQuery::GetAccountInfo { stake_key },
+        AccountsStateQuery::GetAccountInfo { stake_address },
     )));
     let account = query_state(
         &context,
@@ -114,8 +111,8 @@ pub async fn handle_single_account_blockfrost(
     let rest_response = StakeAccountRest {
         utxo_value: account.utxo_value,
         rewards: account.rewards,
-        delegated_spo: delegated_spo,
-        delegated_drep: delegated_drep,
+        delegated_spo,
+        delegated_drep,
     };
 
     match serde_json::to_string(&rest_response) {

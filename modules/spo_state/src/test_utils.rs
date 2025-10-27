@@ -15,7 +15,7 @@ pub fn default_store_config() -> StoreConfig {
         store_updates: false,
         store_delegators: false,
         store_votes: false,
-        store_block_hashes: false,
+        store_blocks: false,
         store_stake_addresses: false,
     }
 }
@@ -28,7 +28,7 @@ pub fn save_history_store_config() -> StoreConfig {
         store_updates: false,
         store_delegators: false,
         store_votes: false,
-        store_block_hashes: false,
+        store_blocks: false,
         store_stake_addresses: false,
     }
 }
@@ -41,12 +41,12 @@ pub fn save_retired_pools_store_config() -> StoreConfig {
         store_updates: false,
         store_delegators: false,
         store_votes: false,
-        store_block_hashes: false,
+        store_blocks: false,
         store_stake_addresses: false,
     }
 }
 
-pub fn save_block_hashes_store_config() -> StoreConfig {
+pub fn save_blocks_store_config() -> StoreConfig {
     StoreConfig {
         store_epochs_history: false,
         store_retired_pools: false,
@@ -54,7 +54,7 @@ pub fn save_block_hashes_store_config() -> StoreConfig {
         store_updates: false,
         store_delegators: false,
         store_votes: false,
-        store_block_hashes: true,
+        store_blocks: true,
         store_stake_addresses: false,
     }
 }
@@ -89,9 +89,17 @@ pub fn new_spdd_message(epoch: u64) -> SPOStakeDistributionMessage {
 pub fn new_epoch_activity_message(epoch: u64) -> EpochActivityMessage {
     EpochActivityMessage {
         epoch,
+        epoch_start_time: 0,
+        epoch_end_time: 0,
+        first_block_time: 0,
+        first_block_height: 0,
+        last_block_time: 0,
+        last_block_height: 0,
         total_blocks: 0,
+        total_txs: 0,
+        total_outputs: 0,
         total_fees: 0,
-        vrf_vkey_hashes: Vec::new(),
+        spo_blocks: Vec::new(),
         nonce: None,
     }
 }

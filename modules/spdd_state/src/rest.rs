@@ -1,5 +1,6 @@
 use crate::state::State;
 use acropolis_common::serialization::Bech32WithHrp;
+use acropolis_common::DelegatedStake;
 use acropolis_common::{extract_strict_query_params, messages::RESTResponse};
 use anyhow::Result;
 use std::{collections::HashMap, sync::Arc};
@@ -7,18 +8,10 @@ use tokio::sync::Mutex;
 
 /// Handles /spdd
 pub async fn handle_spdd(
-    state: Option<Arc<Mutex<State>>>,
+    state: Arc<Mutex<State>>,
     params: HashMap<String, String>,
 ) -> Result<RESTResponse> {
-    let locked = match state.as_ref() {
-        Some(state) => state.lock().await,
-        None => {
-            return Ok(RESTResponse::with_text(
-                503,
-                "SPDD storage is disabled by configuration",
-            ));
-        }
-    };
+    let locked = state.lock().await;
 
     extract_strict_query_params!(params, {
         "epoch" => epoch: Option<u64>,
@@ -38,7 +31,7 @@ pub async fn handle_spdd(
     };
 
     if let Some(spdd) = spdd_opt {
-        let spdd: HashMap<_, _> = spdd
+        let spdd: HashMap<String, DelegatedStake> = spdd
             .iter()
             .map(|(k, v)| {
                 (

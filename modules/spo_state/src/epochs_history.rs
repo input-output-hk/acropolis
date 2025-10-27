@@ -238,7 +238,7 @@ mod tests {
         epochs_history.handle_spdd(&block, &spdd_msg);
 
         let mut epoch_activity_msg = new_epoch_activity_message(1);
-        epoch_activity_msg.vrf_vkey_hashes = vec![(vec![11], 1)];
+        epoch_activity_msg.spo_blocks = vec![(vec![11], 1)];
         epoch_activity_msg.total_blocks = 1;
         epoch_activity_msg.total_fees = 10;
         epochs_history.handle_epoch_activity(&block, &epoch_activity_msg, &vec![(vec![1], 1)]);

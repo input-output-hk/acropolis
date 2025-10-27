@@ -1,7 +1,8 @@
 //! Acropolis SPDD state module for Caryatid
 //! Stores historical stake pool delegation distributions
 use acropolis_common::{
-    messages::{CardanoMessage, Message},
+    messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
+    queries::spdd::{SPDDStateQuery, SPDDStateQueryResponse, DEFAULT_SPDD_QUERY_TOPIC},
     rest_helper::handle_rest_with_query_parameters,
 };
 use anyhow::Result;
@@ -35,15 +36,28 @@ impl SPDDState {
             config.get_string("subscribe-topic").unwrap_or(DEFAULT_SUBSCRIBE_TOPIC.to_string());
         info!("Creating subscriber on '{subscribe_topic}'");
 
+        // REST topic (not included in BF)
         let handle_spdd_topic = config
             .get_string(DEFAULT_HANDLE_SPDD_TOPIC.0)
             .unwrap_or(DEFAULT_HANDLE_SPDD_TOPIC.1.to_string());
         info!("Creating request handler on '{}'", handle_spdd_topic);
 
+        // Query topic
+        let spdd_query_topic = config
+            .get_string(DEFAULT_SPDD_QUERY_TOPIC.0)
+            .unwrap_or(DEFAULT_SPDD_QUERY_TOPIC.1.to_string());
+        info!("Creating query handler on '{}'", spdd_query_topic);
+
         let store_spdd = config.get_bool(DEFAULT_STORE_SPDD.0).unwrap_or(DEFAULT_STORE_SPDD.1);
 
         let state_opt = if store_spdd {
             let state = Arc::new(Mutex::new(State::new()));
+
+            // Register /spdd REST endpoint
+            let state_rest = state.clone();
+            handle_rest_with_query_parameters(context.clone(), &handle_spdd_topic, move |params| {
+                handle_spdd(state_rest.clone(), params)
+            });
 
             // Subscribe for spdd messages from accounts_state
             let state_handler = state.clone();
@@ -104,10 +118,34 @@ impl SPDDState {
             None
         };
 
-        // Register /spdd REST endpoint
-        handle_rest_with_query_parameters(context.clone(), &handle_spdd_topic, move |params| {
-            let state_rest = state_opt.clone();
-            handle_spdd(state_rest.clone(), params)
+        // handle spdd query
+        context.handle(&spdd_query_topic, move |message| {
+            let state = state_opt.clone();
+            async move {
+                let Message::StateQuery(StateQuery::SPDD(query)) = message.as_ref() else {
+                    return Arc::new(Message::StateQueryResponse(StateQueryResponse::SPDD(
+                        SPDDStateQueryResponse::Error("Invalid message for spdd-state".into()),
+                    )));
+                };
+                let Some(state) = state else {
+                    return Arc::new(Message::StateQueryResponse(StateQueryResponse::SPDD(
+                        SPDDStateQueryResponse::Error("SPDD storage is NOT enabled".into()),
+                    )));
+                };
+                let state = state.lock().await;
+
+                let response = match query {
+                    SPDDStateQuery::GetEpochTotalActiveStakes { epoch } => {
+                        SPDDStateQueryResponse::EpochTotalActiveStakes(
+                            state.get_epoch_total_active_stakes(*epoch).unwrap_or(0),
+                        )
+                    }
+                };
+
+                Arc::new(Message::StateQueryResponse(StateQueryResponse::SPDD(
+                    response,
+                )))
+            }
         });
 
         Ok(())

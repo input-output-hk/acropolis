@@ -13,7 +13,7 @@ pub struct MonetaryResult {
     pub pots: Pots,
 
     /// Total stake reward available
-    pub stake_rewards: BigDecimal,
+    pub stake_rewards: Lovelace,
 }
 
 /// Calculate monetary change at the start of an epoch, returning updated pots and total
@@ -39,8 +39,7 @@ pub fn calculate_monetary_change(
     let total_reward_pot = &monetary_expansion + BigDecimal::from(total_fees_last_epoch);
 
     // Top-slice some for treasury
-    let treasury_cut = RationalNumber::new(2, 10);
-    // TODO odd values again! &params.protocol_params.treasury_cut;  // Tau
+    let treasury_cut = &params.protocol_params.treasury_cut; // Tau
     let treasury_increase = (&total_reward_pot * BigDecimal::from(treasury_cut.numer())
         / BigDecimal::from(treasury_cut.denom()))
     .with_scale(0);
@@ -52,10 +51,12 @@ pub fn calculate_monetary_change(
     new_pots.reserves -= treasury_increase_u64;
 
     // Remainder goes to stakeholders
-    let stake_rewards = &total_reward_pot - &treasury_increase;
+    let stake_rewards = (&total_reward_pot - &treasury_increase)
+        .to_u64()
+        .ok_or(anyhow!("Can't calculate integral stake rewards"))?;
 
     info!(total_rewards=%total_reward_pot, cut=%treasury_cut, increase=treasury_increase_u64,
-          %stake_rewards, "Treasury:");
+          stake_rewards, "Treasury:");
 
     Ok(MonetaryResult {
         pots: new_pots,
@@ -106,28 +107,38 @@ fn calculate_monetary_expansion(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acropolis_common::protocol_params::{
-        Nonce, NonceVariant, ProtocolVersion, ShelleyProtocolParams,
-    };
     use acropolis_common::rational_number::rational_number_from_f32;
     use acropolis_common::NetworkId;
+    use acropolis_common::{
+        protocol_params::{Nonce, NonceVariant, ProtocolVersion, ShelleyProtocolParams},
+        GenesisDelegate,
+    };
     use chrono::{DateTime, Utc};
+    use std::collections::HashMap;
 
     // Known values at start of Shelley - from Java reference and DBSync
     const EPOCH_208_RESERVES: Lovelace = 13_888_022_852_926_644;
     const EPOCH_208_MIRS: Lovelace = 593_529_326_186_446;
-    const EPOCH_208_FEES: Lovelace = 10_670_212_208;
 
     const EPOCH_209_RESERVES: Lovelace = 13_286_160_713_028_443;
     const EPOCH_209_TREASURY: Lovelace = 8_332_813_711_755;
-    const EPOCH_209_FEES: Lovelace = 7_666_346_424;
+    const EPOCH_209_FEES: Lovelace = 10_670_212_208;
+    const EPOCH_209_STAKE_REWARDS: Lovelace = 33_331_254_847_024;
 
     const EPOCH_210_RESERVES: Lovelace = 13_278_197_552_770_393;
     const EPOCH_210_TREASURY: Lovelace = 16_306_644_182_013;
     const EPOCH_210_REFUNDS_TO_TREASURY: Lovelace = 500_000_000; // 1 SPO with unknown reward
+    const EPOCH_210_FEES: Lovelace = 7_666_346_424;
+    const EPOCH_210_STAKE_REWARDS: Lovelace = 31_895_321_881_035;
 
     const EPOCH_211_RESERVES: Lovelace = 13_270_236_767_315_870;
     const EPOCH_211_TREASURY: Lovelace = 24_275_595_982_960;
+    const EPOCH_211_FEES: Lovelace = 7_770_532_273;
+    const EPOCH_211_STAKE_REWARDS: Lovelace = 31_873_807_203_788;
+
+    const EPOCH_212_RESERVES: Lovelace = 13_262_280_841_681_299;
+    const EPOCH_212_TREASURY: Lovelace = 32_239_292_149_804;
+    const EPOCH_212_STAKE_REWARDS: Lovelace = 31_854_784_667_376;
 
     fn shelley_params() -> ShelleyParams {
         ShelleyParams {
@@ -164,11 +175,12 @@ mod tests {
             slots_per_kes_period: 129600,
             system_start: DateTime::<Utc>::default(),
             update_quorum: 5,
+            gen_delegs: HashMap::<Vec<u8>, GenesisDelegate>::new(),
         }
     }
 
     #[test]
-    fn epoch_208_monetary_change() {
+    fn epoch_209_monetary_change() {
         let params = shelley_params();
         let pots = Pots {
             reserves: EPOCH_208_RESERVES,
@@ -186,10 +198,11 @@ mod tests {
         );
         assert_eq!(result.pots.reserves - EPOCH_208_MIRS, EPOCH_209_RESERVES);
         assert_eq!(result.pots.treasury, EPOCH_209_TREASURY);
+        assert_eq!(result.stake_rewards, EPOCH_209_STAKE_REWARDS);
     }
 
     #[test]
-    fn epoch_209_monetary_change() {
+    fn epoch_210_monetary_change() {
         let params = shelley_params();
         let pots = Pots {
             reserves: EPOCH_209_RESERVES,
@@ -198,15 +211,16 @@ mod tests {
         };
 
         // Epoch 208 had no non-OBFT blocks
-        let result = calculate_monetary_change(&params, &pots, EPOCH_208_FEES, 0).unwrap();
+        let result = calculate_monetary_change(&params, &pots, EPOCH_209_FEES, 0).unwrap();
 
-        // Epoch 210 reserves
+        // Epoch 210 results
         assert_eq!(result.pots.reserves, EPOCH_210_RESERVES);
         assert_eq!(result.pots.treasury, EPOCH_210_TREASURY);
+        assert_eq!(result.stake_rewards, EPOCH_210_STAKE_REWARDS);
     }
 
     #[test]
-    fn epoch_210_monetary_change() {
+    fn epoch_211_monetary_change() {
         let params = shelley_params();
         let pots = Pots {
             reserves: EPOCH_210_RESERVES,
@@ -215,13 +229,32 @@ mod tests {
         };
 
         // Epoch 209 had no non-OBFT blocks
-        let result = calculate_monetary_change(&params, &pots, EPOCH_209_FEES, 0).unwrap();
+        let result = calculate_monetary_change(&params, &pots, EPOCH_210_FEES, 0).unwrap();
 
-        // Epoch 211 reserves
+        // Epoch 211 results
         assert_eq!(result.pots.reserves, EPOCH_211_RESERVES);
         assert_eq!(
             result.pots.treasury + EPOCH_210_REFUNDS_TO_TREASURY,
             EPOCH_211_TREASURY
         );
+        assert_eq!(result.stake_rewards, EPOCH_211_STAKE_REWARDS);
+    }
+
+    #[test]
+    fn epoch_212_monetary_change() {
+        let params = shelley_params();
+        let pots = Pots {
+            reserves: EPOCH_211_RESERVES,
+            treasury: EPOCH_211_TREASURY,
+            deposits: 0,
+        };
+
+        // Epoch 210 had OBFT blocks but the number is ignored because d=1.0
+        let result = calculate_monetary_change(&params, &pots, EPOCH_211_FEES, 42).unwrap();
+
+        // Epoch 212 results
+        assert_eq!(result.pots.reserves, EPOCH_212_RESERVES);
+        assert_eq!(result.pots.treasury, EPOCH_212_TREASURY);
+        assert_eq!(result.stake_rewards, EPOCH_212_STAKE_REWARDS);
     }
 }

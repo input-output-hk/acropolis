@@ -26,6 +26,12 @@ pub struct AssetRegistry {
     id_to_key: Vec<AssetKey>,
 }
 
+impl Default for AssetRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AssetRegistry {
     pub fn new() -> Self {
         Self {
@@ -52,8 +58,8 @@ impl AssetRegistry {
 
     pub fn lookup_id(&self, policy: &PolicyId, name: &AssetName) -> Option<AssetId> {
         let key = AssetKey {
-            policy: Arc::new(policy.clone()),
-            name: Arc::new(name.clone()),
+            policy: Arc::new(*policy),
+            name: Arc::new(*name),
         };
         self.key_to_id.get(&key).copied()
     }

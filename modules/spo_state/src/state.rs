@@ -1,7 +1,7 @@
 //! Acropolis SPOState: State storage
 
 use acropolis_common::{
-    crypto::keyhash,
+    crypto::keyhash_224,
     ledger_state::SPOState,
     messages::{
         CardanoMessage, Message, SPOStateMessage, StakeAddressDeltasMessage,
@@ -10,12 +10,12 @@ use acropolis_common::{
     params::TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH,
     queries::governance::VoteRecord,
     stake_addresses::StakeAddressMap,
-    BlockHash, BlockInfo, KeyHash, PoolMetadata, PoolRegistration, PoolRegistrationWithPos,
-    PoolRetirement, PoolRetirementWithPos, PoolUpdateEvent, Relay, StakeCredential, TxCertificate,
-    TxHash, Voter, VotingProcedures,
+    BlockInfo, KeyHash, PoolMetadata, PoolRegistration, PoolRegistrationWithPos, PoolRetirement,
+    PoolRetirementWithPos, PoolUpdateEvent, Relay, StakeAddress, TxCertificate, TxHash, Voter,
+    VotingProcedures,
 };
 use anyhow::Result;
-use imbl::{HashMap, Vector};
+use imbl::HashMap;
 use std::sync::{Arc, Mutex};
 use tracing::{debug, error, info};
 
@@ -32,17 +32,13 @@ pub struct State {
 
     spos: HashMap<Vec<u8>, PoolRegistration>,
 
-    pending_deregistrations: HashMap<u64, Vec<Vec<u8>>>,
+    pending_updates: HashMap<Vec<u8>, PoolRegistration>,
 
-    /// vrf_key_hash -> pool_id mapping
-    vrf_key_hash_to_pool_id_map: HashMap<Vec<u8>, Vec<u8>>,
+    pending_deregistrations: HashMap<u64, Vec<Vec<u8>>>,
 
     // Total blocks minted till block number
     // Keyed by pool_id
     total_blocks_minted: HashMap<KeyHash, u64>,
-
-    /// block hashes keyed pool id
-    block_hashes: Option<HashMap<KeyHash, Vector<BlockHash>>>,
 
     /// historical spo state
     /// keyed by pool operator id
@@ -59,15 +55,10 @@ impl State {
             block: 0,
             epoch: 0,
             spos: HashMap::new(),
+            pending_updates: HashMap::new(),
             pending_deregistrations: HashMap::new(),
-            vrf_key_hash_to_pool_id_map: HashMap::new(),
             total_blocks_minted: HashMap::new(),
             historical_spos: if config.store_historical_state() {
-                Some(HashMap::new())
-            } else {
-                None
-            },
-            block_hashes: if config.store_block_hashes {
                 Some(HashMap::new())
             } else {
                 None
@@ -96,8 +87,8 @@ impl State {
         self.store_config.store_votes
     }
 
-    pub fn is_block_hashes_enabled(&self) -> bool {
-        self.store_config.store_block_hashes
+    pub fn is_historical_blocks_enabled(&self) -> bool {
+        self.store_config.store_blocks
     }
 
     pub fn is_stake_address_enabled(&self) -> bool {
@@ -108,8 +99,6 @@ impl State {
 impl From<SPOState> for State {
     fn from(value: SPOState) -> Self {
         let spos: HashMap<KeyHash, PoolRegistration> = value.pools.into();
-        let vrf_key_hash_to_pool_id_map =
-            spos.iter().map(|(k, v)| (v.vrf_key_hash.clone(), k.clone())).collect();
         let pending_deregistrations =
             value.retiring.into_iter().fold(HashMap::new(), |mut acc, (key_hash, epoch)| {
                 acc.entry(epoch).or_insert_with(Vec::new).push(key_hash);
@@ -120,11 +109,10 @@ impl From<SPOState> for State {
             block: 0,
             epoch: 0,
             spos,
+            pending_updates: value.updates.into(),
             pending_deregistrations,
-            vrf_key_hash_to_pool_id_map,
             total_blocks_minted: HashMap::new(),
             historical_spos: None,
-            block_hashes: None,
             stake_addresses: None,
         }
     }
@@ -134,6 +122,11 @@ impl From<&State> for SPOState {
     fn from(state: &State) -> Self {
         Self {
             pools: state.spos.iter().map(|(key, value)| (key.clone(), value.clone())).collect(),
+            updates: state
+                .pending_updates
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect(),
             retiring: state
                 .pending_deregistrations
                 .iter()
@@ -168,19 +161,6 @@ impl State {
         *self.total_blocks_minted.get(pool_operator).unwrap_or(&0)
     }
 
-    /// Get (SPO, u64) from (VRF, u64) Map
-    pub fn get_blocks_minted_by_spos(
-        &self,
-        vrf_key_hashes: &Vec<(KeyHash, usize)>,
-    ) -> Vec<(KeyHash, usize)> {
-        vrf_key_hashes
-            .iter()
-            .filter_map(|(vrf_key_hash, amount)| {
-                self.vrf_key_hash_to_pool_id_map.get(vrf_key_hash).map(|spo| (spo.clone(), *amount))
-            })
-            .collect()
-    }
-
     /// Get all Stake Pool operators' operator hashes
     pub fn list_pool_operators(&self) -> Vec<KeyHash> {
         self.spos.keys().cloned().collect()
@@ -210,7 +190,7 @@ impl State {
             .get(pool_operator)
             .map(|s| s.delegators.clone())
             .flatten()
-            .map(|s| s.into_iter().collect::<Vec<KeyHash>>());
+            .map(|s| s.into_iter().collect::<Vec<StakeAddress>>());
         let Some(delegators) = delegators else {
             return None;
         };
@@ -219,9 +199,23 @@ impl State {
         delegators_map.map(|map| map.into_iter().collect())
     }
 
-    /// Get Pool Blocks
-    pub fn get_pool_block_hashes(&self, pool_id: &KeyHash) -> Option<Vec<BlockHash>> {
-        self.block_hashes.as_ref()?.get(pool_id).map(|blocks| blocks.clone().into_iter().collect())
+    /// Get Blocks by Pool
+    /// Return Vector of block heights
+    /// Return None when store_blocks not enabled
+    pub fn get_blocks_by_pool(&self, pool_id: &KeyHash) -> Option<Vec<u64>> {
+        let Some(historical_spos) = self.historical_spos.as_ref() else {
+            return None;
+        };
+        historical_spos.get(pool_id).and_then(|s| s.get_all_blocks())
+    }
+
+    /// Get Blocks by Pool and Epoch
+    /// Return None when store_blocks not enabled
+    pub fn get_blocks_by_pool_and_epoch(&self, pool_id: &KeyHash, epoch: u64) -> Option<Vec<u64>> {
+        let Some(historical_spos) = self.historical_spos.as_ref() else {
+            return None;
+        };
+        historical_spos.get(pool_id).and_then(|s| s.get_blocks_by_epoch(epoch))
     }
 
     /// Get Pool Updates
@@ -268,20 +262,22 @@ impl State {
     }
 
     // Handle block's minting.
-    // Returns None if block_hashes is not enabled
-    // Return Some(false) if pool_id for vrf_vkey is not found
-    pub fn handle_mint(&mut self, block_info: &BlockInfo, vrf_vkey: &[u8]) -> Option<bool> {
-        let vrf_key_hash = keyhash(vrf_vkey);
-        let Some(pool_id) = self.vrf_key_hash_to_pool_id_map.get(&vrf_key_hash).cloned() else {
-            return Some(false);
-        };
+    pub fn handle_mint(&mut self, block_info: &BlockInfo, issuer_vkey: &[u8]) -> bool {
+        let pool_id = keyhash_224(issuer_vkey);
+        if self.spos.get(&pool_id).is_none() {
+            return false;
+        }
 
         *(self.total_blocks_minted.entry(pool_id.clone()).or_insert(0)) += 1;
-        // if block_hashes are enabled
-        if let Some(block_hashes) = self.block_hashes.as_mut() {
-            block_hashes.entry(pool_id).or_insert_with(Vector::new).push_back(block_info.hash);
-        };
-        Some(true)
+        // if store_blocks is enabled
+        if self.is_historical_blocks_enabled() {
+            if let Some(historical_spos) = self.historical_spos.as_mut() {
+                if let Some(historical_spo) = historical_spos.get_mut(&pool_id) {
+                    historical_spo.add_block(block_info.epoch, block_info.number);
+                }
+            }
+        }
+        true
     }
 
     fn handle_new_epoch(&mut self, block: &BlockInfo) -> Arc<Message> {
@@ -291,6 +287,12 @@ impl State {
         // Flatten into vector of registrations, before retirement so retiring ones
         // are still included
         let spos = self.spos.values().cloned().collect();
+
+        // Update any pending
+        for (operator, reg) in &self.pending_updates {
+            self.spos.insert(operator.clone(), reg.clone());
+        }
+        self.pending_updates.clear();
 
         // Deregister any pending
         let mut retired_spos: Vec<KeyHash> = Vec::new();
@@ -305,7 +307,6 @@ impl State {
                     ),
                     Some(_de_reg) => {
                         retired_spos.push(dr.clone());
-                        // self.vrf_key_hash_to_pool_id_map.remove(&de_reg.vrf_key_hash);
                     }
                 };
             }
@@ -331,13 +332,24 @@ impl State {
             tx_hash,
             cert_index,
         } = reg_with_pos;
-        debug!(
-            block = block.number,
-            "Registering SPO {}",
-            hex::encode(&reg.operator)
-        );
-        self.spos.insert(reg.operator.clone(), reg.clone());
-        self.vrf_key_hash_to_pool_id_map.insert(reg.vrf_key_hash.clone(), reg.operator.clone());
+
+        if self.spos.contains_key(&reg.operator) {
+            debug!(
+                block = block.number,
+                "New pending SPO update {} {:?}",
+                hex::encode(&reg.operator),
+                reg
+            );
+            self.pending_updates.insert(reg.operator.clone(), reg.clone());
+        } else {
+            debug!(
+                block = block.number,
+                "Registering SPO {} {:?}",
+                hex::encode(&reg.operator),
+                reg
+            );
+            self.spos.insert(reg.operator.clone(), reg.clone());
+        }
 
         // Remove any existing queued deregistrations
         for (epoch, deregistrations) in &mut self.pending_deregistrations.iter_mut() {
@@ -405,6 +417,10 @@ impl State {
                 }
             }
             self.pending_deregistrations.entry(ret.epoch).or_default().push(ret.operator.clone());
+
+            // Note: not removing pending updates - the deregistation may happen many
+            // epochs later than the update, and we apply updates before deregistrations
+            // so they cannot recreate deregistered SPOs
         }
 
         // update historical spos
@@ -421,34 +437,34 @@ impl State {
         }
     }
 
-    fn register_stake_address(&mut self, credential: &StakeCredential) {
+    fn register_stake_address(&mut self, stake_address: &StakeAddress) {
         let Some(stake_addresses) = self.stake_addresses.as_ref() else {
             return;
         };
         let mut stake_addresses = stake_addresses.lock().unwrap();
-        stake_addresses.register_stake_address(credential);
+        stake_addresses.register_stake_address(stake_address);
     }
 
-    fn deregister_stake_address(&mut self, credential: &StakeCredential) {
+    fn deregister_stake_address(&mut self, stake_address: &StakeAddress) {
         let Some(stake_addresses) = self.stake_addresses.as_ref() else {
             return;
         };
-        let hash = credential.get_hash();
         let mut stake_addresses = stake_addresses.lock().unwrap();
-        let old_spo = stake_addresses.get(&hash).map(|s| s.delegated_spo.clone()).flatten();
+        let old_spo =
+            stake_addresses.get(&stake_address).map(|s| s.delegated_spo.clone()).flatten();
 
-        if stake_addresses.deregister_stake_address(credential) {
+        if stake_addresses.deregister_stake_address(&stake_address) {
             // update historical_spos
             if let Some(historical_spos) = self.historical_spos.as_mut() {
                 if let Some(old_spo) = old_spo.as_ref() {
                     // remove delegators from old_spo
                     if let Some(historical_spo) = historical_spos.get_mut(old_spo) {
-                        if let Some(removed) = historical_spo.remove_delegator(&hash) {
+                        if let Some(removed) = historical_spo.remove_delegator(stake_address) {
                             if !removed {
                                 error!(
                                     "Historical SPO state for {} does not contain delegator {}",
                                     hex::encode(old_spo),
-                                    hex::encode(&hash)
+                                    stake_address
                                 );
                             }
                         }
@@ -460,27 +476,27 @@ impl State {
 
     /// Record a stake delegation
     /// Update historical_spo_state's delegators
-    fn record_stake_delegation(&mut self, credential: &StakeCredential, spo: &KeyHash) {
+    fn record_stake_delegation(&mut self, stake_address: &StakeAddress, spo: &KeyHash) {
         let Some(stake_addresses) = self.stake_addresses.as_ref() else {
             return;
         };
-        let hash = credential.get_hash();
         let mut stake_addresses = stake_addresses.lock().unwrap();
-        let old_spo = stake_addresses.get(&hash).map(|s| s.delegated_spo.clone()).flatten();
+        let old_spo =
+            stake_addresses.get(&stake_address).map(|s| s.delegated_spo.clone()).flatten();
 
-        if stake_addresses.record_stake_delegation(credential, spo) {
+        if stake_addresses.record_stake_delegation(&stake_address, spo) {
             // update historical_spos
             if let Some(historical_spos) = self.historical_spos.as_mut() {
                 // Remove old delegator
                 if let Some(old_spo) = old_spo.as_ref() {
                     match historical_spos.get_mut(old_spo) {
                         Some(historical_spo) => {
-                            if let Some(removed) = historical_spo.remove_delegator(&hash) {
+                            if let Some(removed) = historical_spo.remove_delegator(&stake_address) {
                                 if !removed {
                                     error!(
                                         "Historical SPO state for {} does not contain delegator {}",
                                         hex::encode(old_spo),
-                                        hex::encode(&hash)
+                                        stake_address
                                     );
                                 }
                             }
@@ -495,12 +511,12 @@ impl State {
                 let historical_spo = historical_spos
                     .entry(spo.clone())
                     .or_insert_with(|| HistoricalSPOState::new(&self.store_config));
-                if let Some(added) = historical_spo.add_delegator(&hash) {
+                if let Some(added) = historical_spo.add_delegator(&stake_address) {
                     if !added {
                         error!(
                             "Historical SPO state for {} already contains delegator {}",
                             hex::encode(spo),
-                            hex::encode(&hash)
+                            stake_address
                         );
                     }
                 }
@@ -532,38 +548,38 @@ impl State {
                 }
 
                 // for stake addresses
-                TxCertificate::StakeRegistration(sc_with_pos) => {
-                    self.register_stake_address(&sc_with_pos.stake_credential);
+                TxCertificate::StakeRegistration(stake_address_with_pos) => {
+                    self.register_stake_address(&stake_address_with_pos.stake_address);
                 }
-                TxCertificate::StakeDeregistration(sc) => {
-                    self.deregister_stake_address(&sc);
+                TxCertificate::StakeDeregistration(stake_address) => {
+                    self.deregister_stake_address(&stake_address);
                 }
                 TxCertificate::Registration(reg) => {
-                    self.register_stake_address(&reg.credential);
+                    self.register_stake_address(&reg.stake_address);
                     // we don't care deposite
                 }
                 TxCertificate::Deregistration(dreg) => {
-                    self.deregister_stake_address(&dreg.credential);
+                    self.deregister_stake_address(&dreg.stake_address);
                     // we don't care refund
                 }
                 TxCertificate::StakeDelegation(delegation) => {
-                    self.record_stake_delegation(&delegation.credential, &delegation.operator);
+                    self.record_stake_delegation(&delegation.stake_address, &delegation.operator);
                 }
                 TxCertificate::StakeAndVoteDelegation(delegation) => {
-                    self.record_stake_delegation(&delegation.credential, &delegation.operator);
+                    self.record_stake_delegation(&delegation.stake_address, &delegation.operator);
                     // don't care about vote delegation
                 }
                 TxCertificate::StakeRegistrationAndDelegation(delegation) => {
-                    self.register_stake_address(&delegation.credential);
-                    self.record_stake_delegation(&delegation.credential, &delegation.operator);
+                    self.register_stake_address(&delegation.stake_address);
+                    self.record_stake_delegation(&delegation.stake_address, &delegation.operator);
                 }
                 TxCertificate::StakeRegistrationAndVoteDelegation(delegation) => {
-                    self.register_stake_address(&delegation.credential);
+                    self.register_stake_address(&delegation.stake_address);
                     // don't care about vote delegation
                 }
                 TxCertificate::StakeRegistrationAndStakeAndVoteDelegation(delegation) => {
-                    self.register_stake_address(&delegation.credential);
-                    self.record_stake_delegation(&delegation.credential, &delegation.operator);
+                    self.register_stake_address(&delegation.stake_address);
+                    self.record_stake_delegation(&delegation.stake_address, &delegation.operator);
                     // don't care about vote delegation
                 }
                 _ => (),
@@ -645,8 +661,8 @@ impl State {
         // Handle deltas
         for delta in reward_deltas_msg.deltas.iter() {
             let mut stake_addresses = stake_addresses.lock().unwrap();
-            if let Err(e) = stake_addresses.update_reward(&delta.hash, delta.delta) {
-                error!("Updating reward account {}: {e}", hex::encode(&delta.hash));
+            if let Err(e) = stake_addresses.update_reward(&delta.stake_address, delta.delta) {
+                error!("Updating reward account {}: {e}", delta.stake_address);
             }
         }
 
@@ -665,20 +681,34 @@ mod tests {
     use crate::test_utils::*;
     use acropolis_common::{
         state_history::{StateHistory, StateHistoryStore},
-        PoolRetirement, Ratio, TxCertificate, TxHash,
+        PoolRetirement, Ratio, StakeAddress, TxCertificate, TxHash,
     };
     use tokio::sync::Mutex;
+
+    fn default_pool_registration(
+        operator: Vec<u8>,
+        vrf_key_hash: Option<Vec<u8>>,
+    ) -> PoolRegistration {
+        PoolRegistration {
+            operator: operator.clone(),
+            vrf_key_hash: vrf_key_hash.unwrap_or_else(|| vec![0]),
+            pledge: 0,
+            cost: 0,
+            margin: Ratio {
+                numerator: 0,
+                denominator: 0,
+            },
+            reward_account: StakeAddress::default(),
+            pool_owners: vec![StakeAddress::default()],
+            relays: vec![],
+            pool_metadata: None,
+        }
+    }
 
     #[test]
     fn get_returns_none_on_empty_state() {
         let state = State::default();
         assert!(state.get(&vec![0]).is_none());
-    }
-
-    #[test]
-    fn vrf_key_hash_to_pool_id_map_is_none_on_empty_state() {
-        let state = State::default();
-        assert!(state.vrf_key_hash_to_pool_id_map.is_empty());
     }
 
     #[test]
@@ -702,20 +732,7 @@ mod tests {
         let mut msg = new_certs_msg();
         msg.certificates.push(TxCertificate::PoolRegistrationWithPos(
             PoolRegistrationWithPos {
-                reg: PoolRegistration {
-                    operator: vec![0],
-                    vrf_key_hash: vec![0],
-                    pledge: 0,
-                    cost: 0,
-                    margin: Ratio {
-                        numerator: 0,
-                        denominator: 0,
-                    },
-                    reward_account: vec![0],
-                    pool_owners: vec![vec![0]],
-                    relays: vec![],
-                    pool_metadata: None,
-                },
+                reg: default_pool_registration(vec![0], None),
                 tx_hash: TxHash::default(),
                 cert_index: 1,
             },
@@ -851,20 +868,7 @@ mod tests {
         let mut msg = new_certs_msg();
         msg.certificates.push(TxCertificate::PoolRegistrationWithPos(
             PoolRegistrationWithPos {
-                reg: PoolRegistration {
-                    operator: vec![0],
-                    vrf_key_hash: vec![0],
-                    pledge: 0,
-                    cost: 0,
-                    margin: Ratio {
-                        numerator: 0,
-                        denominator: 0,
-                    },
-                    reward_account: vec![0],
-                    pool_owners: vec![vec![0]],
-                    relays: vec![],
-                    pool_metadata: None,
-                },
+                reg: default_pool_registration(vec![0], None),
                 tx_hash: TxHash::default(),
                 cert_index: 0,
             },
@@ -907,20 +911,7 @@ mod tests {
         let mut msg = new_certs_msg();
         msg.certificates.push(TxCertificate::PoolRegistrationWithPos(
             PoolRegistrationWithPos {
-                reg: PoolRegistration {
-                    operator: vec![0],
-                    vrf_key_hash: vec![0],
-                    pledge: 0,
-                    cost: 0,
-                    margin: Ratio {
-                        numerator: 0,
-                        denominator: 0,
-                    },
-                    reward_account: vec![0],
-                    pool_owners: vec![vec![0]],
-                    relays: vec![],
-                    pool_metadata: None,
-                },
+                reg: default_pool_registration(vec![0], None),
                 tx_hash: TxHash::default(),
                 cert_index: 0,
             },
@@ -1019,25 +1010,13 @@ mod tests {
 
     #[test]
     fn get_total_blocks_minted_returns_after_handle_mint() {
-        let mut state = State::new(&save_block_hashes_store_config());
+        let mut state = State::new(&save_blocks_store_config());
         let mut block = new_block(0);
         let mut msg = new_certs_msg();
+        let spo_id = keyhash_224(&vec![1 as u8]);
         msg.certificates.push(TxCertificate::PoolRegistrationWithPos(
             PoolRegistrationWithPos {
-                reg: PoolRegistration {
-                    operator: vec![1],
-                    vrf_key_hash: keyhash(&vec![0]),
-                    pledge: 0,
-                    cost: 0,
-                    margin: Ratio {
-                        numerator: 0,
-                        denominator: 0,
-                    },
-                    reward_account: vec![0],
-                    pool_owners: vec![vec![0]],
-                    relays: vec![],
-                    pool_metadata: None,
-                },
+                reg: default_pool_registration(spo_id.clone(), None),
                 tx_hash: TxHash::default(),
                 cert_index: 0,
             },
@@ -1045,57 +1024,51 @@ mod tests {
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
 
         block = new_block(2);
-        assert_eq!(Some(true), state.handle_mint(&block, &vec![0]));
-        assert_eq!(1, state.get_total_blocks_minted_by_pool(&vec![1]));
+        assert_eq!(true, state.handle_mint(&block, &vec![1]));
+        assert_eq!(1, state.get_total_blocks_minted_by_pool(&spo_id));
 
         block = new_block(3);
-        assert_eq!(Some(true), state.handle_mint(&block, &vec![0]));
-        assert_eq!(2, state.get_total_blocks_minted_by_pools(&vec![vec![1]])[0]);
+        assert_eq!(true, state.handle_mint(&block, &vec![1]));
+        assert_eq!(2, state.get_total_blocks_minted_by_pools(&vec![spo_id])[0]);
     }
 
     #[test]
-    fn get_block_hashes_returns_none_when_state_is_new() {
+    fn get_blocks_returns_none_when_blocks_not_enabled() {
         let state = State::default();
-        assert!(state.get_pool_block_hashes(&vec![0]).is_none());
+        assert!(state.get_blocks_by_pool(&vec![0]).is_none());
     }
 
     #[test]
     fn handle_mint_returns_false_if_pool_not_found() {
-        let mut state = State::new(&save_block_hashes_store_config());
+        let mut state = State::new(&save_blocks_store_config());
         let block = new_block(0);
-        assert_eq!(Some(false), state.handle_mint(&block, &vec![0]));
+        assert_eq!(false, state.handle_mint(&block, &vec![0]));
     }
 
     #[test]
-    fn get_block_hashes_return_data_after_handle_mint() {
-        let mut state = State::new(&save_block_hashes_store_config());
+    fn get_blocks_return_data_after_handle_mint() {
+        let mut state = State::new(&save_blocks_store_config());
         let mut block = new_block(0);
         let mut msg = new_certs_msg();
+        let spo_id = keyhash_224(&vec![1 as u8]);
         msg.certificates.push(TxCertificate::PoolRegistrationWithPos(
             PoolRegistrationWithPos {
-                reg: PoolRegistration {
-                    operator: vec![1],
-                    vrf_key_hash: keyhash(&vec![0]),
-                    pledge: 0,
-                    cost: 0,
-                    margin: Ratio {
-                        numerator: 0,
-                        denominator: 0,
-                    },
-                    reward_account: vec![0],
-                    pool_owners: vec![vec![0]],
-                    relays: vec![],
-                    pool_metadata: None,
-                },
+                reg: default_pool_registration(spo_id.clone(), None),
                 tx_hash: TxHash::default(),
                 cert_index: 0,
             },
         ));
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
         block = new_block(2);
-        assert_eq!(Some(true), state.handle_mint(&block, &vec![0]));
-        let block_hashes = state.get_pool_block_hashes(&vec![1]).unwrap();
-        assert_eq!(block_hashes.len(), 1);
-        assert_eq!(block_hashes[0], block.hash);
+        assert_eq!(true, state.handle_mint(&block, &vec![1])); // Note raw issuer_vkey
+        let blocks = state.get_blocks_by_pool(&spo_id).unwrap();
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0], block.number);
+
+        let blocks = state.get_blocks_by_pool_and_epoch(&spo_id, 2).unwrap();
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0], block.number);
+
+        assert!(state.get_blocks_by_pool_and_epoch(&spo_id, 3).is_none());
     }
 }

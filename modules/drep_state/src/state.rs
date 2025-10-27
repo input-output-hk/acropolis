@@ -7,8 +7,8 @@ use acropolis_common::{
         get_query_topic,
         governance::{DRepActionUpdate, DRepUpdateEvent, VoteRecord},
     },
-    Anchor, Credential, DRepChoice, DRepCredential, Lovelace, StakeCredential, TxCertificate,
-    TxHash, Voter, VotingProcedures,
+    Anchor, DRepChoice, DRepCredential, Lovelace, StakeAddress, TxCertificate, TxHash, Voter,
+    VotingProcedures,
 };
 use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
@@ -38,7 +38,7 @@ pub struct HistoricalDRepState {
     // - StakeAndVoteDelegation
     // - StakeRegistrationAndVoteDelegation
     // - StakeRegistrationAndStakeAndVoteDelegation
-    pub delegators: Option<Vec<Credential>>,
+    pub delegators: Option<Vec<StakeAddress>>,
 
     // Populated from voting_procedures in GovernanceProceduresMessage
     pub votes: Option<Vec<VoteRecord>>,
@@ -152,7 +152,7 @@ impl State {
     pub fn get_drep_delegators(
         &self,
         credential: &DRepCredential,
-    ) -> Result<Option<&Vec<Credential>>, &'static str> {
+    ) -> Result<Option<&Vec<StakeAddress>>, &'static str> {
         let hist = self
             .historical_dreps
             .as_ref()
@@ -228,21 +228,21 @@ impl State {
 
         for tx_cert in tx_certs {
             if store_delegators {
-                if let Some((cred, drep)) = Self::extract_delegation_fields(tx_cert) {
-                    batched_delegators.push((cred, drep));
+                if let Some((delegator, drep)) = Self::extract_delegation_fields(tx_cert) {
+                    batched_delegators.push((delegator, drep));
                     continue;
                 }
             }
 
             if let Err(e) = self.process_one_cert(tx_cert, epoch) {
-                tracing::error!("Error processing tx_cert: {e}");
+                error!("Error processing tx_cert: {e}");
             }
         }
 
         // Batched delegations to reduce redundant queries to accounts_state
         if store_delegators && !batched_delegators.is_empty() {
-            if let Err(e) = self.update_delegators(&context, batched_delegators).await {
-                tracing::error!("Error processing batched delegators: {e}");
+            if let Err(e) = self.update_delegators(&context, &batched_delegators).await {
+                error!("Error processing batched delegators: {e}");
             }
         }
 
@@ -472,17 +472,18 @@ impl State {
     async fn update_delegators(
         &mut self,
         context: &Arc<Context<Message>>,
-        delegators: Vec<(&StakeCredential, &DRepChoice)>,
+        delegators: &[(&StakeAddress, &DRepChoice)],
     ) -> Result<()> {
-        let stake_keys: Vec<_> = delegators.iter().map(|(sc, _)| sc.get_hash()).collect();
-        let stake_key_to_input: HashMap<_, _> = delegators
-            .iter()
-            .zip(&stake_keys)
-            .map(|((sc, drep), key)| (key.clone(), (*sc, *drep)))
-            .collect();
+        let mut stake_key_to_input = HashMap::with_capacity(delegators.len());
+        let mut stake_addresses = Vec::with_capacity(delegators.len());
+
+        for &(sc, drep) in delegators {
+            stake_addresses.push(sc.clone());
+            stake_key_to_input.insert(sc.get_credential().get_hash(), (sc, drep));
+        }
 
         let msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
-            AccountsStateQuery::GetAccountsDrepDelegationsMap { stake_keys },
+            AccountsStateQuery::GetAccountsDrepDelegationsMap { stake_addresses },
         )));
 
         let accounts_query_topic = get_query_topic(context.clone(), DEFAULT_ACCOUNTS_QUERY_TOPIC);
@@ -500,8 +501,8 @@ impl State {
         };
 
         for (stake_key, old_drep_opt) in result_map {
-            let (delegator, new_drep_choice) = match stake_key_to_input.get(&stake_key) {
-                Some(pair) => *pair,
+            let &(delegator, new_drep_choice) = match stake_key_to_input.get(&stake_key) {
+                Some(pair) => pair,
                 None => continue,
             };
 
@@ -515,7 +516,10 @@ impl State {
                     if old_drep_cred != new_drep_cred {
                         self.update_historical(&old_drep_cred, false, |entry| {
                             if let Some(delegators) = entry.delegators.as_mut() {
-                                delegators.retain(|s| s != delegator);
+                                delegators.retain(|s| {
+                                    s.get_credential().get_hash()
+                                        != delegator.get_credential().get_hash()
+                                });
                             }
                         })?;
                     }
@@ -538,13 +542,15 @@ impl State {
         Ok(())
     }
 
-    fn extract_delegation_fields(cert: &TxCertificate) -> Option<(&StakeCredential, &DRepChoice)> {
+    fn extract_delegation_fields(cert: &TxCertificate) -> Option<(&StakeAddress, &DRepChoice)> {
         match cert {
-            TxCertificate::VoteDelegation(d) => Some((&d.credential, &d.drep)),
-            TxCertificate::StakeAndVoteDelegation(d) => Some((&d.credential, &d.drep)),
-            TxCertificate::StakeRegistrationAndVoteDelegation(d) => Some((&d.credential, &d.drep)),
+            TxCertificate::VoteDelegation(d) => Some((&d.stake_address, &d.drep)),
+            TxCertificate::StakeAndVoteDelegation(d) => Some((&d.stake_address, &d.drep)),
+            TxCertificate::StakeRegistrationAndVoteDelegation(d) => {
+                Some((&d.stake_address, &d.drep))
+            }
             TxCertificate::StakeRegistrationAndStakeAndVoteDelegation(d) => {
-                Some((&d.credential, &d.drep))
+                Some((&d.stake_address, &d.drep))
             }
             _ => None,
         }

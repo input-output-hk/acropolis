@@ -623,7 +623,7 @@ async fn handle_pools_spo_blockfrost(
     // Query blocks_minted from epochs_state
     let epoch_blocks_minted_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
         EpochsStateQuery::GetLatestEpochBlocksMintedByPool {
-            vrf_key_hash: pool_info.vrf_key_hash.clone(),
+            spo_id: pool_info.operator.clone(),
         },
     )));
     let epoch_blocks_minted_f = query_state(
@@ -664,7 +664,7 @@ async fn handle_pools_spo_blockfrost(
     // Query owner accounts balance sum from accounts_state
     let live_pledge_msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
         AccountsStateQuery::GetAccountsUtxoValuesSum {
-            stake_keys: pool_info.pool_owners.clone(),
+            stake_addresses: pool_info.pool_owners.clone(),
         },
     )));
 
@@ -692,14 +692,14 @@ async fn handle_pools_spo_blockfrost(
     let live_pledge = live_pledge?;
 
     let pool_id = pool_info.operator.to_bech32_with_hrp("pool").unwrap();
-    let reward_account = pool_info.reward_account.to_bech32_with_hrp("stake");
+    let reward_account = pool_info.reward_account.get_credential().to_stake_bech32();
     let Ok(reward_account) = reward_account else {
         return Ok(RESTResponse::with_text(404, "Invalid Reward Account"));
     };
     let pool_owners = pool_info
         .pool_owners
         .iter()
-        .map(|owner| owner.to_bech32_with_hrp("stake"))
+        .map(|owner| owner.get_credential().to_stake_bech32())
         .collect::<Result<Vec<String>, _>>();
     let Ok(pool_owners) = pool_owners else {
         return Ok(RESTResponse::with_text(404, "Invalid Pool Owners"));
@@ -1062,9 +1062,9 @@ pub async fn handle_pool_blocks_blockfrost(
         ));
     };
 
-    // Get block hashes by pool_id from spo_state
+    // Get blocks by pool_id from spo_state
     let pool_blocks_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
-        PoolsStateQuery::GetPoolBlockHashes {
+        PoolsStateQuery::GetBlocksByPool {
             pool_id: spo.clone(),
         },
     )));
@@ -1075,18 +1075,21 @@ pub async fn handle_pool_blocks_blockfrost(
         pool_blocks_msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Pools(
-                PoolsStateQueryResponse::PoolBlockHashes(pool_blocks),
+                PoolsStateQueryResponse::BlocksByPool(pool_blocks),
             )) => Ok(pool_blocks),
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::Error(_),
-            )) => Err(anyhow::anyhow!("Block hashes are not enabled")),
+            )) => Err(anyhow::anyhow!("Blocks are not enabled")),
             _ => Err(anyhow::anyhow!("Unexpected message type")),
         },
     )
     .await?;
 
-    let pool_blocks_rest = pool_blocks.into_iter().map(|b| hex::encode(b)).collect::<Vec<_>>();
-    match serde_json::to_string(&pool_blocks_rest) {
+    // NOTE:
+    // Need to query chain_store
+    // to get block_hash for each block height
+
+    match serde_json::to_string_pretty(&pool_blocks) {
         Ok(json) => Ok(RESTResponse::with_json(200, &json)),
         Err(e) => Ok(RESTResponse::with_text(
             500,

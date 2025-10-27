@@ -5,7 +5,7 @@ use acropolis_common::{
     math::update_value_with_delta,
     queries::assets::{AssetHistory, PolicyAssets},
     Address, AddressDelta, AssetAddressEntry, AssetInfoRecord, AssetMetadataStandard,
-    AssetMintRecord, AssetName, Datum, Lovelace, NativeAssetDelta, PolicyAsset, PolicyId,
+    AssetMintRecord, AssetName, Datum, Lovelace, NativeAssetsDelta, PolicyAsset, PolicyId,
     ShelleyAddress, TxIdentifier, UTXODelta,
 };
 use anyhow::Result;
@@ -27,17 +27,12 @@ pub struct AssetsStorageConfig {
     pub index_by_policy: bool,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy)]
 pub enum StoreTransactions {
+    #[default]
     None,
     All,
     Last(u64),
-}
-
-impl Default for StoreTransactions {
-    fn default() -> Self {
-        StoreTransactions::None
-    }
 }
 
 impl StoreTransactions {
@@ -123,7 +118,7 @@ impl State {
             if let Some(key) = registry.lookup(*id) {
                 out.push(PolicyAsset {
                     policy: *key.policy,
-                    name: key.name.as_ref().clone(),
+                    name: *key.name.as_ref(),
                     quantity: *amount,
                 });
             }
@@ -235,7 +230,7 @@ impl State {
                 let key = registry.lookup(*asset_id)?;
                 Some(PolicyAsset {
                     policy: *policy_id,
-                    name: (*key.name).clone(),
+                    name: *key.name,
                     quantity: *supply,
                 })
             })
@@ -273,7 +268,7 @@ impl State {
 
     pub fn handle_mint_deltas(
         &self,
-        deltas: &[(TxIdentifier, Vec<(PolicyId, Vec<NativeAssetDelta>)>)],
+        deltas: &[(TxIdentifier, NativeAssetsDelta)],
         registry: &mut AssetRegistry,
     ) -> Result<Self> {
         let mut new_supply = self.supply.clone();
@@ -286,7 +281,7 @@ impl State {
         for (tx_identifier, tx_deltas) in deltas {
             for (policy_id, asset_deltas) in tx_deltas {
                 for delta in asset_deltas {
-                    let asset_id = registry.get_or_insert(*policy_id, delta.name.clone());
+                    let asset_id = registry.get_or_insert(*policy_id, delta.name);
 
                     if let Some(supply) = new_supply.as_mut() {
                         let delta_amount = delta.amount;
@@ -314,7 +309,7 @@ impl State {
                             .entry(asset_id)
                             .and_modify(|rec| rec.mint_or_burn_count += 1)
                             .or_insert(AssetInfoRecord {
-                                initial_mint_tx: tx_identifier.clone(),
+                                initial_mint_tx: *tx_identifier,
                                 mint_or_burn_count: 1,
                                 onchain_metadata: None,
                                 metadata_standard: None,
@@ -379,14 +374,13 @@ impl State {
                 continue;
             };
 
-            let tx_identifier = output.tx_identifier.clone();
-
+            let tx_identifier = TxIdentifier::from(output.utxo_identifier);
             for (policy_id, assets) in &output.value.assets {
                 for asset in assets {
                     if let Some(asset_id) = registry.lookup_id(policy_id, &asset.name) {
                         let entry = txs_map.entry(asset_id).or_default();
 
-                        let should_push = entry.back().map_or(true, |last| last != &tx_identifier);
+                        let should_push = entry.back() != Some(&tx_identifier);
 
                         if should_push {
                             entry.push_back(tx_identifier);
@@ -424,7 +418,7 @@ impl State {
 
         for address_delta in deltas {
             if let Address::Shelley(shelley_addr) = &address_delta.address {
-                for (policy_id, asset_deltas) in &address_delta.delta.assets {
+                for (policy_id, asset_deltas) in &address_delta.value.assets {
                     for asset_delta in asset_deltas {
                         if let Some(asset_id) = registry.lookup_id(policy_id, &asset_delta.name) {
                             if let Some(holders) = addr_map.get_mut(&asset_id) {
@@ -640,7 +634,7 @@ mod tests {
     use acropolis_common::{
         Address, AddressDelta, AssetInfoRecord, AssetMetadataStandard, AssetName, Datum,
         NativeAsset, NativeAssetDelta, PolicyId, ShelleyAddress, TxIdentifier, TxInput, TxOutput,
-        UTXODelta, Value, ValueDelta,
+        UTXODelta, UTxOIdentifier, Value, ValueDelta,
     };
 
     fn dummy_policy(byte: u8) -> PolicyId {
@@ -741,7 +735,8 @@ mod tests {
     fn make_address_delta(policy_id: PolicyId, name: AssetName, amount: i64) -> AddressDelta {
         AddressDelta {
             address: dummy_address(),
-            delta: ValueDelta {
+            utxo: UTxOIdentifier::new(0, 0, 0),
+            value: ValueDelta {
                 lovelace: 0,
                 assets: vec![(policy_id, vec![NativeAssetDelta { name, amount }])]
                     .into_iter()
@@ -761,9 +756,7 @@ mod tests {
 
     fn make_output(policy_id: PolicyId, asset_name: AssetName, datum: Option<Vec<u8>>) -> TxOutput {
         TxOutput {
-            tx_hash: [0u8; 32].into(),
-            tx_identifier: TxIdentifier::new(0, 0),
-            index: 0,
+            utxo_identifier: UTxOIdentifier::new(0, 0, 0),
             address: dummy_address(),
             value: Value {
                 lovelace: 0,
@@ -1208,8 +1201,7 @@ mod tests {
         );
 
         let input_delta = UTXODelta::Input(TxInput {
-            tx_hash: [1u8; 32].into(),
-            index: 0,
+            utxo_identifier: UTxOIdentifier::new(0, 0, 0),
         });
         let output = make_output(policy_id, name, None);
         let output_delta = UTXODelta::Output(output);
@@ -1324,11 +1316,11 @@ mod tests {
         let output = make_output(policy_id, asset_name.clone(), None);
 
         let delta1 = UTXODelta::Output(acropolis_common::TxOutput {
-            tx_identifier: dummy_tx_identifier(5),
+            utxo_identifier: UTxOIdentifier::new(0, 0, 0),
             ..output.clone()
         });
         let delta2 = UTXODelta::Output(acropolis_common::TxOutput {
-            tx_identifier: dummy_tx_identifier(5),
+            utxo_identifier: UTxOIdentifier::new(0, 0, 1),
             ..output
         });
 
@@ -1354,18 +1346,15 @@ mod tests {
             StoreTransactions::All,
         );
 
-        let tx1 = dummy_tx_identifier(9);
-        let tx2 = dummy_tx_identifier(8);
-
         let out1 = make_output(policy_id, asset_name.clone(), None);
         let out2 = make_output(policy_id, asset_name.clone(), None);
 
         let delta1 = UTXODelta::Output(acropolis_common::TxOutput {
-            tx_identifier: tx1,
+            utxo_identifier: UTxOIdentifier::new(9, 0, 0),
             ..out1
         });
         let delta2 = UTXODelta::Output(acropolis_common::TxOutput {
-            tx_identifier: tx2,
+            utxo_identifier: UTxOIdentifier::new(10, 0, 0),
             ..out2
         });
 
@@ -1376,8 +1365,8 @@ mod tests {
         // Both transactions were added to the Vec
         assert_eq!(entry.len(), 2);
         // Transactions are in order oldest to newest
-        assert_eq!(entry[0], tx1);
-        assert_eq!(entry[1], tx2);
+        assert_eq!(entry[0], TxIdentifier::new(9, 0));
+        assert_eq!(entry[1], TxIdentifier::new(10, 0));
     }
 
     #[test]
@@ -1394,21 +1383,17 @@ mod tests {
             StoreTransactions::Last(2),
         );
 
-        let tx1 = dummy_tx_identifier(9);
-        let tx2 = dummy_tx_identifier(8);
-        let tx3 = dummy_tx_identifier(7);
-
         let base_output = make_output(policy_id, asset_name.clone(), None);
         let delta1 = UTXODelta::Output(acropolis_common::TxOutput {
-            tx_identifier: tx1.clone(),
+            utxo_identifier: UTxOIdentifier::new(9, 0, 0),
             ..base_output.clone()
         });
         let delta2 = UTXODelta::Output(acropolis_common::TxOutput {
-            tx_identifier: tx2.clone(),
+            utxo_identifier: UTxOIdentifier::new(8, 0, 0),
             ..base_output.clone()
         });
         let delta3 = UTXODelta::Output(acropolis_common::TxOutput {
-            tx_identifier: tx3.clone(),
+            utxo_identifier: UTxOIdentifier::new(7, 0, 0),
             ..base_output
         });
 
@@ -1419,8 +1404,8 @@ mod tests {
         // Transactions are pruned at the prune config
         assert_eq!(entry.len(), 2);
         // Transactions are in order with newest last
-        assert_eq!(entry[0], tx2);
-        assert_eq!(entry[1], tx3);
+        assert_eq!(entry[0], TxIdentifier::new(8, 0));
+        assert_eq!(entry[1], TxIdentifier::new(7, 0));
     }
 
     #[test]

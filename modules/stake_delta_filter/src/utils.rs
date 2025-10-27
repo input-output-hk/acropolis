@@ -43,10 +43,8 @@ impl PointerCache {
     }
 
     pub fn update_block(&mut self, blk: &BlockInfo) {
-        if self.conway_start_slot.is_none() {
-            if blk.era >= Era::Conway {
-                self.conway_start_slot = Some(blk.slot);
-            }
+        if self.conway_start_slot.is_none() && blk.era >= Era::Conway {
+            self.conway_start_slot = Some(blk.slot);
         }
     }
 
@@ -127,7 +125,7 @@ impl PointerCache {
     pub fn try_save_filtered(
         &self,
         file_path: &str,
-        used_pointers: &Vec<ShelleyAddressPointer>,
+        used_pointers: &[ShelleyAddressPointer],
     ) -> Result<()> {
         let mut clean_pointer_cache = PointerCache {
             max_slot: self.max_slot,
@@ -199,19 +197,19 @@ impl Tracker {
         d: &AddressDelta,
         sa: Option<&StakeAddress>,
     ) {
-        self.occurrence.entry(p.clone()).or_insert(vec![]).push(OccurrenceInfo {
+        self.occurrence.entry(p.clone()).or_default().push(OccurrenceInfo {
             block: b.clone(),
             address_delta: d.clone(),
             stake_address: sa.cloned(),
         });
     }
 
-    fn get_kind(v: &Vec<OccurrenceInfo>) -> Option<OccurrenceInfoKind> {
+    fn get_kind(v: &[OccurrenceInfo]) -> Option<OccurrenceInfoKind> {
         let mut is_valid = false;
         let mut is_invalid = false;
         for event in v.iter() {
             is_valid |= event.stake_address.is_some();
-            is_invalid |= !event.stake_address.is_some();
+            is_invalid |= event.stake_address.is_none();
         }
         match (is_valid, is_invalid) {
             (true, false) => Some(OccurrenceInfoKind::Valid),
@@ -226,7 +224,7 @@ impl Tracker {
         let mut invalid_ptrs = 0;
         let mut mixed_ptrs = 0;
         for (_k, v) in self.occurrence.iter() {
-            if let Some(kind) = Self::get_kind(&v) {
+            if let Some(kind) = Self::get_kind(v) {
                 match kind {
                     OccurrenceInfoKind::Valid => valid_ptrs += 1,
                     OccurrenceInfoKind::Invalid => invalid_ptrs += 1,
@@ -243,7 +241,7 @@ impl Tracker {
     }
 
     fn join_hash_set(hs: HashSet<String>, mid: &str) -> String {
-        let v = Vec::from_iter(hs.into_iter());
+        let v = Vec::from_iter(hs);
         v.join(mid)
     }
 
@@ -277,13 +275,13 @@ impl Tracker {
                     .map(|a| a.to_string())
                     .unwrap_or(Ok("(none)".to_owned()))
                     .unwrap_or("(???)".to_owned());
-                delta += event.address_delta.delta.lovelace;
+                delta += event.address_delta.value.lovelace;
 
                 chunk.push(format!(
                     "   blk {}, {}: {} ({:?}) => {} ({:?})",
                     event.block.number,
                     src_addr,
-                    event.address_delta.delta.lovelace,
+                    event.address_delta.value.lovelace,
                     event.address_delta.address,
                     dst_addr,
                     event.stake_address
@@ -360,19 +358,23 @@ pub fn process_message(
                         match cache.decode_pointer(ptr) {
                             None => {
                                 tracing::warn!("Pointer {ptr:?} is not registered in cache");
-                                tracker.as_mut().map(|t| t.track(ptr, block, &d, None));
+                                if let Some(t) = tracker.as_mut() {
+                                    t.track(ptr, block, d, None)
+                                }
                                 continue;
                             }
 
                             Some(None) => {
-                                tracker.as_mut().map(|t| t.track(ptr, block, &d, None));
+                                if let Some(t) = tracker.as_mut() {
+                                    t.track(ptr, block, d, None)
+                                }
                                 continue;
                             }
 
                             Some(Some(ref stake_address)) => {
-                                tracker
-                                    .as_mut()
-                                    .map(|t| t.track(ptr, block, &d, Some(stake_address)));
+                                if let Some(t) = tracker.as_mut() {
+                                    t.track(ptr, block, d, Some(stake_address))
+                                }
                                 stake_address.clone()
                             }
                         }
@@ -388,7 +390,7 @@ pub fn process_message(
 
         let stake_delta = StakeAddressDelta {
             address: stake_address,
-            delta: d.delta.lovelace,
+            delta: d.value.lovelace,
         };
         result.deltas.push(stake_delta);
     }
@@ -401,8 +403,9 @@ mod test {
     use crate::*;
     use acropolis_common::{
         messages::AddressDeltasMessage, Address, AddressDelta, BlockHash, BlockInfo, BlockStatus,
-        ByronAddress, Era, ShelleyAddress, ShelleyAddressDelegationPart, ShelleyAddressPaymentPart,
-        ShelleyAddressPointer, StakeAddress, StakeAddressPayload, ValueDelta,
+        ByronAddress, Era, NetworkId, ShelleyAddress, ShelleyAddressDelegationPart,
+        ShelleyAddressPaymentPart, ShelleyAddressPointer, StakeAddress, StakeAddressPayload,
+        UTxOIdentifier, ValueDelta,
     };
     use bech32::{Bech32, Hrp};
 
@@ -410,17 +413,18 @@ mod test {
         let a = pallas::ledger::addresses::Address::from_bech32(s)?;
         Ok(AddressDelta {
             address: map_address(&a)?,
-            delta: ValueDelta::new(1, Vec::new()),
+            utxo: UTxOIdentifier::new(0, 0, 0),
+            value: ValueDelta::new(1, Vec::new()),
         })
     }
 
-    /// Map Pallas Network to our AddressNetwork
-    fn map_network(network: pallas::ledger::addresses::Network) -> Result<AddressNetwork> {
+    /// Map Pallas Network to our NetworkId
+    fn map_network(network: pallas::ledger::addresses::Network) -> Result<NetworkId> {
         use pallas::ledger::addresses::Network;
         match network {
-            Network::Mainnet => Ok(AddressNetwork::Main),
-            Network::Testnet => Ok(AddressNetwork::Test),
-            _ => return Err(anyhow!("Unknown network in address")),
+            Network::Mainnet => Ok(NetworkId::Mainnet),
+            Network::Testnet => Ok(NetworkId::Testnet),
+            _ => Err(anyhow!("Unknown network in address")),
         }
     }
 

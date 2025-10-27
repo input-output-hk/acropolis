@@ -1,13 +1,16 @@
 use crate::{
     genesis_values::GenesisValues,
     rational_number::{ChameleonFraction, RationalNumber},
-    BlockVersionData, Committee, Constitution, CostModel, DRepVotingThresholds, Era, ExUnitPrices,
-    ExUnits, NetworkId, PoolVotingThresholds, ProtocolConsts,
+    BlockHash, BlockVersionData, Committee, Constitution, CostModel, DRepVotingThresholds, Era,
+    ExUnitPrices, ExUnits, GenesisDelegate, HeavyDelegate, NetworkId, PoolVotingThresholds,
+    ProtocolConsts,
 };
 use anyhow::{bail, Result};
 use blake2::{digest::consts::U32, Blake2b, Digest};
 use chrono::{DateTime, Utc};
-use serde_with::serde_as;
+use serde_with::{hex::Hex, serde_as};
+use std::collections::HashMap;
+use std::ops::Deref;
 
 #[derive(Debug, Default, PartialEq, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtocolParams {
@@ -28,6 +31,7 @@ pub struct ByronParams {
     pub fts_seed: Option<Vec<u8>>,
     pub protocol_consts: ProtocolConsts,
     pub start_time: u64,
+    pub heavy_delegation: HashMap<Vec<u8>, HeavyDelegate>,
 }
 
 //
@@ -122,6 +126,9 @@ pub struct ShelleyParams {
     pub slots_per_kes_period: u32,
     pub system_start: DateTime<Utc>,
     pub update_quorum: u32,
+
+    #[serde_as(as = "HashMap<Hex, _>")]
+    pub gen_delegs: HashMap<Vec<u8>, GenesisDelegate>,
 }
 
 #[serde_as]
@@ -175,8 +182,8 @@ impl From<&ShelleyParams> for PraosParams {
             (security_param as u64) * active_slots_coeff.denom() / active_slots_coeff.numer() * 4;
 
         Self {
-            security_param: security_param,
-            active_slots_coeff: active_slots_coeff,
+            security_param,
+            active_slots_coeff,
             epoch_length: params.epoch_length,
             max_kes_evolutions: params.max_kes_evolutions,
             max_lovelace_supply: params.max_lovelace_supply,
@@ -184,8 +191,8 @@ impl From<&ShelleyParams> for PraosParams {
             slot_length: params.slot_length,
             slots_per_kes_period: params.slots_per_kes_period,
 
-            stability_window: stability_window,
-            randomness_stabilization_window: randomness_stabilization_window,
+            stability_window,
+            randomness_stabilization_window,
         }
     }
 }
@@ -280,6 +287,15 @@ impl From<NonceHash> for Nonce {
     }
 }
 
+impl From<BlockHash> for Nonce {
+    fn from(hash: BlockHash) -> Self {
+        Self {
+            tag: NonceVariant::Nonce,
+            hash: Some(*hash.deref()),
+        }
+    }
+}
+
 #[derive(
     Default, Debug, PartialEq, Eq, PartialOrd, Ord, Clone, serde::Serialize, serde::Deserialize,
 )]
@@ -314,15 +330,13 @@ impl Nonces {
         // if prev_lab is Neutral then just return candidate
         // this is for second shelley epoch boundary (from 208 to 209 in mainnet)
         match prev_lab.tag {
-            NonceVariant::NeutralNonce => {
-                return Ok(candidate.clone());
-            }
+            NonceVariant::NeutralNonce => Ok(candidate.clone()),
             NonceVariant::Nonce => {
                 let Some(prev_lab_hash) = prev_lab.hash.as_ref() else {
                     return Err(anyhow::anyhow!("Prev lab hash is not set"));
                 };
                 let mut hasher = Blake2b::<U32>::new();
-                hasher.update(&[&candidate_hash.clone()[..], &prev_lab_hash.clone()[..]].concat());
+                hasher.update([&(*candidate_hash)[..], &(*prev_lab_hash)[..]].concat());
                 let hash: NonceHash = hasher.finalize().into();
                 Ok(Nonce::from(hash))
             }
@@ -344,7 +358,7 @@ impl Nonces {
         match current.hash.as_ref() {
             Some(nonce) => {
                 let mut hasher = Blake2b::<U32>::new();
-                hasher.update(&[&nonce.clone()[..], &nonce_vrf_output_hash[..]].concat());
+                hasher.update([&(*nonce)[..], &nonce_vrf_output_hash[..]].concat());
                 let hash: NonceHash = hasher.finalize().into();
                 Ok(Nonce::from(hash))
             }
