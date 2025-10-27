@@ -837,7 +837,6 @@ impl State {
                         .unwrap_or(DEFAULT_KEY_DEPOSIT)
                 }
             };
-            self.pots.deposits -= deposit;
 
             // Schedule refund
             self.stake_refunds.push((stake_address.clone(), deposit));
