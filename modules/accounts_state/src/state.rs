@@ -837,7 +837,6 @@ impl State {
                         .unwrap_or(DEFAULT_KEY_DEPOSIT)
                 }
             };
-            self.pots.deposits -= deposit;
 
             // Schedule refund
             self.stake_refunds.push((stake_address.clone(), deposit));
@@ -876,32 +875,29 @@ impl State {
     pub fn handle_tx_certificates(&mut self, tx_certs_msg: &TxCertificatesMessage) -> Result<()> {
         // Handle certificates
         for tx_cert in tx_certs_msg.certificates.iter() {
-            match tx_cert {
+            match &tx_cert.cert {
                 TxCertificate::StakeRegistration(reg) => {
-                    self.register_stake_address(&reg.stake_address, None);
+                    self.register_stake_address(&reg, None);
                 }
 
                 TxCertificate::StakeDeregistration(dreg) => {
-                    self.deregister_stake_address(&dreg.stake_address, None);
+                    self.deregister_stake_address(&dreg, None);
                 }
 
                 TxCertificate::MoveInstantaneousReward(mir) => {
-                    self.handle_mir(&mir.cert).unwrap_or_else(|e| error!("MIR failed: {e:#}"));
+                    self.handle_mir(&mir).unwrap_or_else(|e| error!("MIR failed: {e:#}"));
                 }
 
                 TxCertificate::Registration(reg) => {
-                    self.register_stake_address(&reg.cert.stake_address, Some(reg.cert.deposit));
+                    self.register_stake_address(&reg.stake_address, Some(reg.deposit));
                 }
 
                 TxCertificate::Deregistration(dreg) => {
-                    self.deregister_stake_address(&dreg.cert.stake_address, Some(dreg.cert.refund));
+                    self.deregister_stake_address(&dreg.stake_address, Some(dreg.refund));
                 }
 
                 TxCertificate::StakeDelegation(delegation) => {
-                    self.record_stake_delegation(
-                        &delegation.cert.stake_address,
-                        &delegation.cert.operator,
-                    );
+                    self.record_stake_delegation(&delegation.stake_address, &delegation.operator);
                 }
 
                 TxCertificate::VoteDelegation(delegation) => {
@@ -909,51 +905,33 @@ impl State {
                 }
 
                 TxCertificate::StakeAndVoteDelegation(delegation) => {
-                    self.record_stake_delegation(
-                        &delegation.cert.stake_address,
-                        &delegation.cert.operator,
-                    );
-                    self.record_drep_delegation(
-                        &delegation.cert.stake_address,
-                        &delegation.cert.drep,
-                    );
+                    self.record_stake_delegation(&delegation.stake_address, &delegation.operator);
+                    self.record_drep_delegation(&delegation.stake_address, &delegation.drep);
                 }
 
                 TxCertificate::StakeRegistrationAndDelegation(delegation) => {
                     self.register_stake_address(
-                        &delegation.cert.stake_address,
-                        Some(delegation.cert.deposit),
+                        &delegation.stake_address,
+                        Some(delegation.deposit),
                     );
-                    self.record_stake_delegation(
-                        &delegation.cert.stake_address,
-                        &delegation.cert.operator,
-                    );
+                    self.record_stake_delegation(&delegation.stake_address, &delegation.operator);
                 }
 
                 TxCertificate::StakeRegistrationAndVoteDelegation(delegation) => {
                     self.register_stake_address(
-                        &delegation.cert.stake_address,
-                        Some(delegation.cert.deposit),
+                        &delegation.stake_address,
+                        Some(delegation.deposit),
                     );
-                    self.record_drep_delegation(
-                        &delegation.cert.stake_address,
-                        &delegation.cert.drep,
-                    );
+                    self.record_drep_delegation(&delegation.stake_address, &delegation.drep);
                 }
 
                 TxCertificate::StakeRegistrationAndStakeAndVoteDelegation(delegation) => {
                     self.register_stake_address(
-                        &delegation.cert.stake_address,
-                        Some(delegation.cert.deposit),
+                        &delegation.stake_address,
+                        Some(delegation.deposit),
                     );
-                    self.record_stake_delegation(
-                        &delegation.cert.stake_address,
-                        &delegation.cert.operator,
-                    );
-                    self.record_drep_delegation(
-                        &delegation.cert.stake_address,
-                        &delegation.cert.drep,
-                    );
+                    self.record_stake_delegation(&delegation.stake_address, &delegation.operator);
+                    self.record_drep_delegation(&delegation.stake_address, &delegation.drep);
                 }
 
                 _ => (),
@@ -1014,11 +992,10 @@ mod tests {
     use acropolis_common::{
         protocol_params::ConwayParams, rational_number::RationalNumber, Anchor, Committee,
         Constitution, CostModel, DRepVotingThresholds, NetworkId, PoolVotingThresholds, Pot,
-        PotDelta, Ratio, Registration, RegistrationWithPos, StakeAddress, StakeAddressDelta,
-        StakeAddressPayload, StakeAndVoteDelegation, StakeAndVoteDelegationWithPos,
-        StakeRegistrationAndStakeAndVoteDelegation,
-        StakeRegistrationAndStakeAndVoteDelegationWithPos, StakeRegistrationAndVoteDelegation,
-        StakeRegistrationAndVoteDelegationWithPos, TxIdentifier, VoteDelegation, Withdrawal,
+        PotDelta, Ratio, Registration, StakeAddress, StakeAddressDelta, StakeAndVoteDelegation,
+        StakeCredential, StakeRegistrationAndStakeAndVoteDelegation,
+        StakeRegistrationAndVoteDelegation, TxCertificateWithPos, TxIdentifier, VoteDelegation,
+        Withdrawal,
     };
 
     // Helper to create a StakeAddress from a byte slice
@@ -1027,7 +1004,7 @@ mod tests {
         full_hash[..hash.len().min(28)].copy_from_slice(&hash[..hash.len().min(28)]);
         StakeAddress {
             network: NetworkId::Mainnet,
-            payload: StakeAddressPayload::StakeKeyHash(full_hash),
+            credential: StakeCredential::AddrKeyHash(full_hash),
         }
     }
 
@@ -1391,57 +1368,66 @@ mod tests {
         let spo3 = create_address(&[0x03]);
         let spo4 = create_address(&[0x04]);
 
+        let tx_identifier = TxIdentifier::default();
+
         let certificates = vec![
             // register the first two SPOs separately from their delegation
-            TxCertificate::Registration(RegistrationWithPos {
-                cert: Registration {
+            TxCertificateWithPos {
+                cert: TxCertificate::Registration(Registration {
                     stake_address: spo1.clone(),
                     deposit: 1,
-                },
-                tx_identifier: TxIdentifier::default(),
+                }),
+                tx_identifier,
                 cert_index: 0,
-            }),
-            TxCertificate::Registration(RegistrationWithPos {
-                cert: Registration {
+            },
+            TxCertificateWithPos {
+                cert: TxCertificate::Registration(Registration {
                     stake_address: spo2.clone(),
                     deposit: 1,
-                },
-                tx_identifier: TxIdentifier::default(),
+                }),
+                tx_identifier,
                 cert_index: 0,
-            }),
-            TxCertificate::VoteDelegation(VoteDelegation {
-                stake_address: spo1.clone(),
-                drep: DRepChoice::Key(DREP_HASH.to_vec()),
-            }),
-            TxCertificate::StakeAndVoteDelegation(StakeAndVoteDelegationWithPos {
-                cert: StakeAndVoteDelegation {
+            },
+            TxCertificateWithPos {
+                cert: TxCertificate::VoteDelegation(VoteDelegation {
+                    stake_address: spo1.clone(),
+                    drep: DRepChoice::Key(DREP_HASH.to_vec()),
+                }),
+                tx_identifier,
+                cert_index: 0,
+            },
+            TxCertificateWithPos {
+                cert: TxCertificate::StakeAndVoteDelegation(StakeAndVoteDelegation {
                     stake_address: spo2.clone(),
                     operator: spo1.get_hash().to_vec(),
                     drep: DRepChoice::Script(DREP_HASH.to_vec()),
-                },
-                tx_identifier: TxIdentifier::default(),
-            }),
-            TxCertificate::StakeRegistrationAndVoteDelegation(
-                StakeRegistrationAndVoteDelegationWithPos {
-                    cert: StakeRegistrationAndVoteDelegation {
+                }),
+                tx_identifier,
+                cert_index: 0,
+            },
+            TxCertificateWithPos {
+                cert: TxCertificate::StakeRegistrationAndVoteDelegation(
+                    StakeRegistrationAndVoteDelegation {
                         stake_address: spo3.clone(),
                         drep: DRepChoice::Abstain,
                         deposit: 1,
                     },
-                    tx_identifier: TxIdentifier::default(),
-                },
-            ),
-            TxCertificate::StakeRegistrationAndStakeAndVoteDelegation(
-                StakeRegistrationAndStakeAndVoteDelegationWithPos {
-                    cert: StakeRegistrationAndStakeAndVoteDelegation {
+                ),
+                tx_identifier,
+                cert_index: 0,
+            },
+            TxCertificateWithPos {
+                cert: TxCertificate::StakeRegistrationAndStakeAndVoteDelegation(
+                    StakeRegistrationAndStakeAndVoteDelegation {
                         stake_address: spo4.clone(),
                         operator: spo1.get_hash().to_vec(),
                         drep: DRepChoice::NoConfidence,
                         deposit: 1,
                     },
-                    tx_identifier: TxIdentifier::default(),
-                },
-            ),
+                ),
+                tx_identifier,
+                cert_index: 0,
+            },
         ];
 
         state.handle_tx_certificates(&TxCertificatesMessage { certificates })?;
