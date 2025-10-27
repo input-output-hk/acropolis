@@ -104,7 +104,10 @@ impl CliDriver {
         state.run(context, move |args, context| async move {
             let tx = fs::read(args.tx_file).await?;
             let request = Arc::new(Message::Command(Command::Transactions(
-                TransactionsCommand::Submit { cbor: tx },
+                TransactionsCommand::Submit {
+                    cbor: tx,
+                    wait_for_ack: true,
+                },
             )));
             let response = context.request("cardano.txs.submit", request).await?;
             if let Message::CommandResponse(CommandResponse::Transactions(

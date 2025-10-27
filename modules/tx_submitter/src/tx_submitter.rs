@@ -48,8 +48,10 @@ impl TxSubmitter {
         message: Arc<Message>,
         peers: &Vec<PeerConnection>,
     ) -> Result<TransactionsCommandResponse> {
-        let Message::Command(Command::Transactions(TransactionsCommand::Submit { cbor })) =
-            message.as_ref()
+        let Message::Command(Command::Transactions(TransactionsCommand::Submit {
+            cbor,
+            wait_for_ack,
+        })) = message.as_ref()
         else {
             bail!("unexpected tx request")
         };
@@ -61,6 +63,9 @@ impl TxSubmitter {
             waiting.push(async move {
                 receiver.await.context(format!("could not send tx to {peer_name}"))
             });
+        }
+        if !*wait_for_ack {
+            return Ok(TransactionsCommandResponse::Submitted { id: tx.id });
         }
         while let Some(result) = waiting.next().await {
             match result {

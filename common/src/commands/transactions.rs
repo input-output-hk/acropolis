@@ -8,6 +8,7 @@ pub enum TransactionsCommand {
     Submit {
         #[serde_as(as = "Hex")]
         cbor: Vec<u8>,
+        wait_for_ack: bool,
     },
 }
 
