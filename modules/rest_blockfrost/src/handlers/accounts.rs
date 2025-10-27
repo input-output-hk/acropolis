@@ -199,11 +199,7 @@ pub async fn handle_account_registrations_blockfrost(
 
         rest_response.push(RegistrationUpdateREST {
             tx_hash: hex::encode(tx_hash),
-            action: if r.deregistered {
-                "deregistered".to_string()
-            } else {
-                "registered".to_string()
-            },
+            action: r.status.to_string(),
         });
     }
 
