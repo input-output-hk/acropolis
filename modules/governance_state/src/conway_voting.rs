@@ -76,6 +76,12 @@ impl ConwayVoting {
         self.conway.as_ref().ok_or_else(|| anyhow!("Conway parameters not available"))
     }
 
+    /// Update Conway governance parameters.
+    /// `bootstrap` parameter: Conway era is split into Chang era (protocol version 9.0)
+    /// and Plomin era (10.0). During Chang era governance procedures are working in
+    /// bootstrap (limited) mode.
+    /// Pass true at Chang era, and false at Plomin era.
+    /// https://docs.cardano.org/about-cardano/evolution/upgrades/chang
     pub fn update_parameters(&mut self, conway: &Option<ConwayParams>, bootstrap: bool) {
         self.conway = conway.clone();
         self.bootstrap = Some(bootstrap);
@@ -474,9 +480,9 @@ impl ConwayVoting {
     }
 
     pub fn log_conway_voting_stats(&self, new_epoch: u64) {
-        info!("*** Current voting stats: ***");
         let mut proposal_procedures =
             self.proposals.keys().cloned().collect::<HashSet<GovActionId>>();
+
         for (action_id, voting_procedure) in self.votes.iter() {
             let proposal = match self.proposals.get(action_id) {
                 None => " (absent) ".to_string(),
@@ -490,9 +496,8 @@ impl ConwayVoting {
 
         if !proposal_procedures.is_empty() {
             let pp = proposal_procedures.into_iter().map(|x| format!("{x},")).collect::<String>();
-            info!("Proposal procedures without 'votes' records: [{}]", pp);
+            info!("Proposal procedures at {new_epoch} without 'votes' records: [{}]", pp);
         }
-        info!("*** End of voting stats ***");
     }
 
     /// Processes final `outcomes`, checks ratification/enaction epochs,
