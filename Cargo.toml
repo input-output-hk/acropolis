@@ -25,11 +25,13 @@ members = [
     "modules/historical_accounts_state",    # Tracks historical account information
     "modules/consensus",                    # Chooses favoured chain across multiple options
     "modules/chain_store",                  # Tracks historical information about blocks and TXs
+    "modules/tx_submitter",                 # Submits TXs to peers
 
     # Process builds
-    "processes/omnibus",      # All-inclusive omnibus process
-    "processes/replayer",     # All-inclusive process to replay messages
-    "processes/golden_tests", # All-inclusive golden tests process
+    "processes/omnibus",            # All-inclusive omnibus process
+    "processes/replayer",           # All-inclusive process to replay messages
+    "processes/golden_tests",       # All-inclusive golden tests process
+    "processes/tx_submitter_cli",   # CLI wrapper for TX submitter
 ]
 resolver = "2"
 
@@ -41,7 +43,7 @@ caryatid_module_clock = "0.12"
 caryatid_module_spy = "0.12"
 anyhow = "1.0"
 chrono = "0.4"
-clap = { version = "4.5", features = ["derive"] }
+clap = { version = "4.5", features = ["derive", "string"] }
 config = "0.15.11"
 dashmap = "6.1.0"
 hex = "0.4"
