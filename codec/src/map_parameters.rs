@@ -69,13 +69,9 @@ pub fn map_address(address: &addresses::Address) -> Result<Address> {
 
         addresses::Address::Stake(stake_address) => Ok(Address::Stake(StakeAddress {
             network: map_network(stake_address.network())?,
-            payload: match stake_address.payload() {
-                addresses::StakePayload::Stake(hash) => {
-                    StakeAddressPayload::StakeKeyHash(hash.to_vec())
-                }
-                addresses::StakePayload::Script(hash) => {
-                    StakeAddressPayload::ScriptHash(hash.to_vec())
-                }
+            credential: match stake_address.payload() {
+                addresses::StakePayload::Stake(hash) => StakeCredential::AddrKeyHash(hash.to_vec()),
+                addresses::StakePayload::Script(hash) => StakeCredential::ScriptHash(hash.to_vec()),
             },
         })),
     }
@@ -97,10 +93,10 @@ pub fn map_stake_credential(cred: &PallasStakeCredential) -> StakeCredential {
 pub fn map_stake_address(cred: &PallasStakeCredential, network_id: NetworkId) -> StakeAddress {
     let payload = match cred {
         PallasStakeCredential::AddrKeyhash(key_hash) => {
-            StakeAddressPayload::StakeKeyHash(key_hash.to_vec())
+            StakeCredential::AddrKeyHash(key_hash.to_vec())
         }
         PallasStakeCredential::ScriptHash(script_hash) => {
-            StakeAddressPayload::ScriptHash(script_hash.to_vec())
+            StakeCredential::ScriptHash(script_hash.to_vec())
         }
     };
 
@@ -265,7 +261,7 @@ pub fn map_certificate(
                             .iter()
                             .map(|v| {
                                 StakeAddress::new(
-                                    StakeAddressPayload::StakeKeyHash(v.to_vec()),
+                                    StakeCredential::AddrKeyHash(v.to_vec()),
                                     network_id.clone().into(),
                                 )
                             })
@@ -375,7 +371,7 @@ pub fn map_certificate(
                                 .into_iter()
                                 .map(|v| {
                                     StakeAddress::new(
-                                        StakeAddressPayload::StakeKeyHash(v.to_vec()),
+                                        StakeCredential::AddrKeyHash(v.to_vec()),
                                         network_id.clone().into(),
                                     )
                                 })

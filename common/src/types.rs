@@ -625,15 +625,16 @@ pub struct PotDelta {
     pub delta: LovelaceDelta,
 }
 
+#[serde_as]
 #[derive(
     Debug, Clone, Ord, Eq, PartialEq, PartialOrd, Hash, serde::Serialize, serde::Deserialize,
 )]
 pub enum Credential {
     /// Script hash. NOTE: Order matters when parsing Haskell Node Snapshot data.
-    ScriptHash(KeyHash),
+    ScriptHash(#[serde_as(as = "Hex")] KeyHash),
 
     /// Address key hash
-    AddrKeyHash(KeyHash),
+    AddrKeyHash(#[serde_as(as = "Hex")] KeyHash),
 }
 
 impl Credential {
@@ -734,6 +735,17 @@ impl Credential {
 }
 
 pub type StakeCredential = Credential;
+
+impl StakeCredential {
+    pub fn to_string(&self) -> Result<String> {
+        let (hrp, data) = match &self {
+            Self::AddrKeyHash(data) => (Hrp::parse("stake_vkh")?, data),
+            Self::ScriptHash(data) => (Hrp::parse("script")?, data),
+        };
+
+        Ok(bech32::encode::<Bech32>(hrp, data)?)
+    }
+}
 
 /// Relay single host address
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize, Eq, PartialEq)]

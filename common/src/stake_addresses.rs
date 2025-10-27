@@ -544,7 +544,7 @@ impl StakeAddressMap {
 
 #[cfg(test)]
 mod tests {
-    use crate::{NetworkId, StakeAddress, StakeAddressPayload};
+    use crate::{NetworkId, StakeAddress, StakeCredential};
 
     use super::*;
 
@@ -558,9 +558,7 @@ mod tests {
 
     fn create_stake_address(hash: &[u8]) -> StakeAddress {
         StakeAddress::new(
-            StakeAddressPayload::StakeKeyHash(
-                hash.to_vec().try_into().expect("Invalid hash length"),
-            ),
+            StakeCredential::AddrKeyHash(hash.to_vec().try_into().expect("Invalid hash length")),
             NetworkId::Mainnet,
         )
     }
