@@ -1,8 +1,8 @@
 use std::{path::PathBuf, sync::Arc};
 
 use acropolis_common::{
-    commands::transactions::TransactionsCommand,
-    messages::{Command, Message},
+    commands::transactions::{TransactionsCommand, TransactionsCommandResponse},
+    messages::{Command, CommandResponse, Message},
 };
 use acropolis_module_tx_submitter::TxSubmitter;
 use anyhow::{Result, bail};
@@ -107,7 +107,14 @@ impl CliDriver {
                 TransactionsCommand::Submit { cbor: tx },
             )));
             let response = context.request("cardano.txs.submit", request).await?;
-            info!("{response:?}");
+            if let Message::CommandResponse(CommandResponse::Transactions(
+                TransactionsCommandResponse::Submitted { id },
+            )) = response.as_ref()
+            {
+                info!("Submitted TX {}", hex::encode(id));
+            } else {
+                info!("{response:?}");
+            }
             Ok(())
         });
         Ok(())
