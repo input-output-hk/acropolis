@@ -837,7 +837,6 @@ impl State {
                         .unwrap_or(DEFAULT_KEY_DEPOSIT)
                 }
             };
-            self.pots.deposits -= deposit;
 
             // Schedule refund
             self.stake_refunds.push((stake_address.clone(), deposit));
@@ -1015,7 +1014,7 @@ mod tests {
         protocol_params::ConwayParams, rational_number::RationalNumber, Anchor, Committee,
         Constitution, CostModel, DRepVotingThresholds, NetworkId, PoolVotingThresholds, Pot,
         PotDelta, Ratio, Registration, RegistrationWithPos, StakeAddress, StakeAddressDelta,
-        StakeAddressPayload, StakeAndVoteDelegation, StakeAndVoteDelegationWithPos,
+        StakeAndVoteDelegation, StakeAndVoteDelegationWithPos, StakeCredential,
         StakeRegistrationAndStakeAndVoteDelegation,
         StakeRegistrationAndStakeAndVoteDelegationWithPos, StakeRegistrationAndVoteDelegation,
         StakeRegistrationAndVoteDelegationWithPos, TxIdentifier, VoteDelegation, Withdrawal,
@@ -1027,7 +1026,7 @@ mod tests {
         full_hash[..hash.len().min(28)].copy_from_slice(&hash[..hash.len().min(28)]);
         StakeAddress {
             network: NetworkId::Mainnet,
-            payload: StakeAddressPayload::StakeKeyHash(full_hash),
+            credential: StakeCredential::AddrKeyHash(full_hash),
         }
     }
 

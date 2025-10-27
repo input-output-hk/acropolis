@@ -187,7 +187,7 @@ mod tests {
     use super::*;
     use acropolis_common::stake_addresses::StakeAddressState;
     use acropolis_common::NetworkId::Mainnet;
-    use acropolis_common::{StakeAddress, StakeAddressPayload};
+    use acropolis_common::{StakeAddress, StakeCredential};
 
     // Helper function to create stake addresses for testing
     fn create_test_stake_address(id: u8) -> StakeAddress {
@@ -195,9 +195,7 @@ mod tests {
         hash[0] = id;
         StakeAddress {
             network: Mainnet,
-            payload: StakeAddressPayload::StakeKeyHash(
-                hash.try_into().expect("Invalid hash length"),
-            ),
+            credential: StakeCredential::AddrKeyHash(hash.try_into().expect("Invalid hash length")),
         }
     }
 
