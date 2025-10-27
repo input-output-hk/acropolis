@@ -35,7 +35,7 @@ pub enum AccountsStateQuery {
 
     // Pools related queries
     GetOptimalPoolSizing,
-    GetPoolsLiveStakes { pools_operators: Vec<Vec<u8>> },
+    GetPoolsLiveStakes { pools_operators: Vec<KeyHash> },
     GetPoolDelegators { pool_operator: KeyHash },
     GetPoolLiveStake { pool_operator: KeyHash },
 
@@ -57,9 +57,9 @@ pub enum AccountsStateQueryResponse {
     AccountAssets(AccountAssets),
     AccountAssetsTotals(AccountAssetsTotals),
     AccountUTxOs(AccountUTxOs),
-    AccountsUtxoValuesMap(HashMap<Vec<u8>, u64>),
+    AccountsUtxoValuesMap(HashMap<KeyHash, u64>),
     AccountsUtxoValuesSum(u64),
-    AccountsBalancesMap(HashMap<Vec<u8>, u64>),
+    AccountsBalancesMap(HashMap<KeyHash, u64>),
     AccountsBalancesSum(u64),
 
     // Epochs-related responses
@@ -77,7 +77,7 @@ pub enum AccountsStateQueryResponse {
 
     // DReps-related responses
     DrepDelegators(DrepDelegators),
-    AccountsDrepDelegationsMap(HashMap<Vec<u8>, Option<DRepChoice>>),
+    AccountsDrepDelegationsMap(HashMap<KeyHash, Option<DRepChoice>>),
 
     NotFound,
     Error(String),

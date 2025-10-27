@@ -3,8 +3,7 @@
 #![allow(dead_code)]
 
 use crate::cip19::{VarIntDecoder, VarIntEncoder};
-use crate::types::{KeyHash, ScriptHash};
-use crate::{Credential, NetworkId, StakeCredential};
+use crate::{Credential, KeyHash, NetworkId, StakeCredential};
 use anyhow::{anyhow, bail, Result};
 use crc::{Crc, CRC_32_ISO_HDLC};
 use minicbor::data::IanaTag;
@@ -101,12 +100,12 @@ pub enum ShelleyAddressPaymentPart {
 
     /// Payment to a script
     #[n(1)]
-    ScriptHash(#[n(0)] ScriptHash),
+    ScriptHash(#[n(0)] KeyHash),
 }
 
 impl Default for ShelleyAddressPaymentPart {
     fn default() -> Self {
-        Self::PaymentKeyHash(Vec::new())
+        Self::PaymentKeyHash(KeyHash::new([0u8; 28]))
     }
 }
 
@@ -156,11 +155,11 @@ pub enum ShelleyAddressDelegationPart {
 
     /// Delegation to stake key
     #[n(1)]
-    StakeKeyHash(#[n(0)] Vec<u8>),
+    StakeKeyHash(#[n(0)] KeyHash),
 
     /// Delegation to script key hash
     #[n(2)]
-    ScriptHash(#[n(0)] ScriptHash),
+    ScriptHash(#[n(0)] KeyHash),
 
     /// Delegation to pointer
     #[n(3)]
@@ -213,14 +212,22 @@ impl ShelleyAddress {
             let header = *header;
 
             let payment_part = match (header >> 4) & 0x01 {
-                0 => ShelleyAddressPaymentPart::PaymentKeyHash(data[1..29].to_vec()),
-                1 => ShelleyAddressPaymentPart::ScriptHash(data[1..29].to_vec()),
+                0 => ShelleyAddressPaymentPart::PaymentKeyHash(
+                    data[1..29].try_into().map_err(|_| anyhow!("Invalid payment key hash size"))?
+                ),
+                1 => ShelleyAddressPaymentPart::ScriptHash(
+                    data[1..29].try_into().map_err(|_| anyhow!("Invalid script hash size"))?
+                ),
                 _ => panic!(),
             };
 
             let delegation_part = match (header >> 5) & 0x03 {
-                0 => ShelleyAddressDelegationPart::StakeKeyHash(data[29..57].to_vec()),
-                1 => ShelleyAddressDelegationPart::ScriptHash(data[29..57].to_vec()),
+                0 => ShelleyAddressDelegationPart::StakeKeyHash(
+                    data[29..57].try_into().map_err(|_| anyhow!("Invalid stake key hash size"))?
+                ),
+                1 => ShelleyAddressDelegationPart::ScriptHash(
+                    data[29..57].try_into().map_err(|_| anyhow!("Invalid delegation script hash size"))?
+                ),
                 2 => {
                     let mut decoder = VarIntDecoder::new(&data[29..]);
                     let slot = decoder.read()?;
@@ -254,27 +261,27 @@ impl ShelleyAddress {
             NetworkId::Testnet => (bech32::Hrp::parse("addr_test")?, 0u8),
         };
 
-        let (payment_hash, payment_bits): (&Vec<u8>, u8) = match &self.payment {
+        let (payment_hash, payment_bits): (&KeyHash, u8) = match &self.payment {
             ShelleyAddressPaymentPart::PaymentKeyHash(data) => (data, 0),
             ShelleyAddressPaymentPart::ScriptHash(data) => (data, 1),
         };
 
-        let (delegation_hash, delegation_bits): (&Vec<u8>, u8) = match &self.delegation {
-            ShelleyAddressDelegationPart::None => (&Vec::new(), 3),
-            ShelleyAddressDelegationPart::StakeKeyHash(hash) => (hash, 0),
-            ShelleyAddressDelegationPart::ScriptHash(hash) => (hash, 1),
+        let (delegation_hash, delegation_bits): (Vec<u8>, u8) = match &self.delegation {
+            ShelleyAddressDelegationPart::None => (Vec::new(), 3),
+            ShelleyAddressDelegationPart::StakeKeyHash(hash) => (hash.to_vec(), 0),
+            ShelleyAddressDelegationPart::ScriptHash(hash) => (hash.to_vec(), 1),
             ShelleyAddressDelegationPart::Pointer(pointer) => {
                 let mut encoder = VarIntEncoder::new();
                 encoder.push(pointer.slot);
                 encoder.push(pointer.tx_index);
                 encoder.push(pointer.cert_index);
-                (&encoder.to_vec(), 2)
+                (encoder.to_vec(), 2)
             }
         };
 
         let mut data = vec![network_bits | (payment_bits << 4) | (delegation_bits << 5)];
-        data.extend(payment_hash);
-        data.extend(delegation_hash);
+        data.extend(payment_hash.as_ref());
+        data.extend(&delegation_hash);
         Ok(bech32::encode::<bech32::Bech32>(hrp, &data)?)
     }
 
@@ -284,7 +291,7 @@ impl ShelleyAddress {
             NetworkId::Testnet => 0u8,
         };
 
-        let (payment_hash, payment_bits): (&Vec<u8>, u8) = match &self.payment {
+        let (payment_hash, payment_bits): (&KeyHash, u8) = match &self.payment {
             ShelleyAddressPaymentPart::PaymentKeyHash(data) => (data, 0),
             ShelleyAddressPaymentPart::ScriptHash(data) => (data, 1),
         };
@@ -298,24 +305,24 @@ impl ShelleyAddress {
             ShelleyAddressDelegationPart::None => {
                 let header = build_header(3);
                 data.push(header);
-                data.extend(payment_hash);
+                data.extend(payment_hash.as_ref());
             }
             ShelleyAddressDelegationPart::StakeKeyHash(hash) => {
                 let header = build_header(0);
                 data.push(header);
-                data.extend(payment_hash);
-                data.extend(hash);
+                data.extend(payment_hash.as_ref());
+                data.extend(hash.as_ref());
             }
             ShelleyAddressDelegationPart::ScriptHash(hash) => {
                 let header = build_header(1);
                 data.push(header);
-                data.extend(payment_hash);
-                data.extend(hash);
+                data.extend(payment_hash.as_ref());
+                data.extend(hash.as_ref());
             }
             ShelleyAddressDelegationPart::Pointer(pointer) => {
                 let header = build_header(2);
                 data.push(header);
-                data.extend(payment_hash);
+                data.extend(payment_hash.as_ref());
 
                 let mut encoder = VarIntEncoder::new();
                 encoder.push(pointer.slot);
@@ -338,14 +345,14 @@ impl ShelleyAddress {
             ShelleyAddressDelegationPart::StakeKeyHash(key_hash) => {
                 let mut data = Vec::with_capacity(29);
                 data.push(network_bit | (0b1110 << 4));
-                data.extend_from_slice(key_hash);
+                data.extend_from_slice(key_hash.as_ref());
                 let stake = StakeAddress::from_binary(&data)?.to_string()?;
                 Ok(Some(stake))
             }
             ShelleyAddressDelegationPart::ScriptHash(script_hash) => {
                 let mut data = Vec::with_capacity(29);
                 data.push(network_bit | (0b1111 << 4));
-                data.extend_from_slice(script_hash);
+                data.extend_from_slice(script_hash.as_ref());
                 let stake = StakeAddress::from_binary(&data)?.to_string()?;
                 Ok(Some(stake))
             }
@@ -363,7 +370,7 @@ pub struct StakeAddress {
     pub network: NetworkId,
 
     /// Credential
-    pub credential: StakeCredential, // payload: StakePayload?
+    pub credential: StakeCredential,
 }
 
 impl StakeAddress {
@@ -374,7 +381,7 @@ impl StakeAddress {
         }
     }
 
-    pub fn get_hash(&self) -> &[u8] {
+    pub fn get_hash(&self) -> &KeyHash {
         match &self.credential {
             StakeCredential::AddrKeyHash(hash) => hash,
             StakeCredential::ScriptHash(hash) => hash,
@@ -395,8 +402,8 @@ impl StakeAddress {
             NetworkId::Testnet => bech32::Hrp::parse("stake_test")?,
         };
 
-        let data = self.to_binary();
-        Ok(bech32::encode::<bech32::Bech32>(hrp, &data)?)
+        let data = self.to_binary()?;
+        Ok(bech32::encode::<bech32::Bech32>(hrp, &data.as_slice())?)
     }
 
     /// Read from a string format ("stake1xxx...")
@@ -409,8 +416,8 @@ impl StakeAddress {
             };
 
             let credential = match (header >> 4) & 0x0Fu8 {
-                0b1110 => StakeCredential::AddrKeyHash(data[1..].to_vec()),
-                0b1111 => StakeCredential::ScriptHash(data[1..].to_vec()),
+                0b1110 => StakeCredential::AddrKeyHash(data[1..].try_into().map_err(|_| anyhow!("Invalid key hash size"))?),
+                0b1111 => StakeCredential::ScriptHash(data[1..].try_into().map_err(|_| anyhow!("Invalid script hash size"))?),
                 _ => return Err(anyhow!("Unknown header {header} in stake address")),
             };
 
@@ -424,21 +431,22 @@ impl StakeAddress {
     }
 
     /// Convert to binary format (29 bytes)
-    pub fn to_binary(&self) -> Vec<u8> {
+    pub fn to_binary(&self) -> Result<KeyHash> {
         let network_bits = match self.network {
             NetworkId::Mainnet => 0b1u8,
             NetworkId::Testnet => 0b0u8,
         };
 
-        let (stake_bits, stake_hash): (u8, &Vec<u8>) = match &self.credential {
+        let (stake_bits, stake_hash): (u8, &KeyHash) = match &self.credential {
             StakeCredential::AddrKeyHash(data) => (0b1110, data),
             StakeCredential::ScriptHash(data) => (0b1111, data),
         };
 
         let mut data = vec![network_bits | (stake_bits << 4)];
-        data.extend(stake_hash);
-        data
+        data.extend(stake_hash.as_ref());
+        data.try_into().map_err(|_| anyhow!("Invalid hash size for stake address"))
     }
+
 
     /// Read from binary format (29 bytes)
     pub fn from_binary(data: &[u8]) -> Result<Self> {
@@ -452,8 +460,8 @@ impl StakeAddress {
         };
 
         let credential = match (data[0] >> 4) & 0x0F {
-            0b1110 => StakeCredential::AddrKeyHash(data[1..].to_vec()),
-            0b1111 => StakeCredential::ScriptHash(data[1..].to_vec()),
+            0b1110 => StakeCredential::AddrKeyHash(data[1..].try_into().map_err(|_| anyhow!("Invalid key hash size"))?),
+            0b1111 => StakeCredential::ScriptHash(data[1..].try_into().map_err(|_| anyhow!("Invalid script hash size"))?),
             _ => bail!("Unknown header byte {:x} in stake address", data[0]),
         };
 
@@ -466,8 +474,8 @@ impl StakeAddress {
     pub fn to_bytes_key(&self) -> Result<Vec<u8>> {
         let mut out = Vec::new();
         let (bits, hash): (u8, &[u8]) = match &self.credential {
-            StakeCredential::AddrKeyHash(h) => (0b1110, h),
-            StakeCredential::ScriptHash(h) => (0b1111, h),
+            StakeCredential::AddrKeyHash(h) => (0b1110, h.as_slice()),
+            StakeCredential::ScriptHash(h) => (0b1111, h.as_slice()),
         };
 
         let net_bit = match self.network {
@@ -494,7 +502,8 @@ impl<C> minicbor::Encode<C> for StakeAddress {
         e: &mut minicbor::Encoder<W>,
         _ctx: &mut C,
     ) -> Result<(), minicbor::encode::Error<W::Error>> {
-        e.bytes(&self.to_binary())?;
+        let data = self.to_binary().map_err(|_| minicbor::encode::Error::message("Failed to convert to binary"))?;
+        e.bytes(&data.as_slice())?;
         Ok(())
     }
 }
@@ -514,7 +523,7 @@ impl Default for StakeAddress {
     fn default() -> Self {
         StakeAddress {
             network: NetworkId::Mainnet,
-            credential: StakeCredential::AddrKeyHash(vec![0u8; 28]),
+            credential: StakeCredential::AddrKeyHash(KeyHash::new([0u8; 28])),
         }
     }
 }
@@ -640,32 +649,32 @@ mod tests {
     }
 
     // Standard keys from CIP-19
-    fn test_payment_key_hash() -> Vec<u8> {
+    fn test_payment_key_hash() -> KeyHash {
         let payment_key = "addr_vk1w0l2sr2zgfm26ztc6nl9xy8ghsk5sh6ldwemlpmp9xylzy4dtf7st80zhd";
         let (_, pubkey) = bech32::decode(payment_key).expect("Invalid Bech32 string");
 
         // pubkey is the raw key - we need the Blake2B hash
         let hash = keyhash_224(&pubkey);
         assert_eq!(28, hash.len());
-        hash
+        hash.as_slice().try_into().expect("Invalid hash size")
     }
 
-    fn test_stake_key_hash() -> Vec<u8> {
+    fn test_stake_key_hash() -> KeyHash {
         let stake_key = "stake_vk1px4j0r2fk7ux5p23shz8f3y5y2qam7s954rgf3lg5merqcj6aetsft99wu";
         let (_, pubkey) = bech32::decode(stake_key).expect("Invalid Bech32 string");
 
         // pubkey is the raw key - we need the Blake2B hash
         let hash = keyhash_224(&pubkey);
         assert_eq!(28, hash.len());
-        hash
+        hash.as_slice().try_into().expect("Invalid hash size")
     }
 
-    fn test_script_hash() -> Vec<u8> {
+    fn test_script_hash() -> KeyHash {
         let script_hash = "script1cda3khwqv60360rp5m7akt50m6ttapacs8rqhn5w342z7r35m37";
         let (_, hash) = bech32::decode(script_hash).expect("Invalid Bech32 string");
         // This is already a hash
         assert_eq!(28, hash.len());
-        hash
+        hash.as_slice().try_into().expect("Invalid hash size")
     }
 
     fn test_pointer() -> ShelleyAddressPointer {
@@ -813,7 +822,7 @@ mod tests {
     fn shelley_type_14() {
         let address = Address::Stake(StakeAddress {
             network: NetworkId::Mainnet,
-            credential: StakeCredential::AddrKeyHash(test_stake_key_hash()),
+            credential: StakeCredential::AddrKeyHash(KeyHash::from(test_stake_key_hash()))
         });
 
         let text = address.to_string().unwrap();
@@ -830,7 +839,7 @@ mod tests {
     fn shelley_type_15() {
         let address = Address::Stake(StakeAddress {
             network: NetworkId::Mainnet,
-            credential: StakeCredential::ScriptHash(test_script_hash()),
+            credential: StakeCredential::ScriptHash(KeyHash::from(test_script_hash())),
         });
 
         let text = address.to_string().unwrap();
@@ -930,14 +939,14 @@ mod tests {
     #[test]
     fn stake_addresses_encode_mainnet_stake() {
         let address = mainnet_stake_address();
-        let binary = address.to_binary();
+        let binary = address.to_binary().unwrap();
 
         // CBOR encoding wraps the raw 29-byte stake address in a byte string:
         // - 0x58: CBOR major type 2 (byte string) with 1-byte length follows
         // - 0x1d: Length of 29 bytes (the stake address data)
         // - [29 bytes]: The actual stake address (network header + 28-byte hash)
         // Total: 31 bytes (2-byte CBOR framing + 29-byte payload)
-        let expected = [[0x58, 0x1d].as_slice(), &binary].concat();
+        let expected = [[0x58, 0x1d].as_slice(), &binary.as_slice()].concat();
 
         let mut actual = Vec::new();
         let mut encoder = minicbor::Encoder::new(&mut actual);
@@ -951,7 +960,7 @@ mod tests {
     fn stake_addresses_decode_mainnet_stake() {
         let binary = {
             let mut v = vec![0x58, 0x1d];
-            v.extend_from_slice(&mainnet_stake_address().to_binary());
+            v.extend_from_slice(&mainnet_stake_address().to_binary().unwrap().as_slice());
             v
         };
 

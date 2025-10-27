@@ -66,13 +66,21 @@ impl<'b, C> minicbor::decode::Decode<'b, C> for StakeCredential {
             0 => {
                 // ScriptHash variant (first in enum) - decode bytes directly
                 let bytes = d.bytes()?;
-                let key_hash = bytes.to_vec();
+                let key_hash = KeyHash::try_from(bytes).map_err(|_| {
+                    minicbor::decode::Error::message(
+                        "invalid length for ScriptHash in StakeCredential",
+                    )
+                })?;
                 Ok(StakeCredential::ScriptHash(key_hash))
             }
             1 => {
                 // AddrKeyHash variant (second in enum) - decode bytes directly
                 let bytes = d.bytes()?;
-                let key_hash = bytes.to_vec();
+                let key_hash = KeyHash::try_from(bytes).map_err(|_| {
+                    minicbor::decode::Error::message(
+                        "invalid length for AddrKeyHash in StakeCredential",
+                    )
+                })?;
                 Ok(StakeCredential::AddrKeyHash(key_hash))
             }
             _ => Err(minicbor::decode::Error::message(
@@ -299,6 +307,7 @@ impl<'b, C> minicbor::Decode<'b, C> for Account {
 // Type aliases for pool_params compatibility
 // -----------------------------------------------------------------------------
 
+use crate::KeyHash;
 /// Alias minicbor as cbor for pool_params module
 pub use minicbor as cbor;
 
@@ -1076,15 +1085,19 @@ impl StreamingSnapshotParser {
                 // Convert SPO delegation from StrictMaybe<PoolId> to Option<KeyHash>
                 // PoolId is Hash<28>, we need to convert to Vec<u8>
                 let delegated_spo = match &account.pool {
-                    StrictMaybe::Just(pool_id) => Some(pool_id.as_ref().to_vec()),
+                    StrictMaybe::Just(pool_id) => Some(*pool_id),
                     StrictMaybe::Nothing => None,
                 };
 
                 // Convert DRep delegation from StrictMaybe<DRep> to Option<DRepChoice>
                 let delegated_drep = match &account.drep {
                     StrictMaybe::Just(drep) => Some(match drep {
-                        DRep::Key(hash) => crate::DRepChoice::Key(hash.as_ref().to_vec()),
-                        DRep::Script(hash) => crate::DRepChoice::Script(hash.as_ref().to_vec()),
+                        DRep::Key(hash) => crate::DRepChoice::Key(
+                            KeyHash::try_from(hash.as_ref().to_vec()).unwrap(),
+                        ),
+                        DRep::Script(hash) => crate::DRepChoice::Script(
+                            KeyHash::try_from(hash.as_ref().to_vec()).unwrap(),
+                        ),
                         DRep::Abstain => crate::DRepChoice::Abstain,
                         DRep::NoConfidence => crate::DRepChoice::NoConfidence,
                     }),
@@ -1442,15 +1455,19 @@ impl StreamingSnapshotParser {
 
                 // Convert SPO delegation from StrictMaybe<PoolId> to Option<KeyHash>
                 let delegated_spo = match &account.pool {
-                    StrictMaybe::Just(pool_id) => Some(pool_id.as_ref().to_vec()),
+                    StrictMaybe::Just(pool_id) => Some(*pool_id),
                     StrictMaybe::Nothing => None,
                 };
 
                 // Convert DRep delegation from StrictMaybe<DRep> to Option<DRepChoice>
                 let delegated_drep = match &account.drep {
                     StrictMaybe::Just(drep) => Some(match drep {
-                        DRep::Key(hash) => crate::DRepChoice::Key(hash.as_ref().to_vec()),
-                        DRep::Script(hash) => crate::DRepChoice::Script(hash.as_ref().to_vec()),
+                        DRep::Key(hash) => crate::DRepChoice::Key(
+                            KeyHash::try_from(hash.as_ref().to_vec()).unwrap(),
+                        ),
+                        DRep::Script(hash) => crate::DRepChoice::Script(
+                            KeyHash::try_from(hash.as_ref().to_vec()).unwrap(),
+                        ),
                         DRep::Abstain => crate::DRepChoice::Abstain,
                         DRep::NoConfidence => crate::DRepChoice::NoConfidence,
                     }),

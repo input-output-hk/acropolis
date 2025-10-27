@@ -401,11 +401,7 @@ pub fn process_message(
 #[cfg(test)]
 mod test {
     use crate::*;
-    use acropolis_common::{
-        messages::AddressDeltasMessage, Address, AddressDelta, BlockHash, BlockInfo, BlockStatus,
-        ByronAddress, Era, ShelleyAddress, ShelleyAddressDelegationPart, ShelleyAddressPaymentPart,
-        ShelleyAddressPointer, StakeAddress, StakeCredential, UTxOIdentifier, ValueDelta,
-    };
+    use acropolis_common::{messages::AddressDeltasMessage, Address, AddressDelta, BlockHash, BlockInfo, BlockStatus, ByronAddress, Era, KeyHash, ShelleyAddress, ShelleyAddressDelegationPart, ShelleyAddressPaymentPart, ShelleyAddressPointer, StakeAddress, StakeCredential, UTxOIdentifier, ValueDelta};
     use bech32::{Bech32, Hrp};
 
     fn parse_addr(s: &str) -> Result<AddressDelta> {
@@ -471,10 +467,10 @@ mod test {
                 network: map_network(stake_address.network())?,
                 credential: match stake_address.payload() {
                     addresses::StakePayload::Stake(hash) => {
-                        StakeCredential::AddrKeyHash(hash.to_vec())
+                        StakeCredential::AddrKeyHash(KeyHash::from(hash))
                     }
                     addresses::StakePayload::Script(hash) => {
-                        StakeCredential::ScriptHash(hash.to_vec())
+                        StakeCredential::ScriptHash(KeyHash::from(hash))
                     }
                 },
             })),

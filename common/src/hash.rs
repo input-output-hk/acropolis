@@ -1,12 +1,44 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{fmt, ops::Deref, str::FromStr};
 
-/// data that is a cryptographic [`struct@Hash`] of `BYTES` long.
+/// Data that is a cryptographic hash of `BYTES` long.
 ///
-/// Possible values with Cardano are 32 bytes long (block hash or transaction
-/// hash). Or 28 bytes long (as used in addresses)
+/// This is a generic wrapper around a fixed-size byte array that provides:
+/// - Hexadecimal serialization/deserialization
+/// - CBOR encoding/decoding via minicbor
+/// - Type-safe conversions from various byte representations
+/// - Display and debug formatting
+///
+/// # Common Hash Sizes in Cardano
+///
+/// - **32 bytes**: Block hashes, transaction hashes
+/// - **28 bytes**: Script hashes, address key hashes
+///
+/// # Examples
+///
+/// ```
+/// use your_crate::Hash;
+///
+/// // Parse from hex string
+/// let hash: Hash<32> = "0d8d00cdd4657ac84d82f0a56067634a7adfdf43da41cb534bcaa45060973d21"
+///     .parse()
+///     .unwrap();
+///
+/// // Create from byte array
+/// let bytes = [0u8; 28];
+/// let hash = Hash::new(bytes);
+///
+/// // Convert to hex string
+/// let hex_string = hash.to_string();
+/// ```
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Hash<const BYTES: usize>([u8; BYTES]);
+
+impl<const BYTES: usize> Default for Hash<BYTES> {
+    fn default() -> Self {
+        Self::new([0u8; BYTES])
+    }
+}
 
 // Implement Serialize/Deserialize manually since generic const arrays don't auto-derive
 impl<const BYTES: usize> Serialize for Hash<BYTES> {
@@ -28,14 +60,52 @@ impl<'de, const BYTES: usize> Deserialize<'de> for Hash<BYTES> {
     }
 }
 
-// Type aliases for common hash sizes
-pub type ScriptHash = Hash<28>;
-pub type AddrKeyhash = Hash<28>;
-
 impl<const BYTES: usize> Hash<BYTES> {
+    /// Creates a new hash from a byte array.
+    ///
+    /// This is a const function, allowing hashes to be created at compile time.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use your_crate::Hash;
+    ///
+    /// const MY_HASH: Hash<32> = Hash::new([0u8; 32]);
+    /// ```
     #[inline]
     pub const fn new(bytes: [u8; BYTES]) -> Self {
         Self(bytes)
+    }
+
+    /// Converts the hash to a `Vec<u8>`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use your_crate::Hash;
+    ///
+    /// let hash = Hash::new([1u8; 28]);
+    /// let vec = hash.to_vec();
+    /// assert_eq!(vec.len(), 28);
+    /// ```
+    #[inline]
+    pub fn to_vec(&self) -> Vec<u8> {
+        self.0.to_vec()
+    }
+
+    /// Consumes the hash and returns the inner byte array.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use your_crate::Hash;
+    ///
+    /// let hash = Hash::new([1u8; 28]);
+    /// let bytes: [u8; 28] = hash.into_inner();
+    /// ```
+    #[inline]
+    pub fn into_inner(self) -> [u8; BYTES] {
+        self.0
     }
 }
 
@@ -46,11 +116,43 @@ impl<const BYTES: usize> From<[u8; BYTES]> for Hash<BYTES> {
     }
 }
 
-impl<const BYTES: usize> From<&[u8]> for Hash<BYTES> {
-    fn from(value: &[u8]) -> Self {
-        let mut hash = [0; BYTES];
-        hash.copy_from_slice(value);
-        Self::new(hash)
+impl<const BYTES: usize> TryFrom<&[u8]> for Hash<BYTES> {
+    type Error = std::array::TryFromSliceError;
+
+    /// Attempts to create a hash from a byte slice.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the slice length does not match `BYTES`.
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        let hash: [u8; BYTES] = value.try_into()?;
+        Ok(Self::new(hash))
+    }
+}
+
+impl<const BYTES: usize> TryFrom<Vec<u8>> for Hash<BYTES> {
+    type Error = Vec<u8>;
+
+    /// Attempts to create a hash from a `Vec<u8>`.
+    ///
+    /// # Errors
+    ///
+    /// Returns the original vector if its length does not match `BYTES`.
+    fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {
+        let hash: [u8; BYTES] = value.try_into()?;
+        Ok(Self::new(hash))
+    }
+}
+
+impl<const BYTES: usize> From<Hash<BYTES>> for Vec<u8> {
+    fn from(hash: Hash<BYTES>) -> Self {
+        hash.0.to_vec()
+    }
+}
+
+impl<const BYTES: usize> From<Hash<BYTES>> for [u8; BYTES] {
+    fn from(hash: Hash<BYTES>) -> Self {
+        hash.0
     }
 }
 
@@ -83,6 +185,7 @@ impl<const BYTES: usize> fmt::Debug for Hash<BYTES> {
 }
 
 impl<const BYTES: usize> fmt::Display for Hash<BYTES> {
+    /// Formats the hash as a lowercase hexadecimal string.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&hex::encode(self))
     }
@@ -90,10 +193,44 @@ impl<const BYTES: usize> fmt::Display for Hash<BYTES> {
 
 impl<const BYTES: usize> FromStr for Hash<BYTES> {
     type Err = hex::FromHexError;
+
+    /// Parses a hash from a hexadecimal string.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The string is not valid hexadecimal
+    /// - The decoded bytes do not match the expected length `BYTES`
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use your_crate::Hash;
+    ///
+    /// let hash: Hash<28> = "276fd18711931e2c0e21430192dbeac0e458093cd9d1fcd7210f64b3"
+    ///     .parse()
+    ///     .unwrap();
+    /// ```
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut bytes = [0; BYTES];
         hex::decode_to_slice(s, &mut bytes)?;
         Ok(Self::new(bytes))
+    }
+}
+
+impl<const BYTES: usize> hex::FromHex for Hash<BYTES> {
+    type Error = hex::FromHexError;
+
+    /// Decodes a hash from hexadecimal bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the decoded length does not match `BYTES`.
+    fn from_hex<T: AsRef<[u8]>>(hex: T) -> Result<Self, Self::Error> {
+        match Self::try_from(Vec::<u8>::from_hex(hex)?) {
+            Ok(h) => Ok(h),
+            Err(_) => Err(hex::FromHexError::InvalidStringLength),
+        }
     }
 }
 
@@ -125,6 +262,93 @@ impl<'a, C, const BYTES: usize> minicbor::Decode<'a, C> for Hash<BYTES> {
     }
 }
 
+// Type aliases for common hash sizes in Cardano
+/// A 28-byte hash used for scripts in Cardano addresses.
+pub type ScriptHash = Hash<28>;
+
+/// A 28-byte hash of an address key in Cardano.
+pub type AddrKeyhash = Hash<28>;
+
+/// Declares a type alias for a hash with optional documentation.
+///
+/// # Examples
+///
+/// ```
+/// declare_hash_type!(BlockHash, 32);
+/// declare_hash_type!(TxHash, 32);
+/// ```
+#[macro_export]
+macro_rules! declare_hash_type {
+    ($name:ident, $size:expr) => {
+        #[doc = concat!(stringify!($name), " - a ", stringify!($size), "-byte hash.")]
+        pub type $name = Hash<$size>;
+    };
+    ($(#[$meta:meta])* $name:ident, $size:expr) => {
+        $(#[$meta])*
+        pub type $name = Hash<$size>;
+    };
+}
+
+/// Declares a type alias for a hash with Bech32 encoding support.
+///
+/// This macro creates a type alias and implements the `Bech32Conversion` trait
+/// for encoding/decoding the hash using a specified human-readable part (HRP).
+///
+/// # Examples
+///
+/// ```
+/// declare_hash_type_with_bech32!(VRFKey, 32, "vrf_vk");
+///
+/// let key: VRFKey = // ... get key
+/// let bech32_string = key.to_bech32().unwrap();
+/// let decoded = VRFKey::from_bech32(&bech32_string).unwrap();
+/// ```
+#[macro_export]
+macro_rules! declare_hash_type_with_bech32 {
+    ($name:ident, $size:expr, $hrp:expr) => {
+        declare_hash_type!($name, $size);
+
+        impl crate::serialization::Bech32Conversion for $name {
+            fn to_bech32(&self) -> Result<String, anyhow::Error> {
+                use crate::serialization::Bech32WithHrp;
+                self.to_vec().to_bech32_with_hrp($hrp)
+            }
+
+            fn from_bech32(s: &str) -> Result<Self, anyhow::Error> {
+                use crate::serialization::Bech32WithHrp;
+                let v = Vec::<u8>::from_bech32_with_hrp(s, $hrp)?;
+                Self::try_from(v).map_err(|_| {
+                    anyhow::Error::msg(format!(
+                        "Bad vector input to {}",
+                        stringify!($name)
+                    ))
+                })
+            }
+        }
+    };
+    ($(#[$meta:meta])* $name:ident, $size:expr, $hrp:expr) => {
+        declare_hash_type!($(#[$meta])* $name, $size);
+
+        impl crate::serialization::Bech32Conversion for $name {
+            fn to_bech32(&self) -> Result<String, anyhow::Error> {
+                use crate::serialization::Bech32WithHrp;
+                self.to_vec().to_bech32_with_hrp($hrp)
+            }
+
+            fn from_bech32(s: &str) -> Result<Self, anyhow::Error> {
+                use crate::serialization::Bech32WithHrp;
+                let v = Vec::<u8>::from_bech32_with_hrp(s, $hrp)?;
+                Self::try_from(v).map_err(|_| {
+                    anyhow::Error::msg(format!(
+                        "Bad vector input to {}",
+                        stringify!($name)
+                    ))
+                })
+            }
+        }
+    };
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -148,5 +372,34 @@ mod tests {
     #[should_panic]
     fn from_str_fail_2() {
         let _digest: Hash<32> = "0d8d00cdd465".parse().unwrap();
+    }
+
+    #[test]
+    fn try_from_slice() {
+        let bytes = vec![0u8; 28];
+        let hash: Hash<28> = bytes.as_slice().try_into().unwrap();
+        assert_eq!(hash.as_ref(), bytes.as_slice());
+    }
+
+    #[test]
+    fn try_from_vec() {
+        let bytes = vec![0u8; 28];
+        let hash: Hash<28> = bytes.clone().try_into().unwrap();
+        assert_eq!(hash.as_ref(), bytes.as_slice());
+    }
+
+    #[test]
+    fn into_vec() {
+        let bytes = [0u8; 28];
+        let hash = Hash::new(bytes);
+        let vec: Vec<u8> = hash.into();
+        assert_eq!(vec, bytes.to_vec());
+    }
+
+    #[test]
+    #[should_panic]
+    fn try_from_wrong_size() {
+        let bytes = vec![0u8; 27]; // Wrong size
+        let _hash: Hash<28> = bytes.as_slice().try_into().unwrap();
     }
 }

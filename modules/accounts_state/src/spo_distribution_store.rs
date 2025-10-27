@@ -1,39 +1,40 @@
 use std::collections::HashMap;
 
-use acropolis_common::{AddrKeyhash, PoolId};
+use acropolis_common::{PoolKeyHash};
 use anyhow::Result;
 use fjall::{Config, Keyspace, PartitionCreateOptions};
+use acropolis_common::hash::AddrKeyhash;
 
-const POOL_ID_LEN: usize = 28;
+const POOL_KEY_LENGTH: usize = 28;
 const STAKE_KEY_LEN: usize = 28;
 const EPOCH_LEN: usize = 8;
-const TOTAL_KEY_LEN: usize = EPOCH_LEN + POOL_ID_LEN + STAKE_KEY_LEN;
+const TOTAL_KEY_LEN: usize = EPOCH_LEN + POOL_KEY_LENGTH + STAKE_KEY_LEN;
 
 // Batch size balances commit overhead vs memory usage
 // ~720KB per batch (72 bytes × 10,000)
 // ~130 commits for typical epoch (~1.3M delegations)
 const BATCH_SIZE: usize = 10_000;
 
-fn encode_key(epoch: u64, pool_id: &PoolId, stake_key: &AddrKeyhash) -> Vec<u8> {
+fn encode_key(epoch: u64, pool_key: &PoolKeyHash, stake_key: &AddrKeyhash) -> Vec<u8> {
     let mut key = Vec::with_capacity(TOTAL_KEY_LEN);
     key.extend_from_slice(&epoch.to_be_bytes());
-    key.extend_from_slice(pool_id);
+    key.extend_from_slice(pool_key);
     key.extend_from_slice(stake_key);
     key
 }
 
-fn encode_epoch_pool_prefix(epoch: u64, pool_id: &PoolId) -> Vec<u8> {
-    let mut prefix = Vec::with_capacity(EPOCH_LEN + POOL_ID_LEN);
+fn encode_epoch_pool_prefix(epoch: u64, pool_key: &PoolKeyHash) -> Vec<u8> {
+    let mut prefix = Vec::with_capacity(EPOCH_LEN + POOL_KEY_LENGTH);
     prefix.extend_from_slice(&epoch.to_be_bytes());
-    prefix.extend_from_slice(pool_id);
+    prefix.extend_from_slice(pool_key);
     prefix
 }
 
-fn decode_key(key: &[u8]) -> Result<(u64, PoolId, AddrKeyhash)> {
+fn decode_key(key: &[u8]) -> Result<(u64, PoolKeyHash, AddrKeyhash)> {
     let epoch = u64::from_be_bytes(key[..EPOCH_LEN].try_into()?);
-    let pool_id = key[EPOCH_LEN..EPOCH_LEN + POOL_ID_LEN].to_vec();
-    let stake_key = key[EPOCH_LEN + POOL_ID_LEN..].to_vec();
-    Ok((epoch, pool_id, stake_key))
+    let pool_key = key[EPOCH_LEN..EPOCH_LEN + POOL_KEY_LENGTH].iter().into();
+    let stake_key = key[EPOCH_LEN + POOL_KEY_LENGTH..].iter().into();
+    Ok((epoch, pool_key, stake_key))
 }
 
 /// Encode epoch completion marker key
@@ -44,7 +45,7 @@ fn encode_epoch_marker(epoch: u64) -> Vec<u8> {
 pub struct SPDDStore {
     keyspace: Keyspace,
     /// Partition for all SPDD data
-    /// Key format: epoch(8 bytes) + pool_id + stake_key
+    /// Key format: epoch(8 bytes) + pool_key + stake_key
     /// Value: amount(8 bytes)
     spdd: fjall::PartitionHandle,
     /// Partition for epoch completion markers
@@ -100,7 +101,7 @@ impl SPDDStore {
     pub fn store_spdd(
         &mut self,
         epoch: u64,
-        spdd_state: HashMap<PoolId, Vec<(AddrKeyhash, u64)>>,
+        spdd_state: HashMap<PoolKeyHash, Vec<(AddrKeyhash, u64)>>,
     ) -> fjall::Result<()> {
         if self.is_epoch_complete(epoch)? {
             return Ok(());
@@ -109,9 +110,9 @@ impl SPDDStore {
 
         let mut batch = self.keyspace.batch();
         let mut count = 0;
-        for (pool_id, delegations) in spdd_state {
+        for (pool_key, delegations) in spdd_state {
             for (stake_key, amount) in delegations {
-                let key = encode_key(epoch, &pool_id, &stake_key);
+                let key = encode_key(epoch, &pool_key, &stake_key);
                 let value = amount.to_be_bytes();
                 batch.insert(&self.spdd, key, value);
 
@@ -182,7 +183,7 @@ impl SPDDStore {
         Ok(deleted_epochs)
     }
 
-    pub fn query_by_epoch(&self, epoch: u64) -> Result<Vec<(PoolId, AddrKeyhash, u64)>> {
+    pub fn query_by_epoch(&self, epoch: u64) -> Result<Vec<(PoolKeyHash, AddrKeyhash, u64)>> {
         if !self.is_epoch_complete(epoch)? {
             return Err(anyhow::anyhow!("Epoch SPDD Data is not complete"));
         }
@@ -191,9 +192,9 @@ impl SPDDStore {
         let mut result = Vec::new();
         for item in self.spdd.prefix(prefix) {
             let (key, value) = item?;
-            let (_, pool_id, stake_key) = decode_key(&key)?;
+            let (_, pool_key, stake_key) = decode_key(&key)?;
             let amount = u64::from_be_bytes(value.as_ref().try_into()?);
-            result.push((pool_id, stake_key, amount));
+            result.push((pool_key, stake_key, amount));
         }
         Ok(result)
     }
@@ -201,13 +202,13 @@ impl SPDDStore {
     pub fn query_by_epoch_and_pool(
         &self,
         epoch: u64,
-        pool_id: &PoolId,
+        pool_key: &PoolKeyHash,
     ) -> Result<Vec<(AddrKeyhash, u64)>> {
         if !self.is_epoch_complete(epoch)? {
             return Err(anyhow::anyhow!("Epoch SPDD Data is not complete"));
         }
 
-        let prefix = encode_epoch_pool_prefix(epoch, pool_id);
+        let prefix = encode_epoch_pool_prefix(epoch, pool_key);
         let mut result = Vec::new();
         for item in self.spdd.prefix(prefix) {
             let (key, value) = item?;
@@ -221,6 +222,7 @@ impl SPDDStore {
 
 #[cfg(test)]
 mod tests {
+    use acropolis_common::hash::AddrKeyhash;
     use super::*;
 
     const DB_PATH: &str = "spdd_db";
@@ -229,7 +231,7 @@ mod tests {
     fn test_store_spdd_state() {
         let mut spdd_store =
             SPDDStore::new(std::path::Path::new(DB_PATH), 1).expect("Failed to create SPDD store");
-        let mut spdd_state: HashMap<PoolId, Vec<(AddrKeyhash, u64)>> = HashMap::new();
+        let mut spdd_state: HashMap<PoolKeyHash, Vec<(AddrKeyhash, u64)>> = HashMap::new();
         spdd_state.insert(
             vec![0x01; 28],
             vec![(vec![0x10; 28], 100), (vec![0x11; 28], 150)],
@@ -254,7 +256,7 @@ mod tests {
             .expect("Failed to create SPDD store");
 
         for epoch in 1..=3 {
-            let mut spdd_state: HashMap<PoolId, Vec<(AddrKeyhash, u64)>> = HashMap::new();
+            let mut spdd_state: HashMap<PoolKeyHash, Vec<(AddrKeyhash, u64)>> = HashMap::new();
             spdd_state.insert(
                 vec![epoch as u8; 28],
                 vec![(vec![0x10; 28], epoch * 100), (vec![0x11; 28], epoch * 150)],

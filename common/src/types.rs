@@ -2,11 +2,12 @@
 // We don't use these types in the acropolis_common crate itself
 #![allow(dead_code)]
 
+use crate::hash::{AddrKeyhash, Hash, ScriptHash};
+use crate::snapshot::streaming_snapshot::PoolId;
 use crate::{
     address::{Address, ShelleyAddress, StakeAddress},
-    protocol_params,
+    declare_hash_type, declare_hash_type_with_bech32, protocol_params,
     rational_number::RationalNumber,
-    BlockHash, TxHash,
 };
 use anyhow::{anyhow, bail, Error, Result};
 use bech32::{Bech32, Hrp};
@@ -434,18 +435,15 @@ impl Default for UTXODelta {
     }
 }
 
-/// Key hash used for pool IDs etc.
-pub type KeyHash = Vec<u8>;
-
-pub type PoolId = Vec<u8>;
+pub type KeyHash = Hash<28>;
+pub type PoolKeyHash = Hash<28>;
 
 /// Script identifier
-pub type ScriptHash = KeyHash;
-
-/// Address key hash
-pub type AddrKeyhash = KeyHash;
-
 pub type GenesisKeyhash = Vec<u8>;
+
+declare_hash_type!(BlockHash, 32);
+declare_hash_type!(TxHash, 32);
+declare_hash_type_with_bech32!(VRFKey, 32, "vrf_vk");
 
 /// Data hash used for metadata, anchors (SHA256)
 pub type DataHash = Vec<u8>;
@@ -646,7 +644,8 @@ impl Credential {
                 hex_str
             ))
         } else {
-            Ok(key_hash)
+            KeyHash::try_from(key_hash.as_slice())
+                .map_err(|_| anyhow!("Failed to convert to KeyHash"))
         }
     }
 
@@ -678,7 +677,7 @@ impl Credential {
         .clone()
     }
 
-    pub fn from_drep_bech32(bech32_str: &str) -> Result<Self, anyhow::Error> {
+    pub fn from_drep_bech32(bech32_str: &str) -> Result<Self, Error> {
         let (hrp, data) = bech32::decode(bech32_str)?;
         if data.len() != 28 {
             return Err(anyhow!(
@@ -687,7 +686,12 @@ impl Credential {
             ));
         }
 
-        let hash: KeyHash = data;
+        let hash = KeyHash::try_from(data).map_err(|v| {
+            anyhow!(
+                "Failed to convert to KeyHash: expected 28 bytes, got {}",
+                v.len()
+            )
+        })?;
 
         match hrp.as_str() {
             "drep" => Ok(Credential::AddrKeyHash(hash)),
@@ -726,7 +730,7 @@ impl Credential {
 
         let mut address_bytes = [0u8; 29];
         address_bytes[0] = header;
-        address_bytes[1..].copy_from_slice(&hash);
+        address_bytes[1..].copy_from_slice(hash.as_ref());
 
         let hrp = Hrp::parse("stake").map_err(|e| anyhow!("HRP parse error: {e}"))?;
         bech32::encode::<Bech32>(hrp, &address_bytes)
@@ -739,8 +743,8 @@ pub type StakeCredential = Credential;
 impl StakeCredential {
     pub fn to_string(&self) -> Result<String> {
         let (hrp, data) = match &self {
-            Self::AddrKeyHash(data) => (Hrp::parse("stake_vkh")?, data),
-            Self::ScriptHash(data) => (Hrp::parse("script")?, data),
+            Self::AddrKeyHash(data) => (Hrp::parse("stake_vkh")?, data.as_slice()),
+            Self::ScriptHash(data) => (Hrp::parse("script")?, data.as_slice()),
         };
 
         Ok(bech32::encode::<Bech32>(hrp, data)?)
@@ -881,7 +885,7 @@ pub struct PoolRetirementWithPos {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PoolRetirement {
     /// Operator pool key hash - used as ID
-    pub operator: KeyHash,
+    pub operator: PoolKeyHash,
 
     /// Epoch it will retire at the end of
     pub epoch: u64,
@@ -947,7 +951,7 @@ pub struct StakeDelegation {
     pub stake_address: StakeAddress,
 
     /// Pool ID to delegate to
-    pub operator: KeyHash,
+    pub operator: PoolId,
 }
 
 /// SPO total delegation data (for SPDD)
@@ -1667,13 +1671,15 @@ impl Voter {
 impl Display for Voter {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Voter::ConstitutionalCommitteeKey(h) => write!(f, "{}", self.to_bech32("cc_hot", h)),
-            Voter::ConstitutionalCommitteeScript(s) => {
-                write!(f, "{}", self.to_bech32("cc_hot_script", s))
+            Voter::ConstitutionalCommitteeKey(h) => {
+                write!(f, "{}", self.to_bech32("cc_hot", h.as_ref()))
             }
-            Voter::DRepKey(k) => write!(f, "{}", self.to_bech32("drep", k)),
-            Voter::DRepScript(s) => write!(f, "{}", self.to_bech32("drep_script", s)),
-            Voter::StakePoolKey(k) => write!(f, "{}", self.to_bech32("pool", k)),
+            Voter::ConstitutionalCommitteeScript(s) => {
+                write!(f, "{}", self.to_bech32("cc_hot_script", s.as_ref()))
+            }
+            Voter::DRepKey(k) => write!(f, "{}", self.to_bech32("drep", k.as_ref())),
+            Voter::DRepScript(s) => write!(f, "{}", self.to_bech32("drep_script", s.as_ref())),
+            Voter::StakePoolKey(k) => write!(f, "{}", self.to_bech32("pool", k.as_ref())),
         }
     }
 }
@@ -1958,6 +1964,7 @@ impl AddressTotals {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hash::Hash;
     use anyhow::Result;
 
     #[test]
@@ -1988,10 +1995,12 @@ mod tests {
     }
 
     fn make_committee_credential(addr_key_hash: bool, val: u8) -> CommitteeCredential {
+        // Create a 28-byte array filled with the value
+        let hash_bytes = [val; 28];
         if addr_key_hash {
-            Credential::AddrKeyHash(vec![val])
+            Credential::AddrKeyHash(KeyHash::from(hash_bytes))
         } else {
-            Credential::ScriptHash(vec![val])
+            Credential::ScriptHash(KeyHash::from(hash_bytes))
         }
     }
 
@@ -2000,8 +2009,11 @@ mod tests {
         let gov_action_id = GovActionId::default();
 
         let mut voting = VotingProcedures::default();
+        // Create a test hash with pattern [1, 2, 3, 4, 0, 0, ...]
+        let mut test_hash_bytes = [0u8; 28];
+        test_hash_bytes[0..4].copy_from_slice(&[1, 2, 3, 4]);
         voting.votes.insert(
-            Voter::StakePoolKey(vec![1, 2, 3, 4]),
+            Voter::StakePoolKey(Hash::new(test_hash_bytes)),
             SingleVoterVotes::default(),
         );
 
@@ -2015,7 +2027,7 @@ mod tests {
             },
         );
         voting.votes.insert(
-            Voter::StakePoolKey(vec![1, 2, 3, 4]),
+            Voter::StakePoolKey(Hash::new(test_hash_bytes)),
             SingleVoterVotes::default(),
         );
         println!("Json: {}", serde_json::to_string(&voting)?);

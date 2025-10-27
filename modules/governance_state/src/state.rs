@@ -239,16 +239,16 @@ impl State {
                     Voter::ConstitutionalCommitteeScript(_) => votes.committee += 1,
                     Voter::DRepKey(key) => {
                         self.drep_stake
-                            .get(&DRepCredential::AddrKeyHash(key.clone()))
+                            .get(&DRepCredential::AddrKeyHash(key.into()))
                             .inspect(|v| votes.drep += *v);
                     }
                     Voter::DRepScript(script) => {
                         self.drep_stake
-                            .get(&DRepCredential::ScriptHash(script.clone()))
+                            .get(&DRepCredential::ScriptHash(script.into()))
                             .inspect(|v| votes.drep += *v);
                     }
                     Voter::StakePoolKey(pool) => {
-                        self.spo_stake.get(pool).inspect(|ds| votes.pool += ds.live);
+                        self.spo_stake.get(pool.into()).inspect(|ds| votes.pool += ds.live);
                     }
                 }
             }
