@@ -808,14 +808,6 @@ pub struct PoolMetadata {
     pub hash: DataHash,
 }
 
-/// Pool registration with position
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PoolRegistrationWithPos {
-    pub reg: PoolRegistration,
-    pub tx_hash: TxHash,
-    pub cert_index: u64,
-}
-
 /// Pool registration data
 #[serde_as]
 #[derive(
@@ -869,14 +861,6 @@ pub struct PoolRegistration {
     pub pool_metadata: Option<PoolMetadata>,
 }
 
-// Pool Retirment with position
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PoolRetirementWithPos {
-    pub ret: PoolRetirement,
-    pub tx_hash: TxHash,
-    pub cert_index: u64,
-}
-
 /// Pool retirement data
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PoolRetirement {
@@ -897,23 +881,23 @@ pub enum PoolUpdateAction {
 /// Pool Update Event
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PoolUpdateEvent {
-    pub tx_hash: TxHash,
+    pub tx_identifier: TxIdentifier,
     pub cert_index: u64,
     pub action: PoolUpdateAction,
 }
 
 impl PoolUpdateEvent {
-    pub fn register_event(tx_hash: TxHash, cert_index: u64) -> Self {
+    pub fn register_event(tx_identifier: TxIdentifier, cert_index: u64) -> Self {
         Self {
-            tx_hash,
+            tx_identifier,
             cert_index,
             action: PoolUpdateAction::Registered,
         }
     }
 
-    pub fn retire_event(tx_hash: TxHash, cert_index: u64) -> Self {
+    pub fn retire_event(tx_identifier: TxIdentifier, cert_index: u64) -> Self {
         Self {
-            tx_hash,
+            tx_identifier,
             cert_index,
             action: PoolUpdateAction::Deregistered,
         }
@@ -1140,13 +1124,6 @@ pub struct DRepRegistration {
     pub anchor: Option<Anchor>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct DRepRegistrationWithPos {
-    pub reg: DRepRegistration,
-    pub tx_hash: TxHash,
-    pub cert_index: u64,
-}
-
 /// DRep Deregistration = unreg_drep_cert
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DRepDeregistration {
@@ -1157,13 +1134,6 @@ pub struct DRepDeregistration {
     pub refund: Lovelace,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct DRepDeregistrationWithPos {
-    pub reg: DRepDeregistration,
-    pub tx_hash: TxHash,
-    pub cert_index: u64,
-}
-
 /// DRep Update = update_drep_cert
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DRepUpdate {
@@ -1172,13 +1142,6 @@ pub struct DRepUpdate {
 
     /// Optional anchor
     pub anchor: Option<Anchor>,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct DRepUpdateWithPos {
-    pub reg: DRepUpdate,
-    pub tx_hash: TxHash,
-    pub cert_index: u64,
 }
 
 pub type CommitteeCredential = Credential;
@@ -1794,13 +1757,6 @@ pub struct GovernanceOutcome {
     pub action_to_perform: GovernanceOutcomeVariant,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct StakeAddressWithPos {
-    pub stake_address: StakeAddress,
-    pub tx_index: u64,
-    pub cert_index: u64,
-}
-
 /// Certificate in a transaction
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum TxCertificate {
@@ -1808,7 +1764,7 @@ pub enum TxCertificate {
     None(()),
 
     /// Stake registration
-    StakeRegistration(StakeAddressWithPos),
+    StakeRegistration(StakeAddress),
 
     /// Stake de-registration
     StakeDeregistration(StakeAddress),
@@ -1817,10 +1773,10 @@ pub enum TxCertificate {
     StakeDelegation(StakeDelegation),
 
     /// Pool registration
-    PoolRegistrationWithPos(PoolRegistrationWithPos),
+    PoolRegistration(PoolRegistration),
 
     /// Pool retirement
-    PoolRetirementWithPos(PoolRetirementWithPos),
+    PoolRetirement(PoolRetirement),
 
     /// Genesis key delegation
     GenesisKeyDelegation(GenesisKeyDelegation),
@@ -1856,13 +1812,20 @@ pub enum TxCertificate {
     ResignCommitteeCold(ResignCommitteeCold),
 
     /// DRep registration
-    DRepRegistration(DRepRegistrationWithPos),
+    DRepRegistration(DRepRegistration),
 
     /// DRep deregistration
-    DRepDeregistration(DRepDeregistrationWithPos),
+    DRepDeregistration(DRepDeregistration),
 
     /// DRep update
-    DRepUpdate(DRepUpdateWithPos),
+    DRepUpdate(DRepUpdate),
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TxCertificateWithPos {
+    pub cert: TxCertificate,
+    pub tx_identifier: TxIdentifier,
+    pub cert_index: u64,
 }
 
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]

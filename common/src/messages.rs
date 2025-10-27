@@ -91,7 +91,7 @@ pub struct AssetDeltasMessage {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TxCertificatesMessage {
     /// Ordered set of certificates
-    pub certificates: Vec<TxCertificate>,
+    pub certificates: Vec<TxCertificateWithPos>,
 }
 
 /// Address deltas message

@@ -2,7 +2,7 @@ use acropolis_common::{
     messages::{
         EpochActivityMessage, SPORewardsMessage, SPOStakeDistributionMessage, TxCertificatesMessage,
     },
-    BlockHash, BlockInfo, BlockStatus, Era, TxCertificate,
+    BlockHash, BlockInfo, BlockStatus, Era, TxCertificateWithPos,
 };
 
 use crate::store_config::StoreConfig;
@@ -75,7 +75,7 @@ pub fn new_block(epoch: u64) -> BlockInfo {
 
 pub fn new_certs_msg() -> TxCertificatesMessage {
     TxCertificatesMessage {
-        certificates: Vec::<TxCertificate>::new(),
+        certificates: Vec::<TxCertificateWithPos>::new(),
     }
 }
 

@@ -875,13 +875,13 @@ impl State {
     pub fn handle_tx_certificates(&mut self, tx_certs_msg: &TxCertificatesMessage) -> Result<()> {
         // Handle certificates
         for tx_cert in tx_certs_msg.certificates.iter() {
-            match tx_cert {
-                TxCertificate::StakeRegistration(stake_address_with_pos) => {
-                    self.register_stake_address(&stake_address_with_pos.stake_address, None);
+            match &tx_cert.cert {
+                TxCertificate::StakeRegistration(reg) => {
+                    self.register_stake_address(&reg, None);
                 }
 
-                TxCertificate::StakeDeregistration(stake_address) => {
-                    self.deregister_stake_address(&stake_address, None);
+                TxCertificate::StakeDeregistration(dreg) => {
+                    self.deregister_stake_address(&dreg, None);
                 }
 
                 TxCertificate::MoveInstantaneousReward(mir) => {
@@ -994,7 +994,8 @@ mod tests {
         Constitution, CostModel, DRepVotingThresholds, NetworkId, PoolVotingThresholds, Pot,
         PotDelta, Ratio, Registration, StakeAddress, StakeAddressDelta, StakeAndVoteDelegation,
         StakeCredential, StakeRegistrationAndStakeAndVoteDelegation,
-        StakeRegistrationAndVoteDelegation, VoteDelegation, Withdrawal,
+        StakeRegistrationAndVoteDelegation, TxCertificateWithPos, TxIdentifier, VoteDelegation,
+        Withdrawal,
     };
 
     // Helper to create a StakeAddress from a byte slice
@@ -1367,38 +1368,66 @@ mod tests {
         let spo3 = create_address(&[0x03]);
         let spo4 = create_address(&[0x04]);
 
+        let tx_identifier = TxIdentifier::default();
+
         let certificates = vec![
             // register the first two SPOs separately from their delegation
-            TxCertificate::Registration(Registration {
-                stake_address: spo1.clone(),
-                deposit: 1,
-            }),
-            TxCertificate::Registration(Registration {
-                stake_address: spo2.clone(),
-                deposit: 1,
-            }),
-            TxCertificate::VoteDelegation(VoteDelegation {
-                stake_address: spo1.clone(),
-                drep: DRepChoice::Key(DREP_HASH.to_vec()),
-            }),
-            TxCertificate::StakeAndVoteDelegation(StakeAndVoteDelegation {
-                stake_address: spo2.clone(),
-                operator: spo1.get_hash().to_vec(),
-                drep: DRepChoice::Script(DREP_HASH.to_vec()),
-            }),
-            TxCertificate::StakeRegistrationAndVoteDelegation(StakeRegistrationAndVoteDelegation {
-                stake_address: spo3.clone(),
-                drep: DRepChoice::Abstain,
-                deposit: 1,
-            }),
-            TxCertificate::StakeRegistrationAndStakeAndVoteDelegation(
-                StakeRegistrationAndStakeAndVoteDelegation {
-                    stake_address: spo4.clone(),
-                    operator: spo1.get_hash().to_vec(),
-                    drep: DRepChoice::NoConfidence,
+            TxCertificateWithPos {
+                cert: TxCertificate::Registration(Registration {
+                    stake_address: spo1.clone(),
                     deposit: 1,
-                },
-            ),
+                }),
+                tx_identifier,
+                cert_index: 0,
+            },
+            TxCertificateWithPos {
+                cert: TxCertificate::Registration(Registration {
+                    stake_address: spo2.clone(),
+                    deposit: 1,
+                }),
+                tx_identifier,
+                cert_index: 0,
+            },
+            TxCertificateWithPos {
+                cert: TxCertificate::VoteDelegation(VoteDelegation {
+                    stake_address: spo1.clone(),
+                    drep: DRepChoice::Key(DREP_HASH.to_vec()),
+                }),
+                tx_identifier,
+                cert_index: 0,
+            },
+            TxCertificateWithPos {
+                cert: TxCertificate::StakeAndVoteDelegation(StakeAndVoteDelegation {
+                    stake_address: spo2.clone(),
+                    operator: spo1.get_hash().to_vec(),
+                    drep: DRepChoice::Script(DREP_HASH.to_vec()),
+                }),
+                tx_identifier,
+                cert_index: 0,
+            },
+            TxCertificateWithPos {
+                cert: TxCertificate::StakeRegistrationAndVoteDelegation(
+                    StakeRegistrationAndVoteDelegation {
+                        stake_address: spo3.clone(),
+                        drep: DRepChoice::Abstain,
+                        deposit: 1,
+                    },
+                ),
+                tx_identifier,
+                cert_index: 0,
+            },
+            TxCertificateWithPos {
+                cert: TxCertificate::StakeRegistrationAndStakeAndVoteDelegation(
+                    StakeRegistrationAndStakeAndVoteDelegation {
+                        stake_address: spo4.clone(),
+                        operator: spo1.get_hash().to_vec(),
+                        drep: DRepChoice::NoConfidence,
+                        deposit: 1,
+                    },
+                ),
+                tx_identifier,
+                cert_index: 0,
+            },
         ];
 
         state.handle_tx_certificates(&TxCertificatesMessage { certificates })?;
