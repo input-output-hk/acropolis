@@ -72,10 +72,10 @@ impl ConwayVoting {
         self.conway.as_ref().ok_or_else(|| anyhow!("Conway parameters not available"))
     }
 
-    /// Update Conway governance parameters. 
-    /// `bootstrap` parameter: Conway era is split into Chang era (protocol version 9.0) 
-    /// and Plomin era (10.0). During Chang era governance procedures are working in 
-    /// bootstrap (limited) mode. 
+    /// Update Conway governance parameters.
+    /// `bootstrap` parameter: Conway era is split into Chang era (protocol version 9.0)
+    /// and Plomin era (10.0). During Chang era governance procedures are working in
+    /// bootstrap (limited) mode.
     /// Pass true at Chang era, and false at Plomin era.
     /// https://docs.cardano.org/about-cardano/evolution/upgrades/chang
     pub fn update_parameters(&mut self, conway: &Option<ConwayParams>, bootstrap: bool) {
