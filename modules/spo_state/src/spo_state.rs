@@ -272,7 +272,7 @@ impl SPOState {
                     }
                 }
 
-                // Handle EochActivityMessage
+                // Handle EpochActivityMessage
                 let (_, ea_message) = ea_message_f.await?;
                 if let Message::Cardano((
                     block_info,

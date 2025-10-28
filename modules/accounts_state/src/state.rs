@@ -385,8 +385,8 @@ impl State {
             );
 
             if tracing::enabled!(Level::DEBUG) {
-                registrations.iter().for_each(|addr| debug!("Registration {}", addr));
-                deregistrations.iter().for_each(|addr| debug!("Deregistration {}", addr));
+                registrations.iter().for_each(|addr| debug!(epoch, "Registration {}", addr));
+                deregistrations.iter().for_each(|addr| debug!(epoch, "Deregistration {}", addr));
             }
 
             // Calculate reward payouts for previous epoch
@@ -734,12 +734,14 @@ impl State {
                     if spo.pledge != old_spo.pledge
                         || spo.cost != old_spo.cost
                         || spo.margin != old_spo.margin
+                        || spo.reward_account != old_spo.reward_account
                     {
                         debug!(
                             epoch = spo_msg.epoch,
                             pledge = spo.pledge,
                             cost = spo.cost,
                             margin = ?spo.margin,
+                            reward = %spo.reward_account,
                             "Updated parameters for SPO {}",
                             hex::encode(id)
                         );
@@ -752,6 +754,7 @@ impl State {
                         pledge = spo.pledge,
                         cost = spo.cost,
                         margin = ?spo.margin,
+                        reward = %spo.reward_account,
                         "Registered new SPO {}",
                         hex::encode(id)
                     );
@@ -791,6 +794,7 @@ impl State {
 
     /// Register a stake address, with a specified deposit if known
     fn register_stake_address(&mut self, stake_address: &StakeAddress, deposit: Option<Lovelace>) {
+        debug!("Register stake address {stake_address}");
         // Stake addresses can be registered after being used in UTXOs
         let mut stake_addresses = self.stake_addresses.lock().unwrap();
         if stake_addresses.register_stake_address(stake_address) {
@@ -819,6 +823,8 @@ impl State {
 
     /// Deregister a stake address, with specified refund if known
     fn deregister_stake_address(&mut self, stake_address: &StakeAddress, refund: Option<Lovelace>) {
+        debug!("Deregister stake address {stake_address}");
+
         // Check if it existed
         let mut stake_addresses = self.stake_addresses.lock().unwrap();
         if stake_addresses.deregister_stake_address(stake_address) {
