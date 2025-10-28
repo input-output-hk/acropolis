@@ -1,5 +1,5 @@
 use crate::alonzo_genesis;
-use acropolis_common::hash::ScriptHash;
+use acropolis_common::types::ScriptHash;
 use acropolis_common::{
     protocol_params::{AlonzoParams, BabbageParams, ByronParams, ConwayParams, ShelleyParams},
     rational_number::{rational_number_from_f32, RationalNumber},

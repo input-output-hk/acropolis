@@ -211,25 +211,19 @@ impl ShelleyAddress {
 
             let header = *header;
 
+            let to_28_bytes = |slice: &[u8]| -> Result<KeyHash> {
+                slice.try_into().map_err(|_| anyhow!("Invalid hash"))
+            };
+
             let payment_part = match (header >> 4) & 0x01 {
-                0 => ShelleyAddressPaymentPart::PaymentKeyHash(
-                    data[1..29].try_into().map_err(|_| anyhow!("Invalid payment key hash size"))?,
-                ),
-                1 => ShelleyAddressPaymentPart::ScriptHash(
-                    data[1..29].try_into().map_err(|_| anyhow!("Invalid script hash size"))?,
-                ),
+                0 => ShelleyAddressPaymentPart::PaymentKeyHash(to_28_bytes(&data[1..29])?),
+                1 => ShelleyAddressPaymentPart::ScriptHash(to_28_bytes(&data[1..29])?),
                 _ => panic!(),
             };
 
             let delegation_part = match (header >> 5) & 0x03 {
-                0 => ShelleyAddressDelegationPart::StakeKeyHash(
-                    data[29..57].try_into().map_err(|_| anyhow!("Invalid stake key hash size"))?,
-                ),
-                1 => ShelleyAddressDelegationPart::ScriptHash(
-                    data[29..57]
-                        .try_into()
-                        .map_err(|_| anyhow!("Invalid delegation script hash size"))?,
-                ),
+                0 => ShelleyAddressDelegationPart::StakeKeyHash(to_28_bytes(&data[29..57])?),
+                1 => ShelleyAddressDelegationPart::ScriptHash(to_28_bytes(&data[29..57])?),
                 2 => {
                     let mut decoder = VarIntDecoder::new(&data[29..]);
                     let slot = decoder.read()?;

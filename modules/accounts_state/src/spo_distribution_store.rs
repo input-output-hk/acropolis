@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use acropolis_common::hash::AddrKeyhash;
+use acropolis_common::types::AddrKeyhash;
 use acropolis_common::PoolId;
 use anyhow::Result;
 use fjall::{Config, Keyspace, PartitionCreateOptions};
@@ -224,7 +224,7 @@ impl SPDDStore {
 mod tests {
     use super::*;
     use acropolis_common::crypto::keyhash_224;
-    use acropolis_common::hash::AddrKeyhash;
+    use acropolis_common::types::AddrKeyhash;
     use acropolis_common::PoolId;
 
     const DB_PATH: &str = "spdd_db";

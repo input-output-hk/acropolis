@@ -682,7 +682,7 @@ mod tests {
     use acropolis_common::hash::Hash;
     use acropolis_common::{
         state_history::{StateHistory, StateHistoryStore},
-        PoolId, PoolRetirement, Ratio, StakeAddress, TxCertificate, TxHash, VRFKey,
+        PoolId, PoolRetirement, Ratio, StakeAddress, TxCertificate, TxHash, VrfKeyHash,
     };
     use tokio::sync::Mutex;
 
@@ -696,11 +696,11 @@ mod tests {
 
     fn default_pool_registration(
         operator: PoolId,
-        vrf_key_hash: Option<VRFKey>,
+        vrf_key_hash: Option<VrfKeyHash>,
     ) -> PoolRegistration {
         PoolRegistration {
             operator,
-            vrf_key_hash: vrf_key_hash.unwrap_or_else(|| VRFKey::default()),
+            vrf_key_hash: vrf_key_hash.unwrap_or_else(|| VrfKeyHash::default()),
             pledge: 0,
             cost: 0,
             margin: Ratio {

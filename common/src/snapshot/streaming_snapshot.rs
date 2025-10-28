@@ -29,7 +29,7 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use tracing::info;
 
-pub use crate::hash::{AddrKeyhash, Hash, ScriptHash};
+pub use crate::hash::Hash;
 pub use crate::stake_addresses::{AccountState, StakeAddressState};
 pub use crate::StakeCredential;
 
@@ -74,7 +74,7 @@ impl<'b, C> minicbor::decode::Decode<'b, C> for StakeCredential {
                 Ok(StakeCredential::ScriptHash(key_hash))
             }
             1 => {
-                // AddrKeyHash variant (second in enum) - decode bytes directly
+                // AddrKeyHash variant (second in enum) - decodes bytes directly
                 let bytes = d.bytes()?;
                 let key_hash = KeyHash::try_from(bytes).map_err(|_| {
                     minicbor::decode::Error::message(
@@ -307,6 +307,8 @@ impl<'b, C> minicbor::Decode<'b, C> for Account {
 // Type aliases for pool_params compatibility
 // -----------------------------------------------------------------------------
 
+pub use crate::types::AddrKeyhash;
+pub use crate::types::ScriptHash;
 use crate::{KeyHash, PoolId};
 /// Alias minicbor as cbor for pool_params module
 pub use minicbor as cbor;
@@ -1086,12 +1088,8 @@ impl StreamingSnapshotParser {
                 // Convert DRep delegation from StrictMaybe<DRep> to Option<DRepChoice>
                 let delegated_drep = match &account.drep {
                     StrictMaybe::Just(drep) => Some(match drep {
-                        DRep::Key(hash) => crate::DRepChoice::Key(
-                            KeyHash::try_from(hash.as_ref().to_vec()).unwrap(),
-                        ),
-                        DRep::Script(hash) => crate::DRepChoice::Script(
-                            KeyHash::try_from(hash.as_ref().to_vec()).unwrap(),
-                        ),
+                        DRep::Key(hash) => crate::DRepChoice::Key(*hash),
+                        DRep::Script(hash) => crate::DRepChoice::Script(*hash),
                         DRep::Abstain => crate::DRepChoice::Abstain,
                         DRep::NoConfidence => crate::DRepChoice::NoConfidence,
                     }),
@@ -1456,12 +1454,8 @@ impl StreamingSnapshotParser {
                 // Convert DRep delegation from StrictMaybe<DRep> to Option<DRepChoice>
                 let delegated_drep = match &account.drep {
                     StrictMaybe::Just(drep) => Some(match drep {
-                        DRep::Key(hash) => crate::DRepChoice::Key(
-                            KeyHash::try_from(hash.as_ref().to_vec()).unwrap(),
-                        ),
-                        DRep::Script(hash) => crate::DRepChoice::Script(
-                            KeyHash::try_from(hash.as_ref().to_vec()).unwrap(),
-                        ),
+                        DRep::Key(hash) => crate::DRepChoice::Key(*hash),
+                        DRep::Script(hash) => crate::DRepChoice::Script(*hash),
                         DRep::Abstain => crate::DRepChoice::Abstain,
                         DRep::NoConfidence => crate::DRepChoice::NoConfidence,
                     }),

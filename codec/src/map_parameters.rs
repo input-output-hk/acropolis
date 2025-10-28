@@ -62,8 +62,8 @@ pub fn to_pool_id(pallas_hash: &pallas_primitives::Hash<28>) -> PoolId {
 }
 
 /// Convert a Pallas Hash<32> reference to an Acropolis VRFKey
-pub fn to_vrf_key(pallas_hash: &pallas_primitives::Hash<32>) -> VRFKey {
-    VRFKey::try_from(pallas_hash.as_ref()).unwrap()
+pub fn to_vrf_key(pallas_hash: &pallas_primitives::Hash<32>) -> VrfKeyHash {
+    VrfKeyHash::try_from(pallas_hash.as_ref()).unwrap()
 }
 
 /// Convert a Pallas Bytes reference to an Acropolis Hash<N>
@@ -89,20 +89,20 @@ pub fn map_address(address: &addresses::Address) -> Result<Address> {
 
             payment: match shelley_address.payment() {
                 addresses::ShelleyPaymentPart::Key(hash) => {
-                    ShelleyAddressPaymentPart::PaymentKeyHash(hash.to_vec().try_into().unwrap())
+                    ShelleyAddressPaymentPart::PaymentKeyHash(to_hash(hash))
                 }
                 addresses::ShelleyPaymentPart::Script(hash) => {
-                    ShelleyAddressPaymentPart::ScriptHash(hash.to_vec().try_into().unwrap())
+                    ShelleyAddressPaymentPart::ScriptHash(to_hash(hash))
                 }
             },
 
             delegation: match shelley_address.delegation() {
                 addresses::ShelleyDelegationPart::Null => ShelleyAddressDelegationPart::None,
                 addresses::ShelleyDelegationPart::Key(hash) => {
-                    ShelleyAddressDelegationPart::StakeKeyHash(hash.to_vec().try_into().unwrap())
+                    ShelleyAddressDelegationPart::StakeKeyHash(to_hash(hash))
                 }
                 addresses::ShelleyDelegationPart::Script(hash) => {
-                    ShelleyAddressDelegationPart::ScriptHash(hash.to_vec().try_into().unwrap())
+                    ShelleyAddressDelegationPart::ScriptHash(to_hash(hash))
                 }
                 addresses::ShelleyDelegationPart::Pointer(pointer) => {
                     ShelleyAddressDelegationPart::Pointer(ShelleyAddressPointer {

@@ -262,13 +262,6 @@ impl<'a, C, const BYTES: usize> minicbor::Decode<'a, C> for Hash<BYTES> {
     }
 }
 
-// Type aliases for common hash sizes in Cardano
-/// A 28-byte hash used for scripts in Cardano addresses.
-pub type ScriptHash = Hash<28>;
-
-/// A 28-byte hash of an address key in Cardano.
-pub type AddrKeyhash = Hash<28>;
-
 /// Declares a type alias for a hash with optional documentation.
 ///
 /// # Examples

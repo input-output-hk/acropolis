@@ -2,7 +2,7 @@
 // We don't use these types in the acropolis_common crate itself
 #![allow(dead_code)]
 
-use crate::hash::{AddrKeyhash, Hash, ScriptHash};
+use crate::hash::Hash;
 use crate::{
     address::{Address, ShelleyAddress, StakeAddress},
     declare_hash_newtype_with_bech32, declare_hash_type, declare_hash_type_with_bech32,
@@ -437,12 +437,15 @@ impl Default for UTXODelta {
 
 pub type KeyHash = Hash<28>;
 
+pub type ScriptHash = KeyHash;
+pub type AddrKeyhash = KeyHash;
+
 /// Script identifier
 pub type GenesisKeyhash = Vec<u8>;
 
 declare_hash_type!(BlockHash, 32);
 declare_hash_type!(TxHash, 32);
-declare_hash_newtype_with_bech32!(VRFKey, 32, "vrf_vk");
+declare_hash_newtype_with_bech32!(VrfKeyHash, 32, "vrf_vk");
 declare_hash_newtype_with_bech32!(PoolId, 28, "pool");
 declare_hash_newtype_with_bech32!(DrepKey, 28, "drep");
 declare_hash_type_with_bech32!(DrepScriptKey, 28, "drep_script");
@@ -844,7 +847,7 @@ pub struct PoolRegistration {
     /// VRF key hash
     #[serde_as(as = "Hex")]
     #[n(1)]
-    pub vrf_key_hash: VRFKey,
+    pub vrf_key_hash: VrfKeyHash,
 
     /// Pledged Ada
     #[n(2)]
@@ -989,7 +992,7 @@ pub struct GenesisKeyDelegation {
     pub genesis_delegate_hash: KeyHash,
 
     /// VRF key hash
-    pub vrf_key_hash: VRFKey,
+    pub vrf_key_hash: VrfKeyHash,
 }
 
 /// Source of a MIR

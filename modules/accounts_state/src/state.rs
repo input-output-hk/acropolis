@@ -996,7 +996,7 @@ mod tests {
         Anchor, Committee, Constitution, CostModel, DRepVotingThresholds, NetworkId,
         PoolVotingThresholds, Pot, PotDelta, Ratio, Registration, StakeAddress, StakeAddressDelta,
         StakeAndVoteDelegation, StakeCredential, StakeRegistrationAndStakeAndVoteDelegation,
-        StakeRegistrationAndVoteDelegation, VRFKey, VoteDelegation, Withdrawal,
+        StakeRegistrationAndVoteDelegation, VrfKeyHash, VoteDelegation, Withdrawal,
     };
 
     // Helper to create a StakeAddress from a byte slice
@@ -1017,8 +1017,8 @@ mod tests {
         keyhash_224(bytes)
     }
 
-    fn test_vrf_keyhash(byte: u8) -> VRFKey {
-        VRFKey::new(keyhash_256(&vec![byte]))
+    fn test_vrf_keyhash(byte: u8) -> VrfKeyHash {
+        VrfKeyHash::new(keyhash_256(&vec![byte]))
     }
 
     const STAKE_KEY_HASH: [u8; 3] = [0x99, 0x0f, 0x00];
