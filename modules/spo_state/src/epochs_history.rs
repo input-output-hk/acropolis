@@ -225,13 +225,13 @@ mod tests {
     #[test]
     fn get_pool_history_returns_data() {
         let epochs_history = EpochsHistoryState::new(save_history_store_config());
-        let key_hash: PoolId = PoolId::new(KeyHash::new([1; 28]));
-        let spo_block_key_hash = KeyHash::new([2; 28]);
+        let pool_id = PoolId::new(KeyHash::new([1; 28]));
+        let spo_block_key_hash = PoolId::new(KeyHash::new([2; 28]));
 
         let block = new_block(2);
         let mut spdd_msg = new_spdd_message(1);
         spdd_msg.spos = vec![(
-            key_hash,
+            pool_id,
             DelegatedStake {
                 active: 1,
                 active_delegators_count: 1,
@@ -244,11 +244,11 @@ mod tests {
         epoch_activity_msg.spo_blocks = vec![(spo_block_key_hash, 1)];
         epoch_activity_msg.total_blocks = 1;
         epoch_activity_msg.total_fees = 10;
-        epochs_history.handle_epoch_activity(&block, &epoch_activity_msg, &vec![(key_hash, 1)]);
+        epochs_history.handle_epoch_activity(&block, &epoch_activity_msg, &vec![(pool_id, 1)]);
 
         let mut spo_rewards_msg = new_spo_rewards_message(1);
         spo_rewards_msg.spos = vec![(
-            key_hash,
+            pool_id,
             SPORewards {
                 total_rewards: 100,
                 operator_rewards: 10,
@@ -256,7 +256,7 @@ mod tests {
         )];
         epochs_history.handle_spo_rewards(&block, &spo_rewards_msg);
 
-        let pool_history = epochs_history.get_pool_history(&key_hash).unwrap();
+        let pool_history = epochs_history.get_pool_history(&pool_id).unwrap();
         assert_eq!(2, pool_history.len());
         let first_epoch = pool_history.get(0).unwrap();
         let third_epoch = pool_history.get(1).unwrap();

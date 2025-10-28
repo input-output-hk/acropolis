@@ -263,7 +263,7 @@ mod tests {
             status: acropolis_common::BlockStatus::Immutable,
             slot: block.slot(),
             number: block.number(),
-            hash: BlockHash(*block.hash()),
+            hash: BlockHash::new(*block.hash()),
             epoch,
             epoch_slot,
             new_epoch: false,

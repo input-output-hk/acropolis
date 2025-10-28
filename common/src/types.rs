@@ -989,7 +989,7 @@ pub struct GenesisKeyDelegation {
     pub genesis_delegate_hash: KeyHash,
 
     /// VRF key hash
-    pub vrf_key_hash: KeyHash,
+    pub vrf_key_hash: VRFKey,
 }
 
 /// Source of a MIR

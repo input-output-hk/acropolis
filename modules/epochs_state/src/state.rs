@@ -1,6 +1,13 @@
 //! Acropolis epoch activity counter: state storage
 
-use acropolis_common::{crypto::keyhash_224, genesis_values::GenesisValues, messages::{BlockTxsMessage, EpochActivityMessage, ProtocolParamsMessage}, params::EPOCH_LENGTH, protocol_params::{Nonces, PraosParams}, BlockHash, BlockInfo, PoolId};
+use acropolis_common::{
+    crypto::keyhash_224,
+    genesis_values::GenesisValues,
+    messages::{BlockTxsMessage, EpochActivityMessage, ProtocolParamsMessage},
+    params::EPOCH_LENGTH,
+    protocol_params::{Nonces, PraosParams},
+    BlockHash, BlockInfo, PoolId,
+};
 use anyhow::Result;
 use imbl::HashMap;
 use pallas::ledger::traverse::MultiEraHeader;
@@ -329,7 +336,10 @@ mod tests {
 
         assert_eq!(state.epoch_blocks, 2);
         assert_eq!(state.blocks_minted.len(), 1);
-        assert_eq!(state.blocks_minted.get(&keyhash_224(issuer)), Some(&2));
+        assert_eq!(
+            state.blocks_minted.get(&keyhash_224(issuer).into()),
+            Some(&2)
+        );
     }
 
     #[test]
@@ -348,7 +358,7 @@ mod tests {
             state
                 .blocks_minted
                 .iter()
-                .find(|(k, _)| *k == &keyhash_224(b"issuer_1"))
+                .find(|(k, _)| *k == &keyhash_224(b"issuer_1").into())
                 .map(|(_, v)| *v),
             Some(1)
         );
@@ -356,12 +366,13 @@ mod tests {
             state
                 .blocks_minted
                 .iter()
-                .find(|(k, _)| *k == &keyhash_224(b"issuer_2"))
+                .find(|(k, _)| *k == &keyhash_224(b"issuer_2").into())
                 .map(|(_, v)| *v),
             Some(2)
         );
 
-        let blocks_minted = state.get_latest_epoch_blocks_minted_by_pool(&keyhash_224(b"issuer_2"));
+        let blocks_minted =
+            state.get_latest_epoch_blocks_minted_by_pool(&keyhash_224(b"issuer_2").into());
         assert_eq!(blocks_minted, 2);
     }
 
@@ -417,7 +428,10 @@ mod tests {
         assert_eq!(ea.total_fees, 123);
         assert_eq!(ea.spo_blocks.len(), 1);
         assert_eq!(
-            ea.spo_blocks.iter().find(|(k, _)| k == &keyhash_224(b"issuer_1")).map(|(_, v)| *v),
+            ea.spo_blocks
+                .iter()
+                .find(|(k, _)| k == &keyhash_224(b"issuer_1").into())
+                .map(|(_, v)| *v),
             Some(1)
         );
         assert_eq!(ea.epoch_start_time, genesis.byron_timestamp);
@@ -438,7 +452,8 @@ mod tests {
         assert_eq!(state.last_block_time, block.timestamp);
         assert_eq!(state.last_block_height, block.number);
 
-        let blocks_minted = state.get_latest_epoch_blocks_minted_by_pool(&keyhash_224(b"vrf_1"));
+        let blocks_minted =
+            state.get_latest_epoch_blocks_minted_by_pool(&keyhash_224(b"vrf_1").into());
         assert_eq!(blocks_minted, 0);
     }
 
@@ -473,7 +488,7 @@ mod tests {
             },
         );
         assert_eq!(
-            state.get_latest_epoch_blocks_minted_by_pool(&keyhash_224(b"issuer_1")),
+            state.get_latest_epoch_blocks_minted_by_pool(&keyhash_224(b"issuer_1").into()),
             2
         );
         history.lock().await.commit(block.number, state);
@@ -490,11 +505,11 @@ mod tests {
             },
         );
         assert_eq!(
-            state.get_latest_epoch_blocks_minted_by_pool(&keyhash_224(b"issuer_1")),
+            state.get_latest_epoch_blocks_minted_by_pool(&keyhash_224(b"issuer_1").into()),
             0
         );
         assert_eq!(
-            state.get_latest_epoch_blocks_minted_by_pool(&keyhash_224(b"issuer_2")),
+            state.get_latest_epoch_blocks_minted_by_pool(&keyhash_224(b"issuer_2").into()),
             1
         );
         history.lock().await.commit(block.number, state);

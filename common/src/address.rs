@@ -437,7 +437,7 @@ impl StakeAddress {
     }
 
     /// Convert to binary format (29 bytes)
-    pub fn to_binary(&self) -> Result<KeyHash> {
+    pub fn to_binary(&self) -> Result<Vec<u8>> {
         let network_bits = match self.network {
             NetworkId::Mainnet => 0b1u8,
             NetworkId::Testnet => 0b0u8,

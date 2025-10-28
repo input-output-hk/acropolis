@@ -66,6 +66,7 @@ impl RetiredPoolsHistoryState {
 mod tests {
     use super::*;
     use crate::test_utils::*;
+    use acropolis_common::KeyHash;
 
     #[test]
     fn retired_pools_history_is_none_when_store_retired_pools_is_false() {

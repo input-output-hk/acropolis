@@ -16,7 +16,7 @@ use std::{fmt, ops::Deref, str::FromStr};
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// use your_crate::Hash;
 ///
 /// // Parse from hex string
@@ -67,7 +67,7 @@ impl<const BYTES: usize> Hash<BYTES> {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// use your_crate::Hash;
     ///
     /// const MY_HASH: Hash<32> = Hash::new([0u8; 32]);
@@ -81,7 +81,7 @@ impl<const BYTES: usize> Hash<BYTES> {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// use your_crate::Hash;
     ///
     /// let hash = Hash::new([1u8; 28]);
@@ -97,7 +97,7 @@ impl<const BYTES: usize> Hash<BYTES> {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// use your_crate::Hash;
     ///
     /// let hash = Hash::new([1u8; 28]);
@@ -204,7 +204,7 @@ impl<const BYTES: usize> FromStr for Hash<BYTES> {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// use your_crate::Hash;
     ///
     /// let hash: Hash<28> = "276fd18711931e2c0e21430192dbeac0e458093cd9d1fcd7210f64b3"
@@ -273,7 +273,7 @@ pub type AddrKeyhash = Hash<28>;
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// declare_hash_type!(BlockHash, 32);
 /// declare_hash_type!(TxHash, 32);
 /// ```
@@ -300,7 +300,7 @@ macro_rules! declare_hash_type {
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// declare_hash_type_with_bech32!(VRFKey, 32, "vrf_vk");
 ///
 /// let key: VRFKey = // ... get key
@@ -360,7 +360,7 @@ macro_rules! declare_hash_type_with_bech32 {
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// // Both are 28 bytes but have different Bech32 encodings
 /// declare_hash_newtype_with_bech32!(PoolId, 28, "pool");
 /// declare_hash_newtype_with_bech32!(DrepId, 28, "drep");

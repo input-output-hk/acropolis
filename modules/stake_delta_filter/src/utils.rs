@@ -401,13 +401,14 @@ pub fn process_message(
 #[cfg(test)]
 mod test {
     use crate::*;
+    use acropolis_common::hash::Hash;
     use acropolis_common::{
         messages::AddressDeltasMessage, Address, AddressDelta, BlockHash, BlockInfo, BlockStatus,
-        ByronAddress, Era, KeyHash, ShelleyAddress, ShelleyAddressDelegationPart,
-        ShelleyAddressPaymentPart, ShelleyAddressPointer, StakeAddress, StakeCredential,
-        UTxOIdentifier, ValueDelta,
+        ByronAddress, Era, ShelleyAddress, ShelleyAddressDelegationPart, ShelleyAddressPaymentPart,
+        ShelleyAddressPointer, StakeAddress, StakeCredential, UTxOIdentifier, ValueDelta,
     };
     use bech32::{Bech32, Hrp};
+    use pallas::ledger::addresses::{PaymentKeyHash, ScriptHash, StakeKeyHash};
 
     fn parse_addr(s: &str) -> Result<AddressDelta> {
         let a = pallas::ledger::addresses::Address::from_bech32(s)?;
@@ -428,6 +429,18 @@ mod test {
         }
     }
 
+    pub fn script_to_hash<const N: usize>(pallas_hash: ScriptHash) -> Hash<N> {
+        Hash::try_from(pallas_hash.as_ref()).unwrap()
+    }
+
+    pub fn stake_to_hash<const N: usize>(pallas_hash: StakeKeyHash) -> Hash<N> {
+        Hash::try_from(pallas_hash.as_ref()).unwrap()
+    }
+
+    pub fn payment_to_hash<const N: usize>(pallas_hash: PaymentKeyHash) -> Hash<N> {
+        Hash::try_from(pallas_hash.as_ref()).unwrap()
+    }
+
     /// Derive our Address from a Pallas address
     // This is essentially a 1:1 mapping but makes the Message definitions independent
     // of Pallas
@@ -443,20 +456,20 @@ mod test {
 
                 payment: match shelley_address.payment() {
                     addresses::ShelleyPaymentPart::Key(hash) => {
-                        ShelleyAddressPaymentPart::PaymentKeyHash(hash)
+                        ShelleyAddressPaymentPart::PaymentKeyHash(payment_to_hash(*hash))
                     }
                     addresses::ShelleyPaymentPart::Script(hash) => {
-                        ShelleyAddressPaymentPart::ScriptHash(hash)
+                        ShelleyAddressPaymentPart::ScriptHash(script_to_hash(*hash))
                     }
                 },
 
                 delegation: match shelley_address.delegation() {
                     addresses::ShelleyDelegationPart::Null => ShelleyAddressDelegationPart::None,
                     addresses::ShelleyDelegationPart::Key(hash) => {
-                        ShelleyAddressDelegationPart::StakeKeyHash(hash)
+                        ShelleyAddressDelegationPart::StakeKeyHash(stake_to_hash(*hash))
                     }
                     addresses::ShelleyDelegationPart::Script(hash) => {
-                        ShelleyAddressDelegationPart::ScriptHash(hash)
+                        ShelleyAddressDelegationPart::ScriptHash(script_to_hash(*hash))
                     }
                     addresses::ShelleyDelegationPart::Pointer(pointer) => {
                         ShelleyAddressDelegationPart::Pointer(ShelleyAddressPointer {
@@ -472,10 +485,10 @@ mod test {
                 network: map_network(stake_address.network())?,
                 credential: match stake_address.payload() {
                     addresses::StakePayload::Stake(hash) => {
-                        StakeCredential::AddrKeyHash(KeyHash::from(hash))
+                        StakeCredential::AddrKeyHash(stake_to_hash(*hash))
                     }
                     addresses::StakePayload::Script(hash) => {
-                        StakeCredential::ScriptHash(KeyHash::from(hash))
+                        StakeCredential::ScriptHash(script_to_hash(*hash))
                     }
                 },
             })),

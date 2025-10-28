@@ -1,11 +1,3 @@
-use std::{
-    collections::{
-        hash_map::{Entry, Iter, Values},
-        BTreeMap, HashMap,
-    },
-    sync::atomic::AtomicU64,
-};
-
 use crate::{
     math::update_value_with_delta, messages::DRepDelegationDistribution, DRepChoice,
     DRepCredential, DelegatedStake, KeyHash, Lovelace, PoolId, PoolLiveStakeInfo, StakeAddress,
@@ -15,6 +7,13 @@ use anyhow::Result;
 use dashmap::DashMap;
 use rayon::prelude::*;
 use serde_with::{hex::Hex, serde_as};
+use std::{
+    collections::{
+        hash_map::{Entry, Iter, Values},
+        BTreeMap, HashMap,
+    },
+    sync::atomic::AtomicU64,
+};
 use tracing::{error, warn};
 
 /// State of an individual stake address
@@ -172,14 +171,10 @@ impl StakeAddressMap {
         let delegators: Vec<(KeyHash, u64)> = self
             .inner
             .iter()
-            .filter_map(|(stake_key, sas)| match sas.delegated_spo.as_ref() {
+            .filter_map(|(stake_address, sas)| match sas.delegated_spo.as_ref() {
                 Some(delegated_spo) => {
                     if delegated_spo.eq(pool_operator) {
-                        // to_binary() now returns Result<KeyHash>
-                        stake_key
-                            .to_binary()
-                            .ok()
-                            .map(|key_hash| (key_hash, sas.utxo_value + sas.rewards))
+                        Some((*stake_address.get_hash(), sas.utxo_value + sas.rewards))
                     } else {
                         None
                     }
@@ -193,15 +188,13 @@ impl StakeAddressMap {
 
     /// Get DRep Delegators with live_stakes
     pub fn get_drep_delegators(&self, drep: &DRepChoice) -> Vec<(KeyHash, u64)> {
-        // Find stake addresses delegated to drep
         let delegators: Vec<(KeyHash, u64)> = self
             .inner
             .iter()
             .filter_map(|(stake_address, sas)| match sas.delegated_drep.as_ref() {
                 Some(delegated_drep) => {
                     if delegated_drep.eq(drep) {
-                        // to_binary() now returns Result<KeyHash>
-                        stake_address.to_binary().ok().map(|key_hash| (key_hash, sas.utxo_value))
+                        Some((*stake_address.get_hash(), sas.utxo_value))
                     } else {
                         None
                     }
@@ -224,8 +217,8 @@ impl StakeAddressMap {
         for stake_address in stake_addresses {
             let account = self.get(stake_address)?;
             let utxo_value = account.utxo_value;
-            let key_hash = stake_address.to_binary().ok()?;
-            map.insert(key_hash, utxo_value);
+            let key_hash = stake_address.get_hash();
+            map.insert(*key_hash, utxo_value);
         }
 
         Some(map)
@@ -242,8 +235,8 @@ impl StakeAddressMap {
         for stake_address in stake_addresses {
             let account = self.get(stake_address)?;
             let balance = account.utxo_value + account.rewards;
-            let key_hash = stake_address.to_binary().ok()?;
-            map.insert(key_hash, balance);
+            let key_hash = stake_address.get_hash();
+            map.insert(*key_hash, balance);
         }
 
         Some(map)
@@ -260,8 +253,8 @@ impl StakeAddressMap {
         for stake_address in stake_addresses {
             let account = self.get(stake_address)?;
             let maybe_drep = account.delegated_drep.clone();
-            let key_hash = stake_address.to_binary().ok()?;
-            map.insert(key_hash, maybe_drep);
+            let key_hash = stake_address.get_hash();
+            map.insert(*key_hash, maybe_drep);
         }
 
         Some(map)
@@ -1243,8 +1236,8 @@ mod tests {
             let map = stake_addresses.get_accounts_utxo_values_map(&keys).unwrap();
 
             assert_eq!(map.len(), 2);
-            assert_eq!(map.get(&addr1.to_binary().unwrap()).copied().unwrap(), 1000);
-            assert_eq!(map.get(&addr2.to_binary().unwrap()).copied().unwrap(), 2000);
+            assert_eq!(map.get(&addr1.get_hash()).copied().unwrap(), 1000);
+            assert_eq!(map.get(&addr2.get_hash()).copied().unwrap(), 2000);
         }
 
         #[test]
@@ -1357,8 +1350,8 @@ mod tests {
             let map = stake_addresses.get_accounts_balances_map(&addresses).unwrap();
 
             assert_eq!(map.len(), 2);
-            assert_eq!(map.get(&addr1.to_binary().unwrap()).copied().unwrap(), 1100);
-            assert_eq!(map.get(&addr2.to_binary().unwrap()).copied().unwrap(), 2000);
+            assert_eq!(map.get(&addr1.get_hash()).copied().unwrap(), 1100);
+            assert_eq!(map.get(&addr2.get_hash()).copied().unwrap(), 2000);
         }
 
         #[test]
@@ -1466,14 +1459,14 @@ mod tests {
 
             assert_eq!(map.len(), 3);
             assert_eq!(
-                map.get(&addr1.to_binary().unwrap()).unwrap(),
+                map.get(&addr1.get_hash()).unwrap(),
                 &Some(DRepChoice::Abstain)
             );
             assert_eq!(
-                map.get(&addr2.to_binary().unwrap()).unwrap(),
+                map.get(&addr2.get_hash()).unwrap(),
                 &Some(DRepChoice::Key(DREP_HASH))
             );
-            assert_eq!(map.get(&addr3.to_binary().unwrap()).unwrap(), &None);
+            assert_eq!(map.get(&addr3.get_hash()).unwrap(), &None);
         }
 
         #[test]
