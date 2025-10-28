@@ -669,7 +669,7 @@ mod tests {
         seed_transactions: StoreTransactions,
     ) -> (State, AssetId, AssetName) {
         let asset_name = AssetName::new(asset_name_bytes).unwrap();
-        let asset_id = registry.get_or_insert(policy_id, asset_name.clone());
+        let asset_id = registry.get_or_insert(policy_id, asset_name);
 
         let mut state = State::new(AssetsStorageConfig {
             store_info: true,
@@ -782,14 +782,8 @@ mod tests {
         let tx = dummy_tx_identifier(9);
 
         let deltas = vec![(
-            tx.clone(),
-            vec![(
-                policy,
-                vec![NativeAssetDelta {
-                    name: name.clone(),
-                    amount: 100,
-                }],
-            )],
+            tx,
+            vec![(policy, vec![NativeAssetDelta { name, amount: 100 }])],
         )];
 
         let new_state = state.handle_mint_deltas(&deltas, &mut registry).unwrap();
@@ -827,24 +821,12 @@ mod tests {
         let tx2 = dummy_tx_identifier(2);
 
         let deltas1 = vec![(
-            tx1.clone(),
-            vec![(
-                policy,
-                vec![NativeAssetDelta {
-                    name: name.clone(),
-                    amount: 50,
-                }],
-            )],
+            tx1,
+            vec![(policy, vec![NativeAssetDelta { name, amount: 50 }])],
         )];
         let deltas2 = vec![(
-            tx2.clone(),
-            vec![(
-                policy,
-                vec![NativeAssetDelta {
-                    name: name.clone(),
-                    amount: 25,
-                }],
-            )],
+            tx2,
+            vec![(policy, vec![NativeAssetDelta { name, amount: 25 }])],
         )];
 
         let state = state.handle_mint_deltas(&deltas1, &mut registry).unwrap();
@@ -877,24 +859,12 @@ mod tests {
         let tx2 = dummy_tx_identifier(2);
 
         let mint = vec![(
-            tx1.clone(),
-            vec![(
-                policy,
-                vec![NativeAssetDelta {
-                    name: name.clone(),
-                    amount: 100,
-                }],
-            )],
+            tx1,
+            vec![(policy, vec![NativeAssetDelta { name, amount: 100 }])],
         )];
         let burn = vec![(
-            tx2.clone(),
-            vec![(
-                policy,
-                vec![NativeAssetDelta {
-                    name: name.clone(),
-                    amount: -40,
-                }],
-            )],
+            tx2,
+            vec![(policy, vec![NativeAssetDelta { name, amount: -40 }])],
         )];
 
         let state = state.handle_mint_deltas(&mint, &mut registry).unwrap();
@@ -927,14 +897,8 @@ mod tests {
         let tx = dummy_tx_identifier(1);
 
         let deltas = vec![(
-            tx.clone(),
-            vec![(
-                policy,
-                vec![NativeAssetDelta {
-                    name: name.clone(),
-                    amount: -50,
-                }],
-            )],
+            tx,
+            vec![(policy, vec![NativeAssetDelta { name, amount: -50 }])],
         )];
 
         let result = state.handle_mint_deltas(&deltas, &mut registry);
@@ -952,14 +916,8 @@ mod tests {
         let tx = dummy_tx_identifier(1);
 
         let deltas = vec![(
-            tx.clone(),
-            vec![(
-                policy,
-                vec![NativeAssetDelta {
-                    name: name.clone(),
-                    amount: -10,
-                }],
-            )],
+            tx,
+            vec![(policy, vec![NativeAssetDelta { name, amount: -10 }])],
         )];
 
         let result = state.handle_mint_deltas(&deltas, &mut registry);
@@ -988,7 +946,7 @@ mod tests {
     #[test]
     fn handle_cip25_metadata_updates_correct_asset() {
         let mut registry = AssetRegistry::new();
-        let policy_id: PolicyId = [0u8; 28].into();
+        let policy_id: PolicyId = [0u8; 28];
 
         let (state, asset_id, asset_name) = setup_state_with_asset(
             &mut registry,
@@ -1017,7 +975,7 @@ mod tests {
     #[test]
     fn handle_cip25_metadata_version_field_sets_v2() {
         let mut registry = AssetRegistry::new();
-        let policy_id: PolicyId = [1u8; 28].into();
+        let policy_id: PolicyId = [1u8; 28];
 
         let (state, asset_id, asset_name) = setup_state_with_asset(
             &mut registry,
@@ -1047,7 +1005,7 @@ mod tests {
     #[test]
     fn handle_cip25_metadata_unknown_asset_is_ignored() {
         let mut registry = AssetRegistry::new();
-        let policy_id: PolicyId = [2u8; 28].into();
+        let policy_id: PolicyId = [2u8; 28];
         let (state, asset_id, _) = setup_state_with_asset(
             &mut registry,
             policy_id,
@@ -1075,7 +1033,7 @@ mod tests {
     #[test]
     fn handle_cip25_metadata_invalid_cbor_is_skipped() {
         let mut registry = AssetRegistry::new();
-        let policy_id: PolicyId = [3u8; 28].into();
+        let policy_id: PolicyId = [3u8; 28];
         let (state, asset_id, _) = setup_state_with_asset(
             &mut registry,
             policy_id,
@@ -1107,7 +1065,7 @@ mod tests {
     #[test]
     fn handle_cip68_metadata_updates_onchain_metadata() {
         let mut registry = AssetRegistry::new();
-        let policy_id: PolicyId = [9u8; 28].into();
+        let policy_id: PolicyId = [9u8; 28];
 
         let (state, reference_id, reference_name) = setup_state_with_asset(
             &mut registry,
@@ -1119,10 +1077,10 @@ mod tests {
         );
 
         let datum_blob = vec![1, 2, 3, 4];
-        let output = make_output(policy_id, reference_name.clone(), Some(datum_blob.clone()));
+        let output = make_output(policy_id, reference_name, Some(datum_blob.clone()));
 
         let new_state =
-            state.handle_cip68_metadata(&[UTXODelta::Output(output)], &mut registry).unwrap();
+            state.handle_cip68_metadata(&[UTXODelta::Output(output)], &registry).unwrap();
         let info = new_state.info.expect("info should be Some");
         let record = info.get(&reference_id).expect("record should exist");
 
@@ -1133,7 +1091,7 @@ mod tests {
     #[test]
     fn handle_cip68_metadata_ignores_non_reference_assets() {
         let mut registry = AssetRegistry::new();
-        let policy_id: PolicyId = [9u8; 28].into();
+        let policy_id: PolicyId = [9u8; 28];
 
         let (state, normal_id, normal_name) = setup_state_with_asset(
             &mut registry,
@@ -1145,10 +1103,10 @@ mod tests {
         );
 
         let datum_blob = vec![1, 2, 3, 4];
-        let output = make_output(policy_id, normal_name.clone(), Some(datum_blob.clone()));
+        let output = make_output(policy_id, normal_name, Some(datum_blob.clone()));
 
         let delta = UTXODelta::Output(output);
-        let new_state = state.handle_cip68_metadata(&[delta], &mut registry).unwrap();
+        let new_state = state.handle_cip68_metadata(&[delta], &registry).unwrap();
 
         let info = new_state.info.expect("info should be Some");
         let record = info.get(&normal_id).expect("non reference asset should exist");
@@ -1160,7 +1118,7 @@ mod tests {
     #[test]
     fn handle_cip68_metadata_ignores_unknown_reference_assets() {
         let mut registry = AssetRegistry::new();
-        let policy_id: PolicyId = [9u8; 28].into();
+        let policy_id: PolicyId = [9u8; 28];
 
         let (state, asset_id, name) = setup_state_with_asset(
             &mut registry,
@@ -1175,7 +1133,7 @@ mod tests {
         let output = make_output(policy_id, name, Some(datum_blob));
 
         let delta = UTXODelta::Output(output);
-        let new_state = state.handle_cip68_metadata(&[delta], &mut registry).unwrap();
+        let new_state = state.handle_cip68_metadata(&[delta], &registry).unwrap();
 
         let info = new_state.info.expect("info should be Some");
 
@@ -1189,7 +1147,7 @@ mod tests {
     #[test]
     fn handle_cip68_metadata_ignores_inputs_and_outputs_without_datum() {
         let mut registry = AssetRegistry::new();
-        let policy_id: PolicyId = [7u8; 28].into();
+        let policy_id: PolicyId = [7u8; 28];
 
         let (state, asset_id, name) = setup_state_with_asset(
             &mut registry,
@@ -1207,7 +1165,7 @@ mod tests {
         let output_delta = UTXODelta::Output(output);
 
         let new_state =
-            state.handle_cip68_metadata(&[input_delta, output_delta], &mut registry).unwrap();
+            state.handle_cip68_metadata(&[input_delta, output_delta], &registry).unwrap();
 
         let info = new_state.info.expect("info should be Some");
         let record = info.get(&asset_id).unwrap();
@@ -1222,7 +1180,7 @@ mod tests {
     #[test]
     fn get_asset_info_reference_nft_strips_metadata() {
         let mut registry = AssetRegistry::new();
-        let policy_id: PolicyId = [9u8; 28].into();
+        let policy_id: PolicyId = [9u8; 28];
 
         let (mut state, ref_id, _) = setup_state_with_asset(
             &mut registry,
@@ -1256,10 +1214,10 @@ mod tests {
     #[test]
     fn resolve_cip68_metadata_overwrites_cip25_user_token_metadata() {
         let mut registry = AssetRegistry::new();
-        let policy_id: PolicyId = [10u8; 28].into();
+        let policy_id: PolicyId = [10u8; 28];
 
         let user_name = AssetName::new(&[0x00, 0x0d, 0xe1, 0x40, 0xaa]).unwrap();
-        let user_id = registry.get_or_insert(policy_id, user_name.clone());
+        let user_id = registry.get_or_insert(policy_id, user_name);
 
         let mut ref_bytes = user_name.as_slice().to_vec();
         ref_bytes[0..4].copy_from_slice(&[0x00, 0x06, 0x43, 0xb0]);
@@ -1273,14 +1231,18 @@ mod tests {
         });
         let mut info_map = imbl::HashMap::new();
 
-        let mut user_record = AssetInfoRecord::default();
-        user_record.onchain_metadata = Some(vec![1, 2, 3]);
-        user_record.metadata_standard = Some(AssetMetadataStandard::CIP25v1);
+        let user_record = AssetInfoRecord {
+            onchain_metadata: Some(vec![1, 2, 3]),
+            metadata_standard: Some(AssetMetadataStandard::CIP25v1),
+            ..Default::default()
+        };
         info_map.insert(user_id, user_record);
 
-        let mut ref_record = AssetInfoRecord::default();
-        ref_record.onchain_metadata = Some(vec![9, 9, 9]);
-        ref_record.metadata_standard = Some(AssetMetadataStandard::CIP68v2);
+        let ref_record = AssetInfoRecord {
+            onchain_metadata: Some(vec![9, 9, 9]),
+            metadata_standard: Some(AssetMetadataStandard::CIP68v2),
+            ..Default::default()
+        };
         info_map.insert(ref_id, ref_record);
 
         state.info = Some(info_map);
@@ -1302,7 +1264,7 @@ mod tests {
     #[test]
     fn handle_transactions_duplicate_tx_ignored() {
         let mut registry = AssetRegistry::new();
-        let policy_id: PolicyId = [1u8; 28].into();
+        let policy_id: PolicyId = [1u8; 28];
 
         let (state, asset_id, asset_name) = setup_state_with_asset(
             &mut registry,
@@ -1313,7 +1275,7 @@ mod tests {
             StoreTransactions::All,
         );
 
-        let output = make_output(policy_id, asset_name.clone(), None);
+        let output = make_output(policy_id, asset_name, None);
 
         let delta1 = UTXODelta::Output(acropolis_common::TxOutput {
             utxo_identifier: UTxOIdentifier::new(0, 0, 0),
@@ -1335,7 +1297,7 @@ mod tests {
     #[test]
     fn handle_transactions_updates_asset_transactions() {
         let mut registry = AssetRegistry::new();
-        let policy_id: PolicyId = [2u8; 28].into();
+        let policy_id: PolicyId = [2u8; 28];
 
         let (state, asset_id, asset_name) = setup_state_with_asset(
             &mut registry,
@@ -1346,8 +1308,8 @@ mod tests {
             StoreTransactions::All,
         );
 
-        let out1 = make_output(policy_id, asset_name.clone(), None);
-        let out2 = make_output(policy_id, asset_name.clone(), None);
+        let out1 = make_output(policy_id, asset_name, None);
+        let out2 = make_output(policy_id, asset_name, None);
 
         let delta1 = UTXODelta::Output(acropolis_common::TxOutput {
             utxo_identifier: UTxOIdentifier::new(9, 0, 0),
@@ -1372,7 +1334,7 @@ mod tests {
     #[test]
     fn handle_transactions_prunes_on_store_transactions_config() {
         let mut registry = AssetRegistry::new();
-        let policy_id: PolicyId = [3u8; 28].into();
+        let policy_id: PolicyId = [3u8; 28];
 
         let (state, asset_id, asset_name) = setup_state_with_asset(
             &mut registry,
@@ -1383,7 +1345,7 @@ mod tests {
             StoreTransactions::Last(2),
         );
 
-        let base_output = make_output(policy_id, asset_name.clone(), None);
+        let base_output = make_output(policy_id, asset_name, None);
         let delta1 = UTXODelta::Output(acropolis_common::TxOutput {
             utxo_identifier: UTxOIdentifier::new(9, 0, 0),
             ..base_output.clone()
@@ -1411,7 +1373,7 @@ mod tests {
     #[test]
     fn handle_address_deltas_accumulates_address_balance() {
         let mut registry = AssetRegistry::new();
-        let policy_id: PolicyId = [4u8; 28].into();
+        let policy_id: PolicyId = [4u8; 28];
         let (state, asset_id, asset_name) = setup_state_with_asset(
             &mut registry,
             policy_id,
@@ -1421,8 +1383,8 @@ mod tests {
             StoreTransactions::None,
         );
 
-        let delta1 = make_address_delta(policy_id, asset_name.clone(), 10);
-        let delta2 = make_address_delta(policy_id, asset_name.clone(), 15);
+        let delta1 = make_address_delta(policy_id, asset_name, 10);
+        let delta2 = make_address_delta(policy_id, asset_name, 15);
 
         let new_state = state.handle_address_deltas(&[delta1, delta2], &registry).unwrap();
         let addr_map = new_state.addresses.unwrap();
@@ -1443,7 +1405,7 @@ mod tests {
     #[test]
     fn handle_address_deltas_removes_zero_balance_addresses() {
         let mut registry = AssetRegistry::new();
-        let policy_id: PolicyId = [5u8; 28].into();
+        let policy_id: PolicyId = [5u8; 28];
 
         let (state, asset_id, asset_name) = setup_state_with_asset(
             &mut registry,
@@ -1454,7 +1416,7 @@ mod tests {
             StoreTransactions::None,
         );
 
-        let add_delta = make_address_delta(policy_id, asset_name.clone(), 10);
+        let add_delta = make_address_delta(policy_id, asset_name, 10);
         let state_after_add = state.handle_address_deltas(&[add_delta], &registry).unwrap();
         let addr_map = state_after_add.addresses.as_ref().unwrap();
         let holders = addr_map.get(&asset_id).unwrap();
@@ -1470,7 +1432,7 @@ mod tests {
             10
         );
 
-        let remove_delta = make_address_delta(policy_id, asset_name.clone(), -10);
+        let remove_delta = make_address_delta(policy_id, asset_name, -10);
         let state_after_remove =
             state_after_add.handle_address_deltas(&[remove_delta], &registry).unwrap();
         let addr_map = state_after_remove.addresses.as_ref().unwrap();

@@ -25,7 +25,7 @@ jobs:
 
       - name: Run Clippy
         run: |
-          cargo clippy \
+          cargo clippy --all-targets --all-features \
             --package acropolis_common \
             --package acropolis_codec \
             --package acropolis_module_accounts_state \
