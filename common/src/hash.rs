@@ -294,6 +294,10 @@ macro_rules! declare_hash_type {
 /// This macro creates a type alias and implements the `Bech32Conversion` trait
 /// for encoding/decoding the hash using a specified human-readable part (HRP).
 ///
+/// **WARNING**: You can only use this macro once per hash size, as it implements
+/// a trait on `Hash<SIZE>`. If you need multiple distinct types with different
+/// Bech32 HRPs for the same hash size, use `declare_hash_newtype_with_bech32!` instead.
+///
 /// # Examples
 ///
 /// ```
@@ -343,6 +347,140 @@ macro_rules! declare_hash_type_with_bech32 {
                         "Bad vector input to {}",
                         stringify!($name)
                     ))
+                })
+            }
+        }
+    };
+}
+
+/// Declares a newtype wrapper around Hash with Bech32 encoding support.
+///
+/// Unlike `declare_hash_type_with_bech32!`, this creates a distinct type (not an alias),
+/// allowing you to have multiple types of the same hash size with different Bech32 HRPs.
+///
+/// # Examples
+///
+/// ```
+/// // Both are 28 bytes but have different Bech32 encodings
+/// declare_hash_newtype_with_bech32!(PoolId, 28, "pool");
+/// declare_hash_newtype_with_bech32!(DrepId, 28, "drep");
+/// ```
+#[macro_export]
+macro_rules! declare_hash_newtype_with_bech32 {
+    ($name:ident, $size:expr, $hrp:expr) => {
+        #[doc = concat!(stringify!($name), " - a ", stringify!($size), "-byte hash.")]
+        #[derive(
+            Default,
+            Debug,
+            Clone,
+            Copy,
+            PartialEq,
+            Eq,
+            PartialOrd,
+            Ord,
+            Hash,
+            serde::Serialize,
+            serde::Deserialize,
+        )]
+        #[serde(transparent)]
+        pub struct $name(Hash<$size>);
+
+        impl $name {
+            pub const fn new(hash: Hash<$size>) -> Self {
+                Self(hash)
+            }
+
+            pub fn to_vec(&self) -> Vec<u8> {
+                self.0.to_vec()
+            }
+
+            pub fn into_inner(self) -> Hash<$size> {
+                self.0
+            }
+        }
+
+        impl From<Hash<$size>> for $name {
+            fn from(hash: Hash<$size>) -> Self {
+                Self(hash)
+            }
+        }
+
+        impl From<[u8; $size]> for $name {
+            fn from(bytes: [u8; $size]) -> Self {
+                Self(Hash::new(bytes))
+            }
+        }
+
+        impl TryFrom<Vec<u8>> for $name {
+            type Error = Vec<u8>;
+            fn try_from(vec: Vec<u8>) -> Result<Self, Self::Error> {
+                Ok(Self(Hash::try_from(vec)?))
+            }
+        }
+
+        impl TryFrom<&[u8]> for $name {
+            type Error = std::array::TryFromSliceError;
+            fn try_from(arr: &[u8]) -> Result<Self, Self::Error> {
+                Ok(Self(Hash::try_from(arr)?))
+            }
+        }
+
+        impl AsRef<[u8]> for $name {
+            fn as_ref(&self) -> &[u8] {
+                self.0.as_ref()
+            }
+        }
+
+        impl std::ops::Deref for $name {
+            type Target = Hash<$size>;
+            fn deref(&self) -> &Self::Target {
+                &self.0
+            }
+        }
+
+        impl std::str::FromStr for $name {
+            type Err = hex::FromHexError;
+            fn from_str(s: &str) -> Result<Self, Self::Err> {
+                Ok(Self(s.parse()?))
+            }
+        }
+
+        impl std::fmt::Display for $name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                self.0.fmt(f)
+            }
+        }
+
+        impl<C> minicbor::Encode<C> for $name {
+            fn encode<W: minicbor::encode::Write>(
+                &self,
+                e: &mut minicbor::Encoder<W>,
+                ctx: &mut C,
+            ) -> Result<(), minicbor::encode::Error<W::Error>> {
+                self.0.encode(e, ctx)
+            }
+        }
+
+        impl<'a, C> minicbor::Decode<'a, C> for $name {
+            fn decode(
+                d: &mut minicbor::Decoder<'a>,
+                ctx: &mut C,
+            ) -> Result<Self, minicbor::decode::Error> {
+                Ok(Self(Hash::decode(d, ctx)?))
+            }
+        }
+
+        impl crate::serialization::Bech32Conversion for $name {
+            fn to_bech32(&self) -> Result<String, anyhow::Error> {
+                use crate::serialization::Bech32WithHrp;
+                self.0.to_vec().to_bech32_with_hrp($hrp)
+            }
+
+            fn from_bech32(s: &str) -> Result<Self, anyhow::Error> {
+                use crate::serialization::Bech32WithHrp;
+                let v = Vec::<u8>::from_bech32_with_hrp(s, $hrp)?;
+                Self::try_from(v).map_err(|_| {
+                    anyhow::Error::msg(format!("Bad vector input to {}", stringify!($name)))
                 })
             }
         }

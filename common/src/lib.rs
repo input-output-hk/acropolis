@@ -26,5 +26,4 @@ pub mod validation;
 
 // Flattened re-exports
 pub use self::address::*;
-pub use self::byte_array::*;
 pub use self::types::*;

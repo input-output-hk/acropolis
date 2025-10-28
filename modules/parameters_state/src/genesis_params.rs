@@ -1,4 +1,5 @@
 use crate::alonzo_genesis;
+use acropolis_common::hash::ScriptHash;
 use acropolis_common::{
     protocol_params::{AlonzoParams, BabbageParams, ByronParams, ConwayParams, ShelleyParams},
     rational_number::{rational_number_from_f32, RationalNumber},
@@ -107,7 +108,9 @@ fn map_drep_thresholds(thresholds: &conway::DRepVotingThresholds) -> Result<DRep
 pub fn map_constitution(constitution: &conway::Constitution) -> Result<Constitution> {
     Ok(Constitution {
         anchor: map_anchor(&constitution.anchor)?,
-        guardrail_script: Some(decode_hex_string(&constitution.script, 28)?),
+        guardrail_script: Some(
+            ScriptHash::try_from(decode_hex_string(&constitution.script, 28)?).unwrap(),
+        ),
     })
 }
 

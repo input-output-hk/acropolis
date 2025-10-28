@@ -287,7 +287,7 @@ impl<C> minicbor::Encode<C> for DRep {
 pub struct Account {
     pub rewards_and_deposit: StrictMaybe<(Lovelace, Lovelace)>,
     pub pointers: Set<(u64, u64, u64)>,
-    pub pool: StrictMaybe<PoolId>,
+    pub pool: StrictMaybe<KeyHash>,
     pub drep: StrictMaybe<DRep>,
 }
 
@@ -307,15 +307,12 @@ impl<'b, C> minicbor::Decode<'b, C> for Account {
 // Type aliases for pool_params compatibility
 // -----------------------------------------------------------------------------
 
-use crate::KeyHash;
+use crate::{KeyHash};
 /// Alias minicbor as cbor for pool_params module
 pub use minicbor as cbor;
 
 /// Coin amount (Lovelace)
 pub type Coin = u64;
-
-/// Pool ID (28-byte hash)
-pub type PoolId = Hash<28>;
 
 /// VRF key hash (32-byte hash)
 pub type VrfKeyhash = Hash<32>;

@@ -26,7 +26,6 @@ use crate::queries::{
     transactions::{TransactionsStateQuery, TransactionsStateQueryResponse},
 };
 
-use crate::byte_array::*;
 use crate::types::*;
 use crate::validation::ValidationStatus;
 

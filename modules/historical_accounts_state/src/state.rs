@@ -3,12 +3,9 @@ use std::{
     sync::Arc,
 };
 
-use acropolis_common::{
-    messages::{
-        AddressDeltasMessage, StakeRewardDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
-    },
-    BlockInfo, PoolId, ShelleyAddress, StakeAddress, StakeCredential, TxIdentifier,
-};
+use acropolis_common::{messages::{
+    AddressDeltasMessage, StakeRewardDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
+}, BlockInfo, PoolId, ShelleyAddress, StakeAddress, StakeCredential, TxIdentifier};
 
 use crate::{
     immutable_historical_account_store::ImmutableHistoricalAccountStore,

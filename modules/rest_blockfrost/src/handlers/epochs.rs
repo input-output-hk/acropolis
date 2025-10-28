@@ -4,19 +4,14 @@ use crate::{
         EpochActivityRest, ProtocolParamsRest, SPDDByEpochAndPoolItemRest, SPDDByEpochItemRest,
     },
 };
-use acropolis_common::{
-    messages::{Message, RESTResponse, StateQuery, StateQueryResponse},
-    queries::{
-        accounts::{AccountsStateQuery, AccountsStateQueryResponse},
-        epochs::{EpochsStateQuery, EpochsStateQueryResponse},
-        parameters::{ParametersStateQuery, ParametersStateQueryResponse},
-        pools::{PoolsStateQuery, PoolsStateQueryResponse},
-        spdd::{SPDDStateQuery, SPDDStateQueryResponse},
-        utils::query_state,
-    },
-    serialization::Bech32WithHrp,
-    NetworkId, StakeAddress, StakeCredential,
-};
+use acropolis_common::{messages::{Message, RESTResponse, StateQuery, StateQueryResponse}, queries::{
+    accounts::{AccountsStateQuery, AccountsStateQueryResponse},
+    epochs::{EpochsStateQuery, EpochsStateQueryResponse},
+    parameters::{ParametersStateQuery, ParametersStateQueryResponse},
+    pools::{PoolsStateQuery, PoolsStateQueryResponse},
+    spdd::{SPDDStateQuery, SPDDStateQueryResponse},
+    utils::query_state,
+}, serialization::Bech32WithHrp, KeyHash, NetworkId, StakeAddress, StakeCredential};
 use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
 use std::sync::Arc;
@@ -618,7 +613,7 @@ pub async fn handle_epoch_pool_stakes_blockfrost(
     let msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
         AccountsStateQuery::GetSPDDByEpochAndPool {
             epoch: epoch_number,
-            pool_id,
+            pool_id: pool_id.try_into().unwrap(),
         },
     )));
     let spdd = query_state(
@@ -708,7 +703,7 @@ pub async fn handle_epoch_pool_blocks_blockfrost(
     // query Pool's Blocks by epoch from spo-state
     let msg = Arc::new(Message::StateQuery(StateQuery::Pools(
         PoolsStateQuery::GetBlocksByPoolAndEpoch {
-            pool_id: spo.clone(),
+            pool_id: KeyHash::try_from(spo.clone()).unwrap(),
             epoch: epoch_number,
         },
     )));

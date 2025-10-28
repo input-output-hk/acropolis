@@ -6,7 +6,7 @@ use std::{
     sync::atomic::AtomicU64,
 };
 
-use crate::{math::update_value_with_delta, messages::DRepDelegationDistribution, DRepChoice, DRepCredential, DelegatedStake, KeyHash, Lovelace, PoolLiveStakeInfo, StakeAddress, StakeAddressDelta, Withdrawal};
+use crate::{math::update_value_with_delta, messages::DRepDelegationDistribution, DRepChoice, DRepCredential, DelegatedStake, Lovelace, KeyHash, PoolLiveStakeInfo, StakeAddress, StakeAddressDelta, Withdrawal};
 use anyhow::Result;
 use dashmap::DashMap;
 use rayon::prelude::*;
@@ -285,7 +285,7 @@ impl StakeAddressMap {
     /// Derive the Stake Pool Delegation Distribution (SPDD) - a map of total stake values
     /// (both with and without rewards) for each active SPO
     /// And Stake Pool Reward State (rewards and delegators_count for each pool)
-    /// <PoolId -> DelegatedStake>;Key of returned map is the SPO 'operator' ID
+    /// <KeyHash -> DelegatedStake>;Key of returned map is the SPO 'operator' ID
     pub fn generate_spdd(&self) -> BTreeMap<KeyHash, DelegatedStake> {
         // Shareable Dashmap with referenced keys
         let spo_stakes = DashMap::<KeyHash, DelegatedStake>::new();
@@ -324,7 +324,7 @@ impl StakeAddressMap {
     }
 
     /// Dump current Stake Pool Delegation Distribution State
-    /// <PoolId -> (Stake Key, Active Stakes Amount)>
+    /// <KeyHash -> (Stake Key, Active Stakes Amount)>
     pub fn dump_spdd_state(&self) -> HashMap<KeyHash, Vec<(KeyHash, u64)>> {
         let entries: Vec<_> = self
             .inner

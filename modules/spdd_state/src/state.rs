@@ -35,7 +35,7 @@ impl State {
         }
 
         let to_remove: Vec<_> =
-            next.keys().filter(|k| !present.contains::<[u8]>((**k).as_slice())).cloned().collect();
+            next.keys().filter(|k| !present.contains(*k)).cloned().collect();
         for k in to_remove {
             next.remove(&k);
         }

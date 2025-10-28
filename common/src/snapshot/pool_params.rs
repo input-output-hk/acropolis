@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::PoolId;
 use super::streaming_snapshot::{
-    cbor, AddrKeyhash, Coin, Nullable, PoolId, PoolMetadata, Relay, RewardAccount, Set,
+    cbor, AddrKeyhash, Coin, Nullable, PoolMetadata, Relay, RewardAccount, Set,
     UnitInterval, VrfKeyhash,
 };
 

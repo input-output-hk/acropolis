@@ -584,7 +584,7 @@ mod tests {
 
     #[test]
     fn test_drep_process_one_certificate() {
-        let tx_cred = Credential::AddrKeyHash(CRED_1.to_vec());
+        let tx_cred = Credential::AddrKeyHash(CRED_1.into());
         let tx_cert = TxCertificate::DRepRegistration(DRepRegistrationWithPos {
             reg: DRepRegistration {
                 credential: tx_cred.clone(),
@@ -609,7 +609,7 @@ mod tests {
 
     #[test]
     fn test_drep_do_not_replace_existing_certificate() {
-        let tx_cred = Credential::AddrKeyHash(CRED_1.to_vec());
+        let tx_cred = Credential::AddrKeyHash(CRED_1.into());
         let tx_cert = TxCertificate::DRepRegistration(DRepRegistrationWithPos {
             reg: DRepRegistration {
                 credential: tx_cred.clone(),
@@ -646,7 +646,7 @@ mod tests {
 
     #[test]
     fn test_drep_update_certificate() {
-        let tx_cred = Credential::AddrKeyHash(CRED_1.to_vec());
+        let tx_cred = Credential::AddrKeyHash(CRED_1.into());
         let tx_cert = TxCertificate::DRepRegistration(DRepRegistrationWithPos {
             reg: DRepRegistration {
                 credential: tx_cred.clone(),
@@ -690,7 +690,7 @@ mod tests {
 
     #[test]
     fn test_drep_do_not_update_nonexistent_certificate() {
-        let tx_cred = Credential::AddrKeyHash(CRED_1.to_vec());
+        let tx_cred = Credential::AddrKeyHash(CRED_1.into());
         let tx_cert = TxCertificate::DRepRegistration(DRepRegistrationWithPos {
             reg: DRepRegistration {
                 credential: tx_cred.clone(),
@@ -709,7 +709,7 @@ mod tests {
         };
         let update_anchor_tx_cert = TxCertificate::DRepUpdate(DRepUpdateWithPos {
             reg: DRepUpdate {
-                credential: Credential::AddrKeyHash(CRED_2.to_vec()),
+                credential: Credential::AddrKeyHash(CRED_2.into()),
                 anchor: Some(anchor.clone()),
             },
             tx_hash: TxHash::default(),
@@ -730,7 +730,7 @@ mod tests {
 
     #[test]
     fn test_drep_deregister() {
-        let tx_cred = Credential::AddrKeyHash(CRED_1.to_vec());
+        let tx_cred = Credential::AddrKeyHash(CRED_1.into());
         let tx_cert = TxCertificate::DRepRegistration(acropolis_common::DRepRegistrationWithPos {
             reg: DRepRegistration {
                 credential: tx_cred.clone(),
@@ -761,7 +761,7 @@ mod tests {
 
     #[test]
     fn test_drep_do_not_deregister_nonexistent_cert() {
-        let tx_cred = Credential::AddrKeyHash(CRED_1.to_vec());
+        let tx_cred = Credential::AddrKeyHash(CRED_1.into());
         let tx_cert = TxCertificate::DRepRegistration(acropolis_common::DRepRegistrationWithPos {
             reg: DRepRegistration {
                 credential: tx_cred.clone(),
@@ -776,7 +776,7 @@ mod tests {
 
         let unregister_tx_cert = TxCertificate::DRepDeregistration(DRepDeregistrationWithPos {
             reg: DRepDeregistration {
-                credential: Credential::AddrKeyHash(CRED_2.to_vec()),
+                credential: Credential::AddrKeyHash(CRED_2.into()),
                 refund: 500000000,
             },
             tx_hash: TxHash::default(),

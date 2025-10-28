@@ -166,7 +166,7 @@ impl Verifier {
                     continue;
                 };
 
-                expected_rewards.entry(spo).or_default().push(RewardDetail {
+                expected_rewards.entry(KeyHash::try_from(spo).unwrap()).or_default().push(RewardDetail {
                     account: stake_address,
                     rtype,
                     amount,

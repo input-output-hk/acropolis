@@ -3,12 +3,7 @@
 #![allow(dead_code)]
 
 use crate::hash::{AddrKeyhash, Hash, ScriptHash};
-use crate::snapshot::streaming_snapshot::PoolId;
-use crate::{
-    address::{Address, ShelleyAddress, StakeAddress},
-    declare_hash_type, declare_hash_type_with_bech32, protocol_params,
-    rational_number::RationalNumber,
-};
+use crate::{address::{Address, ShelleyAddress, StakeAddress}, declare_hash_newtype_with_bech32, declare_hash_type, declare_hash_type_with_bech32, protocol_params, rational_number::RationalNumber};
 use anyhow::{anyhow, bail, Error, Result};
 use bech32::{Bech32, Hrp};
 use bitmask_enum::bitmask;
@@ -436,14 +431,16 @@ impl Default for UTXODelta {
 }
 
 pub type KeyHash = Hash<28>;
-pub type PoolKeyHash = Hash<28>;
 
 /// Script identifier
 pub type GenesisKeyhash = Vec<u8>;
 
 declare_hash_type!(BlockHash, 32);
 declare_hash_type!(TxHash, 32);
-declare_hash_type_with_bech32!(VRFKey, 32, "vrf_vk");
+declare_hash_newtype_with_bech32!(VRFKey, 32, "vrf_vk");
+declare_hash_newtype_with_bech32!(PoolId, 28, "pool");
+declare_hash_newtype_with_bech32!(DrepKey, 28, "drep");
+declare_hash_type_with_bech32!(DrepScriptKey, 28, "drep_script");
 
 /// Data hash used for metadata, anchors (SHA256)
 pub type DataHash = Vec<u8>;
@@ -842,7 +839,7 @@ pub struct PoolRegistration {
     /// VRF key hash
     #[serde_as(as = "Hex")]
     #[n(1)]
-    pub vrf_key_hash: KeyHash,
+    pub vrf_key_hash: VRFKey,
 
     /// Pledged Ada
     #[n(2)]
@@ -885,7 +882,7 @@ pub struct PoolRetirementWithPos {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PoolRetirement {
     /// Operator pool key hash - used as ID
-    pub operator: PoolKeyHash,
+    pub operator: PoolId,
 
     /// Epoch it will retire at the end of
     pub epoch: u64,
@@ -1038,10 +1035,10 @@ pub struct Deregistration {
 #[derive(Debug, Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum DRepChoice {
     /// Address key
-    Key(KeyHash),
+    Key(DrepKey),
 
     /// Script key
-    Script(KeyHash),
+    Script(DrepScriptKey),
 
     /// Abstain
     Abstain,

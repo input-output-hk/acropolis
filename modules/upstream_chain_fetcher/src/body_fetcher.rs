@@ -1,7 +1,7 @@
 //! Acropolis Miniprotocols module for Caryatid
 //! Multi-connection, block body fetching part of the client (in separate thread).
 
-use acropolis_common::{messages::RawBlockMessage, BlockHash, BlockInfo, BlockStatus, Era};
+use acropolis_common::{messages::RawBlockMessage, BlockInfo, BlockStatus, Era};
 use anyhow::{bail, Result};
 use crossbeam::channel::{Receiver, TryRecvError};
 use pallas::{
@@ -117,7 +117,7 @@ impl BodyFetcher {
             }, // TODO vary with 'k'
             slot,
             number,
-            hash: BlockHash(hash),
+            hash: hash.into(),
             epoch,
             epoch_slot,
             new_epoch,

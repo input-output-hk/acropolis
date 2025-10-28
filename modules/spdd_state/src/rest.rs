@@ -1,5 +1,5 @@
 use crate::state::State;
-use acropolis_common::serialization::Bech32WithHrp;
+use acropolis_common::serialization::{Bech32Conversion, Bech32WithHrp};
 use acropolis_common::DelegatedStake;
 use acropolis_common::{extract_strict_query_params, messages::RESTResponse};
 use anyhow::Result;
@@ -35,7 +35,7 @@ pub async fn handle_spdd(
             .iter()
             .map(|(k, v)| {
                 (
-                    k.to_bech32_with_hrp("pool").unwrap_or_else(|_| hex::encode(k)),
+                    k.to_bech32().unwrap_or_else(|_| hex::encode(k)),
                     *v,
                 )
             })

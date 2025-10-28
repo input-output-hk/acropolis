@@ -325,7 +325,7 @@ impl MithrilSnapshotFetcher {
                             status: BlockStatus::Immutable,
                             slot,
                             number,
-                            hash: BlockHash(*block.hash()),
+                            hash: BlockHash::new(*block.hash()),
                             epoch,
                             epoch_slot,
                             new_epoch,

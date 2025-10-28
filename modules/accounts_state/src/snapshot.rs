@@ -203,7 +203,7 @@ mod tests {
     fn create_test_spo_hash(id: u8) -> KeyHash {
         let mut hash = vec![0u8; 28];
         hash[0] = id;
-        hash
+        KeyHash::try_from(hash).unwrap()
     }
 
     #[test]

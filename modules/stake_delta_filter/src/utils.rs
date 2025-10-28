@@ -438,20 +438,20 @@ mod test {
 
                 payment: match shelley_address.payment() {
                     addresses::ShelleyPaymentPart::Key(hash) => {
-                        ShelleyAddressPaymentPart::PaymentKeyHash(hash.to_vec())
+                        ShelleyAddressPaymentPart::PaymentKeyHash(hash)
                     }
                     addresses::ShelleyPaymentPart::Script(hash) => {
-                        ShelleyAddressPaymentPart::ScriptHash(hash.to_vec())
+                        ShelleyAddressPaymentPart::ScriptHash(hash)
                     }
                 },
 
                 delegation: match shelley_address.delegation() {
                     addresses::ShelleyDelegationPart::Null => ShelleyAddressDelegationPart::None,
                     addresses::ShelleyDelegationPart::Key(hash) => {
-                        ShelleyAddressDelegationPart::StakeKeyHash(hash.to_vec())
+                        ShelleyAddressDelegationPart::StakeKeyHash(hash)
                     }
                     addresses::ShelleyDelegationPart::Script(hash) => {
-                        ShelleyAddressDelegationPart::ScriptHash(hash.to_vec())
+                        ShelleyAddressDelegationPart::ScriptHash(hash)
                     }
                     addresses::ShelleyDelegationPart::Pointer(pointer) => {
                         ShelleyAddressDelegationPart::Pointer(ShelleyAddressPointer {

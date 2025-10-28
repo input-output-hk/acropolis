@@ -187,7 +187,7 @@ impl State {
     pub fn get_accounts_utxo_values_map(
         &self,
         stake_keys: &[StakeAddress],
-    ) -> Option<HashMap<Vec<u8>, u64>> {
+    ) -> Option<HashMap<KeyHash, u64>> {
         let stake_addresses = self.stake_addresses.lock().ok()?; // If lock fails, return None
         stake_addresses.get_accounts_utxo_values_map(stake_keys)
     }
@@ -202,7 +202,7 @@ impl State {
     pub fn get_accounts_balances_map(
         &self,
         stake_keys: &[StakeAddress],
-    ) -> Option<HashMap<Vec<u8>, u64>> {
+    ) -> Option<HashMap<KeyHash, u64>> {
         let stake_addresses = self.stake_addresses.lock().ok()?; // If lock fails, return None
         stake_addresses.get_accounts_balances_map(stake_keys)
     }
@@ -785,7 +785,7 @@ impl State {
 
             // Schedule to retire - we need them to still be in place when we count
             // blocks for the previous epoch
-            self.retiring_spos.push(id.to_vec());
+            self.retiring_spos.push(*id);
         }
 
         self.spos = new_spos;
@@ -990,11 +990,28 @@ impl State {
 mod tests {
     use super::*;
     use acropolis_common::{
-        protocol_params::ConwayParams, rational_number::RationalNumber, Anchor, Committee,
-        Constitution, CostModel, DRepVotingThresholds, NetworkId, PoolVotingThresholds, Pot,
-        PotDelta, Ratio, Registration, StakeAddress, StakeAddressDelta, StakeAndVoteDelegation,
-        StakeCredential, StakeRegistrationAndStakeAndVoteDelegation,
-        StakeRegistrationAndVoteDelegation, VoteDelegation, Withdrawal,
+        crypto::keyhash_224, // ADDED: Import keyhash function
+        protocol_params::ConwayParams,
+        rational_number::RationalNumber,
+        Anchor,
+        Committee,
+        Constitution,
+        CostModel,
+        DRepVotingThresholds,
+        NetworkId,
+        PoolVotingThresholds,
+        Pot,
+        PotDelta,
+        Ratio,
+        Registration,
+        StakeAddress,
+        StakeAddressDelta,
+        StakeAndVoteDelegation,
+        StakeCredential,
+        StakeRegistrationAndStakeAndVoteDelegation,
+        StakeRegistrationAndVoteDelegation,
+        VoteDelegation,
+        Withdrawal,
     };
 
     // Helper to create a StakeAddress from a byte slice
@@ -1003,8 +1020,18 @@ mod tests {
         full_hash[..hash.len().min(28)].copy_from_slice(&hash[..hash.len().min(28)]);
         StakeAddress {
             network: NetworkId::Mainnet,
-            credential: StakeCredential::AddrKeyHash(full_hash),
+            credential: StakeCredential::AddrKeyHash(KeyHash::try_from(full_hash).unwrap()),
         }
+    }
+
+    // ADDED: Helper to create KeyHash for testing
+    fn test_keyhash(byte: u8) -> KeyHash {
+        keyhash_224(&vec![byte])
+    }
+
+    // ADDED: Helper to create KeyHash from byte array
+    fn test_keyhash_from_bytes(bytes: &[u8]) -> KeyHash {
+        keyhash_224(bytes)
     }
 
     const STAKE_KEY_HASH: [u8; 3] = [0x99, 0x0f, 0x00];
@@ -1060,8 +1087,8 @@ mod tests {
     fn spdd_from_delegation_with_utxo_values_and_pledge() {
         let mut state = State::default();
 
-        let spo1: KeyHash = vec![0x01];
-        let spo2: KeyHash = vec![0x02];
+        let spo1: KeyHash = test_keyhash(0x01); // CHANGED
+        let spo2: KeyHash = test_keyhash(0x02); // CHANGED
 
         // Create the SPOs
         state
@@ -1331,7 +1358,7 @@ mod tests {
     fn drdd_includes_initial_deposit() {
         let mut state = State::default();
 
-        let drep_addr_cred = DRepCredential::AddrKeyHash(DREP_HASH.to_vec());
+        let drep_addr_cred = DRepCredential::AddrKeyHash(test_keyhash_from_bytes(&DREP_HASH));
         state.handle_drep_state(&DRepStateMessage {
             epoch: 1337,
             dreps: vec![(drep_addr_cred.clone(), 1_000_000)],
@@ -1352,8 +1379,8 @@ mod tests {
     fn drdd_respects_different_delegations() -> Result<()> {
         let mut state = State::default();
 
-        let drep_addr_cred = DRepCredential::AddrKeyHash(DREP_HASH.to_vec());
-        let drep_script_cred = DRepCredential::ScriptHash(DREP_HASH.to_vec());
+        let drep_addr_cred = DRepCredential::AddrKeyHash(test_keyhash_from_bytes(&DREP_HASH));
+        let drep_script_cred = DRepCredential::ScriptHash(test_keyhash_from_bytes(&DREP_HASH));
         state.handle_drep_state(&DRepStateMessage {
             epoch: 1337,
             dreps: vec![
@@ -1367,6 +1394,12 @@ mod tests {
         let spo3 = create_address(&[0x03]);
         let spo4 = create_address(&[0x04]);
 
+        // Get the KeyHash once
+        let spo1_hash = spo1.get_hash();
+
+        let drep_key_hash = test_keyhash_from_bytes(&DREP_HASH);
+        let drep_script_hash = test_keyhash_from_bytes(&DREP_HASH);
+
         let certificates = vec![
             // register the first two SPOs separately from their delegation
             TxCertificate::Registration(Registration {
@@ -1379,12 +1412,12 @@ mod tests {
             }),
             TxCertificate::VoteDelegation(VoteDelegation {
                 stake_address: spo1.clone(),
-                drep: DRepChoice::Key(DREP_HASH.to_vec()),
+                drep: DRepChoice::Key(drep_key_hash.clone()), // CHANGED
             }),
             TxCertificate::StakeAndVoteDelegation(StakeAndVoteDelegation {
                 stake_address: spo2.clone(),
-                operator: spo1.get_hash().to_vec(),
-                drep: DRepChoice::Script(DREP_HASH.to_vec()),
+                operator: spo1_hash.clone(),
+                drep: DRepChoice::Script(drep_script_hash.clone()), // CHANGED
             }),
             TxCertificate::StakeRegistrationAndVoteDelegation(StakeRegistrationAndVoteDelegation {
                 stake_address: spo3.clone(),
@@ -1394,7 +1427,7 @@ mod tests {
             TxCertificate::StakeRegistrationAndStakeAndVoteDelegation(
                 StakeRegistrationAndStakeAndVoteDelegation {
                     stake_address: spo4.clone(),
-                    operator: spo1.get_hash().to_vec(),
+                    operator: spo1_hash.clone(),
                     drep: DRepChoice::NoConfidence,
                     deposit: 1,
                 },

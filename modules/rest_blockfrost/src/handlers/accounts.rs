@@ -4,7 +4,7 @@ use std::sync::Arc;
 use acropolis_common::messages::{Message, RESTResponse, StateQuery, StateQueryResponse};
 use acropolis_common::queries::accounts::{AccountsStateQuery, AccountsStateQueryResponse};
 use acropolis_common::queries::utils::query_state;
-use acropolis_common::serialization::Bech32WithHrp;
+use acropolis_common::serialization::{Bech32Conversion, Bech32WithHrp};
 use acropolis_common::{DRepChoice, StakeAddress};
 use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
@@ -128,7 +128,7 @@ fn map_drep_choice(drep: &DRepChoice) -> Result<DRepChoiceRest> {
     match drep {
         DRepChoice::Key(hash) => {
             let val = hash
-                .to_bech32_with_hrp("drep")
+                .to_bech32()
                 .map_err(|e| anyhow!("Bech32 encoding failed for DRep Key: {e}"))?;
             Ok(DRepChoiceRest {
                 drep_type: "Key".to_string(),
@@ -137,7 +137,7 @@ fn map_drep_choice(drep: &DRepChoice) -> Result<DRepChoiceRest> {
         }
         DRepChoice::Script(hash) => {
             let val = hash
-                .to_bech32_with_hrp("drep_script")
+                .to_bech32()
                 .map_err(|e| anyhow!("Bech32 encoding failed for DRep Script: {e}"))?;
             Ok(DRepChoiceRest {
                 drep_type: "Script".to_string(),
