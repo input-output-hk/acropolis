@@ -61,6 +61,7 @@ pub struct Snapshot {
 
 impl Snapshot {
     /// Get a stake snapshot based the current stake addresses
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         epoch: u64,
         stake_addresses: &StakeAddressMap,

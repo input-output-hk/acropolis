@@ -62,8 +62,10 @@ pub fn calculate_rewards(
     registrations: &HashSet<StakeAddress>,
     deregistrations: &HashSet<StakeAddress>,
 ) -> Result<RewardsResult> {
-    let mut result = RewardsResult::default();
-    result.epoch = epoch;
+    let mut result = RewardsResult {
+        epoch,
+        ..Default::default()
+    };
 
     // If no blocks produced in previous epoch, don't do anything
     let total_blocks = performance.blocks;
@@ -142,7 +144,7 @@ pub fn calculate_rewards(
             // Check all SPOs to see if they match this reward account
             for (other_id, other_spo) in staking.spos.iter() {
                 if other_spo.reward_account == staking_spo.reward_account
-                    && other_id.cmp(&operator_id) == Ordering::Less
+                    && other_id.cmp(operator_id) == Ordering::Less
                 // Lower ID (hash) wins
                 {
                     // It must have been paid a reward - we assume that checking it produced
@@ -150,8 +152,8 @@ pub fn calculate_rewards(
                     if performance.spos.get(other_id).map(|s| s.blocks_produced).unwrap_or(0) > 0 {
                         pay_to_pool_reward_account = false;
                         warn!("Shelley shared reward account bug: Dropping reward to {} in favour of {} on shared account {}",
-                              hex::encode(&operator_id),
-                              hex::encode(&other_id),
+                              hex::encode(operator_id),
+                              hex::encode(other_id),
                               staking_spo.reward_account);
                         break;
                     }
@@ -220,6 +222,7 @@ pub fn calculate_rewards(
 }
 
 /// Calculate rewards for an individual SPO
+#[allow(clippy::too_many_arguments)]
 fn calculate_spo_rewards(
     operator_id: &KeyHash,
     spo: &SnapshotSPO,
@@ -238,7 +241,7 @@ fn calculate_spo_rewards(
     // Active stake (sigma)
     let pool_stake = BigDecimal::from(spo.total_stake);
     if pool_stake.is_zero() {
-        warn!("SPO {} has no stake - skipping", hex::encode(&operator_id),);
+        warn!("SPO {} has no stake - skipping", hex::encode(operator_id));
 
         // No stake, no rewards or earnings
         return vec![];
@@ -246,13 +249,13 @@ fn calculate_spo_rewards(
 
     // Get the stake actually delegated by the owners accounts to this SPO
     let pool_owner_stake =
-        staking.get_stake_delegated_to_spo_by_addresses(&operator_id, &spo.pool_owners);
+        staking.get_stake_delegated_to_spo_by_addresses(operator_id, &spo.pool_owners);
 
     // If they haven't met their pledge, no dice
     if pool_owner_stake < spo.pledge {
         debug!(
             "SPO {} has owner stake {} less than pledge {} - skipping",
-            hex::encode(&operator_id),
+            hex::encode(operator_id),
             pool_owner_stake,
             spo.pledge
         );
@@ -263,11 +266,11 @@ fn calculate_spo_rewards(
 
     // Relative stake as fraction of total supply (sigma), and capped with 1/k (sigma')
     let relative_pool_stake = &pool_stake / total_supply;
-    let capped_relative_pool_stake = min(&relative_pool_stake, &relative_pool_saturation_size);
+    let capped_relative_pool_stake = min(&relative_pool_stake, relative_pool_saturation_size);
 
     // Stake pledged by operator (s) and capped with 1/k (s')
     let relative_pool_pledge = &pool_pledge / total_supply;
-    let capped_relative_pool_pledge = min(&relative_pool_pledge, &relative_pool_saturation_size);
+    let capped_relative_pool_pledge = min(&relative_pool_pledge, relative_pool_saturation_size);
 
     // Get the optimum reward for this pool
     let optimum_rewards = ((stake_rewards / (BigDecimal::one() + pledge_influence_factor))
@@ -301,7 +304,7 @@ fn calculate_spo_rewards(
 
     debug!(%pool_stake, %relative_pool_stake, %pool_performance,
            %optimum_rewards, %pool_rewards, pool_owner_stake, %pool_pledge,
-           "Pool {}", hex::encode(&operator_id));
+           "Pool {}", hex::encode(operator_id));
 
     // Subtract fixed costs
     let fixed_cost = BigDecimal::from(spo.fixed_cost);
@@ -316,7 +319,7 @@ fn calculate_spo_rewards(
         let margin =
             BigDecimal::from(spo.margin.numerator) / BigDecimal::from(spo.margin.denominator);
 
-        let relative_owner_stake = &pool_owner_stake / total_supply;
+        let relative_owner_stake = pool_owner_stake / total_supply;
         let margin_cost = ((&pool_rewards - &fixed_cost)
             * (&margin
                 + (BigDecimal::one() - &margin) * (relative_owner_stake / relative_pool_stake)))
@@ -345,7 +348,7 @@ fn calculate_spo_rewards(
                        delegator_stake_address);
 
                 // Pool owners don't get member rewards (seems unfair!)
-                if spo.pool_owners.contains(&delegator_stake_address) {
+                if spo.pool_owners.contains(delegator_stake_address) {
                     debug!(
                         "Skipping pool owner reward account {}, losing {to_pay}",
                         delegator_stake_address
@@ -397,7 +400,7 @@ fn calculate_spo_rewards(
     } else {
         info!(
             "SPO {}'s reward account {} not paid {}",
-            hex::encode(&operator_id),
+            hex::encode(operator_id),
             spo.reward_account,
             spo_benefit,
         );
