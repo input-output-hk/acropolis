@@ -103,9 +103,7 @@ impl EpochsHistoryState {
         pool_operators: &Vec<KeyHash>,
         epoch: u64,
     ) -> Option<Vec<u64>> {
-        let Some(epochs_history) = self.epochs_history.as_ref() else {
-            return None;
-        };
+        let epochs_history = self.epochs_history.as_ref()?;
 
         let mut active_stakes = Vec::<u64>::new();
         for pool_operator in pool_operators {
@@ -169,7 +167,7 @@ impl EpochsHistoryState {
         &self,
         _block: &BlockInfo,
         epoch_activity_message: &EpochActivityMessage,
-        spos: &Vec<(KeyHash, usize)>,
+        spos: &[(KeyHash, usize)],
     ) {
         let Some(epochs_history) = self.epochs_history.as_ref() else {
             return;
@@ -177,7 +175,7 @@ impl EpochsHistoryState {
         let EpochActivityMessage { epoch, .. } = epoch_activity_message;
 
         spos.iter().for_each(|(spo, amount)| {
-            Self::update_epochs_history_with(epochs_history, &spo, *epoch, |epoch_state| {
+            Self::update_epochs_history_with(epochs_history, spo, *epoch, |epoch_state| {
                 epoch_state.blocks_minted = Some(*amount as u64);
             });
         })
@@ -189,7 +187,7 @@ impl EpochsHistoryState {
         epoch: u64,
         update_fn: impl FnOnce(&mut EpochState),
     ) {
-        let mut epochs = epochs_history.entry(spo.clone()).or_insert_with(BTreeMap::new);
+        let mut epochs = epochs_history.entry(spo.clone()).or_default();
         let epoch_state = epochs.entry(epoch).or_insert_with(|| EpochState::new(epoch));
         update_fn(epoch_state);
     }

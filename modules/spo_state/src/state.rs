@@ -129,13 +129,12 @@ impl From<&State> for SPOState {
             retiring: state
                 .pending_deregistrations
                 .iter()
-                .map(|(epoch, key_hashes)| {
+                .flat_map(|(epoch, key_hashes)| {
                     key_hashes
                         .iter()
                         .map(|key_hash| (key_hash.clone(), *epoch))
                         .collect::<Vec<(Vec<u8>, u64)>>()
                 })
-                .flatten()
                 .collect(),
         }
     }
@@ -148,7 +147,7 @@ impl State {
     }
 
     /// Get total blocks minted by pools
-    pub fn get_total_blocks_minted_by_pools(&self, pools_operators: &Vec<KeyHash>) -> Vec<u64> {
+    pub fn get_total_blocks_minted_by_pools(&self, pools_operators: &[KeyHash]) -> Vec<u64> {
         pools_operators
             .iter()
             .map(|pool_operator| *self.total_blocks_minted.get(pool_operator).unwrap_or(&0))
@@ -172,27 +171,19 @@ impl State {
 
     /// Get pool metadata
     pub fn get_pool_metadata(&self, pool_id: &KeyHash) -> Option<PoolMetadata> {
-        self.spos.get(pool_id).map(|p| p.pool_metadata.clone()).flatten()
+        self.spos.get(pool_id).and_then(|p| p.pool_metadata.clone())
     }
 
     /// Get Pool Delegators
     pub fn get_pool_delegators(&self, pool_operator: &KeyHash) -> Option<Vec<(KeyHash, u64)>> {
-        let Some(stake_addresses) = self.stake_addresses.as_ref() else {
-            return None;
-        };
-        let Some(historical_spos) = self.historical_spos.as_ref() else {
-            return None;
-        };
+        let stake_addresses = self.stake_addresses.as_ref()?;
+        let historical_spos = self.historical_spos.as_ref()?;
 
         let stake_addresses = stake_addresses.lock().unwrap();
         let delegators = historical_spos
             .get(pool_operator)
-            .map(|s| s.delegators.clone())
-            .flatten()
-            .map(|s| s.into_iter().collect::<Vec<StakeAddress>>());
-        let Some(delegators) = delegators else {
-            return None;
-        };
+            .and_then(|s| s.delegators.clone())
+            .map(|s| s.into_iter().collect::<Vec<StakeAddress>>())?;
 
         let delegators_map = stake_addresses.get_accounts_balances_map(&delegators);
         delegators_map.map(|map| map.into_iter().collect())
@@ -202,19 +193,13 @@ impl State {
     /// Return Vector of block heights
     /// Return None when store_blocks not enabled
     pub fn get_blocks_by_pool(&self, pool_id: &KeyHash) -> Option<Vec<u64>> {
-        let Some(historical_spos) = self.historical_spos.as_ref() else {
-            return None;
-        };
-        historical_spos.get(pool_id).and_then(|s| s.get_all_blocks())
+        self.historical_spos.as_ref()?.get(pool_id).and_then(|s| s.get_all_blocks())
     }
 
     /// Get Blocks by Pool and Epoch
     /// Return None when store_blocks not enabled
     pub fn get_blocks_by_pool_and_epoch(&self, pool_id: &KeyHash, epoch: u64) -> Option<Vec<u64>> {
-        let Some(historical_spos) = self.historical_spos.as_ref() else {
-            return None;
-        };
-        historical_spos.get(pool_id).and_then(|s| s.get_blocks_by_epoch(epoch))
+        self.historical_spos.as_ref()?.get(pool_id).and_then(|s| s.get_blocks_by_epoch(epoch))
     }
 
     /// Get Pool Updates
@@ -367,10 +352,8 @@ impl State {
                 .entry(reg.operator.clone())
                 .or_insert_with(|| HistoricalSPOState::new(&self.store_config));
             historical_spo.add_pool_registration(reg);
-            historical_spo.add_pool_updates(PoolUpdateEvent::register_event(
-                tx_identifier.clone(),
-                *cert_index,
-            ));
+            historical_spo
+                .add_pool_updates(PoolUpdateEvent::register_event(*tx_identifier, *cert_index));
         }
     }
 
@@ -446,10 +429,9 @@ impl State {
             return;
         };
         let mut stake_addresses = stake_addresses.lock().unwrap();
-        let old_spo =
-            stake_addresses.get(&stake_address).map(|s| s.delegated_spo.clone()).flatten();
+        let old_spo = stake_addresses.get(stake_address).and_then(|s| s.delegated_spo.clone());
 
-        if stake_addresses.deregister_stake_address(&stake_address) {
+        if stake_addresses.deregister_stake_address(stake_address) {
             // update historical_spos
             if let Some(historical_spos) = self.historical_spos.as_mut() {
                 if let Some(old_spo) = old_spo.as_ref() {
@@ -477,17 +459,16 @@ impl State {
             return;
         };
         let mut stake_addresses = stake_addresses.lock().unwrap();
-        let old_spo =
-            stake_addresses.get(&stake_address).map(|s| s.delegated_spo.clone()).flatten();
+        let old_spo = stake_addresses.get(stake_address).and_then(|s| s.delegated_spo.clone());
 
-        if stake_addresses.record_stake_delegation(&stake_address, spo) {
+        if stake_addresses.record_stake_delegation(stake_address, spo) {
             // update historical_spos
             if let Some(historical_spos) = self.historical_spos.as_mut() {
                 // Remove old delegator
                 if let Some(old_spo) = old_spo.as_ref() {
                     match historical_spos.get_mut(old_spo) {
                         Some(historical_spo) => {
-                            if let Some(removed) = historical_spo.remove_delegator(&stake_address) {
+                            if let Some(removed) = historical_spo.remove_delegator(stake_address) {
                                 if !removed {
                                     error!(
                                         "Historical SPO state for {} does not contain delegator {}",
@@ -507,7 +488,7 @@ impl State {
                 let historical_spo = historical_spos
                     .entry(spo.clone())
                     .or_insert_with(|| HistoricalSPOState::new(&self.store_config));
-                if let Some(added) = historical_spo.add_delegator(&stake_address) {
+                if let Some(added) = historical_spo.add_delegator(stake_address) {
                     if !added {
                         error!(
                             "Historical SPO state for {} already contains delegator {}",
@@ -539,7 +520,7 @@ impl State {
                 TxCertificate::PoolRegistration(reg) => {
                     self.handle_pool_registration(
                         block,
-                        &reg,
+                        reg,
                         &tx_cert.tx_identifier,
                         &tx_cert.cert_index,
                     );
@@ -547,7 +528,7 @@ impl State {
                 TxCertificate::PoolRetirement(ret) => {
                     self.handle_pool_retirement(
                         block,
-                        &ret,
+                        ret,
                         &tx_cert.tx_identifier,
                         &tx_cert.cert_index,
                     );
@@ -555,10 +536,10 @@ impl State {
 
                 // for stake addresses
                 TxCertificate::StakeRegistration(stake_address) => {
-                    self.register_stake_address(&stake_address);
+                    self.register_stake_address(stake_address);
                 }
                 TxCertificate::StakeDeregistration(stake_address) => {
-                    self.deregister_stake_address(&stake_address);
+                    self.deregister_stake_address(stake_address);
                 }
                 TxCertificate::Registration(reg) => {
                     self.register_stake_address(&reg.stake_address);
@@ -615,9 +596,9 @@ impl State {
                     .or_insert_with(|| HistoricalSPOState::new(&self.store_config));
 
                 if let Some(votes) = historical_spo.votes.as_mut() {
-                    for (_, vp) in &single_votes.voting_procedures {
+                    for vp in single_votes.voting_procedures.values() {
                         votes.push(VoteRecord {
-                            tx_hash: tx_hash.clone(),
+                            tx_hash: *tx_hash,
                             vote_index: vp.vote_index,
                             vote: vp.vote.clone(),
                         });
