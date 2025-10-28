@@ -30,6 +30,9 @@ const DEFAULT_BLOCKS_SUBSCRIBE_TOPIC: (&str, &str) =
     ("blocks-subscribe-topic", "cardano.block.proposed");
 const DEFAULT_EPOCH_NONCES_SUBSCRIBE_TOPIC: (&str, &str) =
     ("epoch-nonces-subscribe-topic", "cardano.epoch.nonces");
+const DEFAULT_SPO_STATE_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("spo-state-subscribe-topic", "cardano.spo.state");
+
 /// Block VRF Validator module
 #[module(
     message_type(Message),
@@ -46,6 +49,7 @@ impl BlockVrfValidator {
         mut blocks_subscription: Box<dyn Subscription<Message>>,
         mut protocol_parameters_subscription: Box<dyn Subscription<Message>>,
         mut epoch_nonces_subscription: Box<dyn Subscription<Message>>,
+        mut spo_state_subscription: Box<dyn Subscription<Message>>,
     ) -> Result<()> {
         let (_, bootstrapped_message) = bootstrapped_subscription.read().await?;
         let genesis = match bootstrapped_message.as_ref() {
@@ -159,12 +163,18 @@ impl BlockVrfValidator {
             .unwrap_or(DEFAULT_EPOCH_NONCES_SUBSCRIBE_TOPIC.1.to_string());
         info!("Creating epoch nonces subscription on '{epoch_nonces_subscribe_topic}'");
 
+        let spo_state_subscribe_topic = config
+            .get_string(DEFAULT_SPO_STATE_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_SPO_STATE_SUBSCRIBE_TOPIC.1.to_string());
+        info!("Creating spo state subscription on '{spo_state_subscribe_topic}'");
+
         // Subscribers
         let bootstrapped_subscription = context.subscribe(&bootstrapped_subscribe_topic).await?;
         let protocol_parameters_subscription =
             context.subscribe(&protocol_parameters_subscribe_topic).await?;
         let blocks_subscription = context.subscribe(&blocks_subscribe_topic).await?;
         let epoch_nonces_subscription = context.subscribe(&epoch_nonces_subscribe_topic).await?;
+        let spo_state_subscription = context.subscribe(&spo_state_subscribe_topic).await?;
 
         // state history
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
@@ -180,6 +190,7 @@ impl BlockVrfValidator {
                 blocks_subscription,
                 protocol_parameters_subscription,
                 epoch_nonces_subscription,
+                spo_state_subscription,
             )
             .await
             .unwrap_or_else(|e| error!("Failed: {e}"));

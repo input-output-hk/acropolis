@@ -14,7 +14,7 @@ use anyhow::Result;
 use caryatid_sdk::{message_bus::Subscription, module, Context, Module};
 use config::Config;
 use pallas::ledger::traverse::MultiEraHeader;
-use std::{io::Write, sync::Arc};
+use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, info_span, Instrument};
 
