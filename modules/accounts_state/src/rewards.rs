@@ -52,6 +52,7 @@ pub struct RewardsResult {
 /// Calculate rewards for a given epoch based on current rewards state and protocol parameters
 /// The epoch is the one that has just ended - we assume the snapshot for this has already been
 /// taken.
+/// Registrations/deregistrations are net changes between 'staking' and 'performance' snapshots
 /// Note immutable - only state change allowed is to push a new snapshot
 pub fn calculate_rewards(
     epoch: u64,
@@ -130,10 +131,16 @@ pub fn calculate_rewards(
         // Also, to handle the early Shelley timing bug, we allow it if it was registered
         // during the current epoch
         if !pay_to_pool_reward_account {
-            debug!("Checking old reward account {}", staking_spo.reward_account);
+            debug!("Checking old reward account {} for late registration",
+                   staking_spo.reward_account);
 
             // Note we use the staking reward account - it could have changed
             pay_to_pool_reward_account = registrations.contains(&staking_spo.reward_account);
+
+            if pay_to_pool_reward_account {
+                info!("SPO {}'s reward account {} was registered in this epoch",
+                      hex::encode(operator_id), staking_spo.reward_account);
+            }
         }
 
         // There was a bug in the original node from Shelley until Allegra where if multiple SPOs
@@ -161,7 +168,7 @@ pub fn calculate_rewards(
             }
         } else {
             info!(
-                "Reward account for SPO {} was deregistered",
+                "Reward account for SPO {} isn't registered",
                 hex::encode(operator_id)
             )
         }
