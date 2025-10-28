@@ -78,7 +78,7 @@ pub async fn handle_single_account_blockfrost(
             Err(e) => {
                 return Ok(RESTResponse::with_text(
                     500,
-                    &format!("Internal server error while retrieving stake address: {e}"),
+                    &format!("Internal server error while mapping SPO: {e}"),
                 ));
             }
         },
@@ -91,7 +91,7 @@ pub async fn handle_single_account_blockfrost(
             Err(e) => {
                 return Ok(RESTResponse::with_text(
                     500,
-                    &format!("Internal server error while retrieving stake address: {e}"),
+                    &format!("Internal server error while mapping dRep: {e}"),
                 ))
             }
         },
@@ -109,7 +109,7 @@ pub async fn handle_single_account_blockfrost(
         Ok(json) => Ok(RESTResponse::with_json(200, &json)),
         Err(e) => Ok(RESTResponse::with_text(
             500,
-            &format!("Internal server error while retrieving DRep delegation distribution: {e}"),
+            &format!("Internal server error while retrieving account info: {e}"),
         )),
     }
 }
@@ -207,7 +207,7 @@ pub async fn handle_account_registrations_blockfrost(
         Ok(json) => Ok(RESTResponse::with_json(200, &json)),
         Err(e) => Ok(RESTResponse::with_text(
             500,
-            &format!("Internal server error while serializing account registration history: {e}"),
+            &format!("Internal server error while serializing registration history: {e}"),
         )),
     }
 }
@@ -317,7 +317,7 @@ pub async fn handle_account_delegations_blockfrost(
         Ok(json) => Ok(RESTResponse::with_json(200, &json)),
         Err(e) => Ok(RESTResponse::with_text(
             500,
-            &format!("Internal server error while serializing account delegation history: {e}"),
+            &format!("Internal server error while serializing delegation history: {e}"),
         )),
     }
 }
@@ -328,19 +328,17 @@ pub async fn handle_account_mirs_blockfrost(
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
-    let stake_address = match parse_stake_address(&params) {
+    let account = match parse_stake_address(&params) {
         Ok(addr) => addr,
         Err(resp) => return Ok(resp),
     };
 
     // Prepare the message
     let msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
-        AccountsStateQuery::GetAccountMIRHistory {
-            account: stake_address,
-        },
+        AccountsStateQuery::GetAccountMIRHistory { account },
     )));
 
-    // Get delegations from historical accounts state
+    // Get MIRs from historical accounts state
     let mirs = query_state(
         &context,
         &handlers_config.historical_accounts_query_topic,
