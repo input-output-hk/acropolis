@@ -1,5 +1,5 @@
 pub const POINTER_CACHE: [(&str, &str); 1] = [(
-    "Main",
+    "Mainnet",
     r#"
 {
   "pointer_map": [
@@ -58,9 +58,9 @@ pub const POINTER_CACHE: [(&str, &str); 1] = [(
         "cert_index": 0
       },
       {
-        "network": "Main",
-        "payload": {
-          "StakeKeyHash": "bc1597ad71c55d2d009a9274b3831ded155118dd769f5376decc1369"
+        "network": "Mainnet",
+        "credential": {
+          "AddrKeyHash": "bc1597ad71c55d2d009a9274b3831ded155118dd769f5376decc1369"
         }
       }
     ],
@@ -79,9 +79,9 @@ pub const POINTER_CACHE: [(&str, &str); 1] = [(
         "cert_index": 0
       },
       {
-        "network": "Main",
-        "payload": {
-          "StakeKeyHash": "e46c33afa9ca60cfeb3b7452a415c271772020b3f57ac90c496a6127"
+        "network": "Mainnet",
+        "credential": {
+          "AddrKeyHash": "e46c33afa9ca60cfeb3b7452a415c271772020b3f57ac90c496a6127"
         }
       }
     ],
@@ -116,9 +116,9 @@ pub const POINTER_CACHE: [(&str, &str); 1] = [(
         "cert_index": 0
       },
       {
-        "network": "Main",
-        "payload": {
-          "StakeKeyHash": "1332d859dd71f5b1089052a049690d81f7367eac9fafaef80b4da395"
+        "network": "Mainnet",
+        "credential": {
+          "AddrKeyHash": "1332d859dd71f5b1089052a049690d81f7367eac9fafaef80b4da395"
         }
       }
     ],

@@ -1,7 +1,7 @@
 use acropolis_common::{
     messages::{AddressDeltasMessage, StakeAddressDeltasMessage},
     Address, AddressDelta, BlockInfo, Era, ShelleyAddressDelegationPart, ShelleyAddressPointer,
-    StakeAddress, StakeAddressDelta, StakeAddressPayload,
+    StakeAddress, StakeAddressDelta, StakeCredential,
 };
 use anyhow::{anyhow, Result};
 use serde_with::serde_as;
@@ -345,12 +345,12 @@ pub fn process_message(
                     // Base addresses (stake delegated to itself)
                     ShelleyAddressDelegationPart::StakeKeyHash(keyhash) => StakeAddress {
                         network: shelley.network.clone(),
-                        payload: StakeAddressPayload::StakeKeyHash(keyhash.clone()),
+                        credential: StakeCredential::AddrKeyHash(keyhash.clone()),
                     },
 
                     ShelleyAddressDelegationPart::ScriptHash(scripthash) => StakeAddress {
                         network: shelley.network.clone(),
-                        payload: StakeAddressPayload::ScriptHash(scripthash.clone()),
+                        credential: StakeCredential::ScriptHash(scripthash.clone()),
                     },
 
                     // Shelley addresses (stake delegated to some different address)
@@ -404,7 +404,7 @@ mod test {
     use acropolis_common::{
         messages::AddressDeltasMessage, Address, AddressDelta, BlockHash, BlockInfo, BlockStatus,
         ByronAddress, Era, ShelleyAddress, ShelleyAddressDelegationPart, ShelleyAddressPaymentPart,
-        ShelleyAddressPointer, StakeAddress, StakeAddressPayload, UTxOIdentifier, ValueDelta,
+        ShelleyAddressPointer, StakeAddress, StakeCredential, UTxOIdentifier, ValueDelta,
     };
     use bech32::{Bech32, Hrp};
 
@@ -417,13 +417,13 @@ mod test {
         })
     }
 
-    /// Map Pallas Network to our AddressNetwork
-    fn map_network(network: pallas::ledger::addresses::Network) -> Result<AddressNetwork> {
+    /// Map Pallas Network to our NetworkId
+    fn map_network(network: pallas::ledger::addresses::Network) -> Result<NetworkId> {
         use pallas::ledger::addresses::Network;
         match network {
-            Network::Mainnet => Ok(AddressNetwork::Main),
-            Network::Testnet => Ok(AddressNetwork::Test),
-            _ => return Err(anyhow!("Unknown network in address")),
+            Network::Mainnet => Ok(NetworkId::Mainnet),
+            Network::Testnet => Ok(NetworkId::Testnet),
+            _ => Err(anyhow!("Unknown network in address")),
         }
     }
 
@@ -469,12 +469,12 @@ mod test {
 
             addresses::Address::Stake(stake_address) => Ok(Address::Stake(StakeAddress {
                 network: map_network(stake_address.network())?,
-                payload: match stake_address.payload() {
+                credential: match stake_address.payload() {
                     addresses::StakePayload::Stake(hash) => {
-                        StakeAddressPayload::StakeKeyHash(hash.to_vec())
+                        StakeCredential::AddrKeyHash(hash.to_vec())
                     }
                     addresses::StakePayload::Script(hash) => {
-                        StakeAddressPayload::ScriptHash(hash.to_vec())
+                        StakeCredential::ScriptHash(hash.to_vec())
                     }
                 },
             })),
@@ -585,11 +585,11 @@ mod test {
 
         // additional check: payload conversion correctness
         assert_eq!(
-            stake_delta.deltas.get(0).unwrap().address.payload.to_string().unwrap(),
+            stake_delta.deltas.get(0).unwrap().address.credential.to_string().unwrap(),
             stake_key_hash
         );
         assert_eq!(
-            stake_delta.deltas.get(2).unwrap().address.payload.to_string().unwrap(),
+            stake_delta.deltas.get(2).unwrap().address.credential.to_string().unwrap(),
             script_hash
         );
 

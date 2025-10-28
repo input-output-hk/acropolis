@@ -3,6 +3,7 @@
 // We don't use these messages in the acropolis_common crate itself
 #![allow(dead_code)]
 
+use crate::commands::transactions::{TransactionsCommand, TransactionsCommandResponse};
 use crate::genesis_values::GenesisValues;
 use crate::ledger_state::SPOState;
 use crate::protocol_params::{NonceHash, Nonces, ProtocolParams};
@@ -90,7 +91,7 @@ pub struct AssetDeltasMessage {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TxCertificatesMessage {
     /// Ordered set of certificates
-    pub certificates: Vec<TxCertificate>,
+    pub certificates: Vec<TxCertificateWithPos>,
 }
 
 /// Address deltas message
@@ -356,6 +357,10 @@ pub enum Message {
     // State query messages
     StateQuery(StateQuery),
     StateQueryResponse(StateQueryResponse),
+
+    // Commands
+    Command(Command),
+    CommandResponse(CommandResponse),
 }
 
 // Casts from specific Caryatid messages
@@ -427,4 +432,14 @@ pub enum StateQueryResponse {
     Transactions(TransactionsStateQueryResponse),
     UTxOs(UTxOStateQueryResponse),
     SPDD(SPDDStateQueryResponse),
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum Command {
+    Transactions(TransactionsCommand),
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum CommandResponse {
+    Transactions(TransactionsCommandResponse),
 }

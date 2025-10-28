@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{DRepChoice, KeyHash, PoolLiveStakeInfo, StakeAddress};
+use crate::{DRepChoice, KeyHash, PoolId, PoolLiveStakeInfo, StakeAddress, TxIdentifier};
 
 pub const DEFAULT_ACCOUNTS_QUERY_TOPIC: (&str, &str) =
     ("accounts-state-query-topic", "cardano.query.accounts");
@@ -15,10 +15,10 @@ pub enum AccountsStateQuery {
     GetAccountInfo { stake_address: StakeAddress },
     GetAccountRewardHistory { stake_key: Vec<u8> },
     GetAccountHistory { stake_key: Vec<u8> },
-    GetAccountDelegationHistory { stake_key: Vec<u8> },
-    GetAccountRegistrationHistory { stake_key: Vec<u8> },
+    GetAccountRegistrationHistory { account: StakeAddress },
+    GetAccountDelegationHistory { account: StakeAddress },
+    GetAccountMIRHistory { account: StakeAddress },
     GetAccountWithdrawalHistory { stake_key: Vec<u8> },
-    GetAccountMIRHistory { stake_key: Vec<u8> },
     GetAccountAssociatedAddresses { stake_key: Vec<u8> },
     GetAccountAssets { stake_key: Vec<u8> },
     GetAccountAssetsTotals { stake_key: Vec<u8> },
@@ -49,10 +49,10 @@ pub enum AccountsStateQueryResponse {
     AccountInfo(AccountInfo),
     AccountRewardHistory(AccountRewardHistory),
     AccountHistory(AccountHistory),
-    AccountDelegationHistory(AccountDelegationHistory),
-    AccountRegistrationHistory(AccountRegistrationHistory),
+    AccountRegistrationHistory(Vec<RegistrationUpdate>),
+    AccountDelegationHistory(Vec<DelegationUpdate>),
+    AccountMIRHistory(Vec<AccountWithdrawal>),
     AccountWithdrawalHistory(AccountWithdrawalHistory),
-    AccountMIRHistory(AccountMIRHistory),
     AccountAssociatedAddresses(AccountAssociatedAddresses),
     AccountAssets(AccountAssets),
     AccountAssetsTotals(AccountAssetsTotals),
@@ -97,17 +97,52 @@ pub struct AccountRewardHistory {}
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AccountHistory {}
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct AccountDelegationHistory {}
+#[derive(
+    Debug, Clone, serde::Serialize, serde::Deserialize, minicbor::Decode, minicbor::Encode,
+)]
+pub struct DelegationUpdate {
+    #[n(0)]
+    pub active_epoch: u32,
+    #[n(1)]
+    pub tx_identifier: TxIdentifier,
+    #[n(2)]
+    pub amount: u64,
+    #[n(3)]
+    pub pool: PoolId,
+}
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct AccountRegistrationHistory {}
+#[derive(
+    Debug, Clone, serde::Serialize, serde::Deserialize, minicbor::Decode, minicbor::Encode,
+)]
+pub struct RegistrationUpdate {
+    #[n(0)]
+    pub tx_identifier: TxIdentifier,
+    #[n(1)]
+    pub status: RegistrationStatus,
+}
+
+#[derive(
+    Debug, Clone, serde::Serialize, serde::Deserialize, minicbor::Decode, minicbor::Encode,
+)]
+pub enum RegistrationStatus {
+    #[n(0)]
+    Registered,
+    #[n(1)]
+    Deregistered,
+}
+
+#[derive(
+    Debug, Clone, serde::Serialize, serde::Deserialize, minicbor::Decode, minicbor::Encode,
+)]
+pub struct AccountWithdrawal {
+    #[n(0)]
+    pub tx_identifier: TxIdentifier,
+    #[n(1)]
+    pub amount: u64,
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AccountWithdrawalHistory {}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct AccountMIRHistory {}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AccountAssociatedAddresses {}
