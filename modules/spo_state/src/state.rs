@@ -726,7 +726,7 @@ mod tests {
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
         assert_eq!(1, state.spos.len());
         let spo = state.spos.get(&vec![0]);
-        assert!(!spo.is_none());
+        assert!(spo.is_some());
     }
 
     #[tokio::test]
@@ -745,7 +745,7 @@ mod tests {
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
         assert_eq!(1, state.pending_deregistrations.len());
         let drs = state.pending_deregistrations.get(&1);
-        assert!(!drs.is_none());
+        assert!(drs.is_some());
         if let Some(drs) = drs {
             assert_eq!(1, drs.len());
             assert!(drs.contains(&vec![0]));
@@ -781,7 +781,7 @@ mod tests {
 
         assert_eq!(1, state.pending_deregistrations.len());
         let drs = state.pending_deregistrations.get(&2);
-        assert!(!drs.is_none());
+        assert!(drs.is_some());
         if let Some(drs) = drs {
             assert_eq!(2, drs.len());
             assert!(drs.contains(&vec![0u8]));
@@ -829,7 +829,7 @@ mod tests {
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
         assert_eq!(1, state.pending_deregistrations.len());
         let drs = state.pending_deregistrations.get(&2);
-        assert!(!drs.is_none());
+        assert!(drs.is_some());
         if let Some(drs) = drs {
             assert_eq!(1, drs.len());
             assert!(drs.contains(&vec![0]));
@@ -850,7 +850,7 @@ mod tests {
 
         assert_eq!(1, state.spos.len());
         let spo = state.spos.get(&vec![0u8]);
-        assert!(!spo.is_none());
+        assert!(spo.is_some());
 
         block.number = 1;
         let mut msg = new_certs_msg();
@@ -888,7 +888,7 @@ mod tests {
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
         assert_eq!(1, state.spos.len());
         let spo = state.spos.get(&vec![0u8]);
-        assert!(!spo.is_none());
+        assert!(spo.is_some());
         history.lock().await.commit(block.number, state);
 
         let mut state = history.lock().await.get_current_state();
@@ -920,7 +920,7 @@ mod tests {
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
         assert_eq!(1, state.spos.len());
         let spo = state.spos.get(&vec![0]);
-        assert!(!spo.is_none());
+        assert!(spo.is_some());
     }
 
     #[tokio::test]
@@ -967,7 +967,7 @@ mod tests {
     #[test]
     fn get_total_blocks_minted_returns_zeros_when_state_is_new() {
         let state = State::default();
-        assert_eq!(0, state.get_total_blocks_minted_by_pools(&vec![vec![0]])[0]);
+        assert_eq!(0, state.get_total_blocks_minted_by_pools(&[vec![0]])[0]);
         assert_eq!(0, state.get_total_blocks_minted_by_pool(&vec![0]));
     }
 
@@ -976,7 +976,7 @@ mod tests {
         let mut state = State::new(&save_blocks_store_config());
         let mut block = new_block(0);
         let mut msg = new_certs_msg();
-        let spo_id = keyhash_224(&vec![1 as u8]);
+        let spo_id = keyhash_224(&[1_u8]);
         msg.certificates.push(TxCertificateWithPos {
             cert: TxCertificate::PoolRegistration(default_pool_registration(spo_id.clone(), None)),
             tx_identifier: TxIdentifier::default(),
@@ -985,12 +985,12 @@ mod tests {
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
 
         block = new_block(2);
-        assert_eq!(true, state.handle_mint(&block, &vec![1]));
+        assert!(state.handle_mint(&block, &[1]));
         assert_eq!(1, state.get_total_blocks_minted_by_pool(&spo_id));
 
         block = new_block(3);
-        assert_eq!(true, state.handle_mint(&block, &vec![1]));
-        assert_eq!(2, state.get_total_blocks_minted_by_pools(&vec![spo_id])[0]);
+        assert!(state.handle_mint(&block, &[1]));
+        assert_eq!(2, state.get_total_blocks_minted_by_pools(&[spo_id])[0]);
     }
 
     #[test]
@@ -1003,7 +1003,7 @@ mod tests {
     fn handle_mint_returns_false_if_pool_not_found() {
         let mut state = State::new(&save_blocks_store_config());
         let block = new_block(0);
-        assert_eq!(false, state.handle_mint(&block, &vec![0]));
+        assert!(!state.handle_mint(&block, &[0]));
     }
 
     #[test]
@@ -1011,7 +1011,7 @@ mod tests {
         let mut state = State::new(&save_blocks_store_config());
         let mut block = new_block(0);
         let mut msg = new_certs_msg();
-        let spo_id = keyhash_224(&vec![1 as u8]);
+        let spo_id = keyhash_224(&[1_u8]);
         msg.certificates.push(TxCertificateWithPos {
             cert: TxCertificate::PoolRegistration(default_pool_registration(spo_id.clone(), None)),
             tx_identifier: TxIdentifier::default(),
@@ -1019,7 +1019,7 @@ mod tests {
         });
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
         block = new_block(2);
-        assert_eq!(true, state.handle_mint(&block, &vec![1])); // Note raw issuer_vkey
+        assert!(state.handle_mint(&block, &[1])); // Note raw issuer_vkey
         let blocks = state.get_blocks_by_pool(&spo_id).unwrap();
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0], block.number);

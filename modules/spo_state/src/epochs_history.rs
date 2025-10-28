@@ -239,7 +239,7 @@ mod tests {
         epoch_activity_msg.spo_blocks = vec![(vec![11], 1)];
         epoch_activity_msg.total_blocks = 1;
         epoch_activity_msg.total_fees = 10;
-        epochs_history.handle_epoch_activity(&block, &epoch_activity_msg, &vec![(vec![1], 1)]);
+        epochs_history.handle_epoch_activity(&block, &epoch_activity_msg, &[(vec![1], 1)]);
 
         let mut spo_rewards_msg = new_spo_rewards_message(1);
         spo_rewards_msg.spos = vec![(
@@ -253,7 +253,7 @@ mod tests {
 
         let pool_history = epochs_history.get_pool_history(&vec![1]).unwrap();
         assert_eq!(2, pool_history.len());
-        let first_epoch = pool_history.get(0).unwrap();
+        let first_epoch = pool_history.first().unwrap();
         let third_epoch = pool_history.get(1).unwrap();
         assert_eq!(1, first_epoch.epoch);
         assert_eq!(1, first_epoch.blocks_minted);
