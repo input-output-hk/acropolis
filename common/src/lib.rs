@@ -1,7 +1,6 @@
 // Acropolis common library - main library exports
 
 pub mod address;
-pub mod byte_array;
 pub mod calculations;
 pub mod cip19;
 pub mod commands;

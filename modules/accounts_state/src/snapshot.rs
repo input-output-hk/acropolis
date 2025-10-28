@@ -2,8 +2,7 @@
 
 use crate::state::{Pots, RegistrationChange};
 use acropolis_common::{
-    stake_addresses::StakeAddressMap, Lovelace, PoolId, PoolRegistration, Ratio,
-    StakeAddress,
+    stake_addresses::StakeAddressMap, Lovelace, PoolId, PoolRegistration, Ratio, StakeAddress,
 };
 use imbl::OrdMap;
 use std::collections::HashMap;

@@ -5,36 +5,36 @@ use acropolis_common::PoolId;
 use anyhow::Result;
 use fjall::{Config, Keyspace, PartitionCreateOptions};
 
-const POOL_KEY_LENGTH: usize = 28;
+const POOL_ID_LENGTH: usize = 28;
 const STAKE_KEY_LEN: usize = 28;
 const EPOCH_LEN: usize = 8;
-const TOTAL_KEY_LEN: usize = EPOCH_LEN + POOL_KEY_LENGTH + STAKE_KEY_LEN;
+const TOTAL_KEY_LEN: usize = EPOCH_LEN + POOL_ID_LENGTH + STAKE_KEY_LEN;
 
 // Batch size balances commit overhead vs memory usage
 // ~720KB per batch (72 bytes × 10,000)
 // ~130 commits for typical epoch (~1.3M delegations)
 const BATCH_SIZE: usize = 10_000;
 
-fn encode_key(epoch: u64, pool_key: &PoolId, stake_key: &AddrKeyhash) -> Vec<u8> {
+fn encode_key(epoch: u64, pool_id: &PoolId, stake_key: &AddrKeyhash) -> Vec<u8> {
     let mut key = Vec::with_capacity(TOTAL_KEY_LEN);
     key.extend_from_slice(&epoch.to_be_bytes());
-    key.extend_from_slice(pool_key.as_ref());
+    key.extend_from_slice(pool_id.as_ref());
     key.extend_from_slice(stake_key.as_ref());
     key
 }
 
-fn encode_epoch_pool_prefix(epoch: u64, pool_key: &PoolId) -> Vec<u8> {
-    let mut prefix = Vec::with_capacity(EPOCH_LEN + POOL_KEY_LENGTH);
+fn encode_epoch_pool_prefix(epoch: u64, pool_id: &PoolId) -> Vec<u8> {
+    let mut prefix = Vec::with_capacity(EPOCH_LEN + POOL_ID_LENGTH);
     prefix.extend_from_slice(&epoch.to_be_bytes());
-    prefix.extend_from_slice(pool_key.as_ref());
+    prefix.extend_from_slice(pool_id.as_ref());
     prefix
 }
 
 fn decode_key(key: &[u8]) -> Result<(u64, PoolId, AddrKeyhash)> {
     let epoch = u64::from_be_bytes(key[..EPOCH_LEN].try_into()?);
-    let pool_key: PoolId = key[EPOCH_LEN..EPOCH_LEN + POOL_KEY_LENGTH].try_into()?;
-    let stake_key: AddrKeyhash = key[EPOCH_LEN + POOL_KEY_LENGTH..].try_into()?;
-    Ok((epoch, pool_key, stake_key))
+    let pool_id: PoolId = key[EPOCH_LEN..EPOCH_LEN + POOL_ID_LENGTH].try_into()?;
+    let stake_key: AddrKeyhash = key[EPOCH_LEN + POOL_ID_LENGTH..].try_into()?;
+    Ok((epoch, pool_id, stake_key))
 }
 
 /// Encode epoch completion marker key
@@ -45,7 +45,7 @@ fn encode_epoch_marker(epoch: u64) -> Vec<u8> {
 pub struct SPDDStore {
     keyspace: Keyspace,
     /// Partition for all SPDD data
-    /// Key format: epoch(8 bytes) + pool_key + stake_key
+    /// Key format: epoch(8 bytes) + pool_id + stake_key
     /// Value: amount(8 bytes)
     spdd: fjall::PartitionHandle,
     /// Partition for epoch completion markers
@@ -110,9 +110,9 @@ impl SPDDStore {
 
         let mut batch = self.keyspace.batch();
         let mut count = 0;
-        for (pool_key, delegations) in spdd_state {
+        for (pool_id, delegations) in spdd_state {
             for (stake_key, amount) in delegations {
-                let key = encode_key(epoch, &pool_key, &stake_key);
+                let key = encode_key(epoch, &pool_id, &stake_key);
                 let value = amount.to_be_bytes();
                 batch.insert(&self.spdd, key, value);
 
@@ -192,9 +192,9 @@ impl SPDDStore {
         let mut result = Vec::new();
         for item in self.spdd.prefix(prefix) {
             let (key, value) = item?;
-            let (_, pool_key, stake_key) = decode_key(&key)?;
+            let (_, pool_id, stake_key) = decode_key(&key)?;
             let amount = u64::from_be_bytes(value.as_ref().try_into()?);
-            result.push((pool_key, stake_key, amount));
+            result.push((pool_id, stake_key, amount));
         }
         Ok(result)
     }
@@ -202,13 +202,13 @@ impl SPDDStore {
     pub fn query_by_epoch_and_pool(
         &self,
         epoch: u64,
-        pool_key: &PoolId,
+        pool_id: &PoolId,
     ) -> Result<Vec<(AddrKeyhash, u64)>> {
         if !self.is_epoch_complete(epoch)? {
             return Err(anyhow::anyhow!("Epoch SPDD Data is not complete"));
         }
 
-        let prefix = encode_epoch_pool_prefix(epoch, pool_key);
+        let prefix = encode_epoch_pool_prefix(epoch, pool_id);
         let mut result = Vec::new();
         for item in self.spdd.prefix(prefix) {
             let (key, value) = item?;
@@ -224,13 +224,11 @@ impl SPDDStore {
 mod tests {
     use super::*;
     use acropolis_common::crypto::keyhash_224;
-    // ADDED
     use acropolis_common::hash::AddrKeyhash;
     use acropolis_common::PoolId;
 
     const DB_PATH: &str = "spdd_db";
 
-    // ADDED: Helper to create test hashes
     fn test_pool_hash(byte: u8) -> PoolId {
         PoolId::new(keyhash_224(&vec![byte]))
     }

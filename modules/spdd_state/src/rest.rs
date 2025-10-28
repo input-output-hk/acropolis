@@ -1,5 +1,5 @@
 use crate::state::State;
-use acropolis_common::serialization::{Bech32Conversion};
+use acropolis_common::serialization::Bech32Conversion;
 use acropolis_common::DelegatedStake;
 use acropolis_common::{extract_strict_query_params, messages::RESTResponse};
 use anyhow::Result;

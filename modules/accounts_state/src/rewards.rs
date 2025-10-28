@@ -2,8 +2,8 @@
 
 use crate::snapshot::{Snapshot, SnapshotSPO};
 use acropolis_common::{
-    protocol_params::ShelleyParams, rational_number::RationalNumber, Lovelace, PoolId,
-    SPORewards, StakeAddress,
+    protocol_params::ShelleyParams, rational_number::RationalNumber, Lovelace, PoolId, SPORewards,
+    StakeAddress,
 };
 use anyhow::{bail, Result};
 use bigdecimal::{BigDecimal, One, ToPrimitive, Zero};
