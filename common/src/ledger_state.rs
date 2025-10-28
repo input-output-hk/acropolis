@@ -1,4 +1,6 @@
-use crate::{MultiHostName, PoolId, PoolRegistration, Ratio, Relay, SingleHostAddr, SingleHostName};
+use crate::{
+    MultiHostName, PoolId, PoolRegistration, Ratio, Relay, SingleHostAddr, SingleHostName,
+};
 use anyhow::{bail, Context, Result};
 use minicbor::data::Tag;
 use std::{collections::BTreeMap, fs, path::Path};

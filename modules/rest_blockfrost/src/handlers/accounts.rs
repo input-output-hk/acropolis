@@ -4,7 +4,7 @@ use std::sync::Arc;
 use acropolis_common::messages::{Message, RESTResponse, StateQuery, StateQueryResponse};
 use acropolis_common::queries::accounts::{AccountsStateQuery, AccountsStateQueryResponse};
 use acropolis_common::queries::utils::query_state;
-use acropolis_common::serialization::{Bech32Conversion, Bech32WithHrp};
+use acropolis_common::serialization::Bech32Conversion;
 use acropolis_common::{DRepChoice, StakeAddress};
 use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;

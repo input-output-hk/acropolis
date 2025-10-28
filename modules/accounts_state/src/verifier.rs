@@ -166,11 +166,13 @@ impl Verifier {
                     continue;
                 };
 
-                expected_rewards.entry(KeyHash::try_from(spo).unwrap()).or_default().push(RewardDetail {
-                    account: stake_address,
-                    rtype,
-                    amount,
-                });
+                expected_rewards.entry(KeyHash::try_from(spo).unwrap()).or_default().push(
+                    RewardDetail {
+                        account: stake_address,
+                        rtype,
+                        amount,
+                    },
+                );
             }
 
             info!(

@@ -9,7 +9,7 @@ use acropolis_common::{
     },
     protocol_params::ConwayParams,
     BlockInfo, DRepCredential, DelegatedStake, EnactStateElem, Era, GovActionId, GovernanceAction,
-    GovernanceOutcome, GovernanceOutcomeVariant, KeyHash, Lovelace, ProposalProcedure,
+    GovernanceOutcome, GovernanceOutcomeVariant, Lovelace, PoolId, ProposalProcedure,
     SingleVoterVotes, TreasuryWithdrawalsAction, TxHash, Voter, VotesCount, VotingOutcome,
     VotingProcedure,
 };
@@ -32,7 +32,7 @@ pub struct State {
     current_era: Era,
     conway: Option<ConwayParams>,
     drep_stake: HashMap<DRepCredential, Lovelace>,
-    spo_stake: HashMap<KeyHash, DelegatedStake>,
+    spo_stake: HashMap<PoolId, DelegatedStake>,
 
     alonzo_babbage_voting: AlonzoBabbageVoting,
     proposals: HashMap<GovActionId, (u64, ProposalProcedure)>,

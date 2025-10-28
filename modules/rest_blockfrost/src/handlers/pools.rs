@@ -1,17 +1,4 @@
 //! REST handlers for Acropolis Blockfrost /pools endpoints
-use acropolis_common::{messages::{Message, RESTResponse, StateQuery, StateQueryResponse}, queries::{
-    accounts::{AccountsStateQuery, AccountsStateQueryResponse},
-    epochs::{EpochsStateQuery, EpochsStateQueryResponse},
-    pools::{PoolsStateQuery, PoolsStateQueryResponse},
-    utils::query_state,
-}, rest_helper::ToCheckedF64, serialization::Bech32WithHrp, PoolId, PoolRetirement, PoolUpdateAction, StakeCredential, TxHash};
-use anyhow::Result;
-use caryatid_sdk::Context;
-use rust_decimal::Decimal;
-use std::{sync::Arc, time::Duration};
-use tokio::join;
-use tracing::warn;
-use acropolis_common::serialization::Bech32Conversion;
 use crate::{
     handlers_config::HandlersConfig,
     types::{PoolDelegatorRest, PoolInfoRest, PoolRelayRest, PoolUpdateEventRest, PoolVoteRest},
@@ -20,6 +7,24 @@ use crate::{
     types::{PoolEpochStateRest, PoolExtendedRest, PoolMetadataRest, PoolRetirementRest},
     utils::{fetch_pool_metadata_as_bytes, verify_pool_metadata_hash, PoolMetadataJson},
 };
+use acropolis_common::serialization::Bech32Conversion;
+use acropolis_common::{
+    messages::{Message, RESTResponse, StateQuery, StateQueryResponse},
+    queries::{
+        accounts::{AccountsStateQuery, AccountsStateQueryResponse},
+        epochs::{EpochsStateQuery, EpochsStateQueryResponse},
+        pools::{PoolsStateQuery, PoolsStateQueryResponse},
+        utils::query_state,
+    },
+    rest_helper::ToCheckedF64,
+    PoolId, PoolRetirement, PoolUpdateAction, StakeCredential, TxHash,
+};
+use anyhow::Result;
+use caryatid_sdk::Context;
+use rust_decimal::Decimal;
+use std::{sync::Arc, time::Duration};
+use tokio::join;
+use tracing::warn;
 
 /// Handle `/pools` Blockfrost-compatible endpoint
 pub async fn handle_pools_list_blockfrost(
@@ -700,7 +705,7 @@ async fn handle_pools_spo_blockfrost(
     };
     let pool_info_rest: PoolInfoRest = PoolInfoRest {
         pool_id,
-        hex: pool_info.operator,
+        hex: *pool_info.operator,
         vrf_key: pool_info.vrf_key_hash,
         blocks_minted: total_blocks_minted,
         blocks_epoch: epoch_blocks_minted,

@@ -4,11 +4,20 @@ use crate::rewards::{calculate_rewards, RewardsResult};
 use crate::snapshot::Snapshot;
 use crate::verifier::Verifier;
 use acropolis_common::queries::accounts::OptimalPoolSizing;
-use acropolis_common::{math::update_value_with_delta, messages::{
-    DRepDelegationDistribution, DRepStateMessage, EpochActivityMessage, PotDeltasMessage,
-    ProtocolParamsMessage, SPOStateMessage, StakeAddressDeltasMessage, TxCertificatesMessage,
-    WithdrawalsMessage,
-}, protocol_params::ProtocolParams, stake_addresses::{StakeAddressMap, StakeAddressState}, BlockInfo, DRepChoice, DRepCredential, DelegatedStake, InstantaneousRewardSource, InstantaneousRewardTarget, KeyHash, Lovelace, MoveInstantaneousReward, PoolId, PoolLiveStakeInfo, PoolRegistration, Pot, SPORewards, StakeAddress, StakeRewardDelta, TxCertificate};
+use acropolis_common::{
+    math::update_value_with_delta,
+    messages::{
+        DRepDelegationDistribution, DRepStateMessage, EpochActivityMessage, PotDeltasMessage,
+        ProtocolParamsMessage, SPOStateMessage, StakeAddressDeltasMessage, TxCertificatesMessage,
+        WithdrawalsMessage,
+    },
+    protocol_params::ProtocolParams,
+    stake_addresses::{StakeAddressMap, StakeAddressState},
+    BlockInfo, DRepChoice, DRepCredential, DelegatedStake, InstantaneousRewardSource,
+    InstantaneousRewardTarget, KeyHash, Lovelace, MoveInstantaneousReward, PoolId,
+    PoolLiveStakeInfo, PoolRegistration, Pot, SPORewards, StakeAddress, StakeRewardDelta,
+    TxCertificate,
+};
 use anyhow::Result;
 use imbl::OrdMap;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -80,11 +89,11 @@ pub struct RegistrationChange {
 /// Overall state - stored per block
 #[derive(Debug, Default, Clone)]
 pub struct State {
-    /// Map of active SPOs by operator ID
-    spos: OrdMap<KeyHash, PoolRegistration>,
+    /// Map of active SPOs by pool ID
+    spos: OrdMap<PoolId, PoolRegistration>,
 
-    /// List of SPOs (by operator ID) retiring in the current epoch
-    retiring_spos: Vec<KeyHash>,
+    /// List of SPOs (by pool ID) retiring in the current epoch
+    retiring_spos: Vec<PoolId>,
 
     /// Map of staking address values
     /// Wrapped in an Arc so it doesn't get cloned in full by StateHistory
@@ -247,7 +256,7 @@ impl State {
         &mut self,
         epoch: u64,
         total_fees: u64,
-        spo_block_counts: HashMap<KeyHash, usize>,
+        spo_block_counts: HashMap<PoolId, usize>,
         verifier: &Verifier,
     ) -> Result<Vec<StakeRewardDelta>> {
         // TODO HACK! Investigate why this differs to our calculated reserves after AVVM
@@ -589,12 +598,12 @@ impl State {
     /// (both with and without rewards) for each active SPO
     /// And Stake Pool Reward State (rewards and delegators_count for each pool)
     /// Key of returned map is the SPO 'operator' ID
-    pub fn generate_spdd(&self) -> BTreeMap<KeyHash, DelegatedStake> {
+    pub fn generate_spdd(&self) -> BTreeMap<PoolId, DelegatedStake> {
         let stake_addresses = self.stake_addresses.lock().unwrap();
         stake_addresses.generate_spdd()
     }
 
-    pub fn dump_spdd_state(&self) -> HashMap<KeyHash, Vec<(KeyHash, u64)>> {
+    pub fn dump_spdd_state(&self) -> HashMap<PoolId, Vec<(KeyHash, u64)>> {
         let stake_addresses = self.stake_addresses.lock().unwrap();
         stake_addresses.dump_spdd_state()
     }
@@ -631,8 +640,8 @@ impl State {
         &mut self,
         ea_msg: &EpochActivityMessage,
         verifier: &Verifier,
-    ) -> Result<(Vec<(KeyHash, SPORewards)>, Vec<StakeRewardDelta>)> {
-        let mut spo_rewards: Vec<(KeyHash, SPORewards)> = Vec::new();
+    ) -> Result<(Vec<(PoolId, SPORewards)>, Vec<StakeRewardDelta>)> {
+        let mut spo_rewards: Vec<(PoolId, SPORewards)> = Vec::new();
         // Collect stake addresses reward deltas
         let mut reward_deltas = Vec::<StakeRewardDelta>::new();
 
@@ -686,7 +695,7 @@ impl State {
         };
 
         // Map block counts, filtering out SPOs we don't know (OBFT in early Shelley)
-        let spo_blocks: HashMap<KeyHash, usize> = ea_msg
+        let spo_blocks: HashMap<PoolId, usize> = ea_msg
             .spo_blocks
             .iter()
             .filter(|(hash, _)| self.spos.contains_key(hash))
@@ -708,7 +717,7 @@ impl State {
     /// epoch
     pub fn handle_spo_state(&mut self, spo_msg: &SPOStateMessage) -> Result<()> {
         // Capture current SPOs, mapped by operator ID
-        let new_spos: OrdMap<KeyHash, PoolRegistration> =
+        let new_spos: OrdMap<PoolId, PoolRegistration> =
             spo_msg.spos.iter().cloned().map(|spo| (spo.operator.clone(), spo)).collect();
 
         // Get pool deposit amount from parameters, or default
@@ -846,7 +855,7 @@ impl State {
     }
 
     /// Record a stake delegation
-    fn record_stake_delegation(&mut self, stake_address: &StakeAddress, spo: &KeyHash) {
+    fn record_stake_delegation(&mut self, stake_address: &StakeAddress, spo: &PoolId) {
         let mut stake_addresses = self.stake_addresses.lock().unwrap();
         stake_addresses.record_stake_delegation(&stake_address, spo);
     }
@@ -981,29 +990,13 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use acropolis_common::crypto::keyhash_256;
     use acropolis_common::{
-        crypto::keyhash_224, // ADDED: Import keyhash function
-        protocol_params::ConwayParams,
-        rational_number::RationalNumber,
-        Anchor,
-        Committee,
-        Constitution,
-        CostModel,
-        DRepVotingThresholds,
-        NetworkId,
-        PoolVotingThresholds,
-        Pot,
-        PotDelta,
-        Ratio,
-        Registration,
-        StakeAddress,
-        StakeAddressDelta,
-        StakeAndVoteDelegation,
-        StakeCredential,
-        StakeRegistrationAndStakeAndVoteDelegation,
-        StakeRegistrationAndVoteDelegation,
-        VoteDelegation,
-        Withdrawal,
+        crypto::keyhash_224, protocol_params::ConwayParams, rational_number::RationalNumber,
+        Anchor, Committee, Constitution, CostModel, DRepVotingThresholds, NetworkId,
+        PoolVotingThresholds, Pot, PotDelta, Ratio, Registration, StakeAddress, StakeAddressDelta,
+        StakeAndVoteDelegation, StakeCredential, StakeRegistrationAndStakeAndVoteDelegation,
+        StakeRegistrationAndVoteDelegation, VRFKey, VoteDelegation, Withdrawal,
     };
 
     // Helper to create a StakeAddress from a byte slice
@@ -1016,14 +1009,16 @@ mod tests {
         }
     }
 
-    // ADDED: Helper to create KeyHash for testing
     fn test_keyhash(byte: u8) -> KeyHash {
         keyhash_224(&vec![byte])
     }
 
-    // ADDED: Helper to create KeyHash from byte array
     fn test_keyhash_from_bytes(bytes: &[u8]) -> KeyHash {
         keyhash_224(bytes)
+    }
+
+    fn test_vrf_keyhash(byte: u8) -> VRFKey {
+        VRFKey::new(keyhash_256(&vec![byte]))
     }
 
     const STAKE_KEY_HASH: [u8; 3] = [0x99, 0x0f, 0x00];
@@ -1079,8 +1074,11 @@ mod tests {
     fn spdd_from_delegation_with_utxo_values_and_pledge() {
         let mut state = State::default();
 
-        let spo1: KeyHash = test_keyhash(0x01); // CHANGED
-        let spo2: KeyHash = test_keyhash(0x02); // CHANGED
+        let spo1: PoolId = PoolId::new(test_keyhash(0x01));
+        let spo2: PoolId = PoolId::new(test_keyhash(0x02));
+
+        let vrf_key_hash_1 = test_vrf_keyhash(0x03);
+        let vrf_key_hash_2 = test_vrf_keyhash(0x04);
 
         // Create the SPOs
         state
@@ -1089,7 +1087,7 @@ mod tests {
                 spos: vec![
                     PoolRegistration {
                         operator: spo1.clone(),
-                        vrf_key_hash: spo1.clone(),
+                        vrf_key_hash: vrf_key_hash_1,
                         pledge: 26,
                         cost: 0,
                         margin: Ratio {
@@ -1103,7 +1101,7 @@ mod tests {
                     },
                     PoolRegistration {
                         operator: spo2.clone(),
-                        vrf_key_hash: spo2.clone(),
+                        vrf_key_hash: vrf_key_hash_2,
                         pledge: 47,
                         cost: 10,
                         margin: Ratio {
@@ -1392,6 +1390,8 @@ mod tests {
         let drep_key_hash = test_keyhash_from_bytes(&DREP_HASH);
         let drep_script_hash = test_keyhash_from_bytes(&DREP_HASH);
 
+        let pool_id_1 = PoolId::new(*spo1_hash);
+
         let certificates = vec![
             // register the first two SPOs separately from their delegation
             TxCertificate::Registration(Registration {
@@ -1404,12 +1404,12 @@ mod tests {
             }),
             TxCertificate::VoteDelegation(VoteDelegation {
                 stake_address: spo1.clone(),
-                drep: DRepChoice::Key(drep_key_hash.clone()), // CHANGED
+                drep: DRepChoice::Key(drep_key_hash.clone()),
             }),
             TxCertificate::StakeAndVoteDelegation(StakeAndVoteDelegation {
                 stake_address: spo2.clone(),
-                operator: spo1_hash.clone(),
-                drep: DRepChoice::Script(drep_script_hash.clone()), // CHANGED
+                operator: pool_id_1.clone(),
+                drep: DRepChoice::Script(drep_script_hash.clone()),
             }),
             TxCertificate::StakeRegistrationAndVoteDelegation(StakeRegistrationAndVoteDelegation {
                 stake_address: spo3.clone(),
@@ -1419,7 +1419,7 @@ mod tests {
             TxCertificate::StakeRegistrationAndStakeAndVoteDelegation(
                 StakeRegistrationAndStakeAndVoteDelegation {
                     stake_address: spo4.clone(),
-                    operator: spo1_hash.clone(),
+                    operator: pool_id_1.clone(),
                     drep: DRepChoice::NoConfidence,
                     deposit: 1,
                 },

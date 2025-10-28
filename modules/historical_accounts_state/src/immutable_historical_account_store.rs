@@ -155,8 +155,10 @@ impl ImmutableHistoricalAccountStore {
         &self,
         account: &StakeCredential,
     ) -> Result<Option<Vec<RewardHistory>>> {
-        let mut immutable_rewards =
-            self.collect_partition::<RewardHistory>(&self.rewards_history, &account.get_hash().into_inner())?;
+        let mut immutable_rewards = self.collect_partition::<RewardHistory>(
+            &self.rewards_history,
+            &account.get_hash().into_inner(),
+        )?;
 
         self.merge_pending(
             account,
@@ -191,8 +193,10 @@ impl ImmutableHistoricalAccountStore {
         &self,
         account: &StakeCredential,
     ) -> Result<Option<Vec<DelegationUpdate>>> {
-        let mut immutable_delegations = self
-            .collect_partition::<DelegationUpdate>(&self.delegation_history, &account.get_hash().into_inner())?;
+        let mut immutable_delegations = self.collect_partition::<DelegationUpdate>(
+            &self.delegation_history,
+            &account.get_hash().into_inner(),
+        )?;
 
         self.merge_pending(
             account,
@@ -246,8 +250,10 @@ impl ImmutableHistoricalAccountStore {
         &self,
         account: &StakeCredential,
     ) -> Result<Option<Vec<AccountWithdrawal>>> {
-        let mut immutable_mirs =
-            self.collect_partition::<AccountWithdrawal>(&self.mir_history, &account.get_hash().into_inner())?;
+        let mut immutable_mirs = self.collect_partition::<AccountWithdrawal>(
+            &self.mir_history,
+            &account.get_hash().into_inner(),
+        )?;
 
         self.merge_pending(account, |e| e.mir_history.as_ref(), &mut immutable_mirs).await;
 
@@ -258,8 +264,10 @@ impl ImmutableHistoricalAccountStore {
         &self,
         account: &StakeCredential,
     ) -> Result<Option<Vec<ShelleyAddress>>> {
-        let mut immutable_addresses =
-            self.collect_partition::<ShelleyAddress>(&self.addresses, &account.get_hash().into_inner())?;
+        let mut immutable_addresses = self.collect_partition::<ShelleyAddress>(
+            &self.addresses,
+            &account.get_hash().into_inner(),
+        )?;
 
         self.merge_pending(account, |e| e.addresses.as_ref(), &mut immutable_addresses).await;
 

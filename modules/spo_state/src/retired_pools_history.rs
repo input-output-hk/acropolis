@@ -1,6 +1,5 @@
-use acropolis_common::BlockInfo;
-use acropolis_common::KeyHash;
 use acropolis_common::PoolRetirement;
+use acropolis_common::{BlockInfo, PoolId};
 use dashmap::DashMap;
 use std::sync::Arc;
 
@@ -9,7 +8,7 @@ use crate::store_config::StoreConfig;
 #[derive(Debug, Clone)]
 pub struct RetiredPoolsHistoryState {
     /// keyed by epoch
-    retired_pools_history: Option<Arc<DashMap<u64, Vec<KeyHash>>>>,
+    retired_pools_history: Option<Arc<DashMap<u64, Vec<PoolId>>>>,
 }
 
 impl RetiredPoolsHistoryState {
@@ -54,7 +53,7 @@ impl RetiredPoolsHistoryState {
     /// Handle Retired SPOs
     /// Update retired_pools_history with deregistrations
     ///
-    pub fn handle_deregistrations(&self, block: &BlockInfo, retired_spos: &Vec<KeyHash>) {
+    pub fn handle_deregistrations(&self, block: &BlockInfo, retired_spos: &Vec<PoolId>) {
         let Some(retired_pools_history) = self.retired_pools_history.as_ref() else {
             return;
         };
@@ -91,14 +90,16 @@ mod tests {
         let state = RetiredPoolsHistoryState::new(save_retired_pools_store_config());
 
         let block = new_block(2);
-        let retired_spos = vec![vec![1], vec![2]];
+        let spo_1 = PoolId::new(KeyHash::new([1; 28]));
+        let spo_2 = PoolId::new(KeyHash::new([2; 28]));
+        let retired_spos = vec![spo_1, spo_2];
         state.handle_deregistrations(&block, &retired_spos);
 
         let retired_pools = state.get_retired_pools();
         assert_eq!(2, retired_pools.len());
         assert_eq!(2, retired_pools[0].epoch);
         assert_eq!(2, retired_pools[1].epoch);
-        assert_eq!(vec![1], retired_pools[0].operator);
-        assert_eq!(vec![2], retired_pools[1].operator);
+        assert_eq!(spo_1, retired_pools[0].operator);
+        assert_eq!(spo_2, retired_pools[1].operator);
     }
 }

@@ -1,5 +1,5 @@
 use crate::state::State;
-use acropolis_common::serialization::{Bech32Conversion, Bech32WithHrp};
+use acropolis_common::serialization::{Bech32Conversion};
 use acropolis_common::DelegatedStake;
 use acropolis_common::{extract_strict_query_params, messages::RESTResponse};
 use anyhow::Result;
@@ -33,12 +33,7 @@ pub async fn handle_spdd(
     if let Some(spdd) = spdd_opt {
         let spdd: HashMap<String, DelegatedStake> = spdd
             .iter()
-            .map(|(k, v)| {
-                (
-                    k.to_bech32().unwrap_or_else(|_| hex::encode(k)),
-                    *v,
-                )
-            })
+            .map(|(k, v)| (k.to_bech32().unwrap_or_else(|_| hex::encode(k)), *v))
             .collect();
 
         match serde_json::to_string(&spdd) {

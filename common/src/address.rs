@@ -213,20 +213,22 @@ impl ShelleyAddress {
 
             let payment_part = match (header >> 4) & 0x01 {
                 0 => ShelleyAddressPaymentPart::PaymentKeyHash(
-                    data[1..29].try_into().map_err(|_| anyhow!("Invalid payment key hash size"))?
+                    data[1..29].try_into().map_err(|_| anyhow!("Invalid payment key hash size"))?,
                 ),
                 1 => ShelleyAddressPaymentPart::ScriptHash(
-                    data[1..29].try_into().map_err(|_| anyhow!("Invalid script hash size"))?
+                    data[1..29].try_into().map_err(|_| anyhow!("Invalid script hash size"))?,
                 ),
                 _ => panic!(),
             };
 
             let delegation_part = match (header >> 5) & 0x03 {
                 0 => ShelleyAddressDelegationPart::StakeKeyHash(
-                    data[29..57].try_into().map_err(|_| anyhow!("Invalid stake key hash size"))?
+                    data[29..57].try_into().map_err(|_| anyhow!("Invalid stake key hash size"))?,
                 ),
                 1 => ShelleyAddressDelegationPart::ScriptHash(
-                    data[29..57].try_into().map_err(|_| anyhow!("Invalid delegation script hash size"))?
+                    data[29..57]
+                        .try_into()
+                        .map_err(|_| anyhow!("Invalid delegation script hash size"))?,
                 ),
                 2 => {
                     let mut decoder = VarIntDecoder::new(&data[29..]);
@@ -416,8 +418,12 @@ impl StakeAddress {
             };
 
             let credential = match (header >> 4) & 0x0Fu8 {
-                0b1110 => StakeCredential::AddrKeyHash(data[1..].try_into().map_err(|_| anyhow!("Invalid key hash size"))?),
-                0b1111 => StakeCredential::ScriptHash(data[1..].try_into().map_err(|_| anyhow!("Invalid script hash size"))?),
+                0b1110 => StakeCredential::AddrKeyHash(
+                    data[1..].try_into().map_err(|_| anyhow!("Invalid key hash size"))?,
+                ),
+                0b1111 => StakeCredential::ScriptHash(
+                    data[1..].try_into().map_err(|_| anyhow!("Invalid script hash size"))?,
+                ),
                 _ => return Err(anyhow!("Unknown header {header} in stake address")),
             };
 
@@ -447,7 +453,6 @@ impl StakeAddress {
         data.try_into().map_err(|_| anyhow!("Invalid hash size for stake address"))
     }
 
-
     /// Read from binary format (29 bytes)
     pub fn from_binary(data: &[u8]) -> Result<Self> {
         if data.len() != 29 {
@@ -460,8 +465,12 @@ impl StakeAddress {
         };
 
         let credential = match (data[0] >> 4) & 0x0F {
-            0b1110 => StakeCredential::AddrKeyHash(data[1..].try_into().map_err(|_| anyhow!("Invalid key hash size"))?),
-            0b1111 => StakeCredential::ScriptHash(data[1..].try_into().map_err(|_| anyhow!("Invalid script hash size"))?),
+            0b1110 => StakeCredential::AddrKeyHash(
+                data[1..].try_into().map_err(|_| anyhow!("Invalid key hash size"))?,
+            ),
+            0b1111 => StakeCredential::ScriptHash(
+                data[1..].try_into().map_err(|_| anyhow!("Invalid script hash size"))?,
+            ),
             _ => bail!("Unknown header byte {:x} in stake address", data[0]),
         };
 
@@ -502,7 +511,9 @@ impl<C> minicbor::Encode<C> for StakeAddress {
         e: &mut minicbor::Encoder<W>,
         _ctx: &mut C,
     ) -> Result<(), minicbor::encode::Error<W::Error>> {
-        let data = self.to_binary().map_err(|_| minicbor::encode::Error::message("Failed to convert to binary"))?;
+        let data = self
+            .to_binary()
+            .map_err(|_| minicbor::encode::Error::message("Failed to convert to binary"))?;
         e.bytes(&data.as_slice())?;
         Ok(())
     }
@@ -822,7 +833,7 @@ mod tests {
     fn shelley_type_14() {
         let address = Address::Stake(StakeAddress {
             network: NetworkId::Mainnet,
-            credential: StakeCredential::AddrKeyHash(KeyHash::from(test_stake_key_hash()))
+            credential: StakeCredential::AddrKeyHash(KeyHash::from(test_stake_key_hash())),
         });
 
         let text = address.to_string().unwrap();

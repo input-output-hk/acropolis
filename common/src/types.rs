@@ -3,7 +3,12 @@
 #![allow(dead_code)]
 
 use crate::hash::{AddrKeyhash, Hash, ScriptHash};
-use crate::{address::{Address, ShelleyAddress, StakeAddress}, declare_hash_newtype_with_bech32, declare_hash_type, declare_hash_type_with_bech32, protocol_params, rational_number::RationalNumber};
+use crate::{
+    address::{Address, ShelleyAddress, StakeAddress},
+    declare_hash_newtype_with_bech32, declare_hash_type, declare_hash_type_with_bech32,
+    protocol_params,
+    rational_number::RationalNumber,
+};
 use anyhow::{anyhow, bail, Error, Result};
 use bech32::{Bech32, Hrp};
 use bitmask_enum::bitmask;
@@ -834,7 +839,7 @@ pub struct PoolRegistration {
     /// Operator pool key hash - used as ID
     #[serde_as(as = "Hex")]
     #[n(0)]
-    pub operator: KeyHash,
+    pub operator: PoolId,
 
     /// VRF key hash
     #[serde_as(as = "Hex")]
@@ -1064,7 +1069,7 @@ pub struct StakeAndVoteDelegation {
     pub stake_address: StakeAddress,
 
     /// Pool
-    pub operator: KeyHash,
+    pub operator: PoolId,
 
     // DRep vote
     pub drep: DRepChoice,
@@ -1077,7 +1082,7 @@ pub struct StakeRegistrationAndDelegation {
     pub stake_address: StakeAddress,
 
     /// Pool
-    pub operator: KeyHash,
+    pub operator: PoolId,
 
     // Deposit paid
     pub deposit: Lovelace,
@@ -1105,7 +1110,7 @@ pub struct StakeRegistrationAndStakeAndVoteDelegation {
     pub stake_address: StakeAddress,
 
     /// Pool
-    pub operator: KeyHash,
+    pub operator: PoolId,
 
     /// DRep choice
     pub drep: DRepChoice,
@@ -1654,7 +1659,7 @@ pub enum Voter {
     ConstitutionalCommitteeScript(ScriptHash),
     DRepKey(AddrKeyhash),
     DRepScript(ScriptHash),
-    StakePoolKey(AddrKeyhash),
+    StakePoolKey(PoolId),
 }
 
 impl Voter {
@@ -2010,7 +2015,7 @@ mod tests {
         let mut test_hash_bytes = [0u8; 28];
         test_hash_bytes[0..4].copy_from_slice(&[1, 2, 3, 4]);
         voting.votes.insert(
-            Voter::StakePoolKey(Hash::new(test_hash_bytes)),
+            Voter::StakePoolKey(PoolId::new(Hash::new(test_hash_bytes))),
             SingleVoterVotes::default(),
         );
 
@@ -2024,7 +2029,7 @@ mod tests {
             },
         );
         voting.votes.insert(
-            Voter::StakePoolKey(Hash::new(test_hash_bytes)),
+            Voter::StakePoolKey(PoolId::new(Hash::new(test_hash_bytes))),
             SingleVoterVotes::default(),
         );
         println!("Json: {}", serde_json::to_string(&voting)?);

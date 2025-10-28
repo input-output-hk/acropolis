@@ -1,13 +1,6 @@
 //! Acropolis epoch activity counter: state storage
 
-use acropolis_common::{
-    crypto::keyhash_224,
-    genesis_values::GenesisValues,
-    messages::{BlockTxsMessage, EpochActivityMessage, ProtocolParamsMessage},
-    params::EPOCH_LENGTH,
-    protocol_params::{Nonces, PraosParams},
-    BlockHash, BlockInfo, KeyHash,
-};
+use acropolis_common::{crypto::keyhash_224, genesis_values::GenesisValues, messages::{BlockTxsMessage, EpochActivityMessage, ProtocolParamsMessage}, params::EPOCH_LENGTH, protocol_params::{Nonces, PraosParams}, BlockHash, BlockInfo, PoolId};
 use anyhow::Result;
 use imbl::HashMap;
 use pallas::ledger::traverse::MultiEraHeader;
@@ -39,8 +32,8 @@ pub struct State {
     // last block height
     last_block_height: u64,
 
-    // Map of counts by VRF key hashes
-    blocks_minted: HashMap<KeyHash, usize>,
+    // Map of counts by Pool ID
+    blocks_minted: HashMap<PoolId, usize>,
 
     // blocks seen this epoch
     epoch_blocks: usize,
@@ -188,7 +181,7 @@ impl State {
         self.last_block_time = block_info.timestamp;
         self.last_block_height = block_info.number;
         self.epoch_blocks += 1;
-        let spo_id = keyhash_224(issuer_vkey);
+        let spo_id = PoolId::new(keyhash_224(issuer_vkey));
 
         // Count one on this hash
         *(self.blocks_minted.entry(spo_id.clone()).or_insert(0)) += 1;
@@ -255,7 +248,7 @@ impl State {
         }
     }
 
-    pub fn get_latest_epoch_blocks_minted_by_pool(&self, spo_id: &KeyHash) -> u64 {
+    pub fn get_latest_epoch_blocks_minted_by_pool(&self, spo_id: &PoolId) -> u64 {
         self.blocks_minted.get(spo_id).map(|v| *v as u64).unwrap_or(0)
     }
 }

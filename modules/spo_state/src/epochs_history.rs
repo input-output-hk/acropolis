@@ -2,9 +2,9 @@ use acropolis_common::messages::EpochActivityMessage;
 use acropolis_common::messages::SPORewardsMessage;
 use acropolis_common::messages::SPOStakeDistributionMessage;
 use acropolis_common::rational_number::RationalNumber;
-use acropolis_common::BlockInfo;
 use acropolis_common::KeyHash;
 use acropolis_common::PoolEpochState;
+use acropolis_common::{BlockInfo, PoolId};
 use dashmap::DashMap;
 use rayon::prelude::*;
 use std::collections::BTreeMap;
@@ -100,7 +100,7 @@ impl EpochsHistoryState {
     /// Return None if any of pool operators active stake is None
     pub fn get_pools_active_stakes(
         &self,
-        pool_operators: &Vec<KeyHash>,
+        pool_operators: &Vec<PoolId>,
         epoch: u64,
     ) -> Option<Vec<u64>> {
         let Some(epochs_history) = self.epochs_history.as_ref() else {
@@ -169,7 +169,7 @@ impl EpochsHistoryState {
         &self,
         _block: &BlockInfo,
         epoch_activity_message: &EpochActivityMessage,
-        spos: &Vec<(KeyHash, usize)>,
+        spos: &Vec<(PoolId, usize)>,
     ) {
         let Some(epochs_history) = self.epochs_history.as_ref() else {
             return;
@@ -225,7 +225,7 @@ mod tests {
     #[test]
     fn get_pool_history_returns_data() {
         let epochs_history = EpochsHistoryState::new(save_history_store_config());
-        let key_hash = KeyHash::new([1; 28]);
+        let key_hash: PoolId = PoolId::new(KeyHash::new([1; 28]));
         let spo_block_key_hash = KeyHash::new([2; 28]);
 
         let block = new_block(2);

@@ -2,8 +2,8 @@
 
 use crate::snapshot::{Snapshot, SnapshotSPO};
 use acropolis_common::{
-    protocol_params::ShelleyParams, rational_number::RationalNumber, KeyHash, Lovelace, SPORewards,
-    StakeAddress,
+    protocol_params::ShelleyParams, rational_number::RationalNumber, Lovelace, PoolId,
+    SPORewards, StakeAddress,
 };
 use anyhow::{bail, Result};
 use bigdecimal::{BigDecimal, One, ToPrimitive, Zero};
@@ -43,10 +43,10 @@ pub struct RewardsResult {
     pub total_paid: u64,
 
     /// Rewards to be paid
-    pub rewards: BTreeMap<KeyHash, Vec<RewardDetail>>,
+    pub rewards: BTreeMap<PoolId, Vec<RewardDetail>>,
 
     /// SPO rewards
-    pub spo_rewards: Vec<(KeyHash, SPORewards)>,
+    pub spo_rewards: Vec<(PoolId, SPORewards)>,
 }
 
 /// Calculate rewards for a given epoch based on current rewards state and protocol parameters
@@ -221,7 +221,7 @@ pub fn calculate_rewards(
 
 /// Calculate rewards for an individual SPO
 fn calculate_spo_rewards(
-    operator_id: &KeyHash,
+    operator_id: &PoolId,
     spo: &SnapshotSPO,
     blocks_produced: u64,
     total_blocks: usize,

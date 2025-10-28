@@ -18,7 +18,6 @@ use acropolis_common::{
     rational_number::RationalNumber,
     *,
 };
-use pallas_primitives::Bytes;
 use std::collections::{HashMap, HashSet};
 
 /// Map Pallas Network to our NetworkId
@@ -32,15 +31,13 @@ pub fn map_network(network: addresses::Network) -> Result<NetworkId> {
 
 /// Convert from Pallas Hash to Acropolis Hash
 pub fn pallas_hash_to_acropolis<const N: usize>(
-    pallas_hash: &pallas_primitives::Hash<N>
+    pallas_hash: &pallas_primitives::Hash<N>,
 ) -> Hash<N> {
     Hash::new(**pallas_hash)
 }
 
 /// Convert from Acropolis Hash to Pallas Hash
-pub fn acropolis_hash_to_pallas<const N: usize>(
-    our_hash: &Hash<N>
-) -> pallas_primitives::Hash<N> {
+pub fn acropolis_hash_to_pallas<const N: usize>(our_hash: &Hash<N>) -> pallas_primitives::Hash<N> {
     pallas_primitives::Hash::new(**our_hash)
 }
 
@@ -127,7 +124,9 @@ pub fn map_stake_address(cred: &PallasStakeCredential, network_id: NetworkId) ->
 pub fn map_drep(drep: &conway::DRep) -> DRepChoice {
     match drep {
         conway::DRep::Key(key_hash) => DRepChoice::Key(pallas_hash_to_acropolis(key_hash)),
-        conway::DRep::Script(script_hash) => DRepChoice::Script(pallas_hash_to_acropolis(script_hash)),
+        conway::DRep::Script(script_hash) => {
+            DRepChoice::Script(pallas_hash_to_acropolis(script_hash))
+        }
         conway::DRep::Abstain => DRepChoice::Abstain,
         conway::DRep::NoConfidence => DRepChoice::NoConfidence,
     }
