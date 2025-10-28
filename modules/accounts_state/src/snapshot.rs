@@ -196,7 +196,7 @@ mod tests {
         hash[0] = id;
         StakeAddress {
             network: Mainnet,
-            credential: StakeCredential::AddrKeyHash(hash.try_into().expect("Invalid hash length")),
+            credential: StakeCredential::AddrKeyHash(hash),
         }
     }
 
