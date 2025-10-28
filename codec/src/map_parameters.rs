@@ -381,7 +381,7 @@ pub fn map_certificate(
                         // reward account (e1).  Feels like this should have been
                         // a validation failure, but clearly wasn't!
                         reward_account: StakeAddress::new(
-                            StakeAddress::from_binary(reward_account)?.payload,
+                            StakeAddress::from_binary(reward_account)?.credential,
                             network_id.clone(),
                         ),
                         pool_owners: pool_owners
