@@ -257,7 +257,7 @@ impl State {
             return Ok(());
         };
 
-        let cfg = self.config.clone();
+        let cfg = self.config;
         for (tx_hash, voting_procedures) in voting_procedures {
             for (voter, single_votes) in &voting_procedures.votes {
                 let drep_cred = match voter {
@@ -272,9 +272,9 @@ impl State {
 
                 let votes = entry.votes.as_mut().unwrap();
 
-                for (_, vp) in &single_votes.voting_procedures {
+                for vp in single_votes.voting_procedures.values() {
                     votes.push(VoteRecord {
-                        tx_hash: tx_hash.clone(),
+                        tx_hash: *tx_hash,
                         vote_index: vp.vote_index,
                         vote: vp.vote.clone(),
                     });
@@ -455,7 +455,7 @@ impl State {
         };
 
         if create_if_missing {
-            let cfg = self.config.clone();
+            let cfg = self.config;
             let entry = hist
                 .entry(credential.clone())
                 .or_insert_with(|| HistoricalDRepState::from_config(&cfg));
