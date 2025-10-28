@@ -1,23 +1,17 @@
 //! REST handlers for Acropolis Blockfrost /pools endpoints
-use acropolis_common::{
-    messages::{Message, RESTResponse, StateQuery, StateQueryResponse},
-    queries::{
-        accounts::{AccountsStateQuery, AccountsStateQueryResponse},
-        epochs::{EpochsStateQuery, EpochsStateQueryResponse},
-        pools::{PoolsStateQuery, PoolsStateQueryResponse},
-        utils::query_state,
-    },
-    rest_helper::ToCheckedF64,
-    serialization::Bech32WithHrp,
-    PoolRetirement, PoolUpdateAction, StakeCredential, TxHash,
-};
+use acropolis_common::{messages::{Message, RESTResponse, StateQuery, StateQueryResponse}, queries::{
+    accounts::{AccountsStateQuery, AccountsStateQueryResponse},
+    epochs::{EpochsStateQuery, EpochsStateQueryResponse},
+    pools::{PoolsStateQuery, PoolsStateQueryResponse},
+    utils::query_state,
+}, rest_helper::ToCheckedF64, serialization::Bech32WithHrp, PoolId, PoolRetirement, PoolUpdateAction, StakeCredential, TxHash};
 use anyhow::Result;
 use caryatid_sdk::Context;
 use rust_decimal::Decimal;
 use std::{sync::Arc, time::Duration};
 use tokio::join;
 use tracing::warn;
-
+use acropolis_common::serialization::Bech32Conversion;
 use crate::{
     handlers_config::HandlersConfig,
     types::{PoolDelegatorRest, PoolInfoRest, PoolRelayRest, PoolUpdateEventRest, PoolVoteRest},
@@ -63,7 +57,7 @@ pub async fn handle_pools_list_blockfrost(
 
     let pool_ids = pool_operators
         .iter()
-        .map(|operator| operator.to_bech32_with_hrp("pool"))
+        .map(|operator| operator.to_bech32())
         .collect::<Result<Vec<String>, _>>();
 
     match pool_ids {
@@ -102,7 +96,7 @@ pub async fn handle_pools_extended_retired_retiring_single_blockfrost(
         "retiring" => {
             return handle_pools_retiring_blockfrost(context.clone(), handlers_config.clone()).await
         }
-        _ => match Vec::<u8>::from_bech32_with_hrp(param, "pool") {
+        _ => match PoolId::from_bech32(param) {
             Ok(pool_id) => {
                 return handle_pools_spo_blockfrost(
                     context.clone(),
@@ -205,7 +199,7 @@ async fn handle_pools_extended_blockfrost(
     let latest_epoch = latest_epoch_info.epoch;
     let optimal_pool_sizing = optimal_pool_sizing?;
 
-    // if pools are empty, return empty list
+    // if pools are empty, return an empty list
     if pools_list_with_info.is_empty() {
         return Ok(RESTResponse::with_json(200, "[]"));
     }
@@ -222,7 +216,7 @@ async fn handle_pools_extended_blockfrost(
         .map(|(pool_operator, _)| pool_operator.clone())
         .collect::<Vec<_>>();
 
-    // Get active stake for each pool from spo-state
+    // Get an active stake for each pool from spo-state
     let pools_active_stakes_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
         PoolsStateQuery::GetPoolsActiveStakes {
             pools_operators: pools_operators.clone(),
@@ -311,8 +305,8 @@ async fn handle_pools_extended_blockfrost(
             .enumerate()
             .map(|(i, (pool_operator, pool_registration))| {
                 Ok(PoolExtendedRest {
-                    pool_id: pool_operator.to_bech32_with_hrp("pool")?,
-                    hex: pool_operator.clone(),
+                    pool_id: pool_operator.to_bech32()?,
+                    hex: pool_operator.to_vec(),
                     active_stake: pools_active_stakes
                         .as_ref()
                         .map(|active_stakes| active_stakes[i]),
@@ -372,7 +366,7 @@ async fn handle_pools_retired_blockfrost(
     let retired_pools_rest = retired_pools
         .iter()
         .filter_map(|PoolRetirement { operator, epoch }| {
-            let pool_id = operator.to_bech32_with_hrp("pool").ok()?;
+            let pool_id = operator.to_bech32().ok()?;
             Some(PoolRetirementRest {
                 pool_id,
                 epoch: *epoch,
@@ -418,7 +412,7 @@ async fn handle_pools_retiring_blockfrost(
     let retiring_pools_rest = retiring_pools
         .iter()
         .filter_map(|PoolRetirement { operator, epoch }| {
-            let pool_id = operator.to_bech32_with_hrp("pool").ok()?;
+            let pool_id = operator.to_bech32().ok()?;
             Some(PoolRetirementRest {
                 pool_id,
                 epoch: *epoch,
@@ -437,7 +431,7 @@ async fn handle_pools_retiring_blockfrost(
 
 async fn handle_pools_spo_blockfrost(
     context: Arc<Context<Message>>,
-    pool_operator: Vec<u8>,
+    pool_operator: PoolId,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
     // Get PoolRegistration from spo state
@@ -691,7 +685,7 @@ async fn handle_pools_spo_blockfrost(
     let active_stakes_info = active_stakes_info?;
     let live_pledge = live_pledge?;
 
-    let pool_id = pool_info.operator.to_bech32_with_hrp("pool").unwrap();
+    let pool_id = pool_info.operator.to_bech32()?;
     let reward_account = pool_info.reward_account.get_credential().to_stake_bech32();
     let Ok(reward_account) = reward_account else {
         return Ok(RESTResponse::with_text(404, "Invalid Reward Account"));
@@ -749,7 +743,7 @@ pub async fn handle_pool_history_blockfrost(
         return Ok(RESTResponse::with_text(400, "Missing pool ID parameter"));
     };
 
-    let Ok(spo) = Vec::<u8>::from_bech32_with_hrp(pool_id, "pool") else {
+    let Ok(spo) = PoolId::from_bech32(pool_id) else {
         return Ok(RESTResponse::with_text(
             400,
             &format!("Invalid Bech32 stake pool ID: {pool_id}"),
@@ -823,7 +817,7 @@ pub async fn handle_pool_metadata_blockfrost(
         return Ok(RESTResponse::with_text(400, "Missing pool ID parameter"));
     };
 
-    let Ok(spo) = Vec::<u8>::from_bech32_with_hrp(pool_id, "pool") else {
+    let Ok(spo) = PoolId::from_bech32(pool_id) else {
         return Ok(RESTResponse::with_text(
             400,
             &format!("Invalid Bech32 stake pool ID: {pool_id}"),
@@ -904,7 +898,7 @@ pub async fn handle_pool_relays_blockfrost(
         return Ok(RESTResponse::with_text(400, "Missing pool ID parameter"));
     };
 
-    let Ok(spo) = Vec::<u8>::from_bech32_with_hrp(pool_id, "pool") else {
+    let Ok(spo) = PoolId::from_bech32(pool_id) else {
         return Ok(RESTResponse::with_text(
             400,
             &format!("Invalid Bech32 stake pool ID: {pool_id}"),
@@ -958,7 +952,7 @@ pub async fn handle_pool_delegators_blockfrost(
         return Ok(RESTResponse::with_text(400, "Missing pool ID parameter"));
     };
 
-    let Ok(spo) = Vec::<u8>::from_bech32_with_hrp(pool_id, "pool") else {
+    let Ok(spo) = PoolId::from_bech32(pool_id) else {
         return Ok(RESTResponse::with_text(
             400,
             &format!("Invalid Bech32 stake pool ID: {pool_id}"),
@@ -1055,7 +1049,7 @@ pub async fn handle_pool_blocks_blockfrost(
         return Ok(RESTResponse::with_text(400, "Missing pool ID parameter"));
     };
 
-    let Ok(spo) = Vec::<u8>::from_bech32_with_hrp(pool_id, "pool") else {
+    let Ok(spo) = PoolId::from_bech32(pool_id) else {
         return Ok(RESTResponse::with_text(
             400,
             &format!("Invalid Bech32 stake pool ID: {pool_id}"),
@@ -1107,7 +1101,7 @@ pub async fn handle_pool_updates_blockfrost(
         return Ok(RESTResponse::with_text(400, "Missing pool ID parameter"));
     };
 
-    let Ok(spo) = Vec::<u8>::from_bech32_with_hrp(pool_id, "pool") else {
+    let Ok(spo) = PoolId::from_bech32(pool_id) else {
         return Ok(RESTResponse::with_text(
             400,
             &format!("Invalid Bech32 stake pool ID: {pool_id}"),
@@ -1167,7 +1161,7 @@ pub async fn handle_pool_votes_blockfrost(
         return Ok(RESTResponse::with_text(400, "Missing pool ID parameter"));
     };
 
-    let Ok(spo) = Vec::<u8>::from_bech32_with_hrp(pool_id, "pool") else {
+    let Ok(spo) = PoolId::from_bech32(pool_id) else {
         return Ok(RESTResponse::with_text(
             400,
             &format!("Invalid Bech32 stake pool ID: {pool_id}"),

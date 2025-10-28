@@ -83,7 +83,7 @@ pub async fn handle_single_account_blockfrost(
     .await?;
 
     let delegated_spo = match &account.delegated_spo {
-        Some(spo) => match spo.to_bech32_with_hrp("pool") {
+        Some(spo) => match spo.to_bech32() {
             Ok(val) => Some(val),
             Err(e) => {
                 return Ok(RESTResponse::with_text(

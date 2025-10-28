@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use acropolis_common::hash::AddrKeyhash;
-use acropolis_common::PoolKeyHash;
+use acropolis_common::PoolId;
 use anyhow::Result;
 use fjall::{Config, Keyspace, PartitionCreateOptions};
 
@@ -15,7 +15,7 @@ const TOTAL_KEY_LEN: usize = EPOCH_LEN + POOL_KEY_LENGTH + STAKE_KEY_LEN;
 // ~130 commits for typical epoch (~1.3M delegations)
 const BATCH_SIZE: usize = 10_000;
 
-fn encode_key(epoch: u64, pool_key: &PoolKeyHash, stake_key: &AddrKeyhash) -> Vec<u8> {
+fn encode_key(epoch: u64, pool_key: &PoolId, stake_key: &AddrKeyhash) -> Vec<u8> {
     let mut key = Vec::with_capacity(TOTAL_KEY_LEN);
     key.extend_from_slice(&epoch.to_be_bytes());
     key.extend_from_slice(pool_key.as_ref());
@@ -23,16 +23,16 @@ fn encode_key(epoch: u64, pool_key: &PoolKeyHash, stake_key: &AddrKeyhash) -> Ve
     key
 }
 
-fn encode_epoch_pool_prefix(epoch: u64, pool_key: &PoolKeyHash) -> Vec<u8> {
+fn encode_epoch_pool_prefix(epoch: u64, pool_key: &PoolId) -> Vec<u8> {
     let mut prefix = Vec::with_capacity(EPOCH_LEN + POOL_KEY_LENGTH);
     prefix.extend_from_slice(&epoch.to_be_bytes());
     prefix.extend_from_slice(pool_key.as_ref());
     prefix
 }
 
-fn decode_key(key: &[u8]) -> Result<(u64, PoolKeyHash, AddrKeyhash)> {
+fn decode_key(key: &[u8]) -> Result<(u64, PoolId, AddrKeyhash)> {
     let epoch = u64::from_be_bytes(key[..EPOCH_LEN].try_into()?);
-    let pool_key: PoolKeyHash = key[EPOCH_LEN..EPOCH_LEN + POOL_KEY_LENGTH].try_into()?;
+    let pool_key: PoolId = key[EPOCH_LEN..EPOCH_LEN + POOL_KEY_LENGTH].try_into()?;
     let stake_key: AddrKeyhash = key[EPOCH_LEN + POOL_KEY_LENGTH..].try_into()?;
     Ok((epoch, pool_key, stake_key))
 }
@@ -101,7 +101,7 @@ impl SPDDStore {
     pub fn store_spdd(
         &mut self,
         epoch: u64,
-        spdd_state: HashMap<PoolKeyHash, Vec<(AddrKeyhash, u64)>>,
+        spdd_state: HashMap<PoolId, Vec<(AddrKeyhash, u64)>>,
     ) -> fjall::Result<()> {
         if self.is_epoch_complete(epoch)? {
             return Ok(());
@@ -183,7 +183,7 @@ impl SPDDStore {
         Ok(deleted_epochs)
     }
 
-    pub fn query_by_epoch(&self, epoch: u64) -> Result<Vec<(PoolKeyHash, AddrKeyhash, u64)>> {
+    pub fn query_by_epoch(&self, epoch: u64) -> Result<Vec<(PoolId, AddrKeyhash, u64)>> {
         if !self.is_epoch_complete(epoch)? {
             return Err(anyhow::anyhow!("Epoch SPDD Data is not complete"));
         }
@@ -202,7 +202,7 @@ impl SPDDStore {
     pub fn query_by_epoch_and_pool(
         &self,
         epoch: u64,
-        pool_key: &PoolKeyHash,
+        pool_key: &PoolId,
     ) -> Result<Vec<(AddrKeyhash, u64)>> {
         if !self.is_epoch_complete(epoch)? {
             return Err(anyhow::anyhow!("Epoch SPDD Data is not complete"));
@@ -226,12 +226,13 @@ mod tests {
     use acropolis_common::crypto::keyhash_224;
     // ADDED
     use acropolis_common::hash::AddrKeyhash;
+    use acropolis_common::PoolId;
 
     const DB_PATH: &str = "spdd_db";
 
     // ADDED: Helper to create test hashes
-    fn test_pool_hash(byte: u8) -> PoolKeyHash {
-        keyhash_224(&vec![byte])
+    fn test_pool_hash(byte: u8) -> PoolId {
+        PoolId::new(keyhash_224(&vec![byte]))
     }
 
     fn test_addr_hash(byte: u8) -> AddrKeyhash {
@@ -242,7 +243,7 @@ mod tests {
     fn test_store_spdd_state() {
         let mut spdd_store =
             SPDDStore::new(std::path::Path::new(DB_PATH), 1).expect("Failed to create SPDD store");
-        let mut spdd_state: HashMap<PoolKeyHash, Vec<(AddrKeyhash, u64)>> = HashMap::new();
+        let mut spdd_state: HashMap<PoolId, Vec<(AddrKeyhash, u64)>> = HashMap::new();
 
         spdd_state.insert(
             test_pool_hash(0x01),
@@ -269,7 +270,7 @@ mod tests {
             .expect("Failed to create SPDD store");
 
         for epoch in 1..=3 {
-            let mut spdd_state: HashMap<PoolKeyHash, Vec<(AddrKeyhash, u64)>> = HashMap::new();
+            let mut spdd_state: HashMap<PoolId, Vec<(AddrKeyhash, u64)>> = HashMap::new();
 
             spdd_state.insert(
                 test_pool_hash(epoch as u8),

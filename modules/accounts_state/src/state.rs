@@ -4,19 +4,11 @@ use crate::rewards::{calculate_rewards, RewardsResult};
 use crate::snapshot::Snapshot;
 use crate::verifier::Verifier;
 use acropolis_common::queries::accounts::OptimalPoolSizing;
-use acropolis_common::{
-    math::update_value_with_delta,
-    messages::{
-        DRepDelegationDistribution, DRepStateMessage, EpochActivityMessage, PotDeltasMessage,
-        ProtocolParamsMessage, SPOStateMessage, StakeAddressDeltasMessage, TxCertificatesMessage,
-        WithdrawalsMessage,
-    },
-    protocol_params::ProtocolParams,
-    stake_addresses::{StakeAddressMap, StakeAddressState},
-    BlockInfo, DRepChoice, DRepCredential, DelegatedStake, InstantaneousRewardSource,
-    InstantaneousRewardTarget, KeyHash, Lovelace, MoveInstantaneousReward, PoolLiveStakeInfo,
-    PoolRegistration, Pot, SPORewards, StakeAddress, StakeRewardDelta, TxCertificate,
-};
+use acropolis_common::{math::update_value_with_delta, messages::{
+    DRepDelegationDistribution, DRepStateMessage, EpochActivityMessage, PotDeltasMessage,
+    ProtocolParamsMessage, SPOStateMessage, StakeAddressDeltasMessage, TxCertificatesMessage,
+    WithdrawalsMessage,
+}, protocol_params::ProtocolParams, stake_addresses::{StakeAddressMap, StakeAddressState}, BlockInfo, DRepChoice, DRepCredential, DelegatedStake, InstantaneousRewardSource, InstantaneousRewardTarget, KeyHash, Lovelace, MoveInstantaneousReward, PoolId, PoolLiveStakeInfo, PoolRegistration, Pot, SPORewards, StakeAddress, StakeRewardDelta, TxCertificate};
 use anyhow::Result;
 use imbl::OrdMap;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -164,17 +156,17 @@ impl State {
     }
 
     /// Get Pool Live Stake Info
-    pub fn get_pool_live_stake_info(&self, pool_operator: &KeyHash) -> PoolLiveStakeInfo {
+    pub fn get_pool_live_stake_info(&self, pool_operator: &PoolId) -> PoolLiveStakeInfo {
         self.stake_addresses.lock().unwrap().get_pool_live_stake_info(pool_operator)
     }
 
     /// Get Pools Live stake
-    pub fn get_pools_live_stakes(&self, pool_operators: &Vec<KeyHash>) -> Vec<u64> {
+    pub fn get_pools_live_stakes(&self, pool_operators: &Vec<PoolId>) -> Vec<u64> {
         self.stake_addresses.lock().unwrap().get_pools_live_stakes(pool_operators)
     }
 
     /// Get Pool Delegators with live_stakes
-    pub fn get_pool_delegators(&self, pool_operator: &KeyHash) -> Vec<(KeyHash, u64)> {
+    pub fn get_pool_delegators(&self, pool_operator: &PoolId) -> Vec<(KeyHash, u64)> {
         self.stake_addresses.lock().unwrap().get_pool_delegators(pool_operator)
     }
 

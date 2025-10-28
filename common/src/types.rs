@@ -1035,10 +1035,10 @@ pub struct Deregistration {
 #[derive(Debug, Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum DRepChoice {
     /// Address key
-    Key(DrepKey),
+    Key(KeyHash),
 
     /// Script key
-    Script(DrepScriptKey),
+    Script(KeyHash),
 
     /// Abstain
     Abstain,

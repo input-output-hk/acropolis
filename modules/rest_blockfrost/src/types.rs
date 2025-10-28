@@ -1,14 +1,5 @@
 use crate::cost_models::{PLUTUS_V1, PLUTUS_V2, PLUTUS_V3};
-use acropolis_common::{
-    messages::EpochActivityMessage,
-    protocol_params::{Nonce, NonceVariant, ProtocolParams},
-    queries::blocks::BlockInfo,
-    queries::governance::DRepActionUpdate,
-    rest_helper::ToCheckedF64,
-    serialization::{DisplayFromBech32, PoolPrefix},
-    AssetAddressEntry, AssetMetadataStandard, AssetMintRecord, KeyHash, PolicyAsset,
-    PoolEpochState, PoolUpdateAction, Relay, TxHash, Vote,
-};
+use acropolis_common::{messages::EpochActivityMessage, protocol_params::{Nonce, NonceVariant, ProtocolParams}, queries::blocks::BlockInfo, queries::governance::DRepActionUpdate, rest_helper::ToCheckedF64, serialization::{DisplayFromBech32, PoolPrefix}, AssetAddressEntry, AssetMetadataStandard, AssetMintRecord, KeyHash, PolicyAsset, PoolEpochState, PoolUpdateAction, Relay, TxHash, VRFKey, Vote};
 use anyhow::Result;
 use num_traits::ToPrimitive;
 use rust_decimal::Decimal;
@@ -432,7 +423,7 @@ pub struct PoolInfoRest {
     #[serde_as(as = "Hex")]
     pub hex: KeyHash,
     #[serde_as(as = "Hex")]
-    pub vrf_key: KeyHash,
+    pub vrf_key: VRFKey,
     pub blocks_minted: u64,
     pub blocks_epoch: u64,
     #[serde_as(as = "DisplayFromStr")]

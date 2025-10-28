@@ -272,7 +272,7 @@ pub struct SPOStateMessage {
     pub spos: Vec<PoolRegistration>,
 
     /// SPOs in the above list which retired at the start of this epoch, by operator ID
-    pub retired_spos: Vec<KeyHash>,
+    pub retired_spos: Vec<PoolId>,
 }
 
 /// Cardano message enum

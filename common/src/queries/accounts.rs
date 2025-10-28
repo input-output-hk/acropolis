@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{DRepChoice, KeyHash, PoolLiveStakeInfo, StakeAddress};
+use crate::{DRepChoice, KeyHash, PoolId, PoolLiveStakeInfo, StakeAddress};
 
 pub const DEFAULT_ACCOUNTS_QUERY_TOPIC: (&str, &str) =
     ("accounts-state-query-topic", "cardano.query.accounts");
@@ -35,9 +35,9 @@ pub enum AccountsStateQuery {
 
     // Pools related queries
     GetOptimalPoolSizing,
-    GetPoolsLiveStakes { pools_operators: Vec<KeyHash> },
-    GetPoolDelegators { pool_operator: KeyHash },
-    GetPoolLiveStake { pool_operator: KeyHash },
+    GetPoolsLiveStakes { pools_operators: Vec<PoolId> },
+    GetPoolDelegators { pool_operator: PoolId },
+    GetPoolLiveStake { pool_operator: PoolId },
 
     // Dreps related queries
     GetDrepDelegators { drep: DRepChoice },
@@ -87,7 +87,7 @@ pub enum AccountsStateQueryResponse {
 pub struct AccountInfo {
     pub utxo_value: u64,
     pub rewards: u64,
-    pub delegated_spo: Option<KeyHash>,
+    pub delegated_spo: Option<PoolId>,
     pub delegated_drep: Option<DRepChoice>,
 }
 

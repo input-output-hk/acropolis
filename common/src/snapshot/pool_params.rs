@@ -12,16 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::PoolId;
+use crate::{PoolId, VRFKey};
 use super::streaming_snapshot::{
     cbor, AddrKeyhash, Coin, Nullable, PoolMetadata, Relay, RewardAccount, Set,
-    UnitInterval, VrfKeyhash,
+    UnitInterval,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PoolParams {
     pub id: PoolId,
-    pub vrf: VrfKeyhash,
+    pub vrf: VRFKey,
     pub pledge: Coin,
     pub cost: Coin,
     pub margin: UnitInterval,

@@ -6,7 +6,11 @@ use std::{
     sync::atomic::AtomicU64,
 };
 
-use crate::{math::update_value_with_delta, messages::DRepDelegationDistribution, DRepChoice, DRepCredential, DelegatedStake, Lovelace, KeyHash, PoolLiveStakeInfo, StakeAddress, StakeAddressDelta, Withdrawal};
+use crate::{
+    math::update_value_with_delta, messages::DRepDelegationDistribution, DRepChoice,
+    DRepCredential, DelegatedStake, KeyHash, Lovelace, PoolId, PoolLiveStakeInfo, StakeAddress,
+    StakeAddressDelta, Withdrawal,
+};
 use anyhow::Result;
 use dashmap::DashMap;
 use rayon::prelude::*;
@@ -28,7 +32,7 @@ pub struct StakeAddressState {
 
     /// SPO ID they are delegated to ("operator" ID)
     #[serde_as(as = "Option<Hex>")]
-    pub delegated_spo: Option<KeyHash>,
+    pub delegated_spo: Option<PoolId>,
 
     /// DRep they are delegated to
     pub delegated_drep: Option<DRepChoice>,
@@ -112,7 +116,7 @@ impl StakeAddressMap {
     }
 
     /// Get Pool's Live Stake Info
-    pub fn get_pool_live_stake_info(&self, spo: &KeyHash) -> PoolLiveStakeInfo {
+    pub fn get_pool_live_stake_info(&self, spo: &PoolId) -> PoolLiveStakeInfo {
         let total_live_stakes = AtomicU64::new(0);
         let live_stake = AtomicU64::new(0);
         let live_delegators = AtomicU64::new(0);
@@ -140,11 +144,11 @@ impl StakeAddressMap {
     }
 
     /// Get Pool's Live Stake (same order as spos)
-    pub fn get_pools_live_stakes(&self, spos: &[KeyHash]) -> Vec<u64> {
-        let mut live_stakes_map = HashMap::<KeyHash, u64>::new();
+    pub fn get_pools_live_stakes(&self, spos: &[PoolId]) -> Vec<u64> {
+        let mut live_stakes_map = HashMap::<PoolId, u64>::new();
 
         // Collect the SPO keys and UTXO
-        let sas_data: Vec<(KeyHash, u64)> = self
+        let sas_data: Vec<(PoolId, u64)> = self
             .inner
             .values()
             .filter_map(|sas| sas.delegated_spo.as_ref().map(|spo| (spo.clone(), sas.utxo_value)))
@@ -163,7 +167,7 @@ impl StakeAddressMap {
     }
 
     /// Get Pool Delegators with live_stakes
-    pub fn get_pool_delegators(&self, pool_operator: &KeyHash) -> Vec<(KeyHash, u64)> {
+    pub fn get_pool_delegators(&self, pool_operator: &PoolId) -> Vec<(KeyHash, u64)> {
         // Find stake addresses delegated to pool_operator
         let delegators: Vec<(KeyHash, u64)> = self
             .inner
@@ -172,7 +176,10 @@ impl StakeAddressMap {
                 Some(delegated_spo) => {
                     if delegated_spo.eq(pool_operator) {
                         // to_binary() now returns Result<KeyHash>
-                        stake_key.to_binary().ok().map(|key_hash| (key_hash, sas.utxo_value + sas.rewards))
+                        stake_key
+                            .to_binary()
+                            .ok()
+                            .map(|key_hash| (key_hash, sas.utxo_value + sas.rewards))
                     } else {
                         None
                     }
@@ -286,14 +293,14 @@ impl StakeAddressMap {
     /// (both with and without rewards) for each active SPO
     /// And Stake Pool Reward State (rewards and delegators_count for each pool)
     /// <KeyHash -> DelegatedStake>;Key of returned map is the SPO 'operator' ID
-    pub fn generate_spdd(&self) -> BTreeMap<KeyHash, DelegatedStake> {
+    pub fn generate_spdd(&self) -> BTreeMap<PoolId, DelegatedStake> {
         // Shareable Dashmap with referenced keys
-        let spo_stakes = DashMap::<KeyHash, DelegatedStake>::new();
+        let spo_stakes = DashMap::<PoolId, DelegatedStake>::new();
 
         // Total stake across all addresses in parallel, first collecting into a vector
         // because imbl::OrdMap doesn't work in Rayon
         // Collect the SPO keys and UTXO, reward values
-        let sas_data: Vec<(KeyHash, (u64, u64))> = self
+        let sas_data: Vec<(PoolId, (u64, u64))> = self
             .inner
             .values()
             .filter_map(|sas| {
@@ -325,7 +332,7 @@ impl StakeAddressMap {
 
     /// Dump current Stake Pool Delegation Distribution State
     /// <KeyHash -> (Stake Key, Active Stakes Amount)>
-    pub fn dump_spdd_state(&self) -> HashMap<KeyHash, Vec<(KeyHash, u64)>> {
+    pub fn dump_spdd_state(&self) -> HashMap<PoolId, Vec<(KeyHash, u64)>> {
         let entries: Vec<_> = self
             .inner
             .par_iter()
@@ -334,7 +341,7 @@ impl StakeAddressMap {
             })
             .collect();
 
-        let mut result: HashMap<KeyHash, Vec<(KeyHash, u64)>> = HashMap::new();
+        let mut result: HashMap<PoolId, Vec<(KeyHash, u64)>> = HashMap::new();
         for (spo, entry) in entries {
             result.entry(spo).or_default().push((entry.0.get_credential().get_hash(), entry.1));
         }
@@ -432,7 +439,7 @@ impl StakeAddressMap {
     }
 
     /// Record a stake delegation
-    pub fn record_stake_delegation(&mut self, stake_address: &StakeAddress, spo: &KeyHash) -> bool {
+    pub fn record_stake_delegation(&mut self, stake_address: &StakeAddress, spo: &PoolId) -> bool {
         if let Some(sas) = self.get_mut(stake_address) {
             if sas.registered {
                 sas.delegated_spo = Some(spo.clone());
@@ -546,21 +553,19 @@ impl StakeAddressMap {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hash::Hash;
     use crate::{NetworkId, StakeAddress, StakeCredential};
 
     const STAKE_KEY_HASH: KeyHash = KeyHash::new([0x99; 28]);
     const STAKE_KEY_HASH_2: KeyHash = KeyHash::new([0xaa; 28]);
     const STAKE_KEY_HASH_3: KeyHash = KeyHash::new([0xbb; 28]);
 
-    const SPO_HASH: KeyHash = KeyHash::new([0x01; 28]);
-    const SPO_HASH_2: KeyHash = KeyHash::new([0x02; 28]);
+    const SPO_HASH: PoolId = PoolId::new(Hash::new([0xbb_u8; 28]));
+    const SPO_HASH_2: PoolId = PoolId::new(Hash::new([0x02_u8; 28]));
     const DREP_HASH: KeyHash = KeyHash::new([0xca; 28]);
 
     fn create_stake_address(hash: KeyHash) -> StakeAddress {
-        StakeAddress::new(
-            StakeCredential::AddrKeyHash(hash),
-            NetworkId::Mainnet,
-        )
+        StakeAddress::new(StakeCredential::AddrKeyHash(hash), NetworkId::Mainnet)
     }
 
     mod registration_tests {
