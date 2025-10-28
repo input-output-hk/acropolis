@@ -61,6 +61,7 @@ pub struct Snapshot {
 
 impl Snapshot {
     /// Get a stake snapshot based the current stake addresses
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         epoch: u64,
         stake_addresses: &StakeAddressMap,
@@ -195,7 +196,7 @@ mod tests {
         hash[0] = id;
         StakeAddress {
             network: Mainnet,
-            credential: StakeCredential::AddrKeyHash(hash.try_into().expect("Invalid hash length")),
+            credential: StakeCredential::AddrKeyHash(hash),
         }
     }
 

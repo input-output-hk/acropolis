@@ -485,7 +485,7 @@ mod test {
         let (_hrp, key_vec) = bech32::decode(key).unwrap();
         let hash_vec = pallas::crypto::hash::Hasher::<224>::hash(&key_vec);
         let prefix_hrp: Hrp = Hrp::parse(prefix).unwrap();
-        bech32::encode::<Bech32>(prefix_hrp, &hash_vec.to_vec()).unwrap()
+        bech32::encode::<Bech32>(prefix_hrp, hash_vec.as_ref()).unwrap()
     }
 
     // The test is based on CIP-19 standard examples.
@@ -551,7 +551,7 @@ mod test {
         let stake_delta = process_message(&cache, &delta, &block, None);
 
         assert_eq!(
-            stake_delta.deltas.get(0).unwrap().address.to_string().unwrap(),
+            stake_delta.deltas.first().unwrap().address.to_string().unwrap(),
             stake_addr
         );
         assert_eq!(
@@ -585,7 +585,7 @@ mod test {
 
         // additional check: payload conversion correctness
         assert_eq!(
-            stake_delta.deltas.get(0).unwrap().address.credential.to_string().unwrap(),
+            stake_delta.deltas.first().unwrap().address.credential.to_string().unwrap(),
             stake_key_hash
         );
         assert_eq!(

@@ -161,7 +161,7 @@ impl TxUnpacker {
                                 let tx_index = tx_index as u16;
 
                                 // Parse the tx
-                                match MultiEraTx::decode(&raw_tx) {
+                                match MultiEraTx::decode(raw_tx) {
                                     Ok(tx) => {
                                         let tx_hash: TxHash = tx.hash().to_vec().try_into().expect("invalid tx hash length");
                                         let tx_identifier = TxIdentifier::new(block_number, tx_index);
@@ -269,7 +269,7 @@ impl TxUnpacker {
 
                                         if publish_certificates_topic.is_some() {
                                             for ( cert_index, cert) in certs.iter().enumerate() {
-                                                match map_parameters::map_certificate(&cert, tx_identifier, cert_index, network_id.clone()) {
+                                                match map_parameters::map_certificate(cert, tx_identifier, cert_index, network_id.clone()) {
                                                     Ok(tx_cert) => {
                                                         certificates.push(tx_cert);
                                                     },
@@ -302,7 +302,7 @@ impl TxUnpacker {
                                         if publish_governance_procedures_topic.is_some() {
                                             //Self::decode_legacy_updates(&mut legacy_update_proposals, &block, &raw_tx);
                                             if block.era >= Era::Shelley && block.era < Era::Babbage {
-                                                if let Ok(alonzo) = MultiEraTx::decode_for_era(traverse::Era::Alonzo, &raw_tx) {
+                                                if let Ok(alonzo) = MultiEraTx::decode_for_era(traverse::Era::Alonzo, raw_tx) {
                                                     if let Some(update) = alonzo.update() {
                                                         if let Some(alonzo_update) = update.as_alonzo() {
                                                             Self::decode_updates(
@@ -316,7 +316,7 @@ impl TxUnpacker {
                                                 }
                                             }
                                             else if block.era >= Era::Babbage && block.era < Era::Conway{
-                                                if let Ok(babbage) = MultiEraTx::decode_for_era(traverse::Era::Babbage, &raw_tx) {
+                                                if let Ok(babbage) = MultiEraTx::decode_for_era(traverse::Era::Babbage, raw_tx) {
                                                     if let Some(update) = babbage.update() {
                                                         if let Some(babbage_update) = update.as_babbage() {
                                                             Self::decode_updates(
@@ -348,7 +348,7 @@ impl TxUnpacker {
                                                 let mut proc_id = GovActionId { transaction_id: TxHash(*tx.hash()), action_index: 0 };
                                                 for (action_index, pallas_governance_proposals) in pp.iter().enumerate() {
                                                     match proc_id.set_action_index(action_index)
-                                                        .and_then (|proc_id| map_parameters::map_governance_proposals_procedures(&proc_id, &pallas_governance_proposals))
+                                                        .and_then (|proc_id| map_parameters::map_governance_proposals_procedures(proc_id, pallas_governance_proposals))
                                                     {
                                                         Ok(g) => proposal_procedures.push(g),
                                                         Err(e) => error!("Cannot decode governance proposal procedure {} idx {} in slot {}: {e}", proc_id, action_index, block.slot)
@@ -388,7 +388,7 @@ impl TxUnpacker {
                                     })
                                 ));
 
-                                futures.push(context.message_bus.publish(&topic, Arc::new(msg)));
+                                futures.push(context.message_bus.publish(topic, Arc::new(msg)));
                             }
 
                             if let Some(ref topic) = publish_asset_deltas_topic {
@@ -400,7 +400,7 @@ impl TxUnpacker {
                                     })
                                 ));
 
-                                futures.push(context.message_bus.publish(&topic, Arc::new(msg)));
+                                futures.push(context.message_bus.publish(topic, Arc::new(msg)));
                             }
 
                             if let Some(ref topic) = publish_withdrawals_topic {
@@ -411,7 +411,7 @@ impl TxUnpacker {
                                     })
                                 ));
 
-                                futures.push(context.message_bus.publish(&topic, Arc::new(msg)));
+                                futures.push(context.message_bus.publish(topic, Arc::new(msg)));
                             }
 
                             if let Some(ref topic) = publish_certificates_topic {
@@ -422,7 +422,7 @@ impl TxUnpacker {
                                     })
                                 ));
 
-                                futures.push(context.message_bus.publish(&topic, Arc::new(msg)));
+                                futures.push(context.message_bus.publish(topic, Arc::new(msg)));
                             }
 
                             if let Some(ref topic) = publish_governance_procedures_topic {
@@ -436,7 +436,7 @@ impl TxUnpacker {
                                         })
                                 )));
 
-                                futures.push(context.message_bus.publish(&topic,
+                                futures.push(context.message_bus.publish(topic,
                                                                          governance_msg.clone()));
                             }
 
@@ -450,7 +450,7 @@ impl TxUnpacker {
                                     })
                                 ));
 
-                                futures.push(context.message_bus.publish(&topic, Arc::new(msg)));
+                                futures.push(context.message_bus.publish(topic, Arc::new(msg)));
                             }
 
                             join_all(futures)

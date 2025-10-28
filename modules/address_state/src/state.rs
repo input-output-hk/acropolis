@@ -232,7 +232,7 @@ mod tests {
     fn delta(addr: &Address, utxo: &UTxOIdentifier, lovelace: i64) -> AddressDelta {
         AddressDelta {
             address: addr.clone(),
-            utxo: utxo.clone(),
+            utxo: *utxo,
             value: ValueDelta {
                 lovelace,
                 assets: Vec::new(),
@@ -311,21 +311,21 @@ mod tests {
 
         // Verify UTxO was removed while in volatile
         let after_spend_volatile = state.get_address_utxos(&addr).await?;
-        assert!(after_spend_volatile.as_ref().map_or(true, |u| u.is_empty()));
+        assert!(after_spend_volatile.as_ref().is_none_or(|u| u.is_empty()));
 
         // Drain volatile to immutable
         state.prune_volatile().await;
 
         // Verify UTxO was removed while in pending immutable
         let after_spend_pending = state.get_address_utxos(&addr).await?;
-        assert!(after_spend_pending.as_ref().map_or(true, |u| u.is_empty()));
+        assert!(after_spend_pending.as_ref().is_none_or(|u| u.is_empty()));
 
         // Perisist immutable to disk
         state.immutable.persist_epoch(2, &state.config).await?;
 
         // Verify UTxO was removed after persisting spend to disk
         let after_spend_disk = state.get_address_utxos(&addr).await?;
-        assert!(after_spend_disk.as_ref().map_or(true, |u| u.is_empty()));
+        assert!(after_spend_disk.as_ref().is_none_or(|u| u.is_empty()));
 
         Ok(())
     }

@@ -88,8 +88,8 @@ mod tests {
         let policy = dummy_policy(1);
         let name = asset_name_from_str("tokenA");
 
-        let id1 = registry.get_or_insert(policy.clone(), name.clone());
-        let id2 = registry.get_or_insert(policy.clone(), name.clone());
+        let id1 = registry.get_or_insert(policy, name);
+        let id2 = registry.get_or_insert(policy, name);
 
         assert_eq!(id1, id2);
     }
@@ -102,8 +102,8 @@ mod tests {
         let name1 = asset_name_from_str("tokenA");
         let name2 = asset_name_from_str("tokenB");
 
-        let id1 = registry.get_or_insert(policy1.clone(), name1.clone());
-        let id2 = registry.get_or_insert(policy2.clone(), name2.clone());
+        let id1 = registry.get_or_insert(policy1, name1);
+        let id2 = registry.get_or_insert(policy2, name2);
 
         assert_ne!(id1, id2);
         assert_eq!(id1.index(), 0);
@@ -116,7 +116,7 @@ mod tests {
         let policy = dummy_policy(1);
         let name = asset_name_from_str("tokenA");
 
-        let id1 = registry.get_or_insert(policy.clone(), name.clone());
+        let id1 = registry.get_or_insert(policy, name);
         let id2 = registry.lookup_id(&policy, &name).unwrap();
 
         assert_eq!(id1, id2);
@@ -137,7 +137,7 @@ mod tests {
         let policy = dummy_policy(1);
         let name = asset_name_from_str("tokenA");
 
-        let id = registry.get_or_insert(policy.clone(), name.clone());
+        let id = registry.get_or_insert(policy, name);
         let key = registry.lookup(id).unwrap();
 
         assert_eq!(policy, *key.policy);

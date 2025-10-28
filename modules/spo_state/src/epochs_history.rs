@@ -103,9 +103,7 @@ impl EpochsHistoryState {
         pool_operators: &Vec<KeyHash>,
         epoch: u64,
     ) -> Option<Vec<u64>> {
-        let Some(epochs_history) = self.epochs_history.as_ref() else {
-            return None;
-        };
+        let epochs_history = self.epochs_history.as_ref()?;
 
         let mut active_stakes = Vec::<u64>::new();
         for pool_operator in pool_operators {
@@ -169,7 +167,7 @@ impl EpochsHistoryState {
         &self,
         _block: &BlockInfo,
         epoch_activity_message: &EpochActivityMessage,
-        spos: &Vec<(KeyHash, usize)>,
+        spos: &[(KeyHash, usize)],
     ) {
         let Some(epochs_history) = self.epochs_history.as_ref() else {
             return;
@@ -177,7 +175,7 @@ impl EpochsHistoryState {
         let EpochActivityMessage { epoch, .. } = epoch_activity_message;
 
         spos.iter().for_each(|(spo, amount)| {
-            Self::update_epochs_history_with(epochs_history, &spo, *epoch, |epoch_state| {
+            Self::update_epochs_history_with(epochs_history, spo, *epoch, |epoch_state| {
                 epoch_state.blocks_minted = Some(*amount as u64);
             });
         })
@@ -189,7 +187,7 @@ impl EpochsHistoryState {
         epoch: u64,
         update_fn: impl FnOnce(&mut EpochState),
     ) {
-        let mut epochs = epochs_history.entry(spo.clone()).or_insert_with(BTreeMap::new);
+        let mut epochs = epochs_history.entry(spo.clone()).or_default();
         let epoch_state = epochs.entry(epoch).or_insert_with(|| EpochState::new(epoch));
         update_fn(epoch_state);
     }
@@ -241,7 +239,7 @@ mod tests {
         epoch_activity_msg.spo_blocks = vec![(vec![11], 1)];
         epoch_activity_msg.total_blocks = 1;
         epoch_activity_msg.total_fees = 10;
-        epochs_history.handle_epoch_activity(&block, &epoch_activity_msg, &vec![(vec![1], 1)]);
+        epochs_history.handle_epoch_activity(&block, &epoch_activity_msg, &[(vec![1], 1)]);
 
         let mut spo_rewards_msg = new_spo_rewards_message(1);
         spo_rewards_msg.spos = vec![(
@@ -255,7 +253,7 @@ mod tests {
 
         let pool_history = epochs_history.get_pool_history(&vec![1]).unwrap();
         assert_eq!(2, pool_history.len());
-        let first_epoch = pool_history.get(0).unwrap();
+        let first_epoch = pool_history.first().unwrap();
         let third_epoch = pool_history.get(1).unwrap();
         assert_eq!(1, first_epoch.epoch);
         assert_eq!(1, first_epoch.blocks_minted);

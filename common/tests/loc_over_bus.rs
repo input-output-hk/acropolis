@@ -63,46 +63,37 @@ impl Subscriber {
         let ctx = context.clone();
         ctx.run(async move {
             while let Ok((_, msg)) = sub.read().await {
-                match &*msg {
-                    BusMsg::Loc(loc) => {
-                        let res = Resolver::new(&registry()).resolve(loc);
-                        match res {
-                            Ok(view) => {
-                                // touch the bytes so we know mapping worked
-                                let slice = view.as_slice();
-                                // trivial check: non-empty
-                                if !slice.is_empty() {
-                                    context
-                                        .publish(
-                                            &ack_topic,
-                                            Arc::new(BusMsg::Ack("ok".to_string())),
-                                        )
-                                        .await
-                                        .expect("Failed to publish ACK");
-                                } else {
-                                    context
-                                        .publish(
-                                            &ack_topic,
-                                            Arc::new(BusMsg::Ack("empty".to_string())),
-                                        )
-                                        .await
-                                        .expect("Failed to publish ACK");
-                                }
-                                break; // test done
-                            }
-                            Err(_) => {
+                if let BusMsg::Loc(loc) = &*msg {
+                    let res = Resolver::new(&registry()).resolve(loc);
+                    match res {
+                        Ok(view) => {
+                            // touch the bytes so we know mapping worked
+                            let slice = view.as_slice();
+                            // trivial check: non-empty
+                            if !slice.is_empty() {
                                 context
-                                    .publish(
-                                        &ack_topic,
-                                        Arc::new(BusMsg::Ack("resolve_err".to_string())),
-                                    )
+                                    .publish(&ack_topic, Arc::new(BusMsg::Ack("ok".to_string())))
                                     .await
                                     .expect("Failed to publish ACK");
-                                break;
+                            } else {
+                                context
+                                    .publish(&ack_topic, Arc::new(BusMsg::Ack("empty".to_string())))
+                                    .await
+                                    .expect("Failed to publish ACK");
                             }
+                            break; // test done
+                        }
+                        Err(_) => {
+                            context
+                                .publish(
+                                    &ack_topic,
+                                    Arc::new(BusMsg::Ack("resolve_err".to_string())),
+                                )
+                                .await
+                                .expect("Failed to publish ACK");
+                            break;
                         }
                     }
-                    _ => {}
                 }
             }
         });
