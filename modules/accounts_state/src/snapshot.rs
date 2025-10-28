@@ -95,9 +95,13 @@ impl Snapshot {
                         .unwrap_or(false),
                     None => false,
                 };
-            debug!(epoch, previous_epoch=two_previous_snapshot.epoch,
-                   "Two previous reward account for SPO {} registered: {}",
-                   hex::encode(spo_id), two_previous_reward_account_is_registered);
+            debug!(
+                epoch,
+                previous_epoch = two_previous_snapshot.epoch,
+                "Two previous reward account for SPO {} registered: {}",
+                hex::encode(spo_id),
+                two_previous_reward_account_is_registered
+            );
 
             // Add the new one
             snapshot.spos.insert(

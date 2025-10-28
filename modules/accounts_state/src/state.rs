@@ -712,7 +712,6 @@ impl State {
     /// Handle an SPOStateMessage with the full set of SPOs valid at the end of the last
     /// epoch
     pub fn handle_spo_state(&mut self, spo_msg: &SPOStateMessage) -> Result<()> {
-
         // Capture current SPOs, mapped by operator ID
         let new_spos: OrdMap<KeyHash, PoolRegistration> =
             spo_msg.spos.iter().cloned().map(|spo| (spo.operator.clone(), spo)).collect();
@@ -795,7 +794,6 @@ impl State {
 
     /// Register a stake address, with a specified deposit if known
     fn register_stake_address(&mut self, stake_address: &StakeAddress, deposit: Option<Lovelace>) {
-
         debug!("Register stake address {stake_address}");
         // Stake addresses can be registered after being used in UTXOs
         let mut stake_addresses = self.stake_addresses.lock().unwrap();

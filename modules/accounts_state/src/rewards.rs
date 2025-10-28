@@ -131,15 +131,20 @@ pub fn calculate_rewards(
         // Also, to handle the early Shelley timing bug, we allow it if it was registered
         // during the current epoch
         if !pay_to_pool_reward_account {
-            debug!("Checking old reward account {} for late registration",
-                   staking_spo.reward_account);
+            debug!(
+                "Checking old reward account {} for late registration",
+                staking_spo.reward_account
+            );
 
             // Note we use the staking reward account - it could have changed
             pay_to_pool_reward_account = registrations.contains(&staking_spo.reward_account);
 
             if pay_to_pool_reward_account {
-                info!("SPO {}'s reward account {} was registered in this epoch",
-                      hex::encode(operator_id), staking_spo.reward_account);
+                info!(
+                    "SPO {}'s reward account {} was registered in this epoch",
+                    hex::encode(operator_id),
+                    staking_spo.reward_account
+                );
             }
         }
 
