@@ -100,7 +100,7 @@ pub fn map_stake_address(cred: &PallasStakeCredential, network_id: NetworkId) ->
         }
     };
 
-    StakeAddress::new(payload, network_id.into())
+    StakeAddress::new(payload, network_id)
 }
 
 /// Map a Pallas DRep to our DRepChoice
@@ -262,7 +262,7 @@ pub fn map_certificate(
                         .map(|v| {
                             StakeAddress::new(
                                 StakeCredential::AddrKeyHash(v.to_vec()),
-                                network_id.clone().into(),
+                                network_id.clone(),
                             )
                         })
                         .collect(),
@@ -382,7 +382,7 @@ pub fn map_certificate(
                             .map(|v| {
                                 StakeAddress::new(
                                     StakeCredential::AddrKeyHash(v.to_vec()),
-                                    network_id.clone().into(),
+                                    network_id.clone(),
                                 )
                             })
                             .collect(),
