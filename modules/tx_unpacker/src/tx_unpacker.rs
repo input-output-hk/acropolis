@@ -285,15 +285,12 @@ impl TxUnpacker {
                                             for (key, value) in tx_withdrawals {
                                                 match StakeAddress::from_binary(key) {
                                                     Ok(stake_address) => {
-                                                        withdrawals.push(WithdrawalWithPos {
-                                                            withdrawal: Withdrawal {
+                                                        withdrawals.push(Withdrawal {
                                                                 address: stake_address,
-                                                                value
-                                                            },
-                                                            tx_identifier,
-                                                        });
-                                                    }
-
+                                                                value,
+                                                                tx_identifier
+                                                            });
+                                                        }
                                                     Err(e) => error!("Bad stake address: {e:#}"),
                                                 }
                                             }

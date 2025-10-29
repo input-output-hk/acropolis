@@ -228,13 +228,13 @@ impl State {
 
         for w in &withdrawals_msg.withdrawals {
             window
-                .entry(w.withdrawal.address.clone())
+                .entry(w.address.clone())
                 .or_default()
                 .withdrawal_history
                 .get_or_insert_with(Vec::new)
                 .push(AccountWithdrawal {
                     tx_identifier: w.tx_identifier,
-                    amount: w.withdrawal.value,
+                    amount: w.value,
                 })
         }
     }

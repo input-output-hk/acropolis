@@ -200,8 +200,7 @@ impl HistoricalAccountsState {
 
                 if should_prune {
                     let (store, cfg) = {
-                        let mut state: tokio::sync::MutexGuard<'_, State> =
-                            state_mutex.lock().await;
+                        let mut state = state_mutex.lock().await;
                         state.prune_volatile().await;
                         (state.immutable.clone(), state.config.clone())
                     };

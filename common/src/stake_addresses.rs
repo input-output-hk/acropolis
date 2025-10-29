@@ -867,6 +867,8 @@ mod tests {
     }
 
     mod withdrawal_tests {
+        use crate::TxIdentifier;
+
         use super::*;
 
         #[test]
@@ -880,6 +882,7 @@ mod tests {
             let withdrawal = Withdrawal {
                 address: stake_address.clone(),
                 value: 40,
+                tx_identifier: TxIdentifier::default(),
             };
             stake_addresses.process_withdrawal(&withdrawal);
 
@@ -898,6 +901,7 @@ mod tests {
             let withdrawal = Withdrawal {
                 address: stake_address.clone(),
                 value: 24,
+                tx_identifier: TxIdentifier::default(),
             };
             stake_addresses.process_withdrawal(&withdrawal);
             assert_eq!(stake_addresses.get(&stake_address).unwrap().rewards, 12);
@@ -906,6 +910,7 @@ mod tests {
             let withdrawal = Withdrawal {
                 address: stake_address.clone(),
                 value: 2,
+                tx_identifier: TxIdentifier::default(),
             };
             stake_addresses.process_withdrawal(&withdrawal);
             assert_eq!(stake_addresses.get(&stake_address).unwrap().rewards, 10);
@@ -922,6 +927,7 @@ mod tests {
             let withdrawal = Withdrawal {
                 address: stake_address.clone(),
                 value: 0,
+                tx_identifier: TxIdentifier::default(),
             };
 
             stake_addresses.process_withdrawal(&withdrawal);
@@ -936,6 +942,7 @@ mod tests {
             let withdrawal = Withdrawal {
                 address: stake_address.clone(),
                 value: 10,
+                tx_identifier: TxIdentifier::default(),
             };
 
             // Should log error but not panic

@@ -605,11 +605,8 @@ pub struct Withdrawal {
 
     /// Value to withdraw
     pub value: Lovelace,
-}
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct WithdrawalWithPos {
-    pub withdrawal: Withdrawal,
+    // Identifier of withdrawal tx
     pub tx_identifier: TxIdentifier,
 }
 
