@@ -5,12 +5,15 @@ use acropolis_common::{
 use anyhow::{bail, Result};
 use std::collections::{HashMap, HashSet};
 
+// (vote epoch, vote slot, proposal)
+type VoteData = (u64, u64, Box<ProtocolParamUpdate>);
+
 #[derive(Default)]
 pub struct AlonzoBabbageVoting {
     /// map "enact epoch" (proposal enacts at this epoch end) to voting
-    /// "voting": map voter (genesis key) => (vote epoch, vote slot, proposal)
+    /// "voting": map voter (genesis key) => votedata
     /// "vote epoch/slot" --- moment, when the vote was cast for the proposal
-    proposals: HashMap<u64, HashMap<GenesisKeyhash, (u64, u64, Box<ProtocolParamUpdate>)>>,
+    proposals: HashMap<u64, HashMap<GenesisKeyhash, VoteData>>,
     slots_per_epoch: u32,
     update_quorum: u32,
 }
@@ -31,7 +34,7 @@ impl AlonzoBabbageVoting {
     pub fn process_update_proposals(
         &mut self,
         block_info: &BlockInfo,
-        updates: &Vec<AlonzoBabbageUpdateProposal>,
+        updates: &[AlonzoBabbageUpdateProposal],
     ) -> Result<()> {
         if updates.is_empty() {
             return Ok(());
@@ -46,7 +49,7 @@ impl AlonzoBabbageVoting {
         }
 
         for pp in updates.iter() {
-            let entry = self.proposals.entry(pp.enactment_epoch + 1).or_insert(HashMap::new());
+            let entry = self.proposals.entry(pp.enactment_epoch + 1).or_default();
             for (k, p) in &pp.proposals {
                 // A new proposal for key k always replaces the old one
                 entry.insert(k.clone(), (block_info.epoch, block_info.slot, p.clone()));
@@ -81,7 +84,8 @@ impl AlonzoBabbageVoting {
 
                 let votes: Vec<_> = proposals
                     .iter()
-                    .filter_map(|(k, v)| (v == parameter_update).then(|| k.clone()))
+                    .filter(|&(_, v)| v == parameter_update)
+                    .map(|(k, _)| k.clone())
                     .collect();
 
                 for v in &votes {
@@ -220,7 +224,7 @@ mod tests {
     fn extract_mainnet_parameter<T: Clone>(
         f: impl Fn(&ProtocolParamUpdate) -> Option<T>,
     ) -> Result<Vec<(u64, T)>> {
-        extract_parameter(5, 432_000, &MAINNET_PROPOSALS_JSON, f)
+        extract_parameter(5, 432_000, MAINNET_PROPOSALS_JSON, f)
     }
 
     const DECENTRALISATION: [(u64, f32); 39] = [
@@ -282,9 +286,9 @@ mod tests {
         let dcu = extract_mainnet_parameter(|p| p.decentralisation_constant)?;
 
         assert_eq!(DECENTRALISATION.len(), dcu.len());
-        for i in 0..dcu.len() {
-            let rat = rational_number_from_f32(DECENTRALISATION[i].1)?;
-            assert_eq!((DECENTRALISATION[i].0, rat), *dcu.get(i).unwrap());
+        for (decent, param) in DECENTRALISATION.iter().zip(dcu) {
+            let rat = rational_number_from_f32(decent.1)?;
+            assert_eq!((decent.0, rat), param);
         }
 
         Ok(())
@@ -319,7 +323,7 @@ mod tests {
     fn extract_sanchonet_parameter<T: Clone>(
         f: impl Fn(&ProtocolParamUpdate) -> Option<T>,
     ) -> Result<Vec<(u64, T)>> {
-        extract_parameter(3, 86_400, &SANCHONET_PROPOSALS_JSON, f)
+        extract_parameter(3, 86_400, SANCHONET_PROPOSALS_JSON, f)
     }
 
     const SANCHONET_PROTOCOL_VERSION: [(u64, (u64, u64)); 3] =

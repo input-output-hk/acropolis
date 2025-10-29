@@ -8,8 +8,7 @@ mod tests {
         SingleVoterVotes, TxHash, Vote, VoteCount, VoteResult, Voter, VotingProcedure,
     };
     use anyhow::{anyhow, bail, Result};
-    use serde;
-    use serde_json;
+
     use serde_with::{base64::Base64, serde_as};
     use std::{
         collections::{BTreeMap, HashMap},
@@ -83,7 +82,7 @@ mod tests {
                 .strip_prefix("Some(")
                 .ok_or_else(|| anyhow!("Does not have 'Some(' prefix {}", s))?;
             let num = wp.strip_suffix(")").ok_or_else(|| anyhow!("Must have ')' suffix {}", s))?;
-            num.parse().map_err(|e| anyhow!("Cannot parse value {num}, error {e}")).map(|x| Some(x))
+            num.parse().map_err(|e| anyhow!("Cannot parse value {num}, error {e}")).map(Some)
         }
     }
 
@@ -127,12 +126,14 @@ mod tests {
             })
             .collect::<Result<Vec<(u64, HashMap<DRepCredential, Lovelace>)>>>()?;
 
-        let res = HashMap::from_iter(converted.into_iter());
+        let res = HashMap::from_iter(converted);
 
         Ok(res)
     }
 
-    fn map_voter_list(votes: &Vec<VotingRecord>, v: Vote) -> Result<Vec<(Voter, VotingProcedure)>> {
+    type VoterList = Vec<(Voter, VotingProcedure)>;
+
+    fn map_voter_list(votes: &[VotingRecord], v: Vote) -> Result<VoterList> {
         votes
             .iter()
             .map(|x| {
@@ -145,14 +146,12 @@ mod tests {
                     },
                 ))
             })
-            .collect::<Result<Vec<(Voter, VotingProcedure)>>>()
+            .collect()
     }
 
     /// Reads list of votes: for each epoch, for each gov-action, three lists of voters:
     /// ([yes voters], [no voters], [abstain voters])
-    fn read_voting_state(
-        voting_json: &[u8],
-    ) -> Result<HashMap<(u64, GovActionId), Vec<(Voter, VotingProcedure)>>> {
+    fn read_voting_state(voting_json: &[u8]) -> Result<HashMap<(u64, GovActionId), VoterList>> {
         let voting =
             serde_json::from_slice::<Vec<(u64, String, Vec<Vec<VotingRecord>>)>>(voting_json)?;
 
@@ -161,8 +160,8 @@ mod tests {
             let action_id = GovActionId::from_bech32(action_id)?;
 
             let mut vote_procs = Vec::new();
-            if votes.len() > 0 {
-                vote_procs = map_voter_list(votes.get(0).unwrap(), Vote::Yes)?;
+            if !votes.is_empty() {
+                vote_procs = map_voter_list(votes.first().unwrap(), Vote::Yes)?;
                 vote_procs.append(&mut map_voter_list(votes.get(1).unwrap(), Vote::No)?);
                 vote_procs.append(&mut map_voter_list(votes.get(2).unwrap(), Vote::Abstain)?);
             }
@@ -189,13 +188,13 @@ mod tests {
             // s504645304083669/961815354510517/93516758517300,c0:d1:s1
 
             let records = line?.iter().map(|x| x.to_owned()).collect::<Vec<String>>();
-            if records.len() == 0 {
+            if records.is_empty() {
                 continue;
             } else if records.len() != 17 {
                 bail!("Wrong number of elements in csv line: {:?}", records)
             }
 
-            let action_id = records.get(0).unwrap();
+            let action_id = records.first().unwrap();
             let start_epoch = records.get(6).unwrap();
             let proposal = records.get(9).unwrap();
             let ratification_epoch = records.get(11).unwrap();
@@ -220,7 +219,7 @@ mod tests {
 
     fn read_protocol_params(configs_json: &[u8]) -> Result<BTreeMap<u64, ProtocolParams>> {
         let configs = serde_json::from_slice::<Vec<(u64, ProtocolParams)>>(configs_json)?;
-        Ok(BTreeMap::from_iter(configs.into_iter()))
+        Ok(BTreeMap::from_iter(configs))
     }
 
     #[test]
@@ -309,8 +308,8 @@ mod tests {
                     epoch,
                     voting_state,
                     &record.action_id,
-                    &current_drep,
-                    &current_pool,
+                    current_drep,
+                    current_pool,
                 )?;
 
                 let Some(outcome) = outcome else {
@@ -319,7 +318,7 @@ mod tests {
                 };
 
                 assert_eq!(outcome.accepted, record.ratification_epoch.is_some());
-                assert_eq!(outcome.accepted, !record.expiration_epoch.is_some());
+                assert_eq!(outcome.accepted, record.expiration_epoch.is_none());
                 if outcome.accepted {
                     assert_eq!(Some(epoch + 2), record.ratification_epoch)
                 } else {
