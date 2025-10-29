@@ -14,7 +14,7 @@ use std::sync::Arc;
 use tracing::{debug, info, warn};
 
 /// Type of reward being given
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum RewardType {
     Leader,
     Member,
@@ -34,7 +34,7 @@ pub struct RewardDetail {
 }
 
 /// Result of a rewards calculation
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct RewardsResult {
     /// Epoch these rewards were earned in (when blocks produced)
     pub epoch: u64,
