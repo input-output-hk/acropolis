@@ -10,8 +10,8 @@ use acropolis_common::{
     params::TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH,
     queries::governance::VoteRecord,
     stake_addresses::StakeAddressMap,
-    BlockInfo, KeyHash, PoolMetadata, PoolRetirement, PoolUpdateEvent, Relay,
-    StakeAddress, TxCertificate, TxIdentifier, Voter, VotingProcedures,
+    BlockInfo, KeyHash, PoolId, PoolMetadata, PoolRegistration, PoolRetirement, PoolUpdateEvent,
+    Relay, StakeAddress, TxCertificate, TxHash, TxIdentifier, Voter, VotingProcedures,
 };
 use anyhow::Result;
 use imbl::HashMap;
@@ -671,7 +671,8 @@ mod tests {
     use acropolis_common::hash::Hash;
     use acropolis_common::{
         state_history::{StateHistory, StateHistoryStore},
-        PoolRetirement, Ratio, StakeAddress, TxCertificate, TxCertificateWithPos, TxIdentifier, VrfKeyHash
+        PoolRetirement, Ratio, StakeAddress, TxCertificate, TxCertificateWithPos, TxIdentifier,
+        VrfKeyHash,
     };
     use tokio::sync::Mutex;
 
@@ -868,7 +869,7 @@ mod tests {
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
 
         assert_eq!(1, state.spos.len());
-        let spo = state.spos.get(pool_id);
+        let spo = state.spos.get(&pool_id);
         assert!(spo.is_some());
 
         block.number = 1;
@@ -908,7 +909,7 @@ mod tests {
         });
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
         assert_eq!(1, state.spos.len());
-        let spo = state.spos.get(pool_id);
+        let spo = state.spos.get(&pool_id);
         assert!(spo.is_some());
         history.lock().await.commit(block.number, state);
 
@@ -1038,7 +1039,7 @@ mod tests {
         let mut state = State::new(&save_blocks_store_config());
         let mut block = new_block(0);
         let mut msg = new_certs_msg();
-        let spo_id = keyhash_224(&[1_u8]);
+        let spo_id = test_pool_id_from_bytes(&[1]);
         msg.certificates.push(TxCertificateWithPos {
             cert: TxCertificate::PoolRegistration(default_pool_registration(spo_id.clone(), None)),
             tx_identifier: TxIdentifier::default(),
@@ -1047,11 +1048,9 @@ mod tests {
         let spo_id = test_pool_id_from_bytes(&[1]);
 
         msg.certificates.push(TxCertificateWithPos {
-            PoolRegistrationWithPos {
-                reg: default_pool_registration(spo_id, None),
-                tx_hash: TxHash::default(),
-                cert_index: 0,
-            },
+            cert: TxCertificate::PoolRegistration(default_pool_registration(spo_id.clone(), None)),
+            tx_identifier: TxIdentifier::default(),
+            cert_index: 0,
         });
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
         block = new_block(2);

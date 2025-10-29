@@ -327,7 +327,7 @@ pub fn map_certificate(
             }),
             alonzo::Certificate::PoolRetirement(pool_key_hash, epoch) => Ok(TxCertificateWithPos {
                 cert: TxCertificate::PoolRetirement(PoolRetirement {
-                    operator: pool_key_hash.to_vec(),
+                    operator: to_pool_id(pool_key_hash),
                     epoch: *epoch,
                 }),
                 tx_identifier,
@@ -395,7 +395,7 @@ pub fn map_certificate(
                     Ok(TxCertificateWithPos {
                         cert: TxCertificate::StakeDelegation(StakeDelegation {
                             stake_address: map_stake_address(cred, network_id),
-                            operator: pool_key_hash.to_vec(),
+                            operator: to_pool_id(pool_key_hash),
                         }),
                         tx_identifier,
                         cert_index: cert_index.try_into().unwrap(),
@@ -415,8 +415,8 @@ pub fn map_certificate(
                     pool_metadata,
                 } => Ok(TxCertificateWithPos {
                     cert: TxCertificate::PoolRegistration(PoolRegistration {
-                        operator: operator.to_vec(),
-                        vrf_key_hash: vrf_keyhash.to_vec(),
+                        operator: to_pool_id(operator),
+                        vrf_key_hash: to_vrf_key(vrf_keyhash),
                         pledge: *pledge,
                         cost: *cost,
                         margin: Ratio {
@@ -435,7 +435,7 @@ pub fn map_certificate(
                             .into_iter()
                             .map(|v| {
                                 StakeAddress::new(
-                                    StakeCredential::AddrKeyHash(v.to_vec()),
+                                    StakeCredential::AddrKeyHash(to_hash(v)),
                                     network_id.clone(),
                                 )
                             })
@@ -455,7 +455,7 @@ pub fn map_certificate(
                 conway::Certificate::PoolRetirement(pool_key_hash, epoch) => {
                     Ok(TxCertificateWithPos {
                         cert: TxCertificate::PoolRetirement(PoolRetirement {
-                            operator: pool_key_hash.to_vec(),
+                            operator: to_pool_id(pool_key_hash),
                             epoch: *epoch,
                         }),
                         tx_identifier,
@@ -494,7 +494,7 @@ pub fn map_certificate(
                     Ok(TxCertificateWithPos {
                         cert: TxCertificate::StakeAndVoteDelegation(StakeAndVoteDelegation {
                             stake_address: map_stake_address(cred, network_id),
-                            operator: pool_key_hash.to_vec(),
+                            operator: to_pool_id(pool_key_hash),
                             drep: map_drep(drep),
                         }),
                         tx_identifier,
@@ -507,7 +507,7 @@ pub fn map_certificate(
                         cert: TxCertificate::StakeRegistrationAndDelegation(
                             StakeRegistrationAndDelegation {
                                 stake_address: map_stake_address(cred, network_id),
-                                operator: pool_key_hash.to_vec(),
+                                operator: to_pool_id(pool_key_hash),
                                 deposit: *coin,
                             },
                         ),
@@ -533,7 +533,7 @@ pub fn map_certificate(
                         cert: TxCertificate::StakeRegistrationAndStakeAndVoteDelegation(
                             StakeRegistrationAndStakeAndVoteDelegation {
                                 stake_address: map_stake_address(cred, network_id),
-                                operator: pool_key_hash.to_vec(),
+                                operator: to_pool_id(pool_key_hash),
                                 drep: map_drep(drep),
                                 deposit: *coin,
                             },

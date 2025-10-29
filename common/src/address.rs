@@ -398,7 +398,7 @@ impl StakeAddress {
             NetworkId::Testnet => bech32::Hrp::parse("stake_test")?,
         };
 
-        let data = self.to_binary()?;
+        let data = self.to_binary();
         Ok(bech32::encode::<bech32::Bech32>(hrp, &data.as_slice())?)
     }
 
@@ -431,20 +431,20 @@ impl StakeAddress {
     }
 
     /// Convert to binary format (29 bytes)
-    pub fn to_binary(&self) -> Result<Vec<u8>> {
+    pub fn to_binary(&self) -> Vec<u8> {
         let network_bits = match self.network {
             NetworkId::Mainnet => 0b1u8,
             NetworkId::Testnet => 0b0u8,
         };
 
-        let (stake_bits, stake_hash): (u8, &KeyHash) = match &self.credential {
-            StakeCredential::AddrKeyHash(data) => (0b1110, data),
-            StakeCredential::ScriptHash(data) => (0b1111, data),
+        let (stake_bits, stake_hash): (u8, &Vec<u8>) = match &self.credential {
+            StakeCredential::AddrKeyHash(data) => (0b1110, &data.to_vec()),
+            StakeCredential::ScriptHash(data) => (0b1111, &data.to_vec()),
         };
 
         let mut data = vec![network_bits | (stake_bits << 4)];
-        data.extend(stake_hash.as_ref());
-        data.try_into().map_err(|_| anyhow!("Invalid hash size for stake address"))
+        data.extend(stake_hash);
+        data
     }
 
     /// Read from binary format (29 bytes)
@@ -505,9 +505,7 @@ impl<C> minicbor::Encode<C> for StakeAddress {
         e: &mut minicbor::Encoder<W>,
         _ctx: &mut C,
     ) -> Result<(), minicbor::encode::Error<W::Error>> {
-        let data = self
-            .to_binary()
-            .map_err(|_| minicbor::encode::Error::message("Failed to convert to binary"))?;
+        let data = self.to_binary();
         e.bytes(&data.as_slice())?;
         Ok(())
     }
@@ -944,7 +942,7 @@ mod tests {
     #[test]
     fn stake_addresses_encode_mainnet_stake() {
         let address = mainnet_stake_address();
-        let binary = address.to_binary().unwrap();
+        let binary = address.to_binary();
 
         // CBOR encoding wraps the raw 29-byte stake address in a byte string:
         // - 0x58: CBOR major type 2 (byte string) with 1-byte length follows
@@ -965,7 +963,7 @@ mod tests {
     fn stake_addresses_decode_mainnet_stake() {
         let binary = {
             let mut v = vec![0x58, 0x1d];
-            v.extend_from_slice(&mainnet_stake_address().to_binary().unwrap().as_slice());
+            v.extend_from_slice(&mainnet_stake_address().to_binary().as_slice());
             v
         };
 
