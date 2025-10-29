@@ -35,7 +35,7 @@ impl EpochSnapshots {
 #[derive(Default, Debug, Clone)]
 pub struct State {
     /// shelley params
-    pub shelly_params: Option<ShelleyParams>,
+    pub shelley_params: Option<ShelleyParams>,
 
     /// protocol parameter for Praos and TPraos
     pub praos_params: Option<PraosParams>,
@@ -51,16 +51,16 @@ impl State {
     pub fn new() -> Self {
         Self {
             praos_params: None,
-            shelly_params: None,
+            shelley_params: None,
             epoch_nonces: None,
             epoch_snapshots: EpochSnapshots::default(),
         }
     }
 
     pub fn handle_protocol_parameters(&mut self, msg: &ProtocolParamsMessage) {
-        if let Some(shelly_params) = msg.params.shelley.as_ref() {
-            self.shelly_params = Some(shelly_params.clone());
-            self.praos_params = Some(shelly_params.into());
+        if let Some(shelley_params) = msg.params.shelley.as_ref() {
+            self.shelley_params = Some(shelley_params.clone());
+            self.praos_params = Some(shelley_params.into());
         }
     }
 
@@ -88,7 +88,7 @@ impl State {
             return Ok(());
         }
 
-        let Some(shelley_params) = self.shelly_params.as_ref() else {
+        let Some(shelley_params) = self.shelley_params.as_ref() else {
             return Err(VrfValidationError::InvalidShelleyParams(
                 "Shelley Params are not set".to_string(),
             ));

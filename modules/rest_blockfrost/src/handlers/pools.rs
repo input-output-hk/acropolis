@@ -212,7 +212,7 @@ async fn handle_pools_extended_blockfrost(
 
     // check optimal_pool_sizing is Some
     let Some(optimal_pool_sizing) = optimal_pool_sizing else {
-        // if it is before Shelly Era
+        // if it is before Shelley Era
         return Ok(RESTResponse::with_json(200, "[]"));
     };
 
@@ -591,7 +591,7 @@ async fn handle_pools_spo_blockfrost(
     let live_stakes_info = live_stakes_info?;
     let total_blocks_minted = total_blocks_minted?;
     let Some(optimal_pool_sizing) = optimal_pool_sizing? else {
-        // if it is before Shelly Era
+        // if it is before Shelley Era
         return Ok(RESTResponse::with_json(404, "Pool Not Found"));
     };
     let pool_updates = pool_updates?;

@@ -54,7 +54,7 @@ pub struct State {
     // fees seen this epoch
     epoch_fees: u64,
 
-    // nonces will be set starting from Shelly Era
+    // nonces will be set starting from Shelley Era
     nonces: Option<Nonces>,
 
     // protocol parameter for Praos and TPraos
@@ -84,8 +84,8 @@ impl State {
 
     /// Handle protocol parameters updates
     pub fn handle_protocol_parameters(&mut self, msg: &ProtocolParamsMessage) {
-        if let Some(shelly_params) = msg.params.shelley.as_ref() {
-            self.praos_params = Some(shelly_params.into());
+        if let Some(shelley_params) = msg.params.shelley.as_ref() {
+            self.praos_params = Some(shelley_params.into());
         }
     }
 
