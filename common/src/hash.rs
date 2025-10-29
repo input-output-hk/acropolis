@@ -248,22 +248,26 @@ macro_rules! declare_hash_type_with_bech32 {
         }
 
         impl TryFrom<Vec<u8>> for $name {
-            type Error = Vec<u8>;
+            type Error = anyhow::Error;
             fn try_from(vec: Vec<u8>) -> Result<Self, Self::Error> {
-                Ok(Self(Hash::try_from(vec)?))
+                Ok(Self(
+                    Hash::try_from(vec).map_err(|e| anyhow::anyhow!("{}", hex::encode(e)))?,
+                ))
             }
         }
 
         impl TryFrom<&[u8]> for $name {
-            type Error = std::array::TryFromSliceError;
+            type Error = anyhow::Error;
             fn try_from(arr: &[u8]) -> Result<Self, Self::Error> {
-                Ok(Self(Hash::try_from(arr)?))
+                Ok(Self(
+                    Hash::try_from(arr).map_err(|e| anyhow::anyhow!("{}", e))?,
+                ))
             }
         }
 
         impl AsRef<[u8]> for $name {
             fn as_ref(&self) -> &[u8] {
-                self.0.as_ref()
+                &self.0.as_ref()
             }
         }
 
