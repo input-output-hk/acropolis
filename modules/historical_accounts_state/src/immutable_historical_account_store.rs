@@ -9,7 +9,7 @@ use fjall::{Keyspace, Partition, PartitionCreateOptions};
 use minicbor::{decode, to_vec};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use tokio::sync::Mutex;
-use tracing::{debug, error, info};
+use tracing::{debug, error};
 
 use crate::state::{AccountEntry, ActiveStakeHistory, HistoricalAccountsConfig, RewardHistory};
 
@@ -61,16 +61,20 @@ impl ImmutableHistoricalAccountStore {
     /// and addresses into their respective Fjall partitions for an entire epoch.
     /// Skips any partitions that have already stored the given epoch.
     /// All writes are batched and committed atomically, preventing on-disk corruption in case of failure.
-    pub async fn persist_epoch(&self, epoch: u32, config: &HistoricalAccountsConfig) -> Result<()> {
-        if !config.any_enabled() {
-            debug!("no persistence needed for epoch {epoch} (disabled)",);
-            return Ok(());
-        }
-
+    pub async fn persist_epoch(
+        &self,
+        epoch: u32,
+        config: &HistoricalAccountsConfig,
+    ) -> Result<u64> {
         let drained_blocks = {
             let mut pending = self.pending.lock().await;
             std::mem::take(&mut *pending)
         };
+
+        if !config.any_enabled() {
+            debug!("no persistence needed for epoch {epoch} (disabled)",);
+            return Ok(0);
+        }
 
         let mut batch = self.keyspace.batch();
         let mut change_count = 0;
@@ -135,10 +139,7 @@ impl ImmutableHistoricalAccountStore {
         }
 
         match batch.commit() {
-            Ok(_) => {
-                info!("committed {change_count} account changes for epoch {epoch}");
-                Ok(())
-            }
+            Ok(_) => Ok(change_count),
             Err(e) => {
                 error!("batch commit failed for epoch {epoch}: {e}");
                 Err(e.into())

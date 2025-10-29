@@ -20,8 +20,11 @@ use tokio::sync::Mutex;
 use tracing::{error, info, info_span, Instrument};
 
 mod alonzo_babbage_voting;
+mod conway_voting;
+mod conway_voting_test;
 mod state;
 mod voting_state;
+
 use state::State;
 use voting_state::VotingRegistrationState;
 
@@ -33,6 +36,8 @@ const DEFAULT_SPO_DISTRIBUTION_TOPIC: (&str, &str) =
 const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: (&str, &str) =
     ("protocol-parameters-topic", "cardano.protocol.parameters");
 const DEFAULT_ENACT_STATE_TOPIC: (&str, &str) = ("enact-state-topic", "cardano.enact.state");
+
+const VERIFICATION_OUTPUT_FILE: &str = "verification-output-file";
 
 /// Governance State module
 #[module(
@@ -49,6 +54,7 @@ pub struct GovernanceStateConfig {
     protocol_parameters_topic: String,
     enact_state_topic: String,
     governance_query_topic: String,
+    verification_output_file: Option<String>,
 }
 
 impl GovernanceStateConfig {
@@ -66,6 +72,10 @@ impl GovernanceStateConfig {
             protocol_parameters_topic: Self::conf(config, DEFAULT_PROTOCOL_PARAMETERS_TOPIC),
             enact_state_topic: Self::conf(config, DEFAULT_ENACT_STATE_TOPIC),
             governance_query_topic: Self::conf(config, DEFAULT_GOVERNANCE_QUERY_TOPIC),
+            verification_output_file: config
+                .get_string(VERIFICATION_OUTPUT_FILE)
+                .map(|x| Some(x))
+                .unwrap_or(None),
         })
     }
 }
@@ -134,6 +144,7 @@ impl GovernanceState {
         let state = Arc::new(Mutex::new(State::new(
             context.clone(),
             config.enact_state_topic.clone(),
+            config.verification_output_file.clone(),
         )));
 
         // Ticker to log stats

@@ -246,13 +246,16 @@ impl ParametersUpdater {
             .params
             .conway
             .as_mut()
-            .ok_or_else(|| anyhow!("Shelley must present for enact state"))?;
+            .ok_or_else(|| anyhow!("Conway must present for enact state"))?;
 
         match &u {
             EnactStateElem::Params(pu) => self.update_params(&pu)?,
             EnactStateElem::Constitution(cu) => c.constitution = cu.clone(),
             EnactStateElem::Committee(cu) => Self::update_committee(&mut c.committee, cu),
             EnactStateElem::NoConfidence => c.committee.members.clear(),
+            EnactStateElem::ProtVer(pv) => {
+                self.sh_upd(|sp| &mut sp.protocol_version, &Some(pv.clone()))?
+            }
         }
 
         Ok(())
