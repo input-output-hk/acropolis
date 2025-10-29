@@ -1,4 +1,6 @@
-use crate::{BlockHash, TxHash};
+use crate::{BlockHash, Lovelace, NativeAsset, TxHash};
+use serde::ser::{Serialize, SerializeStruct, Serializer};
+use serde_with::{DisplayFromStr, serde_as};
 
 pub const DEFAULT_TRANSACTIONS_QUERY_TOPIC: (&str, &str) = (
     "transactions-state-query-topic",
@@ -41,11 +43,63 @@ pub enum TransactionsStateQueryResponse {
     Error(String),
 }
 
+#[derive(Debug, Clone, serde::Deserialize)]
+pub enum TransactionOutputAmount {
+    Lovelace(Lovelace),
+    Asset(NativeAsset),
+}
+
+impl Serialize for TransactionOutputAmount {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("TransactionOutputAmount", 2)?;
+        match self {
+            TransactionOutputAmount::Lovelace(lovelace) => {
+                state.serialize_field("unit", "lovelace")?;
+                state.serialize_field("amount", &lovelace.to_string())?;
+            },
+            TransactionOutputAmount::Asset(asset) => {
+                state.serialize_field("unit", &asset.name)?;
+                state.serialize_field("amount", &asset.amount.to_string())?;
+            },
+        }
+        state.end()
+    }
+}
+
+#[serde_as]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TransactionInfo {
     pub hash: TxHash,
-    pub block: BlockHash,
-    pub block_height: u64,
+    #[serde(rename = "block")]
+    pub block_hash: BlockHash,
+    #[serde(rename = "height")]
+    pub block_number: u64,
+    #[serde(rename = "time")]
+    pub block_time: u64,
+    pub slot: u64,
+    pub index: u64,
+    #[serde(rename = "order_amount")]
+    pub output_amounts: Vec<TransactionOutputAmount>,
+    #[serde(rename = "fees")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub fee: u64,
+    pub deposit: u64,
+    pub size: u64,
+    pub invalid_before: Option<u64>,
+    pub invalid_after: Option<u64>,
+    pub utxo_count: u64,
+    pub withdrawal_count: u64,
+    pub mir_cert_count: u64,
+    pub delegation_count: u64,
+    pub stake_cert_count: u64,
+    pub pool_update_count: u64,
+    pub pool_retire_count: u64,
+    pub asset_mint_or_burn_count: u64,
+    pub redeemer_count: u64,
+    pub valid_contract: bool,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

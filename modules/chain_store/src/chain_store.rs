@@ -12,11 +12,12 @@ use acropolis_common::{
     },
     queries::misc::Order,
     queries::transactions::{
-        TransactionInfo, TransactionsStateQuery, TransactionsStateQueryResponse,
-        DEFAULT_TRANSACTIONS_QUERY_TOPIC,
+        TransactionInfo, TransactionOutputAmount, TransactionsStateQuery,
+        TransactionsStateQueryResponse, DEFAULT_TRANSACTIONS_QUERY_TOPIC,
     },
     state_history::{StateHistory, StateHistoryStore},
-    BechOrdAddress, BlockHash, GenesisDelegate, HeavyDelegate, TxHash, VRFKey,
+    AssetName, BechOrdAddress, BlockHash, GenesisDelegate, HeavyDelegate, NativeAsset, TxHash,
+    VRFKey,
 };
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{module, Context, Module};
@@ -539,13 +540,59 @@ impl ChainStore {
     fn to_tx_info(tx: Tx) -> Result<TransactionInfo> {
         let block = pallas_traverse::MultiEraBlock::decode(&tx.block.bytes)?;
         let txs = block.txs();
-        let Some(tx) = txs.get(tx.index as usize) else {
+        let Some(tx_decoded) = txs.get(tx.index as usize) else {
             return Err(anyhow!("Transaction not found in block for given index"));
         };
+        let mut output_amounts = Vec::new();
+        for output in tx_decoded.outputs() {
+            let value = output.value();
+            let lovelace_amount = value.coin();
+            if lovelace_amount != 0 {
+                output_amounts.push(TransactionOutputAmount::Lovelace(lovelace_amount));
+            }
+            for policy in value.assets() {
+                for asset in policy.assets() {
+                    if asset.is_output() {
+                        output_amounts.push(TransactionOutputAmount::Asset(NativeAsset {
+                            name: AssetName::new(asset.name()).ok_or(anyhow!("Bad asset name"))?,
+                            amount: asset.output_coin().ok_or(anyhow!("No output amount"))?,
+                        }));
+                    }
+                }
+            }
+        }
         Ok(TransactionInfo {
-            hash: TxHash(*tx.hash()),
-            block: BlockHash(*block.hash()),
-            block_height: block.number(),
+            hash: TxHash(*tx_decoded.hash()),
+            block_hash: BlockHash(*block.hash()),
+            block_number: block.number(),
+            block_time: tx.block.extra.timestamp,
+            slot: block.slot(),
+            index: tx.index,
+            output_amounts,
+            fee: tx_decoded.fee().unwrap_or(0),
+            // TODO
+            deposit: 0,
+            size: tx_decoded.size() as u64,
+            invalid_before: tx_decoded.validity_start(),
+            // TODO
+            invalid_after: None,
+            utxo_count: tx_decoded.requires().len() as u64,
+            withdrawal_count: tx_decoded.withdrawals_sorted_set().len() as u64,
+            // TODO
+            mir_cert_count: 0,
+            // TODO
+            delegation_count: 0,
+            // TODO
+            stake_cert_count: 0,
+            // TODO
+            pool_update_count: 0,
+            // TODO
+            pool_retire_count: 0,
+            // TODO
+            asset_mint_or_burn_count: 0,
+            // TODO
+            redeemer_count: 0,
+            valid_contract: tx_decoded.is_valid(),
         })
     }
 
