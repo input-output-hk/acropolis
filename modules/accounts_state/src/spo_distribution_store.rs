@@ -32,8 +32,8 @@ fn encode_epoch_pool_prefix(epoch: u64, pool_id: &PoolId) -> Vec<u8> {
 
 fn decode_key(key: &[u8]) -> Result<(u64, PoolId, AddrKeyhash)> {
     let epoch = u64::from_be_bytes(key[..EPOCH_LEN].try_into()?);
-    let pool_id: PoolId = key[EPOCH_LEN..EPOCH_LEN + POOL_ID_LENGTH].try_into()?;
-    let stake_key: AddrKeyhash = key[EPOCH_LEN + POOL_ID_LENGTH..].try_into()?;
+    let pool_id = key[EPOCH_LEN..EPOCH_LEN + POOL_ID_LENGTH].try_into()?;
+    let stake_key = key[EPOCH_LEN + POOL_ID_LENGTH..].try_into()?;
     Ok((epoch, pool_id, stake_key))
 }
 
@@ -230,7 +230,7 @@ mod tests {
     const DB_PATH: &str = "spdd_db";
 
     fn test_pool_hash(byte: u8) -> PoolId {
-        PoolId::new(keyhash_224(&vec![byte]))
+        keyhash_224(&vec![byte]).into()
     }
 
     fn test_addr_hash(byte: u8) -> AddrKeyhash {

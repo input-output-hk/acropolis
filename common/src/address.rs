@@ -105,7 +105,7 @@ pub enum ShelleyAddressPaymentPart {
 
 impl Default for ShelleyAddressPaymentPart {
     fn default() -> Self {
-        Self::PaymentKeyHash(KeyHash::new([0u8; 28]))
+        Self::PaymentKeyHash([0u8; 28].into())
     }
 }
 
@@ -211,19 +211,31 @@ impl ShelleyAddress {
 
             let header = *header;
 
-            let to_28_bytes = |slice: &[u8]| -> Result<KeyHash> {
-                slice.try_into().map_err(|_| anyhow!("Invalid hash"))
-            };
-
             let payment_part = match (header >> 4) & 0x01 {
-                0 => ShelleyAddressPaymentPart::PaymentKeyHash(to_28_bytes(&data[1..29])?),
-                1 => ShelleyAddressPaymentPart::ScriptHash(to_28_bytes(&data[1..29])?),
+                0 => ShelleyAddressPaymentPart::PaymentKeyHash(
+                    data[1..29]
+                        .try_into()
+                        .map_err(|e| anyhow!("Failed to parse payment key hash: {}", e))?,
+                ),
+                1 => ShelleyAddressPaymentPart::ScriptHash(
+                    data[1..29]
+                        .try_into()
+                        .map_err(|e| anyhow!("Failed to parse payment script hash: {}", e))?,
+                ),
                 _ => panic!(),
             };
 
             let delegation_part = match (header >> 5) & 0x03 {
-                0 => ShelleyAddressDelegationPart::StakeKeyHash(to_28_bytes(&data[29..57])?),
-                1 => ShelleyAddressDelegationPart::ScriptHash(to_28_bytes(&data[29..57])?),
+                0 => ShelleyAddressDelegationPart::StakeKeyHash(
+                    data[29..57]
+                        .try_into()
+                        .map_err(|e| anyhow!("Failed to parse stake key hash: {}", e))?,
+                ),
+                1 => ShelleyAddressDelegationPart::ScriptHash(
+                    data[29..57]
+                        .try_into()
+                        .map_err(|e| anyhow!("Failed to parse stake script hash: {}", e))?,
+                ),
                 2 => {
                     let mut decoder = VarIntDecoder::new(&data[29..]);
                     let slot = decoder.read()?;
@@ -301,24 +313,24 @@ impl ShelleyAddress {
             ShelleyAddressDelegationPart::None => {
                 let header = build_header(3);
                 data.push(header);
-                data.extend(payment_hash.as_ref());
+                data.extend_from_slice(payment_hash.as_ref());
             }
             ShelleyAddressDelegationPart::StakeKeyHash(hash) => {
                 let header = build_header(0);
                 data.push(header);
-                data.extend(payment_hash.as_ref());
-                data.extend(hash.as_ref());
+                data.extend_from_slice(payment_hash.as_ref());
+                data.extend_from_slice(hash.as_ref());
             }
             ShelleyAddressDelegationPart::ScriptHash(hash) => {
                 let header = build_header(1);
                 data.push(header);
-                data.extend(payment_hash.as_ref());
-                data.extend(hash.as_ref());
+                data.extend_from_slice(payment_hash.as_ref());
+                data.extend_from_slice(hash.as_ref());
             }
             ShelleyAddressDelegationPart::Pointer(pointer) => {
                 let header = build_header(2);
                 data.push(header);
-                data.extend(payment_hash.as_ref());
+                data.extend_from_slice(payment_hash.as_ref());
 
                 let mut encoder = VarIntEncoder::new();
                 encoder.push(pointer.slot);
@@ -413,10 +425,12 @@ impl StakeAddress {
 
             let credential = match (header >> 4) & 0x0Fu8 {
                 0b1110 => StakeCredential::AddrKeyHash(
-                    data[1..].try_into().map_err(|_| anyhow!("Invalid key hash size"))?,
+                    data[1..].try_into().map_err(|e| anyhow!("Failed to parse key hash: {}", e))?,
                 ),
                 0b1111 => StakeCredential::ScriptHash(
-                    data[1..].try_into().map_err(|_| anyhow!("Invalid script hash size"))?,
+                    data[1..]
+                        .try_into()
+                        .map_err(|e| anyhow!("Failed to parse script hash: {}", e))?,
                 ),
                 _ => return Err(anyhow!("Unknown header {header} in stake address")),
             };
@@ -437,9 +451,9 @@ impl StakeAddress {
             NetworkId::Testnet => 0b0u8,
         };
 
-        let (stake_bits, stake_hash): (u8, &Vec<u8>) = match &self.credential {
-            StakeCredential::AddrKeyHash(data) => (0b1110, &data.to_vec()),
-            StakeCredential::ScriptHash(data) => (0b1111, &data.to_vec()),
+        let (stake_bits, stake_hash) = match &self.credential {
+            StakeCredential::AddrKeyHash(data) => (0b1110, data.as_ref()),
+            StakeCredential::ScriptHash(data) => (0b1111, data.as_ref()),
         };
 
         let mut data = vec![network_bits | (stake_bits << 4)];
@@ -526,7 +540,7 @@ impl Default for StakeAddress {
     fn default() -> Self {
         StakeAddress {
             network: NetworkId::Mainnet,
-            credential: StakeCredential::AddrKeyHash(KeyHash::new([0u8; 28])),
+            credential: StakeCredential::AddrKeyHash([0u8; 28].into()),
         }
     }
 }

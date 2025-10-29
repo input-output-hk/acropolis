@@ -1022,7 +1022,7 @@ mod tests {
     }
 
     fn test_vrf_keyhash(byte: u8) -> VrfKeyHash {
-        VrfKeyHash::new(keyhash_256(&vec![byte]))
+        keyhash_256(&vec![byte]).into()
     }
 
     const STAKE_KEY_HASH: [u8; 3] = [0x99, 0x0f, 0x00];
@@ -1078,8 +1078,8 @@ mod tests {
     fn spdd_from_delegation_with_utxo_values_and_pledge() {
         let mut state = State::default();
 
-        let spo1: PoolId = PoolId::new(test_keyhash(0x01));
-        let spo2: PoolId = PoolId::new(test_keyhash(0x02));
+        let spo1 = test_keyhash(0x01).into();
+        let spo2 = test_keyhash(0x02).into();
 
         let vrf_key_hash_1 = test_vrf_keyhash(0x03);
         let vrf_key_hash_2 = test_vrf_keyhash(0x04);
@@ -1090,7 +1090,7 @@ mod tests {
                 epoch: 1,
                 spos: vec![
                     PoolRegistration {
-                        operator: spo1.clone(),
+                        operator: spo1,
                         vrf_key_hash: vrf_key_hash_1,
                         pledge: 26,
                         cost: 0,
@@ -1104,7 +1104,7 @@ mod tests {
                         pool_metadata: None,
                     },
                     PoolRegistration {
-                        operator: spo2.clone(),
+                        operator: spo2,
                         vrf_key_hash: vrf_key_hash_2,
                         pledge: 47,
                         cost: 10,
@@ -1393,7 +1393,7 @@ mod tests {
         // Get the KeyHash once
         let spo1_hash = spo1.get_hash();
         let drep_key_hash = test_keyhash_from_bytes(&DREP_HASH);
-        let pool_id_1 = PoolId::new(*spo1_hash);
+        let pool_id_1 = (*spo1_hash).into();
 
         let certificates = vec![
             // register the first two SPOs separately from their delegation

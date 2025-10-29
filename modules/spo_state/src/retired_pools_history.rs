@@ -66,7 +66,6 @@ impl RetiredPoolsHistoryState {
 mod tests {
     use super::*;
     use crate::test_utils::*;
-    use acropolis_common::KeyHash;
 
     #[test]
     fn retired_pools_history_is_none_when_store_retired_pools_is_false() {
@@ -91,8 +90,8 @@ mod tests {
         let state = RetiredPoolsHistoryState::new(save_retired_pools_store_config());
 
         let block = new_block(2);
-        let spo_1 = PoolId::new(KeyHash::new([1; 28]));
-        let spo_2 = PoolId::new(KeyHash::new([2; 28]));
+        let spo_1 = [1; 28].into();
+        let spo_2 = [2; 28].into();
         let retired_spos = vec![spo_1, spo_2];
         state.handle_deregistrations(&block, &retired_spos);
 

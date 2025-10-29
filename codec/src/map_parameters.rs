@@ -58,7 +58,7 @@ pub fn to_hash_opt<const N: usize>(
 
 /// Convert a Pallas Hash<28> reference to an Acropolis PoolId
 pub fn to_pool_id(pallas_hash: &pallas_primitives::Hash<28>) -> PoolId {
-    PoolId::from(to_hash(pallas_hash))
+    to_hash(pallas_hash).into()
 }
 
 /// Convert a Pallas Hash<32> reference to an Acropolis VRFKey
@@ -72,7 +72,7 @@ pub fn bytes_to_hash<const N: usize>(bytes: &pallas_primitives::Bytes) -> Hash<N
     let slice: &[u8] = bytes.as_ref();
     let mut array = [0u8; N];
     array.copy_from_slice(&slice[..N]);
-    Hash::from(array)
+    array.into()
 }
 
 /// Derive our Address from a Pallas address

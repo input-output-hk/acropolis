@@ -668,7 +668,6 @@ impl State {
 mod tests {
     use super::*;
     use crate::test_utils::*;
-    use acropolis_common::hash::Hash;
     use acropolis_common::{
         state_history::{StateHistory, StateHistoryStore},
         PoolRetirement, Ratio, StakeAddress, TxCertificate, TxCertificateWithPos, TxIdentifier,
@@ -677,11 +676,11 @@ mod tests {
     use tokio::sync::Mutex;
 
     fn test_pool_id(byte: u8) -> PoolId {
-        PoolId::new(Hash::new([byte; 28]))
+        [byte; 28].into()
     }
 
     fn test_pool_id_from_bytes(bytes: &[u8]) -> PoolId {
-        PoolId::new(keyhash_224(bytes))
+        keyhash_224(bytes).into()
     }
 
     fn default_pool_registration(

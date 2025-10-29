@@ -2090,7 +2090,7 @@ mod tests {
         let mut test_hash_bytes = [0u8; 28];
         test_hash_bytes[0..4].copy_from_slice(&[1, 2, 3, 4]);
         voting.votes.insert(
-            Voter::StakePoolKey(PoolId::new(Hash::new(test_hash_bytes))),
+            Voter::StakePoolKey(test_hash_bytes.into()),
             SingleVoterVotes::default(),
         );
 

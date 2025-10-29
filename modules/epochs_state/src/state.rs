@@ -188,7 +188,7 @@ impl State {
         self.last_block_time = block_info.timestamp;
         self.last_block_height = block_info.number;
         self.epoch_blocks += 1;
-        let spo_id = PoolId::new(keyhash_224(issuer_vkey));
+        let spo_id = PoolId::from(keyhash_224(issuer_vkey));
 
         // Count one on this hash
         *(self.blocks_minted.entry(spo_id.clone()).or_insert(0)) += 1;

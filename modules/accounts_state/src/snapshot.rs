@@ -195,23 +195,21 @@ mod tests {
     use super::*;
     use acropolis_common::stake_addresses::StakeAddressState;
     use acropolis_common::NetworkId::Mainnet;
-    use acropolis_common::{KeyHash, PoolId, StakeAddress, StakeCredential};
+    use acropolis_common::{PoolId, StakeAddress, StakeCredential};
 
-    // Helper function to create stake addresses for testing
     fn create_test_stake_address(id: u8) -> StakeAddress {
         let mut hash = [0u8; 28];
         hash[0] = id;
         StakeAddress {
             network: Mainnet,
-            credential: StakeCredential::AddrKeyHash(KeyHash::new(hash)),
+            credential: StakeCredential::AddrKeyHash(hash.into()),
         }
     }
 
-    // Helper function to create SPO key hashes for testing
     fn create_test_spo_hash(id: u8) -> PoolId {
-        let mut hash = vec![0u8; 28];
+        let mut hash = [0u8; 28];
         hash[0] = id;
-        PoolId::try_from(hash).unwrap()
+        hash.into()
     }
 
     #[test]

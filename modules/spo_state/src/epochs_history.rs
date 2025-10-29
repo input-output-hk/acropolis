@@ -214,7 +214,7 @@ mod tests {
 
     #[test]
     fn get_pool_history_returns_none_when_spo_is_not_found() {
-        let key_hash = KeyHash::new([1; 28]);
+        let key_hash = [1; 28].into();
         let epochs_history = EpochsHistoryState::new(save_history_store_config());
         let pool_history = epochs_history.get_pool_history(&key_hash);
         assert!(pool_history.is_none());
@@ -223,8 +223,8 @@ mod tests {
     #[test]
     fn get_pool_history_returns_data() {
         let epochs_history = EpochsHistoryState::new(save_history_store_config());
-        let pool_id = PoolId::new(KeyHash::new([1; 28]));
-        let spo_block_key_hash = PoolId::new(KeyHash::new([2; 28]));
+        let pool_id = [1; 28].into();
+        let spo_block_key_hash = [2; 28].into();
 
         let block = new_block(2);
         let mut spdd_msg = new_spdd_message(1);
