@@ -217,10 +217,15 @@ pub struct StakeRewardDelta {
 }
 
 /// Type of reward being given
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, minicbor::Encode, minicbor::Decode, serde::Serialize, serde::Deserialize,
+)]
 pub enum RewardType {
+    #[n(0)]
     Leader,
+    #[n(1)]
     Member,
+    #[n(2)]
     PoolRefund,
 }
 

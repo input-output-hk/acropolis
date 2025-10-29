@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use crate::{DRepChoice, KeyHash, PoolId, PoolLiveStakeInfo, StakeAddress, TxIdentifier};
+use crate::{
+    DRepChoice, KeyHash, PoolId, PoolLiveStakeInfo, RewardType, StakeAddress, TxIdentifier,
+};
 
 pub const DEFAULT_ACCOUNTS_QUERY_TOPIC: (&str, &str) =
     ("accounts-state-query-topic", "cardano.query.accounts");
@@ -158,7 +160,7 @@ pub struct RewardHistory {
     #[n(2)]
     pub pool: PoolId,
     #[n(3)]
-    pub is_owner: bool,
+    pub reward_type: RewardType,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

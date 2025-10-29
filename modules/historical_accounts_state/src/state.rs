@@ -104,8 +104,18 @@ impl State {
             && block_info.number > self.volatile.epoch_start_block + self.volatile.security_param_k
     }
 
-    pub fn handle_rewards(&mut self, _reward_deltas: &StakeRewardDeltasMessage) -> Result<()> {
-        Ok(())
+    pub fn handle_rewards(&mut self, reward_deltas: &StakeRewardDeltasMessage, epoch: u32) {
+        let volatile = self.volatile.window.back_mut().expect("window should never be empty");
+        for reward in reward_deltas.deltas.iter() {
+            let entry = volatile.entry(reward.stake_address.clone()).or_default();
+            let update = RewardHistory {
+                epoch,
+                amount: reward.delta,
+                pool: Vec::new(),
+                reward_type: reward.reward_type.clone(),
+            };
+            entry.reward_history.get_or_insert_with(Vec::new).push(update);
+        }
     }
 
     pub fn handle_tx_certificates(&mut self, tx_certs: &TxCertificatesMessage, epoch: u32) {

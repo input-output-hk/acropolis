@@ -126,10 +126,7 @@ impl HistoricalAccountsState {
                 {
                     Self::check_sync(&current_block, block_info);
                     let mut state = state_mutex.lock().await;
-                    state
-                        .handle_rewards(rewards_msg)
-                        .inspect_err(|e| error!("Reward deltas handling error: {e:#}"))
-                        .ok();
+                    state.handle_rewards(rewards_msg, block_info.epoch as u32);
                 }
             }
 
