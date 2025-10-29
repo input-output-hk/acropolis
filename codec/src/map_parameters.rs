@@ -710,7 +710,7 @@ fn map_governance_action(action: &conway::GovAction) -> Result<GovernanceAction>
         conway::GovAction::HardForkInitiation(id, version) => Ok(
             GovernanceAction::HardForkInitiation(HardForkInitiationAction {
                 previous_action_id: map_nullable_gov_action_id(id)?,
-                protocol_version: *version,
+                protocol_version: protocol_params::ProtocolVersion::new(version.0, version.1),
             }),
         ),
 

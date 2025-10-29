@@ -16,12 +16,14 @@ caryatid_sdk = { workspace = true }
 anyhow = { workspace = true }
 async-trait = "0.1"
 config = { workspace = true }
+csv = "1"
 hex = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_with = { workspace = true, features = ["base64"] }
 tokio = { workspace = true }
 tracing = { workspace = true }
+tracing-subscriber = { version = "0.3.20", features = ["registry", "env-filter"] }
 
 [lib]
 path = "src/governance_state.rs"

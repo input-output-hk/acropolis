@@ -40,7 +40,7 @@ impl ParametersUpdater {
     }
 
     fn cw_u32(&mut self, f: impl Fn(&mut ConwayParams) -> &mut u32, u: &Option<u64>) -> Result<()> {
-        self.cw_upd(f, &u.map(|x| u32::try_from(x)).transpose()?)
+        self.cw_upd(f, &u.map(u32::try_from).transpose()?)
     }
 
     fn update_conway_params(&mut self, p: &ProtocolParamUpdate) -> Result<()> {
@@ -129,7 +129,7 @@ impl ParametersUpdater {
         f: impl Fn(&mut ShelleyProtocolParams) -> &mut u32,
         u: &Option<u64>,
     ) -> Result<()> {
-        self.sh_upd(f, &u.map(|x| u32::try_from(x)).transpose()?)
+        self.sh_upd(f, &u.map(u32::try_from).transpose()?)
     }
 
     fn update_shelley_params(&mut self, p: &ProtocolParamUpdate) -> Result<()> {
@@ -185,7 +185,7 @@ impl ParametersUpdater {
     }
 
     fn a_u32(&mut self, f: impl Fn(&mut AlonzoParams) -> &mut u32, u: &Option<u64>) -> Result<()> {
-        self.a_upd(f, &u.map(|x| u32::try_from(x)).transpose()?)
+        self.a_upd(f, &u.map(u32::try_from).transpose()?)
     }
 
     fn update_alonzo_params(&mut self, p: &ProtocolParamUpdate) -> Result<()> {
@@ -215,7 +215,7 @@ impl ParametersUpdater {
 
     fn update_committee(c: &mut Committee, cu: &CommitteeChange) {
         for removed_member in cu.removed_committee_members.iter() {
-            if let None = c.members.remove(removed_member) {
+            if c.members.remove(removed_member).is_none() {
                 error!(
                     "Removing {:?}, which is not a part of the committee",
                     removed_member
@@ -231,7 +231,7 @@ impl ParametersUpdater {
                 );
             }
         }
-        c.threshold = cu.terms.clone();
+        c.threshold = cu.terms;
     }
 
     fn apply_alonzo_babbage_outcome_elem(&mut self, u: &AlonzoBabbageVotingOutcome) -> Result<()> {
@@ -242,17 +242,20 @@ impl ParametersUpdater {
     }
 
     fn apply_enact_state_elem(&mut self, u: &EnactStateElem) -> Result<()> {
-        let ref mut c = self
+        let c = &mut (self
             .params
             .conway
             .as_mut()
-            .ok_or_else(|| anyhow!("Shelley must present for enact state"))?;
+            .ok_or_else(|| anyhow!("Conway must present for enact state"))?);
 
         match &u {
-            EnactStateElem::Params(pu) => self.update_params(&pu)?,
+            EnactStateElem::Params(pu) => self.update_params(pu)?,
             EnactStateElem::Constitution(cu) => c.constitution = cu.clone(),
             EnactStateElem::Committee(cu) => Self::update_committee(&mut c.committee, cu),
             EnactStateElem::NoConfidence => c.committee.members.clear(),
+            EnactStateElem::ProtVer(pv) => {
+                self.sh_upd(|sp| &mut sp.protocol_version, &Some(pv.clone()))?
+            }
         }
 
         Ok(())
