@@ -1,7 +1,7 @@
 use std::{collections::HashMap, path::Path};
 
 use acropolis_common::{
-    queries::accounts::{AccountWithdrawal, DelegationUpdate, RegistrationUpdate, RewardHistory},
+    queries::accounts::{AccountReward, AccountWithdrawal, DelegationUpdate, RegistrationUpdate},
     ShelleyAddress, StakeAddress,
 };
 use anyhow::Result;
@@ -155,9 +155,9 @@ impl ImmutableHistoricalAccountStore {
     pub async fn get_reward_history(
         &self,
         account: &StakeAddress,
-    ) -> Result<Option<Vec<RewardHistory>>> {
+    ) -> Result<Option<Vec<AccountReward>>> {
         let mut immutable_rewards =
-            self.collect_partition::<RewardHistory>(&self.rewards_history, account.get_hash())?;
+            self.collect_partition::<AccountReward>(&self.rewards_history, account.get_hash())?;
 
         self.merge_pending(
             account,

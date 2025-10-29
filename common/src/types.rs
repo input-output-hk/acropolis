@@ -230,6 +230,16 @@ pub enum RewardType {
     PoolRefund,
 }
 
+impl fmt::Display for RewardType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RewardType::Leader => write!(f, "leader"),
+            RewardType::Member => write!(f, "member"),
+            RewardType::PoolRefund => write!(f, "pool_deposit_refund"),
+        }
+    }
+}
+
 pub type PolicyId = [u8; 28];
 pub type NativeAssets = Vec<(PolicyId, Vec<NativeAsset>)>;
 pub type NativeAssetsDelta = Vec<(PolicyId, Vec<NativeAssetDelta>)>;

@@ -49,7 +49,7 @@ pub enum AccountsStateQuery {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum AccountsStateQueryResponse {
     AccountInfo(AccountInfo),
-    AccountRewardHistory(Vec<RewardHistory>),
+    AccountRewardHistory(Vec<AccountReward>),
     AccountHistory(AccountHistory),
     AccountRegistrationHistory(Vec<RegistrationUpdate>),
     AccountDelegationHistory(Vec<DelegationUpdate>),
@@ -152,7 +152,7 @@ pub struct AccountWithdrawal {
 #[derive(
     Debug, Clone, minicbor::Decode, minicbor::Encode, serde::Serialize, serde::Deserialize,
 )]
-pub struct RewardHistory {
+pub struct AccountReward {
     #[n(0)]
     pub epoch: u32,
     #[n(1)]

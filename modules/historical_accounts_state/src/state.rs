@@ -8,7 +8,7 @@ use acropolis_common::{
         AddressDeltasMessage, StakeRewardDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
     },
     queries::accounts::{
-        AccountWithdrawal, DelegationUpdate, RegistrationStatus, RegistrationUpdate, RewardHistory,
+        AccountReward, AccountWithdrawal, DelegationUpdate, RegistrationStatus, RegistrationUpdate,
     },
     BlockInfo, InstantaneousRewardTarget, PoolId, ShelleyAddress, StakeAddress, TxCertificate,
     TxIdentifier,
@@ -24,7 +24,7 @@ use anyhow::Result;
 
 #[derive(Debug, Default, Clone)]
 pub struct AccountEntry {
-    pub reward_history: Option<Vec<RewardHistory>>,
+    pub reward_history: Option<Vec<AccountReward>>,
     pub active_stake_history: Option<Vec<ActiveStakeHistory>>,
     pub delegation_history: Option<Vec<DelegationUpdate>>,
     pub registration_history: Option<Vec<RegistrationUpdate>>,
@@ -108,7 +108,7 @@ impl State {
         let volatile = self.volatile.window.back_mut().expect("window should never be empty");
         for reward in reward_deltas.deltas.iter() {
             let entry = volatile.entry(reward.stake_address.clone()).or_default();
-            let update = RewardHistory {
+            let update = AccountReward {
                 epoch,
                 amount: reward.delta,
                 pool: reward.pool.clone(),
@@ -240,7 +240,7 @@ impl State {
     pub async fn get_reward_history(
         &self,
         account: &StakeAddress,
-    ) -> Result<Option<Vec<RewardHistory>>> {
+    ) -> Result<Option<Vec<AccountReward>>> {
         let immutable = self.immutable.get_reward_history(account).await?;
 
         let mut volatile = Vec::new();
