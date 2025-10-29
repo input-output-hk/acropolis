@@ -66,15 +66,15 @@ impl ImmutableHistoricalAccountStore {
         epoch: u32,
         config: &HistoricalAccountsConfig,
     ) -> Result<u64> {
-        if !config.any_enabled() {
-            debug!("no persistence needed for epoch {epoch} (disabled)",);
-            return Ok(0);
-        }
-
         let drained_blocks = {
             let mut pending = self.pending.lock().await;
             std::mem::take(&mut *pending)
         };
+
+        if !config.any_enabled() {
+            debug!("no persistence needed for epoch {epoch} (disabled)",);
+            return Ok(0);
+        }
 
         let mut batch = self.keyspace.batch();
         let mut change_count = 0;
