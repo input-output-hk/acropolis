@@ -116,9 +116,6 @@ pub struct State {
     /// Pool refunds to apply next epoch (list of reward accounts to refund to)
     pool_refunds: Vec<StakeAddress>,
 
-    /// Stake address refunds to apply next epoch
-    stake_refunds: Vec<(StakeAddress, Lovelace)>,
-
     /// MIRs to pay next epoch
     mirs: Vec<MoveInstantaneousReward>,
 
@@ -324,7 +321,6 @@ impl State {
 
         // Pay the refunds after snapshot, so they don't appear in active_stake
         reward_deltas.extend(self.pay_pool_refunds());
-        reward_deltas.extend(self.pay_stake_refunds());
 
         // Verify pots state
         verifier.verify_pots(epoch, &self.pots);
@@ -490,33 +486,6 @@ impl State {
                 self.pots.treasury += deposit;
             }
 
-            self.pots.deposits -= deposit;
-        }
-
-        reward_deltas
-    }
-
-    /// Pay stake address refunds
-    fn pay_stake_refunds(&mut self) -> Vec<StakeRewardDelta> {
-        let mut reward_deltas = Vec::<StakeRewardDelta>::new();
-
-        let refunds = take(&mut self.stake_refunds);
-        if !refunds.is_empty() {
-            info!(
-                "{} deregistered stake addresses, total refunds {}",
-                refunds.len(),
-                refunds.iter().map(|(_, n)| n).sum::<Lovelace>()
-            );
-        }
-
-        // Send them their deposits back
-        for (stake_address, deposit) in refunds {
-            let mut stake_addresses = self.stake_addresses.lock().unwrap();
-            reward_deltas.push(StakeRewardDelta {
-                stake_address: stake_address.clone(), // Extract hash for delta
-                delta: deposit as i64,
-            });
-            stake_addresses.add_to_reward(&stake_address, deposit);
             self.pots.deposits -= deposit;
         }
 
@@ -841,8 +810,7 @@ impl State {
                 }
             };
 
-            // Schedule refund
-            self.stake_refunds.push((stake_address.clone(), deposit));
+            self.pots.deposits -= deposit;
 
             // Add to registration changes
             self.current_epoch_registration_changes.lock().unwrap().push(RegistrationChange {
