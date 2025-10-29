@@ -207,7 +207,16 @@ pub struct StakeAddressDelta {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StakeRewardDelta {
     pub stake_address: StakeAddress,
-    pub delta: i64,
+    pub delta: u64,
+    pub reward_type: RewardType,
+}
+
+/// Type of reward being given
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum RewardType {
+    Leader,
+    Member,
+    PoolRefund,
 }
 
 pub type PolicyId = [u8; 28];

@@ -1,6 +1,7 @@
 //! Acropolis AccountsState: rewards calculations
 
 use crate::snapshot::{Snapshot, SnapshotSPO};
+use acropolis_common::RewardType;
 use acropolis_common::{
     protocol_params::ShelleyParams, rational_number::RationalNumber, KeyHash, Lovelace, SPORewards,
     StakeAddress,
@@ -12,13 +13,6 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 use tracing::{debug, info, warn};
-
-/// Type of reward being given
-#[derive(Debug, Clone)]
-pub enum RewardType {
-    Leader,
-    Member,
-}
 
 /// Reward Detail
 #[derive(Debug, Clone)]
@@ -199,6 +193,7 @@ pub fn calculate_rewards(
                         num_delegators_paid += 1;
                         total_paid_to_delegators += reward.amount;
                     }
+                    RewardType::PoolRefund => {}
                 }
                 spo_rewards.total_rewards += reward.amount;
                 result.total_paid += reward.amount;
