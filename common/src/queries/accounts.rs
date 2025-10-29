@@ -13,7 +13,7 @@ pub const DEFAULT_HISTORICAL_ACCOUNTS_QUERY_TOPIC: (&str, &str) = (
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum AccountsStateQuery {
     GetAccountInfo { stake_address: StakeAddress },
-    GetAccountRewardHistory { stake_key: Vec<u8> },
+    GetAccountRewardHistory { account: StakeAddress },
     GetAccountHistory { stake_key: Vec<u8> },
     GetAccountRegistrationHistory { account: StakeAddress },
     GetAccountDelegationHistory { account: StakeAddress },
@@ -47,7 +47,7 @@ pub enum AccountsStateQuery {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum AccountsStateQueryResponse {
     AccountInfo(AccountInfo),
-    AccountRewardHistory(AccountRewardHistory),
+    AccountRewardHistory(Vec<RewardHistory>),
     AccountHistory(AccountHistory),
     AccountRegistrationHistory(Vec<RegistrationUpdate>),
     AccountDelegationHistory(Vec<DelegationUpdate>),
@@ -90,9 +90,6 @@ pub struct AccountInfo {
     pub delegated_spo: Option<KeyHash>,
     pub delegated_drep: Option<DRepChoice>,
 }
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct AccountRewardHistory {}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AccountHistory {}
@@ -148,6 +145,20 @@ pub struct AccountWithdrawal {
     pub tx_identifier: TxIdentifier,
     #[n(1)]
     pub amount: u64,
+}
+
+#[derive(
+    Debug, Clone, minicbor::Decode, minicbor::Encode, serde::Serialize, serde::Deserialize,
+)]
+pub struct RewardHistory {
+    #[n(0)]
+    pub epoch: u32,
+    #[n(1)]
+    pub amount: u64,
+    #[n(2)]
+    pub pool: PoolId,
+    #[n(3)]
+    pub is_owner: bool,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

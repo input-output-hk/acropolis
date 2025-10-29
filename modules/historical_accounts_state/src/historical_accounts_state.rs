@@ -348,6 +348,15 @@ impl HistoricalAccountsState {
                             Err(e) => AccountsStateQueryResponse::Error(e.to_string()),
                         }
                     }
+                    AccountsStateQuery::GetAccountRewardHistory { account } => {
+                        match state.lock().await.get_reward_history(account).await {
+                            Ok(Some(rewards)) => {
+                                AccountsStateQueryResponse::AccountRewardHistory(rewards)
+                            }
+                            Ok(None) => AccountsStateQueryResponse::NotFound,
+                            Err(e) => AccountsStateQueryResponse::Error(e.to_string()),
+                        }
+                    }
                     _ => AccountsStateQueryResponse::Error(format!(
                         "Unimplemented query variant: {:?}",
                         query

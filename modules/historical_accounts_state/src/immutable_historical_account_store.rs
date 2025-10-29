@@ -1,7 +1,7 @@
 use std::{collections::HashMap, path::Path};
 
 use acropolis_common::{
-    queries::accounts::{AccountWithdrawal, DelegationUpdate, RegistrationUpdate},
+    queries::accounts::{AccountWithdrawal, DelegationUpdate, RegistrationUpdate, RewardHistory},
     ShelleyAddress, StakeAddress,
 };
 use anyhow::Result;
@@ -11,7 +11,7 @@ use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use tokio::sync::Mutex;
 use tracing::{debug, error};
 
-use crate::state::{AccountEntry, ActiveStakeHistory, HistoricalAccountsConfig, RewardHistory};
+use crate::state::{AccountEntry, ActiveStakeHistory, HistoricalAccountsConfig};
 
 pub struct ImmutableHistoricalAccountStore {
     rewards_history: Partition,
@@ -152,7 +152,7 @@ impl ImmutableHistoricalAccountStore {
         pending.extend(drained);
     }
 
-    pub async fn _get_rewards_history(
+    pub async fn get_reward_history(
         &self,
         account: &StakeAddress,
     ) -> Result<Option<Vec<RewardHistory>>> {

@@ -8,10 +8,10 @@ use acropolis_common::{
         AddressDeltasMessage, StakeRewardDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
     },
     queries::accounts::{
-        AccountWithdrawal, DelegationUpdate, RegistrationStatus, RegistrationUpdate,
+        AccountWithdrawal, DelegationUpdate, RegistrationStatus, RegistrationUpdate, RewardHistory,
     },
-    BlockInfo, InstantaneousRewardTarget, PoolId, ShelleyAddress, StakeAddress, StakeCredential,
-    TxCertificate, TxIdentifier,
+    BlockInfo, InstantaneousRewardTarget, PoolId, ShelleyAddress, StakeAddress, TxCertificate,
+    TxIdentifier,
 };
 use tracing::warn;
 
@@ -31,18 +31,6 @@ pub struct AccountEntry {
     pub withdrawal_history: Option<Vec<AccountWithdrawal>>,
     pub mir_history: Option<Vec<AccountWithdrawal>>,
     pub addresses: Option<Vec<ShelleyAddress>>,
-}
-
-#[derive(Debug, Clone, minicbor::Decode, minicbor::Encode)]
-pub struct RewardHistory {
-    #[n(0)]
-    pub epoch: u32,
-    #[n(1)]
-    pub amount: u64,
-    #[n(2)]
-    pub pool: PoolId,
-    #[n(3)]
-    pub is_owner: bool,
 }
 
 #[derive(Debug, Clone, minicbor::Decode, minicbor::Encode)]
@@ -239,11 +227,23 @@ impl State {
         }
     }
 
-    pub async fn _get_reward_history(
+    pub async fn get_reward_history(
         &self,
-        _account: &StakeCredential,
-    ) -> Result<Vec<RewardHistory>> {
-        Ok(Vec::new())
+        account: &StakeAddress,
+    ) -> Result<Option<Vec<RewardHistory>>> {
+        let immutable = self.immutable.get_reward_history(account).await?;
+
+        let mut volatile = Vec::new();
+        self.merge_volatile_history(account, |e| e.reward_history.as_ref(), &mut volatile);
+
+        match immutable {
+            Some(mut rewards) => {
+                rewards.extend(volatile);
+                Ok(Some(rewards))
+            }
+            None if volatile.is_empty() => Ok(None),
+            None => Ok(Some(volatile)),
+        }
     }
 
     pub async fn _get_active_stake_history(
