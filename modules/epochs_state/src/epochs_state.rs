@@ -17,18 +17,16 @@ use pallas::ledger::traverse::MultiEraHeader;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, info_span, Instrument};
-
 mod epoch_activity_publisher;
-mod epoch_nonces_publisher;
+mod epoch_nonce_publisher;
 mod epochs_history;
 mod state;
 mod store_config;
-use state::State;
-
 use crate::{
-    epoch_activity_publisher::EpochActivityPublisher, epoch_nonces_publisher::EpochNoncesPublisher,
+    epoch_activity_publisher::EpochActivityPublisher, epoch_nonce_publisher::EpochNoncePublisher,
     epochs_history::EpochsHistoryState, store_config::StoreConfig,
 };
+use state::State;
 
 const DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC: (&str, &str) = (
     "bootstrapped-subscribe-topic",
@@ -45,8 +43,8 @@ const DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC: (&str, &str) = (
 
 const DEFAULT_EPOCH_ACTIVITY_PUBLISH_TOPIC: (&str, &str) =
     ("epoch-activity-publish-topic", "cardano.epoch.activity");
-const DEFAULT_EPOCH_NONCES_PUBLISH_TOPIC: (&str, &str) =
-    ("epoch-nonces-publish-topic", "cardano.epoch.nonces");
+const DEFAULT_EPOCH_NONCE_PUBLISH_TOPIC: (&str, &str) =
+    ("epoch-nonce-publish-topic", "cardano.epoch.nonce");
 
 /// Epochs State module
 #[module(
@@ -66,7 +64,7 @@ impl EpochsState {
         mut block_txs_subscription: Box<dyn Subscription<Message>>,
         mut protocol_parameters_subscription: Box<dyn Subscription<Message>>,
         mut epoch_activity_publisher: EpochActivityPublisher,
-        mut epoch_nonces_publisher: EpochNoncesPublisher,
+        mut epoch_nonce_publisher: EpochNoncePublisher,
     ) -> Result<()> {
         let (_, bootstrapped_message) = bootstrapped_subscription.read().await?;
         let genesis = match bootstrapped_message.as_ref() {
@@ -153,11 +151,11 @@ impl EpochsState {
                                 Ok(()) => {
                                     if is_new_epoch {
                                         if let Some(nonces) = state.get_nonces() {
-                                            epoch_nonces_publisher
-                                                .publish(&block_info, nonces)
+                                            epoch_nonce_publisher
+                                                .publish(&block_info, nonces.active)
                                                 .await
                                                 .unwrap_or_else(|e| {
-                                                    error!("Failed to publish epoch nonces: {e}")
+                                                    error!("Failed to publish epoch nonce: {e}")
                                                 });
                                         }
                                     }
@@ -233,10 +231,10 @@ impl EpochsState {
             .unwrap_or(DEFAULT_EPOCH_ACTIVITY_PUBLISH_TOPIC.1.to_string());
         info!("Publishing EpochActivityMessage on '{epoch_activity_publish_topic}'");
 
-        let epoch_nonces_publish_topic = config
-            .get_string(DEFAULT_EPOCH_NONCES_PUBLISH_TOPIC.0)
-            .unwrap_or(DEFAULT_EPOCH_NONCES_PUBLISH_TOPIC.1.to_string());
-        info!("Publishing EpochNoncesMessage on '{epoch_nonces_publish_topic}'");
+        let epoch_nonce_publish_topic = config
+            .get_string(DEFAULT_EPOCH_NONCE_PUBLISH_TOPIC.0)
+            .unwrap_or(DEFAULT_EPOCH_NONCE_PUBLISH_TOPIC.1.to_string());
+        info!("Publishing EpochNonceMessage on '{epoch_nonce_publish_topic}'");
 
         // query topic
         let epochs_query_topic = config
@@ -268,8 +266,8 @@ impl EpochsState {
         // Publisher
         let epoch_activity_publisher =
             EpochActivityPublisher::new(context.clone(), epoch_activity_publish_topic);
-        let epoch_nonces_publisher =
-            EpochNoncesPublisher::new(context.clone(), epoch_nonces_publish_topic);
+        let epoch_nonce_publisher =
+            EpochNoncePublisher::new(context.clone(), epoch_nonce_publish_topic);
 
         // handle epochs query
         context.handle(&epochs_query_topic, move |message| {
@@ -368,7 +366,7 @@ impl EpochsState {
                 block_txs_subscription,
                 protocol_parameters_subscription,
                 epoch_activity_publisher,
-                epoch_nonces_publisher,
+                epoch_nonce_publisher,
             )
             .await
             .unwrap_or_else(|e| error!("Failed: {e}"));

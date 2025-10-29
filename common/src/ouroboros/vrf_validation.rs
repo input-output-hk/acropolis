@@ -17,9 +17,9 @@ pub enum VrfValidationError {
     /// **Cause:** The Shelley protocol parameters used to validate the block,
     #[error("{0}")]
     InvalidShelleyParams(String),
-    /// **Cause**: The epoch nonces are not set
-    #[error("Epoch Nonces are missing")]
-    MissingEpochNonces,
+    /// **Cause**: The epoch nonce are not set
+    #[error("Epoch Nonce are missing")]
+    MissingEpochNonce,
     /// **Cause:** The Issuer Key is missing from the block header
     #[error("Missing Issuer Key")]
     MissingIssuerKey,

@@ -5,10 +5,10 @@ use std::sync::Arc;
 use acropolis_common::{
     genesis_values::GenesisValues,
     messages::{
-        EpochNoncesMessage, ProtocolParamsMessage, SPOStakeDistributionMessage, SPOStateMessage,
+        EpochNonceMessage, ProtocolParamsMessage, SPOStakeDistributionMessage, SPOStateMessage,
     },
     ouroboros::{self, vrf_validation::VrfValidationError},
-    protocol_params::{Nonces, PraosParams, ShelleyParams},
+    protocol_params::{Nonce, PraosParams, ShelleyParams},
     BlockInfo, Era,
 };
 use anyhow::Result;
@@ -40,8 +40,8 @@ pub struct State {
     /// protocol parameter for Praos and TPraos
     pub praos_params: Option<PraosParams>,
 
-    /// epoch nonces
-    pub epoch_nonces: Option<Nonces>,
+    /// epoch nonce
+    pub epoch_nonce: Option<Nonce>,
 
     /// epoch snapshots
     pub epoch_snapshots: EpochSnapshots,
@@ -52,7 +52,7 @@ impl State {
         Self {
             praos_params: None,
             shelley_params: None,
-            epoch_nonces: None,
+            epoch_nonce: None,
             epoch_snapshots: EpochSnapshots::default(),
         }
     }
@@ -64,8 +64,8 @@ impl State {
         }
     }
 
-    pub fn handle_epoch_nonces(&mut self, msg: &EpochNoncesMessage) {
-        self.epoch_nonces = Some(msg.nonces.clone());
+    pub fn handle_epoch_nonce(&mut self, msg: &EpochNonceMessage) {
+        self.epoch_nonce = Some(msg.nonce.clone());
     }
 
     pub fn handle_new_snapshot(
@@ -98,8 +98,8 @@ impl State {
                 "Praos Params are not set".to_string(),
             ));
         };
-        let Some(epoch_nonces) = self.epoch_nonces.as_ref() else {
-            return Err(VrfValidationError::MissingEpochNonces);
+        let Some(epoch_nonce) = self.epoch_nonce.as_ref() else {
+            return Err(VrfValidationError::MissingEpochNonce);
         };
         let decentralisation_param = shelley_params.protocol_params.decentralisation_param;
 
@@ -112,7 +112,7 @@ impl State {
             let vrf_validations = ouroboros::tpraos::validate_vrf_tpraos(
                 block_info,
                 header,
-                &epoch_nonces.active,
+                &epoch_nonce,
                 &genesis.genesis_delegs,
                 praos_params,
                 &self.epoch_snapshots.go.active_spos,
@@ -125,7 +125,7 @@ impl State {
             let vrf_validations = ouroboros::praos::validate_vrf_praos(
                 block_info,
                 header,
-                &epoch_nonces.active,
+                &epoch_nonce,
                 praos_params,
                 &self.epoch_snapshots.go.active_spos,
                 &self.epoch_snapshots.go.active_stakes,

@@ -32,8 +32,8 @@ const DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC: (&str, &str) = (
 );
 const DEFAULT_BLOCKS_SUBSCRIBE_TOPIC: (&str, &str) =
     ("blocks-subscribe-topic", "cardano.block.proposed");
-const DEFAULT_EPOCH_NONCES_SUBSCRIBE_TOPIC: (&str, &str) =
-    ("epoch-nonces-subscribe-topic", "cardano.epoch.nonces");
+const DEFAULT_EPOCH_NONCE_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("epoch-nonce-subscribe-topic", "cardano.epoch.nonce");
 const DEFAULT_SPO_STATE_SUBSCRIBE_TOPIC: (&str, &str) =
     ("spo-state-subscribe-topic", "cardano.spo.state");
 const DEFAULT_SPDD_SUBSCRIBE_TOPIC: (&str, &str) =
@@ -55,7 +55,7 @@ impl BlockVrfValidator {
         mut bootstrapped_subscription: Box<dyn Subscription<Message>>,
         mut blocks_subscription: Box<dyn Subscription<Message>>,
         mut protocol_parameters_subscription: Box<dyn Subscription<Message>>,
-        mut epoch_nonces_subscription: Box<dyn Subscription<Message>>,
+        mut epoch_nonce_subscription: Box<dyn Subscription<Message>>,
         mut spo_state_subscription: Box<dyn Subscription<Message>>,
         mut spdd_subscription: Box<dyn Subscription<Message>>,
     ) -> Result<()> {
@@ -86,7 +86,7 @@ impl BlockVrfValidator {
                     if is_new_epoch {
                         // read epoch boundary messages
                         let protocol_parameters_message_f = protocol_parameters_subscription.read();
-                        let epoch_nonces_message_f = epoch_nonces_subscription.read();
+                        let epoch_nonce_message_f = epoch_nonce_subscription.read();
                         let spo_state_message_f = spo_state_subscription.read();
                         let spdd_msg_f = spdd_subscription.read();
 
@@ -102,16 +102,16 @@ impl BlockVrfValidator {
                             _ => error!("Unexpected message type: {protocol_parameters_msg:?}"),
                         });
 
-                        let (_, epoch_nonces_msg) = epoch_nonces_message_f.await?;
+                        let (_, epoch_nonce_msg) = epoch_nonce_message_f.await?;
                         let span = info_span!(
-                            "block_vrf_validator.handle_epoch_nonces",
+                            "block_vrf_validator.handle_epoch_nonce",
                             epoch = block_info.epoch
                         );
-                        span.in_scope(|| match epoch_nonces_msg.as_ref() {
-                            Message::Cardano((_, CardanoMessage::EpochNonces(msg))) => {
-                                state.handle_epoch_nonces(msg);
+                        span.in_scope(|| match epoch_nonce_msg.as_ref() {
+                            Message::Cardano((_, CardanoMessage::EpochNonce(msg))) => {
+                                state.handle_epoch_nonce(msg);
                             }
-                            _ => error!("Unexpected message type: {epoch_nonces_msg:?}"),
+                            _ => error!("Unexpected message type: {epoch_nonce_msg:?}"),
                         });
 
                         let (_, spo_state_msg) = spo_state_message_f.await?;
@@ -205,10 +205,10 @@ impl BlockVrfValidator {
             .unwrap_or(DEFAULT_BLOCKS_SUBSCRIBE_TOPIC.1.to_string());
         info!("Creating blocks subscription on '{blocks_subscribe_topic}'");
 
-        let epoch_nonces_subscribe_topic = config
-            .get_string(DEFAULT_EPOCH_NONCES_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_EPOCH_NONCES_SUBSCRIBE_TOPIC.1.to_string());
-        info!("Creating epoch nonces subscription on '{epoch_nonces_subscribe_topic}'");
+        let epoch_nonce_subscribe_topic = config
+            .get_string(DEFAULT_EPOCH_NONCE_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_EPOCH_NONCE_SUBSCRIBE_TOPIC.1.to_string());
+        info!("Creating epoch nonce subscription on '{epoch_nonce_subscribe_topic}'");
 
         let spo_state_subscribe_topic = config
             .get_string(DEFAULT_SPO_STATE_SUBSCRIBE_TOPIC.0)
@@ -229,7 +229,7 @@ impl BlockVrfValidator {
         let protocol_parameters_subscription =
             context.subscribe(&protocol_parameters_subscribe_topic).await?;
         let blocks_subscription = context.subscribe(&blocks_subscribe_topic).await?;
-        let epoch_nonces_subscription = context.subscribe(&epoch_nonces_subscribe_topic).await?;
+        let epoch_nonce_subscription = context.subscribe(&epoch_nonce_subscribe_topic).await?;
         let spo_state_subscription = context.subscribe(&spo_state_subscribe_topic).await?;
         let spdd_subscription = context.subscribe(&spdd_subscribe_topic).await?;
 
@@ -247,7 +247,7 @@ impl BlockVrfValidator {
                 bootstrapped_subscription,
                 blocks_subscription,
                 protocol_parameters_subscription,
-                epoch_nonces_subscription,
+                epoch_nonce_subscription,
                 spo_state_subscription,
                 spdd_subscription,
             )

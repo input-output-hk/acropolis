@@ -6,7 +6,7 @@
 use crate::commands::transactions::{TransactionsCommand, TransactionsCommandResponse};
 use crate::genesis_values::GenesisValues;
 use crate::ledger_state::SPOState;
-use crate::protocol_params::{NonceHash, Nonces, ProtocolParams};
+use crate::protocol_params::{Nonce, NonceHash, ProtocolParams};
 use crate::queries::parameters::{ParametersStateQuery, ParametersStateQueryResponse};
 use crate::queries::spdd::{SPDDStateQuery, SPDDStateQueryResponse};
 use crate::queries::utxos::{UTxOStateQuery, UTxOStateQueryResponse};
@@ -187,8 +187,8 @@ pub struct EpochActivityMessage {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct EpochNoncesMessage {
-    pub nonces: Nonces,
+pub struct EpochNonceMessage {
+    pub nonce: Nonce,
 }
 
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
@@ -299,9 +299,9 @@ pub enum CardanoMessage {
     PotDeltas(PotDeltasMessage),             // Changes to pot balances
     BlockInfoMessage(BlockTxsMessage), // Transaction Info (total count, total output, total fees in a block)
     EpochActivity(EpochActivityMessage), // Total fees and VRF keys for an epoch
-    EpochNonces(EpochNoncesMessage), // Epoch Nonces for Epoch N (published after the first block of Epoch N)
-    DRepState(DRepStateMessage),     // Active DReps at epoch end
-    SPOState(SPOStateMessage),       // Active SPOs at epoch end
+    EpochNonce(EpochNonceMessage), // Epoch Nonce for Epoch N (published after the first block of Epoch N)
+    DRepState(DRepStateMessage),   // Active DReps at epoch end
+    SPOState(SPOStateMessage),     // Active SPOs at epoch end
     GovernanceProcedures(GovernanceProceduresMessage), // Governance procedures received
 
     // Protocol Parameters
