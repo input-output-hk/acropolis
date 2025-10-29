@@ -15,7 +15,6 @@ use acropolis_common::{
         spdd::{SPDDStateQuery, SPDDStateQueryResponse},
         utils::query_state,
     },
-    serialization::Bech32WithHrp,
     NetworkId, PoolId, StakeAddress, StakeCredential,
 };
 use anyhow::{anyhow, Result};

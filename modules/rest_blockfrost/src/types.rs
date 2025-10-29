@@ -7,7 +7,7 @@ use acropolis_common::{
     rest_helper::ToCheckedF64,
     serialization::{DisplayFromBech32, PoolPrefix},
     AssetAddressEntry, AssetMetadataStandard, AssetMintRecord, KeyHash, PolicyAsset,
-    PoolEpochState, PoolUpdateAction, Relay, TxHash, VrfKeyHash, Vote,
+    PoolEpochState, PoolUpdateAction, Relay, TxHash, Vote, VrfKeyHash,
 };
 use anyhow::Result;
 use num_traits::ToPrimitive;

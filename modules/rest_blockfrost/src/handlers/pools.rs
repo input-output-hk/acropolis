@@ -17,9 +17,7 @@ use acropolis_common::{
         utils::query_state,
     },
     rest_helper::ToCheckedF64,
-    serialization::Bech32WithHrp,
-    PoolRetirement, PoolUpdateAction, StakeCredential, TxIdentifier,
-    PoolId, PoolRetirement, PoolUpdateAction, StakeCredential, TxHash,
+    PoolId, PoolRetirement, PoolUpdateAction, StakeCredential, TxIdentifier,
 };
 use anyhow::Result;
 use caryatid_sdk::Context;

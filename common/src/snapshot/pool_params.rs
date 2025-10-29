@@ -15,8 +15,8 @@
 use super::streaming_snapshot::{
     cbor, Coin, Nullable, PoolMetadata, Relay, RewardAccount, Set, UnitInterval,
 };
-use crate::{PoolId, VrfKeyHash};
 use crate::types::AddrKeyhash;
+use crate::{PoolId, VrfKeyHash};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PoolParams {

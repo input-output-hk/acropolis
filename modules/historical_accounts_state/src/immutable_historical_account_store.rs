@@ -212,8 +212,10 @@ impl ImmutableHistoricalAccountStore {
         &self,
         account: &StakeAddress,
     ) -> Result<Option<Vec<DelegationUpdate>>> {
-        let mut immutable_delegations = self
-            .collect_partition::<DelegationUpdate>(&self.delegation_history, &account.get_hash())?;
+        let mut immutable_delegations = self.collect_partition::<DelegationUpdate>(
+            &self.delegation_history,
+            &account.get_hash().into_inner(),
+        )?;
 
         self.merge_pending(
             account,
@@ -229,8 +231,10 @@ impl ImmutableHistoricalAccountStore {
         &self,
         account: &StakeAddress,
     ) -> Result<Option<Vec<AccountWithdrawal>>> {
-        let mut immutable_mirs =
-            self.collect_partition::<AccountWithdrawal>(&self.mir_history, &account.get_hash())?;
+        let mut immutable_mirs = self.collect_partition::<AccountWithdrawal>(
+            &self.mir_history,
+            &account.get_hash().into_inner(),
+        )?;
 
         self.merge_pending(account, |e| e.mir_history.as_ref(), &mut immutable_mirs).await;
 
@@ -326,7 +330,7 @@ impl ImmutableHistoricalAccountStore {
 
     fn make_epoch_key(account: &StakeAddress, epoch: u32) -> [u8; 32] {
         let mut key = [0u8; 32];
-        key[..28].copy_from_slice(&account.get_credential().get_hash());
+        key[..28].copy_from_slice(&account.get_credential().get_hash().into_inner());
         key[28..32].copy_from_slice(&epoch.to_be_bytes());
         key
     }

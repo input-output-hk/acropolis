@@ -993,14 +993,14 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acropolis_common::crypto::keyhash_256;
+    use acropolis_common::crypto::{keyhash_224, keyhash_256};
     use acropolis_common::{
         protocol_params::ConwayParams, rational_number::RationalNumber, Anchor, Committee,
         Constitution, CostModel, DRepVotingThresholds, NetworkId, PoolVotingThresholds, Pot,
         PotDelta, Ratio, Registration, StakeAddress, StakeAddressDelta, StakeAndVoteDelegation,
         StakeCredential, StakeRegistrationAndStakeAndVoteDelegation,
         StakeRegistrationAndVoteDelegation, TxCertificateWithPos, TxIdentifier, VoteDelegation,
-        Withdrawal,
+        VrfKeyHash, Withdrawal,
     };
 
     // Helper to create a StakeAddress from a byte slice
@@ -1392,10 +1392,7 @@ mod tests {
 
         // Get the KeyHash once
         let spo1_hash = spo1.get_hash();
-
         let drep_key_hash = test_keyhash_from_bytes(&DREP_HASH);
-        let drep_script_hash = test_keyhash_from_bytes(&DREP_HASH);
-
         let pool_id_1 = PoolId::new(*spo1_hash);
 
         let certificates = vec![
@@ -1419,7 +1416,7 @@ mod tests {
             TxCertificateWithPos {
                 cert: TxCertificate::VoteDelegation(VoteDelegation {
                     stake_address: spo1.clone(),
-                    drep: DRepChoice::Key(DREP_HASH.to_vec()),
+                    drep: DRepChoice::Key(drep_key_hash),
                 }),
                 tx_identifier,
                 cert_index: 0,
@@ -1427,8 +1424,8 @@ mod tests {
             TxCertificateWithPos {
                 cert: TxCertificate::StakeAndVoteDelegation(StakeAndVoteDelegation {
                     stake_address: spo2.clone(),
-                    operator: spo1.get_hash().to_vec(),
-                    drep: DRepChoice::Script(DREP_HASH.to_vec()),
+                    operator: pool_id_1,
+                    drep: DRepChoice::Script(drep_key_hash),
                 }),
                 tx_identifier,
                 cert_index: 0,
@@ -1448,7 +1445,7 @@ mod tests {
                 cert: TxCertificate::StakeRegistrationAndStakeAndVoteDelegation(
                     StakeRegistrationAndStakeAndVoteDelegation {
                         stake_address: spo4.clone(),
-                        operator: spo1.get_hash().to_vec(),
+                        operator: pool_id_1,
                         drep: DRepChoice::NoConfidence,
                         deposit: 1,
                     },
