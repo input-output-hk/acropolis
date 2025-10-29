@@ -32,7 +32,7 @@ pub fn calculate_monetary_change(
 
     // Handle monetary expansion - movement from reserves to rewards and treasury
     let eta = calculate_eta(params, total_non_obft_blocks)?;
-    let monetary_expansion = calculate_monetary_expansion(&params, old_pots.reserves, &eta);
+    let monetary_expansion = calculate_monetary_expansion(params, old_pots.reserves, &eta);
 
     // Total rewards available is monetary expansion plus fees from last epoch
     // TODO not sure why this is one epoch behind

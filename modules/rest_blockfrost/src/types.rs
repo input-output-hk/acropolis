@@ -408,8 +408,7 @@ impl From<Relay> for PoolRelayRest {
 #[serde_as]
 #[derive(Serialize)]
 pub struct PoolUpdateEventRest {
-    #[serde_as(as = "Hex")]
-    pub tx_hash: TxHash,
+    pub tx_hash: String,
     pub cert_index: u64,
     pub action: PoolUpdateAction,
 }
@@ -452,10 +451,9 @@ pub struct PoolInfoRest {
     pub fixed_cost: u64,
     pub reward_account: String,
     pub pool_owners: Vec<String>,
-    #[serde_as(as = "Option<Vec<Hex>>")]
-    pub registration: Option<Vec<TxHash>>,
-    #[serde_as(as = "Option<Vec<Hex>>")]
-    pub retirement: Option<Vec<TxHash>>,
+    // TODO: Query chain store module to retrieve TxHash from TxIdentifier
+    pub registration: String,
+    pub retirement: String,
 }
 
 // REST response structure for protocol params
@@ -855,4 +853,24 @@ impl From<acropolis_common::Value> for AmountList {
 
         Self(out)
     }
+}
+
+#[derive(Serialize)]
+pub struct RegistrationUpdateREST {
+    pub tx_hash: String,
+    pub action: String,
+}
+
+#[derive(Serialize)]
+pub struct DelegationUpdateREST {
+    pub active_epoch: u32,
+    pub tx_hash: String,
+    pub amount: String,
+    pub pool_id: String,
+}
+
+#[derive(Serialize)]
+pub struct AccountWithdrawalREST {
+    pub tx_hash: String,
+    pub amount: String,
 }

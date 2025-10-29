@@ -69,13 +69,9 @@ pub fn map_address(address: &addresses::Address) -> Result<Address> {
 
         addresses::Address::Stake(stake_address) => Ok(Address::Stake(StakeAddress {
             network: map_network(stake_address.network())?,
-            payload: match stake_address.payload() {
-                addresses::StakePayload::Stake(hash) => {
-                    StakeAddressPayload::StakeKeyHash(hash.to_vec())
-                }
-                addresses::StakePayload::Script(hash) => {
-                    StakeAddressPayload::ScriptHash(hash.to_vec())
-                }
+            credential: match stake_address.payload() {
+                addresses::StakePayload::Stake(hash) => StakeCredential::AddrKeyHash(hash.to_vec()),
+                addresses::StakePayload::Script(hash) => StakeCredential::ScriptHash(hash.to_vec()),
             },
         })),
     }
@@ -97,14 +93,14 @@ pub fn map_stake_credential(cred: &PallasStakeCredential) -> StakeCredential {
 pub fn map_stake_address(cred: &PallasStakeCredential, network_id: NetworkId) -> StakeAddress {
     let payload = match cred {
         PallasStakeCredential::AddrKeyhash(key_hash) => {
-            StakeAddressPayload::StakeKeyHash(key_hash.to_vec())
+            StakeCredential::AddrKeyHash(key_hash.to_vec())
         }
         PallasStakeCredential::ScriptHash(script_hash) => {
-            StakeAddressPayload::ScriptHash(script_hash.to_vec())
+            StakeCredential::ScriptHash(script_hash.to_vec())
         }
     };
 
-    StakeAddress::new(payload, network_id.into())
+    StakeAddress::new(payload, network_id)
 }
 
 /// Map a Pallas DRep to our DRepChoice
@@ -214,31 +210,32 @@ fn map_relay(relay: &PallasRelay) -> Relay {
 /// Derive our TxCertificate from a Pallas Certificate
 pub fn map_certificate(
     cert: &MultiEraCert,
-    tx_hash: TxHash,
-    tx_index: u16,
+    tx_identifier: TxIdentifier,
     cert_index: usize,
     network_id: NetworkId,
-) -> Result<TxCertificate> {
+) -> Result<TxCertificateWithPos> {
     match cert {
         MultiEraCert::NotApplicable => Err(anyhow!("Not applicable cert!")),
 
         MultiEraCert::AlonzoCompatible(cert) => match cert.as_ref().as_ref() {
-            alonzo::Certificate::StakeRegistration(cred) => {
-                Ok(TxCertificate::StakeRegistration(StakeAddressWithPos {
-                    stake_address: map_stake_address(cred, network_id),
-                    tx_index: tx_index.into(),
-                    cert_index: cert_index.try_into().unwrap(),
-                }))
-            }
-            alonzo::Certificate::StakeDeregistration(cred) => Ok(
-                TxCertificate::StakeDeregistration(map_stake_address(cred, network_id)),
-            ),
-            alonzo::Certificate::StakeDelegation(cred, pool_key_hash) => {
-                Ok(TxCertificate::StakeDelegation(StakeDelegation {
+            alonzo::Certificate::StakeRegistration(cred) => Ok(TxCertificateWithPos {
+                cert: TxCertificate::StakeRegistration(map_stake_address(cred, network_id)),
+                tx_identifier,
+                cert_index: cert_index.try_into().unwrap(),
+            }),
+            alonzo::Certificate::StakeDeregistration(cred) => Ok(TxCertificateWithPos {
+                cert: TxCertificate::StakeDeregistration(map_stake_address(cred, network_id)),
+                tx_identifier,
+                cert_index: cert_index.try_into().unwrap(),
+            }),
+            alonzo::Certificate::StakeDelegation(cred, pool_key_hash) => Ok(TxCertificateWithPos {
+                cert: TxCertificate::StakeDelegation(StakeDelegation {
                     stake_address: map_stake_address(cred, network_id),
                     operator: pool_key_hash.to_vec(),
-                }))
-            }
+                }),
+                tx_identifier,
+                cert_index: cert_index.try_into().unwrap(),
+            }),
             alonzo::Certificate::PoolRegistration {
                 operator,
                 vrf_keyhash,
@@ -249,61 +246,61 @@ pub fn map_certificate(
                 pool_owners,
                 relays,
                 pool_metadata,
-            } => Ok(TxCertificate::PoolRegistrationWithPos(
-                PoolRegistrationWithPos {
-                    reg: PoolRegistration {
-                        operator: operator.to_vec(),
-                        vrf_key_hash: vrf_keyhash.to_vec(),
-                        pledge: *pledge,
-                        cost: *cost,
-                        margin: Ratio {
-                            numerator: margin.numerator,
-                            denominator: margin.denominator,
-                        },
-                        reward_account: StakeAddress::from_binary(reward_account)?,
-                        pool_owners: pool_owners
-                            .iter()
-                            .map(|v| {
-                                StakeAddress::new(
-                                    StakeAddressPayload::StakeKeyHash(v.to_vec()),
-                                    network_id.clone().into(),
-                                )
-                            })
-                            .collect(),
-                        relays: relays.iter().map(map_relay).collect(),
-                        pool_metadata: match pool_metadata {
-                            Nullable::Some(md) => Some(PoolMetadata {
-                                url: md.url.clone(),
-                                hash: md.hash.to_vec(),
-                            }),
-                            _ => None,
-                        },
+            } => Ok(TxCertificateWithPos {
+                cert: TxCertificate::PoolRegistration(PoolRegistration {
+                    operator: operator.to_vec(),
+                    vrf_key_hash: vrf_keyhash.to_vec(),
+                    pledge: *pledge,
+                    cost: *cost,
+                    margin: Ratio {
+                        numerator: margin.numerator,
+                        denominator: margin.denominator,
                     },
-                    tx_hash,
-                    cert_index: cert_index as u64,
-                },
-            )),
-            alonzo::Certificate::PoolRetirement(pool_key_hash, epoch) => Ok(
-                TxCertificate::PoolRetirementWithPos(PoolRetirementWithPos {
-                    ret: PoolRetirement {
-                        operator: pool_key_hash.to_vec(),
-                        epoch: *epoch,
+                    reward_account: StakeAddress::from_binary(reward_account)?,
+                    pool_owners: pool_owners
+                        .iter()
+                        .map(|v| {
+                            StakeAddress::new(
+                                StakeCredential::AddrKeyHash(v.to_vec()),
+                                network_id.clone(),
+                            )
+                        })
+                        .collect(),
+                    relays: relays.iter().map(map_relay).collect(),
+                    pool_metadata: match pool_metadata {
+                        Nullable::Some(md) => Some(PoolMetadata {
+                            url: md.url.clone(),
+                            hash: md.hash.to_vec(),
+                        }),
+                        _ => None,
                     },
-                    tx_hash,
-                    cert_index: cert_index as u64,
                 }),
-            ),
+                tx_identifier,
+                cert_index: cert_index as u64,
+            }),
+            alonzo::Certificate::PoolRetirement(pool_key_hash, epoch) => Ok(TxCertificateWithPos {
+                cert: TxCertificate::PoolRetirement(PoolRetirement {
+                    operator: pool_key_hash.to_vec(),
+                    epoch: *epoch,
+                }),
+                tx_identifier,
+                cert_index: cert_index as u64,
+            }),
             alonzo::Certificate::GenesisKeyDelegation(
                 genesis_hash,
                 genesis_delegate_hash,
                 vrf_key_hash,
-            ) => Ok(TxCertificate::GenesisKeyDelegation(GenesisKeyDelegation {
-                genesis_hash: genesis_hash.to_vec(),
-                genesis_delegate_hash: genesis_delegate_hash.to_vec(),
-                vrf_key_hash: vrf_key_hash.to_vec(),
-            })),
-            alonzo::Certificate::MoveInstantaneousRewardsCert(mir) => Ok(
-                TxCertificate::MoveInstantaneousReward(MoveInstantaneousReward {
+            ) => Ok(TxCertificateWithPos {
+                cert: TxCertificate::GenesisKeyDelegation(GenesisKeyDelegation {
+                    genesis_hash: genesis_hash.to_vec(),
+                    genesis_delegate_hash: genesis_delegate_hash.to_vec(),
+                    vrf_key_hash: vrf_key_hash.to_vec(),
+                }),
+                tx_identifier,
+                cert_index: cert_index as u64,
+            }),
+            alonzo::Certificate::MoveInstantaneousRewardsCert(mir) => Ok(TxCertificateWithPos {
+                cert: TxCertificate::MoveInstantaneousReward(MoveInstantaneousReward {
                     source: match mir.source {
                         alonzo::InstantaneousRewardSource::Reserves => {
                             InstantaneousRewardSource::Reserves
@@ -326,28 +323,38 @@ pub fn map_certificate(
                         }
                     },
                 }),
-            ),
+                tx_identifier,
+                cert_index: cert_index as u64,
+            }),
         },
 
         // Now repeated for a different type!
         MultiEraCert::Conway(cert) => {
             match cert.as_ref().as_ref() {
-                conway::Certificate::StakeRegistration(cred) => {
-                    Ok(TxCertificate::StakeRegistration(StakeAddressWithPos {
-                        stake_address: map_stake_address(cred, network_id),
-                        tx_index: tx_index.into(),
-                        cert_index: cert_index.try_into().unwrap(),
-                    }))
-                }
-                conway::Certificate::StakeDeregistration(cred) => Ok(
-                    TxCertificate::StakeDeregistration(map_stake_address(cred, network_id)),
-                ),
+                conway::Certificate::StakeRegistration(cred) => Ok(TxCertificateWithPos {
+                    cert: TxCertificate::StakeRegistration(map_stake_address(cred, network_id)),
+                    tx_identifier,
+
+                    cert_index: cert_index.try_into().unwrap(),
+                }),
+
+                conway::Certificate::StakeDeregistration(cred) => Ok(TxCertificateWithPos {
+                    cert: TxCertificate::StakeDeregistration(map_stake_address(cred, network_id)),
+                    tx_identifier,
+                    cert_index: cert_index.try_into().unwrap(),
+                }),
+
                 conway::Certificate::StakeDelegation(cred, pool_key_hash) => {
-                    Ok(TxCertificate::StakeDelegation(StakeDelegation {
-                        stake_address: map_stake_address(cred, network_id),
-                        operator: pool_key_hash.to_vec(),
-                    }))
+                    Ok(TxCertificateWithPos {
+                        cert: TxCertificate::StakeDelegation(StakeDelegation {
+                            stake_address: map_stake_address(cred, network_id),
+                            operator: pool_key_hash.to_vec(),
+                        }),
+                        tx_identifier,
+                        cert_index: cert_index.try_into().unwrap(),
+                    })
                 }
+
                 conway::Certificate::PoolRegistration {
                     // TODO relays, pool_metadata
                     operator,
@@ -359,156 +366,185 @@ pub fn map_certificate(
                     pool_owners,
                     relays,
                     pool_metadata,
-                } => Ok(TxCertificate::PoolRegistrationWithPos(
-                    PoolRegistrationWithPos {
-                        reg: PoolRegistration {
-                            operator: operator.to_vec(),
-                            vrf_key_hash: vrf_keyhash.to_vec(),
-                            pledge: *pledge,
-                            cost: *cost,
-                            margin: Ratio {
-                                numerator: margin.numerator,
-                                denominator: margin.denominator,
-                            },
-                            reward_account: StakeAddress::from_binary(reward_account)?,
-                            pool_owners: pool_owners
-                                .into_iter()
-                                .map(|v| {
-                                    StakeAddress::new(
-                                        StakeAddressPayload::StakeKeyHash(v.to_vec()),
-                                        network_id.clone().into(),
-                                    )
-                                })
-                                .collect(),
-                            relays: relays.iter().map(map_relay).collect(),
-                            pool_metadata: match pool_metadata {
-                                Nullable::Some(md) => Some(PoolMetadata {
-                                    url: md.url.clone(),
-                                    hash: md.hash.to_vec(),
-                                }),
-                                _ => None,
-                            },
+                } => Ok(TxCertificateWithPos {
+                    cert: TxCertificate::PoolRegistration(PoolRegistration {
+                        operator: operator.to_vec(),
+                        vrf_key_hash: vrf_keyhash.to_vec(),
+                        pledge: *pledge,
+                        cost: *cost,
+                        margin: Ratio {
+                            numerator: margin.numerator,
+                            denominator: margin.denominator,
                         },
-                        tx_hash,
-                        cert_index: cert_index as u64,
-                    },
-                )),
-                conway::Certificate::PoolRetirement(pool_key_hash, epoch) => Ok(
-                    TxCertificate::PoolRetirementWithPos(PoolRetirementWithPos {
-                        ret: PoolRetirement {
+                        // Force networkId - in mainnet epoch 208, one SPO (c63dab6d780a) uses
+                        // an e0 (testnet!) address, and this then fails to match their actual
+                        // reward account (e1).  Feels like this should have been
+                        // a validation failure, but clearly wasn't!
+                        reward_account: StakeAddress::new(
+                            StakeAddress::from_binary(reward_account)?.credential,
+                            network_id.clone(),
+                        ),
+                        pool_owners: pool_owners
+                            .into_iter()
+                            .map(|v| {
+                                StakeAddress::new(
+                                    StakeCredential::AddrKeyHash(v.to_vec()),
+                                    network_id.clone(),
+                                )
+                            })
+                            .collect(),
+                        relays: relays.iter().map(map_relay).collect(),
+                        pool_metadata: match pool_metadata {
+                            Nullable::Some(md) => Some(PoolMetadata {
+                                url: md.url.clone(),
+                                hash: md.hash.to_vec(),
+                            }),
+                            _ => None,
+                        },
+                    }),
+                    tx_identifier,
+                    cert_index: cert_index as u64,
+                }),
+                conway::Certificate::PoolRetirement(pool_key_hash, epoch) => {
+                    Ok(TxCertificateWithPos {
+                        cert: TxCertificate::PoolRetirement(PoolRetirement {
                             operator: pool_key_hash.to_vec(),
                             epoch: *epoch,
-                        },
-                        tx_hash,
+                        }),
+                        tx_identifier,
                         cert_index: cert_index as u64,
-                    }),
-                ),
-
-                conway::Certificate::Reg(cred, coin) => {
-                    Ok(TxCertificate::Registration(Registration {
-                        stake_address: map_stake_address(cred, network_id),
-                        deposit: *coin,
-                    }))
+                    })
                 }
 
-                conway::Certificate::UnReg(cred, coin) => {
-                    Ok(TxCertificate::Deregistration(Deregistration {
+                conway::Certificate::Reg(cred, coin) => Ok(TxCertificateWithPos {
+                    cert: TxCertificate::Registration(Registration {
+                        stake_address: map_stake_address(cred, network_id),
+                        deposit: *coin,
+                    }),
+                    tx_identifier,
+                    cert_index: cert_index as u64,
+                }),
+
+                conway::Certificate::UnReg(cred, coin) => Ok(TxCertificateWithPos {
+                    cert: TxCertificate::Deregistration(Deregistration {
                         stake_address: map_stake_address(cred, network_id),
                         refund: *coin,
-                    }))
-                }
+                    }),
+                    tx_identifier,
+                    cert_index: cert_index as u64,
+                }),
 
-                conway::Certificate::VoteDeleg(cred, drep) => {
-                    Ok(TxCertificate::VoteDelegation(VoteDelegation {
+                conway::Certificate::VoteDeleg(cred, drep) => Ok(TxCertificateWithPos {
+                    cert: TxCertificate::VoteDelegation(VoteDelegation {
                         stake_address: map_stake_address(cred, network_id),
                         drep: map_drep(drep),
-                    }))
+                    }),
+                    tx_identifier,
+                    cert_index: cert_index as u64,
+                }),
+
+                conway::Certificate::StakeVoteDeleg(cred, pool_key_hash, drep) => {
+                    Ok(TxCertificateWithPos {
+                        cert: TxCertificate::StakeAndVoteDelegation(StakeAndVoteDelegation {
+                            stake_address: map_stake_address(cred, network_id),
+                            operator: pool_key_hash.to_vec(),
+                            drep: map_drep(drep),
+                        }),
+                        tx_identifier,
+                        cert_index: cert_index as u64,
+                    })
                 }
 
-                conway::Certificate::StakeVoteDeleg(cred, pool_key_hash, drep) => Ok(
-                    TxCertificate::StakeAndVoteDelegation(StakeAndVoteDelegation {
-                        stake_address: map_stake_address(cred, network_id),
-                        operator: pool_key_hash.to_vec(),
-                        drep: map_drep(drep),
-                    }),
-                ),
+                conway::Certificate::StakeRegDeleg(cred, pool_key_hash, coin) => {
+                    Ok(TxCertificateWithPos {
+                        cert: TxCertificate::StakeRegistrationAndDelegation(
+                            StakeRegistrationAndDelegation {
+                                stake_address: map_stake_address(cred, network_id),
+                                operator: pool_key_hash.to_vec(),
+                                deposit: *coin,
+                            },
+                        ),
+                        tx_identifier,
+                        cert_index: cert_index as u64,
+                    })
+                }
 
-                conway::Certificate::StakeRegDeleg(cred, pool_key_hash, coin) => Ok(
-                    TxCertificate::StakeRegistrationAndDelegation(StakeRegistrationAndDelegation {
-                        stake_address: map_stake_address(cred, network_id),
-                        operator: pool_key_hash.to_vec(),
-                        deposit: *coin,
-                    }),
-                ),
-
-                conway::Certificate::VoteRegDeleg(cred, drep, coin) => {
-                    Ok(TxCertificate::StakeRegistrationAndVoteDelegation(
+                conway::Certificate::VoteRegDeleg(cred, drep, coin) => Ok(TxCertificateWithPos {
+                    cert: TxCertificate::StakeRegistrationAndVoteDelegation(
                         StakeRegistrationAndVoteDelegation {
                             stake_address: map_stake_address(cred, network_id),
                             drep: map_drep(drep),
                             deposit: *coin,
                         },
-                    ))
-                }
+                    ),
+                    tx_identifier,
+                    cert_index: cert_index as u64,
+                }),
 
                 conway::Certificate::StakeVoteRegDeleg(cred, pool_key_hash, drep, coin) => {
-                    Ok(TxCertificate::StakeRegistrationAndStakeAndVoteDelegation(
-                        StakeRegistrationAndStakeAndVoteDelegation {
-                            stake_address: map_stake_address(cred, network_id),
-                            operator: pool_key_hash.to_vec(),
-                            drep: map_drep(drep),
-                            deposit: *coin,
-                        },
-                    ))
+                    Ok(TxCertificateWithPos {
+                        cert: TxCertificate::StakeRegistrationAndStakeAndVoteDelegation(
+                            StakeRegistrationAndStakeAndVoteDelegation {
+                                stake_address: map_stake_address(cred, network_id),
+                                operator: pool_key_hash.to_vec(),
+                                drep: map_drep(drep),
+                                deposit: *coin,
+                            },
+                        ),
+                        tx_identifier,
+                        cert_index: cert_index as u64,
+                    })
                 }
 
                 conway::Certificate::AuthCommitteeHot(cold_cred, hot_cred) => {
-                    Ok(TxCertificate::AuthCommitteeHot(AuthCommitteeHot {
-                        cold_credential: map_stake_credential(cold_cred),
-                        hot_credential: map_stake_credential(hot_cred),
-                    }))
+                    Ok(TxCertificateWithPos {
+                        cert: TxCertificate::AuthCommitteeHot(AuthCommitteeHot {
+                            cold_credential: map_stake_credential(cold_cred),
+                            hot_credential: map_stake_credential(hot_cred),
+                        }),
+                        tx_identifier,
+                        cert_index: cert_index as u64,
+                    })
                 }
 
                 conway::Certificate::ResignCommitteeCold(cold_cred, anchor) => {
-                    Ok(TxCertificate::ResignCommitteeCold(ResignCommitteeCold {
-                        cold_credential: map_stake_credential(cold_cred),
+                    Ok(TxCertificateWithPos {
+                        cert: TxCertificate::ResignCommitteeCold(ResignCommitteeCold {
+                            cold_credential: map_stake_credential(cold_cred),
+                            anchor: map_nullable_anchor(anchor),
+                        }),
+                        tx_identifier,
+                        cert_index: cert_index as u64,
+                    })
+                }
+
+                conway::Certificate::RegDRepCert(cred, coin, anchor) => Ok(TxCertificateWithPos {
+                    cert: TxCertificate::DRepRegistration(DRepRegistration {
+                        credential: map_stake_credential(cred),
+                        deposit: *coin,
                         anchor: map_nullable_anchor(anchor),
-                    }))
-                }
-
-                conway::Certificate::RegDRepCert(cred, coin, anchor) => {
-                    Ok(TxCertificate::DRepRegistration(DRepRegistrationWithPos {
-                        reg: DRepRegistration {
-                            credential: map_stake_credential(cred),
-                            deposit: *coin,
-                            anchor: map_nullable_anchor(anchor),
-                        },
-                        tx_hash,
-                        cert_index: cert_index as u64,
-                    }))
-                }
-
-                conway::Certificate::UnRegDRepCert(cred, coin) => Ok(
-                    TxCertificate::DRepDeregistration(DRepDeregistrationWithPos {
-                        reg: DRepDeregistration {
-                            credential: map_stake_credential(cred),
-                            refund: *coin,
-                        },
-                        tx_hash,
-                        cert_index: cert_index as u64,
                     }),
-                ),
+                    tx_identifier,
+                    cert_index: cert_index as u64,
+                }),
 
-                conway::Certificate::UpdateDRepCert(cred, anchor) => {
-                    Ok(TxCertificate::DRepUpdate(DRepUpdateWithPos {
-                        reg: DRepUpdate {
-                            credential: map_stake_credential(cred),
-                            anchor: map_nullable_anchor(anchor),
-                        },
-                        tx_hash,
-                        cert_index: cert_index as u64,
-                    }))
-                }
+                conway::Certificate::UnRegDRepCert(cred, coin) => Ok(TxCertificateWithPos {
+                    cert: TxCertificate::DRepDeregistration(DRepDeregistration {
+                        credential: map_stake_credential(cred),
+                        refund: *coin,
+                    }),
+                    tx_identifier,
+                    cert_index: cert_index as u64,
+                }),
+
+                conway::Certificate::UpdateDRepCert(cred, anchor) => Ok(TxCertificateWithPos {
+                    cert: TxCertificate::DRepUpdate(DRepUpdate {
+                        credential: map_stake_credential(cred),
+                        anchor: map_nullable_anchor(anchor),
+                    }),
+                    tx_identifier,
+                    cert_index: cert_index as u64,
+                }),
             }
         }
 

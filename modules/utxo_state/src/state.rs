@@ -791,7 +791,7 @@ mod tests {
                             || (asset.name == AssetName::new(b"FOO").unwrap()
                                 && (asset.amount == 200 || asset.amount == -200))
                     );
-                    let key = (*policy, asset.name.clone());
+                    let key = (*policy, asset.name);
                     *asset_balances.entry(key).or_insert(0) += asset.amount;
                 }
             }

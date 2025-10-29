@@ -1,7 +1,7 @@
 use acropolis_common::{
     messages::{AddressDeltasMessage, StakeAddressDeltasMessage},
     Address, AddressDelta, BlockInfo, Era, ShelleyAddressDelegationPart, ShelleyAddressPointer,
-    StakeAddress, StakeAddressDelta, StakeAddressPayload,
+    StakeAddress, StakeAddressDelta, StakeCredential,
 };
 use anyhow::{anyhow, Result};
 use serde_with::serde_as;
@@ -345,12 +345,12 @@ pub fn process_message(
                     // Base addresses (stake delegated to itself)
                     ShelleyAddressDelegationPart::StakeKeyHash(keyhash) => StakeAddress {
                         network: shelley.network.clone(),
-                        payload: StakeAddressPayload::StakeKeyHash(keyhash.clone()),
+                        credential: StakeCredential::AddrKeyHash(keyhash.clone()),
                     },
 
                     ShelleyAddressDelegationPart::ScriptHash(scripthash) => StakeAddress {
                         network: shelley.network.clone(),
-                        payload: StakeAddressPayload::ScriptHash(scripthash.clone()),
+                        credential: StakeCredential::ScriptHash(scripthash.clone()),
                     },
 
                     // Shelley addresses (stake delegated to some different address)
@@ -403,9 +403,8 @@ mod test {
     use crate::*;
     use acropolis_common::{
         messages::AddressDeltasMessage, Address, AddressDelta, BlockHash, BlockInfo, BlockStatus,
-        ByronAddress, Era, NetworkId, ShelleyAddress, ShelleyAddressDelegationPart,
-        ShelleyAddressPaymentPart, ShelleyAddressPointer, StakeAddress, StakeAddressPayload,
-        UTxOIdentifier, ValueDelta,
+        ByronAddress, Era, ShelleyAddress, ShelleyAddressDelegationPart, ShelleyAddressPaymentPart,
+        ShelleyAddressPointer, StakeAddress, StakeCredential, UTxOIdentifier, ValueDelta,
     };
     use bech32::{Bech32, Hrp};
 
@@ -470,12 +469,12 @@ mod test {
 
             addresses::Address::Stake(stake_address) => Ok(Address::Stake(StakeAddress {
                 network: map_network(stake_address.network())?,
-                payload: match stake_address.payload() {
+                credential: match stake_address.payload() {
                     addresses::StakePayload::Stake(hash) => {
-                        StakeAddressPayload::StakeKeyHash(hash.to_vec())
+                        StakeCredential::AddrKeyHash(hash.to_vec())
                     }
                     addresses::StakePayload::Script(hash) => {
-                        StakeAddressPayload::ScriptHash(hash.to_vec())
+                        StakeCredential::ScriptHash(hash.to_vec())
                     }
                 },
             })),
@@ -486,7 +485,7 @@ mod test {
         let (_hrp, key_vec) = bech32::decode(key).unwrap();
         let hash_vec = pallas::crypto::hash::Hasher::<224>::hash(&key_vec);
         let prefix_hrp: Hrp = Hrp::parse(prefix).unwrap();
-        bech32::encode::<Bech32>(prefix_hrp, &hash_vec.to_vec()).unwrap()
+        bech32::encode::<Bech32>(prefix_hrp, hash_vec.as_ref()).unwrap()
     }
 
     // The test is based on CIP-19 standard examples.
@@ -552,7 +551,7 @@ mod test {
         let stake_delta = process_message(&cache, &delta, &block, None);
 
         assert_eq!(
-            stake_delta.deltas.get(0).unwrap().address.to_string().unwrap(),
+            stake_delta.deltas.first().unwrap().address.to_string().unwrap(),
             stake_addr
         );
         assert_eq!(
@@ -586,11 +585,11 @@ mod test {
 
         // additional check: payload conversion correctness
         assert_eq!(
-            stake_delta.deltas.get(0).unwrap().address.payload.to_string().unwrap(),
+            stake_delta.deltas.first().unwrap().address.credential.to_string().unwrap(),
             stake_key_hash
         );
         assert_eq!(
-            stake_delta.deltas.get(2).unwrap().address.payload.to_string().unwrap(),
+            stake_delta.deltas.get(2).unwrap().address.credential.to_string().unwrap(),
             script_hash
         );
 
