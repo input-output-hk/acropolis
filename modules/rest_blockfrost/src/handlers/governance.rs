@@ -410,7 +410,7 @@ pub async fn handle_drep_updates_blockfrost(
                 .updates
                 .iter()
                 .map(|event| DRepUpdateREST {
-                    tx_hash: hex::encode(event.tx_hash),
+                    tx_hash: "TxHash lookup not yet implemented".to_string(),
                     cert_index: event.cert_index,
                     action: event.action.clone(),
                 })

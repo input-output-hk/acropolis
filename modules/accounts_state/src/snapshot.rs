@@ -60,7 +60,8 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
-    /// Get a stake snapshot based the current stake addresses
+    /// Get a stake snapshot based on the current stake addresses
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         epoch: u64,
         stake_addresses: &StakeAddressMap,
@@ -94,6 +95,13 @@ impl Snapshot {
                         .unwrap_or(false),
                     None => false,
                 };
+            debug!(
+                epoch,
+                previous_epoch = two_previous_snapshot.epoch,
+                "Two previous reward account for SPO {} registered: {}",
+                hex::encode(spo_id),
+                two_previous_reward_account_is_registered
+            );
 
             // Add the new one
             snapshot.spos.insert(
@@ -127,7 +135,7 @@ impl Snapshot {
                         // SPO has retired - this stake is simply ignored
                         debug!(
                             epoch,
-                            "SPO {} for hash {} retired?  Ignored",
+                            "SPO {} for stake address {} retired?  Ignored",
                             hex::encode(spo_id),
                             stake_address
                         );
@@ -186,18 +194,16 @@ impl Snapshot {
 mod tests {
     use super::*;
     use acropolis_common::stake_addresses::StakeAddressState;
-    use acropolis_common::AddressNetwork::Main;
-    use acropolis_common::{StakeAddress, StakeAddressPayload};
+    use acropolis_common::NetworkId::Mainnet;
+    use acropolis_common::{StakeAddress, StakeCredential};
 
     // Helper function to create stake addresses for testing
     fn create_test_stake_address(id: u8) -> StakeAddress {
         let mut hash = vec![0u8; 28];
         hash[0] = id;
         StakeAddress {
-            network: Main,
-            payload: StakeAddressPayload::StakeKeyHash(
-                hash.try_into().expect("Invalid hash length"),
-            ),
+            network: Mainnet,
+            credential: StakeCredential::AddrKeyHash(hash),
         }
     }
 

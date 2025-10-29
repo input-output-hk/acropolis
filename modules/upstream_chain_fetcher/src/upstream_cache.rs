@@ -224,20 +224,20 @@ mod test {
         cache.density = 3;
         let perm: [u64; 11] = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5];
 
-        for n in 0..11 {
-            cache.write_record(&ucr(perm[n], n, n + 100))?;
+        for (n, p) in perm.iter().enumerate() {
+            cache.write_record(&ucr(*p, n, n + 100))?;
         }
 
         assert_eq!(cache.storage.rec.len(), 4);
         for ch in 0..3 {
             let chunk = cache.storage.rec.get(&ch).unwrap();
-            assert_eq!(chunk.get(0).unwrap().id.number, perm[ch * 3]);
+            assert_eq!(chunk.first().unwrap().id.number, perm[ch * 3]);
             assert_eq!(chunk.get(1).unwrap().id.number, perm[ch * 3 + 1]);
             assert_eq!(chunk.get(2).unwrap().id.number, perm[ch * 3 + 2]);
             assert_eq!(chunk.len(), 3);
         }
         assert_eq!(
-            cache.storage.rec.get(&3).unwrap().get(0).unwrap().id.number,
+            cache.storage.rec.get(&3).unwrap().first().unwrap().id.number,
             perm[9]
         );
         assert_eq!(
@@ -247,9 +247,9 @@ mod test {
         assert_eq!(cache.storage.rec.get(&3).unwrap().len(), 2);
 
         cache.start_reading()?;
-        for n in 0..11 {
+        for (n, p) in perm.iter().enumerate() {
             let record = cache.read_record()?.unwrap();
-            assert_eq!(record.id.number, perm[n]);
+            assert_eq!(record.id.number, *p);
             assert_eq!(record.message.header, vec![n as u8]);
             assert_eq!(record.message.body, vec![(n + 100) as u8]);
 

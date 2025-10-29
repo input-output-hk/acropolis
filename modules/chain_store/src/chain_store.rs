@@ -28,7 +28,7 @@ use tracing::error;
 
 use crate::stores::{fjall::FjallStore, Block, Store, Tx};
 
-const DEFAULT_BLOCKS_TOPIC: &str = "cardano.block.body";
+const DEFAULT_BLOCKS_TOPIC: &str = "cardano.block.available";
 const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: &str = "cardano.protocol.parameters";
 const DEFAULT_STORE: &str = "fjall";
 

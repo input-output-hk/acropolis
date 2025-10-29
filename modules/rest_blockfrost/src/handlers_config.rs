@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use acropolis_common::queries::{
-    accounts::DEFAULT_ACCOUNTS_QUERY_TOPIC,
+    accounts::{DEFAULT_ACCOUNTS_QUERY_TOPIC, DEFAULT_HISTORICAL_ACCOUNTS_QUERY_TOPIC},
     addresses::DEFAULT_ADDRESS_QUERY_TOPIC,
     assets::{DEFAULT_ASSETS_QUERY_TOPIC, DEFAULT_OFFCHAIN_TOKEN_REGISTRY_URL},
     blocks::DEFAULT_BLOCKS_QUERY_TOPIC,
@@ -20,6 +20,7 @@ const DEFAULT_EXTERNAL_API_TIMEOUT: (&str, i64) = ("external_api_timeout", 3); /
 #[derive(Clone)]
 pub struct HandlersConfig {
     pub accounts_query_topic: String,
+    pub historical_accounts_query_topic: String,
     pub addresses_query_topic: String,
     pub assets_query_topic: String,
     pub blocks_query_topic: String,
@@ -40,6 +41,10 @@ impl From<Arc<Config>> for HandlersConfig {
         let accounts_query_topic = config
             .get_string(DEFAULT_ACCOUNTS_QUERY_TOPIC.0)
             .unwrap_or(DEFAULT_ACCOUNTS_QUERY_TOPIC.1.to_string());
+
+        let historical_accounts_query_topic = config
+            .get_string(DEFAULT_HISTORICAL_ACCOUNTS_QUERY_TOPIC.0)
+            .unwrap_or(DEFAULT_HISTORICAL_ACCOUNTS_QUERY_TOPIC.1.to_string());
 
         let addresses_query_topic = config
             .get_string(DEFAULT_ADDRESS_QUERY_TOPIC.0)
@@ -95,6 +100,7 @@ impl From<Arc<Config>> for HandlersConfig {
 
         Self {
             accounts_query_topic,
+            historical_accounts_query_topic,
             addresses_query_topic,
             assets_query_topic,
             blocks_query_topic,

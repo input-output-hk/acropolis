@@ -59,11 +59,27 @@ use handlers::{
     transactions::handle_transactions_blockfrost,
 };
 
-use crate::handlers_config::HandlersConfig;
+use crate::{
+    handlers::accounts::{
+        handle_account_delegations_blockfrost, handle_account_mirs_blockfrost,
+        handle_account_registrations_blockfrost,
+    },
+    handlers_config::HandlersConfig,
+};
 
 // Accounts topics
 const DEFAULT_HANDLE_SINGLE_ACCOUNT_TOPIC: (&str, &str) =
     ("handle-topic-account-single", "rest.get.accounts.*");
+const DEFAULT_HANDLE_ACCOUNT_REGISTRATIONS_TOPIC: (&str, &str) = (
+    "handle-topic-account-registrations",
+    "rest.get.accounts.*.registrations",
+);
+const DEFAULT_HANDLE_ACCOUNT_DELEGATIONS_TOPIC: (&str, &str) = (
+    "handle-topic-account-delegations",
+    "rest.get.accounts.*.delegations",
+);
+const DEFAULT_HANDLE_ACCOUNT_MIRS_TOPIC: (&str, &str) =
+    ("handle-topic-account-mirs", "rest.get.accounts.*.mirs");
 
 // Blocks topics
 const DEFAULT_HANDLE_BLOCKS_LATEST_HASH_NUMBER_TOPIC: (&str, &str) =
@@ -251,6 +267,30 @@ impl BlockfrostREST {
             DEFAULT_HANDLE_SINGLE_ACCOUNT_TOPIC,
             handlers_config.clone(),
             handle_single_account_blockfrost,
+        );
+
+        // Handler for /accounts/{stake_address}/registrations
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_ACCOUNT_REGISTRATIONS_TOPIC,
+            handlers_config.clone(),
+            handle_account_registrations_blockfrost,
+        );
+
+        // Handler for /accounts/{stake_address}/delegations
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_ACCOUNT_DELEGATIONS_TOPIC,
+            handlers_config.clone(),
+            handle_account_delegations_blockfrost,
+        );
+
+        // Handler for /accounts/{stake_address}/mirs
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_ACCOUNT_MIRS_TOPIC,
+            handlers_config.clone(),
+            handle_account_mirs_blockfrost,
         );
 
         // Handler for /blocks/latest, /blocks/{hash_or_number}

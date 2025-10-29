@@ -544,7 +544,7 @@ impl StakeAddressMap {
 
 #[cfg(test)]
 mod tests {
-    use crate::{AddressNetwork, StakeAddress, StakeAddressPayload};
+    use crate::{NetworkId, StakeAddress, StakeCredential};
 
     use super::*;
 
@@ -558,10 +558,8 @@ mod tests {
 
     fn create_stake_address(hash: &[u8]) -> StakeAddress {
         StakeAddress::new(
-            StakeAddressPayload::StakeKeyHash(
-                hash.to_vec().try_into().expect("Invalid hash length"),
-            ),
-            AddressNetwork::Main,
+            StakeCredential::AddrKeyHash(hash.to_vec()),
+            NetworkId::Mainnet,
         )
     }
 
@@ -1019,7 +1017,7 @@ mod tests {
 
             let spdd = stake_addresses.generate_spdd();
 
-            let pool_stake = spdd.get(&SPO_HASH.to_vec()).unwrap();
+            let pool_stake = spdd.get(SPO_HASH.as_slice()).unwrap();
             assert_eq!(pool_stake.active, 3000); // utxo only
             assert_eq!(pool_stake.live, 3150); // utxo + rewards
             assert_eq!(pool_stake.active_delegators_count, 2);
@@ -1049,8 +1047,8 @@ mod tests {
             let spdd = stake_addresses.generate_spdd();
 
             assert_eq!(spdd.len(), 2);
-            assert_eq!(spdd.get(&SPO_HASH.to_vec()).unwrap().active, 1000);
-            assert_eq!(spdd.get(&SPO_HASH_2.to_vec()).unwrap().active, 2000);
+            assert_eq!(spdd.get(SPO_HASH.as_slice()).unwrap().active, 1000);
+            assert_eq!(spdd.get(SPO_HASH_2.as_slice()).unwrap().active, 2000);
         }
 
         #[test]

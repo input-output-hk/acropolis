@@ -169,7 +169,7 @@ impl State {
     }
 
     /// Get Pools Live stake
-    pub fn get_pools_live_stakes(&self, pool_operators: &Vec<KeyHash>) -> Vec<u64> {
+    pub fn get_pools_live_stakes(&self, pool_operators: &[KeyHash]) -> Vec<u64> {
         self.stake_addresses.lock().unwrap().get_pools_live_stakes(pool_operators)
     }
 
@@ -385,8 +385,8 @@ impl State {
             );
 
             if tracing::enabled!(Level::DEBUG) {
-                registrations.iter().for_each(|addr| debug!("Registration {}", addr));
-                deregistrations.iter().for_each(|addr| debug!("Deregistration {}", addr));
+                registrations.iter().for_each(|addr| debug!(epoch, "Registration {}", addr));
+                deregistrations.iter().for_each(|addr| debug!(epoch, "Deregistration {}", addr));
             }
 
             // Calculate reward payouts for previous epoch
@@ -657,39 +657,36 @@ impl State {
 
         // If rewards have been calculated, save the results
         if let Some(task) = task.take() {
-            match task.await {
-                Ok(Ok(reward_result)) => {
-                    // Collect rewards to stake addresses reward deltas
-                    for (_, rewards) in &reward_result.rewards {
-                        reward_deltas.extend(
-                            rewards
-                                .iter()
-                                .map(|reward| StakeRewardDelta {
-                                    stake_address: reward.account.clone(),
-                                    delta: reward.amount as i64,
-                                })
-                                .collect::<Vec<_>>(),
-                        );
-                    }
-
-                    // Verify them
-                    verifier.verify_rewards(reward_result.epoch, &reward_result);
-
-                    // Pay the rewards
-                    let mut stake_addresses = self.stake_addresses.lock().unwrap();
-                    for (_, rewards) in reward_result.rewards {
-                        for reward in rewards {
-                            stake_addresses.add_to_reward(&reward.account, reward.amount);
-                        }
-                    }
-
-                    // save SPO rewards
-                    spo_rewards = reward_result.spo_rewards.into_iter().collect();
-
-                    // Adjust the reserves for next time with amount actually paid
-                    self.pots.reserves -= reward_result.total_paid;
+            if let Ok(Ok(reward_result)) = task.await {
+                // Collect rewards to stake addresses reward deltas
+                for rewards in reward_result.rewards.values() {
+                    reward_deltas.extend(
+                        rewards
+                            .iter()
+                            .map(|reward| StakeRewardDelta {
+                                stake_address: reward.account.clone(),
+                                delta: reward.amount as i64,
+                            })
+                            .collect::<Vec<_>>(),
+                    );
                 }
-                _ => (),
+
+                // Verify them
+                verifier.verify_rewards(reward_result.epoch, &reward_result);
+
+                // Pay the rewards
+                let mut stake_addresses = self.stake_addresses.lock().unwrap();
+                for (_, rewards) in reward_result.rewards {
+                    for reward in rewards {
+                        stake_addresses.add_to_reward(&reward.account, reward.amount);
+                    }
+                }
+
+                // save SPO rewards
+                spo_rewards = reward_result.spo_rewards.into_iter().collect();
+
+                // Adjust the reserves for next time with amount actually paid
+                self.pots.reserves -= reward_result.total_paid;
             }
         };
 
@@ -737,12 +734,14 @@ impl State {
                     if spo.pledge != old_spo.pledge
                         || spo.cost != old_spo.cost
                         || spo.margin != old_spo.margin
+                        || spo.reward_account != old_spo.reward_account
                     {
                         debug!(
                             epoch = spo_msg.epoch,
                             pledge = spo.pledge,
                             cost = spo.cost,
                             margin = ?spo.margin,
+                            reward = %spo.reward_account,
                             "Updated parameters for SPO {}",
                             hex::encode(id)
                         );
@@ -755,6 +754,7 @@ impl State {
                         pledge = spo.pledge,
                         cost = spo.cost,
                         margin = ?spo.margin,
+                        reward = %spo.reward_account,
                         "Registered new SPO {}",
                         hex::encode(id)
                     );
@@ -794,9 +794,10 @@ impl State {
 
     /// Register a stake address, with a specified deposit if known
     fn register_stake_address(&mut self, stake_address: &StakeAddress, deposit: Option<Lovelace>) {
+        debug!("Register stake address {stake_address}");
         // Stake addresses can be registered after being used in UTXOs
         let mut stake_addresses = self.stake_addresses.lock().unwrap();
-        if stake_addresses.register_stake_address(&stake_address) {
+        if stake_addresses.register_stake_address(stake_address) {
             // Account for the deposit
             let deposit = match deposit {
                 Some(deposit) => deposit,
@@ -822,9 +823,11 @@ impl State {
 
     /// Deregister a stake address, with specified refund if known
     fn deregister_stake_address(&mut self, stake_address: &StakeAddress, refund: Option<Lovelace>) {
+        debug!("Deregister stake address {stake_address}");
+
         // Check if it existed
         let mut stake_addresses = self.stake_addresses.lock().unwrap();
-        if stake_addresses.deregister_stake_address(&stake_address) {
+        if stake_addresses.deregister_stake_address(stake_address) {
             // Account for the deposit, if registered before
             let deposit = match refund {
                 Some(deposit) => deposit,
@@ -837,7 +840,6 @@ impl State {
                         .unwrap_or(DEFAULT_KEY_DEPOSIT)
                 }
             };
-            self.pots.deposits -= deposit;
 
             // Schedule refund
             self.stake_refunds.push((stake_address.clone(), deposit));
@@ -857,7 +859,7 @@ impl State {
     /// Record a stake delegation
     fn record_stake_delegation(&mut self, stake_address: &StakeAddress, spo: &KeyHash) {
         let mut stake_addresses = self.stake_addresses.lock().unwrap();
-        stake_addresses.record_stake_delegation(&stake_address, spo);
+        stake_addresses.record_stake_delegation(stake_address, spo);
     }
 
     /// Handle an MoveInstantaneousReward (pre-Conway only)
@@ -869,24 +871,24 @@ impl State {
     /// record a drep delegation
     fn record_drep_delegation(&mut self, stake_address: &StakeAddress, drep: &DRepChoice) {
         let mut stake_addresses = self.stake_addresses.lock().unwrap();
-        stake_addresses.record_drep_delegation(&stake_address, drep);
+        stake_addresses.record_drep_delegation(stake_address, drep);
     }
 
     /// Handle TxCertificates
     pub fn handle_tx_certificates(&mut self, tx_certs_msg: &TxCertificatesMessage) -> Result<()> {
         // Handle certificates
         for tx_cert in tx_certs_msg.certificates.iter() {
-            match tx_cert {
-                TxCertificate::StakeRegistration(stake_address_with_pos) => {
-                    self.register_stake_address(&stake_address_with_pos.stake_address, None);
+            match &tx_cert.cert {
+                TxCertificate::StakeRegistration(reg) => {
+                    self.register_stake_address(reg, None);
                 }
 
-                TxCertificate::StakeDeregistration(stake_address) => {
-                    self.deregister_stake_address(&stake_address, None);
+                TxCertificate::StakeDeregistration(dreg) => {
+                    self.deregister_stake_address(dreg, None);
                 }
 
                 TxCertificate::MoveInstantaneousReward(mir) => {
-                    self.handle_mir(&mir).unwrap_or_else(|e| error!("MIR failed: {e:#}"));
+                    self.handle_mir(mir).unwrap_or_else(|e| error!("MIR failed: {e:#}"));
                 }
 
                 TxCertificate::Registration(reg) => {
@@ -991,11 +993,12 @@ impl State {
 mod tests {
     use super::*;
     use acropolis_common::{
-        protocol_params::ConwayParams, rational_number::RationalNumber, AddressNetwork, Anchor,
-        Committee, Constitution, CostModel, DRepVotingThresholds, PoolVotingThresholds, Pot,
-        PotDelta, Ratio, Registration, StakeAddress, StakeAddressDelta, StakeAddressPayload,
-        StakeAndVoteDelegation, StakeRegistrationAndStakeAndVoteDelegation,
-        StakeRegistrationAndVoteDelegation, VoteDelegation, Withdrawal,
+        protocol_params::ConwayParams, rational_number::RationalNumber, Anchor, Committee,
+        Constitution, CostModel, DRepVotingThresholds, NetworkId, PoolVotingThresholds, Pot,
+        PotDelta, Ratio, Registration, StakeAddress, StakeAddressDelta, StakeAndVoteDelegation,
+        StakeCredential, StakeRegistrationAndStakeAndVoteDelegation,
+        StakeRegistrationAndVoteDelegation, TxCertificateWithPos, TxIdentifier, VoteDelegation,
+        Withdrawal,
     };
 
     // Helper to create a StakeAddress from a byte slice
@@ -1003,8 +1006,8 @@ mod tests {
         let mut full_hash = vec![0u8; 28];
         full_hash[..hash.len().min(28)].copy_from_slice(&hash[..hash.len().min(28)]);
         StakeAddress {
-            network: AddressNetwork::Main,
-            payload: StakeAddressPayload::StakeKeyHash(full_hash),
+            network: NetworkId::Mainnet,
+            credential: StakeCredential::AddrKeyHash(full_hash),
         }
     }
 
@@ -1368,38 +1371,66 @@ mod tests {
         let spo3 = create_address(&[0x03]);
         let spo4 = create_address(&[0x04]);
 
+        let tx_identifier = TxIdentifier::default();
+
         let certificates = vec![
             // register the first two SPOs separately from their delegation
-            TxCertificate::Registration(Registration {
-                stake_address: spo1.clone(),
-                deposit: 1,
-            }),
-            TxCertificate::Registration(Registration {
-                stake_address: spo2.clone(),
-                deposit: 1,
-            }),
-            TxCertificate::VoteDelegation(VoteDelegation {
-                stake_address: spo1.clone(),
-                drep: DRepChoice::Key(DREP_HASH.to_vec()),
-            }),
-            TxCertificate::StakeAndVoteDelegation(StakeAndVoteDelegation {
-                stake_address: spo2.clone(),
-                operator: spo1.get_hash().to_vec(),
-                drep: DRepChoice::Script(DREP_HASH.to_vec()),
-            }),
-            TxCertificate::StakeRegistrationAndVoteDelegation(StakeRegistrationAndVoteDelegation {
-                stake_address: spo3.clone(),
-                drep: DRepChoice::Abstain,
-                deposit: 1,
-            }),
-            TxCertificate::StakeRegistrationAndStakeAndVoteDelegation(
-                StakeRegistrationAndStakeAndVoteDelegation {
-                    stake_address: spo4.clone(),
-                    operator: spo1.get_hash().to_vec(),
-                    drep: DRepChoice::NoConfidence,
+            TxCertificateWithPos {
+                cert: TxCertificate::Registration(Registration {
+                    stake_address: spo1.clone(),
                     deposit: 1,
-                },
-            ),
+                }),
+                tx_identifier,
+                cert_index: 0,
+            },
+            TxCertificateWithPos {
+                cert: TxCertificate::Registration(Registration {
+                    stake_address: spo2.clone(),
+                    deposit: 1,
+                }),
+                tx_identifier,
+                cert_index: 0,
+            },
+            TxCertificateWithPos {
+                cert: TxCertificate::VoteDelegation(VoteDelegation {
+                    stake_address: spo1.clone(),
+                    drep: DRepChoice::Key(DREP_HASH.to_vec()),
+                }),
+                tx_identifier,
+                cert_index: 0,
+            },
+            TxCertificateWithPos {
+                cert: TxCertificate::StakeAndVoteDelegation(StakeAndVoteDelegation {
+                    stake_address: spo2.clone(),
+                    operator: spo1.get_hash().to_vec(),
+                    drep: DRepChoice::Script(DREP_HASH.to_vec()),
+                }),
+                tx_identifier,
+                cert_index: 0,
+            },
+            TxCertificateWithPos {
+                cert: TxCertificate::StakeRegistrationAndVoteDelegation(
+                    StakeRegistrationAndVoteDelegation {
+                        stake_address: spo3.clone(),
+                        drep: DRepChoice::Abstain,
+                        deposit: 1,
+                    },
+                ),
+                tx_identifier,
+                cert_index: 0,
+            },
+            TxCertificateWithPos {
+                cert: TxCertificate::StakeRegistrationAndStakeAndVoteDelegation(
+                    StakeRegistrationAndStakeAndVoteDelegation {
+                        stake_address: spo4.clone(),
+                        operator: spo1.get_hash().to_vec(),
+                        drep: DRepChoice::NoConfidence,
+                        deposit: 1,
+                    },
+                ),
+                tx_identifier,
+                cert_index: 0,
+            },
         ];
 
         state.handle_tx_certificates(&TxCertificatesMessage { certificates })?;

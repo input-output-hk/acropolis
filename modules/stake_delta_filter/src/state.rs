@@ -83,16 +83,16 @@ impl State {
         block: &BlockInfo,
         msg: &TxCertificatesMessage,
     ) -> Result<()> {
-        for cert in msg.certificates.iter() {
-            if let TxCertificate::StakeRegistration(reg) = cert {
+        for tx_cert in msg.certificates.iter() {
+            if let TxCertificate::StakeRegistration(stake_address) = &tx_cert.cert {
                 let ptr = ShelleyAddressPointer {
                     slot: block.slot,
-                    tx_index: reg.tx_index,
-                    cert_index: reg.cert_index,
+                    tx_index: tx_cert.tx_identifier.tx_index() as u64,
+                    cert_index: tx_cert.cert_index,
                 };
 
                 // Sets pointer; updates max processed slot
-                self.pointer_cache.set_pointer(ptr, reg.stake_address.clone(), block.slot);
+                self.pointer_cache.set_pointer(ptr, stake_address.clone(), block.slot);
             }
         }
         Ok(())

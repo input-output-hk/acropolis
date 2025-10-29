@@ -336,7 +336,7 @@ mod tests {
 
         state.store.insert_block(&info, &bytes).unwrap();
 
-        let new_block = state.store.get_block_by_hash(&info.hash.as_ref()).unwrap();
+        let new_block = state.store.get_block_by_hash(info.hash.as_ref()).unwrap();
         assert_eq!(block, new_block.unwrap());
     }
 

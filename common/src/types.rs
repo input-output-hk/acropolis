@@ -19,11 +19,28 @@ use std::fmt::{Display, Formatter};
 use std::ops::{AddAssign, Neg};
 use std::{cmp::Ordering, fmt};
 
-#[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Network identifier
+#[derive(
+    Debug,
+    Clone,
+    Default,
+    PartialEq,
+    Eq,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    minicbor::Encode,
+    minicbor::Decode,
+)]
 pub enum NetworkId {
-    Testnet,
+    /// Main
+    #[n(0)]
     #[default]
     Mainnet,
+
+    /// Test
+    #[n(1)]
+    Testnet,
 }
 
 impl From<String> for NetworkId {
@@ -608,15 +625,16 @@ pub struct PotDelta {
     pub delta: LovelaceDelta,
 }
 
+#[serde_as]
 #[derive(
     Debug, Clone, Ord, Eq, PartialEq, PartialOrd, Hash, serde::Serialize, serde::Deserialize,
 )]
 pub enum Credential {
     /// Script hash. NOTE: Order matters when parsing Haskell Node Snapshot data.
-    ScriptHash(KeyHash),
+    ScriptHash(#[serde_as(as = "Hex")] KeyHash),
 
     /// Address key hash
-    AddrKeyHash(KeyHash),
+    AddrKeyHash(#[serde_as(as = "Hex")] KeyHash),
 }
 
 impl Credential {
@@ -718,6 +736,17 @@ impl Credential {
 
 pub type StakeCredential = Credential;
 
+impl StakeCredential {
+    pub fn to_string(&self) -> Result<String> {
+        let (hrp, data) = match &self {
+            Self::AddrKeyHash(data) => (Hrp::parse("stake_vkh")?, data),
+            Self::ScriptHash(data) => (Hrp::parse("script")?, data),
+        };
+
+        Ok(bech32::encode::<Bech32>(hrp, data)?)
+    }
+}
+
 /// Relay single host address
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize, Eq, PartialEq)]
 pub struct SingleHostAddr {
@@ -779,14 +808,6 @@ pub struct PoolMetadata {
     pub hash: DataHash,
 }
 
-/// Pool registration with position
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PoolRegistrationWithPos {
-    pub reg: PoolRegistration,
-    pub tx_hash: TxHash,
-    pub cert_index: u64,
-}
-
 /// Pool registration data
 #[serde_as]
 #[derive(
@@ -840,14 +861,6 @@ pub struct PoolRegistration {
     pub pool_metadata: Option<PoolMetadata>,
 }
 
-// Pool Retirment with position
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PoolRetirementWithPos {
-    pub ret: PoolRetirement,
-    pub tx_hash: TxHash,
-    pub cert_index: u64,
-}
-
 /// Pool retirement data
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PoolRetirement {
@@ -868,23 +881,23 @@ pub enum PoolUpdateAction {
 /// Pool Update Event
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PoolUpdateEvent {
-    pub tx_hash: TxHash,
+    pub tx_identifier: TxIdentifier,
     pub cert_index: u64,
     pub action: PoolUpdateAction,
 }
 
 impl PoolUpdateEvent {
-    pub fn register_event(tx_hash: TxHash, cert_index: u64) -> Self {
+    pub fn register_event(tx_identifier: TxIdentifier, cert_index: u64) -> Self {
         Self {
-            tx_hash,
+            tx_identifier,
             cert_index,
             action: PoolUpdateAction::Registered,
         }
     }
 
-    pub fn retire_event(tx_hash: TxHash, cert_index: u64) -> Self {
+    pub fn retire_event(tx_identifier: TxIdentifier, cert_index: u64) -> Self {
         Self {
-            tx_hash,
+            tx_identifier,
             cert_index,
             action: PoolUpdateAction::Deregistered,
         }
@@ -1111,13 +1124,6 @@ pub struct DRepRegistration {
     pub anchor: Option<Anchor>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct DRepRegistrationWithPos {
-    pub reg: DRepRegistration,
-    pub tx_hash: TxHash,
-    pub cert_index: u64,
-}
-
 /// DRep Deregistration = unreg_drep_cert
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DRepDeregistration {
@@ -1128,13 +1134,6 @@ pub struct DRepDeregistration {
     pub refund: Lovelace,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct DRepDeregistrationWithPos {
-    pub reg: DRepDeregistration,
-    pub tx_hash: TxHash,
-    pub cert_index: u64,
-}
-
 /// DRep Update = update_drep_cert
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DRepUpdate {
@@ -1143,13 +1142,6 @@ pub struct DRepUpdate {
 
     /// Optional anchor
     pub anchor: Option<Anchor>,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct DRepUpdateWithPos {
-    pub reg: DRepUpdate,
-    pub tx_hash: TxHash,
-    pub cert_index: u64,
 }
 
 pub type CommitteeCredential = Credential;
@@ -1765,13 +1757,6 @@ pub struct GovernanceOutcome {
     pub action_to_perform: GovernanceOutcomeVariant,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct StakeAddressWithPos {
-    pub stake_address: StakeAddress,
-    pub tx_index: u64,
-    pub cert_index: u64,
-}
-
 /// Certificate in a transaction
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum TxCertificate {
@@ -1779,7 +1764,7 @@ pub enum TxCertificate {
     None(()),
 
     /// Stake registration
-    StakeRegistration(StakeAddressWithPos),
+    StakeRegistration(StakeAddress),
 
     /// Stake de-registration
     StakeDeregistration(StakeAddress),
@@ -1788,10 +1773,10 @@ pub enum TxCertificate {
     StakeDelegation(StakeDelegation),
 
     /// Pool registration
-    PoolRegistrationWithPos(PoolRegistrationWithPos),
+    PoolRegistration(PoolRegistration),
 
     /// Pool retirement
-    PoolRetirementWithPos(PoolRetirementWithPos),
+    PoolRetirement(PoolRetirement),
 
     /// Genesis key delegation
     GenesisKeyDelegation(GenesisKeyDelegation),
@@ -1827,13 +1812,20 @@ pub enum TxCertificate {
     ResignCommitteeCold(ResignCommitteeCold),
 
     /// DRep registration
-    DRepRegistration(DRepRegistrationWithPos),
+    DRepRegistration(DRepRegistration),
 
     /// DRep deregistration
-    DRepDeregistration(DRepDeregistrationWithPos),
+    DRepDeregistration(DRepDeregistration),
 
     /// DRep update
-    DRepUpdate(DRepUpdateWithPos),
+    DRepUpdate(DRepUpdate),
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TxCertificateWithPos {
+    pub cert: TxCertificate,
+    pub tx_identifier: TxIdentifier,
+    pub cert_index: u64,
 }
 
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
@@ -1936,7 +1928,7 @@ mod tests {
         assert_eq!(Era::default() as u8, 0);
         assert_eq!(Era::Byron as u8, 0);
         assert_eq!(Era::Conway as u8, 6);
-        assert!(!Era::try_from(7).is_ok());
+        assert!(Era::try_from(7).is_err());
 
         for ei in 0..=6 {
             for ej in 0..=6 {
@@ -1994,16 +1986,14 @@ mod tests {
         let gov_action = GovernanceAction::UpdateCommittee(UpdateCommitteeAction {
             previous_action_id: None,
             data: CommitteeChange {
-                removed_committee_members: HashSet::from_iter(
-                    vec![
-                        make_committee_credential(true, 48),
-                        make_committee_credential(false, 12),
-                    ]
-                    .into_iter(),
-                ),
-                new_committee_members: HashMap::from_iter(
-                    vec![(make_committee_credential(false, 87), 1234)].into_iter(),
-                ),
+                removed_committee_members: HashSet::from_iter([
+                    make_committee_credential(true, 48),
+                    make_committee_credential(false, 12),
+                ]),
+                new_committee_members: HashMap::from_iter([(
+                    make_committee_credential(false, 87),
+                    1234,
+                )]),
                 terms: RationalNumber::from(1),
             },
         });
