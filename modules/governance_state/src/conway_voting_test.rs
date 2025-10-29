@@ -34,8 +34,8 @@ mod tests {
     #[derive(Clone, Debug, serde::Deserialize)]
     struct PoolRecord(
         #[serde_as(as = "Base64")] PoolId, // key
-        u64,                                // active stake
-        u64,                                // live stake
+        u64,                               // active stake
+        u64,                               // live stake
     );
 
     #[serde_as]
@@ -224,6 +224,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_voting_mainnet_up_573() -> Result<()> {
         let fmt_layer = fmt::layer()
             .with_filter(

@@ -5,8 +5,8 @@ use acropolis_common::{
         CardanoMessage, DRepStakeDistributionMessage, GovernanceOutcomesMessage,
         GovernanceProceduresMessage, Message, ProtocolParamsMessage, SPOStakeDistributionMessage,
     },
-    BlockInfo, DRepCredential, DelegatedStake, Era, GovActionId, Lovelace,
-    ProposalProcedure, TxHash, Voter, VotingProcedure, PoolId
+    BlockInfo, DRepCredential, DelegatedStake, Era, GovActionId, Lovelace, PoolId,
+    ProposalProcedure, TxHash, Voter, VotingProcedure,
 };
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::Context;

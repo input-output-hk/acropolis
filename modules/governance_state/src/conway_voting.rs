@@ -1,6 +1,11 @@
 use crate::voting_state::VotingRegistrationState;
 use acropolis_common::protocol_params::ConwayParams;
-use acropolis_common::{BlockInfo, DRepCredential, DelegatedStake, EnactStateElem, GovActionId, GovernanceAction, GovernanceOutcome, GovernanceOutcomeVariant, Lovelace, PoolId, ProposalProcedure, SingleVoterVotes, TreasuryWithdrawalsAction, TxHash, Vote, VoteCount, VoteResult, Voter, VotingOutcome, VotingProcedure};
+use acropolis_common::{
+    BlockInfo, DRepCredential, DelegatedStake, EnactStateElem, GovActionId, GovernanceAction,
+    GovernanceOutcome, GovernanceOutcomeVariant, Lovelace, PoolId, ProposalProcedure,
+    SingleVoterVotes, TreasuryWithdrawalsAction, TxHash, Vote, VoteCount, VoteResult, Voter,
+    VotingOutcome, VotingProcedure,
+};
 use anyhow::{anyhow, bail, Result};
 use hex::ToHex;
 use std::collections::{HashMap, HashSet};
