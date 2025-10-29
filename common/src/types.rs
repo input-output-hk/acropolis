@@ -1760,7 +1760,7 @@ impl VoteCount {
 
 impl Display for VoteCount {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}/{}/{}", self.yes, self.no, self.abstain)
+        write!(f, "y{}/n{}/a{}", self.yes, self.no, self.abstain)
     }
 }
 
@@ -1768,7 +1768,7 @@ impl FromStr for VoteCount {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self> {
-        let re = Regex::new(r"(\d+)/(\d+)/(\d+)$").unwrap();
+        let re = Regex::new(r"y(\d+)/n(\d+)/a(\d+)$").unwrap();
         let caps = re.captures(s).ok_or_else(|| anyhow!("Invalid VoteCount string: '{s}'"))?;
 
         let yes = u64::from_str(&caps[1])?;
