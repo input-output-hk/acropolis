@@ -282,73 +282,9 @@ macro_rules! declare_hash_type {
     };
 }
 
-/// Declares a type alias for a hash with Bech32 encoding support.
-///
-/// This macro creates a type alias and implements the `Bech32Conversion` trait
-/// for encoding/decoding the hash using a specified human-readable part (HRP).
-///
-/// **WARNING**: You can only use this macro once per hash size, as it implements
-/// a trait on `Hash<SIZE>`. If you need multiple distinct types with different
-/// Bech32 HRPs for the same hash size, use `declare_hash_newtype_with_bech32!` instead.
-///
-/// # Examples
-///
-/// ```ignore
-/// declare_hash_type_with_bech32!(VRFKey, 32, "vrf_vk");
-///
-/// let key: VRFKey = // ... get key
-/// let bech32_string = key.to_bech32().unwrap();
-/// let decoded = VRFKey::from_bech32(&bech32_string).unwrap();
-/// ```
-#[macro_export]
-macro_rules! declare_hash_type_with_bech32 {
-    ($name:ident, $size:expr, $hrp:expr) => {
-        declare_hash_type!($name, $size);
-
-        impl crate::serialization::Bech32Conversion for $name {
-            fn to_bech32(&self) -> Result<String, anyhow::Error> {
-                use crate::serialization::Bech32WithHrp;
-                self.to_vec().to_bech32_with_hrp($hrp)
-            }
-
-            fn from_bech32(s: &str) -> Result<Self, anyhow::Error> {
-                use crate::serialization::Bech32WithHrp;
-                let v = Vec::<u8>::from_bech32_with_hrp(s, $hrp)?;
-                Self::try_from(v).map_err(|_| {
-                    anyhow::Error::msg(format!(
-                        "Bad vector input to {}",
-                        stringify!($name)
-                    ))
-                })
-            }
-        }
-    };
-    ($(#[$meta:meta])* $name:ident, $size:expr, $hrp:expr) => {
-        declare_hash_type!($(#[$meta])* $name, $size);
-
-        impl crate::serialization::Bech32Conversion for $name {
-            fn to_bech32(&self) -> Result<String, anyhow::Error> {
-                use crate::serialization::Bech32WithHrp;
-                self.to_vec().to_bech32_with_hrp($hrp)
-            }
-
-            fn from_bech32(s: &str) -> Result<Self, anyhow::Error> {
-                use crate::serialization::Bech32WithHrp;
-                let v = Vec::<u8>::from_bech32_with_hrp(s, $hrp)?;
-                Self::try_from(v).map_err(|_| {
-                    anyhow::Error::msg(format!(
-                        "Bad vector input to {}",
-                        stringify!($name)
-                    ))
-                })
-            }
-        }
-    };
-}
-
 /// Declares a newtype wrapper around Hash with Bech32 encoding support.
 ///
-/// Unlike `declare_hash_type_with_bech32!`, this creates a distinct type (not an alias),
+/// This creates a distinct type (not an alias),
 /// allowing you to have multiple types of the same hash size with different Bech32 HRPs.
 ///
 /// # Examples
@@ -359,7 +295,7 @@ macro_rules! declare_hash_type_with_bech32 {
 /// declare_hash_newtype_with_bech32!(DrepId, 28, "drep");
 /// ```
 #[macro_export]
-macro_rules! declare_hash_newtype_with_bech32 {
+macro_rules! declare_hash_type_with_bech32 {
     ($name:ident, $size:expr, $hrp:expr) => {
         #[doc = concat!(stringify!($name), " - a ", stringify!($size), "-byte hash.")]
         #[derive(

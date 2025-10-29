@@ -5,8 +5,7 @@
 use crate::hash::Hash;
 use crate::{
     address::{Address, ShelleyAddress, StakeAddress},
-    declare_hash_newtype_with_bech32, declare_hash_type, declare_hash_type_with_bech32,
-    protocol_params,
+    declare_hash_type, declare_hash_type_with_bech32, protocol_params,
     rational_number::RationalNumber,
 };
 use anyhow::{anyhow, bail, Error, Result};
@@ -445,9 +444,9 @@ pub type GenesisKeyhash = Vec<u8>;
 
 declare_hash_type!(BlockHash, 32);
 declare_hash_type!(TxHash, 32);
-declare_hash_newtype_with_bech32!(VrfKeyHash, 32, "vrf_vk");
-declare_hash_newtype_with_bech32!(PoolId, 28, "pool");
-declare_hash_newtype_with_bech32!(DrepKey, 28, "drep");
+declare_hash_type_with_bech32!(VrfKeyHash, 32, "vrf_vk");
+declare_hash_type_with_bech32!(PoolId, 28, "pool");
+declare_hash_type_with_bech32!(DrepKey, 28, "drep");
 declare_hash_type_with_bech32!(DrepScriptKey, 28, "drep_script");
 
 /// Data hash used for metadata, anchors (SHA256)
