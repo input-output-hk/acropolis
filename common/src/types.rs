@@ -2125,12 +2125,14 @@ mod tests {
 
     #[test]
     fn parse_voting_values() -> Result<()> {
-        let count = VoteCount::from_str("0/5/1")?;
+        let count = VoteCount::from_str("y0/n5/a1")?;
         assert_eq!(count.yes, 0);
         assert_eq!(count.no, 5);
         assert_eq!(count.abstain, 1);
 
-        let counts: VoteResult<VoteCount> = VoteResult::from_str("c0/5/1:d0/1/2:s123/456/0788890")?;
+        let counts: VoteResult<VoteCount> = VoteResult::from_str(
+            "cy0/n5/a1:dy0/n1/a2:sy123/n456/a0788890"
+        )?;
         assert_eq!(counts.committee, count);
         assert_eq!(counts.drep.yes, 0);
         assert_eq!(counts.drep.no, 1);
@@ -2138,6 +2140,32 @@ mod tests {
         assert_eq!(counts.pool.yes, 123);
         assert_eq!(counts.pool.no, 456);
         assert_eq!(counts.pool.abstain, 788890);
+        Ok(())
+    }
+
+    #[test]
+    fn serialize_stake_addres() -> Result<()> {
+        let serialized = "{\
+            \"network\":\"Mainnet\",\
+            \"credential\":{\
+                \"AddrKeyHash\":\"45dee6ee5d7f631b6226d45f29da411c42fa7e816dc0948d31e0dba7\"\
+            }\
+        }";
+
+        let addr = serde_json::from_str::<StakeAddress>(serialized)?;
+        assert_eq!(addr.network, NetworkId::Mainnet);
+        assert_eq!(addr.credential, StakeCredential::AddrKeyHash(KeyHash::from(
+            [
+                0x45, 0xde, 0xe6, 0xee, 0x5d, 0x7f, 0x63, 0x1b,
+                0x62, 0x26, 0xd4, 0x5f, 0x29, 0xda, 0x41, 0x1c,
+                0x42, 0xfa, 0x7e, 0x81, 0x6d, 0xc0, 0x94, 0x8d,
+                0x31, 0xe0, 0xdb, 0xa7,
+            ]
+        )));
+
+        let serialized_back = serde_json::to_string(&addr)?;
+        assert_eq!(serialized_back, serialized);
+
         Ok(())
     }
 }
