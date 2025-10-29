@@ -315,7 +315,7 @@ macro_rules! declare_hash_type_with_bech32 {
                 use crate::serialization::Bech32WithHrp;
                 use anyhow::Context;
 
-                self.to_vec().to_bech32_with_hrp($hrp).with_context(|| {
+                self.as_ref().to_bech32_with_hrp($hrp).with_context(|| {
                     format!(
                         "Failed to encode {} to bech32 with HRP '{}'",
                         stringify!($name),
