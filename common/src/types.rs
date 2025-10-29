@@ -1934,7 +1934,7 @@ mod tests {
         assert_eq!(Era::default() as u8, 0);
         assert_eq!(Era::Byron as u8, 0);
         assert_eq!(Era::Conway as u8, 6);
-        assert!(!Era::try_from(7).is_ok());
+        assert!(Era::try_from(7).is_err());
 
         for ei in 0..=6 {
             for ej in 0..=6 {
@@ -1992,16 +1992,14 @@ mod tests {
         let gov_action = GovernanceAction::UpdateCommittee(UpdateCommitteeAction {
             previous_action_id: None,
             data: CommitteeChange {
-                removed_committee_members: HashSet::from_iter(
-                    vec![
-                        make_committee_credential(true, 48),
-                        make_committee_credential(false, 12),
-                    ]
-                    .into_iter(),
-                ),
-                new_committee_members: HashMap::from_iter(
-                    vec![(make_committee_credential(false, 87), 1234)].into_iter(),
-                ),
+                removed_committee_members: HashSet::from_iter([
+                    make_committee_credential(true, 48),
+                    make_committee_credential(false, 12),
+                ]),
+                new_committee_members: HashMap::from_iter([(
+                    make_committee_credential(false, 87),
+                    1234,
+                )]),
                 terms: RationalNumber::from(1),
             },
         });

@@ -50,27 +50,25 @@ pub async fn handle_single_account_blockfrost(
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::AccountInfo(account),
-            )) => Ok(account),
+            )) => Ok(Some(account)),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::NotFound,
-            )) => {
-                return Err(anyhow::anyhow!("Account not found"));
-            }
+            )) => Ok(None),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
-            )) => {
-                return Err(anyhow::anyhow!(
-                    "Internal server error while retrieving account info: {e}"
-                ));
-            }
-            _ => {
-                return Err(anyhow::anyhow!(
-                    "Unexpected message type while retrieving account info"
-                ))
-            }
+            )) => Err(anyhow::anyhow!(
+                "Internal server error while retrieving account info: {e}"
+            )),
+            _ => Err(anyhow::anyhow!(
+                "Unexpected message type while retrieving account info"
+            )),
         },
     )
     .await?;
+
+    let Some(account) = account else {
+        return Ok(RESTResponse::with_text(404, "Account not found"));
+    };
 
     let delegated_spo = match &account.delegated_spo {
         Some(spo) => match spo.to_bech32_with_hrp("pool") {
@@ -140,27 +138,25 @@ pub async fn handle_account_registrations_blockfrost(
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::AccountRegistrationHistory(registrations),
-            )) => Ok(registrations),
+            )) => Ok(Some(registrations)),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::NotFound,
-            )) => {
-                return Err(anyhow::anyhow!("Account not found"));
-            }
+            )) => Ok(None),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
-            )) => {
-                return Err(anyhow::anyhow!(
-                    "Internal server error while retrieving account info: {e}"
-                ));
-            }
-            _ => {
-                return Err(anyhow::anyhow!(
-                    "Unexpected message type while retrieving account info"
-                ))
-            }
+            )) => Err(anyhow::anyhow!(
+                "Internal server error while retrieving account info: {e}"
+            )),
+            _ => Err(anyhow::anyhow!(
+                "Unexpected message type while retrieving account info"
+            )),
         },
     )
     .await?;
+
+    let Some(registrations) = registrations else {
+        return Ok(RESTResponse::with_text(404, "Account not found"));
+    };
 
     // Get TxHashes from TxIdentifiers
     let tx_ids: Vec<_> = registrations.iter().map(|r| r.tx_identifier.clone()).collect();
@@ -238,27 +234,25 @@ pub async fn handle_account_delegations_blockfrost(
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::AccountDelegationHistory(delegations),
-            )) => Ok(delegations),
+            )) => Ok(Some(delegations)),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::NotFound,
-            )) => {
-                return Err(anyhow::anyhow!("Account not found"));
-            }
+            )) => Ok(None),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
-            )) => {
-                return Err(anyhow::anyhow!(
-                    "Internal server error while retrieving account info: {e}"
-                ));
-            }
-            _ => {
-                return Err(anyhow::anyhow!(
-                    "Unexpected message type while retrieving account info"
-                ))
-            }
+            )) => Err(anyhow::anyhow!(
+                "Internal server error while retrieving account info: {e}"
+            )),
+            _ => Err(anyhow::anyhow!(
+                "Unexpected message type while retrieving account info"
+            )),
         },
     )
     .await?;
+
+    let Some(delegations) = delegations else {
+        return Ok(RESTResponse::with_text(404, "Account not found"));
+    };
 
     // Get TxHashes from TxIdentifiers
     let tx_ids: Vec<_> = delegations.iter().map(|r| r.tx_identifier.clone()).collect();
@@ -346,27 +340,25 @@ pub async fn handle_account_mirs_blockfrost(
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::AccountMIRHistory(mirs),
-            )) => Ok(mirs),
+            )) => Ok(Some(mirs)),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::NotFound,
-            )) => {
-                return Err(anyhow::anyhow!("Account not found"));
-            }
+            )) => Ok(None),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
-            )) => {
-                return Err(anyhow::anyhow!(
-                    "Internal server error while retrieving account info: {e}"
-                ));
-            }
-            _ => {
-                return Err(anyhow::anyhow!(
-                    "Unexpected message type while retrieving account info"
-                ))
-            }
+            )) => Err(anyhow::anyhow!(
+                "Internal server error while retrieving account info: {e}"
+            )),
+            _ => Err(anyhow::anyhow!(
+                "Unexpected message type while retrieving account info"
+            )),
         },
     )
     .await?;
+
+    let Some(mirs) = mirs else {
+        return Ok(RESTResponse::with_text(404, "Account not found"));
+    };
 
     // Get TxHashes from TxIdentifiers
     let tx_ids: Vec<_> = mirs.iter().map(|r| r.tx_identifier.clone()).collect();

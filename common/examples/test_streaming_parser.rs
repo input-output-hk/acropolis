@@ -12,6 +12,7 @@ use std::env;
 use std::time::Instant;
 
 // Simple counter callback that doesn't store data in memory
+#[derive(Default)]
 struct CountingCallbacks {
     metadata: Option<SnapshotMetadata>,
     utxo_count: u64,
@@ -24,24 +25,6 @@ struct CountingCallbacks {
     sample_accounts: Vec<AccountState>,
     sample_dreps: Vec<DRepInfo>,
     sample_proposals: Vec<GovernanceProposal>,
-}
-
-impl Default for CountingCallbacks {
-    fn default() -> Self {
-        Self {
-            metadata: None,
-            utxo_count: 0,
-            pool_count: 0,
-            account_count: 0,
-            drep_count: 0,
-            proposal_count: 0,
-            sample_utxos: Vec::new(),
-            sample_pools: Vec::new(),
-            sample_accounts: Vec::new(),
-            sample_dreps: Vec::new(),
-            sample_proposals: Vec::new(),
-        }
-    }
 }
 
 impl UtxoCallback for CountingCallbacks {
@@ -62,7 +45,7 @@ impl UtxoCallback for CountingCallbacks {
             self.sample_utxos.push(utxo);
         }
         // Progress reporting every million UTXOs
-        if self.utxo_count > 0 && self.utxo_count % 1000000 == 0 {
+        if self.utxo_count > 0 && self.utxo_count.is_multiple_of(1000000) {
             eprintln!("  Parsed {} UTXOs...", self.utxo_count);
         }
         Ok(())
@@ -95,7 +78,7 @@ impl PoolCallback for CountingCallbacks {
 impl StakeCallback for CountingCallbacks {
     fn on_accounts(&mut self, accounts: Vec<AccountState>) -> Result<()> {
         self.account_count = accounts.len();
-        if accounts.len() > 0 {
+        if !accounts.is_empty() {
             eprintln!("✓ Parsed {} stake accounts", accounts.len());
 
             // Show first 10 accounts
@@ -152,7 +135,7 @@ impl DRepCallback for CountingCallbacks {
 impl ProposalCallback for CountingCallbacks {
     fn on_proposals(&mut self, proposals: Vec<GovernanceProposal>) -> Result<()> {
         self.proposal_count = proposals.len();
-        if proposals.len() > 0 {
+        if !proposals.is_empty() {
             eprintln!("✓ Parsed {} governance proposals", proposals.len());
 
             // Show first 10 proposals

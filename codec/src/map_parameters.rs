@@ -100,7 +100,7 @@ pub fn map_stake_address(cred: &PallasStakeCredential, network_id: NetworkId) ->
         }
     };
 
-    StakeAddress::new(payload, network_id.into())
+    StakeAddress::new(payload, network_id)
 }
 
 /// Map a Pallas DRep to our DRepChoice
@@ -262,7 +262,7 @@ pub fn map_certificate(
                         .map(|v| {
                             StakeAddress::new(
                                 StakeCredential::AddrKeyHash(v.to_vec()),
-                                network_id.clone().into(),
+                                network_id.clone(),
                             )
                         })
                         .collect(),
@@ -376,13 +376,20 @@ pub fn map_certificate(
                             numerator: margin.numerator,
                             denominator: margin.denominator,
                         },
-                        reward_account: StakeAddress::from_binary(reward_account)?,
+                        // Force networkId - in mainnet epoch 208, one SPO (c63dab6d780a) uses
+                        // an e0 (testnet!) address, and this then fails to match their actual
+                        // reward account (e1).  Feels like this should have been
+                        // a validation failure, but clearly wasn't!
+                        reward_account: StakeAddress::new(
+                            StakeAddress::from_binary(reward_account)?.credential,
+                            network_id.clone(),
+                        ),
                         pool_owners: pool_owners
                             .into_iter()
                             .map(|v| {
                                 StakeAddress::new(
                                     StakeCredential::AddrKeyHash(v.to_vec()),
-                                    network_id.clone().into(),
+                                    network_id.clone(),
                                 )
                             })
                             .collect(),

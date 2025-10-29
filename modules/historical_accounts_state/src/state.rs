@@ -256,41 +256,58 @@ impl State {
     pub async fn get_registration_history(
         &self,
         account: &StakeAddress,
-    ) -> Result<Vec<RegistrationUpdate>> {
-        let mut registrations =
-            self.immutable.get_registration_history(&account).await?.unwrap_or_default();
+    ) -> Result<Option<Vec<RegistrationUpdate>>> {
+        let immutable = self.immutable.get_registration_history(&account).await?;
 
-        self.merge_volatile_history(
-            &account,
-            |e| e.registration_history.as_ref(),
-            &mut registrations,
-        );
+        let mut volatile = Vec::new();
+        self.merge_volatile_history(&account, |e| e.registration_history.as_ref(), &mut volatile);
 
-        Ok(registrations)
+        match immutable {
+            Some(mut registrations) => {
+                registrations.extend(volatile);
+                Ok(Some(registrations))
+            }
+            None if volatile.is_empty() => Ok(None),
+            None => Ok(Some(volatile)),
+        }
     }
 
     pub async fn get_delegation_history(
         &self,
         account: &StakeAddress,
-    ) -> Result<Vec<DelegationUpdate>> {
-        let mut delegations =
-            self.immutable.get_delegation_history(&account).await?.unwrap_or_default();
+    ) -> Result<Option<Vec<DelegationUpdate>>> {
+        let immutable = self.immutable.get_delegation_history(&account).await?;
 
-        self.merge_volatile_history(
-            &account,
-            |e| e.delegation_history.as_ref(),
-            &mut delegations,
-        );
+        let mut volatile = Vec::new();
+        self.merge_volatile_history(&account, |e| e.delegation_history.as_ref(), &mut volatile);
 
-        Ok(delegations)
+        match immutable {
+            Some(mut delegations) => {
+                delegations.extend(volatile);
+                Ok(Some(delegations))
+            }
+            None if volatile.is_empty() => Ok(None),
+            None => Ok(Some(volatile)),
+        }
     }
 
-    pub async fn get_mir_history(&self, account: &StakeAddress) -> Result<Vec<AccountWithdrawal>> {
-        let mut mirs = self.immutable.get_mir_history(&account).await?.unwrap_or_default();
+    pub async fn get_mir_history(
+        &self,
+        account: &StakeAddress,
+    ) -> Result<Option<Vec<AccountWithdrawal>>> {
+        let immutable = self.immutable.get_mir_history(&account).await?;
 
-        self.merge_volatile_history(&account, |e| e.mir_history.as_ref(), &mut mirs);
+        let mut volatile = Vec::new();
+        self.merge_volatile_history(&account, |e| e.mir_history.as_ref(), &mut volatile);
 
-        Ok(mirs)
+        match immutable {
+            Some(mut mirs) => {
+                mirs.extend(volatile);
+                Ok(Some(mirs))
+            }
+            None if volatile.is_empty() => Ok(None),
+            None => Ok(Some(volatile)),
+        }
     }
 
     pub async fn get_withdrawal_history(

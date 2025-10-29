@@ -315,25 +315,28 @@ impl HistoricalAccountsState {
                 let response = match query {
                     AccountsStateQuery::GetAccountRegistrationHistory { account } => {
                         match state.lock().await.get_registration_history(&account).await {
-                            Ok(registrations) => {
+                            Ok(Some(registrations)) => {
                                 AccountsStateQueryResponse::AccountRegistrationHistory(
                                     registrations,
                                 )
                             }
+                            Ok(None) => AccountsStateQueryResponse::NotFound,
                             Err(e) => AccountsStateQueryResponse::Error(e.to_string()),
                         }
                     }
                     AccountsStateQuery::GetAccountDelegationHistory { account } => {
                         match state.lock().await.get_delegation_history(&account).await {
-                            Ok(delegations) => {
+                            Ok(Some(delegations)) => {
                                 AccountsStateQueryResponse::AccountDelegationHistory(delegations)
                             }
+                            Ok(None) => AccountsStateQueryResponse::NotFound,
                             Err(e) => AccountsStateQueryResponse::Error(e.to_string()),
                         }
                     }
                     AccountsStateQuery::GetAccountMIRHistory { account } => {
                         match state.lock().await.get_mir_history(&account).await {
-                            Ok(mirs) => AccountsStateQueryResponse::AccountMIRHistory(mirs),
+                            Ok(Some(mirs)) => AccountsStateQueryResponse::AccountMIRHistory(mirs),
+                            Ok(None) => AccountsStateQueryResponse::NotFound,
                             Err(e) => AccountsStateQueryResponse::Error(e.to_string()),
                         }
                     }
