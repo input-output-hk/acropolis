@@ -85,11 +85,8 @@ impl ImmutableHistoricalAccountStore {
 
             // Persist rewards
             if config.store_rewards_history {
-                batch.insert(
-                    &self.rewards_history,
-                    epoch_key,
-                    to_vec(&entry.reward_history)?,
-                );
+                let rewards = entry.reward_history.as_ref().map(|v| v.clone()).unwrap_or_default();
+                batch.insert(&self.rewards_history, epoch_key, to_vec(&rewards)?);
             }
 
             // Persist active stake

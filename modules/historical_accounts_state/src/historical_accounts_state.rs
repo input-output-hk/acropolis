@@ -346,7 +346,28 @@ impl HistoricalAccountsState {
                         }
                     }
                     AccountsStateQuery::GetAccountRewardHistory { account } => {
-                        match state.lock().await.get_reward_history(account).await {
+                        let result = state.lock().await.get_reward_history(account).await;
+
+                        match &result {
+                            Ok(Some(rewards)) => {
+                                info!(
+                                    "Account {:?} has {} reward entries",
+                                    account.to_string(),
+                                    rewards.len()
+                                );
+                            }
+                            Ok(None) => {
+                                info!("Account {:?} has no reward history", account.to_string());
+                            }
+                            Err(e) => {
+                                error!(
+                                    "Failed to fetch reward history for {:?}: {e:#}",
+                                    account.to_string()
+                                );
+                            }
+                        }
+
+                        match result {
                             Ok(Some(rewards)) => {
                                 AccountsStateQueryResponse::AccountRewardHistory(rewards)
                             }

@@ -109,7 +109,7 @@ impl State {
         for reward in reward_deltas.deltas.iter() {
             let entry = volatile.entry(reward.stake_address.clone()).or_default();
             let update = AccountReward {
-                epoch,
+                epoch: epoch - 2,
                 amount: reward.delta,
                 pool: reward.pool.clone(),
                 reward_type: reward.reward_type.clone(),

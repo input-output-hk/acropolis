@@ -37,13 +37,13 @@ pub async fn handle_single_account_blockfrost(
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
-    let stake_address = match parse_stake_address(&params) {
+    let account = match parse_stake_address(&params) {
         Ok(addr) => addr,
         Err(resp) => return Ok(resp),
     };
     // Prepare the message
     let msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
-        AccountsStateQuery::GetAccountInfo { stake_address },
+        AccountsStateQuery::GetAccountInfo { account },
     )));
     let account = query_state(
         &context,
@@ -120,16 +120,14 @@ pub async fn handle_account_registrations_blockfrost(
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
-    let stake_address = match parse_stake_address(&params) {
+    let account = match parse_stake_address(&params) {
         Ok(addr) => addr,
         Err(resp) => return Ok(resp),
     };
 
     // Prepare the message
     let msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
-        AccountsStateQuery::GetAccountRegistrationHistory {
-            account: stake_address,
-        },
+        AccountsStateQuery::GetAccountRegistrationHistory { account },
     )));
 
     // Get registrations from historical accounts state
@@ -147,10 +145,10 @@ pub async fn handle_account_registrations_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
             )) => Err(anyhow::anyhow!(
-                "Internal server error while retrieving account info: {e}"
+                "Internal server error while retrieving account registrations: {e}"
             )),
             _ => Err(anyhow::anyhow!(
-                "Unexpected message type while retrieving account info"
+                "Unexpected message type while retrieving account registrations"
             )),
         },
     )
@@ -216,16 +214,14 @@ pub async fn handle_account_delegations_blockfrost(
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
-    let stake_address = match parse_stake_address(&params) {
+    let account = match parse_stake_address(&params) {
         Ok(addr) => addr,
         Err(resp) => return Ok(resp),
     };
 
     // Prepare the message
     let msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
-        AccountsStateQuery::GetAccountDelegationHistory {
-            account: stake_address,
-        },
+        AccountsStateQuery::GetAccountDelegationHistory { account },
     )));
 
     // Get delegations from historical accounts state
@@ -243,10 +239,10 @@ pub async fn handle_account_delegations_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
             )) => Err(anyhow::anyhow!(
-                "Internal server error while retrieving account info: {e}"
+                "Internal server error while retrieving account delegations: {e}"
             )),
             _ => Err(anyhow::anyhow!(
-                "Unexpected message type while retrieving account info"
+                "Unexpected message type while retrieving account delegations"
             )),
         },
     )
@@ -349,10 +345,10 @@ pub async fn handle_account_mirs_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
             )) => Err(anyhow::anyhow!(
-                "Internal server error while retrieving account info: {e}"
+                "Internal server error while retrieving account mirs: {e}"
             )),
             _ => Err(anyhow::anyhow!(
-                "Unexpected message type while retrieving account info"
+                "Unexpected message type while retrieving account mirs"
             )),
         },
     )
@@ -417,16 +413,14 @@ pub async fn handle_account_withdrawals_blockfrost(
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
-    let stake_address = match parse_stake_address(&params) {
+    let account = match parse_stake_address(&params) {
         Ok(addr) => addr,
         Err(resp) => return Ok(resp),
     };
 
     // Prepare the message
     let msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
-        AccountsStateQuery::GetAccountRegistrationHistory {
-            account: stake_address,
-        },
+        AccountsStateQuery::GetAccountRegistrationHistory { account },
     )));
 
     // Get withdrawals from historical accounts state
@@ -444,10 +438,10 @@ pub async fn handle_account_withdrawals_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
             )) => Err(anyhow::anyhow!(
-                "Internal server error while retrieving account info: {e}"
+                "Internal server error while retrieving account withdrawals: {e}"
             )),
             _ => Err(anyhow::anyhow!(
-                "Unexpected message type while retrieving account info"
+                "Unexpected message type while retrieving account withdrawals"
             )),
         },
     )
@@ -512,16 +506,14 @@ pub async fn handle_account_rewards_blockfrost(
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
-    let stake_address = match parse_stake_address(&params) {
+    let account = match parse_stake_address(&params) {
         Ok(addr) => addr,
         Err(resp) => return Ok(resp),
     };
 
     // Prepare the message
     let msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
-        AccountsStateQuery::GetAccountRegistrationHistory {
-            account: stake_address,
-        },
+        AccountsStateQuery::GetAccountRewardHistory { account },
     )));
 
     // Get rewards from historical accounts state
@@ -539,10 +531,10 @@ pub async fn handle_account_rewards_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
             )) => Err(anyhow::anyhow!(
-                "Internal server error while retrieving account info: {e}"
+                "Internal server error while retrieving account rewards: {e}"
             )),
             _ => Err(anyhow::anyhow!(
-                "Unexpected message type while retrieving account info"
+                "Unexpected message type while retrieving account rewards"
             )),
         },
     )
@@ -567,7 +559,7 @@ pub async fn handle_account_rewards_blockfrost(
         Ok(json) => Ok(RESTResponse::with_json(200, &json)),
         Err(e) => Ok(RESTResponse::with_text(
             500,
-            &format!("Internal server error while serializing withdrawal history: {e}"),
+            &format!("Internal server error while serializing reward history: {e}"),
         )),
     }
 }

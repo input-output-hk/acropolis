@@ -505,8 +505,8 @@ impl AccountsState {
                 };
 
                 let response = match query {
-                    AccountsStateQuery::GetAccountInfo { stake_address } => {
-                        if let Some(account) = state.get_stake_state(stake_address) {
+                    AccountsStateQuery::GetAccountInfo { account } => {
+                        if let Some(account) = state.get_stake_state(account) {
                             AccountsStateQueryResponse::AccountInfo(AccountInfo {
                                 utxo_value: account.utxo_value,
                                 rewards: account.rewards,

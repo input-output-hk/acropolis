@@ -14,7 +14,7 @@ pub const DEFAULT_HISTORICAL_ACCOUNTS_QUERY_TOPIC: (&str, &str) = (
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum AccountsStateQuery {
-    GetAccountInfo { stake_address: StakeAddress },
+    GetAccountInfo { account: StakeAddress },
     GetAccountRewardHistory { account: StakeAddress },
     GetAccountHistory { stake_key: Vec<u8> },
     GetAccountRegistrationHistory { account: StakeAddress },
