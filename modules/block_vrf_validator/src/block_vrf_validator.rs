@@ -11,10 +11,13 @@ use config::Config;
 use pallas::ledger::traverse::MultiEraHeader;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{error, info, info_span};
+use tracing::{error, info, info_span, Instrument};
 mod state;
 use state::State;
+
+use crate::vrf_validation_publisher::VrfValidationPublisher;
 mod snapshot;
+mod vrf_validation_publisher;
 
 const DEFAULT_VALIDATION_VRF_PUBLISHER_TOPIC: (&str, &str) =
     ("validation-vrf-publisher-topic", "cardano.validation.vrf");
@@ -48,6 +51,7 @@ pub struct BlockVrfValidator;
 impl BlockVrfValidator {
     async fn run(
         history: Arc<Mutex<StateHistory<State>>>,
+        mut vrf_validation_publisher: VrfValidationPublisher,
         mut bootstrapped_subscription: Box<dyn Subscription<Message>>,
         mut blocks_subscription: Box<dyn Subscription<Message>>,
         mut protocol_parameters_subscription: Box<dyn Subscription<Message>>,
@@ -160,17 +164,19 @@ impl BlockVrfValidator {
 
                     let span =
                         info_span!("block_vrf_validator.validate", block = block_info.number);
-                    span.in_scope(|| {
+                    async {
                         if let Some(header) = header.as_ref() {
                             let result = state.validate_block_vrf(block_info, header, &genesis);
-                            if let Err(e) = result {
-                                error!(
-                                    "VRF validation failed for block {}: {e}",
-                                    block_info.number
-                                );
-                            };
+                            if let Err(e) = vrf_validation_publisher
+                                .publish_vrf_validation(block_info, result)
+                                .await
+                            {
+                                error!("Failed to publish VRF validation: {e}")
+                            }
                         }
-                    });
+                    }
+                    .instrument(span)
+                    .await;
                 }
                 _ => error!("Unexpected message type: {message:?}"),
             }
@@ -214,6 +220,10 @@ impl BlockVrfValidator {
             .unwrap_or(DEFAULT_SPDD_SUBSCRIBE_TOPIC.1.to_string());
         info!("Creating spdd subscription on '{spdd_subscribe_topic}'");
 
+        // publishers
+        let vrf_validation_publisher =
+            VrfValidationPublisher::new(context.clone(), validation_vrf_publisher_topic);
+
         // Subscribers
         let bootstrapped_subscription = context.subscribe(&bootstrapped_subscribe_topic).await?;
         let protocol_parameters_subscription =
@@ -233,6 +243,7 @@ impl BlockVrfValidator {
         context.run(async move {
             Self::run(
                 history,
+                vrf_validation_publisher,
                 bootstrapped_subscription,
                 blocks_subscription,
                 protocol_parameters_subscription,

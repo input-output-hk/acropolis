@@ -15,7 +15,6 @@ use crate::{KeyHash, PoolId};
 use anyhow::Result;
 use pallas::ledger::primitives::VrfCert;
 use pallas::ledger::traverse::MultiEraHeader;
-use tracing::info;
 
 pub fn validate_vrf_tpraos<'a>(
     block_info: &'a BlockInfo,
@@ -65,10 +64,6 @@ pub fn validate_vrf_tpraos<'a>(
                 leader_vrf_cert(header).ok_or(VrfValidationError::TPraosMissingLeaderVrfCert)?;
 
             let pool_id_bech32 = pool_id.to_bech32_with_hrp("pool").unwrap();
-            info!(
-                "epoch: {}, block: {}, pool_id: {}, active_stake: {}, total_active_stake: {}",
-                block_info.epoch, block_info.number, pool_id_bech32, pool_stake, total_active_stake
-            );
 
             // Regular TPraos rules apply
             Ok(vec![
