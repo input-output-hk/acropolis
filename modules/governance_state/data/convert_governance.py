@@ -41,7 +41,7 @@ for v in votes_src:
             votes_hash[int(g.group(1))-1] = []
         votes_hash[int(g.group(1))-1] += [(g.group(2), split_votes(g.group(3)))]
 
-    g = re.match(r'.*acropolis_module_parameters_state: NPPX: \[(\d+),(.*)\]$',v)
+    g = re.match(r'.*acropolis_module_parameters_state: New parameter set enacted [from epoch, params]: \[(\d+),(.*)\]$',v)
     if g:
         param_hash[int(g.group(1))] = g.group(2)
 

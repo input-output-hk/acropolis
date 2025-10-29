@@ -31,7 +31,7 @@ acropolis = open(sys.argv[2],'rt')
 
 dbsync_dict = {}
 
-# 0 7 13 23
+# First field index in header per each line: 0 7 13 23
 header = """id,tx_id,index,prev_gov_action_proposal,deposit,return_address,expiration,
     voting_anchor_id,type,description,param_proposal,ratified_epoch,enacted_epoch,
     dropped_epoch,expired_epoch,id,hash,block_id,block_index,out_sum,fee,deposit,size,
