@@ -105,7 +105,7 @@ pub struct AddressDeltasMessage {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WithdrawalsMessage {
     /// Set of withdrawals
-    pub withdrawals: Vec<WithdrawalWithPos>,
+    pub withdrawals: Vec<Withdrawal>,
 }
 
 /// Pot deltas message

@@ -12,12 +12,17 @@ use anyhow::{anyhow, bail, Error, Result};
 use bech32::{Bech32, Hrp};
 use bitmask_enum::bitmask;
 use hex::decode;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_with::{hex::Hex, serde_as};
-use std::collections::{HashMap, HashSet};
-use std::fmt::{Display, Formatter};
-use std::ops::{AddAssign, Neg};
-use std::{cmp::Ordering, fmt};
+use std::{
+    cmp::Ordering,
+    collections::{HashMap, HashSet},
+    fmt,
+    fmt::{Display, Formatter},
+    ops::{AddAssign, Neg},
+    str::FromStr,
+};
 
 /// Network identifier
 #[derive(
@@ -614,11 +619,8 @@ pub struct Withdrawal {
 
     /// Value to withdraw
     pub value: Lovelace,
-}
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct WithdrawalWithPos {
-    pub withdrawal: Withdrawal,
+    // Identifier of withdrawal tx
     pub tx_identifier: TxIdentifier,
 }
 
@@ -1580,7 +1582,7 @@ pub struct ParameterChangeAction {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct HardForkInitiationAction {
     pub previous_action_id: Option<GovActionId>,
-    pub protocol_version: (u64, u64),
+    pub protocol_version: protocol_params::ProtocolVersion,
 }
 
 #[serde_as]
@@ -1621,6 +1623,44 @@ pub enum GovernanceAction {
     UpdateCommittee(UpdateCommitteeAction),
     NewConstitution(NewConstitutionAction),
     Information,
+}
+
+impl GovernanceAction {
+    pub fn get_previous_action_id(&self) -> Option<GovActionId> {
+        match &self {
+            Self::ParameterChange(ParameterChangeAction {
+                previous_action_id: prev,
+                ..
+            }) => prev.clone(),
+            Self::HardForkInitiation(HardForkInitiationAction {
+                previous_action_id: prev,
+                ..
+            }) => prev.clone(),
+            Self::TreasuryWithdrawals(_) => None,
+            Self::NoConfidence(prev) => prev.clone(),
+            Self::UpdateCommittee(UpdateCommitteeAction {
+                previous_action_id: prev,
+                ..
+            }) => prev.clone(),
+            Self::NewConstitution(NewConstitutionAction {
+                previous_action_id: prev,
+                ..
+            }) => prev.clone(),
+            Self::Information => None,
+        }
+    }
+
+    pub fn get_action_name(&self) -> &str {
+        match &self {
+            GovernanceAction::ParameterChange(_) => "ParameterChange",
+            GovernanceAction::HardForkInitiation(_) => "HardForkInitiation",
+            GovernanceAction::TreasuryWithdrawals(_) => "TreasuryWithdrawals",
+            GovernanceAction::NoConfidence(_) => "NoConfidence",
+            GovernanceAction::UpdateCommittee(_) => "UpdateCommittee",
+            GovernanceAction::NewConstitution(_) => "NewConstitution",
+            GovernanceAction::Information => "Information",
+        }
+    }
 }
 
 #[derive(
@@ -1684,38 +1724,104 @@ pub struct VotingProcedures {
     pub votes: HashMap<Voter, SingleVoterVotes>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct VotesCount {
-    pub committee: u64,
-    pub drep: u64,
-    pub pool: u64,
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct VoteCount {
+    pub yes: u64,
+    pub no: u64,
+    pub abstain: u64,
 }
 
-impl VotesCount {
+impl VoteCount {
     pub fn zero() -> Self {
         Self {
-            committee: 0,
-            drep: 0,
-            pool: 0,
+            yes: 0,
+            no: 0,
+            abstain: 0,
         }
     }
 
-    pub fn majorizes(&self, v: &VotesCount) -> bool {
-        self.committee >= v.committee && self.drep >= v.drep && self.pool >= v.pool
+    pub fn total(&self) -> u64 {
+        self.yes + self.no + self.abstain
     }
 }
 
-impl Display for VotesCount {
+impl Display for VoteCount {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "c{}:d{}:p{}", self.committee, self.drep, self.pool)
+        write!(f, "y{}/n{}/a{}", self.yes, self.no, self.abstain)
+    }
+}
+
+impl FromStr for VoteCount {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        let re = Regex::new(r"y(\d+)/n(\d+)/a(\d+)$").unwrap();
+        let caps = re.captures(s).ok_or_else(|| anyhow!("Invalid VoteCount string: '{s}'"))?;
+
+        let yes = u64::from_str(&caps[1])?;
+        let no = u64::from_str(&caps[2])?;
+        let abstain = u64::from_str(&caps[3])?;
+
+        Ok(VoteCount { yes, no, abstain })
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct VoteResult<E: FromStr + Display> {
+    pub committee: E,
+    pub drep: E,
+    pub pool: E,
+}
+
+impl<E: FromStr + Display> VoteResult<E> {
+    pub fn new(committee: E, drep: E, pool: E) -> Self {
+        Self {
+            committee,
+            drep,
+            pool,
+        }
+    }
+}
+
+impl<E: FromStr + Display> Display for VoteResult<E> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "c{}:d{}:s{}", self.committee, self.drep, self.pool)
+    }
+}
+
+impl<E: FromStr + Display> FromStr for VoteResult<E> {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        // Regex for capturing each section
+        let Ok(re) = Regex::new(r"^c([^:]+):d([^:]+):s([^:]+)$") else {
+            bail!("Cannot parse redex");
+        };
+        let caps = re.captures(s).ok_or_else(|| anyhow!("Invalid VoteResult string: '{s}'"))?;
+
+        let Ok(committee) = E::from_str(&caps[1]) else {
+            bail!("Incorrect committee value {}", &caps[1]);
+        };
+        let Ok(drep) = E::from_str(&caps[2]) else {
+            bail!("Incorrect DRep value {}", &caps[2]);
+        };
+        let Ok(pool) = E::from_str(&caps[3]) else {
+            bail!("Incorrect SPO value {}", &caps[3]);
+        };
+
+        Ok(VoteResult {
+            committee,
+            drep,
+            pool,
+        })
     }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct VotingOutcome {
     pub procedure: ProposalProcedure,
-    pub votes_cast: VotesCount,
-    pub votes_threshold: VotesCount,
+    pub votes_cast: VoteResult<VoteCount>,
+    pub votes_threshold: VoteResult<RationalNumber>,
     pub accepted: bool,
 }
 
@@ -1741,6 +1847,7 @@ pub enum EnactStateElem {
     Params(Box<ProtocolParamUpdate>),
     Constitution(Constitution),
     Committee(CommitteeChange),
+    ProtVer(protocol_params::ProtocolVersion),
     NoConfidence,
 }
 
@@ -2024,6 +2131,50 @@ mod tests {
             },
         };
         println!("Json: {}", serde_json::to_string(&proposal)?);
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_voting_values() -> Result<()> {
+        let count = VoteCount::from_str("y0/n5/a1")?;
+        assert_eq!(count.yes, 0);
+        assert_eq!(count.no, 5);
+        assert_eq!(count.abstain, 1);
+
+        let counts: VoteResult<VoteCount> =
+            VoteResult::from_str("cy0/n5/a1:dy0/n1/a2:sy123/n456/a0788890")?;
+        assert_eq!(counts.committee, count);
+        assert_eq!(counts.drep.yes, 0);
+        assert_eq!(counts.drep.no, 1);
+        assert_eq!(counts.drep.abstain, 2);
+        assert_eq!(counts.pool.yes, 123);
+        assert_eq!(counts.pool.no, 456);
+        assert_eq!(counts.pool.abstain, 788890);
+        Ok(())
+    }
+
+    #[test]
+    fn serialize_stake_addres() -> Result<()> {
+        let serialized = "{\
+            \"network\":\"Mainnet\",\
+            \"credential\":{\
+                \"AddrKeyHash\":\"45dee6ee5d7f631b6226d45f29da411c42fa7e816dc0948d31e0dba7\"\
+            }\
+        }";
+
+        let addr = serde_json::from_str::<StakeAddress>(serialized)?;
+        assert_eq!(addr.network, NetworkId::Mainnet);
+        assert_eq!(
+            addr.credential,
+            StakeCredential::AddrKeyHash(KeyHash::from([
+                0x45, 0xde, 0xe6, 0xee, 0x5d, 0x7f, 0x63, 0x1b, 0x62, 0x26, 0xd4, 0x5f, 0x29, 0xda,
+                0x41, 0x1c, 0x42, 0xfa, 0x7e, 0x81, 0x6d, 0xc0, 0x94, 0x8d, 0x31, 0xe0, 0xdb, 0xa7,
+            ]))
+        );
+
+        let serialized_back = serde_json::to_string(&addr)?;
+        assert_eq!(serialized_back, serialized);
 
         Ok(())
     }

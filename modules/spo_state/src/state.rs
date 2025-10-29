@@ -315,6 +315,7 @@ impl State {
     ) {
         if self.spos.contains_key(&reg.operator) {
             debug!(
+                epoch = self.epoch,
                 block = block.number,
                 "New pending SPO update {} {:?}",
                 hex::encode(&reg.operator),
@@ -323,6 +324,7 @@ impl State {
             self.pending_updates.insert(reg.operator.clone(), reg.clone());
         } else {
             debug!(
+                epoch = self.epoch,
                 block = block.number,
                 "Registering SPO {} {:?}",
                 hex::encode(&reg.operator),
@@ -616,7 +618,7 @@ impl State {
         };
         let mut stake_addresses = stake_addresses.lock().unwrap();
         for withdrawal in withdrawals_msg.withdrawals.iter() {
-            stake_addresses.process_withdrawal(&withdrawal.withdrawal);
+            stake_addresses.process_withdrawal(withdrawal);
         }
 
         Ok(())

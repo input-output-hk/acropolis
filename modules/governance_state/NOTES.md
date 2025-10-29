@@ -16,17 +16,130 @@ This is ok, mainnet Cardano scanners detect this and show latest vote.
 Other names: 'Gov Action Validity', 'govActionLifetime',
 updated in governance_action_validity_period parameter (measured in epochs).
 That is, if proposal is published in epoch E, then voting is finished at
-the end of epoch E+governance_action_validity_period.
+the end of epoch E+governance_action_validity_period+1.
+
+In another words, each action is granted 'govActionLifetime' full
+epochs for voting (P is proposal, E is expiration, govActionLifetime is 6):
+
+`---P--|-----|-----|-----|-----|-----|-----|E`
+
+For +1 origin see e.g. `cardano-node/cardano-testnet/src/Testnet/Components/Query.hs`:
+
+```
+-- | Obtains the @govActionLifetime@ from the protocol parameters.
+-- The @govActionLifetime@ or governance action maximum lifetime in epochs is
+-- the number of epochs such that a governance action submitted during an epoch @e@
+-- expires if it is still not ratified as of the end of epoch: @e + govActionLifetime + 1@.
+```
 
 Default value (6) is taken from Conway Genesis, which is (in turn) taken from
 Cardano book:
 https://book.world.dev.cardano.org/environments/mainnet/conway-genesis.json
 
+So, if voting starts at 529, gov_action_lifetime is 6, then the last epoch
+when votes have meaning is 535. At the 535/536 transition all votes expire.
+
 ### Ratification process.
 Ratification checked at epoch boundary. 
-If ratified, deposits returned immediately, actions take place at E+1/E+2
-boundary.
+If ratified at E/E+1 transition, actions take place at E+1/E+2 boundary. 
+Rewards are paid at E+1/E+2 transition (?)
 Deposits transferred to reward account.
+
+### Counting votes
+
+Proper votes counting (see `cardano-ledger/eras/conway/impl/src/Cardano/Ledger/Conway/Rules/Ratify.hs`)
+
+Committee:
+```
+-- Compute the ratio yes/(yes + no), where
+-- yes:
+--      - the number of registered, unexpired, unresigned committee members that voted yes
+-- no:
+--      - the number of registered, unexpired, unresigned committee members that voted no, plus
+--      - the number of registered, unexpired, unresigned committee members that did not vote for this action
+--
+-- We iterate over the committee, and incrementally construct the numerator and denominator,
+-- based on the votes and the committee state.
+```
+Committee voting should also check committee members expiration.
+
+```
+-- | Final ratio for `totalAcceptedStakePoolsRatio` we want during the bootstrap period is:
+-- t = y \/ (s - a)
+-- Where:
+--  * `y` - total delegated stake that voted Yes
+--  * `a` - total delegated stake that voted Abstain
+--  * `s` - total delegated stake
+--
+-- For `HardForkInitiation` all SPOs that didn't vote are considered as
+-- `No` votes. Whereas, for all other `GovAction`s, SPOs that didn't
+-- vote are considered as `Abstain` votes.
+--
+-- `No` votes are not counted.
+-- After the bootstrap period if an SPO didn't vote, it will be considered as a `No` vote by default.
+-- The only exceptions are when a pool delegated to an `AlwaysNoConfidence` or an `AlwaysAbstain` DRep.
+-- In those cases, behaviour is as expected: vote `Yes` on `NoConfidence` proposals in case of the former and
+-- and vote `Abstain` by default in case of the latter. For `HardForkInitiation`, behaviour is the same as
+-- during the bootstrap period: if an SPO didn't vote, their vote will always count as `No`.
+```
+
+The description is a bit hard to understand, the actual code is the following:
+
+```
+         in case vote of
+              Nothing
+                | HardForkInitiation {} <- pProcGovAction -> (yes, abstain)
+                | bootstrapPhase pv -> (yes, abstain + stake)
+                | otherwise -> case defaultStakePoolVote poolId rePoolParams reDelegatees of
+                    DefaultNoConfidence
+                      | NoConfidence {} <- pProcGovAction -> (yes + stake, abstain)
+                    DefaultAbstain -> (yes, abstain + stake)
+                    _ -> (yes, abstain) -- Default is No, unless overridden by one of the above cases
+              Just Abstain -> (yes, abstain + stake)
+              Just VoteNo -> (yes, abstain)
+              Just VoteYes -> (yes + stake, abstain)
+      (yesStake, abstainStake) =
+```
+And then the final ratio is:
+```
+    toInteger yesStake %? toInteger (totalActiveStake - abstainStake)
+```
+
+So, the formula is the same and the difference between bootstrap period and normal operation is the way 
+how not voted SPOs are treated:
+* HardFork voting -- same as in bootstrap, all non-voted SPOs are 'No';
+* Normal voting with SPO as 'DefaultNoConfidence' -- no-confidence as 'Yes', otherwise as 'No'
+* Normal voting with SPO as 'DefaultAbstain' -- counted as 'Abstain'
+* Normal voting with normal SPO -- counted as 'No'
+
+Open question: (TODO) do we have default votes for SPOs?
+
+No traces of different count of SPO active stake and total stake.
+Let's consider them the same for the moment.
+
+```
+-- Compute the dRep ratio yes/(yes + no), where
+-- yes: is the total stake of
+--    - registered dReps that voted 'yes', plus
+--    - the AlwaysNoConfidence dRep, in case the action is NoConfidence
+-- no: is the total stake of
+--    - registered dReps that voted 'no', plus
+--    - registered dReps that did not vote for this action, plus
+--    - the AlwaysNoConfidence dRep
+-- In other words, the denominator `yes + no` is the total stake of all registered dReps, minus the abstain votes stake
+-- (both credential DReps and AlwaysAbstain)
+```
+
+### Bootstrap period (Chang sub-era of Conway)
+
+Conway era is split into two parts: Chang (9.0 protocol version) and 
+Plomin (10.0 protocol version). The first ("Chang") epoch has limited 
+governance ("bootstrap governance"):
+
+* DReps may vote only for Info actions, they don't count for other actions.
+* Only Info, ParameterChange and HardFork actions are allowed.
+
+https://docs.cardano.org/about-cardano/evolution/upgrades/chang
 
 ### Genesis blocks
 * Conway genesis: committee key hashes have prefix 'scriptHash-' (I believe,
@@ -74,6 +187,7 @@ epoch. Special message?
 total. Need info about voting registration.
 * DRep::epoch -- it's written that it's epoch, which has ended. But I receive
 messages with this epoch in its beginning. Need to sort out.
+* Implement bootstrap period (resolved).
 * What if voting length changes during voting process? E.g.:
    (a) epoch 100 voting starts, voting length is 10 epochs
    (b) epoch 107 voting length change to 3 enacts (e.g., because some earlier successful vote)

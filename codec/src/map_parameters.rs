@@ -376,7 +376,14 @@ pub fn map_certificate(
                             numerator: margin.numerator,
                             denominator: margin.denominator,
                         },
-                        reward_account: StakeAddress::from_binary(reward_account)?,
+                        // Force networkId - in mainnet epoch 208, one SPO (c63dab6d780a) uses
+                        // an e0 (testnet!) address, and this then fails to match their actual
+                        // reward account (e1).  Feels like this should have been
+                        // a validation failure, but clearly wasn't!
+                        reward_account: StakeAddress::new(
+                            StakeAddress::from_binary(reward_account)?.credential,
+                            network_id.clone(),
+                        ),
                         pool_owners: pool_owners
                             .into_iter()
                             .map(|v| {
@@ -703,7 +710,7 @@ fn map_governance_action(action: &conway::GovAction) -> Result<GovernanceAction>
         conway::GovAction::HardForkInitiation(id, version) => Ok(
             GovernanceAction::HardForkInitiation(HardForkInitiationAction {
                 previous_action_id: map_nullable_gov_action_id(id)?,
-                protocol_version: *version,
+                protocol_version: protocol_params::ProtocolVersion::new(version.0, version.1),
             }),
         ),
 
