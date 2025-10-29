@@ -313,16 +313,19 @@ impl State {
     pub async fn get_withdrawal_history(
         &self,
         account: &StakeAddress,
-    ) -> Result<Vec<AccountWithdrawal>> {
-        let mut withdrawals =
-            self.immutable.get_withdrawal_history(&account).await?.unwrap_or_default();
+    ) -> Result<Option<Vec<AccountWithdrawal>>> {
+        let immutable = self.immutable.get_withdrawal_history(&account).await?;
 
-        self.merge_volatile_history(
-            &account,
-            |e| e.withdrawal_history.as_ref(),
-            &mut withdrawals,
-        );
-        Ok(withdrawals)
+        let mut volatile = Vec::new();
+        self.merge_volatile_history(&account, |e| e.withdrawal_history.as_ref(), &mut volatile);
+        match immutable {
+            Some(mut withdrawals) => {
+                withdrawals.extend(volatile);
+                Ok(Some(withdrawals))
+            }
+            None if volatile.is_empty() => Ok(None),
+            None => Ok(Some(volatile)),
+        }
     }
 
     pub async fn _get_addresses(&self, _account: StakeAddress) -> Result<Vec<ShelleyAddress>> {

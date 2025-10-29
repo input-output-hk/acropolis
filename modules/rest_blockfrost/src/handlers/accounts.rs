@@ -435,27 +435,25 @@ pub async fn handle_account_withdrawals_blockfrost(
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::AccountWithdrawalHistory(registrations),
-            )) => Ok(registrations),
+            )) => Ok(Some(registrations)),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::NotFound,
-            )) => {
-                return Err(anyhow::anyhow!("Account not found"));
-            }
+            )) => Ok(None),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
-            )) => {
-                return Err(anyhow::anyhow!(
-                    "Internal server error while retrieving account info: {e}"
-                ));
-            }
-            _ => {
-                return Err(anyhow::anyhow!(
-                    "Unexpected message type while retrieving account info"
-                ))
-            }
+            )) => Err(anyhow::anyhow!(
+                "Internal server error while retrieving account info: {e}"
+            )),
+            _ => Err(anyhow::anyhow!(
+                "Unexpected message type while retrieving account info"
+            )),
         },
     )
     .await?;
+
+    let Some(withdrawals) = withdrawals else {
+        return Ok(RESTResponse::with_text(404, "Account not found"));
+    };
 
     // Get TxHashes from TxIdentifiers
     let tx_ids: Vec<_> = withdrawals.iter().map(|r| r.tx_identifier.clone()).collect();
@@ -502,7 +500,7 @@ pub async fn handle_account_withdrawals_blockfrost(
         Ok(json) => Ok(RESTResponse::with_json(200, &json)),
         Err(e) => Ok(RESTResponse::with_text(
             500,
-            &format!("Internal server error while serializing account withdrawal history: {e}"),
+            &format!("Internal server error while serializing withdrawal history: {e}"),
         )),
     }
 }

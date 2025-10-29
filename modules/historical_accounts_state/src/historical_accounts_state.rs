@@ -342,9 +342,10 @@ impl HistoricalAccountsState {
                     }
                     AccountsStateQuery::GetAccountWithdrawalHistory { account } => {
                         match state.lock().await.get_withdrawal_history(&account).await {
-                            Ok(withdrawals) => {
+                            Ok(Some(withdrawals)) => {
                                 AccountsStateQueryResponse::AccountWithdrawalHistory(withdrawals)
                             }
+                            Ok(None) => AccountsStateQueryResponse::NotFound,
                             Err(e) => AccountsStateQueryResponse::Error(e.to_string()),
                         }
                     }
