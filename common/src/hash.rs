@@ -77,19 +77,18 @@ impl<const BYTES: usize> TryFrom<Vec<u8>> for Hash<BYTES> {
     type Error = Vec<u8>;
 
     fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {
-        let hash: [u8; BYTES] = value.try_into()?;
-        Ok(Self::new(hash))
+        Self::try_from(value.as_slice()).map_err(|_| value)
     }
 }
 
-impl<const BYTES: usize> From<Hash<BYTES>> for Vec<u8> {
-    fn from(hash: Hash<BYTES>) -> Self {
+impl<const BYTES: usize> From<&Hash<BYTES>> for Vec<u8> {
+    fn from(hash: &Hash<BYTES>) -> Self {
         hash.0.to_vec()
     }
 }
 
-impl<const BYTES: usize> From<Hash<BYTES>> for [u8; BYTES] {
-    fn from(hash: Hash<BYTES>) -> Self {
+impl<const BYTES: usize> From<&Hash<BYTES>> for [u8; BYTES] {
+    fn from(hash: &Hash<BYTES>) -> Self {
         hash.0
     }
 }
@@ -278,7 +277,7 @@ macro_rules! declare_hash_type_with_bech32 {
         impl std::str::FromStr for $name {
             type Err = hex::FromHexError;
             fn from_str(s: &str) -> Result<Self, Self::Err> {
-                Ok(Self(s.parse()?))
+                Ok(Self(s.parse::<Hash<$size>>()?))
             }
         }
 
@@ -310,14 +309,30 @@ macro_rules! declare_hash_type_with_bech32 {
         impl crate::serialization::Bech32Conversion for $name {
             fn to_bech32(&self) -> Result<String, anyhow::Error> {
                 use crate::serialization::Bech32WithHrp;
-                self.0.to_vec().to_bech32_with_hrp($hrp)
+                use anyhow::Context;
+
+                self.to_vec().to_bech32_with_hrp($hrp).with_context(|| {
+                    format!(
+                        "Failed to encode {} to bech32 with HRP '{}'",
+                        stringify!($name),
+                        $hrp
+                    )
+                })
             }
 
             fn from_bech32(s: &str) -> Result<Self, anyhow::Error> {
                 use crate::serialization::Bech32WithHrp;
-                let v = Vec::<u8>::from_bech32_with_hrp(s, $hrp)?;
+                use anyhow::Context;
+
+                let v = Vec::<u8>::from_bech32_with_hrp(s, $hrp).with_context(|| {
+                    format!("Failed to decode {} from bech32", stringify!($name))
+                })?;
+
                 Self::try_from(v).map_err(|_| {
-                    anyhow::Error::msg(format!("Bad vector input to {}", stringify!($name)))
+                    anyhow::anyhow!(
+                        "Failed to create {} from decoded bech32 data",
+                        stringify!($name)
+                    )
                 })
             }
         }
@@ -367,7 +382,7 @@ mod tests {
     fn into_vec() {
         let bytes = [0u8; 28];
         let hash = Hash::new(bytes);
-        let vec: Vec<u8> = hash.into();
+        let vec: Vec<u8> = hash.as_ref().into();
         assert_eq!(vec, bytes.to_vec());
     }
 
