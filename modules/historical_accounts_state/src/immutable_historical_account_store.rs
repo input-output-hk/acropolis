@@ -87,7 +87,7 @@ impl ImmutableHistoricalAccountStore {
             if config.store_rewards_history {
                 batch.insert(
                     &self.rewards_history,
-                    &epoch_key,
+                    epoch_key,
                     to_vec(&entry.reward_history)?,
                 );
             }
@@ -96,7 +96,7 @@ impl ImmutableHistoricalAccountStore {
             if config.store_active_stake_history {
                 batch.insert(
                     &self.active_stake_history,
-                    &epoch_key,
+                    epoch_key,
                     to_vec(&entry.active_stake_history)?,
                 );
             }
@@ -104,28 +104,28 @@ impl ImmutableHistoricalAccountStore {
             // Persist account delegation updates
             if config.store_delegation_history {
                 if let Some(updates) = &entry.delegation_history {
-                    batch.insert(&self.delegation_history, &epoch_key, to_vec(&updates)?);
+                    batch.insert(&self.delegation_history, epoch_key, to_vec(updates)?);
                 }
             }
 
             // Persist account registration updates
             if config.store_registration_history {
                 if let Some(updates) = &entry.registration_history {
-                    batch.insert(&self.registration_history, &epoch_key, to_vec(&updates)?);
+                    batch.insert(&self.registration_history, epoch_key, to_vec(updates)?);
                 }
             }
 
             // Persist withdrawal updates
             if config.store_withdrawal_history {
                 if let Some(updates) = &entry.withdrawal_history {
-                    batch.insert(&self.withdrawal_history, &epoch_key, to_vec(&updates)?);
+                    batch.insert(&self.withdrawal_history, epoch_key, to_vec(updates)?);
                 }
             }
 
             // Persist MIR updates
             if config.store_mir_history {
                 if let Some(updates) = &entry.mir_history {
-                    batch.insert(&self.mir_history, &epoch_key, to_vec(&updates)?);
+                    batch.insert(&self.mir_history, epoch_key, to_vec(updates)?);
                 }
             }
 
@@ -133,7 +133,7 @@ impl ImmutableHistoricalAccountStore {
             // TODO: Deduplicate addresses across epochs
             if config.store_addresses {
                 if let Some(updates) = &entry.addresses {
-                    batch.insert(&self.addresses, &epoch_key, to_vec(&updates)?);
+                    batch.insert(&self.addresses, epoch_key, to_vec(updates)?);
                 }
             }
         }
@@ -157,7 +157,7 @@ impl ImmutableHistoricalAccountStore {
         account: &StakeAddress,
     ) -> Result<Option<Vec<RewardHistory>>> {
         let mut immutable_rewards =
-            self.collect_partition::<RewardHistory>(&self.rewards_history, &account.get_hash())?;
+            self.collect_partition::<RewardHistory>(&self.rewards_history, account.get_hash())?;
 
         self.merge_pending(
             account,
@@ -175,7 +175,7 @@ impl ImmutableHistoricalAccountStore {
     ) -> Result<Option<Vec<ActiveStakeHistory>>> {
         let mut immutable_active_stake = self.collect_partition::<ActiveStakeHistory>(
             &self.active_stake_history,
-            &account.get_hash(),
+            account.get_hash(),
         )?;
 
         self.merge_pending(
@@ -194,7 +194,7 @@ impl ImmutableHistoricalAccountStore {
     ) -> Result<Option<Vec<RegistrationUpdate>>> {
         let mut immutable_registrations = self.collect_partition::<RegistrationUpdate>(
             &self.registration_history,
-            &account.get_hash(),
+            account.get_hash(),
         )?;
 
         self.merge_pending(
@@ -212,7 +212,7 @@ impl ImmutableHistoricalAccountStore {
         account: &StakeAddress,
     ) -> Result<Option<Vec<DelegationUpdate>>> {
         let mut immutable_delegations = self
-            .collect_partition::<DelegationUpdate>(&self.delegation_history, &account.get_hash())?;
+            .collect_partition::<DelegationUpdate>(&self.delegation_history, account.get_hash())?;
 
         self.merge_pending(
             account,
@@ -229,21 +229,19 @@ impl ImmutableHistoricalAccountStore {
         account: &StakeAddress,
     ) -> Result<Option<Vec<AccountWithdrawal>>> {
         let mut immutable_mirs =
-            self.collect_partition::<AccountWithdrawal>(&self.mir_history, &account.get_hash())?;
+            self.collect_partition::<AccountWithdrawal>(&self.mir_history, account.get_hash())?;
 
         self.merge_pending(account, |e| e.mir_history.as_ref(), &mut immutable_mirs).await;
 
         Ok((!immutable_mirs.is_empty()).then_some(immutable_mirs))
     }
 
-    pub async fn _get_withdrawal_history(
+    pub async fn get_withdrawal_history(
         &self,
         account: &StakeAddress,
     ) -> Result<Option<Vec<AccountWithdrawal>>> {
-        let mut immutable_withdrawals = self.collect_partition::<AccountWithdrawal>(
-            &self.withdrawal_history,
-            &account.get_hash(),
-        )?;
+        let mut immutable_withdrawals = self
+            .collect_partition::<AccountWithdrawal>(&self.withdrawal_history, account.get_hash())?;
 
         self.merge_pending(
             account,
@@ -260,7 +258,7 @@ impl ImmutableHistoricalAccountStore {
         account: &StakeAddress,
     ) -> Result<Option<Vec<ShelleyAddress>>> {
         let mut immutable_addresses =
-            self.collect_partition::<ShelleyAddress>(&self.addresses, &account.get_hash())?;
+            self.collect_partition::<ShelleyAddress>(&self.addresses, account.get_hash())?;
 
         self.merge_pending(account, |e| e.addresses.as_ref(), &mut immutable_addresses).await;
 

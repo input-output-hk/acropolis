@@ -1282,6 +1282,7 @@ mod tests {
             withdrawals: vec![Withdrawal {
                 address: stake_address.clone(),
                 value: 39,
+                tx_identifier: TxIdentifier::default(),
             }],
         };
 

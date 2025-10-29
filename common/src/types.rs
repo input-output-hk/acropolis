@@ -610,6 +610,9 @@ pub struct Withdrawal {
 
     /// Value to withdraw
     pub value: Lovelace,
+
+    // Identifier of withdrawal tx
+    pub tx_identifier: TxIdentifier,
 }
 
 /// Treasury pot account
