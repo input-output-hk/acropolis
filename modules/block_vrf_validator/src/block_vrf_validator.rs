@@ -1,9 +1,10 @@
 //! Acropolis Block VRF Validator module for Caryatid
 //! Validate the VRF calculation in the block header
+
 use acropolis_common::{
     messages::{CardanoMessage, Message},
     state_history::{StateHistory, StateHistoryStore},
-    BlockStatus, Era,
+    BlockInfo, BlockStatus, Era,
 };
 use anyhow::Result;
 use caryatid_sdk::{module, Context, Module, Subscription};
@@ -74,6 +75,7 @@ impl BlockVrfValidator {
             // Get a mutable state
             let mut state = history.lock().await.get_or_init_with(|| State::new());
             let (_, message) = blocks_subscription.read().await?;
+            let mut current_block: Option<BlockInfo> = None;
 
             match message.as_ref() {
                 Message::Cardano((block_info, CardanoMessage::BlockAvailable(block_msg))) => {
@@ -81,6 +83,7 @@ impl BlockVrfValidator {
                     if block_info.status == BlockStatus::RolledBack {
                         state = history.lock().await.get_rolled_back_state(block_info.number);
                     }
+                    current_block = Some(block_info.clone());
                     let is_new_epoch = block_info.new_epoch && block_info.epoch > 0;
 
                     if is_new_epoch {
@@ -96,7 +99,8 @@ impl BlockVrfValidator {
                             epoch = block_info.epoch
                         );
                         span.in_scope(|| match protocol_parameters_msg.as_ref() {
-                            Message::Cardano((_, CardanoMessage::ProtocolParams(msg))) => {
+                            Message::Cardano((block_info, CardanoMessage::ProtocolParams(msg))) => {
+                                Self::check_sync(&current_block, block_info);
                                 state.handle_protocol_parameters(msg);
                             }
                             _ => error!("Unexpected message type: {protocol_parameters_msg:?}"),
@@ -108,7 +112,8 @@ impl BlockVrfValidator {
                             epoch = block_info.epoch
                         );
                         span.in_scope(|| match epoch_nonce_msg.as_ref() {
-                            Message::Cardano((_, CardanoMessage::EpochNonce(msg))) => {
+                            Message::Cardano((block_info, CardanoMessage::EpochNonce(msg))) => {
+                                Self::check_sync(&current_block, block_info);
                                 state.handle_epoch_nonce(msg);
                             }
                             _ => error!("Unexpected message type: {epoch_nonce_msg:?}"),
@@ -122,12 +127,17 @@ impl BlockVrfValidator {
                         );
                         span.in_scope(|| match (spo_state_msg.as_ref(), spdd_msg.as_ref()) {
                             (
-                                Message::Cardano((_, CardanoMessage::SPOState(spo_state_msg))),
                                 Message::Cardano((
-                                    _,
+                                    block_info_1,
+                                    CardanoMessage::SPOState(spo_state_msg),
+                                )),
+                                Message::Cardano((
+                                    block_info_2,
                                     CardanoMessage::SPOStakeDistribution(spdd_msg),
                                 )),
                             ) => {
+                                Self::check_sync(&current_block, block_info_1);
+                                Self::check_sync(&current_block, block_info_2);
                                 state.handle_new_snapshot(&spo_state_msg, &spdd_msg);
                             }
                             _ => {
@@ -179,6 +189,11 @@ impl BlockVrfValidator {
                     .await;
                 }
                 _ => error!("Unexpected message type: {message:?}"),
+            }
+
+            // Commit the new state
+            if let Some(block_info) = current_block {
+                history.lock().await.commit(block_info.number, state);
             }
         }
     }
@@ -256,5 +271,18 @@ impl BlockVrfValidator {
         });
 
         Ok(())
+    }
+
+    /// Check for synchronisation
+    fn check_sync(expected: &Option<BlockInfo>, actual: &BlockInfo) {
+        if let Some(ref block) = expected {
+            if block.number != actual.number {
+                error!(
+                    expected = block.number,
+                    actual = actual.number,
+                    "Messages out of sync"
+                );
+            }
+        }
     }
 }
