@@ -115,3 +115,23 @@ impl Bech32WithHrp for Vec<u8> {
         Ok(data.to_vec())
     }
 }
+
+impl Bech32WithHrp for [u8] {
+    fn to_bech32_with_hrp(&self, hrp: &str) -> Result<String, anyhow::Error> {
+        let hrp = Hrp::parse(hrp).map_err(|e| anyhow!("Bech32 HRP parse error: {e}"))?;
+
+        bech32::encode::<Bech32>(hrp, self).map_err(|e| anyhow!("Bech32 encoding error: {e}"))
+    }
+
+    fn from_bech32_with_hrp(s: &str, expected_hrp: &str) -> Result<Vec<u8>, anyhow::Error> {
+        let (hrp, data) = bech32::decode(s).map_err(|e| anyhow!("Invalid Bech32 string: {e}"))?;
+
+        if hrp != Hrp::parse(expected_hrp)? {
+            return Err(anyhow!(
+                "Invalid HRP, expected '{expected_hrp}', got '{hrp}'"
+            ));
+        }
+
+        Ok(data.to_vec())
+    }
+}

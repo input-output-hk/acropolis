@@ -400,7 +400,7 @@ impl ChainStore {
             block_info.push(BlockInfo {
                 timestamp: block.extra.timestamp,
                 number: header.number(),
-                hash: BlockHash::new(*header.hash()),
+                hash: BlockHash::from(*header.hash()),
                 slot: header.slot(),
                 epoch: block.extra.epoch,
                 epoch_slot: block.extra.epoch_slot,
@@ -416,8 +416,8 @@ impl ChainStore {
                 block_vrf: header.vrf_vkey().map(|key| VrfKeyHash::try_from(key).ok().unwrap()),
                 op_cert,
                 op_cert_counter,
-                previous_block: header.previous_hash().map(|h| BlockHash::new(*h)),
-                next_block: next_hash.map(|h| BlockHash::new(*h)),
+                previous_block: header.previous_hash().map(|h| BlockHash::from(*h)),
+                next_block: next_hash.map(|h| BlockHash::from(*h)),
                 confirmations: latest_number - header.number(),
             });
 

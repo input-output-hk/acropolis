@@ -134,7 +134,7 @@ impl State {
             let evolving = Nonces::evolve(&current_nonces.evolving, &nonce_vrf_output)?;
 
             // there must be parent hash
-            let Some(parent_hash) = header.previous_hash().map(|h| BlockHash::new(*h)) else {
+            let Some(parent_hash) = header.previous_hash().map(|h| BlockHash::from(*h)) else {
                 return Err(anyhow::anyhow!("Header Parent hash error"));
             };
 

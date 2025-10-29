@@ -117,7 +117,7 @@ impl BodyFetcher {
             }, // TODO vary with 'k'
             slot,
             number,
-            hash: BlockHash::new(hash),
+            hash: BlockHash::from(hash),
             epoch,
             epoch_slot,
             new_epoch,
