@@ -301,7 +301,7 @@ impl Nonce {
         Self::from_number(0)
     }
 
-    /// Seed constant for leader (L) computation  
+    /// Seed constant for leader (L) computation
     /// Used when determining if a stake pool is the slot leader
     pub fn seed_l() -> Self {
         Self::from_number(1)

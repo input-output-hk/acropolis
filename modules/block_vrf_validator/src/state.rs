@@ -103,13 +103,10 @@ impl State {
         };
         let decentralisation_param = shelley_params.protocol_params.decentralisation_param;
 
-        let is_tpraos = match block_info.era {
-            Era::Shelley => true,
-            Era::Allegra => true,
-            Era::Mary => true,
-            Era::Alonzo => true,
-            _ => false,
-        };
+        let is_tpraos = matches!(
+            block_info.era,
+            Era::Shelley | Era::Allegra | Era::Mary | Era::Alonzo
+        );
 
         if is_tpraos {
             let vrf_validations = ouroboros::tpraos::validate_vrf_tpraos(

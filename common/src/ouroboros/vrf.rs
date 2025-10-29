@@ -73,7 +73,7 @@ impl VrfInput {
     ///
     /// * `uc_nonce` - Universal constant nonce (domain separator)
     ///   - Use `seed_eta()` for randomness/eta computation
-    ///   - Use `seed_l()` for leader election computation  
+    ///   - Use `seed_l()` for leader election computation
     /// * `slot` - The slot number
     /// * `e_nonce` - The epoch nonce (randomness from the epoch)
     ///
