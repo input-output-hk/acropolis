@@ -496,7 +496,10 @@ impl ConwayVoting {
 
         if !proposal_procedures.is_empty() {
             let pp = proposal_procedures.into_iter().map(|x| format!("{x},")).collect::<String>();
-            info!("Proposal procedures at {new_epoch} without 'votes' records: [{}]", pp);
+            info!(
+                "Proposal procedures at {new_epoch} without 'votes' records: [{}]",
+                pp
+            );
         }
     }
 
