@@ -9,7 +9,6 @@ use crate::ouroboros::vrf_validation::{
 use crate::ouroboros::{overlay_shedule, vrf};
 use crate::protocol_params::Nonce;
 use crate::rational_number::RationalNumber;
-use crate::serialization::Bech32WithHrp;
 use crate::{genesis_values::GenesisDelegs, protocol_params::PraosParams, BlockInfo};
 use crate::{KeyHash, PoolId};
 use anyhow::Result;
@@ -62,8 +61,6 @@ pub fn validate_vrf_tpraos<'a>(
                 nonce_vrf_cert(header).ok_or(VrfValidationError::TPraosMissingNonceVrfCert)?;
             let leader_vrf_cert =
                 leader_vrf_cert(header).ok_or(VrfValidationError::TPraosMissingLeaderVrfCert)?;
-
-            let pool_id_bech32 = pool_id.to_bech32_with_hrp("pool").unwrap();
 
             // Regular TPraos rules apply
             Ok(vec![
