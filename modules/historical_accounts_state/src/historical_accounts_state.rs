@@ -110,7 +110,7 @@ impl HistoricalAccountsState {
                 if let Message::Cardano((ref block_info, CardanoMessage::ProtocolParams(params))) =
                     params_msg.as_ref()
                 {
-                    Self::check_sync(&current_block, &block_info);
+                    Self::check_sync(&current_block, block_info);
                     let mut state = state_mutex.lock().await;
                     state.volatile.start_new_epoch(block_info.number);
                     if let Some(shelley) = &params.params.shelley {
@@ -124,7 +124,7 @@ impl HistoricalAccountsState {
                     CardanoMessage::StakeRewardDeltas(rewards_msg),
                 )) = rewards_msg.as_ref()
                 {
-                    Self::check_sync(&current_block, &block_info);
+                    Self::check_sync(&current_block, block_info);
                     let mut state = state_mutex.lock().await;
                     state
                         .handle_rewards(rewards_msg)
@@ -142,7 +142,7 @@ impl HistoricalAccountsState {
                     );
                     let _entered = span.enter();
 
-                    Self::check_sync(&current_block, &block_info);
+                    Self::check_sync(&current_block, block_info);
                     let mut state = state_mutex.lock().await;
                     state.handle_tx_certificates(tx_certs_msg, block_info.epoch as u32);
                 }
@@ -160,7 +160,7 @@ impl HistoricalAccountsState {
                     );
                     let _entered = span.enter();
 
-                    Self::check_sync(&current_block, &block_info);
+                    Self::check_sync(&current_block, block_info);
                     let mut state = state_mutex.lock().await;
                     state.handle_withdrawals(withdrawals_msg);
                 }
@@ -178,7 +178,7 @@ impl HistoricalAccountsState {
                     );
                     let _entered = span.enter();
 
-                    Self::check_sync(&current_block, &block_info);
+                    Self::check_sync(&current_block, block_info);
                     {
                         let mut state = state_mutex.lock().await;
                         state
@@ -313,7 +313,7 @@ impl HistoricalAccountsState {
 
                 let response = match query {
                     AccountsStateQuery::GetAccountRegistrationHistory { account } => {
-                        match state.lock().await.get_registration_history(&account).await {
+                        match state.lock().await.get_registration_history(account).await {
                             Ok(Some(registrations)) => {
                                 AccountsStateQueryResponse::AccountRegistrationHistory(
                                     registrations,
@@ -324,7 +324,7 @@ impl HistoricalAccountsState {
                         }
                     }
                     AccountsStateQuery::GetAccountDelegationHistory { account } => {
-                        match state.lock().await.get_delegation_history(&account).await {
+                        match state.lock().await.get_delegation_history(account).await {
                             Ok(Some(delegations)) => {
                                 AccountsStateQueryResponse::AccountDelegationHistory(delegations)
                             }
@@ -333,14 +333,14 @@ impl HistoricalAccountsState {
                         }
                     }
                     AccountsStateQuery::GetAccountMIRHistory { account } => {
-                        match state.lock().await.get_mir_history(&account).await {
+                        match state.lock().await.get_mir_history(account).await {
                             Ok(Some(mirs)) => AccountsStateQueryResponse::AccountMIRHistory(mirs),
                             Ok(None) => AccountsStateQueryResponse::NotFound,
                             Err(e) => AccountsStateQueryResponse::Error(e.to_string()),
                         }
                     }
                     AccountsStateQuery::GetAccountWithdrawalHistory { account } => {
-                        match state.lock().await.get_withdrawal_history(&account).await {
+                        match state.lock().await.get_withdrawal_history(account).await {
                             Ok(Some(withdrawals)) => {
                                 AccountsStateQueryResponse::AccountWithdrawalHistory(withdrawals)
                             }

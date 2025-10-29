@@ -127,14 +127,14 @@ impl State {
                 // Pre-Conway stake registration/deregistration certs
                 TxCertificate::StakeRegistration(stake_address) => {
                     self.handle_stake_registration_change(
-                        &stake_address,
+                        stake_address,
                         &tx_cert.tx_identifier,
                         RegistrationStatus::Registered,
                     );
                 }
                 TxCertificate::StakeDeregistration(stake_address) => {
                     self.handle_stake_registration_change(
-                        &stake_address,
+                        stake_address,
                         &tx_cert.tx_identifier,
                         RegistrationStatus::Deregistered,
                     );
@@ -257,10 +257,10 @@ impl State {
         &self,
         account: &StakeAddress,
     ) -> Result<Option<Vec<RegistrationUpdate>>> {
-        let immutable = self.immutable.get_registration_history(&account).await?;
+        let immutable = self.immutable.get_registration_history(account).await?;
 
         let mut volatile = Vec::new();
-        self.merge_volatile_history(&account, |e| e.registration_history.as_ref(), &mut volatile);
+        self.merge_volatile_history(account, |e| e.registration_history.as_ref(), &mut volatile);
 
         match immutable {
             Some(mut registrations) => {
@@ -276,10 +276,10 @@ impl State {
         &self,
         account: &StakeAddress,
     ) -> Result<Option<Vec<DelegationUpdate>>> {
-        let immutable = self.immutable.get_delegation_history(&account).await?;
+        let immutable = self.immutable.get_delegation_history(account).await?;
 
         let mut volatile = Vec::new();
-        self.merge_volatile_history(&account, |e| e.delegation_history.as_ref(), &mut volatile);
+        self.merge_volatile_history(account, |e| e.delegation_history.as_ref(), &mut volatile);
 
         match immutable {
             Some(mut delegations) => {
@@ -295,10 +295,10 @@ impl State {
         &self,
         account: &StakeAddress,
     ) -> Result<Option<Vec<AccountWithdrawal>>> {
-        let immutable = self.immutable.get_mir_history(&account).await?;
+        let immutable = self.immutable.get_mir_history(account).await?;
 
         let mut volatile = Vec::new();
-        self.merge_volatile_history(&account, |e| e.mir_history.as_ref(), &mut volatile);
+        self.merge_volatile_history(account, |e| e.mir_history.as_ref(), &mut volatile);
 
         match immutable {
             Some(mut mirs) => {
@@ -314,10 +314,10 @@ impl State {
         &self,
         account: &StakeAddress,
     ) -> Result<Option<Vec<AccountWithdrawal>>> {
-        let immutable = self.immutable.get_withdrawal_history(&account).await?;
+        let immutable = self.immutable.get_withdrawal_history(account).await?;
 
         let mut volatile = Vec::new();
-        self.merge_volatile_history(&account, |e| e.withdrawal_history.as_ref(), &mut volatile);
+        self.merge_volatile_history(account, |e| e.withdrawal_history.as_ref(), &mut volatile);
         match immutable {
             Some(mut withdrawals) => {
                 withdrawals.extend(volatile);
