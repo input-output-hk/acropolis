@@ -1,25 +1,32 @@
+use std::collections::HashMap;
+
 use crate::crypto::keyhash_224;
 use crate::ouroboros::overlay_shedule::OBftSlot;
 use crate::ouroboros::vrf_validation::{
-    TPraosBadLeaderVrfProofError, TPraosBadNonceVrfProofError, VrfValidation, VrfValidationError,
-    WrongGenesisLeaderVrfKeyError, WrongLeaderVrfKeyError,
+    TPraosBadLeaderVrfProofError, TPraosBadNonceVrfProofError, VrfLeaderValueTooBigError,
+    VrfValidation, VrfValidationError, WrongGenesisLeaderVrfKeyError, WrongLeaderVrfKeyError,
 };
 use crate::ouroboros::{overlay_shedule, vrf};
 use crate::protocol_params::Nonce;
 use crate::rational_number::RationalNumber;
-use crate::PoolId;
+use crate::serialization::Bech32WithHrp;
 use crate::{genesis_values::GenesisDelegs, protocol_params::PraosParams, BlockInfo};
+use crate::{KeyHash, PoolId};
 use anyhow::Result;
 use pallas::ledger::primitives::VrfCert;
 use pallas::ledger::traverse::MultiEraHeader;
+use tracing::info;
 
 pub fn validate_vrf_tpraos<'a>(
     block_info: &'a BlockInfo,
     header: &'a MultiEraHeader,
-    praos_params: &'a PraosParams,
     epoch_nonce: &'a Nonce,
-    decentralisation_param: RationalNumber,
     genesis_delegs: &'a GenesisDelegs,
+    praos_params: &'a PraosParams,
+    active_spos: &'a HashMap<PoolId, KeyHash>,
+    active_spdd: &'a HashMap<PoolId, u64>,
+    total_active_stake: u64,
+    decentralisation_param: RationalNumber,
 ) -> Result<Vec<VrfValidation<'a>>, VrfValidationError> {
     let active_slots_coeff = praos_params.active_slots_coeff;
 
@@ -27,8 +34,8 @@ pub fn validate_vrf_tpraos<'a>(
     let obft_slot = overlay_shedule::lookup_in_overlay_schedule(
         block_info.epoch_slot,
         genesis_delegs,
-        decentralisation_param,
-        active_slots_coeff,
+        &decentralisation_param,
+        &active_slots_coeff,
     )
     .map_err(|e| VrfValidationError::InvalidShelleyParams(e.to_string()))?;
 
@@ -38,6 +45,13 @@ pub fn validate_vrf_tpraos<'a>(
                 return Ok(vec![Box::new(|| Err(VrfValidationError::MissingIssuerKey))]);
             };
             let pool_id: PoolId = keyhash_224(issuer_vkey);
+            let registered_vrf_key_hash =
+                active_spos.get(&pool_id).ok_or(VrfValidationError::UnknownPool {
+                    pool_id: pool_id.clone(),
+                })?;
+
+            let pool_stake = active_spdd.get(&pool_id).unwrap_or(&0);
+            let relative_stake = RationalNumber::new(*pool_stake, total_active_stake);
 
             let Some(vrf_vkey) = header.vrf_vkey() else {
                 return Ok(vec![Box::new(|| Err(VrfValidationError::MissingVrfVkey))]);
@@ -50,8 +64,18 @@ pub fn validate_vrf_tpraos<'a>(
             let leader_vrf_cert =
                 leader_vrf_cert(header).ok_or(VrfValidationError::TPraosMissingLeaderVrfCert)?;
 
+            let pool_id_bech32 = pool_id.to_bech32_with_hrp("pool").unwrap();
+            info!(
+                "epoch: {}, block: {}, pool_id: {}, active_stake: {}, total_active_stake: {}",
+                block_info.epoch, block_info.number, pool_id_bech32, pool_stake, total_active_stake
+            );
+
             // Regular TPraos rules apply
             Ok(vec![
+                Box::new(move || {
+                    WrongLeaderVrfKeyError::new(&pool_id, registered_vrf_key_hash, vrf_vkey)?;
+                    Ok(())
+                }),
                 Box::new(move || {
                     TPraosBadNonceVrfProofError::new(
                         block_info.slot,
@@ -69,6 +93,14 @@ pub fn validate_vrf_tpraos<'a>(
                         &vrf::PublicKey::from(declared_vrf_key),
                         &leader_vrf_cert.0.to_vec()[..],
                         &leader_vrf_cert.1.to_vec()[..],
+                    )?;
+                    Ok(())
+                }),
+                Box::new(move || {
+                    VrfLeaderValueTooBigError::new(
+                        &leader_vrf_cert.0.to_vec()[..],
+                        &relative_stake,
+                        &active_slots_coeff,
                     )?;
                     Ok(())
                 }),
@@ -139,7 +171,8 @@ fn leader_vrf_cert<'a>(header: &'a MultiEraHeader) -> Option<&'a VrfCert> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        genesis_values::GenesisValues, protocol_params::NonceHash, BlockHash, BlockStatus, Era,
+        crypto::keyhash_256, genesis_values::GenesisValues, protocol_params::NonceHash,
+        serialization::Bech32WithHrp, BlockHash, BlockStatus, Era,
     };
 
     use super::*;
@@ -176,16 +209,81 @@ mod tests {
             new_epoch: true,
             era: Era::Shelley,
         };
+        let active_spos = HashMap::new();
+        let active_spdd = HashMap::new();
         let vrf_validations = validate_vrf_tpraos(
             &block_info,
             &block_header,
-            &praos_params,
             &epoch_nonce,
-            decentralisation_param,
             &genesis_value.genesis_delegs,
+            &praos_params,
+            &active_spos,
+            &active_spdd,
+            1,
+            decentralisation_param,
         )
         .unwrap();
-        let result = vrf_validations.iter().try_for_each(|assert| assert());
+        let result: Result<(), VrfValidationError> =
+            vrf_validations.iter().try_for_each(|assert| assert());
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_4576496_block() {
+        let genesis_value = GenesisValues::mainnet();
+        let praos_params = PraosParams::mainnet();
+        let epoch_nonce = Nonce::from(
+            NonceHash::try_from(
+                hex::decode("3fac34ac3d7d1ac6c976ba68b1509b1ee3aafdbf6de96e10789e488e13e16bd7")
+                    .unwrap()
+                    .as_slice(),
+            )
+            .unwrap(),
+        );
+        let decentralisation_param = RationalNumber::new(9, 10);
+
+        let block_header_4576496: Vec<u8> =
+            hex::decode(include_str!("./data/4576496.cbor")).unwrap();
+        let block_header = MultiEraHeader::decode(1, None, &block_header_4576496).unwrap();
+        let block_info = BlockInfo {
+            status: BlockStatus::Immutable,
+            slot: 6220749,
+            hash: BlockHash::try_from(
+                hex::decode("d78e446b6540612e161ebdda32ee1715ef0f9fc68e890c7e3aae167b0354f998")
+                    .unwrap(),
+            )
+            .unwrap(),
+            timestamp: 1597787040,
+            number: 4576496,
+            epoch: 211,
+            epoch_slot: 431949,
+            new_epoch: false,
+            era: Era::Shelley,
+        };
+        let pool_id = Vec::<u8>::from_bech32_with_hrp(
+            "pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy",
+            "pool",
+        )
+        .unwrap();
+        let active_spos: HashMap<PoolId, KeyHash> = HashMap::from([(
+            pool_id.clone(),
+            keyhash_256(block_header.vrf_vkey().unwrap()),
+        )]);
+        let active_spdd = HashMap::from([(pool_id.clone(), 75284250207839)]);
+        let vrf_validations = validate_vrf_tpraos(
+            &block_info,
+            &block_header,
+            &epoch_nonce,
+            &genesis_value.genesis_delegs,
+            &praos_params,
+            &active_spos,
+            &active_spdd,
+            10177811974823000,
+            decentralisation_param,
+        )
+        .unwrap();
+        let result: Result<(), VrfValidationError> =
+            vrf_validations.iter().try_for_each(|assert| assert());
         assert!(result.is_ok());
     }
 }

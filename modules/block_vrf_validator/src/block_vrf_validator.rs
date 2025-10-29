@@ -14,6 +14,7 @@ use tokio::sync::Mutex;
 use tracing::{error, info, info_span};
 mod state;
 use state::State;
+mod snapshot;
 
 const DEFAULT_VALIDATION_VRF_PUBLISHER_TOPIC: (&str, &str) =
     ("validation-vrf-publisher-topic", "cardano.validation.vrf");
@@ -32,6 +33,8 @@ const DEFAULT_EPOCH_NONCES_SUBSCRIBE_TOPIC: (&str, &str) =
     ("epoch-nonces-subscribe-topic", "cardano.epoch.nonces");
 const DEFAULT_SPO_STATE_SUBSCRIBE_TOPIC: (&str, &str) =
     ("spo-state-subscribe-topic", "cardano.spo.state");
+const DEFAULT_SPDD_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("spdd-subscribe-topic", "cardano.spo.distribution");
 
 /// Block VRF Validator module
 #[module(
@@ -50,6 +53,7 @@ impl BlockVrfValidator {
         mut protocol_parameters_subscription: Box<dyn Subscription<Message>>,
         mut epoch_nonces_subscription: Box<dyn Subscription<Message>>,
         mut spo_state_subscription: Box<dyn Subscription<Message>>,
+        mut spdd_subscription: Box<dyn Subscription<Message>>,
     ) -> Result<()> {
         let (_, bootstrapped_message) = bootstrapped_subscription.read().await?;
         let genesis = match bootstrapped_message.as_ref() {
@@ -75,26 +79,57 @@ impl BlockVrfValidator {
                     }
                     let is_new_epoch = block_info.new_epoch && block_info.epoch > 0;
 
-                    // read protocol parameters if new epoch
                     if is_new_epoch {
+                        // read epoch boundary messages
                         let protocol_parameters_message_f = protocol_parameters_subscription.read();
                         let epoch_nonces_message_f = epoch_nonces_subscription.read();
-                        let (_, protocol_parameters_msg) = protocol_parameters_message_f.await?;
-                        let (_, epoch_nonces_msg) = epoch_nonces_message_f.await?;
+                        let spo_state_message_f = spo_state_subscription.read();
+                        let spdd_msg_f = spdd_subscription.read();
 
-                        match protocol_parameters_msg.as_ref() {
+                        let (_, protocol_parameters_msg) = protocol_parameters_message_f.await?;
+                        let span = info_span!(
+                            "block_vrf_validator.handle_protocol_parameters",
+                            epoch = block_info.epoch
+                        );
+                        span.in_scope(|| match protocol_parameters_msg.as_ref() {
                             Message::Cardano((_, CardanoMessage::ProtocolParams(msg))) => {
                                 state.handle_protocol_parameters(msg);
                             }
                             _ => error!("Unexpected message type: {protocol_parameters_msg:?}"),
-                        }
+                        });
 
-                        match epoch_nonces_msg.as_ref() {
+                        let (_, epoch_nonces_msg) = epoch_nonces_message_f.await?;
+                        let span = info_span!(
+                            "block_vrf_validator.handle_epoch_nonces",
+                            epoch = block_info.epoch
+                        );
+                        span.in_scope(|| match epoch_nonces_msg.as_ref() {
                             Message::Cardano((_, CardanoMessage::EpochNonces(msg))) => {
                                 state.handle_epoch_nonces(msg);
                             }
                             _ => error!("Unexpected message type: {epoch_nonces_msg:?}"),
-                        };
+                        });
+
+                        let (_, spo_state_msg) = spo_state_message_f.await?;
+                        let (_, spdd_msg) = spdd_msg_f.await?;
+                        let span = info_span!(
+                            "block_vrf_validator.handle_new_snapshot",
+                            epoch = block_info.epoch
+                        );
+                        span.in_scope(|| match (spo_state_msg.as_ref(), spdd_msg.as_ref()) {
+                            (
+                                Message::Cardano((_, CardanoMessage::SPOState(spo_state_msg))),
+                                Message::Cardano((
+                                    _,
+                                    CardanoMessage::SPOStakeDistribution(spdd_msg),
+                                )),
+                            ) => {
+                                state.handle_new_snapshot(&spo_state_msg, &spdd_msg);
+                            }
+                            _ => {
+                                error!("Unexpected message type: {spo_state_msg:?} or {spdd_msg:?}")
+                            }
+                        });
                     }
 
                     // decode header
@@ -127,7 +162,13 @@ impl BlockVrfValidator {
                         info_span!("block_vrf_validator.validate", block = block_info.number);
                     span.in_scope(|| {
                         if let Some(header) = header.as_ref() {
-                            state.validate_block_vrf(block_info, header, &genesis);
+                            let result = state.validate_block_vrf(block_info, header, &genesis);
+                            if let Err(e) = result {
+                                error!(
+                                    "VRF validation failed for block {}: {e}",
+                                    block_info.number
+                                );
+                            };
                         }
                     });
                 }
@@ -168,6 +209,11 @@ impl BlockVrfValidator {
             .unwrap_or(DEFAULT_SPO_STATE_SUBSCRIBE_TOPIC.1.to_string());
         info!("Creating spo state subscription on '{spo_state_subscribe_topic}'");
 
+        let spdd_subscribe_topic = config
+            .get_string(DEFAULT_SPDD_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_SPDD_SUBSCRIBE_TOPIC.1.to_string());
+        info!("Creating spdd subscription on '{spdd_subscribe_topic}'");
+
         // Subscribers
         let bootstrapped_subscription = context.subscribe(&bootstrapped_subscribe_topic).await?;
         let protocol_parameters_subscription =
@@ -175,6 +221,7 @@ impl BlockVrfValidator {
         let blocks_subscription = context.subscribe(&blocks_subscribe_topic).await?;
         let epoch_nonces_subscription = context.subscribe(&epoch_nonces_subscribe_topic).await?;
         let spo_state_subscription = context.subscribe(&spo_state_subscribe_topic).await?;
+        let spdd_subscription = context.subscribe(&spdd_subscribe_topic).await?;
 
         // state history
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
@@ -191,6 +238,7 @@ impl BlockVrfValidator {
                 protocol_parameters_subscription,
                 epoch_nonces_subscription,
                 spo_state_subscription,
+                spdd_subscription,
             )
             .await
             .unwrap_or_else(|e| error!("Failed: {e}"));

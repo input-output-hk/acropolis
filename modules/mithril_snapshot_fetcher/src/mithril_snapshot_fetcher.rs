@@ -357,10 +357,6 @@ impl MithrilSnapshotFetcher {
                             CardanoMessage::BlockAvailable(message),
                         ));
 
-                        if block_info.epoch >= 10 {
-                            info!("Publishing block available: for epoch {}", block_info.epoch);
-                        }
-
                         context
                             .message_bus
                             .publish(&block_topic, Arc::new(message_enum))

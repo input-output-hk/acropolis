@@ -33,7 +33,7 @@ pub enum OBftSlot {
 /// If the slot is an overlay slot, then we skip StakeThreshold validation
 /// since this block is produced by genesis key (without "lottery")
 /// https://github.com/IntersectMBO/ouroboros-consensus/blob/e3c52b7c583bdb6708fac4fdaa8bf0b9588f5a88/ouroboros-consensus-protocol/src/ouroboros-consensus-protocol/Ouroboros/Consensus/Protocol/TPraos.hs#L334
-pub fn is_overlay_slot(epoch_slot: u64, decentralisation_param: RationalNumber) -> Result<bool> {
+pub fn is_overlay_slot(epoch_slot: u64, decentralisation_param: &RationalNumber) -> Result<bool> {
     let d = decentralisation_param.to_checked_f64("decentralisation_param").map_err(|e| {
         anyhow::anyhow!("Failed to convert decentralisation parameter to f64: {}", e)
     })?;
@@ -58,8 +58,8 @@ pub fn is_overlay_slot(epoch_slot: u64, decentralisation_param: RationalNumber) 
 pub fn classify_overlay_slot(
     epoch_slot: u64,
     genesis_delegs: &GenesisDelegs,
-    decentralisation_param: RationalNumber,
-    active_slots_coeff: RationalNumber,
+    decentralisation_param: &RationalNumber,
+    active_slots_coeff: &RationalNumber,
 ) -> Result<OBftSlot> {
     let d = decentralisation_param.to_checked_f64("decentralisation_param").map_err(|e| {
         anyhow::anyhow!("Failed to convert decentralisation parameter to f64: {}", e)
@@ -106,8 +106,8 @@ pub fn classify_overlay_slot(
 pub fn lookup_in_overlay_schedule(
     epoch_slot: u64,
     genesis_delegs: &GenesisDelegs,
-    decentralisation_param: RationalNumber,
-    active_slots_coeff: RationalNumber,
+    decentralisation_param: &RationalNumber,
+    active_slots_coeff: &RationalNumber,
 ) -> Result<Option<OBftSlot>> {
     let is_overlay_slot = is_overlay_slot(epoch_slot, decentralisation_param)?;
     if is_overlay_slot {
@@ -142,8 +142,8 @@ mod tests {
         let obft_slot = lookup_in_overlay_schedule(
             epoch_slot,
             &genesis_delegs,
-            decentralisation_param,
-            active_slots_coeff,
+            &decentralisation_param,
+            &active_slots_coeff,
         )
         .unwrap();
         assert!(obft_slot.is_some());
@@ -166,8 +166,8 @@ mod tests {
         let obft_slot = lookup_in_overlay_schedule(
             epoch_slot,
             &genesis_delegs,
-            decentralisation_param,
-            active_slots_coeff,
+            &decentralisation_param,
+            &active_slots_coeff,
         )
         .unwrap();
         assert!(obft_slot.is_none());

@@ -17,6 +17,9 @@ pub enum VrfValidationError {
     /// **Cause:** The Shelley protocol parameters used to validate the block,
     #[error("{0}")]
     InvalidShelleyParams(String),
+    /// **Cause**: The epoch nonces are not set
+    #[error("Epoch Nonces are missing")]
+    MissingEpochNonces,
     /// **Cause:** The Issuer Key is missing from the block header
     #[error("Missing Issuer Key")]
     MissingIssuerKey,
@@ -282,7 +285,7 @@ impl PraosBadVrfProofError {
     }
 }
 
-// ------------------------------------------------------------ TPraosVrfLeaderValueTooBigError
+// ------------------------------------------------------------ VrfLeaderValueTooBigError
 
 /// Reference
 /// https://github.com/IntersectMBO/ouroboros-consensus/blob/e3c52b7c583bdb6708fac4fdaa8bf0b9588f5a88/ouroboros-consensus-protocol/src/ouroboros-consensus-protocol/Ouroboros/Consensus/Protocol/TPraos.hs#L430
@@ -306,8 +309,8 @@ pub enum VrfLeaderValueTooBigError {
 impl VrfLeaderValueTooBigError {
     pub fn new(
         leader_vrf_output: &[u8],
-        leader_relative_stake: RationalNumber,
-        active_slot_coeff: RationalNumber,
+        leader_relative_stake: &RationalNumber,
+        active_slot_coeff: &RationalNumber,
     ) -> Result<(), Self> {
         let certified_leader_vrf = &FixedDecimal::from(leader_vrf_output);
         let output_size_bits = leader_vrf_output.len() * 8;

@@ -1,25 +1,50 @@
 //! Acropolis block_vrf_validator state storage
 
+use std::sync::Arc;
+
 use acropolis_common::{
     genesis_values::GenesisValues,
-    messages::{EpochNoncesMessage, ProtocolParamsMessage},
-    ouroboros::vrf_validation::VrfValidationError,
+    messages::{
+        EpochNoncesMessage, ProtocolParamsMessage, SPOStakeDistributionMessage, SPOStateMessage,
+    },
+    ouroboros::{self, vrf_validation::VrfValidationError},
     protocol_params::{Nonces, PraosParams, ShelleyParams},
-    BlockInfo,
+    BlockInfo, Era,
 };
 use anyhow::Result;
 use pallas::ledger::traverse::MultiEraHeader;
 
+use crate::snapshot::Snapshot;
+
+#[derive(Default, Debug, Clone)]
+pub struct EpochSnapshots {
+    pub mark: Arc<Snapshot>,
+    pub set: Arc<Snapshot>,
+    pub go: Arc<Snapshot>,
+}
+
+impl EpochSnapshots {
+    /// Push a new snapshot
+    pub fn push(&mut self, latest: Snapshot) {
+        self.go = self.set.clone();
+        self.set = self.mark.clone();
+        self.mark = Arc::new(latest);
+    }
+}
+
 #[derive(Default, Debug, Clone)]
 pub struct State {
-    // shelley params
+    /// shelley params
     pub shelly_params: Option<ShelleyParams>,
 
-    // protocol parameter for Praos and TPraos
+    /// protocol parameter for Praos and TPraos
     pub praos_params: Option<PraosParams>,
 
-    // epoch nonces
+    /// epoch nonces
     pub epoch_nonces: Option<Nonces>,
+
+    /// epoch snapshots
+    pub epoch_snapshots: EpochSnapshots,
 }
 
 impl State {
@@ -28,10 +53,10 @@ impl State {
             praos_params: None,
             shelly_params: None,
             epoch_nonces: None,
+            epoch_snapshots: EpochSnapshots::default(),
         }
     }
 
-    /// Handle protocol parameters updates
     pub fn handle_protocol_parameters(&mut self, msg: &ProtocolParamsMessage) {
         if let Some(shelly_params) = msg.params.shelley.as_ref() {
             self.shelly_params = Some(shelly_params.clone());
@@ -39,9 +64,17 @@ impl State {
         }
     }
 
-    /// Handle epoch nonces updates
     pub fn handle_epoch_nonces(&mut self, msg: &EpochNoncesMessage) {
         self.epoch_nonces = Some(msg.nonces.clone());
+    }
+
+    pub fn handle_new_snapshot(
+        &mut self,
+        spo_state_msg: &SPOStateMessage,
+        spdd_msg: &SPOStakeDistributionMessage,
+    ) {
+        let new_snapshot = Snapshot::from((spo_state_msg, spdd_msg));
+        self.epoch_snapshots.push(new_snapshot);
     }
 
     pub fn validate_block_vrf(
@@ -65,7 +98,43 @@ impl State {
                 "Praos Params are not set".to_string(),
             ));
         };
+        let Some(epoch_nonces) = self.epoch_nonces.as_ref() else {
+            return Err(VrfValidationError::MissingEpochNonces);
+        };
+        let decentralisation_param = shelley_params.protocol_params.decentralisation_param;
 
-        Ok(())
+        let is_tpraos = match block_info.era {
+            Era::Shelley => true,
+            Era::Allegra => true,
+            Era::Mary => true,
+            Era::Alonzo => true,
+            _ => false,
+        };
+
+        if is_tpraos {
+            let vrf_validations = ouroboros::tpraos::validate_vrf_tpraos(
+                block_info,
+                header,
+                &epoch_nonces.active,
+                &genesis.genesis_delegs,
+                praos_params,
+                &self.epoch_snapshots.go.active_spos,
+                &self.epoch_snapshots.go.active_stakes,
+                self.epoch_snapshots.go.total_active_stakes,
+                decentralisation_param,
+            )?;
+            vrf_validations.iter().try_for_each(|assert| assert())
+        } else {
+            let vrf_validations = ouroboros::praos::validate_vrf_praos(
+                block_info,
+                header,
+                &epoch_nonces.active,
+                praos_params,
+                &self.epoch_snapshots.go.active_spos,
+                &self.epoch_snapshots.go.active_stakes,
+                self.epoch_snapshots.go.total_active_stakes,
+            )?;
+            vrf_validations.iter().try_for_each(|assert| assert())
+        }
     }
 }

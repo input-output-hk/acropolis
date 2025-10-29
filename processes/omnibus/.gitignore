@@ -6,3 +6,5 @@ cache
 
 # DB files
 *_db
+
+blocks/
