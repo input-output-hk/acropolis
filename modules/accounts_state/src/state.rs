@@ -948,7 +948,7 @@ impl State {
     pub fn handle_withdrawals(&mut self, withdrawals_msg: &WithdrawalsMessage) -> Result<()> {
         for withdrawal in withdrawals_msg.withdrawals.iter() {
             let mut stake_addresses = self.stake_addresses.lock().unwrap();
-            stake_addresses.process_withdrawal(&withdrawal);
+            stake_addresses.process_withdrawal(withdrawal);
         }
 
         Ok(())
