@@ -17,6 +17,8 @@ use acropolis_common::{
         utils::query_state,
     },
     rest_helper::ToCheckedF64,
+    serialization::Bech32WithHrp,
+    PoolRetirement, PoolUpdateAction, StakeCredential, TxIdentifier,
     PoolId, PoolRetirement, PoolUpdateAction, StakeCredential, TxHash,
 };
 use anyhow::Result;
@@ -594,24 +596,25 @@ async fn handle_pools_spo_blockfrost(
         return Ok(RESTResponse::with_json(404, "Pool Not Found"));
     };
     let pool_updates = pool_updates?;
-    let registrations: Option<Vec<TxHash>> = pool_updates.as_ref().map(|updates| {
+    // TODO: Query TxHash from chainstore module for registrations and retirements
+    let _registrations: Option<Vec<TxIdentifier>> = pool_updates.as_ref().map(|updates| {
         updates
             .iter()
             .filter_map(|update| {
                 if update.action == PoolUpdateAction::Registered {
-                    Some(update.tx_hash)
+                    Some(update.tx_identifier)
                 } else {
                     None
                 }
             })
             .collect()
     });
-    let retirements: Option<Vec<TxHash>> = pool_updates.as_ref().map(|updates| {
+    let _retirements: Option<Vec<TxIdentifier>> = pool_updates.as_ref().map(|updates| {
         updates
             .iter()
             .filter_map(|update| {
                 if update.action == PoolUpdateAction::Deregistered {
-                    Some(update.tx_hash)
+                    Some(update.tx_identifier)
                 } else {
                     None
                 }
@@ -726,8 +729,8 @@ async fn handle_pools_spo_blockfrost(
         fixed_cost: pool_info.cost,
         reward_account,
         pool_owners,
-        registration: registrations,
-        retirement: retirements,
+        registration: "TxHash lookup not yet implemented".to_string(),
+        retirement: "TxHash lookup not yet implemented".to_string(),
     };
 
     match serde_json::to_string(&pool_info_rest) {
@@ -1142,7 +1145,7 @@ pub async fn handle_pool_updates_blockfrost(
     let pool_updates_rest = pool_updates
         .into_iter()
         .map(|u| PoolUpdateEventRest {
-            tx_hash: u.tx_hash,
+            tx_hash: "TxHash lookup not yet implemented".to_string(),
             cert_index: u.cert_index,
             action: u.action,
         })

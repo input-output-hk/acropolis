@@ -53,12 +53,12 @@ impl RetiredPoolsHistoryState {
     /// Handle Retired SPOs
     /// Update retired_pools_history with deregistrations
     ///
-    pub fn handle_deregistrations(&self, block: &BlockInfo, retired_spos: &Vec<PoolId>) {
+    pub fn handle_deregistrations(&self, block: &BlockInfo, retired_spos: &[PoolId]) {
         let Some(retired_pools_history) = self.retired_pools_history.as_ref() else {
             return;
         };
 
-        retired_pools_history.insert(block.epoch, retired_spos.clone());
+        retired_pools_history.insert(block.epoch, retired_spos.to_vec());
     }
 }
 

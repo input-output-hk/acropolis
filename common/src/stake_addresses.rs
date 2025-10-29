@@ -188,6 +188,7 @@ impl StakeAddressMap {
 
     /// Get DRep Delegators with live_stakes
     pub fn get_drep_delegators(&self, drep: &DRepChoice) -> Vec<(KeyHash, u64)> {
+        // Find stake addresses delegated to drep
         let delegators: Vec<(KeyHash, u64)> = self
             .inner
             .iter()
@@ -324,7 +325,7 @@ impl StakeAddressMap {
     }
 
     /// Dump current Stake Pool Delegation Distribution State
-    /// <KeyHash -> (Stake Key, Active Stakes Amount)>
+    /// <PoolId -> (Stake Key, Active Stakes Amount)>
     pub fn dump_spdd_state(&self) -> HashMap<PoolId, Vec<(KeyHash, u64)>> {
         let entries: Vec<_> = self
             .inner

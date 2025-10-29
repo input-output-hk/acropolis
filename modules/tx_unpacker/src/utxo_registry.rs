@@ -140,7 +140,7 @@ impl UTxORegistry {
     pub fn consume(&mut self, tx_ref: &TxOutRef) -> Result<TxIdentifier> {
         match self.live_map.remove(tx_ref) {
             Some(id) => {
-                self.spent.add((tx_ref.clone(), id));
+                self.spent.add((*tx_ref, id));
                 Ok(id)
             }
             None => Err(anyhow::anyhow!(
