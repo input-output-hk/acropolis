@@ -15,8 +15,9 @@ use acropolis_common::{
     protocol_params::ProtocolParams,
     stake_addresses::{StakeAddressMap, StakeAddressState},
     BlockInfo, DRepChoice, DRepCredential, DelegatedStake, InstantaneousRewardSource,
-    InstantaneousRewardTarget, KeyHash, Lovelace, MoveInstantaneousReward, PoolLiveStakeInfo,
-    PoolRegistration, Pot, SPORewards, StakeAddress, StakeRewardDelta, TxCertificate,
+    InstantaneousRewardTarget, KeyHash, Lovelace, MoveInstantaneousReward, PoolId,
+    PoolLiveStakeInfo, PoolRegistration, Pot, SPORewards, StakeAddress, StakeRewardDelta,
+    TxCertificate,
 };
 use anyhow::Result;
 use imbl::OrdMap;
@@ -115,7 +116,7 @@ pub struct State {
     previous_protocol_parameters: Option<ProtocolParams>,
 
     /// Pool refunds to apply next epoch (list of reward accounts to refund to)
-    pool_refunds: Vec<StakeAddress>,
+    pool_refunds: Vec<(PoolId, StakeAddress)>,
 
     /// Addresses registration changes in current epoch
     current_epoch_registration_changes: Arc<Mutex<Vec<RegistrationChange>>>,
@@ -466,7 +467,7 @@ impl State {
         }
 
         // Send them their deposits back
-        for stake_address in refunds {
+        for (pool, stake_address) in refunds {
             // If their reward account has been deregistered, it goes to Treasury
             let mut stake_addresses = self.stake_addresses.lock().unwrap();
             if stake_addresses.is_registered(&stake_address) {
@@ -474,6 +475,7 @@ impl State {
                     stake_address: stake_address.clone(),
                     delta: deposit,
                     reward_type: RewardType::PoolRefund,
+                    pool,
                 });
                 stake_addresses.add_to_reward(&stake_address, deposit);
             } else {
@@ -622,6 +624,7 @@ impl State {
                                 stake_address: reward.account.clone(),
                                 delta: reward.amount,
                                 reward_type: reward.rtype.clone(),
+                                pool: reward.pool.clone(),
                             })
                             .collect::<Vec<_>>(),
                     );
@@ -736,7 +739,11 @@ impl State {
                     hex::encode(id),
                     retired_spo.reward_account
                 );
-                self.pool_refunds.push(retired_spo.reward_account.clone()); // Store full StakeAddress
+                self.pool_refunds.push((
+                    retired_spo.operator.clone(),
+                    retired_spo.reward_account.clone(),
+                ));
+                // Store full StakeAddress
             }
 
             // Schedule to retire - we need them to still be in place when we count

@@ -1,11 +1,11 @@
 //! Acropolis AccountsState: rewards calculations
 
 use crate::snapshot::{Snapshot, SnapshotSPO};
-use acropolis_common::RewardType;
 use acropolis_common::{
     protocol_params::ShelleyParams, rational_number::RationalNumber, KeyHash, Lovelace, SPORewards,
     StakeAddress,
 };
+use acropolis_common::{PoolId, RewardType};
 use anyhow::{bail, Result};
 use bigdecimal::{BigDecimal, One, ToPrimitive, Zero};
 use std::cmp::min;
@@ -25,6 +25,9 @@ pub struct RewardDetail {
 
     /// Reward amount
     pub amount: Lovelace,
+
+    // Pool that reward came from
+    pub pool: PoolId,
 }
 
 /// Result of a rewards calculation
@@ -386,6 +389,7 @@ fn calculate_spo_rewards(
                     account: delegator_stake_address.clone(),
                     rtype: RewardType::Member,
                     amount: to_pay,
+                    pool: operator_id.to_vec(),
                 });
                 total_paid += to_pay;
                 delegators_paid += 1;
@@ -403,6 +407,7 @@ fn calculate_spo_rewards(
             account: spo.reward_account.clone(),
             rtype: RewardType::Leader,
             amount: spo_benefit,
+            pool: operator_id.to_vec(),
         });
     } else {
         info!(

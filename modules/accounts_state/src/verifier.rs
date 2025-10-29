@@ -166,10 +166,11 @@ impl Verifier {
                     continue;
                 };
 
-                expected_rewards.entry(spo).or_default().push(RewardDetail {
+                expected_rewards.entry(spo.clone()).or_default().push(RewardDetail {
                     account: stake_address,
                     rtype,
                     amount,
+                    pool: spo,
                 });
             }
 

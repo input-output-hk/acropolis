@@ -214,6 +214,7 @@ pub struct StakeRewardDelta {
     pub stake_address: StakeAddress,
     pub delta: u64,
     pub reward_type: RewardType,
+    pub pool: PoolId,
 }
 
 /// Type of reward being given

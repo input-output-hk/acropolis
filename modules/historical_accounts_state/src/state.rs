@@ -111,7 +111,7 @@ impl State {
             let update = RewardHistory {
                 epoch,
                 amount: reward.delta,
-                pool: Vec::new(),
+                pool: reward.pool.clone(),
                 reward_type: reward.reward_type.clone(),
             };
             entry.reward_history.get_or_insert_with(Vec::new).push(update);
