@@ -283,7 +283,7 @@ mod test {
 
         // blake2b-256
         let mut hasher = Blake2b::<U32>::new();
-        hasher.update(&[&genesis[..]].concat());
+        hasher.update([&genesis[..]].concat());
         let hash: [u8; 32] = hasher.finalize().into();
         println!("{:?}", hex::encode(hash));
         Ok(())

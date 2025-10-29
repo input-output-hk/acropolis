@@ -120,10 +120,10 @@ impl ParametersState {
                             let current_params = state.current_params.get_params();
 
                             // Process GovOutcomes message on epoch transition
-                            let new_params = state.handle_enact_state(&block, &gov).await?;
+                            let new_params = state.handle_enact_state(block, gov).await?;
 
                             // Publish protocol params message
-                            Self::publish_update(&config, &block, new_params.clone())?;
+                            Self::publish_update(&config, block, new_params.clone())?;
 
                             // Commit state on params change
                             if current_params != new_params.params {

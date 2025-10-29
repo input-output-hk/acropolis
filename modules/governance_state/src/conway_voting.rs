@@ -128,7 +128,7 @@ impl ConwayVoting {
     ) -> Result<()> {
         self.votes_count += voter_votes.voting_procedures.len();
         for (action_id, procedure) in voter_votes.voting_procedures.iter() {
-            let votes = self.votes.entry(action_id.clone()).or_insert_with(|| HashMap::new());
+            let votes = self.votes.entry(action_id.clone()).or_default();
 
             match self.action_status.get(action_id) {
                 None => {
@@ -149,7 +149,7 @@ impl ConwayVoting {
             }
 
             if let Some((prev_trans, prev_vote)) =
-                votes.insert(voter.clone(), (transaction.clone(), procedure.clone()))
+                votes.insert(voter.clone(), (*transaction, procedure.clone()))
             {
                 // Re-voting is allowed; new vote must be treated as the proper one,
                 // older is to be discarded.
@@ -202,8 +202,8 @@ impl ConwayVoting {
 
     /// Should be called when voting is over
     fn end_voting(&mut self, action_id: &GovActionId) -> Result<()> {
-        self.votes.remove(&action_id);
-        self.proposals.remove(&action_id);
+        self.votes.remove(action_id);
+        self.proposals.remove(action_id);
 
         Ok(())
     }
@@ -223,7 +223,7 @@ impl ConwayVoting {
             pool: VoteCount::zero(),
         };
 
-        let Some(all_votes) = self.votes.get(&action_id) else {
+        let Some(all_votes) = self.votes.get(action_id) else {
             return Ok(votes);
         };
 
@@ -334,10 +334,10 @@ impl ConwayVoting {
         spo_stake: &HashMap<PoolId, DelegatedStake>,
     ) -> Result<Option<VotingOutcome>> {
         let outcome =
-            self.is_finally_accepted(new_epoch, voting_state, &action_id, drep_stake, spo_stake)?;
-        let expired = self.is_expired(new_epoch, &action_id)?;
+            self.is_finally_accepted(new_epoch, voting_state, action_id, drep_stake, spo_stake)?;
+        let expired = self.is_expired(new_epoch, action_id)?;
         if outcome.accepted || expired {
-            self.end_voting(&action_id)?;
+            self.end_voting(action_id)?;
             info!(
                 "New epoch {new_epoch}: voting for {action_id} outcome: {}, expired: {expired}",
                 outcome.accepted
@@ -362,7 +362,7 @@ impl ConwayVoting {
 
     /// Function dumps information about completed (expired, ratified, enacted) governance
     /// actions in format, close to that of `gov_action_proposal` from `sqldb`.
-    pub fn print_outcome_to_verify(&self, outcome: &Vec<GovernanceOutcome>) -> Result<()> {
+    pub fn print_outcome_to_verify(&self, outcome: &[GovernanceOutcome]) -> Result<()> {
         let out_file_name = match &self.verification_output_file {
             Some(o) => o,
             None => return Ok(()),
@@ -416,7 +416,7 @@ impl ConwayVoting {
                  {ratification_info},{cast},{threshold}\n",
                 elem.voting.procedure.gov_action_id
             );
-            if let Err(e) = out_file.write(&res.as_bytes()) {
+            if let Err(e) = out_file.write(res.as_bytes()) {
                 error!(
                     "Cannot write 'res' to verification output {out_file_name} for writing: {e}"
                 );
@@ -434,7 +434,7 @@ impl ConwayVoting {
         spo_stake: &HashMap<PoolId, DelegatedStake>,
     ) -> Result<Vec<GovernanceOutcome>> {
         let mut outcome = Vec::<GovernanceOutcome>::new();
-        let actions = self.proposals.keys().map(|a| a.clone()).collect::<Vec<_>>();
+        let actions = self.proposals.keys().cloned().collect::<Vec<_>>();
 
         for action_id in actions.iter() {
             info!(
@@ -443,8 +443,8 @@ impl ConwayVoting {
             );
             let one_outcome = match self.process_one_proposal(
                 new_block.epoch,
-                &voting_state,
-                &action_id,
+                voting_state,
+                action_id,
                 drep_stake,
                 spo_stake,
             ) {
@@ -508,7 +508,7 @@ impl ConwayVoting {
     pub fn update_action_status_with_outcomes(
         &mut self,
         epoch: u64,
-        outcomes: &Vec<GovernanceOutcome>,
+        outcomes: &[GovernanceOutcome],
     ) -> Result<()> {
         for one_outcome in outcomes.iter() {
             let action_id = &one_outcome.voting.procedure.gov_action_id;
@@ -601,8 +601,8 @@ mod tests {
             },
         );
 
-        voting.update_action_status_with_outcomes(0, &vec![])?;
-        voting.update_action_status_with_outcomes(1, &vec![oc1.clone()])?;
+        voting.update_action_status_with_outcomes(0, &[])?;
+        voting.update_action_status_with_outcomes(1, std::slice::from_ref(&oc1))?;
         assert_eq!(
             voting
                 .action_status
