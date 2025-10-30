@@ -93,29 +93,22 @@ pub async fn handle_pools_extended_retired_retiring_single_blockfrost(
 
     match param.as_str() {
         "extended" => {
-            return handle_pools_extended_blockfrost(context.clone(), handlers_config.clone()).await
+            handle_pools_extended_blockfrost(context.clone(), handlers_config.clone()).await
         }
         "retired" => {
-            return handle_pools_retired_blockfrost(context.clone(), handlers_config.clone()).await
+            handle_pools_retired_blockfrost(context.clone(), handlers_config.clone()).await
         }
         "retiring" => {
-            return handle_pools_retiring_blockfrost(context.clone(), handlers_config.clone()).await
+            handle_pools_retiring_blockfrost(context.clone(), handlers_config.clone()).await
         }
         _ => match PoolId::from_bech32(param) {
             Ok(pool_id) => {
-                return handle_pools_spo_blockfrost(
-                    context.clone(),
-                    pool_id,
-                    handlers_config.clone(),
-                )
-                .await
+                handle_pools_spo_blockfrost(context.clone(), pool_id, handlers_config.clone()).await
             }
-            Err(e) => {
-                return Ok(RESTResponse::with_text(
-                    400,
-                    &format!("Invalid Bech32 stake pool ID: {param}. Error: {e}"),
-                ));
-            }
+            Err(e) => Ok(RESTResponse::with_text(
+                400,
+                &format!("Invalid Bech32 stake pool ID: {param}. Error: {e}"),
+            )),
         },
     }
 }
@@ -138,16 +131,12 @@ async fn handle_pools_extended_blockfrost(
             )) => Ok(pools_list_with_info.pools),
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::Error(e),
-            )) => {
-                return Err(anyhow::anyhow!(
-                    "Internal server error while retrieving pools list: {e}"
-                ));
-            }
-            _ => {
-                return Err(anyhow::anyhow!(
-                    "Unexpected message type while retrieving pools list with info"
-                ))
-            }
+            )) => Err(anyhow::anyhow!(
+                "Internal server error while retrieving pools list: {e}"
+            )),
+            _ => Err(anyhow::anyhow!(
+                "Unexpected message type while retrieving pools list with info"
+            )),
         },
     );
 
@@ -165,16 +154,12 @@ async fn handle_pools_extended_blockfrost(
             )) => Ok(res.epoch),
             Message::StateQueryResponse(StateQueryResponse::Epochs(
                 EpochsStateQueryResponse::Error(e),
-            )) => {
-                return Err(anyhow::anyhow!(
-                    "Internal server error while retrieving latest epoch: {e}"
-                ));
-            }
-            _ => {
-                return Err(anyhow::anyhow!(
-                    "Unexpected message type while retrieving latest epoch"
-                ))
-            }
+            )) => Err(anyhow::anyhow!(
+                "Internal server error while retrieving latest epoch: {e}"
+            )),
+            _ => Err(anyhow::anyhow!(
+                "Unexpected message type while retrieving latest epoch"
+            )),
         },
     );
 
@@ -242,11 +227,9 @@ async fn handle_pools_extended_blockfrost(
                 // if epoch_history is not enabled
                 Ok(None)
             }
-            _ => {
-                return Err(anyhow::anyhow!(
-                    "Unexpected message type while retrieving pools active stakes"
-                ))
-            }
+            _ => Err(anyhow::anyhow!(
+                "Unexpected message type while retrieving pools active stakes"
+            )),
         },
     );
 
@@ -267,13 +250,11 @@ async fn handle_pools_extended_blockfrost(
 
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
-            )) => {
-                return Err(anyhow::anyhow!(
-                    "Internal server error while retrieving pools live stakes: {e}"
-                ));
-            }
+            )) => Err(anyhow::anyhow!(
+                "Internal server error while retrieving pools live stakes: {e}"
+            )),
 
-            _ => return Err(anyhow::anyhow!("Unexpected message type")),
+            _ => Err(anyhow::anyhow!("Unexpected message type")),
         },
     );
 
@@ -291,7 +272,7 @@ async fn handle_pools_extended_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::PoolsTotalBlocksMinted(total_blocks_minted),
             )) => Ok(total_blocks_minted),
-            _ => return Err(anyhow::anyhow!("Unexpected message type")),
+            _ => Err(anyhow::anyhow!("Unexpected message type")),
         },
     );
 
@@ -480,16 +461,12 @@ async fn handle_pools_spo_blockfrost(
             )) => Ok(res.epoch),
             Message::StateQueryResponse(StateQueryResponse::Epochs(
                 EpochsStateQueryResponse::Error(e),
-            )) => {
-                return Err(anyhow::anyhow!(
-                    "Internal server error while retrieving latest epoch: {e}"
-                ));
-            }
-            _ => {
-                return Err(anyhow::anyhow!(
-                    "Unexpected message type while retrieving latest epoch"
-                ))
-            }
+            )) => Err(anyhow::anyhow!(
+                "Internal server error while retrieving latest epoch: {e}"
+            )),
+            _ => Err(anyhow::anyhow!(
+                "Unexpected message type while retrieving latest epoch"
+            )),
         },
     );
 
@@ -722,7 +699,7 @@ async fn handle_pools_spo_blockfrost(
             .as_ref()
             .map(|info| info.active_size.to_checked_f64("active_size").unwrap_or(0.0)),
         declared_pledge: pool_info.pledge,
-        live_pledge: live_pledge,
+        live_pledge,
         margin_cost: pool_info.margin.to_f32(),
         fixed_cost: pool_info.cost,
         reward_account,
@@ -745,7 +722,7 @@ pub async fn handle_pool_history_blockfrost(
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
-    let Some(pool_id) = params.get(0) else {
+    let Some(pool_id) = params.first() else {
         return Ok(RESTResponse::with_text(400, "Missing pool ID parameter"));
     };
 
@@ -819,7 +796,7 @@ pub async fn handle_pool_metadata_blockfrost(
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
-    let Some(pool_id) = params.get(0) else {
+    let Some(pool_id) = params.first() else {
         return Ok(RESTResponse::with_text(400, "Missing pool ID parameter"));
     };
 
@@ -871,7 +848,7 @@ pub async fn handle_pool_metadata_blockfrost(
     let Ok(pool_metadata_json) = PoolMetadataJson::try_from(pool_metadata_bytes) else {
         return Ok(RESTResponse::with_text(
             400,
-            &format!("Failed PoolMetadata Json conversion"),
+            "Failed PoolMetadata Json conversion",
         ));
     };
 
@@ -900,7 +877,7 @@ pub async fn handle_pool_relays_blockfrost(
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
-    let Some(pool_id) = params.get(0) else {
+    let Some(pool_id) = params.first() else {
         return Ok(RESTResponse::with_text(400, "Missing pool ID parameter"));
     };
 
@@ -954,7 +931,7 @@ pub async fn handle_pool_delegators_blockfrost(
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
-    let Some(pool_id) = params.get(0) else {
+    let Some(pool_id) = params.first() else {
         return Ok(RESTResponse::with_text(400, "Missing pool ID parameter"));
     };
 
@@ -1051,7 +1028,7 @@ pub async fn handle_pool_blocks_blockfrost(
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
-    let Some(pool_id) = params.get(0) else {
+    let Some(pool_id) = params.first() else {
         return Ok(RESTResponse::with_text(400, "Missing pool ID parameter"));
     };
 
@@ -1103,7 +1080,7 @@ pub async fn handle_pool_updates_blockfrost(
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
-    let Some(pool_id) = params.get(0) else {
+    let Some(pool_id) = params.first() else {
         return Ok(RESTResponse::with_text(400, "Missing pool ID parameter"));
     };
 
@@ -1163,7 +1140,7 @@ pub async fn handle_pool_votes_blockfrost(
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
-    let Some(pool_id) = params.get(0) else {
+    let Some(pool_id) = params.first() else {
         return Ok(RESTResponse::with_text(400, "Missing pool ID parameter"));
     };
 

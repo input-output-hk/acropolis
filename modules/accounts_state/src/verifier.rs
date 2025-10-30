@@ -119,7 +119,8 @@ impl Verifier {
     }
 
     /// Verify rewards, logging any errors
-    pub fn verify_rewards(&self, epoch: u64, rewards: &RewardsResult) {
+    pub fn verify_rewards(&self, rewards: &RewardsResult) {
+        let epoch = rewards.epoch;
         if let Some(template) = &self.rewards_file_template {
             let path = template.replace("{}", &epoch.to_string());
 

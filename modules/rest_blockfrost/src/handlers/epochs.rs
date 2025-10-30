@@ -33,11 +33,10 @@ pub async fn handle_epoch_info_blockfrost(
         ));
     }
     let param = &params[0];
-    let query;
 
     // query to get latest epoch or epoch info
-    if param == "latest" {
-        query = EpochsStateQuery::GetLatestEpoch;
+    let query = if param == "latest" {
+        EpochsStateQuery::GetLatestEpoch
     } else {
         let parsed = match param.parse::<u64>() {
             Ok(num) => num,
@@ -48,10 +47,10 @@ pub async fn handle_epoch_info_blockfrost(
                 ));
             }
         };
-        query = EpochsStateQuery::GetEpochInfo {
+        EpochsStateQuery::GetEpochInfo {
             epoch_number: parsed,
-        };
-    }
+        }
+    };
 
     // Get the current epoch number from epochs-state
     let epoch_info_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(query)));
@@ -61,11 +60,9 @@ pub async fn handle_epoch_info_blockfrost(
         epoch_info_msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Epochs(response)) => Ok(response),
-            _ => {
-                return Err(anyhow!(
-                    "Unexpected message type while retrieving latest epoch"
-                ))
-            }
+            _ => Err(anyhow!(
+                "Unexpected message type while retrieving latest epoch"
+            )),
         },
     )
     .await?;
@@ -176,16 +173,12 @@ pub async fn handle_epoch_params_blockfrost(
             )) => Ok(res.epoch.epoch),
             Message::StateQueryResponse(StateQueryResponse::Epochs(
                 EpochsStateQueryResponse::Error(e),
-            )) => {
-                return Err(anyhow::anyhow!(
-                    "Internal server error while retrieving latest epoch: {e}"
-                ));
-            }
-            _ => {
-                return Err(anyhow::anyhow!(
-                    "Unexpected message type while retrieving latest epoch"
-                ))
-            }
+            )) => Err(anyhow::anyhow!(
+                "Internal server error while retrieving latest epoch: {e}"
+            )),
+            _ => Err(anyhow::anyhow!(
+                "Unexpected message type while retrieving latest epoch"
+            )),
         },
     )
     .await?;
@@ -298,18 +291,12 @@ pub async fn handle_epoch_next_blockfrost(
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Epochs(
                 EpochsStateQueryResponse::NextEpochs(response),
-            )) => Ok(response
-                .epochs
-                .into_iter()
-                .map(|epoch| EpochActivityRest::from(epoch))
-                .collect::<Vec<_>>()),
+            )) => Ok(response.epochs.into_iter().map(EpochActivityRest::from).collect::<Vec<_>>()),
             Message::StateQueryResponse(StateQueryResponse::Epochs(
                 EpochsStateQueryResponse::Error(e),
-            )) => {
-                return Err(anyhow::anyhow!(
-                    "Internal server error while retrieving next epochs: {e}"
-                ));
-            }
+            )) => Err(anyhow::anyhow!(
+                "Internal server error while retrieving next epochs: {e}"
+            )),
             Message::StateQueryResponse(StateQueryResponse::Epochs(
                 EpochsStateQueryResponse::NotFound,
             )) => Err(anyhow::anyhow!("Epoch not found")),
@@ -367,18 +354,12 @@ pub async fn handle_epoch_previous_blockfrost(
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Epochs(
                 EpochsStateQueryResponse::PreviousEpochs(response),
-            )) => Ok(response
-                .epochs
-                .into_iter()
-                .map(|epoch| EpochActivityRest::from(epoch))
-                .collect::<Vec<_>>()),
+            )) => Ok(response.epochs.into_iter().map(EpochActivityRest::from).collect::<Vec<_>>()),
             Message::StateQueryResponse(StateQueryResponse::Epochs(
                 EpochsStateQueryResponse::Error(e),
-            )) => {
-                return Err(anyhow::anyhow!(
-                    "Internal server error while retrieving previous epochs: {e}"
-                ));
-            }
+            )) => Err(anyhow::anyhow!(
+                "Internal server error while retrieving previous epochs: {e}"
+            )),
             Message::StateQueryResponse(StateQueryResponse::Epochs(
                 EpochsStateQueryResponse::NotFound,
             )) => Err(anyhow::anyhow!("Epoch not found")),
