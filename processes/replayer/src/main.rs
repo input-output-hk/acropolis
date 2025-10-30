@@ -12,8 +12,8 @@ use tracing_subscriber::{filter, fmt, EnvFilter, Registry};
 
 // External modules
 use acropolis_module_accounts_state::AccountsState;
-use acropolis_module_consensus::Consensus;
 use acropolis_module_block_unpacker::BlockUnpacker;
+use acropolis_module_consensus::Consensus;
 use acropolis_module_drdd_state::DRDDState;
 use acropolis_module_drep_state::DRepState;
 use acropolis_module_epochs_state::EpochsState;
