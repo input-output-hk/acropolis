@@ -1,11 +1,13 @@
 use std::{
+    collections::HashSet,
     path::{Path, PathBuf},
     sync::Arc,
 };
 
 use acropolis_common::{
     messages::{
-        AddressDeltasMessage, StakeRewardDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
+        StakeAddressDeltasMessage, StakeRewardDeltasMessage, TxCertificatesMessage,
+        WithdrawalsMessage,
     },
     queries::accounts::{
         AccountReward, AccountWithdrawal, DelegationUpdate, RegistrationStatus, RegistrationUpdate,
@@ -30,7 +32,7 @@ pub struct AccountEntry {
     pub registration_history: Option<Vec<RegistrationUpdate>>,
     pub withdrawal_history: Option<Vec<AccountWithdrawal>>,
     pub mir_history: Option<Vec<AccountWithdrawal>>,
-    pub addresses: Option<Vec<ShelleyAddress>>,
+    pub addresses: Option<HashSet<ShelleyAddress>>,
 }
 
 #[derive(Debug, Clone, minicbor::Decode, minicbor::Encode)]
@@ -223,8 +225,16 @@ impl State {
         }
     }
 
-    pub fn handle_address_deltas(&mut self, _address_deltas: &AddressDeltasMessage) -> Result<()> {
-        Ok(())
+    pub fn handle_address_deltas(&mut self, stake_address_deltas: &StakeAddressDeltasMessage) {
+        let window = self.volatile.window.back_mut().expect("window should never be empty");
+        for delta in stake_address_deltas.deltas.iter() {
+            window
+                .entry(delta.stake_address.clone())
+                .or_default()
+                .addresses
+                .get_or_insert_with(HashSet::new)
+                .extend(delta.addresses.clone());
+        }
     }
 
     pub fn handle_withdrawals(&mut self, withdrawals_msg: &WithdrawalsMessage) {
@@ -344,8 +354,29 @@ impl State {
         }
     }
 
-    pub async fn _get_addresses(&self, _account: StakeAddress) -> Result<Vec<ShelleyAddress>> {
-        Ok(Vec::new())
+    pub async fn get_addresses(
+        &self,
+        account: &StakeAddress,
+    ) -> Result<Option<Vec<ShelleyAddress>>> {
+        let immutable = self.immutable.get_addresses(account).await?;
+
+        let mut volatile = HashSet::new();
+        for block_map in self.volatile.window.iter() {
+            if let Some(entry) = block_map.get(account) {
+                if let Some(pending) = &entry.addresses {
+                    volatile.extend(pending.iter().cloned());
+                }
+            }
+        }
+
+        match immutable {
+            Some(mut addresses) => {
+                addresses.extend(volatile);
+                Ok(Some(addresses.into_iter().collect()))
+            }
+            None if volatile.is_empty() => Ok(None),
+            None => Ok(Some(volatile.into_iter().collect())),
+        }
     }
 
     fn handle_stake_registration_change(

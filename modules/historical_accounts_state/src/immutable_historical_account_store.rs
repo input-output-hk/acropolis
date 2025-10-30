@@ -1,4 +1,8 @@
-use std::{collections::HashMap, path::Path};
+use std::{
+    collections::{HashMap, HashSet},
+    hash::Hash,
+    path::Path,
+};
 
 use acropolis_common::{
     queries::accounts::{AccountReward, AccountWithdrawal, DelegationUpdate, RegistrationUpdate},
@@ -127,10 +131,12 @@ impl ImmutableHistoricalAccountStore {
             }
 
             // Persist address updates
-            // TODO: Deduplicate addresses across epochs
             if config.store_addresses {
                 if let Some(updates) = &entry.addresses {
-                    batch.insert(&self.addresses, epoch_key, to_vec(updates)?);
+                    for address in updates {
+                        let address_key = Self::make_address_key(&account, address.clone());
+                        batch.insert(&self.addresses, address_key, &[]);
+                    }
                 }
             }
         }
@@ -250,16 +256,28 @@ impl ImmutableHistoricalAccountStore {
         Ok((!immutable_withdrawals.is_empty()).then_some(immutable_withdrawals))
     }
 
-    pub async fn _get_addresses(
+    pub async fn get_addresses(
         &self,
         account: &StakeAddress,
-    ) -> Result<Option<Vec<ShelleyAddress>>> {
-        let mut immutable_addresses =
-            self.collect_partition::<ShelleyAddress>(&self.addresses, account.get_hash())?;
+    ) -> Result<Option<HashSet<ShelleyAddress>>> {
+        let prefix = account.get_hash();
+        let mut addresses: HashSet<ShelleyAddress> = HashSet::new();
 
-        self.merge_pending(account, |e| e.addresses.as_ref(), &mut immutable_addresses).await;
+        for result in self.addresses.prefix(&prefix) {
+            let (key, _) = result?;
+            let shelley = ShelleyAddress::from_bytes_key(&key[prefix.len()..])?;
+            addresses.insert(shelley);
+        }
 
-        Ok((!immutable_addresses.is_empty()).then_some(immutable_addresses))
+        for block_map in self.pending.lock().await.iter() {
+            if let Some(entry) = block_map.get(account) {
+                if let Some(addrs) = &entry.addresses {
+                    addresses.extend(addrs.iter().cloned());
+                }
+            }
+        }
+
+        Ok((!addresses.is_empty()).then_some(addresses))
     }
 
     fn merge_block_deltas(
@@ -281,13 +299,12 @@ impl ImmutableHistoricalAccountStore {
                 );
                 Self::extend_opt_vec(&mut agg_entry.withdrawal_history, entry.withdrawal_history);
                 Self::extend_opt_vec(&mut agg_entry.mir_history, entry.mir_history);
-                Self::extend_opt_vec(&mut agg_entry.addresses, entry.addresses);
+                Self::extend_opt_set(&mut agg_entry.addresses, entry.addresses);
             }
             acc
         })
     }
 
-    #[allow(dead_code)]
     fn collect_partition<T>(&self, partition: &Partition, prefix: &[u8]) -> Result<Vec<T>>
     where
         T: for<'a> minicbor::Decode<'a, ()>,
@@ -301,7 +318,6 @@ impl ImmutableHistoricalAccountStore {
         Ok(out)
     }
 
-    #[allow(dead_code)]
     async fn merge_pending<T, F>(&self, account: &StakeAddress, f: F, out: &mut Vec<T>)
     where
         F: Fn(&AccountEntry) -> Option<&Vec<T>>,
@@ -323,10 +339,27 @@ impl ImmutableHistoricalAccountStore {
         key
     }
 
+    fn make_address_key(account: &StakeAddress, address: ShelleyAddress) -> Vec<u8> {
+        let mut key = account.get_credential().get_hash();
+        key.extend(address.to_bytes_key());
+        key
+    }
+
     fn extend_opt_vec<T>(target: &mut Option<Vec<T>>, src: Option<Vec<T>>) {
         if let Some(mut v) = src {
             if !v.is_empty() {
                 target.get_or_insert_with(Vec::new).append(&mut v);
+            }
+        }
+    }
+
+    fn extend_opt_set<T>(target: &mut Option<HashSet<T>>, src: Option<HashSet<T>>)
+    where
+        T: Eq + Hash,
+    {
+        if let Some(mut s) = src {
+            if !s.is_empty() {
+                target.get_or_insert_with(HashSet::new).extend(s.drain());
             }
         }
     }
