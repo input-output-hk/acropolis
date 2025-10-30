@@ -843,8 +843,8 @@ impl From<acropolis_common::Value> for AmountList {
                 out.push(AmountEntry {
                     unit: format!(
                         "{}{}",
-                        hex::encode(&policy_id),
-                        hex::encode(&asset.name.as_slice())
+                        hex::encode(policy_id),
+                        hex::encode(asset.name.as_slice())
                     ),
                     quantity: asset.amount.to_string(),
                 });

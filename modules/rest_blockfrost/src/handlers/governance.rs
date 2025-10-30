@@ -70,7 +70,7 @@ pub async fn handle_single_drep_blockfrost(
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
-    let Some(drep_id) = params.get(0) else {
+    let Some(drep_id) = params.first() else {
         return Ok(RESTResponse::with_text(400, "Missing DRep ID parameter"));
     };
 
@@ -158,7 +158,7 @@ pub async fn handle_single_drep_blockfrost(
 
         Message::StateQueryResponse(StateQueryResponse::Governance(
             GovernanceStateQueryResponse::Error(e),
-        )) => Ok(RESTResponse::with_text(500, &format!("{e}"))),
+        )) => Ok(RESTResponse::with_text(500, &e.to_string())),
 
         _ => Ok(RESTResponse::with_text(500, "Unexpected message type")),
     }
@@ -169,7 +169,7 @@ pub async fn handle_drep_delegators_blockfrost(
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
-    let Some(drep_id) = params.get(0) else {
+    let Some(drep_id) = params.first() else {
         return Ok(RESTResponse::with_text(400, "Missing DRep ID parameter"));
     };
 
@@ -286,7 +286,7 @@ pub async fn handle_drep_metadata_blockfrost(
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
-    let Some(drep_id) = params.get(0) else {
+    let Some(drep_id) = params.first() else {
         return Ok(RESTResponse::with_text(400, "Missing DRep ID parameter"));
     };
 
@@ -384,7 +384,7 @@ pub async fn handle_drep_updates_blockfrost(
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
-    let Some(drep_id) = params.get(0) else {
+    let Some(drep_id) = params.first() else {
         return Ok(RESTResponse::with_text(400, "Missing DRep ID parameter"));
     };
 
@@ -429,7 +429,7 @@ pub async fn handle_drep_updates_blockfrost(
             GovernanceStateQueryResponse::Error(_),
         )) => Ok(RESTResponse::with_text(
             503,
-            &format!("DRep updates storage is disabled in config"),
+            "DRep updates storage is disabled in config",
         )),
 
         Message::StateQueryResponse(StateQueryResponse::Governance(
@@ -445,7 +445,7 @@ pub async fn handle_drep_votes_blockfrost(
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
-    let Some(drep_id) = params.get(0) else {
+    let Some(drep_id) = params.first() else {
         return Ok(RESTResponse::with_text(400, "Missing DRep ID parameter"));
     };
 
@@ -470,7 +470,7 @@ pub async fn handle_drep_votes_blockfrost(
                 .votes
                 .iter()
                 .map(|vote| DRepVoteREST {
-                    tx_hash: hex::encode(&vote.tx_hash),
+                    tx_hash: hex::encode(vote.tx_hash),
                     cert_index: vote.vote_index,
                     vote: vote.vote.clone(),
                 })
@@ -616,7 +616,7 @@ pub async fn handle_proposal_votes_blockfrost(
         Err(resp) => return Ok(resp),
     };
 
-    let tx_hash = hex::encode(&proposal.transaction_id);
+    let tx_hash = hex::encode(proposal.transaction_id);
     let cert_index = proposal.action_index;
 
     let msg = Arc::new(Message::StateQuery(StateQuery::Governance(
