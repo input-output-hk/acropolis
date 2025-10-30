@@ -74,7 +74,7 @@ impl GovernanceStateConfig {
             governance_query_topic: Self::conf(config, DEFAULT_GOVERNANCE_QUERY_TOPIC),
             verification_output_file: config
                 .get_string(VERIFICATION_OUTPUT_FILE)
-                .map(|x| Some(x))
+                .map(Some)
                 .unwrap_or(None),
         })
     }
@@ -94,7 +94,7 @@ impl GovernanceState {
         }
     }
 
-    async fn read_parameters<'a>(
+    async fn read_parameters(
         parameters_s: &mut Box<dyn Subscription<Message>>,
     ) -> Result<(BlockInfo, ProtocolParamsMessage)> {
         match parameters_s.read().await?.1.as_ref() {
@@ -205,7 +205,7 @@ impl GovernanceState {
                         }
                     }
                     GovernanceStateQuery::GetProposalVotes { proposal } => {
-                        match locked.get_proposal_votes(&proposal) {
+                        match locked.get_proposal_votes(proposal) {
                             Ok(votes) => {
                                 GovernanceStateQueryResponse::ProposalVotes(ProposalVotes { votes })
                             }

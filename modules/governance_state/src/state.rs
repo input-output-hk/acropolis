@@ -65,7 +65,7 @@ impl State {
         if !epoch_blk.new_epoch {
             bail!("Block {epoch_blk:?} must start a new epoch");
         }
-        self.current_era = epoch_blk.era.clone(); // If era is the same -- no problem
+        self.current_era = epoch_blk.era; // If era is the same -- no problem
         self.alonzo_babbage_voting.advance_epoch(epoch_blk);
         Ok(())
     }
@@ -155,16 +155,14 @@ impl State {
     }
 
     fn recalculate_voting_state(&self) -> Result<VotingRegistrationState> {
-        let drep_stake = self.drep_stake.iter().map(|(_dr, lov)| lov).sum();
+        let drep_stake = self.drep_stake.values().sum();
 
         let committee_usize = self.conway_voting.get_conway_params()?.committee.members.len();
-        let committee = committee_usize.try_into().or_else(|e| {
-            Err(anyhow!(
-                "Commitee size: conversion usize -> u64 failed, {e}"
-            ))
-        })?;
+        let committee = committee_usize
+            .try_into()
+            .map_err(|e| anyhow!("Commitee size: conversion usize -> u64 failed, {e}"))?;
 
-        let spo_stake = self.spo_stake.iter().map(|(_sp, ds)| ds.live).sum();
+        let spo_stake = self.spo_stake.values().map(|ds| ds.live).sum();
 
         Ok(VotingRegistrationState::new(
             spo_stake,
@@ -182,15 +180,17 @@ impl State {
         &mut self,
         new_block: &BlockInfo,
     ) -> Result<GovernanceOutcomesMessage> {
-        let mut output = GovernanceOutcomesMessage::default();
-        output.alonzo_babbage_outcomes = self.alonzo_babbage_voting.finalize_voting(new_block)?;
+        let mut output = GovernanceOutcomesMessage {
+            alonzo_babbage_outcomes: self.alonzo_babbage_voting.finalize_voting(new_block)?,
+            ..Default::default()
+        };
 
         if self.current_era >= Era::Conway {
             // Last chance to print actual votes; later they'll be cleaned
             self.conway_voting.log_conway_voting_stats(new_block.epoch);
             let voting_state = self.recalculate_voting_state()?;
             let ratified = self.conway_voting.finalize_conway_voting(
-                &new_block,
+                new_block,
                 &voting_state,
                 &self.drep_stake,
                 &self.spo_stake,

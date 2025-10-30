@@ -1,6 +1,6 @@
 //! Acropolis AccountsState: State storage
 use crate::monetary::calculate_monetary_change;
-use crate::rewards::{calculate_rewards, RewardsResult};
+use crate::rewards::{calculate_rewards, RewardType, RewardsResult};
 use crate::snapshot::Snapshot;
 use crate::verifier::Verifier;
 use acropolis_common::queries::accounts::OptimalPoolSizing;
@@ -115,9 +115,6 @@ pub struct State {
 
     /// Pool refunds to apply next epoch (list of reward accounts to refund to)
     pool_refunds: Vec<StakeAddress>,
-
-    /// Stake address refunds to apply next epoch
-    stake_refunds: Vec<(StakeAddress, Lovelace)>,
 
     /// MIRs to pay next epoch
     mirs: Vec<MoveInstantaneousReward>,
@@ -324,7 +321,6 @@ impl State {
 
         // Pay the refunds after snapshot, so they don't appear in active_stake
         reward_deltas.extend(self.pay_pool_refunds());
-        reward_deltas.extend(self.pay_stake_refunds());
 
         // Verify pots state
         verifier.verify_pots(epoch, &self.pots);
@@ -496,33 +492,6 @@ impl State {
         reward_deltas
     }
 
-    /// Pay stake address refunds
-    fn pay_stake_refunds(&mut self) -> Vec<StakeRewardDelta> {
-        let mut reward_deltas = Vec::<StakeRewardDelta>::new();
-
-        let refunds = take(&mut self.stake_refunds);
-        if !refunds.is_empty() {
-            info!(
-                "{} deregistered stake addresses, total refunds {}",
-                refunds.len(),
-                refunds.iter().map(|(_, n)| n).sum::<Lovelace>()
-            );
-        }
-
-        // Send them their deposits back
-        for (stake_address, deposit) in refunds {
-            let mut stake_addresses = self.stake_addresses.lock().unwrap();
-            reward_deltas.push(StakeRewardDelta {
-                stake_address: stake_address.clone(), // Extract hash for delta
-                delta: deposit as i64,
-            });
-            stake_addresses.add_to_reward(&stake_address, deposit);
-            self.pots.deposits -= deposit;
-        }
-
-        reward_deltas
-    }
-
     /// Pay MIRs
     fn pay_mirs(&mut self) -> Vec<StakeRewardDelta> {
         let mut reward_deltas = Vec::<StakeRewardDelta>::new();
@@ -657,36 +626,52 @@ impl State {
 
         // If rewards have been calculated, save the results
         if let Some(task) = task.take() {
-            if let Ok(Ok(reward_result)) = task.await {
-                // Collect rewards to stake addresses reward deltas
-                for rewards in reward_result.rewards.values() {
-                    reward_deltas.extend(
-                        rewards
-                            .iter()
-                            .map(|reward| StakeRewardDelta {
-                                stake_address: reward.account.clone(),
-                                delta: reward.amount as i64,
-                            })
-                            .collect::<Vec<_>>(),
-                    );
-                }
-
-                // Verify them
-                verifier.verify_rewards(reward_result.epoch, &reward_result);
-
+            if let Ok(Ok(rewards_result)) = task.await {
                 // Pay the rewards
                 let mut stake_addresses = self.stake_addresses.lock().unwrap();
-                for (_, rewards) in reward_result.rewards {
+                let mut filtered_rewards_result = rewards_result.clone();
+                for (spo, rewards) in rewards_result.rewards {
                     for reward in rewards {
-                        stake_addresses.add_to_reward(&reward.account, reward.amount);
+                        if stake_addresses.is_registered(&reward.account) {
+                            stake_addresses.add_to_reward(&reward.account, reward.amount);
+                            reward_deltas.push(StakeRewardDelta {
+                                stake_address: reward.account.clone(),
+                                delta: reward.amount as i64,
+                            });
+                        } else {
+                            warn!(
+                                "Reward account {} deregistered - paying reward {} to treasury",
+                                reward.account, reward.amount
+                            );
+                            self.pots.treasury += reward.amount;
+
+                            // Remove from filtered version for comparison and result
+                            if let Some(rewards) = filtered_rewards_result.rewards.get_mut(&spo) {
+                                rewards.retain(|r| r.account != reward.account);
+                            }
+
+                            if let Some((_, spor)) = filtered_rewards_result
+                                .spo_rewards
+                                .iter_mut()
+                                .find(|(fspo, _)| *fspo == spo)
+                            {
+                                spor.total_rewards -= reward.amount;
+                                if reward.rtype == RewardType::Leader {
+                                    spor.operator_rewards -= reward.amount;
+                                }
+                            }
+                        }
                     }
                 }
 
+                // Verify them
+                verifier.verify_rewards(&filtered_rewards_result);
+
                 // save SPO rewards
-                spo_rewards = reward_result.spo_rewards.into_iter().collect();
+                spo_rewards = filtered_rewards_result.spo_rewards.clone();
 
                 // Adjust the reserves for next time with amount actually paid
-                self.pots.reserves -= reward_result.total_paid;
+                self.pots.reserves -= rewards_result.total_paid;
             }
         };
 
@@ -841,8 +826,7 @@ impl State {
                 }
             };
 
-            // Schedule refund
-            self.stake_refunds.push((stake_address.clone(), deposit));
+            self.pots.deposits -= deposit;
 
             // Add to registration changes
             self.current_epoch_registration_changes.lock().unwrap().push(RegistrationChange {
@@ -1314,6 +1298,7 @@ mod tests {
             withdrawals: vec![Withdrawal {
                 address: stake_address.clone(),
                 value: 39,
+                tx_identifier: TxIdentifier::default(),
             }],
         };
 
