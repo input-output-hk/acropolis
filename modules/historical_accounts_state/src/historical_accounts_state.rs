@@ -110,7 +110,7 @@ impl HistoricalAccountsState {
                 if let Message::Cardano((ref block_info, CardanoMessage::ProtocolParams(params))) =
                     params_msg.as_ref()
                 {
-                    Self::check_sync(&current_block, &block_info);
+                    Self::check_sync(&current_block, block_info);
                     let mut state = state_mutex.lock().await;
                     state.volatile.start_new_epoch(block_info.number);
                     if let Some(shelley) = &params.params.shelley {
@@ -124,7 +124,7 @@ impl HistoricalAccountsState {
                     CardanoMessage::StakeRewardDeltas(rewards_msg),
                 )) = rewards_msg.as_ref()
                 {
-                    Self::check_sync(&current_block, &block_info);
+                    Self::check_sync(&current_block, block_info);
                     let mut state = state_mutex.lock().await;
                     state
                         .handle_rewards(rewards_msg)
@@ -142,12 +142,9 @@ impl HistoricalAccountsState {
                     );
                     let _entered = span.enter();
 
-                    Self::check_sync(&current_block, &block_info);
+                    Self::check_sync(&current_block, block_info);
                     let mut state = state_mutex.lock().await;
-                    state
-                        .handle_tx_certificates(tx_certs_msg, block_info.epoch as u32)
-                        .inspect_err(|e| error!("TxCertificates handling error: {e:#}"))
-                        .ok();
+                    state.handle_tx_certificates(tx_certs_msg, block_info.epoch as u32);
                 }
 
                 _ => error!("Unexpected message type: {certs_message:?}"),
@@ -163,12 +160,9 @@ impl HistoricalAccountsState {
                     );
                     let _entered = span.enter();
 
-                    Self::check_sync(&current_block, &block_info);
+                    Self::check_sync(&current_block, block_info);
                     let mut state = state_mutex.lock().await;
-                    state
-                        .handle_withdrawals(withdrawals_msg)
-                        .inspect_err(|e| error!("Withdrawals handling error: {e:#}"))
-                        .ok();
+                    state.handle_withdrawals(withdrawals_msg);
                 }
 
                 _ => error!("Unexpected message type: {message:?}"),
@@ -184,7 +178,7 @@ impl HistoricalAccountsState {
                     );
                     let _entered = span.enter();
 
-                    Self::check_sync(&current_block, &block_info);
+                    Self::check_sync(&current_block, block_info);
                     {
                         let mut state = state_mutex.lock().await;
                         state
@@ -206,8 +200,7 @@ impl HistoricalAccountsState {
 
                 if should_prune {
                     let (store, cfg) = {
-                        let mut state: tokio::sync::MutexGuard<'_, State> =
-                            state_mutex.lock().await;
+                        let mut state = state_mutex.lock().await;
                         state.prune_volatile().await;
                         (state.immutable.clone(), state.config.clone())
                     };
@@ -320,30 +313,41 @@ impl HistoricalAccountsState {
 
                 let response = match query {
                     AccountsStateQuery::GetAccountRegistrationHistory { account } => {
-                        match state.lock().await.get_registration_history(&account).await {
-                            Ok(registrations) => {
+                        match state.lock().await.get_registration_history(account).await {
+                            Ok(Some(registrations)) => {
                                 AccountsStateQueryResponse::AccountRegistrationHistory(
                                     registrations,
                                 )
                             }
+                            Ok(None) => AccountsStateQueryResponse::NotFound,
                             Err(e) => AccountsStateQueryResponse::Error(e.to_string()),
                         }
                     }
                     AccountsStateQuery::GetAccountDelegationHistory { account } => {
-                        match state.lock().await.get_delegation_history(&account).await {
-                            Ok(delegations) => {
+                        match state.lock().await.get_delegation_history(account).await {
+                            Ok(Some(delegations)) => {
                                 AccountsStateQueryResponse::AccountDelegationHistory(delegations)
                             }
+                            Ok(None) => AccountsStateQueryResponse::NotFound,
                             Err(e) => AccountsStateQueryResponse::Error(e.to_string()),
                         }
                     }
                     AccountsStateQuery::GetAccountMIRHistory { account } => {
-                        match state.lock().await.get_mir_history(&account).await {
-                            Ok(mirs) => AccountsStateQueryResponse::AccountMIRHistory(mirs),
+                        match state.lock().await.get_mir_history(account).await {
+                            Ok(Some(mirs)) => AccountsStateQueryResponse::AccountMIRHistory(mirs),
+                            Ok(None) => AccountsStateQueryResponse::NotFound,
                             Err(e) => AccountsStateQueryResponse::Error(e.to_string()),
                         }
                     }
-
+                    AccountsStateQuery::GetAccountWithdrawalHistory { account } => {
+                        match state.lock().await.get_withdrawal_history(account).await {
+                            Ok(Some(withdrawals)) => {
+                                AccountsStateQueryResponse::AccountWithdrawalHistory(withdrawals)
+                            }
+                            Ok(None) => AccountsStateQueryResponse::NotFound,
+                            Err(e) => AccountsStateQueryResponse::Error(e.to_string()),
+                        }
+                    }
                     _ => AccountsStateQueryResponse::Error(format!(
                         "Unimplemented query variant: {:?}",
                         query

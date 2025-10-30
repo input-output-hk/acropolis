@@ -257,7 +257,7 @@ impl State {
             return Ok(());
         };
 
-        let cfg = self.config.clone();
+        let cfg = self.config;
         for (tx_hash, voting_procedures) in voting_procedures {
             for (voter, single_votes) in &voting_procedures.votes {
                 let drep_cred = match voter {
@@ -272,9 +272,9 @@ impl State {
 
                 let votes = entry.votes.as_mut().unwrap();
 
-                for (_, vp) in &single_votes.voting_procedures {
+                for vp in single_votes.voting_procedures.values() {
                     votes.push(VoteRecord {
-                        tx_hash: tx_hash.clone(),
+                        tx_hash: *tx_hash,
                         vote_index: vp.vote_index,
                         vote: vp.vote.clone(),
                     });
@@ -455,7 +455,7 @@ impl State {
         };
 
         if create_if_missing {
-            let cfg = self.config.clone();
+            let cfg = self.config;
             let entry = hist
                 .entry(credential.clone())
                 .or_insert_with(|| HistoricalDRepState::from_config(&cfg));
@@ -595,7 +595,7 @@ mod tests {
             cert_index: 0,
         };
         let mut state = State::new(DRepStorageConfig::default());
-        assert_eq!(state.process_one_cert(&tx_cert, 1).unwrap(), true);
+        assert!(state.process_one_cert(&tx_cert, 1).unwrap());
         assert_eq!(state.get_count(), 1);
         let tx_cert_record = DRepRecord {
             deposit: 500000000,
@@ -621,7 +621,7 @@ mod tests {
         };
 
         let mut state = State::new(DRepStorageConfig::default());
-        assert_eq!(state.process_one_cert(&tx_cert, 1).unwrap(), true);
+        assert!(state.process_one_cert(&tx_cert, 1).unwrap());
 
         let bad_tx_cert = TxCertificateWithPos {
             cert: TxCertificate::DRepRegistration(DRepRegistration {
@@ -658,7 +658,7 @@ mod tests {
             cert_index: 1,
         };
         let mut state = State::new(DRepStorageConfig::default());
-        assert_eq!(state.process_one_cert(&tx_cert, 1).unwrap(), true);
+        assert!(state.process_one_cert(&tx_cert, 1).unwrap());
 
         let anchor = Anchor {
             url: "https://poop.bike".into(),
@@ -673,10 +673,7 @@ mod tests {
             cert_index: 1,
         };
 
-        assert_eq!(
-            state.process_one_cert(&update_anchor_tx_cert, 1).unwrap(),
-            false
-        );
+        assert!(!state.process_one_cert(&update_anchor_tx_cert, 1).unwrap());
 
         assert_eq!(state.get_count(), 1);
         let tx_cert_record = DRepRecord {
@@ -702,7 +699,7 @@ mod tests {
             cert_index: 1,
         };
         let mut state = State::new(DRepStorageConfig::default());
-        assert_eq!(state.process_one_cert(&tx_cert, 1).unwrap(), true);
+        assert!(state.process_one_cert(&tx_cert, 1).unwrap());
 
         let anchor = Anchor {
             url: "https://poop.bike".into(),
@@ -742,7 +739,7 @@ mod tests {
             cert_index: 1,
         };
         let mut state = State::new(DRepStorageConfig::default());
-        assert_eq!(state.process_one_cert(&tx_cert, 1).unwrap(), true);
+        assert!(state.process_one_cert(&tx_cert, 1).unwrap());
 
         let unregister_tx_cert = TxCertificateWithPos {
             cert: TxCertificate::DRepDeregistration(DRepDeregistration {
@@ -752,10 +749,7 @@ mod tests {
             tx_identifier: TxIdentifier::default(),
             cert_index: 1,
         };
-        assert_eq!(
-            state.process_one_cert(&unregister_tx_cert, 1).unwrap(),
-            true
-        );
+        assert!(state.process_one_cert(&unregister_tx_cert, 1).unwrap());
         assert_eq!(state.get_count(), 0);
         assert!(state.get_drep(&tx_cred).is_none());
     }
@@ -773,7 +767,7 @@ mod tests {
             cert_index: 1,
         };
         let mut state = State::new(DRepStorageConfig::default());
-        assert_eq!(state.process_one_cert(&tx_cert, 1).unwrap(), true);
+        assert!(state.process_one_cert(&tx_cert, 1).unwrap());
 
         let unregister_tx_cert = TxCertificateWithPos {
             cert: TxCertificate::DRepDeregistration(DRepDeregistration {

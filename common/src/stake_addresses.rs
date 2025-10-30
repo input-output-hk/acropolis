@@ -558,7 +558,7 @@ mod tests {
 
     fn create_stake_address(hash: &[u8]) -> StakeAddress {
         StakeAddress::new(
-            StakeCredential::AddrKeyHash(hash.to_vec().try_into().expect("Invalid hash length")),
+            StakeCredential::AddrKeyHash(hash.to_vec()),
             NetworkId::Mainnet,
         )
     }
@@ -867,6 +867,8 @@ mod tests {
     }
 
     mod withdrawal_tests {
+        use crate::TxIdentifier;
+
         use super::*;
 
         #[test]
@@ -880,6 +882,7 @@ mod tests {
             let withdrawal = Withdrawal {
                 address: stake_address.clone(),
                 value: 40,
+                tx_identifier: TxIdentifier::default(),
             };
             stake_addresses.process_withdrawal(&withdrawal);
 
@@ -898,6 +901,7 @@ mod tests {
             let withdrawal = Withdrawal {
                 address: stake_address.clone(),
                 value: 24,
+                tx_identifier: TxIdentifier::default(),
             };
             stake_addresses.process_withdrawal(&withdrawal);
             assert_eq!(stake_addresses.get(&stake_address).unwrap().rewards, 12);
@@ -906,6 +910,7 @@ mod tests {
             let withdrawal = Withdrawal {
                 address: stake_address.clone(),
                 value: 2,
+                tx_identifier: TxIdentifier::default(),
             };
             stake_addresses.process_withdrawal(&withdrawal);
             assert_eq!(stake_addresses.get(&stake_address).unwrap().rewards, 10);
@@ -922,6 +927,7 @@ mod tests {
             let withdrawal = Withdrawal {
                 address: stake_address.clone(),
                 value: 0,
+                tx_identifier: TxIdentifier::default(),
             };
 
             stake_addresses.process_withdrawal(&withdrawal);
@@ -936,6 +942,7 @@ mod tests {
             let withdrawal = Withdrawal {
                 address: stake_address.clone(),
                 value: 10,
+                tx_identifier: TxIdentifier::default(),
             };
 
             // Should log error but not panic
@@ -1017,7 +1024,7 @@ mod tests {
 
             let spdd = stake_addresses.generate_spdd();
 
-            let pool_stake = spdd.get(&SPO_HASH.to_vec()).unwrap();
+            let pool_stake = spdd.get(SPO_HASH.as_slice()).unwrap();
             assert_eq!(pool_stake.active, 3000); // utxo only
             assert_eq!(pool_stake.live, 3150); // utxo + rewards
             assert_eq!(pool_stake.active_delegators_count, 2);
@@ -1047,8 +1054,8 @@ mod tests {
             let spdd = stake_addresses.generate_spdd();
 
             assert_eq!(spdd.len(), 2);
-            assert_eq!(spdd.get(&SPO_HASH.to_vec()).unwrap().active, 1000);
-            assert_eq!(spdd.get(&SPO_HASH_2.to_vec()).unwrap().active, 2000);
+            assert_eq!(spdd.get(SPO_HASH.as_slice()).unwrap().active, 1000);
+            assert_eq!(spdd.get(SPO_HASH_2.as_slice()).unwrap().active, 2000);
         }
 
         #[test]

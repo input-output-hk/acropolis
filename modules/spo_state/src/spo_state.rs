@@ -78,6 +78,7 @@ pub struct SPOState;
 
 impl SPOState {
     /// Main async run loop
+    #[allow(clippy::too_many_arguments)]
     async fn run(
         history: Arc<Mutex<StateHistory<State>>>,
         epochs_history: EpochsHistoryState,
@@ -99,11 +100,8 @@ impl SPOState {
         // Get the stake address deltas from the genesis bootstrap, which we know
         // don't contain any stake, plus an extra parameter state (!unexplained)
         // !TODO this seems overly specific to our startup process
-        match stake_deltas_subscription.as_mut() {
-            Some(sub) => {
-                let _ = sub.read().await?;
-            }
-            None => {}
+        if let Some(sub) = stake_deltas_subscription.as_mut() {
+            let _ = sub.read().await?;
         }
 
         // Main loop of synchronised messages
@@ -164,7 +162,7 @@ impl SPOState {
                         match MultiEraHeader::decode(variant, None, &block_msg.header) {
                             Ok(header) => {
                                 if let Some(vrf_vkey) = header.vrf_vkey() {
-                                    state.handle_mint(&block_info, vrf_vkey);
+                                    state.handle_mint(block_info, vrf_vkey);
                                 }
                             }
 
@@ -181,7 +179,7 @@ impl SPOState {
                 Message::Cardano((block_info, CardanoMessage::TxCertificates(tx_certs_msg))) => {
                     let span = info_span!("spo_state.handle_certs", block = block_info.number);
                     async {
-                        Self::check_sync(&current_block, &block_info);
+                        Self::check_sync(&current_block, block_info);
                         let maybe_message = state
                             .handle_tx_certs(block_info, tx_certs_msg)
                             .inspect_err(|e| error!("TxCerts Messages handling error: {e}"))
@@ -227,7 +225,7 @@ impl SPOState {
                 {
                     let span = info_span!("spo_state.handle_spdd", block = block_info.number);
                     span.in_scope(|| {
-                        Self::check_sync(&current_block, &block_info);
+                        Self::check_sync(&current_block, block_info);
                         // update epochs_history
                         epochs_history.handle_spdd(block_info, spdd_message);
                     });
@@ -244,7 +242,7 @@ impl SPOState {
                         let span =
                             info_span!("spo_state.handle_spo_rewards", block = block_info.number);
                         span.in_scope(|| {
-                            Self::check_sync(&current_block, &block_info);
+                            Self::check_sync(&current_block, block_info);
                             // update epochs_history
                             epochs_history.handle_spo_rewards(block_info, spo_rewards_message);
                         });
@@ -264,7 +262,7 @@ impl SPOState {
                             block = block_info.number
                         );
                         span.in_scope(|| {
-                            Self::check_sync(&current_block, &block_info);
+                            Self::check_sync(&current_block, block_info);
                             // update epochs_history
                             state
                                 .handle_stake_reward_deltas(block_info, stake_reward_deltas_message)
@@ -274,7 +272,7 @@ impl SPOState {
                     }
                 }
 
-                // Handle EochActivityMessage
+                // Handle EpochActivityMessage
                 let (_, ea_message) = ea_message_f.await?;
                 if let Message::Cardano((
                     block_info,
@@ -284,7 +282,7 @@ impl SPOState {
                     let span =
                         info_span!("spo_state.handle_epoch_activity", block = block_info.number);
                     span.in_scope(|| {
-                        Self::check_sync(&current_block, &block_info);
+                        Self::check_sync(&current_block, block_info);
                         // update epochs_history
                         let spos: Vec<(KeyHash, usize)> = epoch_activity_message
                             .spo_blocks
@@ -311,7 +309,7 @@ impl SPOState {
                         let span =
                             info_span!("spo_state.handle_withdrawals", block = block_info.number);
                         async {
-                            Self::check_sync(&current_block, &block_info);
+                            Self::check_sync(&current_block, block_info);
                             state
                                 .handle_withdrawals(withdrawals_msg)
                                 .inspect_err(|e| error!("Withdrawals handling error: {e:#}"))
@@ -336,7 +334,7 @@ impl SPOState {
                         let span =
                             info_span!("spo_state.handle_stake_deltas", block = block_info.number);
                         async {
-                            Self::check_sync(&current_block, &block_info);
+                            Self::check_sync(&current_block, block_info);
                             state
                                 .handle_stake_deltas(deltas_msg)
                                 .inspect_err(|e| error!("StakeAddressDeltas handling error: {e:#}"))
@@ -361,7 +359,7 @@ impl SPOState {
                         let span =
                             info_span!("spo_state.handle_governance", block = block_info.number);
                         span.in_scope(|| {
-                            Self::check_sync(&current_block, &block_info);
+                            Self::check_sync(&current_block, block_info);
                             state
                                 .handle_governance(&governance_msg.voting_procedures)
                                 .inspect_err(|e| error!("Governance handling error: {e:#}"))
@@ -574,7 +572,7 @@ impl SPOState {
                     PoolsStateQuery::GetPoolHistory { pool_id } => {
                         if epochs_history.is_enabled() {
                             let history =
-                                epochs_history.get_pool_history(pool_id).unwrap_or(Vec::new());
+                                epochs_history.get_pool_history(pool_id).unwrap_or_default();
                             PoolsStateQueryResponse::PoolHistory(history)
                         } else {
                             PoolsStateQueryResponse::Error(
@@ -633,22 +631,23 @@ impl SPOState {
                     }
 
                     PoolsStateQuery::GetPoolTotalBlocksMinted { pool_id } => {
-                        PoolsStateQueryResponse::PoolTotalBlocksMinted(state.get_total_blocks_minted_by_pool(&pool_id))
+                        PoolsStateQueryResponse::PoolTotalBlocksMinted(state.get_total_blocks_minted_by_pool(pool_id))
                     }
 
                     PoolsStateQuery::GetBlocksByPool { pool_id } => {
-                        state
-                            .is_historical_blocks_enabled()
-                            .then(|| PoolsStateQueryResponse::BlocksByPool(state.get_blocks_by_pool(pool_id).unwrap_or_default()))
-                            .unwrap_or(PoolsStateQueryResponse::Error("Blocks are not enabled".into()))
+                        if state.is_historical_blocks_enabled() {
+                            PoolsStateQueryResponse::BlocksByPool(state.get_blocks_by_pool(pool_id).unwrap_or_default())
+                        } else {
+                            PoolsStateQueryResponse::Error("Blocks are not enabled".into())
+                        }
                     }
 
                     PoolsStateQuery::GetBlocksByPoolAndEpoch { pool_id, epoch } => {
-                        state
-                        .is_historical_blocks_enabled()
-                        .then(|| PoolsStateQueryResponse::BlocksByPoolAndEpoch(state.get_blocks_by_pool_and_epoch(pool_id, *epoch)
-                        .unwrap_or_default()))
-                        .unwrap_or(PoolsStateQueryResponse::Error("Blocks are not enabled".into()))
+                        if state.is_historical_blocks_enabled() {
+                            PoolsStateQueryResponse::BlocksByPoolAndEpoch(state.get_blocks_by_pool_and_epoch(pool_id, *epoch).unwrap_or_default())
+                        } else {
+                            PoolsStateQueryResponse::Error("Blocks are not enabled".into())
+                        }
                     }
 
                     PoolsStateQuery::GetPoolUpdates { pool_id } => {
@@ -701,9 +700,8 @@ impl SPOState {
                         block_height,
                     })) => {
                         info!("inspecting state at block height {}", block_height);
-                        let maybe_spo_state = guard
-                            .get_by_index_reverse(*block_height)
-                            .map(|state| LedgerSPOState::from(state));
+                        let maybe_spo_state =
+                            guard.get_by_index_reverse(*block_height).map(LedgerSPOState::from);
 
                         if let Some(spo_state) = maybe_spo_state {
                             context_snapshot

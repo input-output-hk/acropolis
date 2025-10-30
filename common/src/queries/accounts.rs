@@ -18,7 +18,7 @@ pub enum AccountsStateQuery {
     GetAccountRegistrationHistory { account: StakeAddress },
     GetAccountDelegationHistory { account: StakeAddress },
     GetAccountMIRHistory { account: StakeAddress },
-    GetAccountWithdrawalHistory { stake_key: Vec<u8> },
+    GetAccountWithdrawalHistory { account: StakeAddress },
     GetAccountAssociatedAddresses { stake_key: Vec<u8> },
     GetAccountAssets { stake_key: Vec<u8> },
     GetAccountAssetsTotals { stake_key: Vec<u8> },
@@ -52,7 +52,7 @@ pub enum AccountsStateQueryResponse {
     AccountRegistrationHistory(Vec<RegistrationUpdate>),
     AccountDelegationHistory(Vec<DelegationUpdate>),
     AccountMIRHistory(Vec<AccountWithdrawal>),
-    AccountWithdrawalHistory(AccountWithdrawalHistory),
+    AccountWithdrawalHistory(Vec<AccountWithdrawal>),
     AccountAssociatedAddresses(AccountAssociatedAddresses),
     AccountAssets(AccountAssets),
     AccountAssetsTotals(AccountAssetsTotals),
@@ -129,6 +129,15 @@ pub enum RegistrationStatus {
     Registered,
     #[n(1)]
     Deregistered,
+}
+
+impl std::fmt::Display for RegistrationStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RegistrationStatus::Registered => write!(f, "registered"),
+            RegistrationStatus::Deregistered => write!(f, "deregistered"),
+        }
+    }
 }
 
 #[derive(

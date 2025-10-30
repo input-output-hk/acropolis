@@ -5,7 +5,7 @@ use crate::{
     ExUnitPrices, ExUnits, GenesisDelegate, HeavyDelegate, NetworkId, PoolVotingThresholds,
     ProtocolConsts,
 };
-use anyhow::Result;
+use anyhow::{bail, Result};
 use blake2::{digest::consts::U32, Blake2b, Digest};
 use chrono::{DateTime, Utc};
 use serde_with::{hex::Hex, serde_as};
@@ -25,12 +25,15 @@ pub struct ProtocolParams {
 // Byron protocol parameters
 //
 
+#[serde_as]
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ByronParams {
     pub block_version_data: BlockVersionData,
     pub fts_seed: Option<Vec<u8>>,
     pub protocol_consts: ProtocolConsts,
     pub start_time: u64,
+
+    #[serde_as(as = "Vec<(_, _)>")]
     pub heavy_delegation: HashMap<Vec<u8>, HeavyDelegate>,
 }
 
@@ -227,11 +230,27 @@ pub struct ConwayParams {
     pub committee: Committee,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProtocolVersion {
-    pub minor: u64,
     pub major: u64,
+    pub minor: u64,
+}
+
+impl ProtocolVersion {
+    pub fn new(major: u64, minor: u64) -> Self {
+        Self { major, minor }
+    }
+
+    pub fn is_chang(&self) -> Result<bool> {
+        if self.major == 9 {
+            if self.minor != 0 {
+                bail!("Chang version 9.xx with nonzero xx is not supported")
+            }
+            return Ok(true);
+        }
+        Ok(false)
+    }
 }
 
 #[derive(
@@ -405,5 +424,45 @@ impl Nonces {
         };
 
         slot + window < next_epoch_first_slot
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_protocol_version_order() {
+        let v9_0 = ProtocolVersion::new(9, 0);
+        let v9_1 = ProtocolVersion::new(9, 1);
+        let v9_10 = ProtocolVersion::new(9, 10);
+        let v10_0 = ProtocolVersion::new(10, 0);
+        let v10_9 = ProtocolVersion::new(10, 9);
+        let v10_10 = ProtocolVersion::new(10, 10);
+        let v10_11 = ProtocolVersion::new(10, 11);
+
+        assert!(v10_9 > v9_10);
+
+        let from = vec![v9_0, v9_1, v9_10, v10_0, v10_9, v10_10, v10_11];
+        let mut upd = from.clone();
+        upd.sort();
+
+        assert_eq!(from, upd);
+    }
+
+    #[test]
+    fn test_protocol_version_parsing() -> Result<()> {
+        let v9_0 = serde_json::from_slice::<ProtocolVersion>(b"{\"minor\": 0, \"major\": 9}")?;
+        let v9_0a = serde_json::from_slice::<ProtocolVersion>(b"{\"major\": 9, \"minor\": 0}")?;
+        let v0_9 = serde_json::from_slice::<ProtocolVersion>(b"{\"minor\": 9, \"major\": 0}")?;
+        let v0_9a = serde_json::from_slice::<ProtocolVersion>(b"{\"major\": 0, \"minor\": 9}")?;
+
+        assert_eq!(v9_0, v9_0a);
+        assert_eq!(v0_9, v0_9a);
+        assert_eq!(v9_0, ProtocolVersion::new(9, 0));
+        assert_eq!(v9_0.major, 9);
+        assert_eq!(v0_9, ProtocolVersion::new(0, 9));
+
+        Ok(())
     }
 }

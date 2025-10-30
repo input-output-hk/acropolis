@@ -13,12 +13,15 @@ use tracing_subscriber::{filter, fmt, EnvFilter, Registry};
 // External modules
 use acropolis_module_accounts_state::AccountsState;
 use acropolis_module_block_unpacker::BlockUnpacker;
+use acropolis_module_drdd_state::DRDDState;
 use acropolis_module_drep_state::DRepState;
 use acropolis_module_epochs_state::EpochsState;
 use acropolis_module_genesis_bootstrapper::GenesisBootstrapper;
 use acropolis_module_governance_state::GovernanceState;
 use acropolis_module_mithril_snapshot_fetcher::MithrilSnapshotFetcher;
 use acropolis_module_parameters_state::ParametersState;
+use acropolis_module_rest_blockfrost::BlockfrostREST;
+use acropolis_module_spdd_state::SPDDState;
 use acropolis_module_spo_state::SPOState;
 use acropolis_module_stake_delta_filter::StakeDeltaFilter;
 use acropolis_module_tx_unpacker::TxUnpacker;
@@ -53,6 +56,14 @@ fn setup_governance_collect(process: &mut dyn ModuleRegistry<Message>) {
     StakeDeltaFilter::register(process);
     EpochsState::register(process);
     AccountsState::register(process);
+    //AddressState::register(process);
+    //AssetsState::register(process);
+    //HistoricalAccountsState::register(process);
+    BlockfrostREST::register(process);
+    SPDDState::register(process);
+    DRDDState::register(process);
+    //Consensus::register(process);
+    //ChainStore::register(process);
 
     Recorder::register(process);
 
@@ -91,6 +102,7 @@ fn setup_governance_replay(process: &mut dyn ModuleRegistry<Message>) {
     ParametersState::register(process);
 
     Playback::register(process);
+    BlockfrostREST::register(process);
 
     Clock::<Message>::register(process);
     RESTServer::<Message>::register(process);

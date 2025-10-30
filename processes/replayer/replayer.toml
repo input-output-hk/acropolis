@@ -8,47 +8,140 @@ path = "governance-logs"
 topic = "cardano.governance"
 path = "governance-logs"
 
+[module.gov-alonzo-recorder]
+topic = "cardano.governance"
+path = "governance-logs"
+
+
 [module.genesis-bootstrapper]
 
 [module.mithril-snapshot-fetcher]
 aggregator-url = "https://aggregator.release-mainnet.api.mithril.network/aggregator"
 genesis-key = "5b3139312c36362c3134302c3138352c3133382c31312c3233372c3230372c3235302c3134342c32372c322c3138382c33302c31322c38312c3135352c3230342c31302c3137392c37352c32332c3133382c3139362c3231372c352c31342c32302c35372c37392c33392c3137365d"
-download = false
+# Download max age in hours. E.g. 8 means 8 hours (if there isn't any snapshot within this time range download from Mithril)
+download-max-age = "never"
+# Pause constraint E.g. "epoch:100", "block:1200"
+pause = "none"
 
 [module.upstream-chain-fetcher]
 sync-point = "snapshot"
 node-address = "backbone.cardano.iog.io:3001"
 magic-number = 764824073
 
+#[module.consensus]
+# List of validation result topics to listen on validators = [
+# Add these once they are actually being sent
+#           "cardano.validation.vrf",
+#           "cardano.validation.kes",
+#           "cardano.validation.utxo"
+#]
+
 [module.block-unpacker]
+
+[module.rest-blockfrost]
 
 [module.tx-unpacker]
 publish-utxo-deltas-topic = "cardano.utxo.deltas"
+publish-asset-deltas-topic = "cardano.asset.deltas"
 publish-withdrawals-topic = "cardano.withdrawals"
 publish-certificates-topic = "cardano.certificates"
 publish-governance-topic = "cardano.governance"
 publish-block-txs-topic = "cardano.block.txs"
+network-name = "mainnet"
 
 [module.utxo-state]
 store = "memory" # "memory", "dashmap", "fjall", "fjall-async", "sled", "sled-async", "fake"
 address-delta-topic = "cardano.address.delta"
 
 [module.spo-state]
+# Enables /pools/{pool_id}/history endpoint, enables to query active_stakes
+store-epochs-history = false
+# Enable /pools/retired
+store-retired-pools = false
+# Enables /pools/{pool_id} endpoint
+store-registration = false
+# # Enables /pools/{pool_id}/updates endpoint
+store-updates = false
+# Enables /pools/{pool_id}/delegators endpoint (Requires store-stake-addresses to be enabled)
+store-delegators = false
+# Enables /pools/{pool_id}/votes endpoint
+store-votes = false
+# Store blocks, enables /pools/{pool_id}/blocks, /epochs/{number}/blocks/{pool_id}
+store-blocks = false
+# Store stake_addresses
+store-stake-addresses = false
+
+[module.spdd-state]
+# Enables active_stakes in /epochs/latest | {number} endpoints
+# Enables /epochs/{number}/{next | previous}
+store-spdd = false
+
+[module.historical-accounts-state]
 
 [module.drep-state]
+# Enables /governance/dreps/{drep_id} endpoint (Requires store-delegators to be enabled)
+store-info = false
+# Enables /governance/dreps/{drep_id}/delegators endpoint
+store-delegators = false
+# Enables /governance/dreps/{drep_id}/metadata endpoint
+store-metadata = false
+# Enables /governance/dreps/{drep_id}/updates endpoint
+store-updates = false
+# Enables /governance/dreps/{drep_id}/votes endpoint
+store-votes = false
+
+[module.drdd-state]
+store-drdd = false
 
 [module.governance-state]
-subscribe-topic = "cardano.governance"
+verification-output-file = "conway_verification.csv"
 
 [module.parameters-state]
+store-history = false
 
 [module.stake-delta-filter]
 cache-mode = "predefined" # "predefined", "read", "write", "write-if-absent"
 write-full-cache = "false"
 
 [module.epochs-state]
+# Enables /epochs/{number} endpoint (for historical epochs)
+store-history = false
 
 [module.accounts-state]
+# Enable /epochs/{number}/stakes & /epochs/{number}/stakes/{pool_id} endpoints
+spdd-retention-epochs = 0
+spdd-db-path = "./spdd_db"
+# Verify against captured CSV
+verify-pots-file = "../../modules/accounts_state/test-data/pots.mainnet.csv"
+verify-rewards-files = "../../modules/accounts_state/test-data/rewards.mainnet.{}.csv"
+
+#[module.assets-state]
+# Enables /assets endpoint
+#store-assets = false
+# Enables /assets/{asset} endpoint (requires store-assets to be enabled)
+#store-info = false
+# Enables /assets/{asset}/history endpoint
+#store-history = false
+# Enables /assets/{asset}/transactions endpoint
+#   Usage: "none", "all", or most recent: "1", "20", etc.
+#store-transactions = "none"
+# Enables /assets/{asset}/addresses endpoint
+#store-addresses = false
+# Enables /assets/{asset} endpoint (requires store-assets to be enabled)
+#index-by-policy = false
+
+#[module.chain-store]
+# Clear state on start up (default true)
+#clear-on-start = true
+
+#[module.address-state]
+# Enables /addresses/{address}, /addresses/{address}/extended,
+# /addresses/{address}/utxos/{asset}, and /addresses/{address}/utxos endpoints
+#store-info = false
+# Enables /addresses/{address}/totals endpoint
+#store-totals = false
+# Enables /addresses/{address}/transactions endpoint
+#store-transactions = false
 
 [module.clock]
 
@@ -58,7 +151,7 @@ port = 4340
 
 [module.spy]
 # Enable for message spying
-#topic = "cardano.address.#"
+#topic = "cardano.#"
 
 [startup]
 topic = "cardano.sequence.start"
