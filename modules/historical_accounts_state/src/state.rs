@@ -10,8 +10,8 @@ use acropolis_common::{
     queries::accounts::{
         AccountReward, AccountWithdrawal, DelegationUpdate, RegistrationStatus, RegistrationUpdate,
     },
-    BlockInfo, InstantaneousRewardTarget, PoolId, ShelleyAddress, StakeAddress, TxCertificate,
-    TxIdentifier,
+    BlockInfo, InstantaneousRewardTarget, PoolId, RewardType, ShelleyAddress, StakeAddress,
+    TxCertificate, TxIdentifier,
 };
 use tracing::warn;
 
@@ -108,8 +108,14 @@ impl State {
         let volatile = self.volatile.window.back_mut().expect("window should never be empty");
         for reward in reward_deltas.deltas.iter() {
             let entry = volatile.entry(reward.stake_address.clone()).or_default();
+
+            let reward_epoch = match reward.reward_type {
+                RewardType::PoolRefund => epoch,
+                _ => epoch.saturating_sub(2),
+            };
+
             let update = AccountReward {
-                epoch: epoch - 2,
+                epoch: reward_epoch,
                 amount: reward.delta,
                 pool: reward.pool.clone(),
                 reward_type: reward.reward_type.clone(),
