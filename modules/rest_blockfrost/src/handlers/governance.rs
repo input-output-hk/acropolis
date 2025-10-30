@@ -4,14 +4,10 @@ use crate::types::{
     DRepInfoREST, DRepMetadataREST, DRepUpdateREST, DRepVoteREST, DRepsListREST, ProposalVoteREST,
     VoterRoleREST,
 };
-use acropolis_common::{
-    messages::{Message, RESTResponse, StateQuery, StateQueryResponse},
-    queries::{
-        accounts::{AccountsStateQuery, AccountsStateQueryResponse},
-        governance::{GovernanceStateQuery, GovernanceStateQueryResponse},
-    },
-    Credential, GovActionId, KeyHash, TxHash, Voter,
-};
+use acropolis_common::{messages::{Message, RESTResponse, StateQuery, StateQueryResponse}, queries::{
+    accounts::{AccountsStateQuery, AccountsStateQueryResponse},
+    governance::{GovernanceStateQuery, GovernanceStateQueryResponse},
+}, Credential, GovActionId, StakeAddress, TxHash, Voter};
 use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
 use reqwest::Client;
@@ -191,7 +187,7 @@ pub async fn handle_drep_delegators_blockfrost(
         Message::StateQueryResponse(StateQueryResponse::Governance(
             GovernanceStateQueryResponse::DRepDelegators(delegators),
         )) => {
-            let stake_key_to_bech32: HashMap<KeyHash, String> = match delegators
+            let stake_address_to_bech32: HashMap<StakeAddress, String> = match delegators
                 .addresses
                 .iter()
                 .map(|addr| {
@@ -199,8 +195,7 @@ pub async fn handle_drep_delegators_blockfrost(
                     let bech32 = credential
                         .to_stake_bech32()
                         .map_err(|_| anyhow!("Failed to encode stake address"))?;
-                    let key_hash = credential.get_hash();
-                    Ok((key_hash, bech32))
+                    Ok((addr.clone(), bech32))
                 })
                 .collect::<Result<HashMap<_, _>>>()
             {
@@ -229,8 +224,8 @@ pub async fn handle_drep_delegators_blockfrost(
                 )) => {
                     let mut response = Vec::new();
 
-                    for (key, amount) in map {
-                        let Some(bech32) = stake_key_to_bech32.get(&key) else {
+                    for (stake_address, amount) in map {
+                        let Some(bech32) = stake_address_to_bech32.get(&stake_address) else {
                             return Ok(RESTResponse::with_text(
                                 500,
                                 "Internal error: missing Bech32 for stake key",

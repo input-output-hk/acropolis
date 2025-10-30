@@ -17,7 +17,7 @@ use acropolis_common::{
         utils::query_state,
     },
     rest_helper::ToCheckedF64,
-    PoolId, PoolRetirement, PoolUpdateAction, StakeCredential, TxIdentifier,
+    PoolId, PoolRetirement, PoolUpdateAction, TxIdentifier,
 };
 use anyhow::Result;
 use caryatid_sdk::Context;
@@ -1004,9 +1004,9 @@ pub async fn handle_pool_delegators_blockfrost(
     };
 
     let mut delegators_rest = Vec::<PoolDelegatorRest>::new();
-    for (d, l) in pool_delegators {
-        let bech32 = StakeCredential::AddrKeyHash(d.clone())
-            .to_stake_bech32()
+    for (stake_address, l) in pool_delegators {
+        let bech32 = stake_address
+            .to_string()
             .map_err(|e| anyhow::anyhow!("Invalid stake address in pool delegators: {e}"))?;
         delegators_rest.push(PoolDelegatorRest {
             address: bech32,

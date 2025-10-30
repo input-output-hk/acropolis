@@ -16,7 +16,7 @@ pub fn map_to_block_issuer(
                 let digest = keyhash_224(vkey);
                 if let Some(issuer) = shelley_genesis_delegates
                     .values()
-                    .find(|v| v.delegate == digest.to_vec())
+                    .find(|v| v.delegate == digest)
                     .map(|i| BlockIssuer::GenesisDelegate(i.clone()))
                 {
                     Some(issuer)

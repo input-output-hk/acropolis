@@ -51,7 +51,9 @@ impl TxUnpacker {
 
         for (hash, vote) in proposals.iter() {
             match map(vote) {
-                Ok(upd) => update.proposals.push((hash.to_vec(), upd)),
+                Ok(upd) => {
+                    update.proposals.push((GenesisKeyhash::try_from(hash.as_slice()).unwrap(), upd))
+                }
                 Err(e) => error!("Cannot convert alonzo protocol param update {vote:?}: {e}"),
             }
         }

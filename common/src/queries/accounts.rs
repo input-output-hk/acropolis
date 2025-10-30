@@ -57,17 +57,17 @@ pub enum AccountsStateQueryResponse {
     AccountAssets(AccountAssets),
     AccountAssetsTotals(AccountAssetsTotals),
     AccountUTxOs(AccountUTxOs),
-    AccountsUtxoValuesMap(HashMap<KeyHash, u64>),
+    AccountsUtxoValuesMap(HashMap<StakeAddress, u64>),
     AccountsUtxoValuesSum(u64),
-    AccountsBalancesMap(HashMap<KeyHash, u64>),
+    AccountsBalancesMap(HashMap<StakeAddress, u64>),
     AccountsBalancesSum(u64),
 
     // Epochs-related responses
     ActiveStakes(u64),
-    /// Vec<(PoolId, StakeKey, ActiveStakeAmount)>
-    SPDDByEpoch(Vec<(PoolId, KeyHash, u64)>),
-    /// Vec<(StakeKey, ActiveStakeAmount)>
-    SPDDByEpochAndPool(Vec<(KeyHash, u64)>),
+    /// Vec<(PoolId, StakeAddress, ActiveStakeAmount)>
+    SPDDByEpoch(Vec<(PoolId, StakeAddress, u64)>),
+    /// Vec<(StakeAddress, ActiveStakeAmount)>
+    SPDDByEpochAndPool(Vec<(StakeAddress, u64)>),
 
     // Pools-related responses
     OptimalPoolSizing(Option<OptimalPoolSizing>),
@@ -77,7 +77,7 @@ pub enum AccountsStateQueryResponse {
 
     // DReps-related responses
     DrepDelegators(DrepDelegators),
-    AccountsDrepDelegationsMap(HashMap<KeyHash, Option<DRepChoice>>),
+    AccountsDrepDelegationsMap(HashMap<StakeAddress, Option<DRepChoice>>),
 
     NotFound,
     Error(String),
@@ -173,7 +173,7 @@ pub struct OptimalPoolSizing {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PoolDelegators {
-    pub delegators: Vec<(KeyHash, u64)>,
+    pub delegators: Vec<(StakeAddress, u64)>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

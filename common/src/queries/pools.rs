@@ -1,6 +1,6 @@
 use crate::{
-    queries::governance::VoteRecord, rational_number::RationalNumber, KeyHash, PoolEpochState,
-    PoolId, PoolMetadata, PoolRegistration, PoolRetirement, PoolUpdateEvent, Relay,
+    queries::governance::VoteRecord, rational_number::RationalNumber, PoolEpochState, PoolId,
+    PoolMetadata, PoolRegistration, PoolRetirement, PoolUpdateEvent, Relay, StakeAddress,
 };
 
 pub const DEFAULT_POOLS_QUERY_TOPIC: (&str, &str) =
@@ -94,5 +94,5 @@ pub struct PoolActiveStakeInfo {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PoolDelegators {
-    pub delegators: Vec<(KeyHash, u64)>,
+    pub delegators: Vec<(StakeAddress, u64)>,
 }

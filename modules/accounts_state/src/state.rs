@@ -172,7 +172,7 @@ impl State {
     }
 
     /// Get Pool Delegators with live_stakes
-    pub fn get_pool_delegators(&self, pool_operator: &PoolId) -> Vec<(KeyHash, u64)> {
+    pub fn get_pool_delegators(&self, pool_operator: &PoolId) -> Vec<(StakeAddress, u64)> {
         self.stake_addresses.lock().unwrap().get_pool_delegators(pool_operator)
     }
 
@@ -185,7 +185,7 @@ impl State {
     pub fn get_accounts_utxo_values_map(
         &self,
         stake_keys: &[StakeAddress],
-    ) -> Option<HashMap<KeyHash, u64>> {
+    ) -> Option<HashMap<StakeAddress, u64>> {
         let stake_addresses = self.stake_addresses.lock().ok()?; // If lock fails, return None
         stake_addresses.get_accounts_utxo_values_map(stake_keys)
     }
@@ -200,7 +200,7 @@ impl State {
     pub fn get_accounts_balances_map(
         &self,
         stake_keys: &[StakeAddress],
-    ) -> Option<HashMap<KeyHash, u64>> {
+    ) -> Option<HashMap<StakeAddress, u64>> {
         let stake_addresses = self.stake_addresses.lock().ok()?; // If lock fails, return None
         stake_addresses.get_accounts_balances_map(stake_keys)
     }
@@ -220,7 +220,7 @@ impl State {
     pub fn get_drep_delegations_map(
         &self,
         stake_keys: &[StakeAddress],
-    ) -> Option<HashMap<KeyHash, Option<DRepChoice>>> {
+    ) -> Option<HashMap<StakeAddress, Option<DRepChoice>>> {
         let stake_addresses = self.stake_addresses.lock().ok()?; // If lock fails, return None
         stake_addresses.get_drep_delegations_map(stake_keys)
     }
@@ -572,7 +572,7 @@ impl State {
         stake_addresses.generate_spdd()
     }
 
-    pub fn dump_spdd_state(&self) -> HashMap<PoolId, Vec<(KeyHash, u64)>> {
+    pub fn dump_spdd_state(&self) -> HashMap<PoolId, Vec<(StakeAddress, u64)>> {
         let stake_addresses = self.stake_addresses.lock().unwrap();
         stake_addresses.dump_spdd_state()
     }

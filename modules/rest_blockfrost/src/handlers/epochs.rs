@@ -15,7 +15,7 @@ use acropolis_common::{
         spdd::{SPDDStateQuery, SPDDStateQueryResponse},
         utils::query_state,
     },
-    NetworkId, PoolId, StakeAddress, StakeCredential,
+    NetworkId, PoolId,
 };
 use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
@@ -486,16 +486,10 @@ pub async fn handle_epoch_total_stakes_blockfrost(
     .await?;
     let spdd_response = spdd
         .into_iter()
-        .map(|(pool_id, stake_key_hash, amount)| {
-            let stake_address = StakeAddress {
-                network: network.clone(),
-                credential: StakeCredential::AddrKeyHash(stake_key_hash),
-            }
-            .to_string()
-            .map_err(|e| anyhow::anyhow!("Failed to convert stake address to string: {e}"))?;
+        .map(|(pool_id, stake_address, amount)| {
             Ok(SPDDByEpochItemRest {
-                pool_id: pool_id.to_vec(),
-                stake_address,
+                pool_id,
+                stake_address: stake_address.to_string().unwrap(),
                 amount,
             })
         })
@@ -623,16 +617,9 @@ pub async fn handle_epoch_pool_stakes_blockfrost(
     .await?;
     let spdd_response = spdd
         .into_iter()
-        .map(|(key_hash, amount)| {
-            let stake_address = StakeAddress {
-                network: network.clone(),
-                credential: StakeCredential::AddrKeyHash(key_hash),
-            }
-            .to_string()
-            .map_err(|e| anyhow::anyhow!("Failed to convert stake address to string: {e}"))?;
-
+        .map(|(stake_address, amount)| {
             Ok(SPDDByEpochAndPoolItemRest {
-                stake_address,
+                stake_address: stake_address.to_string().unwrap(),
                 amount,
             })
         })

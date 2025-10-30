@@ -474,12 +474,12 @@ impl State {
         context: &Arc<Context<Message>>,
         delegators: &[(&StakeAddress, &DRepChoice)],
     ) -> Result<()> {
-        let mut stake_key_to_input = HashMap::with_capacity(delegators.len());
+        let mut stake_address_to_input = HashMap::with_capacity(delegators.len());
         let mut stake_addresses = Vec::with_capacity(delegators.len());
 
-        for &(sc, drep) in delegators {
-            stake_addresses.push(sc.clone());
-            stake_key_to_input.insert(sc.get_credential().get_hash(), (sc, drep));
+        for &(stake_address, drep) in delegators {
+            stake_addresses.push(stake_address.clone());
+            stake_address_to_input.insert(stake_address, (stake_address, drep));
         }
 
         let msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
@@ -500,8 +500,8 @@ impl State {
             }
         };
 
-        for (stake_key, old_drep_opt) in result_map {
-            let &(delegator, new_drep_choice) = match stake_key_to_input.get(&stake_key) {
+        for (stake_address, old_drep_opt) in result_map {
+            let &(delegator, new_drep_choice) = match stake_address_to_input.get(&stake_address) {
                 Some(pair) => pair,
                 None => continue,
             };
