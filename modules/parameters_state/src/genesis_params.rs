@@ -1,5 +1,4 @@
 use crate::alonzo_genesis;
-use acropolis_common::types::ScriptHash;
 use acropolis_common::{
     protocol_params::{AlonzoParams, BabbageParams, ByronParams, ConwayParams, ShelleyParams},
     rational_number::{rational_number_from_f32, RationalNumber},
@@ -109,7 +108,7 @@ pub fn map_constitution(constitution: &conway::Constitution) -> Result<Constitut
     Ok(Constitution {
         anchor: map_anchor(&constitution.anchor)?,
         guardrail_script: Some(
-            ScriptHash::try_from(decode_hex_string(&constitution.script, 28)?).unwrap(),
+            decode_hex_string(&constitution.script, 28)?.try_into().unwrap(),
         ),
     })
 }

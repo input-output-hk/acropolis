@@ -49,13 +49,6 @@ pub fn genesis_delegate_to_hash<const N: usize>(
     Hash::try_from(pallas_hash.as_ref()).unwrap()
 }
 
-/// Convert an optional Pallas Hash reference to an optional Acropolis Hash
-pub fn to_hash_opt<const N: usize>(
-    pallas_hash: Option<&pallas_primitives::Hash<N>>,
-) -> Option<Hash<N>> {
-    pallas_hash.map(|h| to_hash(h))
-}
-
 /// Convert a Pallas Hash<28> reference to an Acropolis PoolId
 pub fn to_pool_id(pallas_hash: &pallas_primitives::Hash<28>) -> PoolId {
     to_hash(pallas_hash).into()
@@ -64,15 +57,6 @@ pub fn to_pool_id(pallas_hash: &pallas_primitives::Hash<28>) -> PoolId {
 /// Convert a Pallas Hash<32> reference to an Acropolis VRFKey
 pub fn to_vrf_key(pallas_hash: &pallas_primitives::Hash<32>) -> VrfKeyHash {
     VrfKeyHash::try_from(pallas_hash.as_ref()).unwrap()
-}
-
-/// Convert a Pallas Bytes reference to an Acropolis Hash<N>
-/// Useful for genesis hash fields that might be stored as Bytes
-pub fn bytes_to_hash<const N: usize>(bytes: &pallas_primitives::Bytes) -> Hash<N> {
-    let slice: &[u8] = bytes.as_ref();
-    let mut array = [0u8; N];
-    array.copy_from_slice(&slice[..N]);
-    array.into()
 }
 
 /// Derive our Address from a Pallas address

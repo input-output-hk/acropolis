@@ -653,8 +653,10 @@ impl Credential {
                 hex_str
             ))
         } else {
-            KeyHash::try_from(key_hash.as_slice())
-                .map_err(|_| anyhow!("Failed to convert to KeyHash"))
+            key_hash
+                .as_slice()
+                .try_into()
+                .map_err(|e| anyhow!("Failed to convert to KeyHash {}", e))
         }
     }
 
@@ -695,12 +697,7 @@ impl Credential {
             ));
         }
 
-        let hash = KeyHash::try_from(data).map_err(|v| {
-            anyhow!(
-                "Failed to convert to KeyHash: expected 28 bytes, got {}",
-                v.len()
-            )
-        })?;
+        let hash = data.try_into().expect("failed to convert to fixed-size array");
 
         match hrp.as_str() {
             "drep" => Ok(Credential::AddrKeyHash(hash)),

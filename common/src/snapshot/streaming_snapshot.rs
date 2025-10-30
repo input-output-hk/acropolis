@@ -66,7 +66,7 @@ impl<'b, C> minicbor::decode::Decode<'b, C> for StakeCredential {
             0 => {
                 // ScriptHash variant (first in enum) - decode bytes directly
                 let bytes = d.bytes()?;
-                let key_hash = KeyHash::try_from(bytes).map_err(|_| {
+                let key_hash = bytes.try_into().map_err(|_| {
                     minicbor::decode::Error::message(
                         "invalid length for ScriptHash in StakeCredential",
                     )
@@ -76,7 +76,7 @@ impl<'b, C> minicbor::decode::Decode<'b, C> for StakeCredential {
             1 => {
                 // AddrKeyHash variant (second in enum) - decodes bytes directly
                 let bytes = d.bytes()?;
-                let key_hash = KeyHash::try_from(bytes).map_err(|_| {
+                let key_hash = bytes.try_into().map_err(|_| {
                     minicbor::decode::Error::message(
                         "invalid length for AddrKeyHash in StakeCredential",
                     )
@@ -309,7 +309,7 @@ impl<'b, C> minicbor::Decode<'b, C> for Account {
 
 pub use crate::types::AddrKeyhash;
 pub use crate::types::ScriptHash;
-use crate::{KeyHash, PoolId};
+use crate::{PoolId};
 /// Alias minicbor as cbor for pool_params module
 pub use minicbor as cbor;
 

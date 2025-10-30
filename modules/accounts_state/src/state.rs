@@ -1009,7 +1009,7 @@ mod tests {
         full_hash[..hash.len().min(28)].copy_from_slice(&hash[..hash.len().min(28)]);
         StakeAddress {
             network: NetworkId::Mainnet,
-            credential: StakeCredential::AddrKeyHash(KeyHash::try_from(full_hash).unwrap()),
+            credential: StakeCredential::AddrKeyHash(full_hash.try_into().unwrap()),
         }
     }
 

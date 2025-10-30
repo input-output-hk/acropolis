@@ -430,15 +430,15 @@ mod test {
     }
 
     pub fn script_to_hash<const N: usize>(pallas_hash: ScriptHash) -> Hash<N> {
-        Hash::try_from(pallas_hash.as_ref()).unwrap()
+        pallas_hash.as_ref().try_into().unwrap()
     }
 
     pub fn stake_to_hash<const N: usize>(pallas_hash: StakeKeyHash) -> Hash<N> {
-        Hash::try_from(pallas_hash.as_ref()).unwrap()
+        pallas_hash.as_ref().try_into().unwrap()
     }
 
     pub fn payment_to_hash<const N: usize>(pallas_hash: PaymentKeyHash) -> Hash<N> {
-        Hash::try_from(pallas_hash.as_ref()).unwrap()
+        pallas_hash.as_ref().try_into().unwrap()
     }
 
     /// Derive our Address from a Pallas address
