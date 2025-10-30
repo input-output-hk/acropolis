@@ -65,7 +65,7 @@ impl State {
     }
 
     pub fn handle_epoch_nonce(&mut self, msg: &EpochNonceMessage) {
-        self.epoch_nonce = Some(msg.nonce.clone());
+        self.epoch_nonce = msg.nonce.clone();
     }
 
     pub fn handle_new_snapshot(
@@ -115,9 +115,9 @@ impl State {
                 &epoch_nonce,
                 &genesis.genesis_delegs,
                 praos_params,
-                &self.epoch_snapshots.go.active_spos,
-                &self.epoch_snapshots.go.active_stakes,
-                self.epoch_snapshots.go.total_active_stakes,
+                &self.epoch_snapshots.set.active_spos,
+                &self.epoch_snapshots.set.active_stakes,
+                self.epoch_snapshots.set.total_active_stakes,
                 decentralisation_param,
             )?;
             vrf_validations.iter().try_for_each(|assert| assert())
@@ -127,9 +127,9 @@ impl State {
                 header,
                 &epoch_nonce,
                 praos_params,
-                &self.epoch_snapshots.go.active_spos,
-                &self.epoch_snapshots.go.active_stakes,
-                self.epoch_snapshots.go.total_active_stakes,
+                &self.epoch_snapshots.set.active_spos,
+                &self.epoch_snapshots.set.active_stakes,
+                self.epoch_snapshots.set.total_active_stakes,
             )?;
             vrf_validations.iter().try_for_each(|assert| assert())
         }

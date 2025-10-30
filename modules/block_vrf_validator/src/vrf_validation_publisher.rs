@@ -32,7 +32,11 @@ impl VrfValidationPublisher {
         let validation_status = match validation_result {
             Ok(_) => ValidationStatus::Go,
             Err(error) => {
-                error!("VRF validation failed: {}", error.clone());
+                error!(
+                    "VRF validation failed: {} of block {}",
+                    error.clone(),
+                    block.number
+                );
                 ValidationStatus::NoGo(ValidationError::from(error))
             }
         };

@@ -1,6 +1,6 @@
 use acropolis_common::{
     messages::{CardanoMessage, EpochNonceMessage, Message},
-    protocol_params::Nonce,
+    protocol_params::Nonces,
     BlockInfo,
 };
 use caryatid_sdk::Context;
@@ -22,14 +22,21 @@ impl EpochNoncePublisher {
     }
 
     /// Publish the Epoch Nonce Message
-    pub async fn publish(&mut self, block_info: &BlockInfo, nonce: Nonce) -> anyhow::Result<()> {
+    pub async fn publish(
+        &mut self,
+        block_info: &BlockInfo,
+        nonces: Option<Nonces>,
+    ) -> anyhow::Result<()> {
+        let active_nonce = nonces.map(|nonces| nonces.active);
         self.context
             .message_bus
             .publish(
                 &self.topic,
                 Arc::new(Message::Cardano((
                     block_info.clone(),
-                    CardanoMessage::EpochNonce(EpochNonceMessage { nonce }),
+                    CardanoMessage::EpochNonce(EpochNonceMessage {
+                        nonce: active_nonce,
+                    }),
                 ))),
             )
             .await

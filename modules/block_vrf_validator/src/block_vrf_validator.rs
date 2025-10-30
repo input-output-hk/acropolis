@@ -74,9 +74,9 @@ impl BlockVrfValidator {
         loop {
             // Get a mutable state
             let mut state = history.lock().await.get_or_init_with(|| State::new());
-            let (_, message) = blocks_subscription.read().await?;
             let mut current_block: Option<BlockInfo> = None;
 
+            let (_, message) = blocks_subscription.read().await?;
             match message.as_ref() {
                 Message::Cardano((block_info, CardanoMessage::BlockAvailable(block_msg))) => {
                     // handle rollback here

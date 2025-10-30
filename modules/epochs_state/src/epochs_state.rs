@@ -150,14 +150,13 @@ impl EpochsState {
                             match state.handle_block_header(&genesis, &block_info, &header) {
                                 Ok(()) => {
                                     if is_new_epoch {
-                                        if let Some(nonces) = state.get_nonces() {
-                                            epoch_nonce_publisher
-                                                .publish(&block_info, nonces.active)
-                                                .await
-                                                .unwrap_or_else(|e| {
-                                                    error!("Failed to publish epoch nonce: {e}")
-                                                });
-                                        }
+                                        let nonces = state.get_nonces();
+                                        epoch_nonce_publisher
+                                            .publish(&block_info, nonces)
+                                            .await
+                                            .unwrap_or_else(|e| {
+                                                error!("Failed to publish epoch nonce: {e}")
+                                            });
                                     }
                                 }
                                 Err(e) => error!("Error handling block header: {e}"),

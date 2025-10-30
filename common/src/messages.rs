@@ -188,7 +188,7 @@ pub struct EpochActivityMessage {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EpochNonceMessage {
-    pub nonce: Nonce,
+    pub nonce: Option<Nonce>,
 }
 
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]

@@ -170,7 +170,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_4490511_block() {
+    fn test_4490511_block_produced_by_genesis_key() {
         let genesis_value = GenesisValues::mainnet();
         let praos_params = PraosParams::mainnet();
         let epoch_nonce = Nonce::from(
@@ -212,6 +212,65 @@ mod tests {
             &active_spos,
             &active_spdd,
             1,
+            decentralisation_param,
+        )
+        .unwrap();
+        let result: Result<(), VrfValidationError> =
+            vrf_validations.iter().try_for_each(|assert| assert());
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_4556956_block() {
+        let genesis_value = GenesisValues::mainnet();
+        let praos_params = PraosParams::mainnet();
+        let epoch_nonce = Nonce::from(
+            NonceHash::try_from(
+                hex::decode("3fac34ac3d7d1ac6c976ba68b1509b1ee3aafdbf6de96e10789e488e13e16bd7")
+                    .unwrap()
+                    .as_slice(),
+            )
+            .unwrap(),
+        );
+        let decentralisation_param = RationalNumber::new(9, 10);
+
+        let block_header_4556956: Vec<u8> =
+            hex::decode(include_str!("./data/4556956.cbor")).unwrap();
+        let block_header = MultiEraHeader::decode(1, None, &block_header_4556956).unwrap();
+        let block_info = BlockInfo {
+            status: BlockStatus::Immutable,
+            slot: 5824849,
+            hash: BlockHash::try_from(
+                hex::decode("1038b2c76a23ea7d89cbd84d7744c97560eb3412661beed6959d748e24ff8229")
+                    .unwrap(),
+            )
+            .unwrap(),
+            timestamp: 1597391140,
+            number: 4556956,
+            epoch: 211,
+            epoch_slot: 36049,
+            new_epoch: false,
+            era: Era::Shelley,
+        };
+        let pool_id = Vec::<u8>::from_bech32_with_hrp(
+            "pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy",
+            "pool",
+        )
+        .unwrap();
+        let active_spos: HashMap<PoolId, KeyHash> = HashMap::from([(
+            pool_id.clone(),
+            keyhash_256(block_header.vrf_vkey().unwrap()),
+        )]);
+        let active_spdd = HashMap::from([(pool_id.clone(), 75284250207839)]);
+        let vrf_validations = validate_vrf_tpraos(
+            &block_info,
+            &block_header,
+            &epoch_nonce,
+            &genesis_value.genesis_delegs,
+            &praos_params,
+            &active_spos,
+            &active_spdd,
+            10177811974823000,
             decentralisation_param,
         )
         .unwrap();
