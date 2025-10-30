@@ -1002,7 +1002,8 @@ mod tests {
         // Pass in deltas
         let msg = StakeAddressDeltasMessage {
             deltas: vec![StakeAddressDelta {
-                address: stake_address.clone(),
+                stake_address: stake_address.clone(),
+                addresses: Vec::new(),
                 delta: 42,
             }],
         };
@@ -1089,7 +1090,8 @@ mod tests {
         // Put some value in
         let msg1 = StakeAddressDeltasMessage {
             deltas: vec![StakeAddressDelta {
-                address: addr1.clone(),
+                stake_address: addr1.clone(),
+                addresses: Vec::new(),
                 delta: 42,
             }],
         };
@@ -1098,7 +1100,8 @@ mod tests {
 
         let msg2 = StakeAddressDeltasMessage {
             deltas: vec![StakeAddressDelta {
-                address: addr2.clone(),
+                stake_address: addr2.clone(),
+                addresses: Vec::new(),
                 delta: 21,
             }],
         };
@@ -1196,7 +1199,8 @@ mod tests {
 
         let msg = StakeAddressDeltasMessage {
             deltas: vec![StakeAddressDelta {
-                address: stake_address.clone(),
+                stake_address: stake_address.clone(),
+                addresses: Vec::new(),
                 delta: 99,
             }],
         };
@@ -1242,7 +1246,8 @@ mod tests {
         state.register_stake_address(&stake_address, None);
         let msg = StakeAddressDeltasMessage {
             deltas: vec![StakeAddressDelta {
-                address: stake_address.clone(),
+                stake_address: stake_address.clone(),
+                addresses: Vec::new(),
                 delta: 99,
             }],
         };
@@ -1402,19 +1407,23 @@ mod tests {
 
         let deltas = vec![
             StakeAddressDelta {
-                address: spo1,
+                stake_address: spo1,
+                addresses: Vec::new(),
                 delta: 100,
             },
             StakeAddressDelta {
-                address: spo2,
+                stake_address: spo2,
+                addresses: Vec::new(),
                 delta: 1_000,
             },
             StakeAddressDelta {
-                address: spo3,
+                stake_address: spo3,
+                addresses: Vec::new(),
                 delta: 10_000,
             },
             StakeAddressDelta {
-                address: spo4,
+                stake_address: spo4,
+                addresses: Vec::new(),
                 delta: 100_000,
             },
         ];

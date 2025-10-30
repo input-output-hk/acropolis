@@ -201,8 +201,11 @@ pub struct AddressDelta {
 /// Stake balance change
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StakeAddressDelta {
-    /// Address
-    pub address: StakeAddress,
+    /// Stake address
+    pub stake_address: StakeAddress,
+
+    /// Shelley addresses contributing to the delta
+    pub addresses: Vec<ShelleyAddress>,
 
     /// Balance change
     pub delta: i64,
