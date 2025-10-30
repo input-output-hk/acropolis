@@ -429,15 +429,15 @@ mod test {
         }
     }
 
-    pub fn script_to_hash<const N: usize>(pallas_hash: ScriptHash) -> Hash<N> {
+    pub fn script_to_hash(pallas_hash: ScriptHash) -> Hash<28> {
         pallas_hash.as_ref().try_into().unwrap()
     }
 
-    pub fn stake_to_hash<const N: usize>(pallas_hash: StakeKeyHash) -> Hash<N> {
+    pub fn stake_to_hash(pallas_hash: StakeKeyHash) -> Hash<28> {
         pallas_hash.as_ref().try_into().unwrap()
     }
 
-    pub fn payment_to_hash<const N: usize>(pallas_hash: PaymentKeyHash) -> Hash<N> {
+    pub fn payment_to_hash(pallas_hash: PaymentKeyHash) -> Hash<28> {
         pallas_hash.as_ref().try_into().unwrap()
     }
 

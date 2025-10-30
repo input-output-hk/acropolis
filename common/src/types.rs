@@ -450,7 +450,7 @@ pub type ScriptHash = KeyHash;
 pub type AddrKeyhash = KeyHash;
 
 /// Script identifier
-pub type GenesisKeyhash = Vec<u8>;
+pub type GenesisKeyhash = Hash<32>;
 
 declare_hash_type!(BlockHash, 32);
 declare_hash_type!(TxHash, 32);
@@ -982,10 +982,10 @@ pub struct SPORewards {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenesisKeyDelegation {
     /// Genesis hash
-    pub genesis_hash: KeyHash,
+    pub genesis_hash: GenesisKeyhash,
 
     /// Genesis delegate hash
-    pub genesis_delegate_hash: KeyHash,
+    pub genesis_delegate_hash: PoolId,
 
     /// VRF key hash
     pub vrf_key_hash: VrfKeyHash,
@@ -1678,19 +1678,23 @@ pub enum Voter {
     StakePoolKey(PoolId),
 }
 
-impl Display for Voter {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        let bech32 = match self {
+impl Voter {
+    pub fn to_bech32(&self) -> Result<String, Error> {
+        match self {
             Voter::ConstitutionalCommitteeKey(h) => h.to_bech32(),
             Voter::ConstitutionalCommitteeScript(s) => s.to_bech32(),
             Voter::DRepKey(k) => k.to_bech32(),
             Voter::DRepScript(s) => s.to_bech32(),
             Voter::StakePoolKey(k) => k.to_bech32(),
-        };
+        }
+    }
+}
 
-        match bech32 {
-            Ok(s) => write!(f, "{}", s),
-            Err(e) => write!(f, "<invalid: {}>", e),
+impl Display for Voter {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self.to_bech32() {
+            Ok(addr) => write!(f, "{}", addr),
+            Err(e) => write!(f, "<invalid voter: {}>", e),
         }
     }
 }
