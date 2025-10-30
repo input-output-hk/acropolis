@@ -110,25 +110,23 @@ impl Recorder {
                 gov_recorder.write(&blk_g, CardanoMessage::GovernanceProcedures(gov_procs));
             }
 
-            if blk_g.new_epoch {
-                if blk_g.epoch > 0 {
-                    info!("Waiting drep...");
-                    let (blk_drep, d_drep) = Self::read_drep(&mut drep_s).await?;
-                    if blk_g != blk_drep {
-                        error!("Governance {blk_g:?} and DRep distribution {blk_drep:?} are out of sync");
-                    }
-
-                    info!("Waiting spo...");
-                    let (blk_spo, d_spo) = Self::read_spo(&mut spo_s).await?;
-                    if blk_g != blk_spo {
-                        error!(
-                            "Governance {blk_g:?} and SPO distribution {blk_spo:?} are out of sync"
-                        );
-                    }
-
-                    drep_recorder.write(&blk_g, CardanoMessage::DRepStakeDistribution(d_drep));
-                    spo_recorder.write(&blk_g, CardanoMessage::SPOStakeDistribution(d_spo));
+            if blk_g.new_epoch && blk_g.epoch > 0 {
+                info!("Waiting drep...");
+                let (blk_drep, d_drep) = Self::read_drep(&mut drep_s).await?;
+                if blk_g != blk_drep {
+                    error!(
+                        "Governance {blk_g:?} and DRep distribution {blk_drep:?} are out of sync"
+                    );
                 }
+
+                info!("Waiting spo...");
+                let (blk_spo, d_spo) = Self::read_spo(&mut spo_s).await?;
+                if blk_g != blk_spo {
+                    error!("Governance {blk_g:?} and SPO distribution {blk_spo:?} are out of sync");
+                }
+
+                drep_recorder.write(&blk_g, CardanoMessage::DRepStakeDistribution(d_drep));
+                spo_recorder.write(&blk_g, CardanoMessage::SPOStakeDistribution(d_spo));
             }
         }
     }

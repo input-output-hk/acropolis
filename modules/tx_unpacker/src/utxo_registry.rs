@@ -174,7 +174,7 @@ mod tests {
     use anyhow::Result;
 
     fn make_hash(byte: u8) -> TxHash {
-        TxHash([byte; 32])
+        TxHash::new([byte; 32])
     }
     impl UTxORegistry {
         /// Lookup unspent tx output

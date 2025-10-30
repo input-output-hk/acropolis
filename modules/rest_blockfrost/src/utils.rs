@@ -98,9 +98,7 @@ mod tests {
                     serde_json::from_reader::<_, std::collections::HashMap<String, String>>(file)
                 {
                     if let Some(path_str) = map.get(url.trim()) {
-                        if let Ok(bytes) =
-                            std::fs::read(&std::path::Path::new(path_str).to_path_buf())
-                        {
+                        if let Ok(bytes) = std::fs::read(path_str) {
                             return Ok(bytes);
                         }
                     }

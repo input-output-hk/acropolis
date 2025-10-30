@@ -1,7 +1,6 @@
 // Acropolis common library - main library exports
 
 pub mod address;
-pub mod byte_array;
 pub mod calculations;
 pub mod cip19;
 pub mod commands;
@@ -27,5 +26,4 @@ pub mod validation;
 
 // Flattened re-exports
 pub use self::address::*;
-pub use self::byte_array::*;
 pub use self::types::*;

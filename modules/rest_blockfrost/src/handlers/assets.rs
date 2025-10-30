@@ -150,10 +150,10 @@ pub async fn handle_asset_single_blockfrost(
     )
     .await;
 
-    return match response {
+    match response {
         Ok(rest) => Ok(rest),
         Err(e) => Ok(RESTResponse::with_text(500, &format!("Query failed: {e}"))),
-    };
+    }
 }
 
 pub async fn handle_asset_history_blockfrost(
@@ -295,7 +295,7 @@ pub async fn handle_asset_addresses_blockfrost(
                 AssetsStateQueryResponse::AssetAddresses(addresses),
             )) => {
                 let rest_addrs: Result<Vec<_>, _> =
-                    addresses.iter().map(|entry| AssetAddressRest::try_from(entry)).collect();
+                    addresses.iter().map(AssetAddressRest::try_from).collect();
 
                 match rest_addrs {
                     Ok(rest_addrs) => match serde_json::to_string_pretty(&rest_addrs) {

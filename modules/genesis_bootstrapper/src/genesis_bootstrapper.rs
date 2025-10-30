@@ -141,7 +141,7 @@ impl GenesisBootstrapper {
                 let mut total_allocated: u64 = 0;
                 for (tx_index, (hash, address, amount)) in gen_utxos.iter().enumerate() {
                     let tx_identifier = TxIdentifier::new(0, tx_index as u16);
-                    let tx_ref = TxOutRef::new(TxHash(**hash), 0);
+                    let tx_ref = TxOutRef::new(TxHash::from(**hash), 0);
 
                     gen_utxo_identifiers.push((tx_ref, tx_identifier));
 
