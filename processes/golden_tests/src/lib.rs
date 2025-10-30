@@ -28,8 +28,8 @@ pub fn signal_test_completion() {
     }
 }
 
-// Disabled test pending fix
-// #[tokio::test]
+#[tokio::test]
+#[ignore = "Disabled test pending fix"]
 async fn golden_test() -> Result<()> {
     let config = Arc::new(
         Config::builder()

@@ -24,34 +24,7 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Run Clippy
-        run: |
-          cargo clippy --all-targets --all-features \
-            --package acropolis_common \
-            --package acropolis_codec \
-            --package acropolis_module_accounts_state \
-            --package acropolis_module_address_state \
-            --package acropolis_module_assets_state \
-            --package acropolis_module_block_unpacker \
-            --package acropolis_module_chain_store \
-            --package acropolis_module_consensus \
-            --package acropolis_module_drdd_state \
-            --package acropolis_module_drep_state \
-            --package acropolis_module_epochs_state \
-            --package acropolis_module_genesis_bootstrapper \
-            --package acropolis_module_governance_state \
-            --package acropolis_module_historical_accounts_state \
-            --package acropolis_module_mithril_snapshot_fetcher \
-            --package acropolis_module_parameters_state \
-            --package acropolis_module_rest_blockfrost \
-            --package acropolis_module_snapshot_bootstrapper \
-            --package acropolis_module_spdd_state \
-            --package acropolis_module_spo_state \
-            --package acropolis_module_stake_delta_filter \
-            --package acropolis_module_tx_submitter \
-            --package acropolis_module_tx_unpacker \
-            --package acropolis_module_upstream_chain_fetcher \
-            --package acropolis_module_utxo_state \
-            --package acropolis_process_tx_submitter_cli
+        run: cargo clippy --all-targets --all-features
 
       - name: Run Build
         run: cargo build --verbose
