@@ -4,7 +4,7 @@
 use acropolis_common::{
     messages::{CardanoMessage, Message},
     state_history::{StateHistory, StateHistoryStore},
-    BlockInfo, BlockStatus, Era,
+    BlockInfo, BlockStatus,
 };
 use anyhow::Result;
 use caryatid_sdk::{module, Context, Module, Subscription};
@@ -149,21 +149,17 @@ impl BlockVrfValidator {
                     // decode header
                     // Derive the variant from the era - just enough to make
                     // MultiEraHeader::decode() work.
-                    let variant = match block_info.era {
-                        Era::Byron => 0,
-                        Era::Shelley => 1,
-                        Era::Allegra => 2,
-                        Era::Mary => 3,
-                        Era::Alonzo => 4,
-                        _ => 5,
-                    };
                     let span = info_span!(
                         "block_vrf_validator.decode_header",
                         block = block_info.number
                     );
                     let mut header = None;
                     span.in_scope(|| {
-                        header = match MultiEraHeader::decode(variant, None, &block_msg.header) {
+                        header = match MultiEraHeader::decode(
+                            block_info.era as u8,
+                            None,
+                            &block_msg.header,
+                        ) {
                             Ok(header) => Some(header),
                             Err(e) => {
                                 error!("Can't decode header {}: {e}", block_info.slot);

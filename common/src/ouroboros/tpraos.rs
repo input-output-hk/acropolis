@@ -185,7 +185,6 @@ mod tests {
 
         let block_header_4490511: Vec<u8> =
             hex::decode(include_str!("./data/4490511.cbor")).unwrap();
-        let block_header = MultiEraHeader::decode(1, None, &block_header_4490511).unwrap();
         let block_info = BlockInfo {
             status: BlockStatus::Immutable,
             slot: 4492800,
@@ -201,6 +200,8 @@ mod tests {
             new_epoch: true,
             era: Era::Shelley,
         };
+        let block_header =
+            MultiEraHeader::decode(block_info.era as u8, None, &block_header_4490511).unwrap();
         let active_spos = HashMap::new();
         let active_spdd = HashMap::new();
         let result = validate_vrf_tpraos(
@@ -234,7 +235,6 @@ mod tests {
 
         let block_header_4556956: Vec<u8> =
             hex::decode(include_str!("./data/4556956.cbor")).unwrap();
-        let block_header = MultiEraHeader::decode(1, None, &block_header_4556956).unwrap();
         let block_info = BlockInfo {
             status: BlockStatus::Immutable,
             slot: 5824849,
@@ -250,6 +250,8 @@ mod tests {
             new_epoch: false,
             era: Era::Shelley,
         };
+        let block_header =
+            MultiEraHeader::decode(block_info.era as u8, None, &block_header_4556956).unwrap();
         let pool_id = Vec::<u8>::from_bech32_with_hrp(
             "pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy",
             "pool",
@@ -291,7 +293,6 @@ mod tests {
 
         let block_header_4576496: Vec<u8> =
             hex::decode(include_str!("./data/4576496.cbor")).unwrap();
-        let block_header = MultiEraHeader::decode(1, None, &block_header_4576496).unwrap();
         let block_info = BlockInfo {
             status: BlockStatus::Immutable,
             slot: 6220749,
@@ -307,6 +308,8 @@ mod tests {
             new_epoch: false,
             era: Era::Shelley,
         };
+        let block_header =
+            MultiEraHeader::decode(block_info.era as u8, None, &block_header_4576496).unwrap();
         let pool_id = Vec::<u8>::from_bech32_with_hrp(
             "pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy",
             "pool",
@@ -348,7 +351,6 @@ mod tests {
 
         let block_header_4576496: Vec<u8> =
             hex::decode(include_str!("./data/4576496.cbor")).unwrap();
-        let block_header = MultiEraHeader::decode(1, None, &block_header_4576496).unwrap();
         let block_info = BlockInfo {
             status: BlockStatus::Immutable,
             slot: 6220749,
@@ -364,6 +366,8 @@ mod tests {
             new_epoch: false,
             era: Era::Shelley,
         };
+        let block_header =
+            MultiEraHeader::decode(block_info.era as u8, None, &block_header_4576496).unwrap();
         let pool_id = Vec::<u8>::from_bech32_with_hrp(
             "pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy",
             "pool",
@@ -406,7 +410,6 @@ mod tests {
 
         let block_header_4576496: Vec<u8> =
             hex::decode(include_str!("./data/4576496.cbor")).unwrap();
-        let block_header = MultiEraHeader::decode(1, None, &block_header_4576496).unwrap();
         let block_info = BlockInfo {
             status: BlockStatus::Immutable,
             slot: 6220749,
@@ -422,6 +425,8 @@ mod tests {
             new_epoch: false,
             era: Era::Shelley,
         };
+        let block_header =
+            MultiEraHeader::decode(block_info.era as u8, None, &block_header_4576496).unwrap();
         let pool_id = Vec::<u8>::from_bech32_with_hrp(
             "pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy",
             "pool",
@@ -469,7 +474,6 @@ mod tests {
 
         let block_header_4576496: Vec<u8> =
             hex::decode(include_str!("./data/4576496.cbor")).unwrap();
-        let block_header = MultiEraHeader::decode(1, None, &block_header_4576496).unwrap();
         let block_info = BlockInfo {
             status: BlockStatus::Immutable,
             slot: 6220749,
@@ -485,6 +489,8 @@ mod tests {
             new_epoch: false,
             era: Era::Shelley,
         };
+        let block_header =
+            MultiEraHeader::decode(block_info.era as u8, None, &block_header_4576496).unwrap();
         let pool_id = Vec::<u8>::from_bech32_with_hrp(
             "pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy",
             "pool",

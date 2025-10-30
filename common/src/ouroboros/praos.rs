@@ -83,3 +83,68 @@ fn vrf_result<'a>(header: &'a MultiEraHeader) -> Option<&'a VrfCert> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        crypto::keyhash_256, protocol_params::NonceHash, serialization::Bech32WithHrp, BlockHash,
+        BlockStatus, Era,
+    };
+
+    use super::*;
+
+    #[test]
+    fn test_7854823_block() {
+        let praos_params = PraosParams::mainnet();
+        let epoch_nonce = Nonce::from(
+            NonceHash::try_from(
+                hex::decode("8dad163edf4607452fec9c5955d593fb598ca728bae162138f88da6667bba79b")
+                    .unwrap()
+                    .as_slice(),
+            )
+            .unwrap(),
+        );
+
+        let block_header_7854823: Vec<u8> =
+            hex::decode(include_str!("./data/7854823.cbor")).unwrap();
+        let block_info = BlockInfo {
+            status: BlockStatus::Immutable,
+            slot: 73614529,
+            hash: BlockHash::try_from(
+                hex::decode("4884996cff870563ffddab5d1255a82a58482ba9351536f5b72c882f883c8947")
+                    .unwrap(),
+            )
+            .unwrap(),
+            timestamp: 1665180820,
+            number: 7854823,
+            epoch: 368,
+            epoch_slot: 1729,
+            new_epoch: false,
+            era: Era::Babbage,
+        };
+        let block_header =
+            MultiEraHeader::decode(block_info.era as u8, None, &block_header_7854823).unwrap();
+        let pool_id = Vec::<u8>::from_bech32_with_hrp(
+            "pool195gdnmj6smzuakm4etxsxw3fgh8asqc4awtcskpyfnkpcvh2v8t",
+            "pool",
+        )
+        .unwrap();
+        let active_spos = HashMap::from([(
+            pool_id.clone(),
+            keyhash_256(block_header.vrf_vkey().unwrap()),
+        )]);
+        let active_spdd = HashMap::from([(pool_id.clone(), 64590523391239)]);
+        let result = validate_vrf_praos(
+            &block_info,
+            &block_header,
+            &epoch_nonce,
+            &praos_params,
+            &active_spos,
+            &active_spdd,
+            25069171797357766,
+        )
+        .and_then(|vrf_validations| vrf_validations.iter().try_for_each(|assert| assert()));
+        println!("{:?}", result);
+        assert!(result.is_ok());
+    }
+}
