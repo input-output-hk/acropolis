@@ -167,13 +167,11 @@ impl Verifier {
                     continue;
                 };
 
-                expected_rewards.entry(spo.try_into().unwrap()).or_default().push(
-                    RewardDetail {
-                        account: stake_address,
-                        rtype,
-                        amount,
-                    },
-                );
+                expected_rewards.entry(spo.try_into().unwrap()).or_default().push(RewardDetail {
+                    account: stake_address,
+                    rtype,
+                    amount,
+                });
             }
 
             info!(

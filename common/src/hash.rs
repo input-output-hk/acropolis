@@ -53,6 +53,11 @@ impl<const BYTES: usize> Hash<BYTES> {
     pub fn into_inner(self) -> [u8; BYTES] {
         self.0
     }
+
+    #[inline]
+    pub fn as_inner(&self) -> &[u8; BYTES] {
+        &self.0
+    }
 }
 
 impl<const BYTES: usize> From<[u8; BYTES]> for Hash<BYTES> {

@@ -451,8 +451,8 @@ declare_hash_type!(BlockHash, 32);
 declare_hash_type!(TxHash, 32);
 declare_hash_type_with_bech32!(VrfKeyHash, 32, "vrf_vk");
 declare_hash_type_with_bech32!(PoolId, 28, "pool");
-declare_hash_type_with_bech32!(DrepKey, 28, "drep");
-declare_hash_type_with_bech32!(DrepScriptKey, 28, "drep_script");
+// declare_hash_type_with_bech32!(DrepKey, 28, "drep");
+// declare_hash_type_with_bech32!(DrepScriptKey, 28, "drep_script");
 
 /// Data hash used for metadata, anchors (SHA256)
 pub type DataHash = Vec<u8>;

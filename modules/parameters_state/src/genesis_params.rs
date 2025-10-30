@@ -107,9 +107,7 @@ fn map_drep_thresholds(thresholds: &conway::DRepVotingThresholds) -> Result<DRep
 pub fn map_constitution(constitution: &conway::Constitution) -> Result<Constitution> {
     Ok(Constitution {
         anchor: map_anchor(&constitution.anchor)?,
-        guardrail_script: Some(
-            decode_hex_string(&constitution.script, 28)?.try_into().unwrap(),
-        ),
+        guardrail_script: Some(decode_hex_string(&constitution.script, 28)?.try_into().unwrap()),
     })
 }
 

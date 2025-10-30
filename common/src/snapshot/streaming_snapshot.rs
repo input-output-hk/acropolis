@@ -309,7 +309,7 @@ impl<'b, C> minicbor::Decode<'b, C> for Account {
 
 pub use crate::types::AddrKeyhash;
 pub use crate::types::ScriptHash;
-use crate::{PoolId};
+use crate::PoolId;
 /// Alias minicbor as cbor for pool_params module
 pub use minicbor as cbor;
 
