@@ -29,7 +29,7 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use tracing::info;
 
-pub use crate::hash::{AddrKeyhash, Hash, ScriptHash};
+pub use crate::hash::Hash;
 pub use crate::stake_addresses::{AccountState, StakeAddressState};
 pub use crate::StakeCredential;
 
@@ -307,6 +307,9 @@ pub type Coin = u64;
 
 /// Pool ID (28-byte hash)
 pub type PoolId = Hash<28>;
+
+pub type AddrKeyhash = Hash<28>;
+pub type ScriptHash = Hash<28>;
 
 /// VRF key hash (32-byte hash)
 pub type VrfKeyhash = Hash<32>;
@@ -2003,7 +2006,7 @@ impl StreamingSnapshotParser {
                     cost: params.cost,
                     margin: (params.margin.numerator as f64) / (params.margin.denominator as f64),
                     reward_account: hex::encode(&params.reward_account.0),
-                    pool_owners: params.owners.iter().map(|h| h.to_string()).collect(),
+                    pool_owners: params.owners.iter().map(|h| hex::encode(h)).collect(),
                     relays,
                     pool_metadata,
                     retirement_epoch,

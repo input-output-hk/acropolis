@@ -1,7 +1,7 @@
 use crate::{
     queries::misc::Order,
     serialization::{Bech32Conversion, Bech32WithHrp},
-    Address, BlockHash, GenesisDelegate, HeavyDelegate, KeyHash, TxHash, TxIdentifier, VRFKey,
+    Address, BlockHash, GenesisDelegate, HeavyDelegate, KeyHash, TxHash, TxIdentifier, VrfKeyHash,
 };
 use cryptoxide::hashing::blake2b::Blake2b;
 use serde::ser::{Serialize, SerializeStruct, Serializer};
@@ -114,7 +114,7 @@ pub struct BlockInfo {
     pub tx_count: u64,
     pub output: Option<u64>,
     pub fees: Option<u64>,
-    pub block_vrf: Option<VRFKey>,
+    pub block_vrf: Option<VrfKeyHash>,
     pub op_cert: Option<KeyHash>,
     pub op_cert_counter: Option<u64>,
     pub previous_block: Option<BlockHash>,

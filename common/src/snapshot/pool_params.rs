@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use super::streaming_snapshot::{
-    cbor, AddrKeyhash, Coin, Nullable, PoolId, PoolMetadata, Relay, RewardAccount, Set,
-    UnitInterval, VrfKeyhash,
+    cbor, Coin, Nullable, PoolId, PoolMetadata, Relay, RewardAccount, Set, UnitInterval, VrfKeyhash,
 };
+use crate::AddrKeyhash;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PoolParams {
