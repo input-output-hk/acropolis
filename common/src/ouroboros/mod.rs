@@ -1,4 +1,4 @@
-pub mod overlay_shedule;
+pub mod overlay_schedule;
 pub mod praos;
 pub mod tpraos;
 pub mod vrf;

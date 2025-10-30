@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 
 use crate::crypto::keyhash_224;
-use crate::ouroboros::overlay_shedule::OBftSlot;
+use crate::ouroboros::overlay_schedule::OBftSlot;
 use crate::ouroboros::vrf_validation::{
     TPraosBadLeaderVrfProofError, TPraosBadNonceVrfProofError, VrfLeaderValueTooBigError,
     VrfValidation, VrfValidationError, WrongGenesisLeaderVrfKeyError, WrongLeaderVrfKeyError,
 };
-use crate::ouroboros::{overlay_shedule, vrf};
+use crate::ouroboros::{overlay_schedule, vrf};
 use crate::protocol_params::Nonce;
 use crate::rational_number::RationalNumber;
 use crate::{genesis_values::GenesisDelegs, protocol_params::PraosParams, BlockInfo};
@@ -29,7 +29,7 @@ pub fn validate_vrf_tpraos<'a>(
     let active_slots_coeff = praos_params.active_slots_coeff;
 
     // first look up for overlay slot
-    let obft_slot = overlay_shedule::lookup_in_overlay_schedule(
+    let obft_slot = overlay_schedule::lookup_in_overlay_schedule(
         block_info.epoch_slot,
         genesis_delegs,
         &decentralisation_param,
