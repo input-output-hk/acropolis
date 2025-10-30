@@ -912,13 +912,13 @@ pub fn map_governance_proposals_procedures(
 fn map_voter(voter: &conway::Voter) -> Voter {
     match voter {
         conway::Voter::ConstitutionalCommitteeKey(key_hash) => {
-            Voter::ConstitutionalCommitteeKey(to_hash(key_hash))
+            Voter::ConstitutionalCommitteeKey(to_hash(key_hash).into())
         }
         conway::Voter::ConstitutionalCommitteeScript(script_hash) => {
-            Voter::ConstitutionalCommitteeScript(to_hash(script_hash))
+            Voter::ConstitutionalCommitteeScript(to_hash(script_hash).into())
         }
-        conway::Voter::DRepKey(addr_key_hash) => Voter::DRepKey(to_hash(addr_key_hash)),
-        conway::Voter::DRepScript(script_hash) => Voter::DRepScript(to_hash(script_hash)),
+        conway::Voter::DRepKey(addr_key_hash) => Voter::DRepKey(to_hash(addr_key_hash).into()),
+        conway::Voter::DRepScript(script_hash) => Voter::DRepScript(to_hash(script_hash).into()),
         conway::Voter::StakePoolKey(key_hash) => Voter::StakePoolKey(to_pool_id(key_hash)),
     }
 }

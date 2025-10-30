@@ -3,6 +3,7 @@
 #![allow(dead_code)]
 
 use crate::hash::Hash;
+use crate::serialization::Bech32Conversion;
 use crate::{
     address::{Address, ShelleyAddress, StakeAddress},
     declare_hash_type, declare_hash_type_with_bech32, protocol_params,
@@ -439,9 +440,13 @@ impl Default for UTXODelta {
     }
 }
 
+/// Key hash
 pub type KeyHash = Hash<28>;
 
+/// Script hash
 pub type ScriptHash = KeyHash;
+
+/// Address key hash
 pub type AddrKeyhash = KeyHash;
 
 /// Script identifier
@@ -451,8 +456,11 @@ declare_hash_type!(BlockHash, 32);
 declare_hash_type!(TxHash, 32);
 declare_hash_type_with_bech32!(VrfKeyHash, 32, "vrf_vk");
 declare_hash_type_with_bech32!(PoolId, 28, "pool");
-// declare_hash_type_with_bech32!(DrepKey, 28, "drep");
-// declare_hash_type_with_bech32!(DrepScriptKey, 28, "drep_script");
+
+declare_hash_type_with_bech32!(ConstitutionalCommitteeKeyHash, 28, "cc_hot");
+declare_hash_type_with_bech32!(ConstitutionalCommitteeScriptHash, 28, "cc_hot_script");
+declare_hash_type_with_bech32!(DrepKeyHash, 28, "drep");
+declare_hash_type_with_bech32!(DRepScriptHash, 28, "drep_script");
 
 /// Data hash used for metadata, anchors (SHA256)
 pub type DataHash = Vec<u8>;
@@ -641,10 +649,10 @@ pub struct PotDelta {
 )]
 pub enum Credential {
     /// Script hash. NOTE: Order matters when parsing Haskell Node Snapshot data.
-    ScriptHash(#[serde_as(as = "Hex")] KeyHash),
+    ScriptHash(#[serde_as(as = "Hex")] ScriptHash),
 
     /// Address key hash
-    AddrKeyHash(#[serde_as(as = "Hex")] KeyHash),
+    AddrKeyHash(#[serde_as(as = "Hex")] AddrKeyhash),
 }
 
 impl Credential {
@@ -1663,33 +1671,26 @@ impl GovernanceAction {
     serde::Serialize, serde::Deserialize, Debug, PartialEq, PartialOrd, Eq, Ord, Clone, Hash,
 )]
 pub enum Voter {
-    ConstitutionalCommitteeKey(AddrKeyhash),
-    ConstitutionalCommitteeScript(ScriptHash),
-    DRepKey(AddrKeyhash),
-    DRepScript(ScriptHash),
+    ConstitutionalCommitteeKey(ConstitutionalCommitteeKeyHash),
+    ConstitutionalCommitteeScript(ConstitutionalCommitteeScriptHash),
+    DRepKey(DrepKeyHash),
+    DRepScript(DRepScriptHash),
     StakePoolKey(PoolId),
 }
 
-impl Voter {
-    pub fn to_bech32(&self, hrp: &str, buf: &[u8]) -> String {
-        let voter_hrp: Hrp = Hrp::parse(hrp).unwrap();
-        bech32::encode::<Bech32>(voter_hrp, buf)
-            .unwrap_or_else(|e| format!("Cannot convert {:?} to bech32: {e}", self))
-    }
-}
-
 impl Display for Voter {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Voter::ConstitutionalCommitteeKey(h) => {
-                write!(f, "{}", self.to_bech32("cc_hot", h.as_ref()))
-            }
-            Voter::ConstitutionalCommitteeScript(s) => {
-                write!(f, "{}", self.to_bech32("cc_hot_script", s.as_ref()))
-            }
-            Voter::DRepKey(k) => write!(f, "{}", self.to_bech32("drep", k.as_ref())),
-            Voter::DRepScript(s) => write!(f, "{}", self.to_bech32("drep_script", s.as_ref())),
-            Voter::StakePoolKey(k) => write!(f, "{}", self.to_bech32("pool", k.as_ref())),
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let bech32 = match self {
+            Voter::ConstitutionalCommitteeKey(h) => h.to_bech32(),
+            Voter::ConstitutionalCommitteeScript(s) => s.to_bech32(),
+            Voter::DRepKey(k) => k.to_bech32(),
+            Voter::DRepScript(s) => s.to_bech32(),
+            Voter::StakePoolKey(k) => k.to_bech32(),
+        };
+
+        match bech32 {
+            Ok(s) => write!(f, "{}", s),
+            Err(e) => write!(f, "<invalid: {}>", e),
         }
     }
 }

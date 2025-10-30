@@ -1,10 +1,10 @@
 use crate::voting_state::VotingRegistrationState;
 use acropolis_common::protocol_params::ConwayParams;
 use acropolis_common::{
-    BlockInfo, DRepCredential, DelegatedStake, EnactStateElem, GovActionId, GovernanceAction,
-    GovernanceOutcome, GovernanceOutcomeVariant, Lovelace, PoolId, ProposalProcedure,
-    SingleVoterVotes, TreasuryWithdrawalsAction, TxHash, Vote, VoteCount, VoteResult, Voter,
-    VotingOutcome, VotingProcedure,
+    AddrKeyhash, BlockInfo, DRepCredential, DelegatedStake, EnactStateElem, GovActionId,
+    GovernanceAction, GovernanceOutcome, GovernanceOutcomeVariant, Lovelace, PoolId,
+    ProposalProcedure, ScriptHash, SingleVoterVotes, TreasuryWithdrawalsAction, TxHash, Vote,
+    VoteCount, VoteResult, Voter, VotingOutcome, VotingProcedure,
 };
 use anyhow::{anyhow, bail, Result};
 use hex::ToHex;
@@ -253,22 +253,30 @@ impl ConwayVoting {
                     if tracing::enabled!(tracing::Level::DEBUG) {
                         debug!(
                             "Vote for {action_id}, epoch start {new_epoch}: {voter} = {:?}",
-                            drep_stake.get(&DRepCredential::AddrKeyHash(key.clone()))
+                            drep_stake.get(&DRepCredential::AddrKeyHash(AddrKeyhash::from(
+                                key.into_inner()
+                            )))
                         );
                     }
                     drep_stake
-                        .get(&DRepCredential::AddrKeyHash(key.clone()))
+                        .get(&DRepCredential::AddrKeyHash(AddrKeyhash::from(
+                            key.into_inner(),
+                        )))
                         .inspect(|v| *vd += *v);
                 }
                 Voter::DRepScript(script) => {
                     if tracing::enabled!(tracing::Level::DEBUG) {
                         debug!(
                             "Vote for {action_id}, epoch start {new_epoch}: {voter} = {:?}",
-                            drep_stake.get(&DRepCredential::ScriptHash(script.clone()))
+                            drep_stake.get(&DRepCredential::ScriptHash(ScriptHash::from(
+                                script.into_inner()
+                            )))
                         );
                     }
                     drep_stake
-                        .get(&DRepCredential::ScriptHash(script.clone()))
+                        .get(&DRepCredential::ScriptHash(ScriptHash::from(
+                            script.into_inner(),
+                        )))
                         .inspect(|v| *vd += *v);
                 }
                 Voter::StakePoolKey(pool) => {

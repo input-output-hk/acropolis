@@ -261,8 +261,8 @@ impl State {
         for (tx_hash, voting_procedures) in voting_procedures {
             for (voter, single_votes) in &voting_procedures.votes {
                 let drep_cred = match voter {
-                    Voter::DRepKey(k) => DRepCredential::AddrKeyHash(*k),
-                    Voter::DRepScript(s) => DRepCredential::ScriptHash(*s),
+                    Voter::DRepKey(k) => DRepCredential::AddrKeyHash(k.into_inner().into()),
+                    Voter::DRepScript(s) => DRepCredential::ScriptHash(s.into_inner().into()),
                     _ => continue,
                 };
 

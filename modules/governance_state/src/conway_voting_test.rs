@@ -3,9 +3,11 @@ mod tests {
     use crate::conway_voting::ConwayVoting;
     use crate::voting_state::VotingRegistrationState;
     use acropolis_common::{
-        protocol_params::ProtocolParams, rational_number::RationalNumber, Credential,
-        DRepCredential, DelegatedStake, GovActionId, KeyHash, Lovelace, PoolId, ProposalProcedure,
-        SingleVoterVotes, TxHash, Vote, VoteCount, VoteResult, Voter, VotingProcedure,
+        protocol_params::ProtocolParams, rational_number::RationalNumber,
+        ConstitutionalCommitteeKeyHash, ConstitutionalCommitteeScriptHash, Credential,
+        DRepCredential, DRepScriptHash, DelegatedStake, DrepKeyHash, GovActionId, KeyHash,
+        Lovelace, PoolId, ProposalProcedure, SingleVoterVotes, TxHash, Vote, VoteCount, VoteResult,
+        Voter, VotingProcedure,
     };
     use anyhow::{anyhow, bail, Result};
 
@@ -56,11 +58,15 @@ mod tests {
         pub fn to_voter(&self) -> Result<Voter> {
             let key = self.1;
             match &self.0 {
-                0 => Ok(Voter::DRepKey(key)),
-                1 => Ok(Voter::DRepScript(key)),
+                0 => Ok(Voter::DRepKey(DrepKeyHash::from(key))),
+                1 => Ok(Voter::DRepScript(DRepScriptHash::from(key))),
                 2 => Ok(Voter::StakePoolKey(PoolId::from(key))),
-                3 => Ok(Voter::ConstitutionalCommitteeKey(key)),
-                4 => Ok(Voter::ConstitutionalCommitteeScript(key)),
+                3 => Ok(Voter::ConstitutionalCommitteeKey(
+                    ConstitutionalCommitteeKeyHash::from(key),
+                )),
+                4 => Ok(Voter::ConstitutionalCommitteeScript(
+                    ConstitutionalCommitteeScriptHash::from(key),
+                )),
                 _ => bail!("Unknown voter key type {}", self.0),
             }
         }

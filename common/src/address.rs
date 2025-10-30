@@ -3,7 +3,7 @@
 #![allow(dead_code)]
 
 use crate::cip19::{VarIntDecoder, VarIntEncoder};
-use crate::{Credential, KeyHash, NetworkId, StakeCredential};
+use crate::{Credential, KeyHash, NetworkId, ScriptHash, StakeCredential};
 use anyhow::{anyhow, bail, Result};
 use crc::{Crc, CRC_32_ISO_HDLC};
 use minicbor::data::IanaTag;
@@ -100,12 +100,12 @@ pub enum ShelleyAddressPaymentPart {
 
     /// Payment to a script
     #[n(1)]
-    ScriptHash(#[n(0)] KeyHash),
+    ScriptHash(#[n(0)] ScriptHash),
 }
 
 impl Default for ShelleyAddressPaymentPart {
     fn default() -> Self {
-        Self::PaymentKeyHash([0u8; 28].into())
+        Self::PaymentKeyHash(KeyHash::default())
     }
 }
 
@@ -159,7 +159,7 @@ pub enum ShelleyAddressDelegationPart {
 
     /// Delegation to script key hash
     #[n(2)]
-    ScriptHash(#[n(0)] KeyHash),
+    ScriptHash(#[n(0)] ScriptHash),
 
     /// Delegation to pointer
     #[n(3)]
@@ -540,7 +540,7 @@ impl Default for StakeAddress {
     fn default() -> Self {
         StakeAddress {
             network: NetworkId::Mainnet,
-            credential: StakeCredential::AddrKeyHash([0u8; 28].into()),
+            credential: StakeCredential::AddrKeyHash(KeyHash::default()),
         }
     }
 }
