@@ -159,7 +159,7 @@ pub async fn handle_account_registrations_blockfrost(
     };
 
     // Get TxHashes from TxIdentifiers
-    let tx_ids: Vec<_> = registrations.iter().map(|r| r.tx_identifier.clone()).collect();
+    let tx_ids: Vec<_> = registrations.iter().map(|r| r.tx_identifier).collect();
     let msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
         BlocksStateQuery::GetTransactionHashes { tx_ids },
     )));
@@ -253,7 +253,7 @@ pub async fn handle_account_delegations_blockfrost(
     };
 
     // Get TxHashes from TxIdentifiers
-    let tx_ids: Vec<_> = delegations.iter().map(|r| r.tx_identifier.clone()).collect();
+    let tx_ids: Vec<_> = delegations.iter().map(|r| r.tx_identifier).collect();
     let msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
         BlocksStateQuery::GetTransactionHashes { tx_ids },
     )));
@@ -359,7 +359,7 @@ pub async fn handle_account_mirs_blockfrost(
     };
 
     // Get TxHashes from TxIdentifiers
-    let tx_ids: Vec<_> = mirs.iter().map(|r| r.tx_identifier.clone()).collect();
+    let tx_ids: Vec<_> = mirs.iter().map(|r| r.tx_identifier).collect();
     let msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
         BlocksStateQuery::GetTransactionHashes { tx_ids },
     )));
@@ -452,7 +452,7 @@ pub async fn handle_account_withdrawals_blockfrost(
     };
 
     // Get TxHashes from TxIdentifiers
-    let tx_ids: Vec<_> = withdrawals.iter().map(|r| r.tx_identifier.clone()).collect();
+    let tx_ids: Vec<_> = withdrawals.iter().map(|r| r.tx_identifier).collect();
     let msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
         BlocksStateQuery::GetTransactionHashes { tx_ids },
     )));

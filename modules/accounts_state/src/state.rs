@@ -614,38 +614,54 @@ impl State {
 
         // If rewards have been calculated, save the results
         if let Some(task) = task.take() {
-            if let Ok(Ok(reward_result)) = task.await {
-                // Collect rewards to stake addresses reward deltas
-                for rewards in reward_result.rewards.values() {
-                    reward_deltas.extend(
-                        rewards
-                            .iter()
-                            .map(|reward| StakeRewardDelta {
+            if let Ok(Ok(rewards_result)) = task.await {
+                // Pay the rewards
+                let mut stake_addresses = self.stake_addresses.lock().unwrap();
+                let mut filtered_rewards_result = rewards_result.clone();
+                for (spo, rewards) in rewards_result.rewards {
+                    for reward in rewards {
+                        if stake_addresses.is_registered(&reward.account) {
+                            stake_addresses.add_to_reward(&reward.account, reward.amount);
+                            reward_deltas.push(StakeRewardDelta {
                                 stake_address: reward.account.clone(),
                                 delta: reward.amount,
                                 reward_type: reward.rtype.clone(),
                                 pool: reward.pool.clone(),
-                            })
-                            .collect::<Vec<_>>(),
-                    );
-                }
+                            });
+                        } else {
+                            warn!(
+                                "Reward account {} deregistered - paying reward {} to treasury",
+                                reward.account, reward.amount
+                            );
+                            self.pots.treasury += reward.amount;
 
-                // Verify them
-                verifier.verify_rewards(reward_result.epoch, &reward_result);
+                            // Remove from filtered version for comparison and result
+                            if let Some(rewards) = filtered_rewards_result.rewards.get_mut(&spo) {
+                                rewards.retain(|r| r.account != reward.account);
+                            }
 
-                // Pay the rewards
-                let mut stake_addresses = self.stake_addresses.lock().unwrap();
-                for (_, rewards) in reward_result.rewards {
-                    for reward in rewards {
-                        stake_addresses.add_to_reward(&reward.account, reward.amount);
+                            if let Some((_, spor)) = filtered_rewards_result
+                                .spo_rewards
+                                .iter_mut()
+                                .find(|(fspo, _)| *fspo == spo)
+                            {
+                                spor.total_rewards -= reward.amount;
+                                if reward.rtype == RewardType::Leader {
+                                    spor.operator_rewards -= reward.amount;
+                                }
+                            }
+                        }
                     }
                 }
 
+                // Verify them
+                verifier.verify_rewards(&filtered_rewards_result);
+
                 // save SPO rewards
-                spo_rewards = reward_result.spo_rewards.into_iter().collect();
+                spo_rewards = filtered_rewards_result.spo_rewards.clone();
 
                 // Adjust the reserves for next time with amount actually paid
-                self.pots.reserves -= reward_result.total_paid;
+                self.pots.reserves -= rewards_result.total_paid;
             }
         };
 

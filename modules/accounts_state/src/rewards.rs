@@ -31,7 +31,7 @@ pub struct RewardDetail {
 }
 
 /// Result of a rewards calculation
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct RewardsResult {
     /// Epoch these rewards were earned in (when blocks produced)
     pub epoch: u64,

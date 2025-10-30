@@ -2,11 +2,11 @@
 // We don't use these types in the acropolis_common crate itself
 #![allow(dead_code)]
 
+use crate::hash::Hash;
 use crate::{
     address::{Address, ShelleyAddress, StakeAddress},
-    protocol_params,
+    declare_hash_type, declare_hash_type_with_bech32, protocol_params,
     rational_number::RationalNumber,
-    BlockHash, TxHash,
 };
 use anyhow::{anyhow, bail, Error, Result};
 use bech32::{Bech32, Hrp};
@@ -219,7 +219,13 @@ pub struct StakeRewardDelta {
 
 /// Type of reward being given
 #[derive(
-    Debug, Clone, minicbor::Encode, minicbor::Decode, serde::Serialize, serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    minicbor::Encode,
+    minicbor::Decode,
+    serde::Serialize,
+    serde::Deserialize,
 )]
 pub enum RewardType {
     #[n(0)]
@@ -476,6 +482,12 @@ pub type ScriptHash = KeyHash;
 pub type AddrKeyhash = KeyHash;
 
 pub type GenesisKeyhash = Vec<u8>;
+
+declare_hash_type!(BlockHash, 32);
+declare_hash_type!(TxHash, 32);
+declare_hash_type_with_bech32!(VrfKeyHash, 32, "vrf_vk");
+declare_hash_type_with_bech32!(DrepKey, 28, "drep");
+declare_hash_type_with_bech32!(DrepScriptKey, 28, "drep_script");
 
 /// Data hash used for metadata, anchors (SHA256)
 pub type DataHash = Vec<u8>;
