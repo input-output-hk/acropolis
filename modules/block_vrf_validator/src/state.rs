@@ -109,7 +109,7 @@ impl State {
         );
 
         if is_tpraos {
-            let vrf_validations = ouroboros::tpraos::validate_vrf_tpraos(
+            let result = ouroboros::tpraos::validate_vrf_tpraos(
                 block_info,
                 header,
                 &epoch_nonce,
@@ -119,10 +119,11 @@ impl State {
                 &self.epoch_snapshots.set.active_stakes,
                 self.epoch_snapshots.set.total_active_stakes,
                 decentralisation_param,
-            )?;
-            vrf_validations.iter().try_for_each(|assert| assert())
+            )
+            .and_then(|vrf_validations| vrf_validations.iter().try_for_each(|assert| assert()));
+            result
         } else {
-            let vrf_validations = ouroboros::praos::validate_vrf_praos(
+            let result = ouroboros::praos::validate_vrf_praos(
                 block_info,
                 header,
                 &epoch_nonce,
@@ -130,8 +131,9 @@ impl State {
                 &self.epoch_snapshots.set.active_spos,
                 &self.epoch_snapshots.set.active_stakes,
                 self.epoch_snapshots.set.total_active_stakes,
-            )?;
-            vrf_validations.iter().try_for_each(|assert| assert())
+            )
+            .and_then(|vrf_validations| vrf_validations.iter().try_for_each(|assert| assert()));
+            result
         }
     }
 }
