@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use crate::crypto::keyhash_224;
 use crate::ouroboros::vrf;
 use crate::ouroboros::vrf_validation::{
-    TPraosBadLeaderVrfProofError, TPraosBadNonceVrfProofError, VrfLeaderValueTooBigError,
-    VrfValidation, VrfValidationError, WrongLeaderVrfKeyError,
+    PraosBadVrfProofError, VrfLeaderValueTooBigError, VrfValidation, VrfValidationError,
+    WrongLeaderVrfKeyError,
 };
 use crate::protocol_params::Nonce;
 use crate::rational_number::RationalNumber;
@@ -43,10 +43,7 @@ pub fn validate_vrf_praos<'a>(
     let declared_vrf_key: &[u8; vrf::PublicKey::HASH_SIZE] = vrf_vkey
         .try_into()
         .map_err(|_| VrfValidationError::TryFromSlice("Invalid Vrf Key".to_string()))?;
-    let nonce_vrf_cert =
-        nonce_vrf_cert(header).ok_or(VrfValidationError::TPraosMissingNonceVrfCert)?;
-    let leader_vrf_cert =
-        leader_vrf_cert(header).ok_or(VrfValidationError::TPraosMissingLeaderVrfCert)?;
+    let vrf_cert = vrf_result(header).ok_or(VrfValidationError::PraosMissingVrfCert)?;
 
     // Regular TPraos rules apply
     Ok(vec![
@@ -55,28 +52,23 @@ pub fn validate_vrf_praos<'a>(
             Ok(())
         }),
         Box::new(move || {
-            TPraosBadNonceVrfProofError::new(
+            PraosBadVrfProofError::new(
                 block_info.slot,
                 epoch_nonce,
+                &header
+                    .leader_vrf_output()
+                    .map_err(|_| VrfValidationError::PraosMissingLeaderVrfOutput)?[..],
                 &vrf::PublicKey::from(declared_vrf_key),
-                &nonce_vrf_cert.0.to_vec()[..],
-                &nonce_vrf_cert.1.to_vec()[..],
-            )?;
-            Ok(())
-        }),
-        Box::new(move || {
-            TPraosBadLeaderVrfProofError::new(
-                block_info.slot,
-                epoch_nonce,
-                &vrf::PublicKey::from(declared_vrf_key),
-                &leader_vrf_cert.0.to_vec()[..],
-                &leader_vrf_cert.1.to_vec()[..],
+                &vrf_cert.0.to_vec()[..],
+                &vrf_cert.1.to_vec()[..],
             )?;
             Ok(())
         }),
         Box::new(move || {
             VrfLeaderValueTooBigError::new(
-                &leader_vrf_cert.0.to_vec()[..],
+                &header
+                    .leader_vrf_output()
+                    .map_err(|_| VrfValidationError::PraosMissingLeaderVrfOutput)?[..],
                 &relative_stake,
                 &active_slots_coeff,
             )?;
@@ -85,16 +77,9 @@ pub fn validate_vrf_praos<'a>(
     ])
 }
 
-fn nonce_vrf_cert<'a>(header: &'a MultiEraHeader) -> Option<&'a VrfCert> {
+fn vrf_result<'a>(header: &'a MultiEraHeader) -> Option<&'a VrfCert> {
     match header {
-        MultiEraHeader::ShelleyCompatible(x) => Some(&x.header_body.nonce_vrf),
-        _ => None,
-    }
-}
-
-fn leader_vrf_cert<'a>(header: &'a MultiEraHeader) -> Option<&'a VrfCert> {
-    match header {
-        MultiEraHeader::ShelleyCompatible(x) => Some(&x.header_body.leader_vrf),
+        MultiEraHeader::BabbageCompatible(x) => Some(&x.header_body.vrf_result),
         _ => None,
     }
 }

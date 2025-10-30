@@ -32,6 +32,12 @@ pub enum VrfValidationError {
     /// **Cause:** The Leader VRF Cert is missing from the block header in TPraos Protocol
     #[error("TPraos Missing Leader VRF Cert")]
     TPraosMissingLeaderVrfCert,
+    /// **Cause:** The VRF output is missing from the block header in Praos Protocol
+    #[error("Praos Missing Leader VRF Output")]
+    PraosMissingLeaderVrfOutput,
+    /// **Cause:** The VRF Cert is missing from the block header in Praos Protocol
+    #[error("Praos Missing VRF Cert")]
+    PraosMissingVrfCert,
     /// **Cause:** Block issuer's pool ID is not registered in current stake distribution
     #[error("Unknown Pool: {}", hex::encode(&pool_id))]
     UnknownPool { pool_id: PoolId },
