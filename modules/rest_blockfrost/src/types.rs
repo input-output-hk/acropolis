@@ -7,7 +7,7 @@ use acropolis_common::{
     rest_helper::ToCheckedF64,
     serialization::{DisplayFromBech32, PoolPrefix},
     AssetAddressEntry, AssetMetadataStandard, AssetMintRecord, KeyHash, PolicyAsset,
-    PoolEpochState, PoolUpdateAction, Relay, TxHash, Vote, VrfKeyHash,
+    PoolEpochState, PoolId, PoolUpdateAction, Relay, TxHash, Vote, VrfKeyHash,
 };
 use anyhow::Result;
 use num_traits::ToPrimitive;
@@ -63,7 +63,7 @@ pub struct BlockInfoREST(pub BlockInfo);
 pub struct SPDDByEpochItemRest {
     pub stake_address: String,
     #[serde_as(as = "DisplayFromBech32<PoolPrefix>")]
-    pub pool_id: Vec<u8>,
+    pub pool_id: PoolId,
     #[serde_as(as = "DisplayFromStr")]
     pub amount: u64,
 }

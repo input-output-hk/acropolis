@@ -494,7 +494,7 @@ pub async fn handle_epoch_total_stakes_blockfrost(
             .to_string()
             .map_err(|e| anyhow::anyhow!("Failed to convert stake address to string: {e}"))?;
             Ok(SPDDByEpochItemRest {
-                pool_id: pool_id.to_vec(),
+                pool_id,
                 stake_address,
                 amount,
             })
