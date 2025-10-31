@@ -650,7 +650,7 @@ impl State {
         // Handle deltas
         for delta in reward_deltas_msg.deltas.iter() {
             let mut stake_addresses = stake_addresses.lock().unwrap();
-            if let Err(e) = stake_addresses.update_reward(&delta.stake_address, delta.delta) {
+            if let Err(e) = stake_addresses.pay_reward(&delta.stake_address, delta.delta) {
                 error!("Updating reward account {}: {e}", delta.stake_address);
             }
         }

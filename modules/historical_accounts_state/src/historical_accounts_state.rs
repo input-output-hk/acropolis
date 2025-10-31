@@ -126,10 +126,7 @@ impl HistoricalAccountsState {
                 {
                     Self::check_sync(&current_block, block_info);
                     let mut state = state_mutex.lock().await;
-                    state
-                        .handle_rewards(rewards_msg)
-                        .inspect_err(|e| error!("Reward deltas handling error: {e:#}"))
-                        .ok();
+                    state.handle_rewards(rewards_msg, block_info.epoch as u32);
                 }
             }
 
@@ -343,6 +340,15 @@ impl HistoricalAccountsState {
                         match state.lock().await.get_withdrawal_history(account).await {
                             Ok(Some(withdrawals)) => {
                                 AccountsStateQueryResponse::AccountWithdrawalHistory(withdrawals)
+                            }
+                            Ok(None) => AccountsStateQueryResponse::NotFound,
+                            Err(e) => AccountsStateQueryResponse::Error(e.to_string()),
+                        }
+                    }
+                    AccountsStateQuery::GetAccountRewardHistory { account } => {
+                        match state.lock().await.get_reward_history(account).await {
+                            Ok(Some(rewards)) => {
+                                AccountsStateQueryResponse::AccountRewardHistory(rewards)
                             }
                             Ok(None) => AccountsStateQueryResponse::NotFound,
                             Err(e) => AccountsStateQueryResponse::Error(e.to_string()),

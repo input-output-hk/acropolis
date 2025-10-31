@@ -535,6 +535,13 @@ impl StakeAddressMap {
         update_value_with_delta(&mut sas.rewards, delta)
     }
 
+    pub fn pay_reward(&mut self, stake_address: &StakeAddress, delta: u64) -> Result<()> {
+        let sas = self.entry(stake_address.clone()).or_default();
+        sas.rewards =
+            sas.rewards.checked_add(delta).ok_or_else(|| anyhow::anyhow!("reward overflow"))?;
+        Ok(())
+    }
+
     /// Update utxo value with delta
     pub fn update_utxo_value(&mut self, stake_address: &StakeAddress, delta: i64) -> Result<()> {
         let sas = self.entry(stake_address.clone()).or_default();
