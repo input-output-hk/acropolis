@@ -63,6 +63,8 @@ impl HistoricalAccountsState {
     ) -> Result<()> {
         let _ = params_subscription.read().await?;
         info!("Consumed initial genesis params from params_subscription");
+        let _ = stake_address_deltas_subscription.read().await?;
+        info!("Consumed initial stake deltas from stake_address_deltas_subscription");
 
         // Background task to persist epochs sequentially
         const MAX_PENDING_PERSISTS: usize = 1;

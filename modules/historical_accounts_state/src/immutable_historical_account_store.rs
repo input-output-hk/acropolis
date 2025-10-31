@@ -268,7 +268,7 @@ impl ImmutableHistoricalAccountStore {
         &self,
         account: &StakeAddress,
     ) -> Result<Option<HashSet<ShelleyAddress>>> {
-        let prefix = account.get_hash();
+        let prefix = account.to_binary();
         let mut addresses: HashSet<ShelleyAddress> = HashSet::new();
 
         for result in self.addresses.prefix(&prefix) {
