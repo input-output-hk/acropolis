@@ -15,7 +15,7 @@ use acropolis_common::{
         spdd::{SPDDStateQuery, SPDDStateQueryResponse},
         utils::query_state,
     },
-    NetworkId, PoolId,
+    PoolId,
 };
 use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
@@ -428,37 +428,6 @@ pub async fn handle_epoch_total_stakes_blockfrost(
         return Ok(RESTResponse::with_text(404, "Epoch not found"));
     }
 
-    // Query current network from parameters-state
-    let current_network_msg = Arc::new(Message::StateQuery(StateQuery::Parameters(
-        ParametersStateQuery::GetNetworkName,
-    )));
-    let current_network = query_state(
-        &context,
-        &handlers_config.parameters_query_topic,
-        current_network_msg,
-        |message| match message {
-            Message::StateQueryResponse(StateQueryResponse::Parameters(
-                ParametersStateQueryResponse::NetworkName(network),
-            )) => Ok(network),
-            _ => Err(anyhow::anyhow!(
-                "Unexpected message type while retrieving current network"
-            )),
-        },
-    )
-    .await?;
-
-    let network = match current_network.as_str() {
-        "mainnet" => NetworkId::Mainnet,
-        "testnet" => NetworkId::Testnet,
-        unknown => {
-            return Ok(RESTResponse::with_text(
-                500,
-                format!("Internal server error while retrieving current network: {unknown}")
-                    .as_str(),
-            ))
-        }
-    };
-
     // Query SPDD by epoch from accounts-state
     let msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
         AccountsStateQuery::GetSPDDByEpoch {
@@ -557,37 +526,6 @@ pub async fn handle_epoch_pool_stakes_blockfrost(
     if epoch_number > latest_epoch {
         return Ok(RESTResponse::with_text(404, "Epoch not found"));
     }
-
-    // Query current network from parameters-state
-    let current_network_msg = Arc::new(Message::StateQuery(StateQuery::Parameters(
-        ParametersStateQuery::GetNetworkName,
-    )));
-    let current_network = query_state(
-        &context,
-        &handlers_config.parameters_query_topic,
-        current_network_msg,
-        |message| match message {
-            Message::StateQueryResponse(StateQueryResponse::Parameters(
-                ParametersStateQueryResponse::NetworkName(network),
-            )) => Ok(network),
-            _ => Err(anyhow::anyhow!(
-                "Unexpected message type while retrieving current network"
-            )),
-        },
-    )
-    .await?;
-
-    let network = match current_network.as_str() {
-        "mainnet" => NetworkId::Mainnet,
-        "testnet" => NetworkId::Testnet,
-        unknown => {
-            return Ok(RESTResponse::with_text(
-                500,
-                format!("Internal server error while retrieving current network: {unknown}")
-                    .as_str(),
-            ))
-        }
-    };
 
     // Query SPDD by epoch and pool from accounts-state
     let msg = Arc::new(Message::StateQuery(StateQuery::Accounts(

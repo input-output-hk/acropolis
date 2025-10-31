@@ -1,26 +1,22 @@
-use std::collections::HashMap;
-use std::ops::Add;
-use acropolis_common::types::AddrKeyhash;
 use acropolis_common::{PoolId, StakeAddress};
 use anyhow::Result;
 use fjall::{Config, Keyspace, PartitionCreateOptions};
+use std::collections::HashMap;
 
 const POOL_ID_LENGTH: usize = 28;
-const STAKE_KEY_LEN: usize = 28;
+const STAKE_ADDRESS_LEN: usize = 29; // 1 byte header + 28 bytes hash
 const EPOCH_LEN: usize = 8;
-const TOTAL_KEY_LEN: usize = EPOCH_LEN + POOL_ID_LENGTH + STAKE_KEY_LEN;
+const TOTAL_KEY_LEN: usize = EPOCH_LEN + POOL_ID_LENGTH + STAKE_ADDRESS_LEN;
 
-// Batch size balances commit overhead vs memory usage
-// ~720KB per batch (72 bytes × 10,000)
-// ~130 commits for typical epoch (~1.3M delegations)
 const BATCH_SIZE: usize = 10_000;
 
-fn encode_key(epoch: u64, pool_id: &PoolId, stake_key: &AddrKeyhash) -> Vec<u8> {
+fn encode_key(epoch: u64, pool_id: &PoolId, stake_address: &StakeAddress) -> Result<Vec<u8>> {
     let mut key = Vec::with_capacity(TOTAL_KEY_LEN);
     key.extend_from_slice(&epoch.to_be_bytes());
     key.extend_from_slice(pool_id.as_ref());
-    key.extend_from_slice(stake_key.as_ref());
-    key
+    key.extend_from_slice(&stake_address.to_binary());
+
+    Ok(key)
 }
 
 fn encode_epoch_pool_prefix(epoch: u64, pool_id: &PoolId) -> Vec<u8> {
@@ -30,29 +26,32 @@ fn encode_epoch_pool_prefix(epoch: u64, pool_id: &PoolId) -> Vec<u8> {
     prefix
 }
 
-fn decode_key(key: &[u8]) -> Result<(u64, PoolId, AddrKeyhash)> {
+fn decode_key(key: &[u8]) -> Result<(u64, PoolId, StakeAddress)> {
+    if key.len() != TOTAL_KEY_LEN {
+        anyhow::bail!(
+            "Invalid key length: expected {}, got {}",
+            TOTAL_KEY_LEN,
+            key.len()
+        );
+    }
+
     let epoch = u64::from_be_bytes(key[..EPOCH_LEN].try_into()?);
     let pool_id = key[EPOCH_LEN..EPOCH_LEN + POOL_ID_LENGTH].try_into()?;
-    let stake_key = key[EPOCH_LEN + POOL_ID_LENGTH..].try_into()?;
-    Ok((epoch, pool_id, stake_key))
+
+    let stake_address_bytes = &key[EPOCH_LEN + POOL_ID_LENGTH..];
+    let stake_address = StakeAddress::from_binary(stake_address_bytes)?;
+
+    Ok((epoch, pool_id, stake_address))
 }
 
-/// Encode epoch completion marker key
 fn encode_epoch_marker(epoch: u64) -> Vec<u8> {
     epoch.to_be_bytes().to_vec()
 }
 
 pub struct SPDDStore {
     keyspace: Keyspace,
-    /// Partition for all SPDD data
-    /// Key format: epoch(8 bytes) + pool_id + stake_key
-    /// Value: amount(8 bytes)
     spdd: fjall::PartitionHandle,
-    /// Partition for epoch completion markers
-    /// Key format: epoch(8 bytes)
-    /// Value: "complete"
     epoch_markers: fjall::PartitionHandle,
-    /// Maximum number of epochs to retain (None = unlimited)
     retention_epochs: u64,
 }
 
@@ -101,8 +100,8 @@ impl SPDDStore {
     pub fn store_spdd(
         &mut self,
         epoch: u64,
-        spdd_state: HashMap<PoolId, Vec<(AddrKeyhash, u64)>>,
-    ) -> fjall::Result<()> {
+        spdd_state: HashMap<PoolId, Vec<(StakeAddress, u64)>>,
+    ) -> Result<()> {
         if self.is_epoch_complete(epoch)? {
             return Ok(());
         }
@@ -111,8 +110,8 @@ impl SPDDStore {
         let mut batch = self.keyspace.batch();
         let mut count = 0;
         for (pool_id, delegations) in spdd_state {
-            for (stake_key, amount) in delegations {
-                let key = encode_key(epoch, &pool_id, &stake_key);
+            for (stake_address, amount) in delegations {
+                let key = encode_key(epoch, &pool_id, &stake_address)?;
                 let value = amount.to_be_bytes();
                 batch.insert(&self.spdd, key, value);
 
@@ -128,7 +127,6 @@ impl SPDDStore {
             batch.commit()?;
         }
 
-        // Mark epoch as complete (single key operation)
         let marker_key = encode_epoch_marker(epoch);
         self.epoch_markers.insert(marker_key, b"complete")?;
 
@@ -141,7 +139,6 @@ impl SPDDStore {
     }
 
     pub fn remove_epoch_data(&self, epoch: u64) -> fjall::Result<u64> {
-        // Remove epoch marker first - if process fails midway, epoch will be marked incomplete
         let marker_key = encode_epoch_marker(epoch);
         self.epoch_markers.remove(marker_key)?;
 
@@ -183,7 +180,7 @@ impl SPDDStore {
         Ok(deleted_epochs)
     }
 
-    pub fn query_by_epoch(&self, epoch: u64) -> Result<Vec<(PoolId, AddrKeyhash, u64)>> {
+    pub fn query_by_epoch(&self, epoch: u64) -> Result<Vec<(PoolId, StakeAddress, u64)>> {
         if !self.is_epoch_complete(epoch)? {
             return Err(anyhow::anyhow!("Epoch SPDD Data is not complete"));
         }
@@ -192,9 +189,9 @@ impl SPDDStore {
         let mut result = Vec::new();
         for item in self.spdd.prefix(prefix) {
             let (key, value) = item?;
-            let (_, pool_id, stake_key) = decode_key(&key)?;
+            let (_, pool_id, stake_address) = decode_key(&key)?;
             let amount = u64::from_be_bytes(value.as_ref().try_into()?);
-            result.push((pool_id, stake_key, amount));
+            result.push((pool_id, stake_address, amount));
         }
         Ok(result)
     }
@@ -203,7 +200,7 @@ impl SPDDStore {
         &self,
         epoch: u64,
         pool_id: &PoolId,
-    ) -> Result<Vec<(AddrKeyhash, u64)>> {
+    ) -> Result<Vec<(StakeAddress, u64)>> {
         if !self.is_epoch_complete(epoch)? {
             return Err(anyhow::anyhow!("Epoch SPDD Data is not complete"));
         }
@@ -212,9 +209,9 @@ impl SPDDStore {
         let mut result = Vec::new();
         for item in self.spdd.prefix(prefix) {
             let (key, value) = item?;
-            let (_, _, stake_key) = decode_key(&key)?;
+            let (_, _, stake_address) = decode_key(&key)?;
             let amount = u64::from_be_bytes(value.as_ref().try_into()?);
-            result.push((stake_key, amount));
+            result.push((stake_address, amount));
         }
         Ok(result)
     }
@@ -224,8 +221,7 @@ impl SPDDStore {
 mod tests {
     use super::*;
     use acropolis_common::crypto::keyhash_224;
-    use acropolis_common::types::AddrKeyhash;
-    use acropolis_common::PoolId;
+    use acropolis_common::{NetworkId, PoolId, StakeCredential};
 
     const DB_PATH: &str = "spdd_db";
 
@@ -233,23 +229,29 @@ mod tests {
         keyhash_224(&[byte]).into()
     }
 
-    fn test_addr_hash(byte: u8) -> AddrKeyhash {
-        keyhash_224(&[byte])
+    fn test_stake_address(byte: u8, network: NetworkId) -> StakeAddress {
+        StakeAddress::new(StakeCredential::AddrKeyHash(keyhash_224(&[byte])), network)
     }
 
     #[test]
     fn test_store_spdd_state() {
         let mut spdd_store =
             SPDDStore::new(std::path::Path::new(DB_PATH), 1).expect("Failed to create SPDD store");
-        let mut spdd_state: HashMap<PoolId, Vec<(AddrKeyhash, u64)>> = HashMap::new();
+        let mut spdd_state: HashMap<PoolId, Vec<(StakeAddress, u64)>> = HashMap::new();
 
         spdd_state.insert(
             test_pool_hash(0x01),
-            vec![(test_addr_hash(0x10), 100), (test_addr_hash(0x11), 150)],
+            vec![
+                (test_stake_address(0x10, NetworkId::Mainnet), 100),
+                (test_stake_address(0x11, NetworkId::Mainnet), 150),
+            ],
         );
         spdd_state.insert(
             test_pool_hash(0x02),
-            vec![(test_addr_hash(0x20), 200), (test_addr_hash(0x21), 250)],
+            vec![
+                (test_stake_address(0x20, NetworkId::Testnet), 200),
+                (test_stake_address(0x21, NetworkId::Testnet), 250),
+            ],
         );
         assert!(spdd_store.store_spdd(1, spdd_state).is_ok());
 
@@ -268,13 +270,13 @@ mod tests {
             .expect("Failed to create SPDD store");
 
         for epoch in 1..=3 {
-            let mut spdd_state: HashMap<PoolId, Vec<(AddrKeyhash, u64)>> = HashMap::new();
+            let mut spdd_state: HashMap<PoolId, Vec<(StakeAddress, u64)>> = HashMap::new();
 
             spdd_state.insert(
                 test_pool_hash(epoch as u8),
                 vec![
-                    (test_addr_hash(0x10), epoch * 100),
-                    (test_addr_hash(0x11), epoch * 150),
+                    (test_stake_address(0x10, NetworkId::Mainnet), epoch * 100),
+                    (test_stake_address(0x11, NetworkId::Mainnet), epoch * 150),
                 ],
             );
             spdd_store.store_spdd(epoch, spdd_state).expect("Failed to store SPDD state");
