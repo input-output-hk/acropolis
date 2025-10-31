@@ -12,7 +12,7 @@ use acropolis_common::{
     },
     queries::misc::Order,
     state_history::{StateHistory, StateHistoryStore},
-    BechOrdAddress, BlockHash, GenesisDelegate, HeavyDelegate, TxHash,
+    BechOrdAddress, BlockHash, GenesisDelegate, HeavyDelegate, PoolId, TxHash,
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Module};
@@ -525,8 +525,8 @@ impl ChainStore {
 
 #[derive(Default, Debug, Clone)]
 pub struct State {
-    pub byron_heavy_delegates: HashMap<Vec<u8>, HeavyDelegate>,
-    pub shelley_genesis_delegates: HashMap<Vec<u8>, GenesisDelegate>,
+    pub byron_heavy_delegates: HashMap<PoolId, HeavyDelegate>,
+    pub shelley_genesis_delegates: HashMap<PoolId, GenesisDelegate>,
 }
 
 impl State {

@@ -1350,7 +1350,7 @@ pub struct HeavyDelegate {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GenesisDelegate {
     #[serde_as(as = "Hex")]
-    pub delegate: Vec<u8>,
+    pub delegate: Hash<28>,
     #[serde_as(as = "Hex")]
     pub vrf: Vec<u8>,
 }
