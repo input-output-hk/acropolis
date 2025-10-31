@@ -13,6 +13,7 @@ use tracing_subscriber::{filter, fmt, EnvFilter, Registry};
 // External modules
 use acropolis_module_accounts_state::AccountsState;
 use acropolis_module_block_unpacker::BlockUnpacker;
+use acropolis_module_consensus::Consensus;
 use acropolis_module_drdd_state::DRDDState;
 use acropolis_module_drep_state::DRepState;
 use acropolis_module_epochs_state::EpochsState;
@@ -56,14 +57,10 @@ fn setup_governance_collect(process: &mut dyn ModuleRegistry<Message>) {
     StakeDeltaFilter::register(process);
     EpochsState::register(process);
     AccountsState::register(process);
-    //AddressState::register(process);
-    //AssetsState::register(process);
-    //HistoricalAccountsState::register(process);
     BlockfrostREST::register(process);
     SPDDState::register(process);
     DRDDState::register(process);
-    //Consensus::register(process);
-    //ChainStore::register(process);
+    Consensus::register(process);
 
     Recorder::register(process);
 
