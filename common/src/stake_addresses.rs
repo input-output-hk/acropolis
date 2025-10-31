@@ -1467,14 +1467,8 @@ mod tests {
             let map = stake_addresses.get_drep_delegations_map(&addresses).unwrap();
 
             assert_eq!(map.len(), 3);
-            assert_eq!(
-                map.get(&addr1).unwrap(),
-                &Some(DRepChoice::Abstain)
-            );
-            assert_eq!(
-                map.get(&addr2).unwrap(),
-                &Some(DRepChoice::Key(DREP_HASH))
-            );
+            assert_eq!(map.get(&addr1).unwrap(), &Some(DRepChoice::Abstain));
+            assert_eq!(map.get(&addr2).unwrap(), &Some(DRepChoice::Key(DREP_HASH)));
             assert_eq!(map.get(&addr3).unwrap(), &None);
         }
 

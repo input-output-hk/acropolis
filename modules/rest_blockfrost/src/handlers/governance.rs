@@ -4,10 +4,14 @@ use crate::types::{
     DRepInfoREST, DRepMetadataREST, DRepUpdateREST, DRepVoteREST, DRepsListREST, ProposalVoteREST,
     VoterRoleREST,
 };
-use acropolis_common::{messages::{Message, RESTResponse, StateQuery, StateQueryResponse}, queries::{
-    accounts::{AccountsStateQuery, AccountsStateQueryResponse},
-    governance::{GovernanceStateQuery, GovernanceStateQueryResponse},
-}, Credential, GovActionId, StakeAddress, TxHash, Voter};
+use acropolis_common::{
+    messages::{Message, RESTResponse, StateQuery, StateQueryResponse},
+    queries::{
+        accounts::{AccountsStateQuery, AccountsStateQueryResponse},
+        governance::{GovernanceStateQuery, GovernanceStateQueryResponse},
+    },
+    Credential, GovActionId, StakeAddress, TxHash, Voter,
+};
 use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
 use reqwest::Client;
