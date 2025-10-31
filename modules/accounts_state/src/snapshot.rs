@@ -105,7 +105,7 @@ impl Snapshot {
 
             // Add the new one
             snapshot.spos.insert(
-                spo_id.clone(),
+                *spo_id,
                 SnapshotSPO {
                     delegators: vec![],
                     total_stake: 0,
@@ -229,7 +229,7 @@ mod tests {
             StakeAddressState {
                 utxo_value: 42,
                 registered: true,
-                delegated_spo: Some(spo1.clone()),
+                delegated_spo: Some(spo1),
                 ..StakeAddressState::default()
             },
         );
@@ -238,7 +238,7 @@ mod tests {
             StakeAddressState {
                 utxo_value: 99,
                 registered: true,
-                delegated_spo: Some(spo2.clone()),
+                delegated_spo: Some(spo2),
                 ..StakeAddressState::default()
             },
         );
@@ -247,7 +247,7 @@ mod tests {
             StakeAddressState {
                 utxo_value: 0,
                 registered: true,
-                delegated_spo: Some(spo1.clone()),
+                delegated_spo: Some(spo1),
                 ..StakeAddressState::default()
             },
         );
@@ -271,8 +271,8 @@ mod tests {
         );
 
         let mut spos: OrdMap<PoolId, PoolRegistration> = OrdMap::new();
-        spos.insert(spo1.clone(), PoolRegistration::default());
-        spos.insert(spo2.clone(), PoolRegistration::default());
+        spos.insert(spo1, PoolRegistration::default());
+        spos.insert(spo2, PoolRegistration::default());
         let spo_block_counts: HashMap<PoolId, usize> = HashMap::new();
         let snapshot = Snapshot::new(
             42,
@@ -313,7 +313,7 @@ mod tests {
         let addr4 = create_test_stake_address(0x14);
 
         snapshot.spos.insert(
-            spo1.clone(),
+            spo1,
             SnapshotSPO {
                 delegators: vec![
                     (addr1.clone(), 100),
@@ -340,7 +340,7 @@ mod tests {
         let addr_x = create_test_stake_address(0x99);
 
         snapshot.spos.insert(
-            spo1.clone(),
+            spo1,
             SnapshotSPO {
                 delegators: vec![(addr1.clone(), 100)],
                 total_stake: 100,
@@ -369,7 +369,7 @@ mod tests {
         let addr1 = create_test_stake_address(0x11);
 
         snapshot.spos.insert(
-            spo1.clone(),
+            spo1,
             SnapshotSPO {
                 delegators: vec![(addr1.clone(), 100)],
                 total_stake: 100,

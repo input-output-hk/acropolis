@@ -99,7 +99,7 @@ mod tests {
                 *epoch,
                 HashMap::from_iter(distr.iter().map(|PoolRecord(id, active, live)| {
                     (
-                        id.clone(),
+                        *id,
                         DelegatedStake {
                             active: *active,
                             active_delegators_count: 0,

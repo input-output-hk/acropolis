@@ -723,11 +723,10 @@ impl Credential {
     }
 
     pub fn get_hash(&self) -> KeyHash {
-        match self {
+        *match self {
             Self::AddrKeyHash(hash) => hash,
             Self::ScriptHash(hash) => hash,
         }
-        .clone()
     }
 
     pub fn from_drep_bech32(bech32_str: &str) -> Result<Self, Error> {

@@ -52,7 +52,7 @@ impl AlonzoBabbageVoting {
             let entry = self.proposals.entry(pp.enactment_epoch + 1).or_default();
             for (k, p) in &pp.proposals {
                 // A new proposal for key k always replaces the old one
-                entry.insert(k.clone(), (block_info.epoch, block_info.slot, p.clone()));
+                entry.insert(*k, (block_info.epoch, block_info.slot, p.clone()));
             }
         }
 
@@ -71,7 +71,7 @@ impl AlonzoBabbageVoting {
         let proposals = proposals_for_new_epoch
             .iter()
             .filter(|(_k, (_epoch, slot, _proposal))| self.is_timely_vote(*slot, new_blk))
-            .map(|(k, (_e, _s, proposal))| (k.clone(), proposal.clone()))
+            .map(|(k, (_e, _s, proposal))| (*k, proposal.clone()))
             .collect::<Vec<_>>();
 
         let mut cast_votes = HashSet::new();
@@ -85,12 +85,12 @@ impl AlonzoBabbageVoting {
                 let votes: Vec<_> = proposals
                     .iter()
                     .filter(|&(_, v)| v == parameter_update)
-                    .map(|(k, _)| k.clone())
+                    .map(|(k, _)| *k)
                     .collect();
 
                 for v in &votes {
                     // TODO Check keys (whether they are genesis keys)
-                    cast_votes.insert(v.clone());
+                    cast_votes.insert(*v);
                 }
 
                 let votes_len = votes.len() as u32;
@@ -168,8 +168,7 @@ mod tests {
             };
 
             for prop in proposals {
-                let decoded_updates =
-                    prop.1.iter().map(|(k, v)| (k.0.clone(), v.clone())).collect();
+                let decoded_updates = prop.1.iter().map(|(k, v)| (k.0, v.clone())).collect();
 
                 let update_prop = AlonzoBabbageUpdateProposal {
                     proposals: decoded_updates,

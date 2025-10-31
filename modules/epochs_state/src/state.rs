@@ -191,7 +191,7 @@ impl State {
         let spo_id = PoolId::from(keyhash_224(issuer_vkey));
 
         // Count one on this hash
-        *(self.blocks_minted.entry(spo_id.clone()).or_insert(0)) += 1;
+        *(self.blocks_minted.entry(spo_id).or_insert(0)) += 1;
     }
 
     // Handle Block Txs
@@ -250,7 +250,7 @@ impl State {
             total_txs: self.epoch_txs,
             total_outputs: self.epoch_outputs,
             total_fees: self.epoch_fees,
-            spo_blocks: self.blocks_minted.iter().map(|(k, v)| (k.clone(), *v)).collect(),
+            spo_blocks: self.blocks_minted.iter().map(|(k, v)| (*k, *v)).collect(),
             nonce: self.nonces.as_ref().and_then(|n| n.active.hash),
         }
     }

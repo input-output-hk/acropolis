@@ -626,7 +626,7 @@ impl State {
                                 stake_address: reward.account.clone(),
                                 delta: reward.amount,
                                 reward_type: reward.rtype.clone(),
-                                pool: reward.pool.clone(),
+                                pool: reward.pool,
                             });
                         } else {
                             warn!(
@@ -670,7 +670,7 @@ impl State {
             .spo_blocks
             .iter()
             .filter(|(hash, _)| self.spos.contains_key(hash))
-            .map(|(hash, count)| (hash.clone(), *count))
+            .map(|(hash, count)| (*hash, *count))
             .collect();
 
         // Enter epoch - note the message specifies the epoch that has just *ended*
@@ -689,7 +689,7 @@ impl State {
     pub fn handle_spo_state(&mut self, spo_msg: &SPOStateMessage) -> Result<()> {
         // Capture current SPOs, mapped by operator ID
         let new_spos: OrdMap<PoolId, PoolRegistration> =
-            spo_msg.spos.iter().cloned().map(|spo| (spo.operator.clone(), spo)).collect();
+            spo_msg.spos.iter().cloned().map(|spo| (spo.operator, spo)).collect();
 
         // Get pool deposit amount from parameters, or default
         let deposit = self
@@ -755,10 +755,7 @@ impl State {
                     hex::encode(id),
                     retired_spo.reward_account
                 );
-                self.pool_refunds.push((
-                    retired_spo.operator.clone(),
-                    retired_spo.reward_account.clone(),
-                ));
+                self.pool_refunds.push((retired_spo.operator, retired_spo.reward_account.clone()));
                 // Store full StakeAddress
             }
 
@@ -985,7 +982,7 @@ mod tests {
     }
 
     fn test_keyhash(byte: u8) -> KeyHash {
-        keyhash_224(&vec![byte])
+        keyhash_224(&[byte])
     }
 
     fn test_keyhash_from_bytes(bytes: &[u8]) -> KeyHash {
@@ -993,7 +990,7 @@ mod tests {
     }
 
     fn test_vrf_keyhash(byte: u8) -> VrfKeyHash {
-        keyhash_256(&vec![byte]).into()
+        keyhash_256(&[byte]).into()
     }
 
     const STAKE_KEY_HASH: [u8; 3] = [0x99, 0x0f, 0x00];

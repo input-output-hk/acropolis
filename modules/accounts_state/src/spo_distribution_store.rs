@@ -230,11 +230,11 @@ mod tests {
     const DB_PATH: &str = "spdd_db";
 
     fn test_pool_hash(byte: u8) -> PoolId {
-        keyhash_224(&vec![byte]).into()
+        keyhash_224(&[byte]).into()
     }
 
     fn test_addr_hash(byte: u8) -> AddrKeyhash {
-        keyhash_224(&vec![byte])
+        keyhash_224(&[byte])
     }
 
     #[test]

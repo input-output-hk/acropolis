@@ -40,7 +40,7 @@ impl RetiredPoolsHistoryState {
                             .value()
                             .iter()
                             .map(move |pool| PoolRetirement {
-                                operator: pool.clone(),
+                                operator: *pool,
                                 epoch,
                             })
                             .collect::<Vec<PoolRetirement>>()

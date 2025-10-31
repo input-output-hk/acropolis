@@ -157,7 +157,7 @@ impl Serialize for BlockInfo {
             "block_vrf",
             &self.block_vrf.and_then(|vkey| vkey.to_bech32().ok()),
         )?;
-        state.serialize_field("op_cert", &self.op_cert.clone().map(hex::encode))?;
+        state.serialize_field("op_cert", &self.op_cert.map(hex::encode))?;
         state.serialize_field("op_cert_counter", &self.op_cert_counter)?;
         state.serialize_field("previous_block", &self.previous_block)?;
         state.serialize_field("next_block", &self.next_block)?;

@@ -117,7 +117,7 @@ impl State {
             let update = AccountReward {
                 epoch: reward_epoch,
                 amount: reward.delta,
-                pool: reward.pool.clone(),
+                pool: reward.pool,
                 reward_type: reward.reward_type.clone(),
             };
             entry.reward_history.get_or_insert_with(Vec::new).push(update);
@@ -376,7 +376,7 @@ impl State {
             active_epoch: epoch.saturating_add(2),
             tx_identifier: *tx_identifier,
             amount: 0, // Amount is set during persistence when active stake is known
-            pool: pool.clone(),
+            pool: *pool,
         };
         entry.delegation_history.get_or_insert_with(Vec::new).push(update);
     }

@@ -312,10 +312,10 @@ macro_rules! declare_hash_type_with_bech32 {
             }
         }
 
-        impl crate::serialization::Bech32Conversion for $name {
+        impl $crate::serialization::Bech32Conversion for $name {
             fn to_bech32(&self) -> Result<String, anyhow::Error> {
-                use crate::serialization::Bech32WithHrp;
                 use anyhow::Context;
+                use $crate::serialization::Bech32WithHrp;
 
                 self.as_ref().to_bech32_with_hrp($hrp).with_context(|| {
                     format!(
@@ -327,8 +327,8 @@ macro_rules! declare_hash_type_with_bech32 {
             }
 
             fn from_bech32(s: &str) -> Result<Self, anyhow::Error> {
-                use crate::serialization::Bech32WithHrp;
                 use anyhow::Context;
+                use $crate::serialization::Bech32WithHrp;
 
                 let v = Vec::<u8>::from_bech32_with_hrp(s, $hrp).with_context(|| {
                     format!("Failed to decode {} from bech32", stringify!($name))

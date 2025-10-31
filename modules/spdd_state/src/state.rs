@@ -29,7 +29,7 @@ impl State {
                 None => true,
             };
             if changed {
-                next.insert(k.clone(), v_new);
+                next.insert(k, v_new);
             }
             present.insert(k);
         }

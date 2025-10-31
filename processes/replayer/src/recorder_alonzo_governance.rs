@@ -55,7 +55,7 @@ impl BlockRecorder {
         for vote in votes.iter() {
             let mut votes_indexed = Vec::new();
             for (h, u) in &vote.proposals {
-                votes_indexed.push(VoteRecord(ReplayerGenesisKeyhash(h.clone()), u.clone()));
+                votes_indexed.push(VoteRecord(ReplayerGenesisKeyhash(*h), u.clone()));
             }
             proposals.push((vote.enactment_epoch, votes_indexed));
         }

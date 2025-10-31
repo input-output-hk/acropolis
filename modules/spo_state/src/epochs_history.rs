@@ -187,7 +187,7 @@ impl EpochsHistoryState {
         epoch: u64,
         update_fn: impl FnOnce(&mut EpochState),
     ) {
-        let mut epochs = epochs_history.entry(spo.clone()).or_default();
+        let mut epochs = epochs_history.entry(*spo).or_default();
         let epoch_state = epochs.entry(epoch).or_insert_with(|| EpochState::new(epoch));
         update_fn(epoch_state);
     }
@@ -242,7 +242,7 @@ mod tests {
         epoch_activity_msg.spo_blocks = vec![(spo_block_key_hash, 1)];
         epoch_activity_msg.total_blocks = 1;
         epoch_activity_msg.total_fees = 10;
-        epochs_history.handle_epoch_activity(&block, &epoch_activity_msg, &vec![(pool_id, 1)]);
+        epochs_history.handle_epoch_activity(&block, &epoch_activity_msg, &[(pool_id, 1)]);
 
         let mut spo_rewards_msg = new_spo_rewards_message(1);
         spo_rewards_msg.spos = vec![(

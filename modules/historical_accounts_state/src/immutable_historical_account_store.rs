@@ -326,7 +326,7 @@ impl ImmutableHistoricalAccountStore {
 
     fn make_epoch_key(account: &StakeAddress, epoch: u32) -> [u8; 32] {
         let mut key = [0u8; 32];
-        key[..28].copy_from_slice(&account.get_credential().get_hash().as_ref());
+        key[..28].copy_from_slice(account.get_credential().get_hash().as_ref());
         key[28..32].copy_from_slice(&epoch.to_be_bytes());
         key
     }
