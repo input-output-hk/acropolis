@@ -1,5 +1,5 @@
 use acropolis_common::{PoolId, StakeAddress};
-use anyhow::Result;
+use anyhow::{anyhow, Context, Result};
 use fjall::{Config, Keyspace, PartitionCreateOptions};
 use std::collections::HashMap;
 
@@ -30,19 +30,27 @@ fn encode_epoch_pool_prefix(epoch: u64, pool_id: &PoolId) -> Vec<u8> {
 }
 
 fn decode_key(key: &[u8]) -> Result<(u64, PoolId, StakeAddress)> {
-    if key.len() != TOTAL_KEY_LEN {
-        anyhow::bail!(
-            "Invalid key length: expected {}, got {}",
-            TOTAL_KEY_LEN,
-            key.len()
-        );
-    }
+    let epoch_bytes: [u8; EPOCH_LEN] = key[..EPOCH_LEN]
+        .try_into()
+        .map_err(|_| anyhow!("Failed to extract epoch bytes (offset 0-{})", EPOCH_LEN))?;
+    let epoch = u64::from_be_bytes(epoch_bytes);
 
-    let epoch = u64::from_be_bytes(key[..EPOCH_LEN].try_into()?);
-    let pool_id = key[EPOCH_LEN..EPOCH_LEN + POOL_ID_LENGTH].try_into()?;
+    let pool_id: PoolId = key[EPOCH_LEN..EPOCH_LEN + POOL_ID_LENGTH].try_into().map_err(|_| {
+        anyhow!(
+            "Failed to extract pool ID bytes (offset {}-{})",
+            EPOCH_LEN,
+            EPOCH_LEN + POOL_ID_LENGTH
+        )
+    })?;
 
     let stake_address_bytes = &key[EPOCH_LEN + POOL_ID_LENGTH..];
-    let stake_address = StakeAddress::from_binary(stake_address_bytes)?;
+    let stake_address = StakeAddress::from_binary(stake_address_bytes).with_context(|| {
+        format!(
+            "Failed to decode stake address from {} bytes at offset {}",
+            stake_address_bytes.len(),
+            EPOCH_LEN + POOL_ID_LENGTH
+        )
+    })?;
 
     Ok((epoch, pool_id, stake_address))
 }

@@ -456,9 +456,12 @@ pub async fn handle_epoch_total_stakes_blockfrost(
     let spdd_response = spdd
         .into_iter()
         .map(|(pool_id, stake_address, amount)| {
+            let bech32 = stake_address
+                .to_string()
+                .map_err(|e| anyhow::anyhow!("Failed to convert stake address to string {}", e))?;
             Ok(SPDDByEpochItemRest {
                 pool_id,
-                stake_address: stake_address.to_string().unwrap(),
+                stake_address: bech32,
                 amount,
             })
         })
@@ -556,8 +559,11 @@ pub async fn handle_epoch_pool_stakes_blockfrost(
     let spdd_response = spdd
         .into_iter()
         .map(|(stake_address, amount)| {
+            let bech32 = stake_address
+                .to_string()
+                .map_err(|e| anyhow::anyhow!("Failed to convert stake address to string {}", e))?;
             Ok(SPDDByEpochAndPoolItemRest {
-                stake_address: stake_address.to_string().unwrap(),
+                stake_address: bech32,
                 amount,
             })
         })
