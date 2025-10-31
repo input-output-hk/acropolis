@@ -1,6 +1,6 @@
 use crate::{BlockHash, Lovelace, NativeAsset, TxHash};
 use serde::ser::{Serialize, SerializeStruct, Serializer};
-use serde_with::{DisplayFromStr, serde_as};
+use serde_with::{serde_as, DisplayFromStr};
 
 pub const DEFAULT_TRANSACTIONS_QUERY_TOPIC: (&str, &str) = (
     "transactions-state-query-topic",
@@ -59,11 +59,11 @@ impl Serialize for TransactionOutputAmount {
             TransactionOutputAmount::Lovelace(lovelace) => {
                 state.serialize_field("unit", "lovelace")?;
                 state.serialize_field("amount", &lovelace.to_string())?;
-            },
+            }
             TransactionOutputAmount::Asset(asset) => {
                 state.serialize_field("unit", &asset.name)?;
                 state.serialize_field("amount", &asset.amount.to_string())?;
-            },
+            }
         }
         state.end()
     }

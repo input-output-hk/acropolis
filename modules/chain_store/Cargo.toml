@@ -19,6 +19,7 @@ pallas-traverse = { workspace = true }
 tracing = "0.1.40"
 tokio.workspace = true
 imbl.workspace = true
+pallas.workspace = true
 
 [dev-dependencies]
 tempfile = "3"

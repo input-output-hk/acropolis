@@ -22,6 +22,8 @@ use acropolis_common::{
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{module, Context, Module};
 use config::Config;
+use pallas::ledger::primitives::{alonzo, conway};
+use pallas_traverse::MultiEraCert;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -561,6 +563,29 @@ impl ChainStore {
                 }
             }
         }
+        let mut mir_cert_count = 0;
+        let mut delegation_count = 0;
+        let mut stake_cert_count = 0;
+        let mut pool_update_count = 0;
+        let mut pool_retire_count = 0;
+        for cert in tx_decoded.certs() {
+            match cert {
+                MultiEraCert::AlonzoCompatible(cert) => match cert.as_ref().as_ref() {
+                    alonzo::Certificate::PoolRegistration { .. } => pool_update_count += 1,
+                    alonzo::Certificate::PoolRetirement { .. } => pool_retire_count += 1,
+                    alonzo::Certificate::MoveInstantaneousRewardsCert { .. } => mir_cert_count += 1,
+                    _ => (),
+                },
+                MultiEraCert::Conway(cert) => match cert.as_ref().as_ref() {
+                    conway::Certificate::PoolRegistration { .. } => pool_update_count += 1,
+                    conway::Certificate::PoolRetirement { .. } => pool_retire_count += 1,
+                    conway::Certificate::StakeRegistration { .. } => stake_cert_count += 1,
+                    conway::Certificate::StakeDelegation { .. } => delegation_count += 1,
+                    _ => (),
+                },
+                _ => (),
+            }
+        }
         Ok(TransactionInfo {
             hash: TxHash(*tx_decoded.hash()),
             block_hash: BlockHash(*block.hash()),
@@ -569,29 +594,29 @@ impl ChainStore {
             slot: block.slot(),
             index: tx.index,
             output_amounts,
+            // TODO: None for byron - needs to look up input utxo values in other txs and subtract
+            // outputs value?
             fee: tx_decoded.fee().unwrap_or(0),
             // TODO
             deposit: 0,
+            // TODO reporting too many bytes (140)
             size: tx_decoded.size() as u64,
             invalid_before: tx_decoded.validity_start(),
             // TODO
             invalid_after: None,
-            utxo_count: tx_decoded.requires().len() as u64,
+            utxo_count: (tx_decoded.requires().len() + tx_decoded.produces().len()) as u64,
             withdrawal_count: tx_decoded.withdrawals_sorted_set().len() as u64,
-            // TODO
-            mir_cert_count: 0,
-            // TODO
-            delegation_count: 0,
-            // TODO
-            stake_cert_count: 0,
-            // TODO
-            pool_update_count: 0,
-            // TODO
-            pool_retire_count: 0,
-            // TODO
-            asset_mint_or_burn_count: 0,
-            // TODO
-            redeemer_count: 0,
+            mir_cert_count,
+            delegation_count,
+            stake_cert_count,
+            pool_update_count,
+            pool_retire_count,
+            asset_mint_or_burn_count: tx_decoded
+                .mints()
+                .iter()
+                .map(|p| p.assets().len())
+                .sum::<usize>() as u64,
+            redeemer_count: tx_decoded.redeemers().len() as u64,
             valid_contract: tx_decoded.is_valid(),
         })
     }
