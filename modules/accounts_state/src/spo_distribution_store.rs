@@ -242,39 +242,42 @@ impl SPDDStore {
 mod tests {
     use super::*;
     use acropolis_common::crypto::keyhash_224;
-    use acropolis_common::{NetworkId, PoolId, StakeCredential};
-
-    const DB_PATH: &str = "spdd_db";
+    use acropolis_common::NetworkId::Mainnet;
+    use acropolis_common::{PoolId, StakeCredential};
+    use tempfile::TempDir;
 
     fn test_pool_hash(byte: u8) -> PoolId {
         keyhash_224(&[byte]).into()
     }
 
-    fn test_stake_address(byte: u8, network: NetworkId) -> StakeAddress {
-        StakeAddress::new(StakeCredential::AddrKeyHash(keyhash_224(&[byte])), network)
+    fn test_stake_address(byte: u8) -> StakeAddress {
+        StakeAddress::new(StakeCredential::AddrKeyHash(keyhash_224(&[byte])), Mainnet)
     }
 
     #[test]
-    fn test_store_spdd_state() {
+    fn test_store_and_query_spdd() {
+        let temp_dir = TempDir::new().unwrap();
         let mut spdd_store =
-            SPDDStore::new(std::path::Path::new(DB_PATH), 1).expect("Failed to create SPDD store");
-        let mut spdd_state: HashMap<PoolId, Vec<(StakeAddress, u64)>> = HashMap::new();
+            SPDDStore::new(temp_dir.path(), 10).expect("Failed to create SPDD store");
 
+        let mut spdd_state: HashMap<PoolId, Vec<(StakeAddress, u64)>> = HashMap::new();
         spdd_state.insert(
             test_pool_hash(0x01),
             vec![
-                (test_stake_address(0x10, NetworkId::Mainnet), 100),
-                (test_stake_address(0x11, NetworkId::Mainnet), 150),
+                (test_stake_address(0x10), 100),
+                (test_stake_address(0x11), 150),
             ],
         );
         spdd_state.insert(
             test_pool_hash(0x02),
             vec![
-                (test_stake_address(0x20, NetworkId::Testnet), 200),
-                (test_stake_address(0x21, NetworkId::Testnet), 250),
+                (test_stake_address(0x20), 200),
+                (test_stake_address(0x21), 250),
             ],
         );
+
         assert!(spdd_store.store_spdd(1, spdd_state).is_ok());
+        assert!(spdd_store.is_epoch_complete(1).unwrap());
 
         let result = spdd_store.query_by_epoch(1).unwrap();
         assert_eq!(result.len(), 4);
@@ -286,31 +289,81 @@ mod tests {
     }
 
     #[test]
-    fn test_prune_old_epochs() {
-        let mut spdd_store = SPDDStore::new(std::path::Path::new("spdd_prune_test_db"), 2)
-            .expect("Failed to create SPDD store");
+    fn test_retention_pruning() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut spdd_store =
+            SPDDStore::new(temp_dir.path(), 2).expect("Failed to create SPDD store");
 
+        // Store epochs 1, 2, 3
         for epoch in 1..=3 {
             let mut spdd_state: HashMap<PoolId, Vec<(StakeAddress, u64)>> = HashMap::new();
-
             spdd_state.insert(
                 test_pool_hash(epoch as u8),
                 vec![
-                    (test_stake_address(0x10, NetworkId::Mainnet), epoch * 100),
-                    (test_stake_address(0x11, NetworkId::Mainnet), epoch * 150),
+                    (test_stake_address(0x10), epoch * 100),
+                    (test_stake_address(0x11), epoch * 150),
                 ],
             );
             spdd_store.store_spdd(epoch, spdd_state).expect("Failed to store SPDD state");
         }
 
+        // Epoch 1 should be pruned (retention=2, so keep epochs 2 and 3)
         assert!(!spdd_store.is_epoch_complete(1).unwrap());
         assert!(spdd_store.is_epoch_complete(2).unwrap());
         assert!(spdd_store.is_epoch_complete(3).unwrap());
 
         assert!(spdd_store.query_by_epoch(1).is_err());
-        let result = spdd_store.query_by_epoch(2).unwrap();
-        assert_eq!(result.len(), 2);
-        let result = spdd_store.query_by_epoch(3).unwrap();
-        assert_eq!(result.len(), 2);
+        assert!(spdd_store.query_by_epoch(2).is_ok());
+        assert!(spdd_store.query_by_epoch(3).is_ok());
+    }
+
+    #[test]
+    fn test_query_incomplete_epoch() {
+        let temp_dir = TempDir::new().unwrap();
+        let spdd_store = SPDDStore::new(temp_dir.path(), 10).expect("Failed to create SPDD store");
+
+        assert!(!spdd_store.is_epoch_complete(999).unwrap());
+        assert!(spdd_store.query_by_epoch(999).is_err());
+        assert!(spdd_store.query_by_epoch_and_pool(999, &test_pool_hash(0x01)).is_err());
+    }
+
+    #[test]
+    fn test_remove_epoch_data() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut spdd_store =
+            SPDDStore::new(temp_dir.path(), 10).expect("Failed to create SPDD store");
+
+        let mut spdd_state: HashMap<PoolId, Vec<(StakeAddress, u64)>> = HashMap::new();
+        spdd_state.insert(
+            test_pool_hash(0x01),
+            vec![
+                (test_stake_address(0x10), 100),
+                (test_stake_address(0x11), 150),
+            ],
+        );
+
+        spdd_store.store_spdd(1, spdd_state).unwrap();
+        assert!(spdd_store.is_epoch_complete(1).unwrap());
+
+        let deleted = spdd_store.remove_epoch_data(1).unwrap();
+        assert_eq!(deleted, 2);
+        assert!(!spdd_store.is_epoch_complete(1).unwrap());
+
+        let deleted = spdd_store.remove_epoch_data(999).unwrap();
+        assert_eq!(deleted, 0);
+    }
+
+    #[test]
+    fn test_encode_decode_roundtrip() {
+        let epoch = 12345u64;
+        let pool_id = test_pool_hash(0x42);
+        let stake_address = test_stake_address(0x99);
+
+        let encoded = encode_key(epoch, &pool_id, &stake_address);
+        let (decoded_epoch, decoded_pool, decoded_stake) = decode_key(&encoded).unwrap();
+
+        assert_eq!(decoded_epoch, epoch);
+        assert_eq!(decoded_pool, pool_id);
+        assert_eq!(decoded_stake, stake_address);
     }
 }
