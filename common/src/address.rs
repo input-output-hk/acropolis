@@ -1119,8 +1119,8 @@ mod tests {
         // Normal address
         let addr_base = ShelleyAddress {
             network: NetworkId::Mainnet,
-            payment: ShelleyAddressPaymentPart::PaymentKeyHash(payment_hash.clone()),
-            delegation: ShelleyAddressDelegationPart::StakeKeyHash(stake_hash.clone()),
+            payment: ShelleyAddressPaymentPart::PaymentKeyHash(payment_hash),
+            delegation: ShelleyAddressDelegationPart::StakeKeyHash(stake_hash),
         };
         let bytes = addr_base.to_bytes_key();
         let decoded = ShelleyAddress::from_bytes_key(&bytes).expect("decode base");
@@ -1129,8 +1129,8 @@ mod tests {
         // Script address
         let addr_script = ShelleyAddress {
             network: NetworkId::Testnet,
-            payment: ShelleyAddressPaymentPart::ScriptHash(payment_hash.clone()),
-            delegation: ShelleyAddressDelegationPart::ScriptHash(script_hash.clone()),
+            payment: ShelleyAddressPaymentPart::ScriptHash(payment_hash),
+            delegation: ShelleyAddressDelegationPart::ScriptHash(script_hash),
         };
         let bytes = addr_script.to_bytes_key();
         let decoded = ShelleyAddress::from_bytes_key(&bytes).expect("decode script");
@@ -1144,7 +1144,7 @@ mod tests {
         };
         let addr_pointer = ShelleyAddress {
             network: NetworkId::Mainnet,
-            payment: ShelleyAddressPaymentPart::PaymentKeyHash(payment_hash.clone()),
+            payment: ShelleyAddressPaymentPart::PaymentKeyHash(payment_hash),
             delegation: ShelleyAddressDelegationPart::Pointer(pointer),
         };
         let bytes = addr_pointer.to_bytes_key();
