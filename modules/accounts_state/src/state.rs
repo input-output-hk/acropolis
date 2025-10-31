@@ -175,7 +175,7 @@ impl State {
     }
 
     /// Get Drep Delegators with live_stakes
-    pub fn get_drep_delegators(&self, drep: &DRepChoice) -> Vec<(KeyHash, u64)> {
+    pub fn get_drep_delegators(&self, drep: &DRepChoice) -> Vec<(StakeAddress, u64)> {
         self.stake_addresses.lock().unwrap().get_drep_delegators(drep)
     }
 

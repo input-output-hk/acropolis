@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{
-    DRepChoice, KeyHash, PoolId, PoolLiveStakeInfo, RewardType, StakeAddress, TxIdentifier,
-};
+use crate::{DRepChoice, PoolId, PoolLiveStakeInfo, RewardType, StakeAddress, TxIdentifier};
 
 pub const DEFAULT_ACCOUNTS_QUERY_TOPIC: (&str, &str) =
     ("accounts-state-query-topic", "cardano.query.accounts");
@@ -191,5 +189,5 @@ pub struct PoolDelegators {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DrepDelegators {
-    pub delegators: Vec<(KeyHash, u64)>,
+    pub delegators: Vec<(StakeAddress, u64)>,
 }

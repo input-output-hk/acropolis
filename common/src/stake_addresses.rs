@@ -1,6 +1,6 @@
 use crate::{
     math::update_value_with_delta, messages::DRepDelegationDistribution, DRepChoice,
-    DRepCredential, DelegatedStake, KeyHash, Lovelace, PoolId, PoolLiveStakeInfo, StakeAddress,
+    DRepCredential, DelegatedStake, Lovelace, PoolId, PoolLiveStakeInfo, StakeAddress,
     StakeAddressDelta, Withdrawal,
 };
 use anyhow::Result;
@@ -184,15 +184,15 @@ impl StakeAddressMap {
     }
 
     /// Get DRep Delegators with live_stakes
-    pub fn get_drep_delegators(&self, drep: &DRepChoice) -> Vec<(KeyHash, u64)> {
+    pub fn get_drep_delegators(&self, drep: &DRepChoice) -> Vec<(StakeAddress, u64)> {
         // Find stake addresses delegated to drep
-        let delegators: Vec<(KeyHash, u64)> = self
+        let delegators: Vec<(StakeAddress, u64)> = self
             .inner
             .iter()
             .filter_map(|(stake_address, sas)| match sas.delegated_drep.as_ref() {
                 Some(delegated_drep) => {
                     if delegated_drep.eq(drep) {
-                        Some((*stake_address.get_hash(), sas.utxo_value))
+                        Some((stake_address.clone(), sas.utxo_value))
                     } else {
                         None
                     }
@@ -549,7 +549,7 @@ impl StakeAddressMap {
 mod tests {
     use super::*;
     use crate::hash::Hash;
-    use crate::{NetworkId, StakeAddress, StakeCredential};
+    use crate::{KeyHash, NetworkId, StakeAddress, StakeCredential};
 
     const STAKE_KEY_HASH: KeyHash = KeyHash::new([0x99; 28]);
     const STAKE_KEY_HASH_2: KeyHash = KeyHash::new([0xaa; 28]);
