@@ -7,7 +7,7 @@ use acropolis_common::queries::blocks::{
     BlocksStateQuery, BlocksStateQueryResponse, TransactionHashes,
 };
 use acropolis_common::queries::utils::query_state;
-use acropolis_common::serialization::Bech32WithHrp;
+use acropolis_common::serialization::{Bech32Conversion, Bech32WithHrp};
 use acropolis_common::{DRepChoice, StakeAddress};
 use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
@@ -73,7 +73,7 @@ pub async fn handle_single_account_blockfrost(
     };
 
     let delegated_spo = match &account.delegated_spo {
-        Some(spo) => match spo.to_bech32_with_hrp("pool") {
+        Some(spo) => match spo.to_bech32() {
             Ok(val) => Some(val),
             Err(e) => {
                 return Ok(RESTResponse::with_text(
@@ -287,7 +287,7 @@ pub async fn handle_account_delegations_blockfrost(
             ));
         };
 
-        let pool_id = match r.pool.to_bech32_with_hrp("pool") {
+        let pool_id = match r.pool.to_bech32() {
             Ok(p) => p,
             Err(e) => {
                 return Ok(RESTResponse::with_text(
@@ -581,6 +581,7 @@ fn map_drep_choice(drep: &DRepChoice) -> Result<DRepChoiceRest> {
     match drep {
         DRepChoice::Key(hash) => {
             let val = hash
+                .to_vec()
                 .to_bech32_with_hrp("drep")
                 .map_err(|e| anyhow!("Bech32 encoding failed for DRep Key: {e}"))?;
             Ok(DRepChoiceRest {
@@ -590,6 +591,7 @@ fn map_drep_choice(drep: &DRepChoice) -> Result<DRepChoiceRest> {
         }
         DRepChoice::Script(hash) => {
             let val = hash
+                .to_vec()
                 .to_bech32_with_hrp("drep_script")
                 .map_err(|e| anyhow!("Bech32 encoding failed for DRep Script: {e}"))?;
             Ok(DRepChoiceRest {

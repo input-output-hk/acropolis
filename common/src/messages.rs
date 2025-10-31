@@ -179,7 +179,7 @@ pub struct EpochActivityMessage {
     pub total_fees: u64,
 
     /// Map of SPO IDs to blocks produced
-    pub spo_blocks: Vec<(KeyHash, usize)>,
+    pub spo_blocks: Vec<(PoolId, usize)>,
 
     /// Nonce
     pub nonce: Option<NonceHash>,
@@ -233,7 +233,7 @@ pub struct SPOStakeDistributionMessage {
     pub epoch: u64,
 
     /// SPO stake distribution by operator ID
-    pub spos: Vec<(KeyHash, DelegatedStake)>,
+    pub spos: Vec<(PoolId, DelegatedStake)>,
 }
 
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
@@ -242,7 +242,7 @@ pub struct SPORewardsMessage {
     pub epoch: u64,
 
     /// SPO rewards by operator ID (total rewards before distribution, pool operator's rewards)
-    pub spos: Vec<(KeyHash, SPORewards)>,
+    pub spos: Vec<(PoolId, SPORewards)>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -272,7 +272,7 @@ pub struct SPOStateMessage {
     pub spos: Vec<PoolRegistration>,
 
     /// SPOs in the above list which retired at the start of this epoch, by operator ID
-    pub retired_spos: Vec<KeyHash>,
+    pub retired_spos: Vec<PoolId>,
 }
 
 /// Cardano message enum

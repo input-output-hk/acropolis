@@ -1,9 +1,7 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{fmt, ops::Deref, str::FromStr};
 
-/// Data that is a cryptographic hash of `BYTES` long.
-///
-/// This is a generic wrapper around a fixed-size byte array.:
+/// data that is a cryptographic [`struct@Hash`] of `BYTES` long.
 ///
 /// # Common Hash Sizes in Cardano
 ///
@@ -54,6 +52,11 @@ impl<const BYTES: usize> Hash<BYTES> {
     #[inline]
     pub fn into_inner(self) -> [u8; BYTES] {
         self.0
+    }
+
+    #[inline]
+    pub fn as_inner(&self) -> &[u8; BYTES] {
+        &self.0
     }
 }
 
@@ -122,7 +125,6 @@ impl<const BYTES: usize> fmt::Debug for Hash<BYTES> {
 }
 
 impl<const BYTES: usize> fmt::Display for Hash<BYTES> {
-    /// Formats the hash as a lowercase hexadecimal string.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&hex::encode(self))
     }

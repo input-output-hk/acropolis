@@ -2,7 +2,7 @@
 
 use crate::state::{Pots, RegistrationChange};
 use acropolis_common::{
-    stake_addresses::StakeAddressMap, KeyHash, Lovelace, PoolRegistration, Ratio, StakeAddress,
+    stake_addresses::StakeAddressMap, Lovelace, PoolId, PoolRegistration, Ratio, StakeAddress,
 };
 use imbl::OrdMap;
 use std::collections::HashMap;
@@ -47,7 +47,7 @@ pub struct Snapshot {
     pub epoch: u64,
 
     /// Map of SPOs by operator ID
-    pub spos: HashMap<KeyHash, SnapshotSPO>,
+    pub spos: HashMap<PoolId, SnapshotSPO>,
 
     /// Persistent pot values
     pub pots: Pots,
@@ -65,8 +65,8 @@ impl Snapshot {
     pub fn new(
         epoch: u64,
         stake_addresses: &StakeAddressMap,
-        spos: &OrdMap<KeyHash, PoolRegistration>,
-        spo_block_counts: &HashMap<KeyHash, usize>,
+        spos: &OrdMap<PoolId, PoolRegistration>,
+        spo_block_counts: &HashMap<PoolId, usize>,
         pots: &Pots,
         blocks: usize,
         registration_changes: Vec<RegistrationChange>,
@@ -168,7 +168,7 @@ impl Snapshot {
     /// Get the total stake held by a vector of stake addresses for a particular SPO (by ID)
     pub fn get_stake_delegated_to_spo_by_addresses(
         &self,
-        spo: &KeyHash,
+        spo: &PoolId,
         addresses: &[StakeAddress],
     ) -> Lovelace {
         let Some(snapshot_spo) = self.spos.get(spo) else {
@@ -195,23 +195,21 @@ mod tests {
     use super::*;
     use acropolis_common::stake_addresses::StakeAddressState;
     use acropolis_common::NetworkId::Mainnet;
-    use acropolis_common::{StakeAddress, StakeCredential};
+    use acropolis_common::{PoolId, StakeAddress, StakeCredential};
 
-    // Helper function to create stake addresses for testing
     fn create_test_stake_address(id: u8) -> StakeAddress {
-        let mut hash = vec![0u8; 28];
+        let mut hash = [0u8; 28];
         hash[0] = id;
         StakeAddress {
             network: Mainnet,
-            credential: StakeCredential::AddrKeyHash(hash),
+            credential: StakeCredential::AddrKeyHash(hash.into()),
         }
     }
 
-    // Helper function to create SPO key hashes for testing
-    fn create_test_spo_hash(id: u8) -> KeyHash {
-        let mut hash = vec![0u8; 28];
+    fn create_test_spo_hash(id: u8) -> PoolId {
+        let mut hash = [0u8; 28];
         hash[0] = id;
-        hash
+        hash.into()
     }
 
     #[test]
@@ -272,10 +270,10 @@ mod tests {
             },
         );
 
-        let mut spos: OrdMap<KeyHash, PoolRegistration> = OrdMap::new();
+        let mut spos: OrdMap<PoolId, PoolRegistration> = OrdMap::new();
         spos.insert(spo1.clone(), PoolRegistration::default());
         spos.insert(spo2.clone(), PoolRegistration::default());
-        let spo_block_counts: HashMap<KeyHash, usize> = HashMap::new();
+        let spo_block_counts: HashMap<PoolId, usize> = HashMap::new();
         let snapshot = Snapshot::new(
             42,
             &stake_addresses,

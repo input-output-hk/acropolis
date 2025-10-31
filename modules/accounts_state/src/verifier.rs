@@ -1,7 +1,7 @@
 //! Verification of calculated values against captured CSV from Haskell node / DBSync
 use crate::rewards::{RewardDetail, RewardsResult};
 use crate::state::Pots;
-use acropolis_common::{KeyHash, RewardType, StakeAddress};
+use acropolis_common::{PoolId, RewardType, StakeAddress};
 use hex::FromHex;
 use itertools::EitherOrBoth::{Both, Left, Right};
 use itertools::Itertools;
@@ -131,7 +131,7 @@ impl Verifier {
             };
 
             // Expect CSV header: spo,address,type,amount
-            let mut expected_rewards: BTreeMap<KeyHash, Vec<RewardDetail>> = BTreeMap::new();
+            let mut expected_rewards: BTreeMap<PoolId, Vec<RewardDetail>> = BTreeMap::new();
             for result in reader.deserialize() {
                 let (spo, address, rtype, amount): (String, String, String, u64) = match result {
                     Ok(row) => row,
@@ -141,10 +141,13 @@ impl Verifier {
                     }
                 };
 
-                let Ok(spo) = Vec::from_hex(&spo) else {
-                    error!("Bad hex in {path} for SPO: {spo} - skipping");
+                let Some(spo) =
+                    Vec::from_hex(&spo).ok().and_then(|bytes| PoolId::try_from(bytes).ok())
+                else {
+                    error!("Bad hex/SPO in {path} for SPO: {spo} - skipping");
                     continue;
                 };
+
                 let Ok(account) = Vec::from_hex(&address) else {
                     error!("Bad hex in {path} for address: {address} - skipping");
                     continue;
@@ -167,7 +170,7 @@ impl Verifier {
                     continue;
                 };
 
-                expected_rewards.entry(spo.clone()).or_default().push(RewardDetail {
+                expected_rewards.entry(spo).or_default().push(RewardDetail {
                     account: stake_address,
                     rtype,
                     amount,

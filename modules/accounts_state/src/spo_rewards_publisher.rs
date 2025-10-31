@@ -1,5 +1,5 @@
 use acropolis_common::messages::{CardanoMessage, Message, SPORewardsMessage};
-use acropolis_common::{BlockInfo, KeyHash, SPORewards};
+use acropolis_common::{BlockInfo, PoolId, SPORewards};
 use caryatid_sdk::Context;
 use std::sync::Arc;
 
@@ -22,7 +22,7 @@ impl SPORewardsPublisher {
     pub async fn publish_spo_rewards(
         &mut self,
         block: &BlockInfo,
-        spo_rewards: Vec<(KeyHash, SPORewards)>,
+        spo_rewards: Vec<(PoolId, SPORewards)>,
     ) -> anyhow::Result<()> {
         self.context
             .message_bus

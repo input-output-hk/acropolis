@@ -1,13 +1,14 @@
 use std::collections::HashMap;
 
-use acropolis_common::{AddrKeyhash, PoolId};
+use acropolis_common::types::AddrKeyhash;
+use acropolis_common::PoolId;
 use anyhow::Result;
 use fjall::{Config, Keyspace, PartitionCreateOptions};
 
-const POOL_ID_LEN: usize = 28;
+const POOL_ID_LENGTH: usize = 28;
 const STAKE_KEY_LEN: usize = 28;
 const EPOCH_LEN: usize = 8;
-const TOTAL_KEY_LEN: usize = EPOCH_LEN + POOL_ID_LEN + STAKE_KEY_LEN;
+const TOTAL_KEY_LEN: usize = EPOCH_LEN + POOL_ID_LENGTH + STAKE_KEY_LEN;
 
 // Batch size balances commit overhead vs memory usage
 // ~720KB per batch (72 bytes × 10,000)
@@ -17,22 +18,22 @@ const BATCH_SIZE: usize = 10_000;
 fn encode_key(epoch: u64, pool_id: &PoolId, stake_key: &AddrKeyhash) -> Vec<u8> {
     let mut key = Vec::with_capacity(TOTAL_KEY_LEN);
     key.extend_from_slice(&epoch.to_be_bytes());
-    key.extend_from_slice(pool_id);
-    key.extend_from_slice(stake_key);
+    key.extend_from_slice(pool_id.as_ref());
+    key.extend_from_slice(stake_key.as_ref());
     key
 }
 
 fn encode_epoch_pool_prefix(epoch: u64, pool_id: &PoolId) -> Vec<u8> {
-    let mut prefix = Vec::with_capacity(EPOCH_LEN + POOL_ID_LEN);
+    let mut prefix = Vec::with_capacity(EPOCH_LEN + POOL_ID_LENGTH);
     prefix.extend_from_slice(&epoch.to_be_bytes());
-    prefix.extend_from_slice(pool_id);
+    prefix.extend_from_slice(pool_id.as_ref());
     prefix
 }
 
 fn decode_key(key: &[u8]) -> Result<(u64, PoolId, AddrKeyhash)> {
     let epoch = u64::from_be_bytes(key[..EPOCH_LEN].try_into()?);
-    let pool_id = key[EPOCH_LEN..EPOCH_LEN + POOL_ID_LEN].to_vec();
-    let stake_key = key[EPOCH_LEN + POOL_ID_LEN..].to_vec();
+    let pool_id = key[EPOCH_LEN..EPOCH_LEN + POOL_ID_LENGTH].try_into()?;
+    let stake_key = key[EPOCH_LEN + POOL_ID_LENGTH..].try_into()?;
     Ok((epoch, pool_id, stake_key))
 }
 
@@ -222,29 +223,42 @@ impl SPDDStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use acropolis_common::crypto::keyhash_224;
+    use acropolis_common::types::AddrKeyhash;
+    use acropolis_common::PoolId;
 
     const DB_PATH: &str = "spdd_db";
+
+    fn test_pool_hash(byte: u8) -> PoolId {
+        keyhash_224(&vec![byte]).into()
+    }
+
+    fn test_addr_hash(byte: u8) -> AddrKeyhash {
+        keyhash_224(&vec![byte])
+    }
 
     #[test]
     fn test_store_spdd_state() {
         let mut spdd_store =
             SPDDStore::new(std::path::Path::new(DB_PATH), 1).expect("Failed to create SPDD store");
         let mut spdd_state: HashMap<PoolId, Vec<(AddrKeyhash, u64)>> = HashMap::new();
+
         spdd_state.insert(
-            vec![0x01; 28],
-            vec![(vec![0x10; 28], 100), (vec![0x11; 28], 150)],
+            test_pool_hash(0x01),
+            vec![(test_addr_hash(0x10), 100), (test_addr_hash(0x11), 150)],
         );
         spdd_state.insert(
-            vec![0x02; 28],
-            vec![(vec![0x20; 28], 200), (vec![0x21; 28], 250)],
+            test_pool_hash(0x02),
+            vec![(test_addr_hash(0x20), 200), (test_addr_hash(0x21), 250)],
         );
         assert!(spdd_store.store_spdd(1, spdd_state).is_ok());
 
         let result = spdd_store.query_by_epoch(1).unwrap();
         assert_eq!(result.len(), 4);
-        let result = spdd_store.query_by_epoch_and_pool(1, &vec![0x01; 28]).unwrap();
+
+        let result = spdd_store.query_by_epoch_and_pool(1, &test_pool_hash(0x01)).unwrap();
         assert_eq!(result.len(), 2);
-        let result = spdd_store.query_by_epoch_and_pool(1, &vec![0x02; 28]).unwrap();
+        let result = spdd_store.query_by_epoch_and_pool(1, &test_pool_hash(0x02)).unwrap();
         assert_eq!(result.len(), 2);
     }
 
@@ -255,9 +269,13 @@ mod tests {
 
         for epoch in 1..=3 {
             let mut spdd_state: HashMap<PoolId, Vec<(AddrKeyhash, u64)>> = HashMap::new();
+
             spdd_state.insert(
-                vec![epoch as u8; 28],
-                vec![(vec![0x10; 28], epoch * 100), (vec![0x11; 28], epoch * 150)],
+                test_pool_hash(epoch as u8),
+                vec![
+                    (test_addr_hash(0x10), epoch * 100),
+                    (test_addr_hash(0x11), epoch * 150),
+                ],
             );
             spdd_store.store_spdd(epoch, spdd_state).expect("Failed to store SPDD state");
         }
