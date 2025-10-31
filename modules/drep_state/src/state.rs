@@ -474,12 +474,12 @@ impl State {
         context: &Arc<Context<Message>>,
         delegators: &[(&StakeAddress, &DRepChoice)],
     ) -> Result<()> {
-        let mut stake_address_to_input = HashMap::with_capacity(delegators.len());
+        let mut stake_address_to_drep = HashMap::with_capacity(delegators.len());
         let mut stake_addresses = Vec::with_capacity(delegators.len());
 
         for &(stake_address, drep) in delegators {
             stake_addresses.push(stake_address.clone());
-            stake_address_to_input.insert(stake_address, (stake_address, drep));
+            stake_address_to_drep.insert(stake_address, drep);
         }
 
         let msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
@@ -501,8 +501,8 @@ impl State {
         };
 
         for (stake_address, old_drep_opt) in result_map {
-            let &(delegator, new_drep_choice) = match stake_address_to_input.get(&stake_address) {
-                Some(pair) => pair,
+            let new_drep_choice = match stake_address_to_drep.get(&stake_address) {
+                Some(&drep) => drep,
                 None => continue,
             };
 
@@ -516,10 +516,7 @@ impl State {
                     if old_drep_cred != new_drep_cred {
                         self.update_historical(&old_drep_cred, false, |entry| {
                             if let Some(delegators) = entry.delegators.as_mut() {
-                                delegators.retain(|s| {
-                                    s.get_credential().get_hash()
-                                        != delegator.get_credential().get_hash()
-                                });
+                                delegators.retain(|s| s.get_hash() != stake_address.get_hash());
                             }
                         })?;
                     }
@@ -529,8 +526,8 @@ impl State {
             // Add delegator to new DRep
             match self.update_historical(&new_drep_cred, true, |entry| {
                 if let Some(delegators) = entry.delegators.as_mut() {
-                    if !delegators.contains(delegator) {
-                        delegators.push(delegator.clone());
+                    if !delegators.contains(&stake_address) {
+                        delegators.push(stake_address.clone());
                     }
                 }
             }) {
