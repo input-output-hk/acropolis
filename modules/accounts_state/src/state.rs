@@ -15,9 +15,8 @@ use acropolis_common::{
     protocol_params::ProtocolParams,
     stake_addresses::{StakeAddressMap, StakeAddressState},
     BlockInfo, DRepChoice, DRepCredential, DelegatedStake, InstantaneousRewardSource,
-    InstantaneousRewardTarget, KeyHash, Lovelace, MoveInstantaneousReward, PoolId,
-    PoolLiveStakeInfo, PoolRegistration, Pot, SPORewards, StakeAddress, StakeRewardDelta,
-    TxCertificate,
+    InstantaneousRewardTarget, Lovelace, MoveInstantaneousReward, PoolId, PoolLiveStakeInfo,
+    PoolRegistration, Pot, SPORewards, StakeAddress, StakeRewardDelta, TxCertificate,
 };
 use anyhow::Result;
 use imbl::OrdMap;
@@ -170,12 +169,12 @@ impl State {
     }
 
     /// Get Pool Delegators with live_stakes
-    pub fn get_pool_delegators(&self, pool_operator: &PoolId) -> Vec<(KeyHash, u64)> {
+    pub fn get_pool_delegators(&self, pool_operator: &PoolId) -> Vec<(StakeAddress, u64)> {
         self.stake_addresses.lock().unwrap().get_pool_delegators(pool_operator)
     }
 
     /// Get Drep Delegators with live_stakes
-    pub fn get_drep_delegators(&self, drep: &DRepChoice) -> Vec<(KeyHash, u64)> {
+    pub fn get_drep_delegators(&self, drep: &DRepChoice) -> Vec<(StakeAddress, u64)> {
         self.stake_addresses.lock().unwrap().get_drep_delegators(drep)
     }
 
@@ -183,7 +182,7 @@ impl State {
     pub fn get_accounts_utxo_values_map(
         &self,
         stake_keys: &[StakeAddress],
-    ) -> Option<HashMap<KeyHash, u64>> {
+    ) -> Option<HashMap<StakeAddress, u64>> {
         let stake_addresses = self.stake_addresses.lock().ok()?; // If lock fails, return None
         stake_addresses.get_accounts_utxo_values_map(stake_keys)
     }
@@ -198,7 +197,7 @@ impl State {
     pub fn get_accounts_balances_map(
         &self,
         stake_keys: &[StakeAddress],
-    ) -> Option<HashMap<KeyHash, u64>> {
+    ) -> Option<HashMap<StakeAddress, u64>> {
         let stake_addresses = self.stake_addresses.lock().ok()?; // If lock fails, return None
         stake_addresses.get_accounts_balances_map(stake_keys)
     }
@@ -218,7 +217,7 @@ impl State {
     pub fn get_drep_delegations_map(
         &self,
         stake_keys: &[StakeAddress],
-    ) -> Option<HashMap<KeyHash, Option<DRepChoice>>> {
+    ) -> Option<HashMap<StakeAddress, Option<DRepChoice>>> {
         let stake_addresses = self.stake_addresses.lock().ok()?; // If lock fails, return None
         stake_addresses.get_drep_delegations_map(stake_keys)
     }
@@ -559,7 +558,7 @@ impl State {
         stake_addresses.generate_spdd()
     }
 
-    pub fn dump_spdd_state(&self) -> HashMap<PoolId, Vec<(KeyHash, u64)>> {
+    pub fn dump_spdd_state(&self) -> HashMap<PoolId, Vec<(StakeAddress, u64)>> {
         let stake_addresses = self.stake_addresses.lock().unwrap();
         stake_addresses.dump_spdd_state()
     }
@@ -964,9 +963,9 @@ mod tests {
     use acropolis_common::crypto::{keyhash_224, keyhash_256};
     use acropolis_common::{
         protocol_params::ConwayParams, rational_number::RationalNumber, Anchor, Committee,
-        Constitution, CostModel, DRepVotingThresholds, NetworkId, PoolVotingThresholds, Pot,
-        PotDelta, Ratio, Registration, StakeAddress, StakeAddressDelta, StakeAndVoteDelegation,
-        StakeCredential, StakeRegistrationAndStakeAndVoteDelegation,
+        Constitution, CostModel, DRepVotingThresholds, KeyHash, NetworkId, PoolVotingThresholds,
+        Pot, PotDelta, Ratio, Registration, StakeAddress, StakeAddressDelta,
+        StakeAndVoteDelegation, StakeCredential, StakeRegistrationAndStakeAndVoteDelegation,
         StakeRegistrationAndVoteDelegation, TxCertificateWithPos, TxIdentifier, VoteDelegation,
         VrfKeyHash, Withdrawal,
     };

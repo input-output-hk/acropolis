@@ -10,8 +10,8 @@ use acropolis_common::{
     params::TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH,
     queries::governance::VoteRecord,
     stake_addresses::StakeAddressMap,
-    BlockInfo, KeyHash, PoolId, PoolMetadata, PoolRegistration, PoolRetirement, PoolUpdateEvent,
-    Relay, StakeAddress, TxCertificate, TxHash, TxIdentifier, Voter, VotingProcedures,
+    BlockInfo, PoolId, PoolMetadata, PoolRegistration, PoolRetirement, PoolUpdateEvent, Relay,
+    StakeAddress, TxCertificate, TxHash, TxIdentifier, Voter, VotingProcedures,
 };
 use anyhow::Result;
 use imbl::HashMap;
@@ -175,7 +175,7 @@ impl State {
     }
 
     /// Get Pool Delegators
-    pub fn get_pool_delegators(&self, pool_operator: &PoolId) -> Option<Vec<(KeyHash, u64)>> {
+    pub fn get_pool_delegators(&self, pool_operator: &PoolId) -> Option<Vec<(StakeAddress, u64)>> {
         let stake_addresses = self.stake_addresses.as_ref()?;
         let historical_spos = self.historical_spos.as_ref()?;
 
