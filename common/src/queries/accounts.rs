@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use crate::{DRepChoice, KeyHash, PoolId, PoolLiveStakeInfo, StakeAddress, TxIdentifier};
+use crate::{
+    DRepChoice, KeyHash, PoolId, PoolLiveStakeInfo, RewardType, StakeAddress, TxIdentifier,
+};
 
 pub const DEFAULT_ACCOUNTS_QUERY_TOPIC: (&str, &str) =
     ("accounts-state-query-topic", "cardano.query.accounts");
@@ -12,8 +14,8 @@ pub const DEFAULT_HISTORICAL_ACCOUNTS_QUERY_TOPIC: (&str, &str) = (
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum AccountsStateQuery {
-    GetAccountInfo { stake_address: StakeAddress },
-    GetAccountRewardHistory { stake_key: Vec<u8> },
+    GetAccountInfo { account: StakeAddress },
+    GetAccountRewardHistory { account: StakeAddress },
     GetAccountHistory { stake_key: Vec<u8> },
     GetAccountRegistrationHistory { account: StakeAddress },
     GetAccountDelegationHistory { account: StakeAddress },
@@ -47,7 +49,7 @@ pub enum AccountsStateQuery {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum AccountsStateQueryResponse {
     AccountInfo(AccountInfo),
-    AccountRewardHistory(AccountRewardHistory),
+    AccountRewardHistory(Vec<AccountReward>),
     AccountHistory(AccountHistory),
     AccountRegistrationHistory(Vec<RegistrationUpdate>),
     AccountDelegationHistory(Vec<DelegationUpdate>),
@@ -90,9 +92,6 @@ pub struct AccountInfo {
     pub delegated_spo: Option<PoolId>,
     pub delegated_drep: Option<DRepChoice>,
 }
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct AccountRewardHistory {}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AccountHistory {}
@@ -148,6 +147,20 @@ pub struct AccountWithdrawal {
     pub tx_identifier: TxIdentifier,
     #[n(1)]
     pub amount: u64,
+}
+
+#[derive(
+    Debug, Clone, minicbor::Decode, minicbor::Encode, serde::Serialize, serde::Deserialize,
+)]
+pub struct AccountReward {
+    #[n(0)]
+    pub epoch: u32,
+    #[n(1)]
+    pub amount: u64,
+    #[n(2)]
+    pub pool: PoolId,
+    #[n(3)]
+    pub reward_type: RewardType,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

@@ -25,17 +25,18 @@ pub struct RecorderAlonzoGovernance;
 #[derive(serde::Serialize, serde::Deserialize)]
 struct ReplayerGenesisKeyhash(#[serde_as(as = "Base64")] GenesisKeyhash);
 
+// key, vote
+#[derive(serde::Serialize)]
+struct VoteRecord(ReplayerGenesisKeyhash, Box<ProtocolParamUpdate>);
+
+// slot, epoch, era (num), new_epoch, [enactment epoch, voting]
+#[derive(serde::Serialize)]
+struct BlockRecord(u64, u64, u8, u8, Vec<(u64, Vec<VoteRecord>)>);
+
 struct BlockRecorder {
     cfg: Arc<ReplayerConfig>,
     prefix: String,
-    // slot, epoch, era (num), new_epoch, [enactment epoch, voting: [key, vote]]
-    list: Vec<(
-        u64,
-        u64,
-        u8,
-        u8,
-        Vec<(u64, Vec<(ReplayerGenesisKeyhash, Box<ProtocolParamUpdate>)>)>,
-    )>,
+    list: Vec<BlockRecord>,
 }
 
 impl BlockRecorder {
@@ -47,22 +48,22 @@ impl BlockRecorder {
         }
     }
 
-    pub fn write(&mut self, block: &BlockInfo, votes: &Vec<AlonzoBabbageUpdateProposal>) {
+    pub fn write(&mut self, block: &BlockInfo, votes: &[AlonzoBabbageUpdateProposal]) {
         let file = format!("{}/{}.json", self.cfg.path, self.prefix);
 
         let mut proposals = Vec::new();
         for vote in votes.iter() {
             let mut votes_indexed = Vec::new();
             for (h, u) in &vote.proposals {
-                votes_indexed.push((ReplayerGenesisKeyhash(h.clone()), u.clone()));
+                votes_indexed.push(VoteRecord(ReplayerGenesisKeyhash(h.clone()), u.clone()));
             }
             proposals.push((vote.enactment_epoch, votes_indexed));
         }
 
-        self.list.push((
+        self.list.push(BlockRecord(
             block.slot,
             block.epoch,
-            block.era.clone() as u8,
+            block.era as u8,
             block.new_epoch as u8,
             proposals,
         ));

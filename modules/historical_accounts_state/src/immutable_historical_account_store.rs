@@ -1,7 +1,7 @@
 use std::{collections::HashMap, path::Path};
 
 use acropolis_common::{
-    queries::accounts::{AccountWithdrawal, DelegationUpdate, RegistrationUpdate},
+    queries::accounts::{AccountReward, AccountWithdrawal, DelegationUpdate, RegistrationUpdate},
     ShelleyAddress, StakeAddress,
 };
 use anyhow::Result;
@@ -11,7 +11,7 @@ use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use tokio::sync::Mutex;
 use tracing::{debug, error};
 
-use crate::state::{AccountEntry, ActiveStakeHistory, HistoricalAccountsConfig, RewardHistory};
+use crate::state::{AccountEntry, ActiveStakeHistory, HistoricalAccountsConfig};
 
 pub struct ImmutableHistoricalAccountStore {
     rewards_history: Partition,
@@ -85,11 +85,8 @@ impl ImmutableHistoricalAccountStore {
 
             // Persist rewards
             if config.store_rewards_history {
-                batch.insert(
-                    &self.rewards_history,
-                    epoch_key,
-                    to_vec(&entry.reward_history)?,
-                );
+                let rewards = entry.reward_history.clone().unwrap_or_default();
+                batch.insert(&self.rewards_history, epoch_key, to_vec(&rewards)?);
             }
 
             // Persist active stake
@@ -152,14 +149,12 @@ impl ImmutableHistoricalAccountStore {
         pending.extend(drained);
     }
 
-    pub async fn _get_rewards_history(
+    pub async fn get_reward_history(
         &self,
         account: &StakeAddress,
-    ) -> Result<Option<Vec<RewardHistory>>> {
-        let mut immutable_rewards = self.collect_partition::<RewardHistory>(
-            &self.rewards_history,
-            account.get_hash().as_ref(),
-        )?;
+    ) -> Result<Option<Vec<AccountReward>>> {
+        let mut immutable_rewards =
+            self.collect_partition::<AccountReward>(&self.rewards_history, account.get_hash())?;
 
         self.merge_pending(
             account,

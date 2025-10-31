@@ -1,9 +1,10 @@
 //! Acropolis AccountsState: State storage
 use crate::monetary::calculate_monetary_change;
-use crate::rewards::{calculate_rewards, RewardType, RewardsResult};
+use crate::rewards::{calculate_rewards, RewardsResult};
 use crate::snapshot::Snapshot;
 use crate::verifier::Verifier;
 use acropolis_common::queries::accounts::OptimalPoolSizing;
+use acropolis_common::RewardType;
 use acropolis_common::{
     math::update_value_with_delta,
     messages::{
@@ -115,10 +116,7 @@ pub struct State {
     previous_protocol_parameters: Option<ProtocolParams>,
 
     /// Pool refunds to apply next epoch (list of reward accounts to refund to)
-    pool_refunds: Vec<StakeAddress>,
-
-    /// MIRs to pay next epoch
-    mirs: Vec<MoveInstantaneousReward>,
+    pool_refunds: Vec<(PoolId, StakeAddress)>,
 
     /// Addresses registration changes in current epoch
     current_epoch_registration_changes: Arc<Mutex<Vec<RegistrationChange>>>,
@@ -303,7 +301,6 @@ impl State {
 
         // Pay MIRs before snapshot, so reserves is correct for total_supply in rewards
         let mut reward_deltas = Vec::<StakeRewardDelta>::new();
-        reward_deltas.extend(self.pay_mirs());
 
         // Capture a new snapshot for the end of the previous epoch and push it to state
         let snapshot = Snapshot::new(
@@ -470,13 +467,15 @@ impl State {
         }
 
         // Send them their deposits back
-        for stake_address in refunds {
+        for (pool, stake_address) in refunds {
             // If their reward account has been deregistered, it goes to Treasury
             let mut stake_addresses = self.stake_addresses.lock().unwrap();
             if stake_addresses.is_registered(&stake_address) {
                 reward_deltas.push(StakeRewardDelta {
                     stake_address: stake_address.clone(),
-                    delta: deposit as i64,
+                    delta: deposit,
+                    reward_type: RewardType::PoolRefund,
+                    pool,
                 });
                 stake_addresses.add_to_reward(&stake_address, deposit);
             } else {
@@ -494,73 +493,61 @@ impl State {
     }
 
     /// Pay MIRs
-    fn pay_mirs(&mut self) -> Vec<StakeRewardDelta> {
-        let mut reward_deltas = Vec::<StakeRewardDelta>::new();
+    fn pay_mir(&mut self, mir: &MoveInstantaneousReward) {
+        let (source, source_name, other, other_name) = match &mir.source {
+            InstantaneousRewardSource::Reserves => (
+                &mut self.pots.reserves,
+                "reserves",
+                &mut self.pots.treasury,
+                "treasury",
+            ),
+            InstantaneousRewardSource::Treasury => (
+                &mut self.pots.treasury,
+                "treasury",
+                &mut self.pots.reserves,
+                "reserves",
+            ),
+        };
 
-        let mirs = take(&mut self.mirs);
-        for mir in mirs {
-            let (source, source_name, other, other_name) = match &mir.source {
-                InstantaneousRewardSource::Reserves => (
-                    &mut self.pots.reserves,
-                    "reserves",
-                    &mut self.pots.treasury,
-                    "treasury",
-                ),
-                InstantaneousRewardSource::Treasury => (
-                    &mut self.pots.treasury,
-                    "treasury",
-                    &mut self.pots.reserves,
-                    "reserves",
-                ),
-            };
+        match &mir.target {
+            InstantaneousRewardTarget::StakeAddresses(deltas) => {
+                // Transfer to a stake addresses from a pot
+                let mut total_value: u64 = 0;
+                for (stake_address, value) in deltas.iter() {
+                    // Get old stake address state, or create one
+                    let mut stake_addresses = self.stake_addresses.lock().unwrap();
+                    let sas = stake_addresses.entry(stake_address.clone()).or_default();
 
-            match &mir.target {
-                InstantaneousRewardTarget::StakeAddresses(deltas) => {
-                    // Transfer to (in theory also from) stake addresses from (to) a pot
-                    let mut total_value: u64 = 0;
-                    for (stake_address, value) in deltas.iter() {
-                        // Get old stake address state, or create one
-                        let mut stake_addresses = self.stake_addresses.lock().unwrap();
-                        let sas = stake_addresses.entry(stake_address.clone()).or_default();
-
-                        // Add to this one
-                        reward_deltas.push(StakeRewardDelta {
-                            stake_address: stake_address.clone(),
-                            delta: *value,
-                        });
-                        if let Err(e) = update_value_with_delta(&mut sas.rewards, *value) {
-                            error!("MIR to stake address {}: {e}", stake_address);
-                        }
-
-                        // Update the source
-                        if let Err(e) = update_value_with_delta(source, -*value) {
-                            error!("MIR from {source_name}: {e}");
-                        }
-
-                        let _ = update_value_with_delta(&mut total_value, *value);
+                    if let Err(e) = update_value_with_delta(&mut sas.rewards, *value) {
+                        error!("MIR to stake address {}: {e}", stake_address);
                     }
 
-                    info!(
-                        "MIR of {total_value} to {} stake addresses from {source_name}",
-                        deltas.len()
-                    );
-                }
-
-                InstantaneousRewardTarget::OtherAccountingPot(value) => {
-                    // Transfer between pots
-                    if let Err(e) = update_value_with_delta(source, -(*value as i64)) {
+                    // Update the source
+                    if let Err(e) = update_value_with_delta(source, -*value) {
                         error!("MIR from {source_name}: {e}");
                     }
-                    if let Err(e) = update_value_with_delta(other, *value as i64) {
-                        error!("MIR to {other_name}: {e}");
-                    }
 
-                    info!("MIR of {value} from {source_name} to {other_name}");
+                    let _ = update_value_with_delta(&mut total_value, *value);
                 }
+
+                info!(
+                    "MIR of {total_value} to {} stake addresses from {source_name}",
+                    deltas.len()
+                );
+            }
+
+            InstantaneousRewardTarget::OtherAccountingPot(value) => {
+                // Transfer between pots
+                if let Err(e) = update_value_with_delta(source, -(*value as i64)) {
+                    error!("MIR from {source_name}: {e}");
+                }
+                if let Err(e) = update_value_with_delta(other, *value as i64) {
+                    error!("MIR to {other_name}: {e}");
+                }
+
+                info!("MIR of {value} from {source_name} to {other_name}");
             }
         }
-
-        reward_deltas
     }
 
     /// Derive the Stake Pool Delegation Distribution (SPDD) - a map of total stake values
@@ -637,7 +624,9 @@ impl State {
                             stake_addresses.add_to_reward(&reward.account, reward.amount);
                             reward_deltas.push(StakeRewardDelta {
                                 stake_address: reward.account.clone(),
-                                delta: reward.amount as i64,
+                                delta: reward.amount,
+                                reward_type: reward.rtype.clone(),
+                                pool: reward.pool.clone(),
                             });
                         } else {
                             warn!(
@@ -766,7 +755,11 @@ impl State {
                     hex::encode(id),
                     retired_spo.reward_account
                 );
-                self.pool_refunds.push(retired_spo.reward_account.clone()); // Store full StakeAddress
+                self.pool_refunds.push((
+                    retired_spo.operator.clone(),
+                    retired_spo.reward_account.clone(),
+                ));
+                // Store full StakeAddress
             }
 
             // Schedule to retire - we need them to still be in place when we count
@@ -847,12 +840,6 @@ impl State {
         stake_addresses.record_stake_delegation(stake_address, spo);
     }
 
-    /// Handle an MoveInstantaneousReward (pre-Conway only)
-    pub fn handle_mir(&mut self, mir: &MoveInstantaneousReward) -> Result<()> {
-        self.mirs.push(mir.clone());
-        Ok(())
-    }
-
     /// record a drep delegation
     fn record_drep_delegation(&mut self, stake_address: &StakeAddress, drep: &DRepChoice) {
         let mut stake_addresses = self.stake_addresses.lock().unwrap();
@@ -873,7 +860,7 @@ impl State {
                 }
 
                 TxCertificate::MoveInstantaneousReward(mir) => {
-                    self.handle_mir(mir).unwrap_or_else(|e| error!("MIR failed: {e:#}"));
+                    self.pay_mir(mir);
                 }
 
                 TxCertificate::Registration(reg) => {
@@ -1195,8 +1182,7 @@ mod tests {
             target: InstantaneousRewardTarget::OtherAccountingPot(42),
         };
 
-        state.handle_mir(&mir).unwrap();
-        state.pay_mirs();
+        state.pay_mir(&mir);
         assert_eq!(state.pots.reserves, 58);
         assert_eq!(state.pots.treasury, 42);
         assert_eq!(state.pots.deposits, 0);
@@ -1207,9 +1193,7 @@ mod tests {
             target: InstantaneousRewardTarget::OtherAccountingPot(10),
         };
 
-        state.handle_mir(&mir).unwrap();
-        let reward_deltas = state.pay_mirs();
-        assert_eq!(reward_deltas.len(), 0);
+        state.pay_mir(&mir);
         assert_eq!(state.pots.reserves, 68);
         assert_eq!(state.pots.treasury, 32);
         assert_eq!(state.pots.deposits, 0);
@@ -1251,8 +1235,7 @@ mod tests {
             ]),
         };
 
-        state.handle_mir(&mir).unwrap();
-        state.pay_mirs();
+        state.pay_mir(&mir);
         assert_eq!(state.pots.reserves, 58);
         assert_eq!(state.pots.treasury, 0);
         assert_eq!(state.pots.deposits, 2_000_000); // Paid deposit
@@ -1297,16 +1280,12 @@ mod tests {
             target: InstantaneousRewardTarget::StakeAddresses(vec![(stake_address.clone(), 42)]),
         };
 
-        state.handle_mir(&mir).unwrap();
-        let diffs = state.pay_mirs();
-        assert_eq!(state.pots.reserves, 58);
-        assert_eq!(diffs.len(), 1);
-        assert_eq!(diffs[0].stake_address.get_hash(), stake_address.get_hash());
-        assert_eq!(diffs[0].delta, 42);
+        state.pay_mir(&mir);
 
         {
             let stake_addresses = state.stake_addresses.lock().unwrap();
             let sas = stake_addresses.get(&stake_address).unwrap();
+            assert_eq!(state.pots.reserves, 58);
             assert_eq!(sas.rewards, 42);
         }
 

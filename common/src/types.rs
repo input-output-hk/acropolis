@@ -213,7 +213,38 @@ pub struct StakeAddressDelta {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StakeRewardDelta {
     pub stake_address: StakeAddress,
-    pub delta: i64,
+    pub delta: u64,
+    pub reward_type: RewardType,
+    pub pool: PoolId,
+}
+
+/// Type of reward being given
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    minicbor::Encode,
+    minicbor::Decode,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+pub enum RewardType {
+    #[n(0)]
+    Leader,
+    #[n(1)]
+    Member,
+    #[n(2)]
+    PoolRefund,
+}
+
+impl fmt::Display for RewardType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RewardType::Leader => write!(f, "leader"),
+            RewardType::Member => write!(f, "member"),
+            RewardType::PoolRefund => write!(f, "pool_deposit_refund"),
+        }
+    }
 }
 
 pub type PolicyId = [u8; 28];

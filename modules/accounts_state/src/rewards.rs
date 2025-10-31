@@ -5,6 +5,7 @@ use acropolis_common::{
     protocol_params::ShelleyParams, rational_number::RationalNumber, Lovelace, PoolId, SPORewards,
     StakeAddress,
 };
+use acropolis_common::{PoolId, RewardType};
 use anyhow::{bail, Result};
 use bigdecimal::{BigDecimal, One, ToPrimitive, Zero};
 use std::cmp::min;
@@ -12,13 +13,6 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 use tracing::{debug, info, warn};
-
-/// Type of reward being given
-#[derive(Debug, Clone, PartialEq)]
-pub enum RewardType {
-    Leader,
-    Member,
-}
 
 /// Reward Detail
 #[derive(Debug, Clone)]
@@ -31,6 +25,9 @@ pub struct RewardDetail {
 
     /// Reward amount
     pub amount: Lovelace,
+
+    // Pool that reward came from
+    pub pool: PoolId,
 }
 
 /// Result of a rewards calculation
@@ -211,6 +208,7 @@ pub fn calculate_rewards(
                         num_delegators_paid += 1;
                         total_paid_to_delegators += reward.amount;
                     }
+                    RewardType::PoolRefund => {}
                 }
                 spo_rewards.total_rewards += reward.amount;
                 result.total_paid += reward.amount;
@@ -391,6 +389,7 @@ fn calculate_spo_rewards(
                     account: delegator_stake_address.clone(),
                     rtype: RewardType::Member,
                     amount: to_pay,
+                    pool: operator_id.to_vec(),
                 });
                 total_paid += to_pay;
                 delegators_paid += 1;
@@ -408,6 +407,7 @@ fn calculate_spo_rewards(
             account: spo.reward_account.clone(),
             rtype: RewardType::Leader,
             amount: spo_benefit,
+            pool: operator_id.to_vec(),
         });
     } else {
         info!(

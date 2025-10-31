@@ -1,7 +1,7 @@
 //! Verification of calculated values against captured CSV from Haskell node / DBSync
-use crate::rewards::{RewardDetail, RewardType, RewardsResult};
+use crate::rewards::{RewardDetail, RewardsResult};
 use crate::state::Pots;
-use acropolis_common::{KeyHash, StakeAddress};
+use acropolis_common::{KeyHash, RewardType, StakeAddress};
 use hex::FromHex;
 use itertools::EitherOrBoth::{Both, Left, Right};
 use itertools::Itertools;
@@ -167,10 +167,11 @@ impl Verifier {
                     continue;
                 };
 
-                expected_rewards.entry(spo.try_into().unwrap()).or_default().push(RewardDetail {
+                expected_rewards.entry(spo.clone()).or_default().push(RewardDetail {
                     account: stake_address,
                     rtype,
                     amount,
+                    pool: spo,
                 });
             }
 
