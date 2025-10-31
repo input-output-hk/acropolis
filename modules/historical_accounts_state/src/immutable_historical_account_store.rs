@@ -153,8 +153,10 @@ impl ImmutableHistoricalAccountStore {
         &self,
         account: &StakeAddress,
     ) -> Result<Option<Vec<AccountReward>>> {
-        let mut immutable_rewards =
-            self.collect_partition::<AccountReward>(&self.rewards_history, account.get_hash())?;
+        let mut immutable_rewards = self.collect_partition::<AccountReward>(
+            &self.rewards_history,
+            account.get_hash().as_ref(),
+        )?;
 
         self.merge_pending(
             account,

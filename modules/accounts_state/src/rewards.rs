@@ -2,10 +2,9 @@
 
 use crate::snapshot::{Snapshot, SnapshotSPO};
 use acropolis_common::{
-    protocol_params::ShelleyParams, rational_number::RationalNumber, Lovelace, PoolId, SPORewards,
-    StakeAddress,
+    protocol_params::ShelleyParams, rational_number::RationalNumber, Lovelace, PoolId, RewardType,
+    SPORewards, StakeAddress,
 };
-use acropolis_common::{PoolId, RewardType};
 use anyhow::{bail, Result};
 use bigdecimal::{BigDecimal, One, ToPrimitive, Zero};
 use std::cmp::min;
@@ -389,7 +388,7 @@ fn calculate_spo_rewards(
                     account: delegator_stake_address.clone(),
                     rtype: RewardType::Member,
                     amount: to_pay,
-                    pool: operator_id.to_vec(),
+                    pool: *operator_id,
                 });
                 total_paid += to_pay;
                 delegators_paid += 1;
@@ -407,7 +406,7 @@ fn calculate_spo_rewards(
             account: spo.reward_account.clone(),
             rtype: RewardType::Leader,
             amount: spo_benefit,
-            pool: operator_id.to_vec(),
+            pool: *operator_id,
         });
     } else {
         info!(
