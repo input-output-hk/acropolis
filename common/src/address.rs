@@ -275,6 +275,7 @@ impl ShelleyAddress {
             ShelleyAddressPaymentPart::ScriptHash(data) => (data, 1),
         };
 
+        // TODO: MH - make delegation hash an Option<Hash<28>> type
         let (delegation_hash, delegation_bits): (Vec<u8>, u8) = match &self.delegation {
             ShelleyAddressDelegationPart::None => (Vec::new(), 3),
             ShelleyAddressDelegationPart::StakeKeyHash(hash) => (hash.to_vec(), 0),
