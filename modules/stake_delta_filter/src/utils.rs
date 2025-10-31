@@ -562,50 +562,50 @@ mod test {
 
         let stake_delta = process_message(&cache, &delta, &block, None);
 
+        let stake_addr_entry = stake_delta
+            .deltas
+            .iter()
+            .find(|d| d.stake_address.to_string().unwrap() == stake_addr)
+            .expect("Expected stake_addr not found in deltas");
         assert_eq!(
-            stake_delta.deltas.first().unwrap().stake_address.to_string().unwrap(),
-            stake_addr
+            stake_addr_entry.addresses.len(),
+            2,
+            "Expected 2 Shelley addresses grouped under stake_addr"
         );
+
+        let script_addr_entry = stake_delta
+            .deltas
+            .iter()
+            .find(|d| d.stake_address.to_string().unwrap() == script_addr)
+            .expect("Expected script_addr not found in deltas");
         assert_eq!(
-            stake_delta.deltas.get(1).unwrap().stake_address.to_string().unwrap(),
-            stake_addr
+            script_addr_entry.addresses.len(),
+            2,
+            "Expected 2 Shelley addresses grouped under script_addr"
         );
-        assert_eq!(
-            stake_delta.deltas.get(2).unwrap().stake_address.to_string().unwrap(),
-            script_addr
-        );
-        assert_eq!(
-            stake_delta.deltas.get(3).unwrap().stake_address.to_string().unwrap(),
-            script_addr
-        );
-        assert_eq!(
-            stake_delta.deltas.get(4).unwrap().stake_address.to_string().unwrap(),
-            pointed_addr
-        );
-        assert_eq!(
-            stake_delta.deltas.get(5).unwrap().stake_address.to_string().unwrap(),
-            pointed_addr
-        );
-        assert_eq!(
-            stake_delta.deltas.get(6).unwrap().stake_address.to_string().unwrap(),
-            stake_addr
-        );
-        assert_eq!(
-            stake_delta.deltas.get(7).unwrap().stake_address.to_string().unwrap(),
-            script_addr
+
+        assert!(
+            stake_delta.deltas.iter().any(|d| d.stake_address.to_string().unwrap() == pointed_addr),
+            "Expected pointed_addr not found in deltas"
         );
 
         // additional check: payload conversion correctness
-        assert_eq!(
-            stake_delta.deltas.first().unwrap().stake_address.credential.to_string().unwrap(),
-            stake_key_hash
+        assert!(
+            stake_delta
+                .deltas
+                .iter()
+                .any(|d| d.stake_address.credential.to_string().unwrap() == stake_key_hash),
+            "Expected stake_key_hash not found in deltas"
         );
-        assert_eq!(
-            stake_delta.deltas.get(2).unwrap().stake_address.credential.to_string().unwrap(),
-            script_hash
+        assert!(
+            stake_delta
+                .deltas
+                .iter()
+                .any(|d| d.stake_address.credential.to_string().unwrap() == script_hash),
+            "Expected script_hash not found in deltas"
         );
 
-        assert_eq!(stake_delta.deltas.len(), 8);
+        assert_eq!(stake_delta.deltas.len(), 3);
 
         Ok(())
     }
