@@ -3,9 +3,11 @@ mod tests {
     use crate::conway_voting::ConwayVoting;
     use crate::voting_state::VotingRegistrationState;
     use acropolis_common::{
-        protocol_params::ProtocolParams, rational_number::RationalNumber, Credential,
-        DRepCredential, DelegatedStake, GovActionId, KeyHash, Lovelace, ProposalProcedure,
-        SingleVoterVotes, TxHash, Vote, VoteCount, VoteResult, Voter, VotingProcedure,
+        protocol_params::ProtocolParams, rational_number::RationalNumber,
+        ConstitutionalCommitteeKeyHash, ConstitutionalCommitteeScriptHash, Credential,
+        DRepCredential, DRepScriptHash, DelegatedStake, DrepKeyHash, GovActionId, KeyHash,
+        Lovelace, PoolId, ProposalProcedure, SingleVoterVotes, TxHash, Vote, VoteCount, VoteResult,
+        Voter, VotingProcedure,
     };
     use anyhow::{anyhow, bail, Result};
 
@@ -32,9 +34,9 @@ mod tests {
     #[serde_as]
     #[derive(Clone, Debug, serde::Deserialize)]
     struct PoolRecord(
-        #[serde_as(as = "Base64")] KeyHash, // key
-        u64,                                // active stake
-        u64,                                // live stake
+        #[serde_as(as = "Base64")] PoolId, // key
+        u64,                               // active stake
+        u64,                               // live stake
     );
 
     #[serde_as]
@@ -54,13 +56,17 @@ mod tests {
 
     impl VotingRecord {
         pub fn to_voter(&self) -> Result<Voter> {
-            let key = self.1.to_vec();
+            let key = self.1;
             match &self.0 {
-                0 => Ok(Voter::DRepKey(key)),
-                1 => Ok(Voter::DRepScript(key)),
-                2 => Ok(Voter::StakePoolKey(key)),
-                3 => Ok(Voter::ConstitutionalCommitteeKey(key)),
-                4 => Ok(Voter::ConstitutionalCommitteeScript(key)),
+                0 => Ok(Voter::DRepKey(DrepKeyHash::from(key))),
+                1 => Ok(Voter::DRepScript(DRepScriptHash::from(key))),
+                2 => Ok(Voter::StakePoolKey(PoolId::from(key))),
+                3 => Ok(Voter::ConstitutionalCommitteeKey(
+                    ConstitutionalCommitteeKeyHash::from(key),
+                )),
+                4 => Ok(Voter::ConstitutionalCommitteeScript(
+                    ConstitutionalCommitteeScriptHash::from(key),
+                )),
                 _ => bail!("Unknown voter key type {}", self.0),
             }
         }
@@ -86,14 +92,14 @@ mod tests {
         }
     }
 
-    fn read_pools(pools_json: &[u8]) -> Result<HashMap<u64, HashMap<KeyHash, DelegatedStake>>> {
+    fn read_pools(pools_json: &[u8]) -> Result<HashMap<u64, HashMap<PoolId, DelegatedStake>>> {
         let pools = serde_json::from_slice::<Vec<(u64, Vec<PoolRecord>)>>(pools_json)?;
         let res = HashMap::from_iter(pools.iter().map(|(epoch, distr)| {
             (
                 *epoch,
                 HashMap::from_iter(distr.iter().map(|PoolRecord(id, active, live)| {
                     (
-                        id.clone(),
+                        *id,
                         DelegatedStake {
                             active: *active,
                             active_delegators_count: 0,
@@ -118,7 +124,7 @@ mod tests {
                         distr
                             .iter()
                             .map(|DRepRecord(dt, key, lvl)| {
-                                Ok((parse_drep_credential(*dt, key.to_vec())?, *lvl))
+                                Ok((parse_drep_credential(*dt, *key)?, *lvl))
                             })
                             .collect::<Result<Vec<(DRepCredential, Lovelace)>>>()?,
                     ),

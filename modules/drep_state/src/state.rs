@@ -261,8 +261,8 @@ impl State {
         for (tx_hash, voting_procedures) in voting_procedures {
             for (voter, single_votes) in &voting_procedures.votes {
                 let drep_cred = match voter {
-                    Voter::DRepKey(k) => DRepCredential::AddrKeyHash(k.to_vec()),
-                    Voter::DRepScript(s) => DRepCredential::ScriptHash(s.to_vec()),
+                    Voter::DRepKey(k) => DRepCredential::AddrKeyHash(k.into_inner()),
+                    Voter::DRepScript(s) => DRepCredential::ScriptHash(s.into_inner()),
                     _ => continue,
                 };
 
@@ -559,8 +559,8 @@ impl State {
 
 fn drep_choice_to_credential(choice: &DRepChoice) -> Option<DRepCredential> {
     match choice {
-        DRepChoice::Key(k) => Some(DRepCredential::AddrKeyHash(k.clone())),
-        DRepChoice::Script(k) => Some(DRepCredential::ScriptHash(k.clone())),
+        DRepChoice::Key(k) => Some(DRepCredential::AddrKeyHash(*k)),
+        DRepChoice::Script(k) => Some(DRepCredential::ScriptHash(*k)),
         _ => None,
     }
 }
@@ -584,7 +584,7 @@ mod tests {
 
     #[test]
     fn test_drep_process_one_certificate() {
-        let tx_cred = Credential::AddrKeyHash(CRED_1.to_vec());
+        let tx_cred = Credential::AddrKeyHash(CRED_1.into());
         let tx_cert = TxCertificateWithPos {
             cert: TxCertificate::DRepRegistration(DRepRegistration {
                 credential: tx_cred.clone(),
@@ -609,7 +609,7 @@ mod tests {
 
     #[test]
     fn test_drep_do_not_replace_existing_certificate() {
-        let tx_cred = Credential::AddrKeyHash(CRED_1.to_vec());
+        let tx_cred = Credential::AddrKeyHash(CRED_1.into());
         let tx_cert = TxCertificateWithPos {
             cert: TxCertificate::DRepRegistration(DRepRegistration {
                 credential: tx_cred.clone(),
@@ -647,7 +647,7 @@ mod tests {
 
     #[test]
     fn test_drep_update_certificate() {
-        let tx_cred = Credential::AddrKeyHash(CRED_1.to_vec());
+        let tx_cred = Credential::AddrKeyHash(CRED_1.into());
         let tx_cert = TxCertificateWithPos {
             cert: TxCertificate::DRepRegistration(DRepRegistration {
                 credential: tx_cred.clone(),
@@ -688,7 +688,7 @@ mod tests {
 
     #[test]
     fn test_drep_do_not_update_nonexistent_certificate() {
-        let tx_cred = Credential::AddrKeyHash(CRED_1.to_vec());
+        let tx_cred = Credential::AddrKeyHash(CRED_1.into());
         let tx_cert = TxCertificateWithPos {
             cert: TxCertificate::DRepRegistration(DRepRegistration {
                 credential: tx_cred.clone(),
@@ -707,7 +707,7 @@ mod tests {
         };
         let update_anchor_tx_cert = TxCertificateWithPos {
             cert: TxCertificate::DRepUpdate(DRepUpdate {
-                credential: Credential::AddrKeyHash(CRED_2.to_vec()),
+                credential: Credential::AddrKeyHash(CRED_2.into()),
                 anchor: Some(anchor.clone()),
             }),
             tx_identifier: TxIdentifier::default(),
@@ -728,7 +728,7 @@ mod tests {
 
     #[test]
     fn test_drep_deregister() {
-        let tx_cred = Credential::AddrKeyHash(CRED_1.to_vec());
+        let tx_cred = Credential::AddrKeyHash(CRED_1.into());
         let tx_cert = TxCertificateWithPos {
             cert: TxCertificate::DRepRegistration(DRepRegistration {
                 credential: tx_cred.clone(),
@@ -756,7 +756,7 @@ mod tests {
 
     #[test]
     fn test_drep_do_not_deregister_nonexistent_cert() {
-        let tx_cred = Credential::AddrKeyHash(CRED_1.to_vec());
+        let tx_cred = Credential::AddrKeyHash(CRED_1.into());
         let tx_cert = TxCertificateWithPos {
             cert: TxCertificate::DRepRegistration(DRepRegistration {
                 credential: tx_cred.clone(),
@@ -771,7 +771,7 @@ mod tests {
 
         let unregister_tx_cert = TxCertificateWithPos {
             cert: TxCertificate::DRepDeregistration(DRepDeregistration {
-                credential: Credential::AddrKeyHash(CRED_2.to_vec()),
+                credential: Credential::AddrKeyHash(CRED_2.into()),
                 refund: 500000000,
             }),
             tx_identifier: TxIdentifier::default(),

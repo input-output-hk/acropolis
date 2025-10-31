@@ -2,10 +2,9 @@
 
 use crate::snapshot::{Snapshot, SnapshotSPO};
 use acropolis_common::{
-    protocol_params::ShelleyParams, rational_number::RationalNumber, KeyHash, Lovelace, SPORewards,
-    StakeAddress,
+    protocol_params::ShelleyParams, rational_number::RationalNumber, Lovelace, PoolId, RewardType,
+    SPORewards, StakeAddress,
 };
-use acropolis_common::{PoolId, RewardType};
 use anyhow::{bail, Result};
 use bigdecimal::{BigDecimal, One, ToPrimitive, Zero};
 use std::cmp::min;
@@ -40,10 +39,10 @@ pub struct RewardsResult {
     pub total_paid: u64,
 
     /// Rewards to be paid
-    pub rewards: BTreeMap<KeyHash, Vec<RewardDetail>>,
+    pub rewards: BTreeMap<PoolId, Vec<RewardDetail>>,
 
     /// SPO rewards
-    pub spo_rewards: Vec<(KeyHash, SPORewards)>,
+    pub spo_rewards: Vec<(PoolId, SPORewards)>,
 }
 
 /// Calculate rewards for a given epoch based on current rewards state and protocol parameters
@@ -214,8 +213,8 @@ pub fn calculate_rewards(
                 result.total_paid += reward.amount;
             }
 
-            result.rewards.insert(operator_id.clone(), rewards);
-            result.spo_rewards.push((operator_id.clone(), spo_rewards));
+            result.rewards.insert(*operator_id, rewards);
+            result.spo_rewards.push((*operator_id, spo_rewards));
         }
     }
 
@@ -234,7 +233,7 @@ pub fn calculate_rewards(
 /// Calculate rewards for an individual SPO
 #[allow(clippy::too_many_arguments)]
 fn calculate_spo_rewards(
-    operator_id: &KeyHash,
+    operator_id: &PoolId,
     spo: &SnapshotSPO,
     blocks_produced: u64,
     total_blocks: usize,
@@ -389,7 +388,7 @@ fn calculate_spo_rewards(
                     account: delegator_stake_address.clone(),
                     rtype: RewardType::Member,
                     amount: to_pay,
-                    pool: operator_id.to_vec(),
+                    pool: *operator_id,
                 });
                 total_paid += to_pay;
                 delegators_paid += 1;
@@ -407,7 +406,7 @@ fn calculate_spo_rewards(
             account: spo.reward_account.clone(),
             rtype: RewardType::Leader,
             amount: spo_benefit,
-            pool: operator_id.to_vec(),
+            pool: *operator_id,
         });
     } else {
         info!(

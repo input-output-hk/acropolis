@@ -4,6 +4,7 @@ use crate::{
         EpochActivityRest, ProtocolParamsRest, SPDDByEpochAndPoolItemRest, SPDDByEpochItemRest,
     },
 };
+use acropolis_common::serialization::Bech32Conversion;
 use acropolis_common::{
     messages::{Message, RESTResponse, StateQuery, StateQueryResponse},
     queries::{
@@ -14,8 +15,7 @@ use acropolis_common::{
         spdd::{SPDDStateQuery, SPDDStateQueryResponse},
         utils::query_state,
     },
-    serialization::Bech32WithHrp,
-    NetworkId, StakeAddress, StakeCredential,
+    NetworkId, PoolId, StakeAddress, StakeCredential,
 };
 use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
@@ -534,7 +534,7 @@ pub async fn handle_epoch_pool_stakes_blockfrost(
         }
     };
 
-    let Ok(pool_id) = Vec::<u8>::from_bech32_with_hrp(pool_id, "pool") else {
+    let Ok(pool_id) = PoolId::from_bech32(pool_id) else {
         return Ok(RESTResponse::with_text(
             400,
             &format!("Invalid Bech32 stake pool ID: {pool_id}"),
@@ -679,7 +679,7 @@ pub async fn handle_epoch_pool_blocks_blockfrost(
         }
     };
 
-    let Ok(spo) = Vec::<u8>::from_bech32_with_hrp(pool_id_param, "pool") else {
+    let Ok(spo) = PoolId::from_bech32(pool_id_param) else {
         return Ok(RESTResponse::with_text(
             400,
             &format!("Invalid Bech32 stake pool ID: {pool_id_param}"),
@@ -689,7 +689,7 @@ pub async fn handle_epoch_pool_blocks_blockfrost(
     // query Pool's Blocks by epoch from spo-state
     let msg = Arc::new(Message::StateQuery(StateQuery::Pools(
         PoolsStateQuery::GetBlocksByPoolAndEpoch {
-            pool_id: spo.clone(),
+            pool_id: spo,
             epoch: epoch_number,
         },
     )));

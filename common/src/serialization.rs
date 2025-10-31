@@ -1,5 +1,6 @@
 use std::marker::PhantomData;
 
+use crate::PoolId;
 use anyhow::anyhow;
 use bech32::{Bech32, Hrp};
 use serde::{ser::SerializeMap, Deserialize, Serializer};
@@ -60,7 +61,29 @@ impl HrpPrefix for AddrPrefix {
 // Generic Bech32 converter with HRP parameter
 pub struct DisplayFromBech32<PREFIX: HrpPrefix>(PhantomData<PREFIX>);
 
-// Serialization implementation
+// PoolID serialization implementation
+impl SerializeAs<PoolId> for DisplayFromBech32<PoolPrefix> {
+    fn serialize_as<S>(source: &PoolId, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let bech32_string = source.to_bech32().map_err(serde::ser::Error::custom)?;
+        serializer.serialize_str(&bech32_string)
+    }
+}
+
+// PoolID deserialization implementation
+impl<'de> DeserializeAs<'de, PoolId> for DisplayFromBech32<PoolPrefix> {
+    fn deserialize_as<D>(deserializer: D) -> Result<PoolId, D::Error>
+    where
+        D: serde::de::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        PoolId::from_bech32(&s).map_err(serde::de::Error::custom)
+    }
+}
+
+// Vec<u8> serialization implementation
 impl<PREFIX> SerializeAs<Vec<u8>> for DisplayFromBech32<PREFIX>
 where
     PREFIX: HrpPrefix,

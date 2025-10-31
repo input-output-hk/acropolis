@@ -34,13 +34,13 @@ pub enum AccountsStateQuery {
     // Epochs-related queries
     GetActiveStakes {},
     GetSPDDByEpoch { epoch: u64 },
-    GetSPDDByEpochAndPool { epoch: u64, pool_id: KeyHash },
+    GetSPDDByEpochAndPool { epoch: u64, pool_id: PoolId },
 
     // Pools related queries
     GetOptimalPoolSizing,
-    GetPoolsLiveStakes { pools_operators: Vec<Vec<u8>> },
-    GetPoolDelegators { pool_operator: KeyHash },
-    GetPoolLiveStake { pool_operator: KeyHash },
+    GetPoolsLiveStakes { pools_operators: Vec<PoolId> },
+    GetPoolDelegators { pool_operator: PoolId },
+    GetPoolLiveStake { pool_operator: PoolId },
 
     // Dreps related queries
     GetDrepDelegators { drep: DRepChoice },
@@ -60,15 +60,15 @@ pub enum AccountsStateQueryResponse {
     AccountAssets(AccountAssets),
     AccountAssetsTotals(AccountAssetsTotals),
     AccountUTxOs(AccountUTxOs),
-    AccountsUtxoValuesMap(HashMap<Vec<u8>, u64>),
+    AccountsUtxoValuesMap(HashMap<KeyHash, u64>),
     AccountsUtxoValuesSum(u64),
-    AccountsBalancesMap(HashMap<Vec<u8>, u64>),
+    AccountsBalancesMap(HashMap<KeyHash, u64>),
     AccountsBalancesSum(u64),
 
     // Epochs-related responses
     ActiveStakes(u64),
     /// Vec<(PoolId, StakeKey, ActiveStakeAmount)>
-    SPDDByEpoch(Vec<(KeyHash, KeyHash, u64)>),
+    SPDDByEpoch(Vec<(PoolId, KeyHash, u64)>),
     /// Vec<(StakeKey, ActiveStakeAmount)>
     SPDDByEpochAndPool(Vec<(KeyHash, u64)>),
 
@@ -80,7 +80,7 @@ pub enum AccountsStateQueryResponse {
 
     // DReps-related responses
     DrepDelegators(DrepDelegators),
-    AccountsDrepDelegationsMap(HashMap<Vec<u8>, Option<DRepChoice>>),
+    AccountsDrepDelegationsMap(HashMap<KeyHash, Option<DRepChoice>>),
 
     NotFound,
     Error(String),
@@ -90,7 +90,7 @@ pub enum AccountsStateQueryResponse {
 pub struct AccountInfo {
     pub utxo_value: u64,
     pub rewards: u64,
-    pub delegated_spo: Option<KeyHash>,
+    pub delegated_spo: Option<PoolId>,
     pub delegated_drep: Option<DRepChoice>,
 }
 

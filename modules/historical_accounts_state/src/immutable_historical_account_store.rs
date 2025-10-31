@@ -159,8 +159,10 @@ impl ImmutableHistoricalAccountStore {
         &self,
         account: &StakeAddress,
     ) -> Result<Option<Vec<AccountReward>>> {
-        let mut immutable_rewards =
-            self.collect_partition::<AccountReward>(&self.rewards_history, account.get_hash())?;
+        let mut immutable_rewards = self.collect_partition::<AccountReward>(
+            &self.rewards_history,
+            account.get_hash().as_ref(),
+        )?;
 
         self.merge_pending(
             account,
@@ -178,7 +180,7 @@ impl ImmutableHistoricalAccountStore {
     ) -> Result<Option<Vec<ActiveStakeHistory>>> {
         let mut immutable_active_stake = self.collect_partition::<ActiveStakeHistory>(
             &self.active_stake_history,
-            account.get_hash(),
+            account.get_hash().as_ref(),
         )?;
 
         self.merge_pending(
@@ -197,7 +199,7 @@ impl ImmutableHistoricalAccountStore {
     ) -> Result<Option<Vec<RegistrationUpdate>>> {
         let mut immutable_registrations = self.collect_partition::<RegistrationUpdate>(
             &self.registration_history,
-            account.get_hash(),
+            account.get_hash().as_ref(),
         )?;
 
         self.merge_pending(
@@ -214,8 +216,10 @@ impl ImmutableHistoricalAccountStore {
         &self,
         account: &StakeAddress,
     ) -> Result<Option<Vec<DelegationUpdate>>> {
-        let mut immutable_delegations = self
-            .collect_partition::<DelegationUpdate>(&self.delegation_history, account.get_hash())?;
+        let mut immutable_delegations = self.collect_partition::<DelegationUpdate>(
+            &self.delegation_history,
+            account.get_hash().as_ref(),
+        )?;
 
         self.merge_pending(
             account,
@@ -231,8 +235,10 @@ impl ImmutableHistoricalAccountStore {
         &self,
         account: &StakeAddress,
     ) -> Result<Option<Vec<AccountWithdrawal>>> {
-        let mut immutable_mirs =
-            self.collect_partition::<AccountWithdrawal>(&self.mir_history, account.get_hash())?;
+        let mut immutable_mirs = self.collect_partition::<AccountWithdrawal>(
+            &self.mir_history,
+            account.get_hash().as_ref(),
+        )?;
 
         self.merge_pending(account, |e| e.mir_history.as_ref(), &mut immutable_mirs).await;
 
@@ -243,8 +249,10 @@ impl ImmutableHistoricalAccountStore {
         &self,
         account: &StakeAddress,
     ) -> Result<Option<Vec<AccountWithdrawal>>> {
-        let mut immutable_withdrawals = self
-            .collect_partition::<AccountWithdrawal>(&self.withdrawal_history, account.get_hash())?;
+        let mut immutable_withdrawals = self.collect_partition::<AccountWithdrawal>(
+            &self.withdrawal_history,
+            account.get_hash().as_ref(),
+        )?;
 
         self.merge_pending(
             account,
@@ -334,13 +342,13 @@ impl ImmutableHistoricalAccountStore {
 
     fn make_epoch_key(account: &StakeAddress, epoch: u32) -> [u8; 32] {
         let mut key = [0u8; 32];
-        key[..28].copy_from_slice(&account.get_credential().get_hash());
+        key[..28].copy_from_slice(account.get_credential().get_hash().as_ref());
         key[28..32].copy_from_slice(&epoch.to_be_bytes());
         key
     }
 
     fn make_address_key(account: &StakeAddress, address: ShelleyAddress) -> Vec<u8> {
-        let mut key = account.get_credential().get_hash();
+        let mut key = account.to_binary();
         key.extend(address.to_bytes_key());
         key
     }

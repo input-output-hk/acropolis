@@ -13,7 +13,7 @@ use acropolis_common::{
     },
     rational_number::RationalNumber,
     state_history::{StateHistory, StateHistoryStore},
-    BlockInfo, BlockStatus, Era, KeyHash,
+    BlockInfo, BlockStatus, Era, PoolId,
 };
 use anyhow::Result;
 use caryatid_sdk::{module, Context, Module, Subscription};
@@ -284,10 +284,10 @@ impl SPOState {
                     span.in_scope(|| {
                         Self::check_sync(&current_block, block_info);
                         // update epochs_history
-                        let spos: Vec<(KeyHash, usize)> = epoch_activity_message
+                        let spos: Vec<(PoolId, usize)> = epoch_activity_message
                             .spo_blocks
                             .iter()
-                            .map(|(hash, count)| (hash.clone(), *count))
+                            .map(|(hash, count)| (*hash, *count))
                             .collect();
                         epochs_history.handle_epoch_activity(
                             block_info,
