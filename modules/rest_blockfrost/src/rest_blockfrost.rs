@@ -16,7 +16,11 @@ mod handlers_config;
 mod types;
 mod utils;
 use handlers::{
-    accounts::handle_single_account_blockfrost,
+    accounts::{
+        handle_account_delegations_blockfrost, handle_account_mirs_blockfrost,
+        handle_account_registrations_blockfrost, handle_account_rewards_blockfrost,
+        handle_account_withdrawals_blockfrost, handle_single_account_blockfrost,
+    },
     addresses::{
         handle_address_asset_utxos_blockfrost, handle_address_extended_blockfrost,
         handle_address_single_blockfrost, handle_address_totals_blockfrost,
@@ -58,13 +62,7 @@ use handlers::{
     },
 };
 
-use crate::{
-    handlers::accounts::{
-        handle_account_delegations_blockfrost, handle_account_mirs_blockfrost,
-        handle_account_registrations_blockfrost, handle_account_withdrawals_blockfrost,
-    },
-    handlers_config::HandlersConfig,
-};
+use crate::handlers_config::HandlersConfig;
 
 // Accounts topics
 const DEFAULT_HANDLE_SINGLE_ACCOUNT_TOPIC: (&str, &str) =
@@ -82,6 +80,10 @@ const DEFAULT_HANDLE_ACCOUNT_MIRS_TOPIC: (&str, &str) =
 const DEFAULT_HANDLE_ACCOUNT_WITHDRAWALS_TOPIC: (&str, &str) = (
     "handle-topic-account-withdrawals",
     "rest.get.accounts.*.withdrawals",
+);
+const DEFAULT_HANDLE_ACCOUNT_REWARDS_TOPIC: (&str, &str) = (
+    "handle-topic-account-rewards",
+    "rest.get.accounts.*.rewards",
 );
 
 // Blocks topics
@@ -299,6 +301,14 @@ impl BlockfrostREST {
             DEFAULT_HANDLE_ACCOUNT_WITHDRAWALS_TOPIC,
             handlers_config.clone(),
             handle_account_withdrawals_blockfrost,
+        );
+
+        // Handler for /accounts/{stake_address}/rewards
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_ACCOUNT_REWARDS_TOPIC,
+            handlers_config.clone(),
+            handle_account_rewards_blockfrost,
         );
 
         // Handler for /blocks/latest, /blocks/{hash_or_number}

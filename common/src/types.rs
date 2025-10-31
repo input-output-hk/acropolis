@@ -213,7 +213,38 @@ pub struct StakeAddressDelta {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StakeRewardDelta {
     pub stake_address: StakeAddress,
-    pub delta: i64,
+    pub delta: u64,
+    pub reward_type: RewardType,
+    pub pool: PoolId,
+}
+
+/// Type of reward being given
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    minicbor::Encode,
+    minicbor::Decode,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+pub enum RewardType {
+    #[n(0)]
+    Leader,
+    #[n(1)]
+    Member,
+    #[n(2)]
+    PoolRefund,
+}
+
+impl fmt::Display for RewardType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RewardType::Leader => write!(f, "leader"),
+            RewardType::Member => write!(f, "member"),
+            RewardType::PoolRefund => write!(f, "pool_deposit_refund"),
+        }
+    }
 }
 
 pub type PolicyId = [u8; 28];
@@ -450,7 +481,7 @@ pub type ScriptHash = KeyHash;
 pub type AddrKeyhash = KeyHash;
 
 /// Script identifier
-pub type GenesisKeyhash = Hash<32>;
+pub type GenesisKeyhash = Hash<28>;
 
 declare_hash_type!(BlockHash, 32);
 declare_hash_type!(TxHash, 32);
@@ -692,11 +723,10 @@ impl Credential {
     }
 
     pub fn get_hash(&self) -> KeyHash {
-        match self {
+        *match self {
             Self::AddrKeyHash(hash) => hash,
             Self::ScriptHash(hash) => hash,
         }
-        .clone()
     }
 
     pub fn from_drep_bech32(bech32_str: &str) -> Result<Self, Error> {
@@ -982,7 +1012,7 @@ pub struct SPORewards {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenesisKeyDelegation {
     /// Genesis hash
-    pub genesis_hash: GenesisKeyhash,
+    pub genesis_hash: Hash<32>,
 
     /// Genesis delegate hash
     pub genesis_delegate_hash: PoolId,
@@ -1350,7 +1380,7 @@ pub struct HeavyDelegate {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GenesisDelegate {
     #[serde_as(as = "Hex")]
-    pub delegate: Vec<u8>,
+    pub delegate: Hash<28>,
     #[serde_as(as = "Hex")]
     pub vrf: Vec<u8>,
 }

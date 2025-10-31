@@ -398,8 +398,8 @@ impl StakeAddress {
 
     pub fn get_credential(&self) -> Credential {
         match &self.credential {
-            StakeCredential::AddrKeyHash(hash) => Credential::AddrKeyHash(hash.clone()),
-            StakeCredential::ScriptHash(hash) => Credential::ScriptHash(hash.clone()),
+            StakeCredential::AddrKeyHash(hash) => Credential::AddrKeyHash(*hash),
+            StakeCredential::ScriptHash(hash) => Credential::ScriptHash(*hash),
         }
     }
 
@@ -411,7 +411,7 @@ impl StakeAddress {
         };
 
         let data = self.to_binary();
-        Ok(bech32::encode::<bech32::Bech32>(hrp, &data.as_slice())?)
+        Ok(bech32::encode::<bech32::Bech32>(hrp, data.as_slice())?)
     }
 
     /// Read from a string format ("stake1xxx...")
@@ -520,7 +520,7 @@ impl<C> minicbor::Encode<C> for StakeAddress {
         _ctx: &mut C,
     ) -> Result<(), minicbor::encode::Error<W::Error>> {
         let data = self.to_binary();
-        e.bytes(&data.as_slice())?;
+        e.bytes(data.as_slice())?;
         Ok(())
     }
 }
@@ -902,7 +902,7 @@ mod tests {
         assert_eq!(sa.network, NetworkId::Mainnet);
         assert_eq!(
             match sa.credential {
-                StakeCredential::AddrKeyHash(key) => hex::encode(&key),
+                StakeCredential::AddrKeyHash(key) => hex::encode(key),
                 _ => "SCRIPT".to_string(),
             },
             "558f3ee09b26d88fac2eddc772a9eda94cce6dbadbe9fee439bd6001"
@@ -918,7 +918,7 @@ mod tests {
         assert_eq!(sa.network, NetworkId::Mainnet);
         assert_eq!(
             match sa.credential {
-                StakeCredential::ScriptHash(key) => hex::encode(&key),
+                StakeCredential::ScriptHash(key) => hex::encode(key),
                 _ => "STAKE".to_string(),
             },
             "558f3ee09b26d88fac2eddc772a9eda94cce6dbadbe9fee439bd6001"
@@ -934,7 +934,7 @@ mod tests {
         assert_eq!(sa.network, NetworkId::Testnet);
         assert_eq!(
             match sa.credential {
-                StakeCredential::AddrKeyHash(key) => hex::encode(&key),
+                StakeCredential::AddrKeyHash(key) => hex::encode(key),
                 _ => "SCRIPT".to_string(),
             },
             "558f3ee09b26d88fac2eddc772a9eda94cce6dbadbe9fee439bd6001"
@@ -963,7 +963,7 @@ mod tests {
         // - 0x1d: Length of 29 bytes (the stake address data)
         // - [29 bytes]: The actual stake address (network header + 28-byte hash)
         // Total: 31 bytes (2-byte CBOR framing + 29-byte payload)
-        let expected = [[0x58, 0x1d].as_slice(), &binary.as_slice()].concat();
+        let expected = [[0x58, 0x1d].as_slice(), binary.as_slice()].concat();
 
         let mut actual = Vec::new();
         let mut encoder = minicbor::Encoder::new(&mut actual);
@@ -977,7 +977,7 @@ mod tests {
     fn stake_addresses_decode_mainnet_stake() {
         let binary = {
             let mut v = vec![0x58, 0x1d];
-            v.extend_from_slice(&mainnet_stake_address().to_binary().as_slice());
+            v.extend_from_slice(mainnet_stake_address().to_binary().as_slice());
             v
         };
 
@@ -987,7 +987,7 @@ mod tests {
         assert_eq!(decoded.network, NetworkId::Mainnet);
         assert_eq!(
             match decoded.credential {
-                StakeCredential::AddrKeyHash(key) => hex::encode(&key),
+                StakeCredential::AddrKeyHash(key) => hex::encode(key),
                 _ => "STAKE".to_string(),
             },
             "558f3ee09b26d88fac2eddc772a9eda94cce6dbadbe9fee439bd6001"
@@ -1010,7 +1010,7 @@ mod tests {
         assert_eq!(decoded.network, NetworkId::Mainnet);
         assert_eq!(
             match decoded.credential {
-                StakeCredential::ScriptHash(key) => hex::encode(&key),
+                StakeCredential::ScriptHash(key) => hex::encode(key),
                 _ => "STAKE".to_string(),
             },
             "558f3ee09b26d88fac2eddc772a9eda94cce6dbadbe9fee439bd6001"
@@ -1031,7 +1031,7 @@ mod tests {
         assert_eq!(decoded.network, NetworkId::Testnet);
         assert_eq!(
             match decoded.credential {
-                StakeCredential::ScriptHash(key) => hex::encode(&key),
+                StakeCredential::ScriptHash(key) => hex::encode(key),
                 _ => "SCRIPT".to_string(),
             },
             "558f3ee09b26d88fac2eddc772a9eda94cce6dbadbe9fee439bd6001"

@@ -345,12 +345,12 @@ pub fn process_message(
                     // Base addresses (stake delegated to itself)
                     ShelleyAddressDelegationPart::StakeKeyHash(keyhash) => StakeAddress {
                         network: shelley.network.clone(),
-                        credential: StakeCredential::AddrKeyHash(keyhash.clone()),
+                        credential: StakeCredential::AddrKeyHash(*keyhash),
                     },
 
                     ShelleyAddressDelegationPart::ScriptHash(scripthash) => StakeAddress {
                         network: shelley.network.clone(),
-                        credential: StakeCredential::ScriptHash(scripthash.clone()),
+                        credential: StakeCredential::ScriptHash(*scripthash),
                     },
 
                     // Shelley addresses (stake delegated to some different address)

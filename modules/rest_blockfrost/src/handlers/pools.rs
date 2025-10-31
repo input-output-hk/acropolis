@@ -201,10 +201,8 @@ async fn handle_pools_extended_blockfrost(
     };
 
     // Populate pools_operators
-    let pools_operators = pools_list_with_info
-        .iter()
-        .map(|(pool_operator, _)| pool_operator.clone())
-        .collect::<Vec<_>>();
+    let pools_operators =
+        pools_list_with_info.iter().map(|(pool_operator, _)| *pool_operator).collect::<Vec<_>>();
 
     // Get an active stake for each pool from spo-state
     let pools_active_stakes_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
@@ -423,7 +421,7 @@ async fn handle_pools_spo_blockfrost(
     // Get PoolRegistration from spo state
     let pool_info_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
         PoolsStateQuery::GetPoolInfo {
-            pool_id: pool_operator.clone(),
+            pool_id: pool_operator,
         },
     )));
 
@@ -472,9 +470,7 @@ async fn handle_pools_spo_blockfrost(
 
     // query live stakes from accounts_state
     let live_stakes_info_msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
-        AccountsStateQuery::GetPoolLiveStake {
-            pool_operator: pool_operator.clone(),
-        },
+        AccountsStateQuery::GetPoolLiveStake { pool_operator },
     )));
     let live_stakes_info_f = query_state(
         &context,
@@ -507,7 +503,7 @@ async fn handle_pools_spo_blockfrost(
     // Query pool update events from spo_state
     let pool_updates_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
         PoolsStateQuery::GetPoolUpdates {
-            pool_id: pool_operator.clone(),
+            pool_id: pool_operator,
         },
     )));
     let pool_updates_f = query_state(
@@ -531,7 +527,7 @@ async fn handle_pools_spo_blockfrost(
     // Query total_blocks_minted from spo_state
     let total_blocks_minted_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
         PoolsStateQuery::GetPoolTotalBlocksMinted {
-            pool_id: pool_operator.clone(),
+            pool_id: pool_operator,
         },
     )));
     let total_blocks_minted_f = query_state(
@@ -600,7 +596,7 @@ async fn handle_pools_spo_blockfrost(
     // Query blocks_minted from epochs_state
     let epoch_blocks_minted_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
         EpochsStateQuery::GetLatestEpochBlocksMintedByPool {
-            spo_id: pool_info.operator.clone(),
+            spo_id: pool_info.operator,
         },
     )));
     let epoch_blocks_minted_f = query_state(
@@ -618,7 +614,7 @@ async fn handle_pools_spo_blockfrost(
     // query active stakes info from spo_state
     let active_stakes_info_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
         PoolsStateQuery::GetPoolActiveStakeInfo {
-            pool_operator: pool_operator.clone(),
+            pool_operator,
             epoch: latest_epoch,
         },
     )));
@@ -808,9 +804,7 @@ pub async fn handle_pool_metadata_blockfrost(
     };
 
     let pool_metadata_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
-        PoolsStateQuery::GetPoolMetadata {
-            pool_id: spo.clone(),
-        },
+        PoolsStateQuery::GetPoolMetadata { pool_id: spo },
     )));
     let pool_metadata = query_state(
         &context,
@@ -889,9 +883,7 @@ pub async fn handle_pool_relays_blockfrost(
     };
 
     let pool_relay_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
-        PoolsStateQuery::GetPoolRelays {
-            pool_id: spo.clone(),
-        },
+        PoolsStateQuery::GetPoolRelays { pool_id: spo },
     )));
 
     let pool_relays = query_state(
@@ -944,9 +936,7 @@ pub async fn handle_pool_delegators_blockfrost(
 
     // Get Pool delegators from spo-state
     let pool_delegators_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
-        PoolsStateQuery::GetPoolDelegators {
-            pool_id: spo.clone(),
-        },
+        PoolsStateQuery::GetPoolDelegators { pool_id: spo },
     )));
 
     let pool_delegators = query_state(
@@ -978,9 +968,7 @@ pub async fn handle_pool_delegators_blockfrost(
         None => {
             // Query from Accounts state
             let pool_delegators_msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
-                AccountsStateQuery::GetPoolDelegators {
-                    pool_operator: spo.clone(),
-                },
+                AccountsStateQuery::GetPoolDelegators { pool_operator: spo },
             )));
             let pool_delegators = query_state(
                 &context,
@@ -1041,9 +1029,7 @@ pub async fn handle_pool_blocks_blockfrost(
 
     // Get blocks by pool_id from spo_state
     let pool_blocks_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
-        PoolsStateQuery::GetBlocksByPool {
-            pool_id: spo.clone(),
-        },
+        PoolsStateQuery::GetBlocksByPool { pool_id: spo },
     )));
 
     let pool_blocks = query_state(
@@ -1093,9 +1079,7 @@ pub async fn handle_pool_updates_blockfrost(
 
     // query from spo_state
     let pool_updates_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
-        PoolsStateQuery::GetPoolUpdates {
-            pool_id: spo.clone(),
-        },
+        PoolsStateQuery::GetPoolUpdates { pool_id: spo },
     )));
     let pool_updates = query_state(
         &context,
@@ -1153,9 +1137,7 @@ pub async fn handle_pool_votes_blockfrost(
 
     // query from spo_state
     let pool_votes_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
-        PoolsStateQuery::GetPoolVotes {
-            pool_id: spo.clone(),
-        },
+        PoolsStateQuery::GetPoolVotes { pool_id: spo },
     )));
     let pool_votes = query_state(
         &context,

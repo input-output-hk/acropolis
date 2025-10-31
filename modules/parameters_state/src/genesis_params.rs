@@ -3,7 +3,7 @@ use acropolis_common::{
     protocol_params::{AlonzoParams, BabbageParams, ByronParams, ConwayParams, ShelleyParams},
     rational_number::{rational_number_from_f32, RationalNumber},
     Anchor, BlockVersionData, Committee, Constitution, CostModel, Credential, DRepVotingThresholds,
-    Era, HeavyDelegate, PoolVotingThresholds, ProtocolConsts, SoftForkRule, TxFeePolicy,
+    Era, HeavyDelegate, PoolId, PoolVotingThresholds, ProtocolConsts, SoftForkRule, TxFeePolicy,
 };
 use anyhow::{anyhow, bail, Result};
 use base64::prelude::*;
@@ -183,13 +183,13 @@ fn map_byron(genesis: &byron::GenesisFile) -> Result<ByronParams> {
         .heavy_delegation
         .iter()
         .map(|(k, v)| {
-            let k = hex::decode(k)?;
+            let k = PoolId::try_from(decode(k)?)?;
             let v = HeavyDelegate {
-                cert: hex::decode(v.cert.clone())?,
+                cert: decode(v.cert.clone())?,
                 delegate_pk: BASE64_STANDARD.decode(v.delegate_pk.clone())?,
                 issuer_pk: BASE64_STANDARD.decode(v.issuer_pk.clone())?,
             };
-            Ok::<(Vec<u8>, HeavyDelegate), anyhow::Error>((k, v))
+            Ok::<(PoolId, HeavyDelegate), anyhow::Error>((k, v))
         })
         .collect::<Result<_, _>>()?;
     Ok(ByronParams {

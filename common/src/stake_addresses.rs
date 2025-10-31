@@ -150,14 +150,11 @@ impl StakeAddressMap {
         let sas_data: Vec<(PoolId, u64)> = self
             .inner
             .values()
-            .filter_map(|sas| sas.delegated_spo.as_ref().map(|spo| (spo.clone(), sas.utxo_value)))
+            .filter_map(|sas| sas.delegated_spo.as_ref().map(|spo| (*spo, sas.utxo_value)))
             .collect();
 
         sas_data.iter().for_each(|(spo, utxo_value)| {
-            live_stakes_map
-                .entry(spo.clone())
-                .and_modify(|v| *v += utxo_value)
-                .or_insert(*utxo_value);
+            live_stakes_map.entry(*spo).and_modify(|v| *v += utxo_value).or_insert(*utxo_value);
         });
 
         spos.iter()
@@ -295,7 +292,7 @@ impl StakeAddressMap {
             .inner
             .values()
             .filter_map(|sas| {
-                sas.delegated_spo.as_ref().map(|spo| (spo.clone(), (sas.utxo_value, sas.rewards)))
+                sas.delegated_spo.as_ref().map(|spo| (*spo, (sas.utxo_value, sas.rewards)))
             })
             .collect();
 
@@ -304,7 +301,7 @@ impl StakeAddressMap {
             .par_iter() // Rayon multi-threaded iterator
             .for_each(|(spo, (utxo_value, rewards))| {
                 spo_stakes
-                    .entry(spo.clone())
+                    .entry(*spo)
                     .and_modify(|v| {
                         v.active += *utxo_value;
                         v.active_delegators_count += 1;
@@ -318,7 +315,7 @@ impl StakeAddressMap {
             });
 
         // Collect into a plain BTreeMap, so that it is ordered on output
-        spo_stakes.iter().map(|entry| (entry.key().clone(), *entry.value())).collect()
+        spo_stakes.iter().map(|entry| (*entry.key(), *entry.value())).collect()
     }
 
     /// Dump current Stake Pool Delegation Distribution State
@@ -328,7 +325,7 @@ impl StakeAddressMap {
             .inner
             .par_iter()
             .filter_map(|(key, sas)| {
-                sas.delegated_spo.as_ref().map(|spo| (spo.clone(), (key.clone(), sas.utxo_value)))
+                sas.delegated_spo.as_ref().map(|spo| (*spo, (key.clone(), sas.utxo_value)))
             })
             .collect();
 
@@ -433,7 +430,7 @@ impl StakeAddressMap {
     pub fn record_stake_delegation(&mut self, stake_address: &StakeAddress, spo: &PoolId) -> bool {
         if let Some(sas) = self.get_mut(stake_address) {
             if sas.registered {
-                sas.delegated_spo = Some(spo.clone());
+                sas.delegated_spo = Some(*spo);
                 true
             } else {
                 error!(
@@ -532,6 +529,13 @@ impl StakeAddressMap {
     pub fn update_reward(&mut self, stake_address: &StakeAddress, delta: i64) -> Result<()> {
         let sas = self.entry(stake_address.clone()).or_default();
         update_value_with_delta(&mut sas.rewards, delta)
+    }
+
+    pub fn pay_reward(&mut self, stake_address: &StakeAddress, delta: u64) -> Result<()> {
+        let sas = self.entry(stake_address.clone()).or_default();
+        sas.rewards =
+            sas.rewards.checked_add(delta).ok_or_else(|| anyhow::anyhow!("reward overflow"))?;
+        Ok(())
     }
 
     /// Update utxo value with delta

@@ -2,8 +2,8 @@
 
 use crate::snapshot::{Snapshot, SnapshotSPO};
 use acropolis_common::{
-    protocol_params::ShelleyParams, rational_number::RationalNumber, Lovelace, PoolId, SPORewards,
-    StakeAddress,
+    protocol_params::ShelleyParams, rational_number::RationalNumber, Lovelace, PoolId, RewardType,
+    SPORewards, StakeAddress,
 };
 use anyhow::{bail, Result};
 use bigdecimal::{BigDecimal, One, ToPrimitive, Zero};
@@ -12,13 +12,6 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 use tracing::{debug, info, warn};
-
-/// Type of reward being given
-#[derive(Debug, Clone, PartialEq)]
-pub enum RewardType {
-    Leader,
-    Member,
-}
 
 /// Reward Detail
 #[derive(Debug, Clone)]
@@ -31,6 +24,9 @@ pub struct RewardDetail {
 
     /// Reward amount
     pub amount: Lovelace,
+
+    // Pool that reward came from
+    pub pool: PoolId,
 }
 
 /// Result of a rewards calculation
@@ -211,13 +207,14 @@ pub fn calculate_rewards(
                         num_delegators_paid += 1;
                         total_paid_to_delegators += reward.amount;
                     }
+                    RewardType::PoolRefund => {}
                 }
                 spo_rewards.total_rewards += reward.amount;
                 result.total_paid += reward.amount;
             }
 
-            result.rewards.insert(operator_id.clone(), rewards);
-            result.spo_rewards.push((operator_id.clone(), spo_rewards));
+            result.rewards.insert(*operator_id, rewards);
+            result.spo_rewards.push((*operator_id, spo_rewards));
         }
     }
 
@@ -391,6 +388,7 @@ fn calculate_spo_rewards(
                     account: delegator_stake_address.clone(),
                     rtype: RewardType::Member,
                     amount: to_pay,
+                    pool: *operator_id,
                 });
                 total_paid += to_pay;
                 delegators_paid += 1;
@@ -408,6 +406,7 @@ fn calculate_spo_rewards(
             account: spo.reward_account.clone(),
             rtype: RewardType::Leader,
             amount: spo_benefit,
+            pool: *operator_id,
         });
     } else {
         info!(

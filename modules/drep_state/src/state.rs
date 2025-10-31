@@ -261,8 +261,8 @@ impl State {
         for (tx_hash, voting_procedures) in voting_procedures {
             for (voter, single_votes) in &voting_procedures.votes {
                 let drep_cred = match voter {
-                    Voter::DRepKey(k) => DRepCredential::AddrKeyHash(k.into_inner().into()),
-                    Voter::DRepScript(s) => DRepCredential::ScriptHash(s.into_inner().into()),
+                    Voter::DRepKey(k) => DRepCredential::AddrKeyHash(k.into_inner()),
+                    Voter::DRepScript(s) => DRepCredential::ScriptHash(s.into_inner()),
                     _ => continue,
                 };
 
@@ -559,8 +559,8 @@ impl State {
 
 fn drep_choice_to_credential(choice: &DRepChoice) -> Option<DRepCredential> {
     match choice {
-        DRepChoice::Key(k) => Some(DRepCredential::AddrKeyHash(k.clone())),
-        DRepChoice::Script(k) => Some(DRepCredential::ScriptHash(k.clone())),
+        DRepChoice::Key(k) => Some(DRepCredential::AddrKeyHash(*k)),
+        DRepChoice::Script(k) => Some(DRepCredential::ScriptHash(*k)),
         _ => None,
     }
 }

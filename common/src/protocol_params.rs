@@ -2,7 +2,7 @@ use crate::{
     genesis_values::GenesisValues,
     rational_number::{ChameleonFraction, RationalNumber},
     BlockHash, BlockVersionData, Committee, Constitution, CostModel, DRepVotingThresholds, Era,
-    ExUnitPrices, ExUnits, GenesisDelegate, HeavyDelegate, NetworkId, PoolVotingThresholds,
+    ExUnitPrices, ExUnits, GenesisDelegate, HeavyDelegate, NetworkId, PoolId, PoolVotingThresholds,
     ProtocolConsts,
 };
 use anyhow::{bail, Result};
@@ -34,7 +34,7 @@ pub struct ByronParams {
     pub start_time: u64,
 
     #[serde_as(as = "Vec<(_, _)>")]
-    pub heavy_delegation: HashMap<Vec<u8>, HeavyDelegate>,
+    pub heavy_delegation: HashMap<PoolId, HeavyDelegate>,
 }
 
 //
@@ -131,7 +131,7 @@ pub struct ShelleyParams {
     pub update_quorum: u32,
 
     #[serde_as(as = "HashMap<Hex, _>")]
-    pub gen_delegs: HashMap<Vec<u8>, GenesisDelegate>,
+    pub gen_delegs: HashMap<PoolId, GenesisDelegate>,
 }
 
 #[serde_as]
