@@ -450,7 +450,7 @@ pub type ScriptHash = KeyHash;
 pub type AddrKeyhash = KeyHash;
 
 /// Script identifier
-pub type GenesisKeyhash = Hash<32>;
+pub type GenesisKeyhash = Hash<28>;
 
 declare_hash_type!(BlockHash, 32);
 declare_hash_type!(TxHash, 32);
@@ -982,7 +982,7 @@ pub struct SPORewards {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenesisKeyDelegation {
     /// Genesis hash
-    pub genesis_hash: GenesisKeyhash,
+    pub genesis_hash: Hash<32>,
 
     /// Genesis delegate hash
     pub genesis_delegate_hash: PoolId,
