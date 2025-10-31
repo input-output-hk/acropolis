@@ -510,7 +510,7 @@ impl AccountsState {
                             AccountsStateQueryResponse::AccountInfo(AccountInfo {
                                 utxo_value: account.utxo_value,
                                 rewards: account.rewards,
-                                delegated_spo: account.delegated_spo.clone(),
+                                delegated_spo: account.delegated_spo,
                                 delegated_drep: account.delegated_drep.clone(),
                             })
                         } else {

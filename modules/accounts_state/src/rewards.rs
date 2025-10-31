@@ -213,8 +213,8 @@ pub fn calculate_rewards(
                 result.total_paid += reward.amount;
             }
 
-            result.rewards.insert(operator_id.clone(), rewards);
-            result.spo_rewards.push((operator_id.clone(), spo_rewards));
+            result.rewards.insert(*operator_id, rewards);
+            result.spo_rewards.push((*operator_id, spo_rewards));
         }
     }
 

@@ -198,7 +198,7 @@ pub fn map_nullable_gov_action_id(
 fn map_constitution(constitution: &conway::Constitution) -> Constitution {
     Constitution {
         anchor: map_anchor(&constitution.anchor),
-        guardrail_script: map_nullable(|x| to_hash(x), &constitution.guardrail_script),
+        guardrail_script: map_nullable(to_hash, &constitution.guardrail_script),
     }
 }
 

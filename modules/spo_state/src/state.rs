@@ -120,11 +120,11 @@ impl From<SPOState> for State {
 impl From<&State> for SPOState {
     fn from(state: &State) -> Self {
         Self {
-            pools: state.spos.iter().map(|(key, value)| (key.clone(), value.clone())).collect(),
+            pools: state.spos.iter().map(|(key, value)| (*key, value.clone())).collect(),
             updates: state
                 .pending_updates
                 .iter()
-                .map(|(key, value)| (key.clone(), value.clone()))
+                .map(|(key, value)| (*key, value.clone()))
                 .collect(),
             retiring: state
                 .pending_deregistrations
@@ -132,7 +132,7 @@ impl From<&State> for SPOState {
                 .flat_map(|(epoch, key_hashes)| {
                     key_hashes
                         .iter()
-                        .map(|key_hash| (key_hash.clone(), *epoch))
+                        .map(|key_hash| (*key_hash, *epoch))
                         .collect::<Vec<(PoolId, u64)>>()
                 })
                 .collect(),
@@ -166,7 +166,7 @@ impl State {
 
     /// Get all Stake Pool Operators' operator hashes and their registration information
     pub fn list_pools_with_info(&self) -> Vec<(PoolId, PoolRegistration)> {
-        self.spos.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+        self.spos.iter().map(|(k, v)| (*k, v.clone())).collect()
     }
 
     /// Get pool metadata
@@ -225,7 +225,7 @@ impl State {
             .filter(|(&epoch, _)| epoch > current_epoch)
             .flat_map(|(&epoch, retiring_operators)| {
                 retiring_operators.iter().map(move |operator| PoolRetirement {
-                    operator: operator.clone(),
+                    operator: *operator,
                     epoch,
                 })
             })
@@ -252,7 +252,7 @@ impl State {
             return false;
         }
 
-        *(self.total_blocks_minted.entry(pool_id.clone()).or_insert(0)) += 1;
+        *(self.total_blocks_minted.entry(pool_id).or_insert(0)) += 1;
         // if store_blocks is enabled
         if self.is_historical_blocks_enabled() {
             if let Some(historical_spos) = self.historical_spos.as_mut() {
@@ -274,7 +274,7 @@ impl State {
 
         // Update any pending
         for (operator, reg) in &self.pending_updates {
-            self.spos.insert(operator.clone(), reg.clone());
+            self.spos.insert(*operator, reg.clone());
         }
         self.pending_updates.clear();
 
@@ -283,14 +283,14 @@ impl State {
         let deregistrations = self.pending_deregistrations.remove(&self.epoch);
         if let Some(deregistrations) = deregistrations {
             for dr in deregistrations {
-                debug!("Retiring SPO {}", hex::encode(&dr));
+                debug!("Retiring SPO {}", hex::encode(dr));
                 match self.spos.remove(&dr) {
                     None => error!(
                         "Retirement requested for unregistered SPO {}",
-                        hex::encode(&dr),
+                        hex::encode(dr),
                     ),
                     Some(_de_reg) => {
-                        retired_spos.push(dr.clone());
+                        retired_spos.push(dr);
                     }
                 };
             }
@@ -318,19 +318,19 @@ impl State {
                 epoch = self.epoch,
                 block = block.number,
                 "New pending SPO update {} {:?}",
-                hex::encode(&reg.operator),
+                hex::encode(reg.operator),
                 reg
             );
-            self.pending_updates.insert(reg.operator.clone(), reg.clone());
+            self.pending_updates.insert(reg.operator, reg.clone());
         } else {
             debug!(
                 epoch = self.epoch,
                 block = block.number,
                 "Registering SPO {} {:?}",
-                hex::encode(&reg.operator),
+                hex::encode(reg.operator),
                 reg
             );
-            self.spos.insert(reg.operator.clone(), reg.clone());
+            self.spos.insert(reg.operator, reg.clone());
         }
 
         // Remove any existing queued deregistrations
@@ -340,7 +340,7 @@ impl State {
             if deregistrations.len() != old_len {
                 debug!(
                     "Removed pending deregistration of SPO {} from epoch {}",
-                    hex::encode(&reg.operator),
+                    hex::encode(reg.operator),
                     epoch
                 );
             }
@@ -351,7 +351,7 @@ impl State {
             // Don't check there was registration already or not
             // because we don't remove registration when pool is retired.
             let historical_spo = historical_spos
-                .entry(reg.operator.clone())
+                .entry(reg.operator)
                 .or_insert_with(|| HistoricalSPOState::new(&self.store_config));
             historical_spo.add_pool_registration(reg);
             historical_spo
@@ -368,7 +368,7 @@ impl State {
     ) {
         debug!(
             "SPO {} wants to retire at the end of epoch {} (cert in block number {})",
-            hex::encode(&ret.operator),
+            hex::encode(ret.operator),
             ret.epoch,
             block.number
         );
@@ -376,13 +376,13 @@ impl State {
             error!(
                 "SPO retirement received for current or past epoch {} for SPO {}",
                 ret.epoch,
-                hex::encode(&ret.operator)
+                hex::encode(ret.operator)
             );
         } else if ret.epoch > self.epoch + TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH {
             error!(
                 "SPO retirement received for epoch {} that exceeds future limit for SPO {}",
                 ret.epoch,
-                hex::encode(&ret.operator)
+                hex::encode(ret.operator)
             );
         } else {
             // Replace any existing queued deregistrations
@@ -392,12 +392,12 @@ impl State {
                 if deregistrations.len() != old_len {
                     debug!(
                         "Replaced pending deregistration of SPO {} from epoch {}",
-                        hex::encode(&ret.operator),
+                        hex::encode(ret.operator),
                         epoch
                     );
                 }
             }
-            self.pending_deregistrations.entry(ret.epoch).or_default().push(ret.operator.clone());
+            self.pending_deregistrations.entry(ret.epoch).or_default().push(ret.operator);
 
             // Note: not removing pending updates - the deregistation may happen many
             // epochs later than the update, and we apply updates before deregistrations
@@ -412,7 +412,7 @@ impl State {
             } else {
                 error!(
                     "Historical SPO for {} not registered when try to retire it",
-                    hex::encode(&ret.operator)
+                    hex::encode(ret.operator)
                 );
             }
         }
@@ -431,7 +431,7 @@ impl State {
             return;
         };
         let mut stake_addresses = stake_addresses.lock().unwrap();
-        let old_spo = stake_addresses.get(stake_address).and_then(|s| s.delegated_spo.clone());
+        let old_spo = stake_addresses.get(stake_address).and_then(|s| s.delegated_spo);
 
         if stake_addresses.deregister_stake_address(stake_address) {
             // update historical_spos
@@ -461,7 +461,7 @@ impl State {
             return;
         };
         let mut stake_addresses = stake_addresses.lock().unwrap();
-        let old_spo = stake_addresses.get(stake_address).and_then(|s| s.delegated_spo.clone());
+        let old_spo = stake_addresses.get(stake_address).and_then(|s| s.delegated_spo);
 
         if stake_addresses.record_stake_delegation(stake_address, spo) {
             // update historical_spos
@@ -488,7 +488,7 @@ impl State {
 
                 // get old one or create from store_config
                 let historical_spo = historical_spos
-                    .entry(spo.clone())
+                    .entry(*spo)
                     .or_insert_with(|| HistoricalSPOState::new(&self.store_config));
                 if let Some(added) = historical_spo.add_delegator(stake_address) {
                     if !added {
@@ -594,7 +594,7 @@ impl State {
                 };
 
                 let historical_spo = historical_spos
-                    .entry(spo.clone())
+                    .entry(*spo)
                     .or_insert_with(|| HistoricalSPOState::new(&self.store_config));
 
                 if let Some(votes) = historical_spo.votes.as_mut() {
@@ -689,7 +689,7 @@ mod tests {
     ) -> PoolRegistration {
         PoolRegistration {
             operator,
-            vrf_key_hash: vrf_key_hash.unwrap_or_else(|| VrfKeyHash::default()),
+            vrf_key_hash: vrf_key_hash.unwrap_or_default(),
             pledge: 0,
             cost: 0,
             margin: Ratio {
@@ -738,7 +738,7 @@ mod tests {
         assert!(state.handle_tx_certs(&block, &msg).is_ok());
         assert_eq!(1, state.spos.len());
         let spo = state.spos.get(&pool_id);
-        assert!(!spo.is_none());
+        assert!(spo.is_some());
     }
 
     #[tokio::test]
@@ -1004,7 +1004,7 @@ mod tests {
         let spo_id = test_pool_id_from_bytes(&[1]);
 
         msg.certificates.push(TxCertificateWithPos {
-            cert: TxCertificate::PoolRegistration(default_pool_registration(spo_id.clone(), None)),
+            cert: TxCertificate::PoolRegistration(default_pool_registration(spo_id, None)),
             tx_identifier: TxIdentifier::default(),
             cert_index: 0,
         });
@@ -1040,14 +1040,14 @@ mod tests {
         let mut msg = new_certs_msg();
         let spo_id = test_pool_id_from_bytes(&[1]);
         msg.certificates.push(TxCertificateWithPos {
-            cert: TxCertificate::PoolRegistration(default_pool_registration(spo_id.clone(), None)),
+            cert: TxCertificate::PoolRegistration(default_pool_registration(spo_id, None)),
             tx_identifier: TxIdentifier::default(),
             cert_index: 0,
         });
         let spo_id = test_pool_id_from_bytes(&[1]);
 
         msg.certificates.push(TxCertificateWithPos {
-            cert: TxCertificate::PoolRegistration(default_pool_registration(spo_id.clone(), None)),
+            cert: TxCertificate::PoolRegistration(default_pool_registration(spo_id, None)),
             tx_identifier: TxIdentifier::default(),
             cert_index: 0,
         });

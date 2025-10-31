@@ -195,7 +195,7 @@ impl Verifier {
                     Left(expected_spo) => {
                         error!(
                             "Missing rewards SPO: {} {} rewards",
-                            hex::encode(&expected_spo.0),
+                            hex::encode(expected_spo.0),
                             expected_spo.1.len()
                         );
                         errors += 1;
@@ -203,7 +203,7 @@ impl Verifier {
                     Right(actual_spo) => {
                         error!(
                             "Extra rewards SPO: {} {} rewards",
-                            hex::encode(&actual_spo.0),
+                            hex::encode(actual_spo.0),
                             actual_spo.1.len()
                         );
                         errors += 1;
@@ -222,7 +222,7 @@ impl Verifier {
                                 Left(expected) => {
                                     error!(
                                         "Missing reward: SPO {} account {} {:?} {}",
-                                        hex::encode(&expected_spo.0),
+                                        hex::encode(expected_spo.0),
                                         expected.account,
                                         expected.rtype,
                                         expected.amount
@@ -232,7 +232,7 @@ impl Verifier {
                                 Right(actual) => {
                                     error!(
                                         "Extra reward: SPO {} account {} {:?} {}",
-                                        hex::encode(&actual_spo.0),
+                                        hex::encode(actual_spo.0),
                                         actual.account,
                                         actual.rtype,
                                         actual.amount
@@ -242,7 +242,7 @@ impl Verifier {
                                 Both(expected, actual) => {
                                     if expected.amount != actual.amount {
                                         error!("Different reward: SPO {} account {} {:?} expected {}, actual {} ({})",
-                                               hex::encode(&expected_spo.0),
+                                               hex::encode(expected_spo.0),
                                                expected.account,
                                                expected.rtype,
                                                expected.amount,
@@ -252,7 +252,7 @@ impl Verifier {
                                     } else {
                                         debug!(
                                             "Reward match: SPO {} account {} {:?} {}",
-                                            hex::encode(&expected_spo.0),
+                                            hex::encode(expected_spo.0),
                                             expected.account,
                                             expected.rtype,
                                             expected.amount

@@ -287,7 +287,7 @@ impl SPOState {
                         let spos: Vec<(PoolId, usize)> = epoch_activity_message
                             .spo_blocks
                             .iter()
-                            .map(|(hash, count)| (hash.clone(), *count))
+                            .map(|(hash, count)| (*hash, *count))
                             .collect();
                         epochs_history.handle_epoch_activity(
                             block_info,
