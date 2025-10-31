@@ -133,8 +133,10 @@ impl ImmutableHistoricalAccountStore {
             // Persist address updates
             if config.store_addresses {
                 if let Some(updates) = &entry.addresses {
-                    for address in updates {
-                        let address_key = Self::make_address_key(&account, address.clone());
+                    for (index, address) in updates.iter().enumerate() {
+                        let idx = index as u32;
+                        let address_key =
+                            Self::make_address_key(&account, epoch, idx, address.clone());
                         batch.insert(&self.addresses, address_key, []);
                     }
                 }
@@ -347,9 +349,17 @@ impl ImmutableHistoricalAccountStore {
         key
     }
 
-    fn make_address_key(account: &StakeAddress, address: ShelleyAddress) -> Vec<u8> {
-        let mut key = account.to_binary();
-        key.extend(address.to_bytes_key());
+    fn make_address_key(
+        account: &StakeAddress,
+        epoch: u32,
+        index: u32,
+        address: ShelleyAddress,
+    ) -> Vec<u8> {
+        let mut key = Vec::new();
+        key.extend_from_slice(&account.to_binary());
+        key.extend_from_slice(&epoch.to_be_bytes());
+        key.extend_from_slice(&index.to_be_bytes());
+        key.extend_from_slice(&address.to_bytes_key());
         key
     }
 
