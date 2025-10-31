@@ -135,7 +135,7 @@ impl ImmutableHistoricalAccountStore {
                 if let Some(updates) = &entry.addresses {
                     for address in updates {
                         let address_key = Self::make_address_key(&account, address.clone());
-                        batch.insert(&self.addresses, address_key, &[]);
+                        batch.insert(&self.addresses, address_key, []);
                     }
                 }
             }

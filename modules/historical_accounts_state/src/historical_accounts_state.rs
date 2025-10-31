@@ -175,10 +175,10 @@ impl HistoricalAccountsState {
                     );
                     let _entered = span.enter();
 
-                    Self::check_sync(&current_block, &block_info);
+                    Self::check_sync(&current_block, block_info);
                     {
                         let mut state = state_mutex.lock().await;
-                        state.handle_address_deltas(&deltas_msg);
+                        state.handle_address_deltas(deltas_msg);
                     }
                 }
 
