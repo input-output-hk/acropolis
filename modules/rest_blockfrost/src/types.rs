@@ -894,3 +894,8 @@ impl TryFrom<&AccountReward> for AccountRewardREST {
         })
     }
 }
+
+#[derive(Serialize)]
+pub struct AccountAddressREST {
+    pub address: String,
+}
