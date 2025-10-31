@@ -8,15 +8,18 @@ const STAKE_ADDRESS_LEN: usize = 29; // 1 byte header + 28 bytes hash
 const EPOCH_LEN: usize = 8;
 const TOTAL_KEY_LEN: usize = EPOCH_LEN + POOL_ID_LENGTH + STAKE_ADDRESS_LEN;
 
+// Batch size balances commit overhead vs memory usage
+// ~720KB per batch (72 bytes × 10,000)
+// ~130 commits for typical epoch (~1.3M delegations)
 const BATCH_SIZE: usize = 10_000;
 
-fn encode_key(epoch: u64, pool_id: &PoolId, stake_address: &StakeAddress) -> Result<Vec<u8>> {
+fn encode_key(epoch: u64, pool_id: &PoolId, stake_address: &StakeAddress) -> Vec<u8> {
     let mut key = Vec::with_capacity(TOTAL_KEY_LEN);
     key.extend_from_slice(&epoch.to_be_bytes());
     key.extend_from_slice(pool_id.as_ref());
     key.extend_from_slice(&stake_address.to_binary());
 
-    Ok(key)
+    key
 }
 
 fn encode_epoch_pool_prefix(epoch: u64, pool_id: &PoolId) -> Vec<u8> {
@@ -44,14 +47,22 @@ fn decode_key(key: &[u8]) -> Result<(u64, PoolId, StakeAddress)> {
     Ok((epoch, pool_id, stake_address))
 }
 
+/// Encode epoch completion marker key
 fn encode_epoch_marker(epoch: u64) -> Vec<u8> {
     epoch.to_be_bytes().to_vec()
 }
 
 pub struct SPDDStore {
     keyspace: Keyspace,
+    /// Partition for all SPDD data
+    /// Key format: epoch(8 bytes) + pool_id + stake_key
+    /// Value: amount(8 bytes)
     spdd: fjall::PartitionHandle,
+    /// Partition for epoch completion markers
+    /// Key format: epoch(8 bytes)
+    /// Value: "complete"
     epoch_markers: fjall::PartitionHandle,
+    /// Maximum number of epochs to retain (None = unlimited)
     retention_epochs: u64,
 }
 
@@ -101,7 +112,7 @@ impl SPDDStore {
         &mut self,
         epoch: u64,
         spdd_state: HashMap<PoolId, Vec<(StakeAddress, u64)>>,
-    ) -> Result<()> {
+    ) -> fjall::Result<()> {
         if self.is_epoch_complete(epoch)? {
             return Ok(());
         }
@@ -111,7 +122,7 @@ impl SPDDStore {
         let mut count = 0;
         for (pool_id, delegations) in spdd_state {
             for (stake_address, amount) in delegations {
-                let key = encode_key(epoch, &pool_id, &stake_address)?;
+                let key = encode_key(epoch, &pool_id, &stake_address);
                 let value = amount.to_be_bytes();
                 batch.insert(&self.spdd, key, value);
 
@@ -127,6 +138,7 @@ impl SPDDStore {
             batch.commit()?;
         }
 
+        // Mark epoch as complete (single key operation)
         let marker_key = encode_epoch_marker(epoch);
         self.epoch_markers.insert(marker_key, b"complete")?;
 
@@ -139,6 +151,7 @@ impl SPDDStore {
     }
 
     pub fn remove_epoch_data(&self, epoch: u64) -> fjall::Result<u64> {
+        // Remove epoch marker first - if process fails midway, epoch will be marked incomplete
         let marker_key = encode_epoch_marker(epoch);
         self.epoch_markers.remove(marker_key)?;
 

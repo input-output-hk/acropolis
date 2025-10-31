@@ -15,7 +15,7 @@ use acropolis_common::{
     protocol_params::ProtocolParams,
     stake_addresses::{StakeAddressMap, StakeAddressState},
     BlockInfo, DRepChoice, DRepCredential, DelegatedStake, InstantaneousRewardSource,
-    InstantaneousRewardTarget, KeyHash, Lovelace, MoveInstantaneousReward, PoolId,
+    InstantaneousRewardTarget, Lovelace, MoveInstantaneousReward, PoolId,
     PoolLiveStakeInfo, PoolRegistration, Pot, SPORewards, StakeAddress, StakeRewardDelta,
     TxCertificate,
 };
@@ -962,14 +962,7 @@ impl State {
 mod tests {
     use super::*;
     use acropolis_common::crypto::{keyhash_224, keyhash_256};
-    use acropolis_common::{
-        protocol_params::ConwayParams, rational_number::RationalNumber, Anchor, Committee,
-        Constitution, CostModel, DRepVotingThresholds, NetworkId, PoolVotingThresholds, Pot,
-        PotDelta, Ratio, Registration, StakeAddress, StakeAddressDelta, StakeAndVoteDelegation,
-        StakeCredential, StakeRegistrationAndStakeAndVoteDelegation,
-        StakeRegistrationAndVoteDelegation, TxCertificateWithPos, TxIdentifier, VoteDelegation,
-        VrfKeyHash, Withdrawal,
-    };
+    use acropolis_common::{protocol_params::ConwayParams, rational_number::RationalNumber, Anchor, Committee, Constitution, CostModel, DRepVotingThresholds, KeyHash, NetworkId, PoolVotingThresholds, Pot, PotDelta, Ratio, Registration, StakeAddress, StakeAddressDelta, StakeAndVoteDelegation, StakeCredential, StakeRegistrationAndStakeAndVoteDelegation, StakeRegistrationAndVoteDelegation, TxCertificateWithPos, TxIdentifier, VoteDelegation, VrfKeyHash, Withdrawal};
 
     // Helper to create a StakeAddress from a byte slice
     fn create_address(hash: &[u8]) -> StakeAddress {
