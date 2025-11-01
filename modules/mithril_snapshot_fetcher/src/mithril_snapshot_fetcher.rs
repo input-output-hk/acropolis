@@ -335,14 +335,11 @@ impl MithrilSnapshotFetcher {
 
                         // Check pause constraint
                         if pause_constraint.should_pause(&block_info) {
-                            let description = pause_constraint.get_description();
-                            let next_pause_constraint = pause_constraint.get_next();
-                            let next_description = next_pause_constraint.get_description();
-                            if prompt_pause(description, next_description).await {
+                            if prompt_pause(pause_constraint.get_description()).await {
                                 info!("Continuing without further pauses...");
                                 pause_constraint = PauseType::NoPause;
                             } else {
-                                pause_constraint = next_pause_constraint;
+                                pause_constraint.next();
                             }
                         }
 
@@ -433,9 +430,9 @@ impl MithrilSnapshotFetcher {
 }
 
 /// Async helper to prompt user for pause behavior
-async fn prompt_pause(description: String, next_description: String) -> bool {
+async fn prompt_pause(description: String) -> bool {
     info!(
-        "Paused at {description}. Press [Enter] to step to {next_description}, or [c + Enter] to continue without pauses."
+        "Paused at {description}. Press [Enter] to step to to the next, or [c + Enter] to continue without pauses."
     );
     tokio::task::spawn_blocking(|| {
         use std::io::{self, BufRead};
