@@ -1012,7 +1012,7 @@ pub struct SPORewards {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenesisKeyDelegation {
     /// Genesis hash
-    pub genesis_hash: Hash<32>,
+    pub genesis_hash: Hash<28>,
 
     /// Genesis delegate hash
     pub genesis_delegate_hash: PoolId,
