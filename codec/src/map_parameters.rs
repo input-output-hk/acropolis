@@ -37,7 +37,7 @@ pub fn to_hash<const N: usize>(pallas_hash: &pallas_primitives::Hash<N>) -> Hash
 
 /// Convert a Pallas Hash reference to an Acropolis Hash (owned)
 /// Works for any hash size N
-pub fn genesis_to_hash(pallas_hash: &pallas_primitives::Genesishash) -> Hash<32> {
+pub fn genesis_to_hash(pallas_hash: &pallas_primitives::Genesishash) -> Hash<28> {
     Hash::try_from(pallas_hash.as_ref()).unwrap()
 }
 
