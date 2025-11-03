@@ -316,7 +316,7 @@ impl ImmutableHistoricalAccountStore {
                 );
                 Self::extend_opt_vec(&mut agg_entry.withdrawal_history, entry.withdrawal_history);
                 Self::extend_opt_vec(&mut agg_entry.mir_history, entry.mir_history);
-                Self::extend_opt_set(&mut agg_entry.addresses, entry.addresses);
+                Self::extend_opt_vec_ordered(&mut agg_entry.addresses, entry.addresses);
             }
             acc
         })
@@ -378,13 +378,22 @@ impl ImmutableHistoricalAccountStore {
         }
     }
 
-    fn extend_opt_set<T>(target: &mut Option<HashSet<T>>, src: Option<HashSet<T>>)
+    fn extend_opt_vec_ordered<T>(target: &mut Option<Vec<T>>, src: Option<Vec<T>>)
     where
-        T: Eq + Hash,
+        T: Eq + Hash + Clone,
     {
-        if let Some(mut s) = src {
-            if !s.is_empty() {
-                target.get_or_insert_with(HashSet::new).extend(s.drain());
+        if let Some(src_vec) = src {
+            if src_vec.is_empty() {
+                return;
+            }
+
+            let target_vec = target.get_or_insert_with(Vec::new);
+            let mut seen: HashSet<T> = target_vec.iter().cloned().collect();
+
+            for item in src_vec {
+                if seen.insert(item.clone()) {
+                    target_vec.push(item);
+                }
             }
         }
     }

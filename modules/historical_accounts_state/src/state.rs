@@ -32,7 +32,7 @@ pub struct AccountEntry {
     pub registration_history: Option<Vec<RegistrationUpdate>>,
     pub withdrawal_history: Option<Vec<AccountWithdrawal>>,
     pub mir_history: Option<Vec<AccountWithdrawal>>,
-    pub addresses: Option<HashSet<ShelleyAddress>>,
+    pub addresses: Option<Vec<ShelleyAddress>>,
 }
 
 #[derive(Debug, Clone, minicbor::Decode, minicbor::Encode)]
@@ -232,7 +232,7 @@ impl State {
                 .entry(delta.stake_address.clone())
                 .or_default()
                 .addresses
-                .get_or_insert_with(HashSet::new)
+                .get_or_insert_with(Vec::new)
                 .extend(delta.addresses.clone());
         }
     }
@@ -358,10 +358,7 @@ impl State {
         &self,
         account: &StakeAddress,
     ) -> Result<Option<Vec<ShelleyAddress>>> {
-        let mut addresses = match self.immutable.get_addresses(account).await? {
-            Some(list) => list,
-            None => Vec::new(),
-        };
+        let mut addresses = self.immutable.get_addresses(account).await?.unwrap_or_default();
 
         let mut seen: HashSet<ShelleyAddress> = addresses.iter().cloned().collect();
         for block_map in self.volatile.window.iter() {
