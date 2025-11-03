@@ -114,7 +114,7 @@ impl CliDriver {
                 TransactionsCommandResponse::Submitted { id },
             )) = response.as_ref()
             {
-                info!("Submitted TX {}", hex::encode(id));
+                info!("Submitted TX {}", id);
             } else {
                 info!("{response:?}");
             }
