@@ -120,8 +120,7 @@ pub fn calculate_rewards(
 
         debug!(
             "SPO {} reward account registered two epochs ago: {}",
-            hex::encode(operator_id),
-            pay_to_pool_reward_account
+            operator_id, pay_to_pool_reward_account
         );
 
         // Also, to handle the early Shelley timing bug, we allow it if it was registered
@@ -138,8 +137,7 @@ pub fn calculate_rewards(
             if pay_to_pool_reward_account {
                 info!(
                     "SPO {}'s reward account {} was registered in this epoch",
-                    hex::encode(operator_id),
-                    staking_spo.reward_account
+                    operator_id, staking_spo.reward_account
                 );
             }
         }
@@ -160,18 +158,15 @@ pub fn calculate_rewards(
                     if performance.spos.get(other_id).map(|s| s.blocks_produced).unwrap_or(0) > 0 {
                         pay_to_pool_reward_account = false;
                         warn!("Shelley shared reward account bug: Dropping reward to {} in favour of {} on shared account {}",
-                              hex::encode(operator_id),
-                              hex::encode(other_id),
+                              operator_id,
+                              other_id,
                               staking_spo.reward_account);
                         break;
                     }
                 }
             }
         } else {
-            info!(
-                "Reward account for SPO {} isn't registered",
-                hex::encode(operator_id)
-            )
+            info!("Reward account for SPO {} isn't registered", operator_id)
         }
 
         // Calculate rewards for this SPO
@@ -250,7 +245,7 @@ fn calculate_spo_rewards(
     // Active stake (sigma)
     let pool_stake = BigDecimal::from(spo.total_stake);
     if pool_stake.is_zero() {
-        warn!("SPO {} has no stake - skipping", hex::encode(operator_id));
+        warn!("SPO {} has no stake - skipping", operator_id);
 
         // No stake, no rewards or earnings
         return vec![];
@@ -264,9 +259,7 @@ fn calculate_spo_rewards(
     if pool_owner_stake < spo.pledge {
         debug!(
             "SPO {} has owner stake {} less than pledge {} - skipping",
-            hex::encode(operator_id),
-            pool_owner_stake,
-            spo.pledge
+            operator_id, pool_owner_stake, spo.pledge
         );
         return vec![];
     }
@@ -313,7 +306,7 @@ fn calculate_spo_rewards(
 
     debug!(%pool_stake, %relative_pool_stake, %pool_performance,
            %optimum_rewards, %pool_rewards, pool_owner_stake, %pool_pledge,
-           "Pool {}", hex::encode(operator_id));
+           "Pool {}", operator_id);
 
     // Subtract fixed costs
     let fixed_cost = BigDecimal::from(spo.fixed_cost);
@@ -411,9 +404,7 @@ fn calculate_spo_rewards(
     } else {
         info!(
             "SPO {}'s reward account {} not paid {}",
-            hex::encode(operator_id),
-            spo.reward_account,
-            spo_benefit,
+            operator_id, spo.reward_account, spo_benefit,
         );
     }
 

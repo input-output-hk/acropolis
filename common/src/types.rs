@@ -717,8 +717,8 @@ impl Credential {
 
     pub fn to_json_string(&self) -> String {
         match self {
-            Self::ScriptHash(hash) => format!("scriptHash-{}", hex::encode(hash)),
-            Self::AddrKeyHash(hash) => format!("keyHash-{}", hex::encode(hash)),
+            Self::ScriptHash(hash) => format!("scriptHash-{}", hash),
+            Self::AddrKeyHash(hash) => format!("keyHash-{}", hash),
         }
     }
 
