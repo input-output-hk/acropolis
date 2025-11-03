@@ -311,7 +311,7 @@ pub enum CardanoMessage {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum SnapshotMessage {
-    Startup(), // subscribers should listen for incremental snapshot data
+    Startup, // subscribers should listen for incremental snapshot data
     Bootstrap(SnapshotStateMessage),
     DumpRequest(SnapshotDumpMessage),
     Dump(SnapshotStateMessage),

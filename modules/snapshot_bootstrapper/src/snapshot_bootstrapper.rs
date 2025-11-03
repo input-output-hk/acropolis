@@ -101,11 +101,11 @@ impl SnapshotHandler {
             .publish(
                 &self.snapshot_topic,
                 Arc::new(Message::Snapshot(
-                    acropolis_common::messages::SnapshotMessage::Startup(),
+                    acropolis_common::messages::SnapshotMessage::Startup,
                 )),
             )
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to publish start message: {}", e))
+            .map_err(|e| anyhow::anyhow!("Failed to publish start message: {e}"))
     }
 
     async fn publish_completion(
@@ -124,7 +124,7 @@ impl SnapshotHandler {
             .message_bus
             .publish(&self.snapshot_topic, Arc::new(message))
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to publish completion: {}", e))
+            .map_err(|e| anyhow::anyhow!("Failed to publish completion: {e}"))
     }
 }
 
