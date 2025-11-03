@@ -95,12 +95,15 @@ impl SnapshotHandler {
         })
     }
 
-    async fn publish_start(
-        &self,
-    ) -> Result<()> {
+    async fn publish_start(&self) -> Result<()> {
         self.context
             .message_bus
-            .publish(&self.snapshot_topic, Arc::new(Message::Snapshot(acropolis_common::messages::SnapshotMessage::Startup())))
+            .publish(
+                &self.snapshot_topic,
+                Arc::new(Message::Snapshot(
+                    acropolis_common::messages::SnapshotMessage::Startup(),
+                )),
+            )
             .await
             .map_err(|e| anyhow::anyhow!("Failed to publish completion: {}", e))
     }
@@ -263,7 +266,10 @@ impl SnapshotBootstrapper {
         let parser = StreamingSnapshotParser::new(file_path);
         let mut callbacks = SnapshotHandler::new(context.clone(), completion_topic.to_string());
 
-        info!("Starting snapshot parsing and publishing from: {}", file_path);
+        info!(
+            "Starting snapshot parsing and publishing from: {}",
+            file_path
+        );
         let start = Instant::now();
 
         callbacks.publish_start().await?;
@@ -272,7 +278,10 @@ impl SnapshotBootstrapper {
         parser.parse(&mut callbacks)?;
 
         let duration = start.elapsed();
-        info!("✓ Parse and publish completed successfully in {:.2?}", duration);
+        info!(
+            "✓ Parse and publish completed successfully in {:.2?}",
+            duration
+        );
 
         // Build the final state from accumulated data
         let block_info = callbacks.build_block_info()?;
