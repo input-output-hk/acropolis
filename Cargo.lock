@@ -502,6 +502,7 @@ dependencies = [
  "acropolis_module_historical_accounts_state",
  "acropolis_module_mithril_snapshot_fetcher",
  "acropolis_module_parameters_state",
+ "acropolis_module_peer_network_interface",
  "acropolis_module_rest_blockfrost",
  "acropolis_module_spdd_state",
  "acropolis_module_spo_state",

@@ -22,6 +22,7 @@ use acropolis_module_governance_state::GovernanceState;
 use acropolis_module_historical_accounts_state::HistoricalAccountsState;
 use acropolis_module_mithril_snapshot_fetcher::MithrilSnapshotFetcher;
 use acropolis_module_parameters_state::ParametersState;
+use acropolis_module_peer_network_interface::PeerNetworkInterface;
 use acropolis_module_rest_blockfrost::BlockfrostREST;
 use acropolis_module_spdd_state::SPDDState;
 use acropolis_module_spo_state::SPOState;
@@ -102,6 +103,7 @@ pub async fn main() -> Result<()> {
     MithrilSnapshotFetcher::register(&mut process);
     UpstreamChainFetcher::register(&mut process);
     BlockUnpacker::register(&mut process);
+    PeerNetworkInterface::register(&mut process);
     TxUnpacker::register(&mut process);
     UTXOState::register(&mut process);
     SPOState::register(&mut process);
