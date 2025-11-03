@@ -133,7 +133,7 @@ impl UtxoCallback for SnapshotHandler {
         self.utxo_count += 1;
 
         // Log progress every million UTXOs
-        if self.utxo_count % 1_000_000 == 0 {
+        if self.utxo_count.is_multiple_of(1_000_000) {
             info!("Processed {} UTXOs", self.utxo_count);
         }
         // TODO: Accumulate UTXO data if needed or send in chunks to UTXOState processor
