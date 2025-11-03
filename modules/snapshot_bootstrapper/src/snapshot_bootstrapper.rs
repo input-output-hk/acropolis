@@ -105,7 +105,7 @@ impl SnapshotHandler {
                 )),
             )
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to publish completion: {}", e))
+            .map_err(|e| anyhow::anyhow!("Failed to publish start message: {}", e))
     }
 
     async fn publish_completion(
