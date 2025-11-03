@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{BTreeMap, HashMap, VecDeque},
     time::Duration,
 };
 
@@ -16,7 +16,7 @@ use tracing::{info, warn};
 pub struct NetworkManager {
     network_magic: u64,
     next_id: u64,
-    peers: HashMap<PeerId, PeerConnection>,
+    peers: BTreeMap<PeerId, PeerConnection>,
     preferred_upstream: Option<PeerId>,
     blocks_to_fetch: VecDeque<Header>,
     blocks: HashMap<BlockHash, BlockStatus>,
@@ -38,7 +38,7 @@ impl NetworkManager {
         Self {
             network_magic,
             next_id: 0,
-            peers: HashMap::new(),
+            peers: BTreeMap::new(),
             preferred_upstream: None,
             blocks_to_fetch: VecDeque::new(),
             blocks: HashMap::new(),
@@ -54,18 +54,18 @@ impl NetworkManager {
     pub async fn run(mut self) -> Result<()> {
         while let Some(event) = self.events.recv().await {
             match event {
-                NetworkEvent::NewConnection { address, delay } => {
-                    self.handle_new_connection(address, delay).await
-                }
                 NetworkEvent::PeerUpdate { peer, event } => {
-                    self.handle_peer_update(peer, event).await?
+                    let maybe_publish_blocks = self.handle_peer_update(peer, event)?;
+                    if maybe_publish_blocks {
+                        self.publish_blocks().await?;
+                    }
                 }
             }
         }
         bail!("event sink closed")
     }
 
-    pub async fn handle_new_connection(&mut self, address: String, delay: Duration) {
+    pub fn handle_new_connection(&mut self, address: String, delay: Duration) {
         let id = PeerId(self.next_id);
         self.next_id += 1;
         let sender = PeerMessageSender {
@@ -75,10 +75,10 @@ impl NetworkManager {
         let conn = PeerConnection::new(address, self.network_magic, sender, delay);
         if self.preferred_upstream.is_none() {
             self.peers.insert(id, conn);
-            self.set_preferred_upstream(id).await;
+            self.set_preferred_upstream(id);
         } else {
             if let Some(head) = self.head.clone()
-                && let Err(error) = conn.find_intersect(vec![head]).await
+                && let Err(error) = conn.find_intersect(vec![head])
             {
                 warn!("could not sync {}: {error}", conn.address);
             }
@@ -96,26 +96,26 @@ impl NetworkManager {
             };
             match conn.find_tip().await {
                 Ok(point) => {
-                    self.sync_to_point(point).await;
+                    self.sync_to_point(point);
                     return Ok(());
                 }
                 Err(e) => {
                     warn!("could not fetch tip from {}: {e}", conn.address);
-                    self.handle_disconnect(upstream).await?;
+                    self.handle_disconnect(upstream);
                 }
             }
         }
     }
 
-    pub async fn sync_to_point(&mut self, point: Point) {
+    pub fn sync_to_point(&mut self, point: Point) {
         for conn in self.peers.values() {
-            if let Err(error) = conn.find_intersect(vec![point.clone()]).await {
+            if let Err(error) = conn.find_intersect(vec![point.clone()]) {
                 warn!("could not sync {}: {error}", conn.address);
             }
         }
     }
 
-    async fn handle_peer_update(&mut self, peer: PeerId, event: PeerEvent) -> Result<()> {
+    fn handle_peer_update(&mut self, peer: PeerId, event: PeerEvent) -> Result<bool> {
         let is_preferred = self.preferred_upstream.is_some_and(|id| id == peer);
         match event {
             PeerEvent::ChainSync(PeerChainSyncEvent::RollForward(header)) => {
@@ -132,21 +132,20 @@ impl NetworkManager {
                                 let Some(peer) = self.peers.get(&announcer) else {
                                     continue;
                                 };
-                                if let Err(e) = peer.request_block(header.hash, header.slot).await
+                                if let Err(e) = peer.request_block(header.hash, header.slot)
                                 {
                                     warn!("could not request block from {}: {e}", peer.address);
-                                    self.handle_disconnect(announcer).await?
+                                    self.handle_disconnect(announcer);
                                 }
                                 break; // only fetch from one
                             }
                         }
+                        Ok(false)
                     }
                     BlockStatus::Fetched(_) => {
-                        if is_preferred {
-                            // Chainsync has requested a block which we've already fetched,
-                            // so we might be able to publish one or more.
-                            self.publish_blocks().await?;
-                        }
+                        // If chainsync has requested a block which we've already fetched,
+                        // we might be able to publish one or more.
+                        Ok(is_preferred)
                     }
                 }
             }
@@ -173,40 +172,48 @@ impl NetworkManager {
                         }
                     }
                 }
+                Ok(false)
             }
             PeerEvent::BlockFetched(fetched) => {
                 let Some(block) = self.blocks.get_mut(&fetched.hash) else {
-                    return Ok(());
+                    return Ok(false);
                 };
                 block.set_body(&fetched.body);
-                self.publish_blocks().await?;
+                Ok(true)
             }
-            PeerEvent::Disconnected => self.handle_disconnect(peer).await?,
+            PeerEvent::Disconnected => {
+                self.handle_disconnect(peer);
+                Ok(false)
+            }
         }
-        Ok(())
     }
 
-    async fn handle_disconnect(&mut self, peer: PeerId) -> Result<()> {
+    fn handle_disconnect(&mut self, peer: PeerId) {
         let Some(conn) = self.peers.remove(&peer) else {
-            return Ok(());
+            return;
         };
+        warn!("disconnected from {}", conn.address);
         let is_preferred = self.preferred_upstream.is_some_and(|id| id == peer);
         if is_preferred && let Some(new_preferred) = self.peers.keys().next().copied() {
-            self.set_preferred_upstream(new_preferred).await;
+            self.set_preferred_upstream(new_preferred);
         }
-        self.events_sender
-            .send(NetworkEvent::NewConnection {
-                address: conn.address,
-                delay: Duration::from_secs(5),
-            })
-            .await?;
-        Ok(())
+        if self.peers.is_empty() {
+            warn!("no upstream peers!");
+        }
+        let address = conn.address.clone();
+        drop(conn);
+        self.handle_new_connection(address, Duration::from_secs(5));
     }
 
-    async fn set_preferred_upstream(&mut self, peer: PeerId) {
+    fn set_preferred_upstream(&mut self, peer: PeerId) {
+        if let Some(conn) = self.peers.get(&peer) {
+            info!("setting preferred upstream to {}", conn.address);
+        } else {
+            warn!("setting preferred upstream to unrecognized node {peer:?}");
+        }
         self.preferred_upstream = Some(peer);
         if let Some(head) = self.head.clone() {
-            self.sync_to_point(head).await;
+            self.sync_to_point(head);
         }
     }
 
@@ -229,11 +236,10 @@ impl NetworkManager {
 }
 
 pub enum NetworkEvent {
-    NewConnection { address: String, delay: Duration },
     PeerUpdate { peer: PeerId, event: PeerEvent },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PeerId(u64);
 
 pub struct PeerMessageSender {

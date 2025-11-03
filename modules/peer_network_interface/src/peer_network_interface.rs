@@ -58,18 +58,18 @@ impl PeerNetworkInterface {
 
             let mut manager = NetworkManager::new(cfg.magic_number, events, events_sender, sink);
             for address in cfg.node_addresses {
-                manager.handle_new_connection(address, Duration::ZERO).await;
+                manager.handle_new_connection(address, Duration::ZERO);
             }
 
             match cfg.sync_point {
-                SyncPoint::Origin => manager.sync_to_point(Point::Origin).await,
+                SyncPoint::Origin => manager.sync_to_point(Point::Origin),
                 SyncPoint::Tip => manager.sync_to_tip().await?,
                 SyncPoint::Cache => unimplemented!(),
                 SyncPoint::Snapshot => {
                     let mut subscription =
                         snapshot_complete.expect("Snapshot topic subscription missing");
                     let point = Self::wait_snapshot_completion(&mut subscription).await?;
-                    manager.sync_to_point(point).await;
+                    manager.sync_to_point(point);
                 }
             }
 

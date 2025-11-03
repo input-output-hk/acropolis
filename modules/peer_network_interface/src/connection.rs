@@ -20,8 +20,8 @@ use crate::network::PeerMessageSender;
 
 pub struct PeerConnection {
     pub address: String,
-    chainsync: mpsc::Sender<ChainsyncCommand>,
-    blockfetch: mpsc::Sender<BlockfetchCommand>,
+    chainsync: mpsc::UnboundedSender<ChainsyncCommand>,
+    blockfetch: mpsc::UnboundedSender<BlockfetchCommand>,
 }
 
 impl PeerConnection {
@@ -31,8 +31,8 @@ impl PeerConnection {
             magic,
             sender,
         };
-        let (chainsync_tx, chainsync_rx) = mpsc::channel(16);
-        let (blockfetch_tx, blockfetch_rx) = mpsc::channel(16);
+        let (chainsync_tx, chainsync_rx) = mpsc::unbounded_channel();
+        let (blockfetch_tx, blockfetch_rx) = mpsc::unbounded_channel();
         tokio::spawn(async move {
             tokio::time::sleep(delay).await;
             worker.run(chainsync_rx, blockfetch_rx).await;
@@ -46,17 +46,17 @@ impl PeerConnection {
 
     pub async fn find_tip(&self) -> Result<Point> {
         let (tx, rx) = oneshot::channel();
-        self.chainsync.send(ChainsyncCommand::FindTip(tx)).await?;
+        self.chainsync.send(ChainsyncCommand::FindTip(tx))?;
         Ok(rx.await?)
     }
 
-    pub async fn find_intersect(&self, points: Vec<Point>) -> Result<()> {
-        self.chainsync.send(ChainsyncCommand::FindIntersect(points)).await?;
+    pub fn find_intersect(&self, points: Vec<Point>) -> Result<()> {
+        self.chainsync.send(ChainsyncCommand::FindIntersect(points))?;
         Ok(())
     }
 
-    pub async fn request_block(&self, hash: BlockHash, height: u64) -> Result<()> {
-        self.blockfetch.send(BlockfetchCommand::Fetch(hash, height)).await?;
+    pub fn request_block(&self, hash: BlockHash, height: u64) -> Result<()> {
+        self.blockfetch.send(BlockfetchCommand::Fetch(hash, height))?;
         Ok(())
     }
 }
@@ -98,8 +98,8 @@ struct PeerConnectionWorker {
 impl PeerConnectionWorker {
     async fn run(
         mut self,
-        chainsync: mpsc::Receiver<ChainsyncCommand>,
-        blockfetch: mpsc::Receiver<BlockfetchCommand>,
+        chainsync: mpsc::UnboundedReceiver<ChainsyncCommand>,
+        blockfetch: mpsc::UnboundedReceiver<BlockfetchCommand>,
     ) {
         if let Err(err) = self.do_run(chainsync, blockfetch).await {
             error!(peer = self.address, "{err:#}");
@@ -109,8 +109,8 @@ impl PeerConnectionWorker {
 
     async fn do_run(
         &mut self,
-        chainsync: mpsc::Receiver<ChainsyncCommand>,
-        blockfetch: mpsc::Receiver<BlockfetchCommand>,
+        chainsync: mpsc::UnboundedReceiver<ChainsyncCommand>,
+        blockfetch: mpsc::UnboundedReceiver<BlockfetchCommand>,
     ) -> Result<()> {
         let client = PeerClient::connect(self.address.clone(), self.magic).await?;
         select! {
@@ -122,7 +122,7 @@ impl PeerConnectionWorker {
     async fn run_chainsync(
         &self,
         mut client: chainsync::N2NClient,
-        mut commands: mpsc::Receiver<ChainsyncCommand>,
+        mut commands: mpsc::UnboundedReceiver<ChainsyncCommand>,
     ) -> Result<()> {
         let mut reached = None;
         loop {
@@ -136,6 +136,12 @@ impl PeerConnectionWorker {
                 cmd = commands.recv() => {
                     let Some(cmd) = cmd else {
                         bail!("parent process has disconnected");
+                    };
+                    if !client.has_agency() {
+                        // To run find_intersect, we must have agency.
+                        // If we don't, it's because we requested the next response already.
+                        // There's no way to cancel that request, so just wait for it to finish.
+                        client.recv_while_must_reply().await?;
                     };
                     match cmd {
                         ChainsyncCommand::FindIntersect(points) => {
@@ -158,7 +164,7 @@ impl PeerConnectionWorker {
     async fn run_blockfetch(
         &self,
         mut client: blockfetch::Client,
-        mut commands: mpsc::Receiver<BlockfetchCommand>,
+        mut commands: mpsc::UnboundedReceiver<BlockfetchCommand>,
     ) -> Result<()> {
         while let Some(BlockfetchCommand::Fetch(hash, slot)) = commands.recv().await {
             let point = Point::Specific(slot, hash.to_vec());
