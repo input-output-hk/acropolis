@@ -97,7 +97,7 @@ impl PeerNetworkInterface {
         let (_, message) = subscription.read().await?;
         match message.as_ref() {
             Message::Cardano((block, CardanoMessage::SnapshotComplete)) => {
-                Ok(Point::Specific(block.number, block.hash.to_vec()))
+                Ok(Point::Specific(block.slot, block.hash.to_vec()))
             }
             msg => bail!("Unexpected message in snapshot completion topic: {msg:?}"),
         }

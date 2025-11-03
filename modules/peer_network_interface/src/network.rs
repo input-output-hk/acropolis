@@ -11,7 +11,7 @@ use acropolis_common::BlockHash;
 use anyhow::{Context as _, Result, bail};
 use pallas::network::miniprotocols::Point;
 use tokio::sync::mpsc;
-use tracing::warn;
+use tracing::{info, warn};
 
 pub struct NetworkManager {
     network_magic: u64,
@@ -25,6 +25,7 @@ pub struct NetworkManager {
     events: mpsc::Receiver<NetworkEvent>,
     events_sender: mpsc::Sender<NetworkEvent>,
     block_sink: BlockSink,
+    published_blocks: u64,
 }
 
 impl NetworkManager {
@@ -46,6 +47,7 @@ impl NetworkManager {
             events,
             events_sender,
             block_sink,
+            published_blocks: 0,
         }
     }
 
@@ -130,7 +132,7 @@ impl NetworkManager {
                                 let Some(peer) = self.peers.get(&announcer) else {
                                     continue;
                                 };
-                                if let Err(e) = peer.request_block(header.hash, header.number).await
+                                if let Err(e) = peer.request_block(header.hash, header.slot).await
                                 {
                                     warn!("could not request block from {}: {e}", peer.address);
                                     self.handle_disconnect(announcer).await?
@@ -155,10 +157,10 @@ impl NetworkManager {
                             self.blocks_to_fetch.clear();
                             self.rolled_back = true;
                         }
-                        Point::Specific(number, _) => {
+                        Point::Specific(slot, _) => {
                             let mut already_sent = true;
                             while let Some(newest) = self.blocks_to_fetch.back() {
-                                if newest.number == number {
+                                if newest.slot == slot {
                                     already_sent = false;
                                     break;
                                 } else {
@@ -214,7 +216,11 @@ impl NetworkManager {
                 break;
             };
             self.block_sink.announce(header, body, self.rolled_back).await?;
-            self.head = Some(Point::Specific(header.number, header.hash.to_vec()));
+            self.published_blocks += 1;
+            if self.published_blocks.is_multiple_of(100) {
+                info!("Published block {}", header.number);
+            }
+            self.head = Some(Point::Specific(header.slot, header.hash.to_vec()));
             self.rolled_back = false;
             self.blocks_to_fetch.pop_front();
         }
@@ -227,7 +233,7 @@ pub enum NetworkEvent {
     PeerUpdate { peer: PeerId, event: PeerEvent },
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct PeerId(u64);
 
 pub struct PeerMessageSender {

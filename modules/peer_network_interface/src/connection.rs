@@ -61,18 +61,20 @@ impl PeerConnection {
     }
 }
 
+#[derive(Debug)]
 pub enum PeerEvent {
     ChainSync(PeerChainSyncEvent),
     BlockFetched(BlockFetched),
     Disconnected,
 }
 
+#[derive(Debug)]
 pub enum PeerChainSyncEvent {
     RollForward(Header),
     RollBackward(Point),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Header {
     pub hash: BlockHash,
     pub slot: u64,
@@ -81,6 +83,7 @@ pub struct Header {
     pub era: Era,
 }
 
+#[derive(Debug)]
 pub struct BlockFetched {
     pub hash: BlockHash,
     pub body: Vec<u8>,
@@ -157,8 +160,8 @@ impl PeerConnectionWorker {
         mut client: blockfetch::Client,
         mut commands: mpsc::Receiver<BlockfetchCommand>,
     ) -> Result<()> {
-        while let Some(BlockfetchCommand::Fetch(hash, height)) = commands.recv().await {
-            let point = Point::Specific(height, hash.to_vec());
+        while let Some(BlockfetchCommand::Fetch(hash, slot)) = commands.recv().await {
+            let point = Point::Specific(slot, hash.to_vec());
             let body = client.fetch_single(point).await?;
             self.sender.write(PeerEvent::BlockFetched(BlockFetched { hash, body })).await?;
         }
@@ -174,7 +177,7 @@ impl PeerConnectionWorker {
                 let Some(parsed) = self.parse_header(header)? else {
                     return Ok(None);
                 };
-                let point = Point::Specific(parsed.number, parsed.hash.to_vec());
+                let point = Point::Specific(parsed.slot, parsed.hash.to_vec());
                 Ok(Some(ParsedChainsyncMessage {
                     point,
                     event: PeerChainSyncEvent::RollForward(parsed),
