@@ -1,5 +1,6 @@
 use std::marker::PhantomData;
 
+use crate::PoolId;
 use anyhow::anyhow;
 use bech32::{Bech32, Hrp};
 use serde::{ser::SerializeMap, Deserialize, Serializer};
@@ -60,7 +61,29 @@ impl HrpPrefix for AddrPrefix {
 // Generic Bech32 converter with HRP parameter
 pub struct DisplayFromBech32<PREFIX: HrpPrefix>(PhantomData<PREFIX>);
 
-// Serialization implementation
+// PoolID serialization implementation
+impl SerializeAs<PoolId> for DisplayFromBech32<PoolPrefix> {
+    fn serialize_as<S>(source: &PoolId, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let bech32_string = source.to_bech32().map_err(serde::ser::Error::custom)?;
+        serializer.serialize_str(&bech32_string)
+    }
+}
+
+// PoolID deserialization implementation
+impl<'de> DeserializeAs<'de, PoolId> for DisplayFromBech32<PoolPrefix> {
+    fn deserialize_as<D>(deserializer: D) -> Result<PoolId, D::Error>
+    where
+        D: serde::de::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        PoolId::from_bech32(&s).map_err(serde::de::Error::custom)
+    }
+}
+
+// Vec<u8> serialization implementation
 impl<PREFIX> SerializeAs<Vec<u8>> for DisplayFromBech32<PREFIX>
 where
     PREFIX: HrpPrefix,
@@ -104,6 +127,26 @@ impl Bech32WithHrp for Vec<u8> {
     }
 
     fn from_bech32_with_hrp(s: &str, expected_hrp: &str) -> Result<Self, anyhow::Error> {
+        let (hrp, data) = bech32::decode(s).map_err(|e| anyhow!("Invalid Bech32 string: {e}"))?;
+
+        if hrp != Hrp::parse(expected_hrp)? {
+            return Err(anyhow!(
+                "Invalid HRP, expected '{expected_hrp}', got '{hrp}'"
+            ));
+        }
+
+        Ok(data.to_vec())
+    }
+}
+
+impl Bech32WithHrp for [u8] {
+    fn to_bech32_with_hrp(&self, hrp: &str) -> Result<String, anyhow::Error> {
+        let hrp = Hrp::parse(hrp).map_err(|e| anyhow!("Bech32 HRP parse error: {e}"))?;
+
+        bech32::encode::<Bech32>(hrp, self).map_err(|e| anyhow!("Bech32 encoding error: {e}"))
+    }
+
+    fn from_bech32_with_hrp(s: &str, expected_hrp: &str) -> Result<Vec<u8>, anyhow::Error> {
         let (hrp, data) = bech32::decode(s).map_err(|e| anyhow!("Invalid Bech32 string: {e}"))?;
 
         if hrp != Hrp::parse(expected_hrp)? {

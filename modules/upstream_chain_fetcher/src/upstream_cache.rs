@@ -1,7 +1,4 @@
-use acropolis_common::{
-    messages::{BlockBodyMessage, BlockHeaderMessage},
-    BlockInfo,
-};
+use acropolis_common::{messages::RawBlockMessage, BlockInfo};
 use anyhow::{anyhow, bail, Result};
 use std::{
     fs::File,
@@ -13,13 +10,12 @@ use std::{
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct UpstreamCacheRecord {
     pub id: BlockInfo,
-    pub hdr: Arc<BlockHeaderMessage>,
-    pub body: Arc<BlockBodyMessage>,
+    pub message: Arc<RawBlockMessage>,
 }
 
 pub trait Storage {
     fn read_chunk(&mut self, chunk_no: usize) -> Result<Vec<UpstreamCacheRecord>>;
-    fn write_chunk(&mut self, chunk_no: usize, chunk: &Vec<UpstreamCacheRecord>) -> Result<()>;
+    fn write_chunk(&mut self, chunk_no: usize, chunk: &[UpstreamCacheRecord]) -> Result<()>;
 }
 
 pub struct FileStorage {
@@ -160,7 +156,7 @@ impl Storage for FileStorage {
         }
     }
 
-    fn write_chunk(&mut self, chunk_no: usize, data: &Vec<UpstreamCacheRecord>) -> Result<()> {
+    fn write_chunk(&mut self, chunk_no: usize, data: &[UpstreamCacheRecord]) -> Result<()> {
         let mut file = File::create(self.get_file_name(chunk_no))?;
         file.write_all(serde_json::to_string(data)?.as_bytes())?;
         Ok(())
@@ -170,10 +166,7 @@ impl Storage for FileStorage {
 #[cfg(test)]
 mod test {
     use crate::upstream_cache::{Storage, UpstreamCacheImpl, UpstreamCacheRecord};
-    use acropolis_common::{
-        messages::{BlockBodyMessage, BlockHeaderMessage},
-        BlockHash, BlockInfo, BlockStatus, Era,
-    };
+    use acropolis_common::{messages::RawBlockMessage, BlockHash, BlockInfo, BlockStatus, Era};
     use anyhow::Result;
     use std::{collections::HashMap, sync::Arc};
 
@@ -194,11 +187,9 @@ mod test {
     fn ucr(n: u64, hdr: usize, body: usize) -> UpstreamCacheRecord {
         UpstreamCacheRecord {
             id: blk(n),
-            hdr: Arc::new(BlockHeaderMessage {
-                raw: vec![hdr as u8],
-            }),
-            body: Arc::new(BlockBodyMessage {
-                raw: vec![body as u8],
+            message: Arc::new(RawBlockMessage {
+                header: vec![hdr as u8],
+                body: vec![body as u8],
             }),
         }
     }
@@ -213,8 +204,8 @@ mod test {
             Ok(self.rec.get(&chunk_no).unwrap_or(&vec![]).clone())
         }
 
-        fn write_chunk(&mut self, chunk_no: usize, chunk: &Vec<UpstreamCacheRecord>) -> Result<()> {
-            self.rec.insert(chunk_no, chunk.clone());
+        fn write_chunk(&mut self, chunk_no: usize, chunk: &[UpstreamCacheRecord]) -> Result<()> {
+            self.rec.insert(chunk_no, chunk.to_vec());
             Ok(())
         }
     }
@@ -233,20 +224,20 @@ mod test {
         cache.density = 3;
         let perm: [u64; 11] = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5];
 
-        for n in 0..11 {
-            cache.write_record(&ucr(perm[n], n, n + 100))?;
+        for (n, p) in perm.iter().enumerate() {
+            cache.write_record(&ucr(*p, n, n + 100))?;
         }
 
         assert_eq!(cache.storage.rec.len(), 4);
         for ch in 0..3 {
             let chunk = cache.storage.rec.get(&ch).unwrap();
-            assert_eq!(chunk.get(0).unwrap().id.number, perm[ch * 3]);
+            assert_eq!(chunk.first().unwrap().id.number, perm[ch * 3]);
             assert_eq!(chunk.get(1).unwrap().id.number, perm[ch * 3 + 1]);
             assert_eq!(chunk.get(2).unwrap().id.number, perm[ch * 3 + 2]);
             assert_eq!(chunk.len(), 3);
         }
         assert_eq!(
-            cache.storage.rec.get(&3).unwrap().get(0).unwrap().id.number,
+            cache.storage.rec.get(&3).unwrap().first().unwrap().id.number,
             perm[9]
         );
         assert_eq!(
@@ -256,11 +247,11 @@ mod test {
         assert_eq!(cache.storage.rec.get(&3).unwrap().len(), 2);
 
         cache.start_reading()?;
-        for n in 0..11 {
+        for (n, p) in perm.iter().enumerate() {
             let record = cache.read_record()?.unwrap();
-            assert_eq!(record.id.number, perm[n]);
-            assert_eq!(record.hdr.raw, vec![n as u8]);
-            assert_eq!(record.body.raw, vec![(n + 100) as u8]);
+            assert_eq!(record.id.number, *p);
+            assert_eq!(record.message.header, vec![n as u8]);
+            assert_eq!(record.message.body, vec![(n + 100) as u8]);
 
             cache.next_record()?;
         }

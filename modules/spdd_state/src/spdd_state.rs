@@ -75,7 +75,7 @@ impl SPDDState {
 
                                 guard.apply_spdd_snapshot(
                                     msg.epoch,
-                                    msg.spos.iter().map(|(k, v)| (k.clone(), *v)),
+                                    msg.spos.iter().map(|(k, v)| (*k, *v)),
                                 );
                             }
                             .instrument(span)
@@ -142,9 +142,9 @@ impl SPDDState {
                     }
                 };
 
-                return Arc::new(Message::StateQueryResponse(StateQueryResponse::SPDD(
+                Arc::new(Message::StateQueryResponse(StateQueryResponse::SPDD(
                     response,
-                )));
+                )))
             }
         });
 

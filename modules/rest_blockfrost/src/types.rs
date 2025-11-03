@@ -2,12 +2,11 @@ use crate::cost_models::{PLUTUS_V1, PLUTUS_V2, PLUTUS_V3};
 use acropolis_common::{
     messages::EpochActivityMessage,
     protocol_params::{Nonce, NonceVariant, ProtocolParams},
-    queries::blocks::BlockInfo,
-    queries::governance::DRepActionUpdate,
+    queries::{accounts::AccountReward, blocks::BlockInfo, governance::DRepActionUpdate},
     rest_helper::ToCheckedF64,
-    serialization::{DisplayFromBech32, PoolPrefix},
+    serialization::{Bech32WithHrp, DisplayFromBech32, PoolPrefix},
     AssetAddressEntry, AssetMetadataStandard, AssetMintRecord, KeyHash, PolicyAsset,
-    PoolEpochState, PoolUpdateAction, Relay, TxHash, Vote,
+    PoolEpochState, PoolId, PoolUpdateAction, Relay, TxHash, Vote, VrfKeyHash,
 };
 use anyhow::Result;
 use num_traits::ToPrimitive;
@@ -63,7 +62,7 @@ pub struct BlockInfoREST(pub BlockInfo);
 pub struct SPDDByEpochItemRest {
     pub stake_address: String,
     #[serde_as(as = "DisplayFromBech32<PoolPrefix>")]
-    pub pool_id: KeyHash,
+    pub pool_id: PoolId,
     #[serde_as(as = "DisplayFromStr")]
     pub amount: u64,
 }
@@ -408,8 +407,7 @@ impl From<Relay> for PoolRelayRest {
 #[serde_as]
 #[derive(Serialize)]
 pub struct PoolUpdateEventRest {
-    #[serde_as(as = "Hex")]
-    pub tx_hash: TxHash,
+    pub tx_hash: String,
     pub cert_index: u64,
     pub action: PoolUpdateAction,
 }
@@ -432,7 +430,7 @@ pub struct PoolInfoRest {
     #[serde_as(as = "Hex")]
     pub hex: KeyHash,
     #[serde_as(as = "Hex")]
-    pub vrf_key: KeyHash,
+    pub vrf_key: VrfKeyHash,
     pub blocks_minted: u64,
     pub blocks_epoch: u64,
     #[serde_as(as = "DisplayFromStr")]
@@ -452,10 +450,9 @@ pub struct PoolInfoRest {
     pub fixed_cost: u64,
     pub reward_account: String,
     pub pool_owners: Vec<String>,
-    #[serde_as(as = "Option<Vec<Hex>>")]
-    pub registration: Option<Vec<TxHash>>,
-    #[serde_as(as = "Option<Vec<Hex>>")]
-    pub retirement: Option<Vec<TxHash>>,
+    // TODO: Query chain store module to retrieve TxHash from TxIdentifier
+    pub registration: String,
+    pub retirement: String,
 }
 
 // REST response structure for protocol params
@@ -845,8 +842,8 @@ impl From<acropolis_common::Value> for AmountList {
                 out.push(AmountEntry {
                     unit: format!(
                         "{}{}",
-                        hex::encode(&policy_id),
-                        hex::encode(&asset.name.as_slice())
+                        hex::encode(policy_id),
+                        hex::encode(asset.name.as_slice())
                     ),
                     quantity: asset.amount.to_string(),
                 });
@@ -854,5 +851,46 @@ impl From<acropolis_common::Value> for AmountList {
         }
 
         Self(out)
+    }
+}
+
+#[derive(Serialize)]
+pub struct RegistrationUpdateREST {
+    pub tx_hash: String,
+    pub action: String,
+}
+
+#[derive(Serialize)]
+pub struct DelegationUpdateREST {
+    pub active_epoch: u32,
+    pub tx_hash: String,
+    pub amount: String,
+    pub pool_id: String,
+}
+
+#[derive(Serialize)]
+pub struct AccountWithdrawalREST {
+    pub tx_hash: String,
+    pub amount: String,
+}
+
+#[derive(Serialize)]
+pub struct AccountRewardREST {
+    pub epoch: u32,
+    pub amount: String,
+    pub pool_id: String,
+    #[serde(rename = "type")]
+    pub reward_type: String,
+}
+
+impl TryFrom<&AccountReward> for AccountRewardREST {
+    type Error = anyhow::Error;
+    fn try_from(value: &AccountReward) -> Result<Self, Self::Error> {
+        Ok(Self {
+            epoch: value.epoch,
+            amount: value.amount.to_string(),
+            pool_id: value.pool.to_bech32_with_hrp("pool")?,
+            reward_type: value.reward_type.to_string(),
+        })
     }
 }

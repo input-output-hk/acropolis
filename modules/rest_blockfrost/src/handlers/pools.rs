@@ -1,4 +1,13 @@
 //! REST handlers for Acropolis Blockfrost /pools endpoints
+use crate::{
+    handlers_config::HandlersConfig,
+    types::{PoolDelegatorRest, PoolInfoRest, PoolRelayRest, PoolUpdateEventRest, PoolVoteRest},
+};
+use crate::{
+    types::{PoolEpochStateRest, PoolExtendedRest, PoolMetadataRest, PoolRetirementRest},
+    utils::{fetch_pool_metadata_as_bytes, verify_pool_metadata_hash, PoolMetadataJson},
+};
+use acropolis_common::serialization::Bech32Conversion;
 use acropolis_common::{
     messages::{Message, RESTResponse, StateQuery, StateQueryResponse},
     queries::{
@@ -8,8 +17,7 @@ use acropolis_common::{
         utils::query_state,
     },
     rest_helper::ToCheckedF64,
-    serialization::Bech32WithHrp,
-    PoolRetirement, PoolUpdateAction, StakeCredential, TxHash,
+    PoolId, PoolRetirement, PoolUpdateAction, TxIdentifier,
 };
 use anyhow::Result;
 use caryatid_sdk::Context;
@@ -17,15 +25,6 @@ use rust_decimal::Decimal;
 use std::{sync::Arc, time::Duration};
 use tokio::join;
 use tracing::warn;
-
-use crate::{
-    handlers_config::HandlersConfig,
-    types::{PoolDelegatorRest, PoolInfoRest, PoolRelayRest, PoolUpdateEventRest, PoolVoteRest},
-};
-use crate::{
-    types::{PoolEpochStateRest, PoolExtendedRest, PoolMetadataRest, PoolRetirementRest},
-    utils::{fetch_pool_metadata_as_bytes, verify_pool_metadata_hash, PoolMetadataJson},
-};
 
 /// Handle `/pools` Blockfrost-compatible endpoint
 pub async fn handle_pools_list_blockfrost(
@@ -63,7 +62,7 @@ pub async fn handle_pools_list_blockfrost(
 
     let pool_ids = pool_operators
         .iter()
-        .map(|operator| operator.to_bech32_with_hrp("pool"))
+        .map(|operator| operator.to_bech32())
         .collect::<Result<Vec<String>, _>>();
 
     match pool_ids {
@@ -94,29 +93,22 @@ pub async fn handle_pools_extended_retired_retiring_single_blockfrost(
 
     match param.as_str() {
         "extended" => {
-            return handle_pools_extended_blockfrost(context.clone(), handlers_config.clone()).await
+            handle_pools_extended_blockfrost(context.clone(), handlers_config.clone()).await
         }
         "retired" => {
-            return handle_pools_retired_blockfrost(context.clone(), handlers_config.clone()).await
+            handle_pools_retired_blockfrost(context.clone(), handlers_config.clone()).await
         }
         "retiring" => {
-            return handle_pools_retiring_blockfrost(context.clone(), handlers_config.clone()).await
+            handle_pools_retiring_blockfrost(context.clone(), handlers_config.clone()).await
         }
-        _ => match Vec::<u8>::from_bech32_with_hrp(param, "pool") {
+        _ => match PoolId::from_bech32(param) {
             Ok(pool_id) => {
-                return handle_pools_spo_blockfrost(
-                    context.clone(),
-                    pool_id,
-                    handlers_config.clone(),
-                )
-                .await
+                handle_pools_spo_blockfrost(context.clone(), pool_id, handlers_config.clone()).await
             }
-            Err(e) => {
-                return Ok(RESTResponse::with_text(
-                    400,
-                    &format!("Invalid Bech32 stake pool ID: {param}. Error: {e}"),
-                ));
-            }
+            Err(e) => Ok(RESTResponse::with_text(
+                400,
+                &format!("Invalid Bech32 stake pool ID: {param}. Error: {e}"),
+            )),
         },
     }
 }
@@ -139,16 +131,12 @@ async fn handle_pools_extended_blockfrost(
             )) => Ok(pools_list_with_info.pools),
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::Error(e),
-            )) => {
-                return Err(anyhow::anyhow!(
-                    "Internal server error while retrieving pools list: {e}"
-                ));
-            }
-            _ => {
-                return Err(anyhow::anyhow!(
-                    "Unexpected message type while retrieving pools list with info"
-                ))
-            }
+            )) => Err(anyhow::anyhow!(
+                "Internal server error while retrieving pools list: {e}"
+            )),
+            _ => Err(anyhow::anyhow!(
+                "Unexpected message type while retrieving pools list with info"
+            )),
         },
     );
 
@@ -166,16 +154,12 @@ async fn handle_pools_extended_blockfrost(
             )) => Ok(res.epoch),
             Message::StateQueryResponse(StateQueryResponse::Epochs(
                 EpochsStateQueryResponse::Error(e),
-            )) => {
-                return Err(anyhow::anyhow!(
-                    "Internal server error while retrieving latest epoch: {e}"
-                ));
-            }
-            _ => {
-                return Err(anyhow::anyhow!(
-                    "Unexpected message type while retrieving latest epoch"
-                ))
-            }
+            )) => Err(anyhow::anyhow!(
+                "Internal server error while retrieving latest epoch: {e}"
+            )),
+            _ => Err(anyhow::anyhow!(
+                "Unexpected message type while retrieving latest epoch"
+            )),
         },
     );
 
@@ -205,7 +189,7 @@ async fn handle_pools_extended_blockfrost(
     let latest_epoch = latest_epoch_info.epoch;
     let optimal_pool_sizing = optimal_pool_sizing?;
 
-    // if pools are empty, return empty list
+    // if pools are empty, return an empty list
     if pools_list_with_info.is_empty() {
         return Ok(RESTResponse::with_json(200, "[]"));
     }
@@ -217,12 +201,10 @@ async fn handle_pools_extended_blockfrost(
     };
 
     // Populate pools_operators
-    let pools_operators = pools_list_with_info
-        .iter()
-        .map(|(pool_operator, _)| pool_operator.clone())
-        .collect::<Vec<_>>();
+    let pools_operators =
+        pools_list_with_info.iter().map(|(pool_operator, _)| *pool_operator).collect::<Vec<_>>();
 
-    // Get active stake for each pool from spo-state
+    // Get an active stake for each pool from spo-state
     let pools_active_stakes_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
         PoolsStateQuery::GetPoolsActiveStakes {
             pools_operators: pools_operators.clone(),
@@ -243,11 +225,9 @@ async fn handle_pools_extended_blockfrost(
                 // if epoch_history is not enabled
                 Ok(None)
             }
-            _ => {
-                return Err(anyhow::anyhow!(
-                    "Unexpected message type while retrieving pools active stakes"
-                ))
-            }
+            _ => Err(anyhow::anyhow!(
+                "Unexpected message type while retrieving pools active stakes"
+            )),
         },
     );
 
@@ -268,13 +248,11 @@ async fn handle_pools_extended_blockfrost(
 
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
-            )) => {
-                return Err(anyhow::anyhow!(
-                    "Internal server error while retrieving pools live stakes: {e}"
-                ));
-            }
+            )) => Err(anyhow::anyhow!(
+                "Internal server error while retrieving pools live stakes: {e}"
+            )),
 
-            _ => return Err(anyhow::anyhow!("Unexpected message type")),
+            _ => Err(anyhow::anyhow!("Unexpected message type")),
         },
     );
 
@@ -292,7 +270,7 @@ async fn handle_pools_extended_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::PoolsTotalBlocksMinted(total_blocks_minted),
             )) => Ok(total_blocks_minted),
-            _ => return Err(anyhow::anyhow!("Unexpected message type")),
+            _ => Err(anyhow::anyhow!("Unexpected message type")),
         },
     );
 
@@ -311,8 +289,8 @@ async fn handle_pools_extended_blockfrost(
             .enumerate()
             .map(|(i, (pool_operator, pool_registration))| {
                 Ok(PoolExtendedRest {
-                    pool_id: pool_operator.to_bech32_with_hrp("pool")?,
-                    hex: pool_operator.clone(),
+                    pool_id: pool_operator.to_bech32()?,
+                    hex: pool_operator.to_vec(),
                     active_stake: pools_active_stakes
                         .as_ref()
                         .map(|active_stakes| active_stakes[i]),
@@ -372,7 +350,7 @@ async fn handle_pools_retired_blockfrost(
     let retired_pools_rest = retired_pools
         .iter()
         .filter_map(|PoolRetirement { operator, epoch }| {
-            let pool_id = operator.to_bech32_with_hrp("pool").ok()?;
+            let pool_id = operator.to_bech32().ok()?;
             Some(PoolRetirementRest {
                 pool_id,
                 epoch: *epoch,
@@ -418,7 +396,7 @@ async fn handle_pools_retiring_blockfrost(
     let retiring_pools_rest = retiring_pools
         .iter()
         .filter_map(|PoolRetirement { operator, epoch }| {
-            let pool_id = operator.to_bech32_with_hrp("pool").ok()?;
+            let pool_id = operator.to_bech32().ok()?;
             Some(PoolRetirementRest {
                 pool_id,
                 epoch: *epoch,
@@ -437,13 +415,13 @@ async fn handle_pools_retiring_blockfrost(
 
 async fn handle_pools_spo_blockfrost(
     context: Arc<Context<Message>>,
-    pool_operator: Vec<u8>,
+    pool_operator: PoolId,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
     // Get PoolRegistration from spo state
     let pool_info_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
         PoolsStateQuery::GetPoolInfo {
-            pool_id: pool_operator.clone(),
+            pool_id: pool_operator,
         },
     )));
 
@@ -481,24 +459,18 @@ async fn handle_pools_spo_blockfrost(
             )) => Ok(res.epoch),
             Message::StateQueryResponse(StateQueryResponse::Epochs(
                 EpochsStateQueryResponse::Error(e),
-            )) => {
-                return Err(anyhow::anyhow!(
-                    "Internal server error while retrieving latest epoch: {e}"
-                ));
-            }
-            _ => {
-                return Err(anyhow::anyhow!(
-                    "Unexpected message type while retrieving latest epoch"
-                ))
-            }
+            )) => Err(anyhow::anyhow!(
+                "Internal server error while retrieving latest epoch: {e}"
+            )),
+            _ => Err(anyhow::anyhow!(
+                "Unexpected message type while retrieving latest epoch"
+            )),
         },
     );
 
     // query live stakes from accounts_state
     let live_stakes_info_msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
-        AccountsStateQuery::GetPoolLiveStake {
-            pool_operator: pool_operator.clone(),
-        },
+        AccountsStateQuery::GetPoolLiveStake { pool_operator },
     )));
     let live_stakes_info_f = query_state(
         &context,
@@ -531,7 +503,7 @@ async fn handle_pools_spo_blockfrost(
     // Query pool update events from spo_state
     let pool_updates_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
         PoolsStateQuery::GetPoolUpdates {
-            pool_id: pool_operator.clone(),
+            pool_id: pool_operator,
         },
     )));
     let pool_updates_f = query_state(
@@ -555,7 +527,7 @@ async fn handle_pools_spo_blockfrost(
     // Query total_blocks_minted from spo_state
     let total_blocks_minted_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
         PoolsStateQuery::GetPoolTotalBlocksMinted {
-            pool_id: pool_operator.clone(),
+            pool_id: pool_operator,
         },
     )));
     let total_blocks_minted_f = query_state(
@@ -595,24 +567,25 @@ async fn handle_pools_spo_blockfrost(
         return Ok(RESTResponse::with_json(404, "Pool Not Found"));
     };
     let pool_updates = pool_updates?;
-    let registrations: Option<Vec<TxHash>> = pool_updates.as_ref().map(|updates| {
+    // TODO: Query TxHash from chainstore module for registrations and retirements
+    let _registrations: Option<Vec<TxIdentifier>> = pool_updates.as_ref().map(|updates| {
         updates
             .iter()
             .filter_map(|update| {
                 if update.action == PoolUpdateAction::Registered {
-                    Some(update.tx_hash)
+                    Some(update.tx_identifier)
                 } else {
                     None
                 }
             })
             .collect()
     });
-    let retirements: Option<Vec<TxHash>> = pool_updates.as_ref().map(|updates| {
+    let _retirements: Option<Vec<TxIdentifier>> = pool_updates.as_ref().map(|updates| {
         updates
             .iter()
             .filter_map(|update| {
                 if update.action == PoolUpdateAction::Deregistered {
-                    Some(update.tx_hash)
+                    Some(update.tx_identifier)
                 } else {
                     None
                 }
@@ -623,7 +596,7 @@ async fn handle_pools_spo_blockfrost(
     // Query blocks_minted from epochs_state
     let epoch_blocks_minted_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
         EpochsStateQuery::GetLatestEpochBlocksMintedByPool {
-            spo_id: pool_info.operator.clone(),
+            spo_id: pool_info.operator,
         },
     )));
     let epoch_blocks_minted_f = query_state(
@@ -641,7 +614,7 @@ async fn handle_pools_spo_blockfrost(
     // query active stakes info from spo_state
     let active_stakes_info_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
         PoolsStateQuery::GetPoolActiveStakeInfo {
-            pool_operator: pool_operator.clone(),
+            pool_operator,
             epoch: latest_epoch,
         },
     )));
@@ -664,7 +637,7 @@ async fn handle_pools_spo_blockfrost(
     // Query owner accounts balance sum from accounts_state
     let live_pledge_msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
         AccountsStateQuery::GetAccountsUtxoValuesSum {
-            stake_keys: pool_info.pool_owners.clone(),
+            stake_addresses: pool_info.pool_owners.clone(),
         },
     )));
 
@@ -691,22 +664,22 @@ async fn handle_pools_spo_blockfrost(
     let active_stakes_info = active_stakes_info?;
     let live_pledge = live_pledge?;
 
-    let pool_id = pool_info.operator.to_bech32_with_hrp("pool").unwrap();
-    let reward_account = pool_info.reward_account.to_bech32_with_hrp("stake");
+    let pool_id = pool_info.operator.to_bech32()?;
+    let reward_account = pool_info.reward_account.get_credential().to_stake_bech32();
     let Ok(reward_account) = reward_account else {
         return Ok(RESTResponse::with_text(404, "Invalid Reward Account"));
     };
     let pool_owners = pool_info
         .pool_owners
         .iter()
-        .map(|owner| owner.to_bech32_with_hrp("stake"))
+        .map(|owner| owner.get_credential().to_stake_bech32())
         .collect::<Result<Vec<String>, _>>();
     let Ok(pool_owners) = pool_owners else {
         return Ok(RESTResponse::with_text(404, "Invalid Pool Owners"));
     };
     let pool_info_rest: PoolInfoRest = PoolInfoRest {
         pool_id,
-        hex: pool_info.operator,
+        hex: *pool_info.operator,
         vrf_key: pool_info.vrf_key_hash,
         blocks_minted: total_blocks_minted,
         blocks_epoch: epoch_blocks_minted,
@@ -722,13 +695,13 @@ async fn handle_pools_spo_blockfrost(
             .as_ref()
             .map(|info| info.active_size.to_checked_f64("active_size").unwrap_or(0.0)),
         declared_pledge: pool_info.pledge,
-        live_pledge: live_pledge,
+        live_pledge,
         margin_cost: pool_info.margin.to_f32(),
         fixed_cost: pool_info.cost,
         reward_account,
         pool_owners,
-        registration: registrations,
-        retirement: retirements,
+        registration: "TxHash lookup not yet implemented".to_string(),
+        retirement: "TxHash lookup not yet implemented".to_string(),
     };
 
     match serde_json::to_string(&pool_info_rest) {
@@ -745,11 +718,11 @@ pub async fn handle_pool_history_blockfrost(
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
-    let Some(pool_id) = params.get(0) else {
+    let Some(pool_id) = params.first() else {
         return Ok(RESTResponse::with_text(400, "Missing pool ID parameter"));
     };
 
-    let Ok(spo) = Vec::<u8>::from_bech32_with_hrp(pool_id, "pool") else {
+    let Ok(spo) = PoolId::from_bech32(pool_id) else {
         return Ok(RESTResponse::with_text(
             400,
             &format!("Invalid Bech32 stake pool ID: {pool_id}"),
@@ -819,11 +792,11 @@ pub async fn handle_pool_metadata_blockfrost(
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
-    let Some(pool_id) = params.get(0) else {
+    let Some(pool_id) = params.first() else {
         return Ok(RESTResponse::with_text(400, "Missing pool ID parameter"));
     };
 
-    let Ok(spo) = Vec::<u8>::from_bech32_with_hrp(pool_id, "pool") else {
+    let Ok(spo) = PoolId::from_bech32(pool_id) else {
         return Ok(RESTResponse::with_text(
             400,
             &format!("Invalid Bech32 stake pool ID: {pool_id}"),
@@ -831,9 +804,7 @@ pub async fn handle_pool_metadata_blockfrost(
     };
 
     let pool_metadata_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
-        PoolsStateQuery::GetPoolMetadata {
-            pool_id: spo.clone(),
-        },
+        PoolsStateQuery::GetPoolMetadata { pool_id: spo },
     )));
     let pool_metadata = query_state(
         &context,
@@ -871,7 +842,7 @@ pub async fn handle_pool_metadata_blockfrost(
     let Ok(pool_metadata_json) = PoolMetadataJson::try_from(pool_metadata_bytes) else {
         return Ok(RESTResponse::with_text(
             400,
-            &format!("Failed PoolMetadata Json conversion"),
+            "Failed PoolMetadata Json conversion",
         ));
     };
 
@@ -900,11 +871,11 @@ pub async fn handle_pool_relays_blockfrost(
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
-    let Some(pool_id) = params.get(0) else {
+    let Some(pool_id) = params.first() else {
         return Ok(RESTResponse::with_text(400, "Missing pool ID parameter"));
     };
 
-    let Ok(spo) = Vec::<u8>::from_bech32_with_hrp(pool_id, "pool") else {
+    let Ok(spo) = PoolId::from_bech32(pool_id) else {
         return Ok(RESTResponse::with_text(
             400,
             &format!("Invalid Bech32 stake pool ID: {pool_id}"),
@@ -912,9 +883,7 @@ pub async fn handle_pool_relays_blockfrost(
     };
 
     let pool_relay_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
-        PoolsStateQuery::GetPoolRelays {
-            pool_id: spo.clone(),
-        },
+        PoolsStateQuery::GetPoolRelays { pool_id: spo },
     )));
 
     let pool_relays = query_state(
@@ -954,11 +923,11 @@ pub async fn handle_pool_delegators_blockfrost(
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
-    let Some(pool_id) = params.get(0) else {
+    let Some(pool_id) = params.first() else {
         return Ok(RESTResponse::with_text(400, "Missing pool ID parameter"));
     };
 
-    let Ok(spo) = Vec::<u8>::from_bech32_with_hrp(pool_id, "pool") else {
+    let Ok(spo) = PoolId::from_bech32(pool_id) else {
         return Ok(RESTResponse::with_text(
             400,
             &format!("Invalid Bech32 stake pool ID: {pool_id}"),
@@ -967,9 +936,7 @@ pub async fn handle_pool_delegators_blockfrost(
 
     // Get Pool delegators from spo-state
     let pool_delegators_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
-        PoolsStateQuery::GetPoolDelegators {
-            pool_id: spo.clone(),
-        },
+        PoolsStateQuery::GetPoolDelegators { pool_id: spo },
     )));
 
     let pool_delegators = query_state(
@@ -1001,9 +968,7 @@ pub async fn handle_pool_delegators_blockfrost(
         None => {
             // Query from Accounts state
             let pool_delegators_msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
-                AccountsStateQuery::GetPoolDelegators {
-                    pool_operator: spo.clone(),
-                },
+                AccountsStateQuery::GetPoolDelegators { pool_operator: spo },
             )));
             let pool_delegators = query_state(
                 &context,
@@ -1027,9 +992,9 @@ pub async fn handle_pool_delegators_blockfrost(
     };
 
     let mut delegators_rest = Vec::<PoolDelegatorRest>::new();
-    for (d, l) in pool_delegators {
-        let bech32 = StakeCredential::AddrKeyHash(d.clone())
-            .to_stake_bech32()
+    for (stake_address, l) in pool_delegators {
+        let bech32 = stake_address
+            .to_string()
             .map_err(|e| anyhow::anyhow!("Invalid stake address in pool delegators: {e}"))?;
         delegators_rest.push(PoolDelegatorRest {
             address: bech32,
@@ -1051,11 +1016,11 @@ pub async fn handle_pool_blocks_blockfrost(
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
-    let Some(pool_id) = params.get(0) else {
+    let Some(pool_id) = params.first() else {
         return Ok(RESTResponse::with_text(400, "Missing pool ID parameter"));
     };
 
-    let Ok(spo) = Vec::<u8>::from_bech32_with_hrp(pool_id, "pool") else {
+    let Ok(spo) = PoolId::from_bech32(pool_id) else {
         return Ok(RESTResponse::with_text(
             400,
             &format!("Invalid Bech32 stake pool ID: {pool_id}"),
@@ -1064,9 +1029,7 @@ pub async fn handle_pool_blocks_blockfrost(
 
     // Get blocks by pool_id from spo_state
     let pool_blocks_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
-        PoolsStateQuery::GetBlocksByPool {
-            pool_id: spo.clone(),
-        },
+        PoolsStateQuery::GetBlocksByPool { pool_id: spo },
     )));
 
     let pool_blocks = query_state(
@@ -1103,11 +1066,11 @@ pub async fn handle_pool_updates_blockfrost(
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
-    let Some(pool_id) = params.get(0) else {
+    let Some(pool_id) = params.first() else {
         return Ok(RESTResponse::with_text(400, "Missing pool ID parameter"));
     };
 
-    let Ok(spo) = Vec::<u8>::from_bech32_with_hrp(pool_id, "pool") else {
+    let Ok(spo) = PoolId::from_bech32(pool_id) else {
         return Ok(RESTResponse::with_text(
             400,
             &format!("Invalid Bech32 stake pool ID: {pool_id}"),
@@ -1116,9 +1079,7 @@ pub async fn handle_pool_updates_blockfrost(
 
     // query from spo_state
     let pool_updates_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
-        PoolsStateQuery::GetPoolUpdates {
-            pool_id: spo.clone(),
-        },
+        PoolsStateQuery::GetPoolUpdates { pool_id: spo },
     )));
     let pool_updates = query_state(
         &context,
@@ -1143,7 +1104,7 @@ pub async fn handle_pool_updates_blockfrost(
     let pool_updates_rest = pool_updates
         .into_iter()
         .map(|u| PoolUpdateEventRest {
-            tx_hash: u.tx_hash,
+            tx_hash: "TxHash lookup not yet implemented".to_string(),
             cert_index: u.cert_index,
             action: u.action,
         })
@@ -1163,11 +1124,11 @@ pub async fn handle_pool_votes_blockfrost(
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
-    let Some(pool_id) = params.get(0) else {
+    let Some(pool_id) = params.first() else {
         return Ok(RESTResponse::with_text(400, "Missing pool ID parameter"));
     };
 
-    let Ok(spo) = Vec::<u8>::from_bech32_with_hrp(pool_id, "pool") else {
+    let Ok(spo) = PoolId::from_bech32(pool_id) else {
         return Ok(RESTResponse::with_text(
             400,
             &format!("Invalid Bech32 stake pool ID: {pool_id}"),
@@ -1176,9 +1137,7 @@ pub async fn handle_pool_votes_blockfrost(
 
     // query from spo_state
     let pool_votes_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
-        PoolsStateQuery::GetPoolVotes {
-            pool_id: spo.clone(),
-        },
+        PoolsStateQuery::GetPoolVotes { pool_id: spo },
     )));
     let pool_votes = query_state(
         &context,

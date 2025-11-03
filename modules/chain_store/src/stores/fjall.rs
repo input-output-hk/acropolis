@@ -131,21 +131,21 @@ impl FjallBlockStore {
             minicbor::encode(raw, &mut bytes).expect("infallible");
             bytes
         };
-        batch.insert(&self.blocks, &*info.hash, encoded);
+        batch.insert(&self.blocks, *info.hash, encoded);
         batch.insert(
             &self.block_hashes_by_slot,
             info.slot.to_be_bytes(),
-            &*info.hash,
+            *info.hash,
         );
         batch.insert(
             &self.block_hashes_by_number,
             info.number.to_be_bytes(),
-            &*info.hash,
+            *info.hash,
         );
         batch.insert(
             &self.block_hashes_by_epoch_slot,
             epoch_slot_key(info.epoch, info.epoch_slot),
-            &*info.hash,
+            *info.hash,
         );
     }
 
@@ -263,7 +263,7 @@ mod tests {
             status: acropolis_common::BlockStatus::Immutable,
             slot: block.slot(),
             number: block.number(),
-            hash: BlockHash(*block.hash()),
+            hash: BlockHash::from(*block.hash()),
             epoch,
             epoch_slot,
             new_epoch: false,
@@ -316,7 +316,7 @@ mod tests {
 
         state.store.insert_block(&info, &bytes).unwrap();
 
-        let new_block = state.store.get_block_by_hash(&info.hash.as_ref()).unwrap();
+        let new_block = state.store.get_block_by_hash(info.hash.as_ref()).unwrap();
         assert_eq!(block, new_block.unwrap());
     }
 

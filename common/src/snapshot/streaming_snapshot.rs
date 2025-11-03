@@ -29,7 +29,7 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use tracing::info;
 
-pub use crate::hash::{AddrKeyhash, Hash, ScriptHash};
+pub use crate::hash::Hash;
 pub use crate::stake_addresses::{AccountState, StakeAddressState};
 pub use crate::StakeCredential;
 
@@ -66,13 +66,21 @@ impl<'b, C> minicbor::decode::Decode<'b, C> for StakeCredential {
             0 => {
                 // ScriptHash variant (first in enum) - decode bytes directly
                 let bytes = d.bytes()?;
-                let key_hash = bytes.to_vec();
+                let key_hash = bytes.try_into().map_err(|_| {
+                    minicbor::decode::Error::message(
+                        "invalid length for ScriptHash in StakeCredential",
+                    )
+                })?;
                 Ok(StakeCredential::ScriptHash(key_hash))
             }
             1 => {
-                // AddrKeyHash variant (second in enum) - decode bytes directly
+                // AddrKeyHash variant (second in enum) - decodes bytes directly
                 let bytes = d.bytes()?;
-                let key_hash = bytes.to_vec();
+                let key_hash = bytes.try_into().map_err(|_| {
+                    minicbor::decode::Error::message(
+                        "invalid length for AddrKeyHash in StakeCredential",
+                    )
+                })?;
                 Ok(StakeCredential::AddrKeyHash(key_hash))
             }
             _ => Err(minicbor::decode::Error::message(
@@ -299,17 +307,14 @@ impl<'b, C> minicbor::Decode<'b, C> for Account {
 // Type aliases for pool_params compatibility
 // -----------------------------------------------------------------------------
 
+pub use crate::types::AddrKeyhash;
+pub use crate::types::ScriptHash;
+use crate::PoolId;
 /// Alias minicbor as cbor for pool_params module
 pub use minicbor as cbor;
 
 /// Coin amount (Lovelace)
 pub type Coin = u64;
-
-/// Pool ID (28-byte hash)
-pub type PoolId = Hash<28>;
-
-/// VRF key hash (32-byte hash)
-pub type VrfKeyhash = Hash<32>;
 
 /// Reward account (stake address bytes) - wrapper to handle CBOR bytes encoding
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -812,6 +817,35 @@ pub trait SnapshotCallbacks:
 }
 
 // -----------------------------------------------------------------------------
+// Internal Types
+// -----------------------------------------------------------------------------
+
+#[expect(dead_code)]
+struct ParsedMetadata {
+    epoch: u64,
+    treasury: u64,
+    reserves: u64,
+    pools: Vec<PoolInfo>,
+    dreps: Vec<DRepInfo>,
+    accounts: Vec<AccountState>,
+    blocks_previous_epoch: Vec<crate::types::PoolBlockProduction>,
+    blocks_current_epoch: Vec<crate::types::PoolBlockProduction>,
+    utxo_position: u64,
+}
+
+#[expect(dead_code)]
+struct ParsedMetadataWithoutUtxoPosition {
+    epoch: u64,
+    treasury: u64,
+    reserves: u64,
+    pools: Vec<PoolInfo>,
+    dreps: Vec<DRepInfo>,
+    accounts: Vec<AccountState>,
+    blocks_previous_epoch: Vec<crate::types::PoolBlockProduction>,
+    blocks_current_epoch: Vec<crate::types::PoolBlockProduction>,
+}
+
+// -----------------------------------------------------------------------------
 // Streaming Parser
 // -----------------------------------------------------------------------------
 
@@ -1047,15 +1081,15 @@ impl StreamingSnapshotParser {
                 // Convert SPO delegation from StrictMaybe<PoolId> to Option<KeyHash>
                 // PoolId is Hash<28>, we need to convert to Vec<u8>
                 let delegated_spo = match &account.pool {
-                    StrictMaybe::Just(pool_id) => Some(pool_id.as_ref().to_vec()),
+                    StrictMaybe::Just(pool_id) => Some(*pool_id),
                     StrictMaybe::Nothing => None,
                 };
 
                 // Convert DRep delegation from StrictMaybe<DRep> to Option<DRepChoice>
                 let delegated_drep = match &account.drep {
                     StrictMaybe::Just(drep) => Some(match drep {
-                        DRep::Key(hash) => crate::DRepChoice::Key(hash.as_ref().to_vec()),
-                        DRep::Script(hash) => crate::DRepChoice::Script(hash.as_ref().to_vec()),
+                        DRep::Key(hash) => crate::DRepChoice::Key(*hash),
+                        DRep::Script(hash) => crate::DRepChoice::Script(*hash),
                         DRep::Abstain => crate::DRepChoice::Abstain,
                         DRep::NoConfidence => crate::DRepChoice::NoConfidence,
                     }),
@@ -1145,21 +1179,8 @@ impl StreamingSnapshotParser {
     }
 
     /// Parse metadata and structure, returning the UTXO position (for future chunked reading)
-    #[allow(dead_code)]
-    fn parse_metadata_and_find_utxos(
-        &self,
-        buffer: &[u8],
-    ) -> Result<(
-        u64,
-        u64,
-        u64,
-        Vec<PoolInfo>,
-        Vec<DRepInfo>,
-        Vec<AccountState>,
-        Vec<crate::types::PoolBlockProduction>,
-        Vec<crate::types::PoolBlockProduction>,
-        u64,
-    )> {
+    #[expect(dead_code)]
+    fn parse_metadata_and_find_utxos(&self, buffer: &[u8]) -> Result<ParsedMetadata> {
         let mut decoder = Decoder::new(buffer);
         let start_pos = decoder.position();
 
@@ -1261,7 +1282,7 @@ impl StreamingSnapshotParser {
         // Current position is right before the UTXO map [3][1][1][0]
         let utxo_position = start_pos as u64 + decoder.position() as u64;
 
-        Ok((
+        Ok(ParsedMetadata {
             epoch,
             treasury,
             reserves,
@@ -1271,24 +1292,15 @@ impl StreamingSnapshotParser {
             blocks_previous_epoch,
             blocks_current_epoch,
             utxo_position,
-        ))
+        })
     }
 
     /// Parse metadata and structure (everything except UTXOs) (legacy)
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     fn parse_metadata_and_structure(
         &self,
         buffer: &[u8],
-    ) -> Result<(
-        u64,
-        u64,
-        u64,
-        Vec<PoolInfo>,
-        Vec<DRepInfo>,
-        Vec<AccountState>,
-        Vec<crate::types::PoolBlockProduction>,
-        Vec<crate::types::PoolBlockProduction>,
-    )> {
+    ) -> Result<ParsedMetadataWithoutUtxoPosition> {
         let mut decoder = Decoder::new(buffer);
 
         // Navigate to NewEpochState root array
@@ -1383,7 +1395,7 @@ impl StreamingSnapshotParser {
         let accounts =
             Self::parse_dstate(&mut decoder).context("Failed to parse DState for accounts")?;
 
-        Ok((
+        Ok(ParsedMetadataWithoutUtxoPosition {
             epoch,
             treasury,
             reserves,
@@ -1392,7 +1404,7 @@ impl StreamingSnapshotParser {
             accounts,
             blocks_previous_epoch,
             blocks_current_epoch,
-        ))
+        })
     }
 
     /// Parse DState for accounts (extracted from original parse method)
@@ -1435,15 +1447,15 @@ impl StreamingSnapshotParser {
 
                 // Convert SPO delegation from StrictMaybe<PoolId> to Option<KeyHash>
                 let delegated_spo = match &account.pool {
-                    StrictMaybe::Just(pool_id) => Some(pool_id.as_ref().to_vec()),
+                    StrictMaybe::Just(pool_id) => Some(*pool_id),
                     StrictMaybe::Nothing => None,
                 };
 
                 // Convert DRep delegation from StrictMaybe<DRep> to Option<DRepChoice>
                 let delegated_drep = match &account.drep {
                     StrictMaybe::Just(drep) => Some(match drep {
-                        DRep::Key(hash) => crate::DRepChoice::Key(hash.as_ref().to_vec()),
-                        DRep::Script(hash) => crate::DRepChoice::Script(hash.as_ref().to_vec()),
+                        DRep::Key(hash) => crate::DRepChoice::Key(*hash),
+                        DRep::Script(hash) => crate::DRepChoice::Script(*hash),
                         DRep::Abstain => crate::DRepChoice::Abstain,
                         DRep::NoConfidence => crate::DRepChoice::NoConfidence,
                     }),
@@ -1533,11 +1545,9 @@ impl StreamingSnapshotParser {
                 let position_before = entry_decoder.position();
 
                 // Check for indefinite map break
-                if map_len == u64::MAX {
-                    if matches!(entry_decoder.datatype(), Ok(Type::Break)) {
-                        entries_processed = map_len; // Exit outer loop
-                        break;
-                    }
+                if map_len == u64::MAX && matches!(entry_decoder.datatype(), Ok(Type::Break)) {
+                    entries_processed = map_len; // Exit outer loop
+                    break;
                 }
 
                 // Try to parse one UTXO entry
@@ -1555,7 +1565,7 @@ impl StreamingSnapshotParser {
                         last_good_position = bytes_consumed;
 
                         // Progress reporting - less frequent for better performance
-                        if utxo_count % 1000000 == 0 {
+                        if utxo_count.is_multiple_of(1000000) {
                             let buffer_usage = buffer.len();
                             info!(
                                 "    Streamed {} UTXOs, buffer: {} MB, max entry: {} bytes",

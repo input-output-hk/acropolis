@@ -16,7 +16,11 @@ mod handlers_config;
 mod types;
 mod utils;
 use handlers::{
-    accounts::handle_single_account_blockfrost,
+    accounts::{
+        handle_account_delegations_blockfrost, handle_account_mirs_blockfrost,
+        handle_account_registrations_blockfrost, handle_account_rewards_blockfrost,
+        handle_account_withdrawals_blockfrost, handle_single_account_blockfrost,
+    },
     addresses::{
         handle_address_asset_utxos_blockfrost, handle_address_extended_blockfrost,
         handle_address_single_blockfrost, handle_address_totals_blockfrost,
@@ -63,6 +67,24 @@ use crate::handlers_config::HandlersConfig;
 // Accounts topics
 const DEFAULT_HANDLE_SINGLE_ACCOUNT_TOPIC: (&str, &str) =
     ("handle-topic-account-single", "rest.get.accounts.*");
+const DEFAULT_HANDLE_ACCOUNT_REGISTRATIONS_TOPIC: (&str, &str) = (
+    "handle-topic-account-registrations",
+    "rest.get.accounts.*.registrations",
+);
+const DEFAULT_HANDLE_ACCOUNT_DELEGATIONS_TOPIC: (&str, &str) = (
+    "handle-topic-account-delegations",
+    "rest.get.accounts.*.delegations",
+);
+const DEFAULT_HANDLE_ACCOUNT_MIRS_TOPIC: (&str, &str) =
+    ("handle-topic-account-mirs", "rest.get.accounts.*.mirs");
+const DEFAULT_HANDLE_ACCOUNT_WITHDRAWALS_TOPIC: (&str, &str) = (
+    "handle-topic-account-withdrawals",
+    "rest.get.accounts.*.withdrawals",
+);
+const DEFAULT_HANDLE_ACCOUNT_REWARDS_TOPIC: (&str, &str) = (
+    "handle-topic-account-rewards",
+    "rest.get.accounts.*.rewards",
+);
 
 // Blocks topics
 const DEFAULT_HANDLE_BLOCKS_LATEST_HASH_NUMBER_TOPIC: (&str, &str) =
@@ -247,6 +269,46 @@ impl BlockfrostREST {
             DEFAULT_HANDLE_SINGLE_ACCOUNT_TOPIC,
             handlers_config.clone(),
             handle_single_account_blockfrost,
+        );
+
+        // Handler for /accounts/{stake_address}/registrations
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_ACCOUNT_REGISTRATIONS_TOPIC,
+            handlers_config.clone(),
+            handle_account_registrations_blockfrost,
+        );
+
+        // Handler for /accounts/{stake_address}/delegations
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_ACCOUNT_DELEGATIONS_TOPIC,
+            handlers_config.clone(),
+            handle_account_delegations_blockfrost,
+        );
+
+        // Handler for /accounts/{stake_address}/mirs
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_ACCOUNT_MIRS_TOPIC,
+            handlers_config.clone(),
+            handle_account_mirs_blockfrost,
+        );
+
+        // Handler for /accounts/{stake_address}/withdrawals
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_ACCOUNT_WITHDRAWALS_TOPIC,
+            handlers_config.clone(),
+            handle_account_withdrawals_blockfrost,
+        );
+
+        // Handler for /accounts/{stake_address}/rewards
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_ACCOUNT_REWARDS_TOPIC,
+            handlers_config.clone(),
+            handle_account_rewards_blockfrost,
         );
 
         // Handler for /blocks/latest, /blocks/{hash_or_number}

@@ -25,6 +25,7 @@ pub struct StoreConfig {
 }
 
 impl StoreConfig {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         store_epochs_history: bool,
         store_retired_pools: bool,

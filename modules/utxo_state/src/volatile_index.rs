@@ -23,7 +23,7 @@ impl VolatileIndex {
 
     /// Get the number of entries in the index
     pub fn len(&self) -> usize {
-        return self.blocks.iter().map(|v| v.len()).sum();
+        self.blocks.iter().map(|v| v.len()).sum()
     }
 
     /// Add a new block entry
@@ -44,7 +44,7 @@ impl VolatileIndex {
     /// Add a UTXO to the current last block
     pub fn add_utxo(&mut self, utxo: &UTxOIdentifier) {
         if let Some(last) = self.blocks.back_mut() {
-            last.push(utxo.clone());
+            last.push(*utxo);
         }
     }
 
@@ -66,7 +66,7 @@ impl VolatileIndex {
             self.first_block += 1;
         }
 
-        return utxos;
+        utxos
     }
 
     /// Prune all blocks at or after the given boundary returning a vector of
@@ -92,7 +92,7 @@ impl VolatileIndex {
             last_block -= 1;
         }
 
-        return utxos;
+        utxos
     }
 }
 

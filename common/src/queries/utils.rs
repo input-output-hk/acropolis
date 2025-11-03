@@ -19,7 +19,7 @@ where
 
     let message = Arc::try_unwrap(raw_msg).unwrap_or_else(|arc| (*arc).clone());
 
-    Ok(extractor(message)?)
+    extractor(message)
 }
 
 /// The outer option in the extractor return value is whether the response was handled by F
@@ -33,7 +33,7 @@ where
     F: FnOnce(Message) -> Option<Result<Option<T>, anyhow::Error>>,
     T: Serialize,
 {
-    let result = query_state(&context, topic, request_msg, |response| {
+    let result = query_state(context, topic, request_msg, |response| {
         match extractor(response) {
             Some(response) => response,
             None => Err(anyhow::anyhow!(

@@ -1,5 +1,5 @@
 use crate::{
-    KeyHash, MultiHostName, PoolRegistration, Ratio, Relay, SingleHostAddr, SingleHostName,
+    MultiHostName, PoolId, PoolRegistration, Ratio, Relay, SingleHostAddr, SingleHostName,
 };
 use anyhow::{bail, Context, Result};
 use minicbor::data::Tag;
@@ -31,11 +31,11 @@ pub struct ParametersState {}
 )]
 pub struct SPOState {
     #[n(0)]
-    pub pools: BTreeMap<KeyHash, PoolRegistration>,
+    pub pools: BTreeMap<PoolId, PoolRegistration>,
     #[n(1)]
-    pub updates: BTreeMap<KeyHash, PoolRegistration>,
+    pub updates: BTreeMap<PoolId, PoolRegistration>,
     #[n(2)]
-    pub retiring: BTreeMap<KeyHash, u64>,
+    pub retiring: BTreeMap<PoolId, u64>,
 }
 
 pub struct DRepState {}
@@ -75,7 +75,7 @@ impl LedgerState {
             let entry = entry.with_context(|| "failed to read directory entry")?;
             let path = entry.path();
 
-            if path.is_file() && path.extension().map_or(false, |ext| ext == "cbor") {
+            if path.is_file() && path.extension().is_some_and(|ext| ext == "cbor") {
                 self.load_cbor_file(&path)
                     .with_context(|| format!("failed to load CBOR file: {}", path.display()))?;
             }

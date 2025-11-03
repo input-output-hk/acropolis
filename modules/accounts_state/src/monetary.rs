@@ -32,7 +32,7 @@ pub fn calculate_monetary_change(
 
     // Handle monetary expansion - movement from reserves to rewards and treasury
     let eta = calculate_eta(params, total_non_obft_blocks)?;
-    let monetary_expansion = calculate_monetary_expansion(&params, old_pots.reserves, &eta);
+    let monetary_expansion = calculate_monetary_expansion(params, old_pots.reserves, &eta);
 
     // Total rewards available is monetary expansion plus fees from last epoch
     // TODO not sure why this is one epoch behind
@@ -108,11 +108,11 @@ fn calculate_monetary_expansion(
 mod tests {
     use super::*;
     use acropolis_common::rational_number::rational_number_from_f32;
-    use acropolis_common::NetworkId;
     use acropolis_common::{
         protocol_params::{Nonce, NonceVariant, ProtocolVersion, ShelleyProtocolParams},
         GenesisDelegate,
     };
+    use acropolis_common::{NetworkId, PoolId};
     use chrono::{DateTime, Utc};
     use std::collections::HashMap;
 
@@ -175,7 +175,7 @@ mod tests {
             slots_per_kes_period: 129600,
             system_start: DateTime::<Utc>::default(),
             update_quorum: 5,
-            gen_delegs: HashMap::<Vec<u8>, GenesisDelegate>::new(),
+            gen_delegs: HashMap::<PoolId, GenesisDelegate>::new(),
         }
     }
 

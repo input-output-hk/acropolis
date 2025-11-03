@@ -49,16 +49,23 @@ impl TxUnpacker {
             enactment_epoch: epoch,
         };
 
-        for (hash, vote) in proposals.iter() {
+        for (hash_bytes, vote) in proposals.iter() {
+            let hash = match GenesisKeyhash::try_from(hash_bytes.as_ref()) {
+                Ok(h) => h,
+                Err(e) => {
+                    error!("Invalid genesis keyhash in protocol parameter update: {e}");
+                    continue;
+                }
+            };
+
             match map(vote) {
-                Ok(upd) => update.proposals.push((hash.to_vec(), upd)),
-                Err(e) => error!("Cannot convert alonzo protocol param update {vote:?}: {e}"),
+                Ok(upd) => update.proposals.push((hash, upd)),
+                Err(e) => error!("Cannot convert protocol param update {vote:?}: {e}"),
             }
         }
 
         dest.push(update);
     }
-
     /// Main init function
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // Get configuration
@@ -102,6 +109,9 @@ impl TxUnpacker {
         if let Some(ref topic) = publish_block_txs_topic {
             info!("Publishing block txs on '{topic}'");
         }
+
+        let network_id: NetworkId =
+            config.get_string("network-id").unwrap_or("mainnet".to_string()).into();
 
         // Initialize UTxORegistry
         let mut utxo_registry = UTxORegistry::default();
@@ -158,7 +168,7 @@ impl TxUnpacker {
                                 let tx_index = tx_index as u16;
 
                                 // Parse the tx
-                                match MultiEraTx::decode(&raw_tx) {
+                                match MultiEraTx::decode(raw_tx) {
                                     Ok(tx) => {
                                         let tx_hash: TxHash = tx.hash().to_vec().try_into().expect("invalid tx hash length");
                                         let tx_identifier = TxIdentifier::new(block_number, tx_index);
@@ -180,7 +190,7 @@ impl TxUnpacker {
                                             for input in inputs {  // MultiEraInput
                                                 // Lookup and remove UTxOIdentifier from registry 
                                                 let oref = input.output_ref();
-                                                let tx_ref = TxOutRef::new(TxHash(**oref.hash()), oref.index() as u16);
+                                                let tx_ref = TxOutRef::new(TxHash::from(**oref.hash()), oref.index() as u16);
 
                                                 match utxo_registry.consume(&tx_ref) {
                                                     Ok(tx_identifier) => {
@@ -265,9 +275,8 @@ impl TxUnpacker {
                                         }
 
                                         if publish_certificates_topic.is_some() {
-                                            let tx_hash = tx.hash();
                                             for ( cert_index, cert) in certs.iter().enumerate() {
-                                                match map_parameters::map_certificate(&cert, TxHash(*tx_hash), tx_index, cert_index) {
+                                                match map_parameters::map_certificate(cert, tx_identifier, cert_index, network_id.clone()) {
                                                     Ok(tx_cert) => {
                                                         certificates.push(tx_cert);
                                                     },
@@ -284,11 +293,11 @@ impl TxUnpacker {
                                                 match StakeAddress::from_binary(key) {
                                                     Ok(stake_address) => {
                                                         withdrawals.push(Withdrawal {
-                                                            address: stake_address,
-                                                            value,
-                                                        });
-                                                    }
-
+                                                                address: stake_address,
+                                                                value,
+                                                                tx_identifier
+                                                            });
+                                                        }
                                                     Err(e) => error!("Bad stake address: {e:#}"),
                                                 }
                                             }
@@ -297,7 +306,7 @@ impl TxUnpacker {
                                         if publish_governance_procedures_topic.is_some() {
                                             //Self::decode_legacy_updates(&mut legacy_update_proposals, &block, &raw_tx);
                                             if block.era >= Era::Shelley && block.era < Era::Babbage {
-                                                if let Ok(alonzo) = MultiEraTx::decode_for_era(traverse::Era::Alonzo, &raw_tx) {
+                                                if let Ok(alonzo) = MultiEraTx::decode_for_era(traverse::Era::Alonzo, raw_tx) {
                                                     if let Some(update) = alonzo.update() {
                                                         if let Some(alonzo_update) = update.as_alonzo() {
                                                             Self::decode_updates(
@@ -311,7 +320,7 @@ impl TxUnpacker {
                                                 }
                                             }
                                             else if block.era >= Era::Babbage && block.era < Era::Conway{
-                                                if let Ok(babbage) = MultiEraTx::decode_for_era(traverse::Era::Babbage, &raw_tx) {
+                                                if let Ok(babbage) = MultiEraTx::decode_for_era(traverse::Era::Babbage, raw_tx) {
                                                     if let Some(update) = babbage.update() {
                                                         if let Some(babbage_update) = update.as_babbage() {
                                                             Self::decode_updates(
@@ -340,10 +349,10 @@ impl TxUnpacker {
                                         if publish_governance_procedures_topic.is_some() {
                                             if let Some(pp) = props {
                                                 // Nonempty set -- governance_message.proposal_procedures will not be empty
-                                                let mut proc_id = GovActionId { transaction_id: TxHash(*tx.hash()), action_index: 0 };
+                                                let mut proc_id = GovActionId { transaction_id: tx_hash, action_index: 0 };
                                                 for (action_index, pallas_governance_proposals) in pp.iter().enumerate() {
                                                     match proc_id.set_action_index(action_index)
-                                                        .and_then (|proc_id| map_parameters::map_governance_proposals_procedures(&proc_id, &pallas_governance_proposals))
+                                                        .and_then (|proc_id| map_parameters::map_governance_proposals_procedures(proc_id, pallas_governance_proposals))
                                                     {
                                                         Ok(g) => proposal_procedures.push(g),
                                                         Err(e) => error!("Cannot decode governance proposal procedure {} idx {} in slot {}: {e}", proc_id, action_index, block.slot)
@@ -354,7 +363,7 @@ impl TxUnpacker {
                                             if let Some(pallas_vp) = votes {
                                                 // Nonempty set -- governance_message.voting_procedures will not be empty
                                                 match map_parameters::map_all_governance_voting_procedures(pallas_vp) {
-                                                    Ok(vp) => voting_procedures.push((TxHash(*tx.hash()), vp)),
+                                                    Ok(vp) => voting_procedures.push((tx_hash, vp)),
                                                     Err(e) => error!("Cannot decode governance voting procedures in slot {}: {e}", block.slot)
                                                 }
                                             }
@@ -383,7 +392,7 @@ impl TxUnpacker {
                                     })
                                 ));
 
-                                futures.push(context.message_bus.publish(&topic, Arc::new(msg)));
+                                futures.push(context.message_bus.publish(topic, Arc::new(msg)));
                             }
 
                             if let Some(ref topic) = publish_asset_deltas_topic {
@@ -395,7 +404,7 @@ impl TxUnpacker {
                                     })
                                 ));
 
-                                futures.push(context.message_bus.publish(&topic, Arc::new(msg)));
+                                futures.push(context.message_bus.publish(topic, Arc::new(msg)));
                             }
 
                             if let Some(ref topic) = publish_withdrawals_topic {
@@ -406,7 +415,7 @@ impl TxUnpacker {
                                     })
                                 ));
 
-                                futures.push(context.message_bus.publish(&topic, Arc::new(msg)));
+                                futures.push(context.message_bus.publish(topic, Arc::new(msg)));
                             }
 
                             if let Some(ref topic) = publish_certificates_topic {
@@ -417,7 +426,7 @@ impl TxUnpacker {
                                     })
                                 ));
 
-                                futures.push(context.message_bus.publish(&topic, Arc::new(msg)));
+                                futures.push(context.message_bus.publish(topic, Arc::new(msg)));
                             }
 
                             if let Some(ref topic) = publish_governance_procedures_topic {
@@ -431,7 +440,7 @@ impl TxUnpacker {
                                         })
                                 )));
 
-                                futures.push(context.message_bus.publish(&topic,
+                                futures.push(context.message_bus.publish(topic,
                                                                          governance_msg.clone()));
                             }
 
@@ -445,7 +454,7 @@ impl TxUnpacker {
                                     })
                                 ));
 
-                                futures.push(context.message_bus.publish(&topic, Arc::new(msg)));
+                                futures.push(context.message_bus.publish(topic, Arc::new(msg)));
                             }
 
                             join_all(futures)

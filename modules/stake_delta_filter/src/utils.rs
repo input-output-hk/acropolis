@@ -1,7 +1,7 @@
 use acropolis_common::{
     messages::{AddressDeltasMessage, StakeAddressDeltasMessage},
     Address, AddressDelta, BlockInfo, Era, ShelleyAddressDelegationPart, ShelleyAddressPointer,
-    StakeAddress, StakeAddressDelta, StakeAddressPayload,
+    StakeAddress, StakeAddressDelta, StakeCredential,
 };
 use anyhow::{anyhow, Result};
 use serde_with::serde_as;
@@ -43,10 +43,8 @@ impl PointerCache {
     }
 
     pub fn update_block(&mut self, blk: &BlockInfo) {
-        if self.conway_start_slot.is_none() {
-            if blk.era >= Era::Conway {
-                self.conway_start_slot = Some(blk.slot);
-            }
+        if self.conway_start_slot.is_none() && blk.era >= Era::Conway {
+            self.conway_start_slot = Some(blk.slot);
         }
     }
 
@@ -127,7 +125,7 @@ impl PointerCache {
     pub fn try_save_filtered(
         &self,
         file_path: &str,
-        used_pointers: &Vec<ShelleyAddressPointer>,
+        used_pointers: &[ShelleyAddressPointer],
     ) -> Result<()> {
         let mut clean_pointer_cache = PointerCache {
             max_slot: self.max_slot,
@@ -199,19 +197,19 @@ impl Tracker {
         d: &AddressDelta,
         sa: Option<&StakeAddress>,
     ) {
-        self.occurrence.entry(p.clone()).or_insert(vec![]).push(OccurrenceInfo {
+        self.occurrence.entry(p.clone()).or_default().push(OccurrenceInfo {
             block: b.clone(),
             address_delta: d.clone(),
             stake_address: sa.cloned(),
         });
     }
 
-    fn get_kind(v: &Vec<OccurrenceInfo>) -> Option<OccurrenceInfoKind> {
+    fn get_kind(v: &[OccurrenceInfo]) -> Option<OccurrenceInfoKind> {
         let mut is_valid = false;
         let mut is_invalid = false;
         for event in v.iter() {
             is_valid |= event.stake_address.is_some();
-            is_invalid |= !event.stake_address.is_some();
+            is_invalid |= event.stake_address.is_none();
         }
         match (is_valid, is_invalid) {
             (true, false) => Some(OccurrenceInfoKind::Valid),
@@ -226,7 +224,7 @@ impl Tracker {
         let mut invalid_ptrs = 0;
         let mut mixed_ptrs = 0;
         for (_k, v) in self.occurrence.iter() {
-            if let Some(kind) = Self::get_kind(&v) {
+            if let Some(kind) = Self::get_kind(v) {
                 match kind {
                     OccurrenceInfoKind::Valid => valid_ptrs += 1,
                     OccurrenceInfoKind::Invalid => invalid_ptrs += 1,
@@ -243,7 +241,7 @@ impl Tracker {
     }
 
     fn join_hash_set(hs: HashSet<String>, mid: &str) -> String {
-        let v = Vec::from_iter(hs.into_iter());
+        let v = Vec::from_iter(hs);
         v.join(mid)
     }
 
@@ -347,12 +345,12 @@ pub fn process_message(
                     // Base addresses (stake delegated to itself)
                     ShelleyAddressDelegationPart::StakeKeyHash(keyhash) => StakeAddress {
                         network: shelley.network.clone(),
-                        payload: StakeAddressPayload::StakeKeyHash(keyhash.clone()),
+                        credential: StakeCredential::AddrKeyHash(*keyhash),
                     },
 
                     ShelleyAddressDelegationPart::ScriptHash(scripthash) => StakeAddress {
                         network: shelley.network.clone(),
-                        payload: StakeAddressPayload::ScriptHash(scripthash.clone()),
+                        credential: StakeCredential::ScriptHash(*scripthash),
                     },
 
                     // Shelley addresses (stake delegated to some different address)
@@ -360,19 +358,23 @@ pub fn process_message(
                         match cache.decode_pointer(ptr) {
                             None => {
                                 tracing::warn!("Pointer {ptr:?} is not registered in cache");
-                                tracker.as_mut().map(|t| t.track(ptr, block, &d, None));
+                                if let Some(t) = tracker.as_mut() {
+                                    t.track(ptr, block, d, None)
+                                }
                                 continue;
                             }
 
                             Some(None) => {
-                                tracker.as_mut().map(|t| t.track(ptr, block, &d, None));
+                                if let Some(t) = tracker.as_mut() {
+                                    t.track(ptr, block, d, None)
+                                }
                                 continue;
                             }
 
                             Some(Some(ref stake_address)) => {
-                                tracker
-                                    .as_mut()
-                                    .map(|t| t.track(ptr, block, &d, Some(stake_address)));
+                                if let Some(t) = tracker.as_mut() {
+                                    t.track(ptr, block, d, Some(stake_address))
+                                }
                                 stake_address.clone()
                             }
                         }
@@ -399,12 +401,14 @@ pub fn process_message(
 #[cfg(test)]
 mod test {
     use crate::*;
+    use acropolis_common::hash::Hash;
     use acropolis_common::{
         messages::AddressDeltasMessage, Address, AddressDelta, BlockHash, BlockInfo, BlockStatus,
         ByronAddress, Era, ShelleyAddress, ShelleyAddressDelegationPart, ShelleyAddressPaymentPart,
-        ShelleyAddressPointer, StakeAddress, StakeAddressPayload, UTxOIdentifier, ValueDelta,
+        ShelleyAddressPointer, StakeAddress, StakeCredential, UTxOIdentifier, ValueDelta,
     };
     use bech32::{Bech32, Hrp};
+    use pallas::ledger::addresses::{PaymentKeyHash, ScriptHash, StakeKeyHash};
 
     fn parse_addr(s: &str) -> Result<AddressDelta> {
         let a = pallas::ledger::addresses::Address::from_bech32(s)?;
@@ -415,14 +419,26 @@ mod test {
         })
     }
 
-    /// Map Pallas Network to our AddressNetwork
-    fn map_network(network: pallas::ledger::addresses::Network) -> Result<AddressNetwork> {
+    /// Map Pallas Network to our NetworkId
+    fn map_network(network: pallas::ledger::addresses::Network) -> Result<NetworkId> {
         use pallas::ledger::addresses::Network;
         match network {
-            Network::Mainnet => Ok(AddressNetwork::Main),
-            Network::Testnet => Ok(AddressNetwork::Test),
-            _ => return Err(anyhow!("Unknown network in address")),
+            Network::Mainnet => Ok(NetworkId::Mainnet),
+            Network::Testnet => Ok(NetworkId::Testnet),
+            _ => Err(anyhow!("Unknown network in address")),
         }
+    }
+
+    pub fn script_to_hash(pallas_hash: ScriptHash) -> Hash<28> {
+        pallas_hash.as_ref().try_into().unwrap()
+    }
+
+    pub fn stake_to_hash(pallas_hash: StakeKeyHash) -> Hash<28> {
+        pallas_hash.as_ref().try_into().unwrap()
+    }
+
+    pub fn payment_to_hash(pallas_hash: PaymentKeyHash) -> Hash<28> {
+        pallas_hash.as_ref().try_into().unwrap()
     }
 
     /// Derive our Address from a Pallas address
@@ -440,20 +456,20 @@ mod test {
 
                 payment: match shelley_address.payment() {
                     addresses::ShelleyPaymentPart::Key(hash) => {
-                        ShelleyAddressPaymentPart::PaymentKeyHash(hash.to_vec())
+                        ShelleyAddressPaymentPart::PaymentKeyHash(payment_to_hash(*hash))
                     }
                     addresses::ShelleyPaymentPart::Script(hash) => {
-                        ShelleyAddressPaymentPart::ScriptHash(hash.to_vec())
+                        ShelleyAddressPaymentPart::ScriptHash(script_to_hash(*hash))
                     }
                 },
 
                 delegation: match shelley_address.delegation() {
                     addresses::ShelleyDelegationPart::Null => ShelleyAddressDelegationPart::None,
                     addresses::ShelleyDelegationPart::Key(hash) => {
-                        ShelleyAddressDelegationPart::StakeKeyHash(hash.to_vec())
+                        ShelleyAddressDelegationPart::StakeKeyHash(stake_to_hash(*hash))
                     }
                     addresses::ShelleyDelegationPart::Script(hash) => {
-                        ShelleyAddressDelegationPart::ScriptHash(hash.to_vec())
+                        ShelleyAddressDelegationPart::ScriptHash(script_to_hash(*hash))
                     }
                     addresses::ShelleyDelegationPart::Pointer(pointer) => {
                         ShelleyAddressDelegationPart::Pointer(ShelleyAddressPointer {
@@ -467,12 +483,12 @@ mod test {
 
             addresses::Address::Stake(stake_address) => Ok(Address::Stake(StakeAddress {
                 network: map_network(stake_address.network())?,
-                payload: match stake_address.payload() {
+                credential: match stake_address.payload() {
                     addresses::StakePayload::Stake(hash) => {
-                        StakeAddressPayload::StakeKeyHash(hash.to_vec())
+                        StakeCredential::AddrKeyHash(stake_to_hash(*hash))
                     }
                     addresses::StakePayload::Script(hash) => {
-                        StakeAddressPayload::ScriptHash(hash.to_vec())
+                        StakeCredential::ScriptHash(script_to_hash(*hash))
                     }
                 },
             })),
@@ -483,7 +499,7 @@ mod test {
         let (_hrp, key_vec) = bech32::decode(key).unwrap();
         let hash_vec = pallas::crypto::hash::Hasher::<224>::hash(&key_vec);
         let prefix_hrp: Hrp = Hrp::parse(prefix).unwrap();
-        bech32::encode::<Bech32>(prefix_hrp, &hash_vec.to_vec()).unwrap()
+        bech32::encode::<Bech32>(prefix_hrp, hash_vec.as_ref()).unwrap()
     }
 
     // The test is based on CIP-19 standard examples.
@@ -549,7 +565,7 @@ mod test {
         let stake_delta = process_message(&cache, &delta, &block, None);
 
         assert_eq!(
-            stake_delta.deltas.get(0).unwrap().address.to_string().unwrap(),
+            stake_delta.deltas.first().unwrap().address.to_string().unwrap(),
             stake_addr
         );
         assert_eq!(
@@ -583,11 +599,11 @@ mod test {
 
         // additional check: payload conversion correctness
         assert_eq!(
-            stake_delta.deltas.get(0).unwrap().address.payload.to_string().unwrap(),
+            stake_delta.deltas.first().unwrap().address.credential.to_string().unwrap(),
             stake_key_hash
         );
         assert_eq!(
-            stake_delta.deltas.get(2).unwrap().address.payload.to_string().unwrap(),
+            stake_delta.deltas.get(2).unwrap().address.credential.to_string().unwrap(),
             script_hash
         );
 

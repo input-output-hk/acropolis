@@ -139,17 +139,17 @@ impl ImmutableAddressStore {
             batch.insert(
                 &self.utxos,
                 ADDRESS_UTXOS_EPOCH_COUNTER,
-                &epoch.to_le_bytes(),
+                epoch.to_le_bytes(),
             );
         }
         if persist_txs {
-            batch.insert(&self.txs, ADDRESS_TXS_EPOCH_COUNTER, &epoch.to_le_bytes());
+            batch.insert(&self.txs, ADDRESS_TXS_EPOCH_COUNTER, epoch.to_le_bytes());
         }
         if persist_totals {
             batch.insert(
                 &self.totals,
                 ADDRESS_TOTALS_EPOCH_COUNTER,
-                &epoch.to_le_bytes(),
+                epoch.to_le_bytes(),
             );
         }
 

@@ -63,6 +63,7 @@ pub struct AccountsState;
 
 impl AccountsState {
     /// Async run loop
+    #[allow(clippy::too_many_arguments)]
     async fn run(
         history: Arc<Mutex<StateHistory<State>>>,
         spdd_store: Option<Arc<Mutex<SPDDStore>>>,
@@ -166,8 +167,8 @@ impl AccountsState {
                             block = block_info.number
                         );
                         async {
-                            Self::check_sync(&current_block, &block_info);
-                            state.handle_drep_state(&dreps_msg);
+                            Self::check_sync(&current_block, block_info);
+                            state.handle_drep_state(dreps_msg);
 
                             let drdd = state.generate_drdd();
                             if let Err(e) = drep_publisher.publish_drdd(block_info, drdd).await {
@@ -188,7 +189,7 @@ impl AccountsState {
                         let span =
                             info_span!("account_state.handle_spo_state", block = block_info.number);
                         async {
-                            Self::check_sync(&current_block, &block_info);
+                            Self::check_sync(&current_block, block_info);
                             state
                                 .handle_spo_state(spo_msg)
                                 .inspect_err(|e| error!("SPOState handling error: {e:#}"))
@@ -225,7 +226,7 @@ impl AccountsState {
                             block = block_info.number
                         );
                         async {
-                            Self::check_sync(&current_block, &block_info);
+                            Self::check_sync(&current_block, block_info);
                             state
                                 .handle_parameters(params_msg)
                                 .inspect_err(|e| error!("Messaging handling error: {e}"))
@@ -247,9 +248,9 @@ impl AccountsState {
                             block = block_info.number
                         );
                         async {
-                            Self::check_sync(&current_block, &block_info);
+                            Self::check_sync(&current_block, block_info);
                             let after_epoch_result = state
-                                .handle_epoch_activity(ea_msg, &verifier)
+                                .handle_epoch_activity(ea_msg, verifier)
                                 .await
                                 .inspect_err(|e| error!("EpochActivity handling error: {e:#}"))
                                 .ok();
@@ -285,7 +286,7 @@ impl AccountsState {
                 Message::Cardano((block_info, CardanoMessage::TxCertificates(tx_certs_msg))) => {
                     let span = info_span!("account_state.handle_certs", block = block_info.number);
                     async {
-                        Self::check_sync(&current_block, &block_info);
+                        Self::check_sync(&current_block, block_info);
                         state
                             .handle_tx_certificates(tx_certs_msg)
                             .inspect_err(|e| error!("TxCertificates handling error: {e:#}"))
@@ -307,7 +308,7 @@ impl AccountsState {
                         block = block_info.number
                     );
                     async {
-                        Self::check_sync(&current_block, &block_info);
+                        Self::check_sync(&current_block, block_info);
                         state
                             .handle_withdrawals(withdrawals_msg)
                             .inspect_err(|e| error!("Withdrawals handling error: {e:#}"))
@@ -329,7 +330,7 @@ impl AccountsState {
                         block = block_info.number
                     );
                     async {
-                        Self::check_sync(&current_block, &block_info);
+                        Self::check_sync(&current_block, block_info);
                         state
                             .handle_stake_deltas(deltas_msg)
                             .inspect_err(|e| error!("StakeAddressDeltas handling error: {e:#}"))
@@ -504,12 +505,12 @@ impl AccountsState {
                 };
 
                 let response = match query {
-                    AccountsStateQuery::GetAccountInfo { stake_key } => {
-                        if let Some(account) = state.get_stake_state(stake_key) {
+                    AccountsStateQuery::GetAccountInfo { account } => {
+                        if let Some(account) = state.get_stake_state(account) {
                             AccountsStateQueryResponse::AccountInfo(AccountInfo {
                                 utxo_value: account.utxo_value,
                                 rewards: account.rewards,
-                                delegated_spo: account.delegated_spo.clone(),
+                                delegated_spo: account.delegated_spo,
                                 delegated_drep: account.delegated_drep.clone(),
                             })
                         } else {
@@ -541,14 +542,16 @@ impl AccountsState {
                         })
                     }
 
-                    AccountsStateQuery::GetAccountsDrepDelegationsMap { stake_keys } => match state
-                        .get_drep_delegations_map(stake_keys)
-                    {
-                        Some(map) => AccountsStateQueryResponse::AccountsDrepDelegationsMap(map),
-                        None => AccountsStateQueryResponse::Error(
-                            "Error retrieving DRep delegations map".to_string(),
-                        ),
-                    },
+                    AccountsStateQuery::GetAccountsDrepDelegationsMap { stake_addresses } => {
+                        match state.get_drep_delegations_map(stake_addresses) {
+                            Some(map) => {
+                                AccountsStateQueryResponse::AccountsDrepDelegationsMap(map)
+                            }
+                            None => AccountsStateQueryResponse::Error(
+                                "Error retrieving DRep delegations map".to_string(),
+                            ),
+                        }
+                    }
 
                     AccountsStateQuery::GetOptimalPoolSizing => {
                         AccountsStateQueryResponse::OptimalPoolSizing(
@@ -556,8 +559,8 @@ impl AccountsState {
                         )
                     }
 
-                    AccountsStateQuery::GetAccountsUtxoValuesMap { stake_keys } => {
-                        match state.get_accounts_utxo_values_map(stake_keys) {
+                    AccountsStateQuery::GetAccountsUtxoValuesMap { stake_addresses } => {
+                        match state.get_accounts_utxo_values_map(stake_addresses) {
                             Some(map) => AccountsStateQueryResponse::AccountsUtxoValuesMap(map),
                             None => AccountsStateQueryResponse::Error(
                                 "One or more accounts not found".to_string(),
@@ -565,8 +568,8 @@ impl AccountsState {
                         }
                     }
 
-                    AccountsStateQuery::GetAccountsUtxoValuesSum { stake_keys } => {
-                        match state.get_accounts_utxo_values_sum(stake_keys) {
+                    AccountsStateQuery::GetAccountsUtxoValuesSum { stake_addresses } => {
+                        match state.get_accounts_utxo_values_sum(stake_addresses) {
                             Some(sum) => AccountsStateQueryResponse::AccountsUtxoValuesSum(sum),
                             None => AccountsStateQueryResponse::Error(
                                 "One or more accounts not found".to_string(),
@@ -574,8 +577,8 @@ impl AccountsState {
                         }
                     }
 
-                    AccountsStateQuery::GetAccountsBalancesMap { stake_keys } => {
-                        match state.get_accounts_balances_map(stake_keys) {
+                    AccountsStateQuery::GetAccountsBalancesMap { stake_addresses } => {
+                        match state.get_accounts_balances_map(stake_addresses) {
                             Some(map) => AccountsStateQueryResponse::AccountsBalancesMap(map),
                             None => AccountsStateQueryResponse::Error(
                                 "One or more accounts not found".to_string(),
@@ -589,8 +592,8 @@ impl AccountsState {
                         )
                     }
 
-                    AccountsStateQuery::GetAccountsBalancesSum { stake_keys } => {
-                        match state.get_account_balances_sum(stake_keys) {
+                    AccountsStateQuery::GetAccountsBalancesSum { stake_addresses } => {
+                        match state.get_account_balances_sum(stake_addresses) {
                             Some(sum) => AccountsStateQueryResponse::AccountsBalancesSum(sum),
                             None => AccountsStateQueryResponse::Error(
                                 "One or more accounts not found".to_string(),

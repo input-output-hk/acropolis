@@ -1,0 +1,24 @@
+# Acropolis consensus module
+
+[package]
+name = "acropolis_module_consensus"
+version = "0.1.0"
+edition = "2021"
+authors = ["Paul Clark <paul.clark@iohk.io>"]
+description = "Consensus Caryatid module for Acropolis"
+license = "Apache-2.0"
+
+[dependencies]
+acropolis_common = { path = "../../common" }
+
+caryatid_sdk = { workspace = true }
+
+anyhow = { workspace = true }
+config = { workspace = true }
+pallas = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+futures = "0.3.31"
+
+[lib]
+path = "src/consensus.rs"

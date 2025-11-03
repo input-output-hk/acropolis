@@ -6,7 +6,6 @@ use caryatid_process::Process;
 use config::{Config, Environment, File};
 use std::sync::Arc;
 use tracing::info;
-use tracing_subscriber;
 
 // External modules
 use acropolis_module_accounts_state::AccountsState;
@@ -14,11 +13,13 @@ use acropolis_module_address_state::AddressState;
 use acropolis_module_assets_state::AssetsState;
 use acropolis_module_block_unpacker::BlockUnpacker;
 use acropolis_module_chain_store::ChainStore;
+use acropolis_module_consensus::Consensus;
 use acropolis_module_drdd_state::DRDDState;
 use acropolis_module_drep_state::DRepState;
 use acropolis_module_epochs_state::EpochsState;
 use acropolis_module_genesis_bootstrapper::GenesisBootstrapper;
 use acropolis_module_governance_state::GovernanceState;
+use acropolis_module_historical_accounts_state::HistoricalAccountsState;
 use acropolis_module_mithril_snapshot_fetcher::MithrilSnapshotFetcher;
 use acropolis_module_parameters_state::ParametersState;
 use acropolis_module_rest_blockfrost::BlockfrostREST;
@@ -60,7 +61,7 @@ pub async fn main() -> Result<()> {
 
     // Standard logging using RUST_LOG for log levels default to INFO for events only
     let fmt_layer = fmt::layer()
-        .with_filter(EnvFilter::from_default_env().add_directive(filter::LevelFilter::INFO.into()))
+        .with_filter(EnvFilter::try_from_default_env().unwrap_or(EnvFilter::new("info")))
         .with_filter(filter::filter_fn(|meta| meta.is_event()));
 
     // Only turn on tracing if some OTEL environment variables exist
@@ -112,9 +113,11 @@ pub async fn main() -> Result<()> {
     AccountsState::register(&mut process);
     AddressState::register(&mut process);
     AssetsState::register(&mut process);
+    HistoricalAccountsState::register(&mut process);
     BlockfrostREST::register(&mut process);
     SPDDState::register(&mut process);
     DRDDState::register(&mut process);
+    Consensus::register(&mut process);
     ChainStore::register(&mut process);
 
     Clock::<Message>::register(&mut process);

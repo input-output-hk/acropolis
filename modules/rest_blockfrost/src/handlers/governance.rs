@@ -12,11 +12,11 @@ use acropolis_common::{
     },
     Credential, GovActionId, TxHash, Voter,
 };
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
 use reqwest::Client;
 use serde_json::Value;
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 pub async fn handle_dreps_list_blockfrost(
     context: Arc<Context<Message>>,
@@ -70,7 +70,7 @@ pub async fn handle_single_drep_blockfrost(
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
-    let Some(drep_id) = params.get(0) else {
+    let Some(drep_id) = params.first() else {
         return Ok(RESTResponse::with_text(400, "Missing DRep ID parameter"));
     };
 
@@ -99,16 +99,10 @@ pub async fn handle_single_drep_blockfrost(
         )) => {
             let active = !response.info.retired && !response.info.expired;
 
-            let accounts = response
-                .delegators
-                .iter()
-                .map(|addr| addr.get_hash()) // or `get_hash()` if using StakeCredential
-                .collect();
+            let stake_addresses = response.delegators.clone();
 
             let sum_msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
-                AccountsStateQuery::GetAccountsBalancesSum {
-                    stake_keys: accounts,
-                },
+                AccountsStateQuery::GetAccountsBalancesSum { stake_addresses },
             )));
 
             let raw_sum =
@@ -164,7 +158,7 @@ pub async fn handle_single_drep_blockfrost(
 
         Message::StateQueryResponse(StateQueryResponse::Governance(
             GovernanceStateQueryResponse::Error(e),
-        )) => Ok(RESTResponse::with_text(500, &format!("{e}"))),
+        )) => Ok(RESTResponse::with_text(500, &e.to_string())),
 
         _ => Ok(RESTResponse::with_text(500, "Unexpected message type")),
     }
@@ -175,7 +169,7 @@ pub async fn handle_drep_delegators_blockfrost(
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
-    let Some(drep_id) = params.get(0) else {
+    let Some(drep_id) = params.first() else {
         return Ok(RESTResponse::with_text(400, "Missing DRep ID parameter"));
     };
 
@@ -197,27 +191,10 @@ pub async fn handle_drep_delegators_blockfrost(
         Message::StateQueryResponse(StateQueryResponse::Governance(
             GovernanceStateQueryResponse::DRepDelegators(delegators),
         )) => {
-            let mut stake_keys = Vec::new();
-            let mut stake_key_to_bech32 = HashMap::new();
-
-            for addr in &delegators.addresses {
-                let bech32 = match addr.to_stake_bech32() {
-                    Ok(b) => b,
-                    Err(_) => {
-                        return Ok(RESTResponse::with_text(
-                            500,
-                            "Internal error: failed to encode stake address",
-                        ));
-                    }
-                };
-
-                let hash = addr.get_hash();
-                stake_keys.push(hash.clone());
-                stake_key_to_bech32.insert(hash, bech32);
-            }
-
             let msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
-                AccountsStateQuery::GetAccountsUtxoValuesMap { stake_keys },
+                AccountsStateQuery::GetAccountsUtxoValuesMap {
+                    stake_addresses: delegators.addresses.clone(),
+                },
             )));
 
             let raw_msg =
@@ -228,27 +205,31 @@ pub async fn handle_drep_delegators_blockfrost(
                 Message::StateQueryResponse(StateQueryResponse::Accounts(
                     AccountsStateQueryResponse::AccountsUtxoValuesMap(map),
                 )) => {
-                    let mut response = Vec::new();
+                    let response: Result<Vec<_>> = map
+                        .into_iter()
+                        .map(|(stake_address, amount)| {
+                            let bech32 = stake_address
+                                .to_string()
+                                .map_err(|e| anyhow!("Failed to encode stake address {}", e))?;
 
-                    for (key, amount) in map {
-                        let Some(bech32) = stake_key_to_bech32.get(&key) else {
-                            return Ok(RESTResponse::with_text(
+                            Ok(serde_json::json!({
+                                "address": bech32,
+                                "amount": amount.to_string(),
+                            }))
+                        })
+                        .collect();
+
+                    match response {
+                        Ok(response) => match serde_json::to_string_pretty(&response) {
+                            Ok(json) => Ok(RESTResponse::with_json(200, &json)),
+                            Err(e) => Ok(RESTResponse::with_text(
                                 500,
-                                "Internal error: missing Bech32 for stake key",
-                            ));
-                        };
-
-                        response.push(serde_json::json!({
-                            "address": bech32,
-                            "amount": amount.to_string(),
-                        }));
-                    }
-
-                    match serde_json::to_string_pretty(&response) {
-                        Ok(json) => Ok(RESTResponse::with_json(200, &json)),
+                                &format!("Failed to serialize DRep delegators: {e}"),
+                            )),
+                        },
                         Err(e) => Ok(RESTResponse::with_text(
                             500,
-                            &format!("Failed to serialize DRep delegators: {e}"),
+                            &format!("Internal error: {e}"),
                         )),
                     }
                 }
@@ -281,13 +262,12 @@ pub async fn handle_drep_delegators_blockfrost(
         _ => Ok(RESTResponse::with_text(500, "Unexpected message type")),
     }
 }
-
 pub async fn handle_drep_metadata_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
-    let Some(drep_id) = params.get(0) else {
+    let Some(drep_id) = params.first() else {
         return Ok(RESTResponse::with_text(400, "Missing DRep ID parameter"));
     };
 
@@ -385,7 +365,7 @@ pub async fn handle_drep_updates_blockfrost(
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
-    let Some(drep_id) = params.get(0) else {
+    let Some(drep_id) = params.first() else {
         return Ok(RESTResponse::with_text(400, "Missing DRep ID parameter"));
     };
 
@@ -411,7 +391,7 @@ pub async fn handle_drep_updates_blockfrost(
                 .updates
                 .iter()
                 .map(|event| DRepUpdateREST {
-                    tx_hash: hex::encode(event.tx_hash),
+                    tx_hash: "TxHash lookup not yet implemented".to_string(),
                     cert_index: event.cert_index,
                     action: event.action.clone(),
                 })
@@ -430,7 +410,7 @@ pub async fn handle_drep_updates_blockfrost(
             GovernanceStateQueryResponse::Error(_),
         )) => Ok(RESTResponse::with_text(
             503,
-            &format!("DRep updates storage is disabled in config"),
+            "DRep updates storage is disabled in config",
         )),
 
         Message::StateQueryResponse(StateQueryResponse::Governance(
@@ -446,7 +426,7 @@ pub async fn handle_drep_votes_blockfrost(
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
-    let Some(drep_id) = params.get(0) else {
+    let Some(drep_id) = params.first() else {
         return Ok(RESTResponse::with_text(400, "Missing DRep ID parameter"));
     };
 
@@ -471,7 +451,7 @@ pub async fn handle_drep_votes_blockfrost(
                 .votes
                 .iter()
                 .map(|vote| DRepVoteREST {
-                    tx_hash: hex::encode(&vote.tx_hash),
+                    tx_hash: hex::encode(vote.tx_hash),
                     cert_index: vote.vote_index,
                     vote: vote.vote.clone(),
                 })
@@ -617,7 +597,7 @@ pub async fn handle_proposal_votes_blockfrost(
         Err(resp) => return Ok(resp),
     };
 
-    let tx_hash = hex::encode(&proposal.transaction_id);
+    let tx_hash = hex::encode(proposal.transaction_id);
     let cert_index = proposal.action_index;
 
     let msg = Arc::new(Message::StateQuery(StateQuery::Governance(

@@ -1,12 +1,12 @@
 use acropolis_common::{
     state_history::{StateHistory, StateHistoryStore},
-    DelegatedStake, KeyHash,
+    DelegatedStake, PoolId,
 };
 use imbl::{OrdMap, OrdSet};
 use tracing::info;
 
 pub struct State {
-    spdd_history: StateHistory<OrdMap<KeyHash, DelegatedStake>>,
+    spdd_history: StateHistory<OrdMap<PoolId, DelegatedStake>>,
 }
 
 impl State {
@@ -18,7 +18,7 @@ impl State {
 
     pub fn apply_spdd_snapshot<I>(&mut self, epoch: u64, snapshot: I)
     where
-        I: IntoIterator<Item = (KeyHash, DelegatedStake)>,
+        I: IntoIterator<Item = (PoolId, DelegatedStake)>,
     {
         let mut next = self.spdd_history.get_rolled_back_state(epoch);
 
@@ -29,13 +29,12 @@ impl State {
                 None => true,
             };
             if changed {
-                next.insert(k.clone(), v_new);
+                next.insert(k, v_new);
             }
             present.insert(k);
         }
 
-        let to_remove: Vec<_> =
-            next.keys().filter(|k| !present.contains::<[u8]>((**k).as_slice())).cloned().collect();
+        let to_remove: Vec<_> = next.keys().filter(|k| !present.contains(*k)).cloned().collect();
         for k in to_remove {
             next.remove(&k);
         }
@@ -44,12 +43,12 @@ impl State {
     }
 
     #[allow(dead_code)]
-    pub fn get_latest(&self) -> Option<&OrdMap<KeyHash, DelegatedStake>> {
+    pub fn get_latest(&self) -> Option<&OrdMap<PoolId, DelegatedStake>> {
         self.spdd_history.current()
     }
 
     #[allow(dead_code)]
-    pub fn get_epoch(&self, epoch: u64) -> Option<&OrdMap<KeyHash, DelegatedStake>> {
+    pub fn get_epoch(&self, epoch: u64) -> Option<&OrdMap<PoolId, DelegatedStake>> {
         self.spdd_history.get_by_index(epoch)
     }
 
@@ -57,7 +56,7 @@ impl State {
     // we plus 2 to epoch number
     pub fn get_epoch_total_active_stakes(&self, epoch: u64) -> Option<u64> {
         if epoch <= 2 {
-            return None;
+            None
         } else {
             self.spdd_history
                 .get_by_index(epoch - 2)

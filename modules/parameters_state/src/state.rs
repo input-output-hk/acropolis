@@ -33,7 +33,7 @@ impl State {
     }
 
     pub fn apply_genesis(&mut self, new_block: &BlockInfo) -> Result<()> {
-        let to_apply = Self::genesis_era_range(self.current_era.clone(), new_block.era.clone());
+        let to_apply = Self::genesis_era_range(self.current_era, new_block.era);
         if to_apply.is_empty() {
             return Ok(());
         }
@@ -60,7 +60,7 @@ impl State {
         msg: &GovernanceOutcomesMessage,
     ) -> Result<ProtocolParamsMessage> {
         if self.current_era != Some(block.era) {
-            self.apply_genesis(&block)?;
+            self.apply_genesis(block)?;
         }
         self.current_params.apply_enact_state(msg)?;
         let params_message = ProtocolParamsMessage {

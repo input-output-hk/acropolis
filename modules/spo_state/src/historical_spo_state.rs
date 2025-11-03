@@ -1,5 +1,5 @@
 use acropolis_common::{
-    queries::governance::VoteRecord, KeyHash, PoolRegistration, PoolUpdateEvent,
+    queries::governance::VoteRecord, PoolRegistration, PoolUpdateEvent, StakeAddress,
 };
 use imbl::{HashSet, OrdMap, Vector};
 use serde::{Deserialize, Serialize};
@@ -14,7 +14,7 @@ pub struct HistoricalSPOState {
     pub updates: Option<Vec<PoolUpdateEvent>>,
 
     // SPO's delegators
-    pub delegators: Option<HashSet<KeyHash>>,
+    pub delegators: Option<HashSet<StakeAddress>>,
     // SPO's votes
     pub votes: Option<Vec<VoteRecord>>,
 
@@ -37,28 +37,26 @@ impl HistoricalSPOState {
 
     pub fn add_pool_registration(&mut self, reg: &PoolRegistration) -> Option<bool> {
         // update registration if enabled
-        self.registration.as_mut().and_then(|registration| {
+        self.registration.as_mut().map(|registration| {
             *registration = reg.clone();
-            Some(true)
+            true
         })
     }
 
     pub fn add_pool_updates(&mut self, update: PoolUpdateEvent) -> Option<bool> {
         // update updates if enabled
-        self.updates.as_mut().and_then(|updates| {
+        self.updates.as_mut().map(|updates| {
             updates.push(update);
-            Some(true)
+            true
         })
     }
 
-    pub fn add_delegator(&mut self, delegator: &KeyHash) -> Option<bool> {
-        self.delegators
-            .as_mut()
-            .and_then(|delegators| Some(delegators.insert(delegator.clone()).is_some()))
+    pub fn add_delegator(&mut self, delegator: &StakeAddress) -> Option<bool> {
+        self.delegators.as_mut().map(|delegators| delegators.insert(delegator.clone()).is_some())
     }
 
-    pub fn remove_delegator(&mut self, delegator: &KeyHash) -> Option<bool> {
-        self.delegators.as_mut().and_then(|delegators| Some(delegators.remove(delegator).is_some()))
+    pub fn remove_delegator(&mut self, delegator: &StakeAddress) -> Option<bool> {
+        self.delegators.as_mut().map(|delegators| delegators.remove(delegator).is_some())
     }
 
     pub fn get_all_blocks(&self) -> Option<Vec<u64>> {
@@ -72,9 +70,8 @@ impl HistoricalSPOState {
     }
 
     pub fn add_block(&mut self, epoch: u64, block_number: u64) -> Option<()> {
-        self.blocks.as_mut().and_then(|blocks| {
+        self.blocks.as_mut().map(|blocks| {
             blocks.entry(epoch).or_insert_with(Vector::new).push_back(block_number);
-            Some(())
         })
     }
 }

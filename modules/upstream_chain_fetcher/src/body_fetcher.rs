@@ -1,10 +1,7 @@
 //! Acropolis Miniprotocols module for Caryatid
 //! Multi-connection, block body fetching part of the client (in separate thread).
 
-use acropolis_common::{
-    messages::{BlockBodyMessage, BlockHeaderMessage},
-    BlockHash, BlockInfo, BlockStatus, Era,
-};
+use acropolis_common::{messages::RawBlockMessage, BlockHash, BlockInfo, BlockStatus, Era};
 use anyhow::{bail, Result};
 use crossbeam::channel::{Receiver, TryRecvError};
 use pallas::{
@@ -55,13 +52,13 @@ impl BodyFetcher {
         }
     }
 
-    async fn fetch_block(&mut self, point: Point) -> Result<FetchResult<Arc<BlockBodyMessage>>> {
+    async fn fetch_block(&mut self, point: Point) -> Result<FetchResult<Arc<Vec<u8>>>> {
         // Fetch the block body
         debug!("Requesting single block {point:?}");
         let body = self.peer.blockfetch().fetch_single(point.clone()).await;
 
         match body {
-            Ok(body) => Ok(Success(Arc::new(BlockBodyMessage { raw: body }))),
+            Ok(body) => Ok(Success(Arc::new(body))),
             Err(blockfetch::ClientError::Plexer(e)) => {
                 error!("Can't fetch block at {point:?}: {e}, will try to restart");
                 Ok(NetworkError)
@@ -120,7 +117,7 @@ impl BodyFetcher {
             }, // TODO vary with 'k'
             slot,
             number,
-            hash: BlockHash(hash),
+            hash: BlockHash::from(hash),
             epoch,
             epoch_slot,
             new_epoch,
@@ -139,16 +136,18 @@ impl BodyFetcher {
         // reconstruct a Point from the header because the one we get
         // in the RollForward is the *tip*, not the next read point
         let fetch_point = Point::Specific(block_info.slot, block_info.hash.to_vec());
-        let msg_body = match self.fetch_block(fetch_point).await? {
+        let raw_body = match self.fetch_block(fetch_point).await? {
             Success(body) => body,
             NetworkError => return Ok(NetworkError),
         };
 
-        let msg_hdr = Arc::new(BlockHeaderMessage { raw: h.cbor });
+        let message = Arc::new(RawBlockMessage {
+            header: h.cbor,
+            body: raw_body.to_vec(),
+        });
         let record = UpstreamCacheRecord {
             id: block_info.clone(),
-            hdr: msg_hdr.clone(),
-            body: msg_body.clone(),
+            message: message.clone(),
         };
 
         Ok(Success(record))

@@ -4,6 +4,7 @@ use crate::{
         EpochActivityRest, ProtocolParamsRest, SPDDByEpochAndPoolItemRest, SPDDByEpochItemRest,
     },
 };
+use acropolis_common::serialization::Bech32Conversion;
 use acropolis_common::{
     messages::{Message, RESTResponse, StateQuery, StateQueryResponse},
     queries::{
@@ -14,8 +15,7 @@ use acropolis_common::{
         spdd::{SPDDStateQuery, SPDDStateQueryResponse},
         utils::query_state,
     },
-    serialization::Bech32WithHrp,
-    AddressNetwork, StakeAddress, StakeAddressPayload,
+    PoolId,
 };
 use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
@@ -33,11 +33,10 @@ pub async fn handle_epoch_info_blockfrost(
         ));
     }
     let param = &params[0];
-    let query;
 
     // query to get latest epoch or epoch info
-    if param == "latest" {
-        query = EpochsStateQuery::GetLatestEpoch;
+    let query = if param == "latest" {
+        EpochsStateQuery::GetLatestEpoch
     } else {
         let parsed = match param.parse::<u64>() {
             Ok(num) => num,
@@ -48,10 +47,10 @@ pub async fn handle_epoch_info_blockfrost(
                 ));
             }
         };
-        query = EpochsStateQuery::GetEpochInfo {
+        EpochsStateQuery::GetEpochInfo {
             epoch_number: parsed,
-        };
-    }
+        }
+    };
 
     // Get the current epoch number from epochs-state
     let epoch_info_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(query)));
@@ -61,11 +60,9 @@ pub async fn handle_epoch_info_blockfrost(
         epoch_info_msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Epochs(response)) => Ok(response),
-            _ => {
-                return Err(anyhow!(
-                    "Unexpected message type while retrieving latest epoch"
-                ))
-            }
+            _ => Err(anyhow!(
+                "Unexpected message type while retrieving latest epoch"
+            )),
         },
     )
     .await?;
@@ -176,16 +173,12 @@ pub async fn handle_epoch_params_blockfrost(
             )) => Ok(res.epoch.epoch),
             Message::StateQueryResponse(StateQueryResponse::Epochs(
                 EpochsStateQueryResponse::Error(e),
-            )) => {
-                return Err(anyhow::anyhow!(
-                    "Internal server error while retrieving latest epoch: {e}"
-                ));
-            }
-            _ => {
-                return Err(anyhow::anyhow!(
-                    "Unexpected message type while retrieving latest epoch"
-                ))
-            }
+            )) => Err(anyhow::anyhow!(
+                "Internal server error while retrieving latest epoch: {e}"
+            )),
+            _ => Err(anyhow::anyhow!(
+                "Unexpected message type while retrieving latest epoch"
+            )),
         },
     )
     .await?;
@@ -298,18 +291,12 @@ pub async fn handle_epoch_next_blockfrost(
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Epochs(
                 EpochsStateQueryResponse::NextEpochs(response),
-            )) => Ok(response
-                .epochs
-                .into_iter()
-                .map(|epoch| EpochActivityRest::from(epoch))
-                .collect::<Vec<_>>()),
+            )) => Ok(response.epochs.into_iter().map(EpochActivityRest::from).collect::<Vec<_>>()),
             Message::StateQueryResponse(StateQueryResponse::Epochs(
                 EpochsStateQueryResponse::Error(e),
-            )) => {
-                return Err(anyhow::anyhow!(
-                    "Internal server error while retrieving next epochs: {e}"
-                ));
-            }
+            )) => Err(anyhow::anyhow!(
+                "Internal server error while retrieving next epochs: {e}"
+            )),
             Message::StateQueryResponse(StateQueryResponse::Epochs(
                 EpochsStateQueryResponse::NotFound,
             )) => Err(anyhow::anyhow!("Epoch not found")),
@@ -367,18 +354,12 @@ pub async fn handle_epoch_previous_blockfrost(
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Epochs(
                 EpochsStateQueryResponse::PreviousEpochs(response),
-            )) => Ok(response
-                .epochs
-                .into_iter()
-                .map(|epoch| EpochActivityRest::from(epoch))
-                .collect::<Vec<_>>()),
+            )) => Ok(response.epochs.into_iter().map(EpochActivityRest::from).collect::<Vec<_>>()),
             Message::StateQueryResponse(StateQueryResponse::Epochs(
                 EpochsStateQueryResponse::Error(e),
-            )) => {
-                return Err(anyhow::anyhow!(
-                    "Internal server error while retrieving previous epochs: {e}"
-                ));
-            }
+            )) => Err(anyhow::anyhow!(
+                "Internal server error while retrieving previous epochs: {e}"
+            )),
             Message::StateQueryResponse(StateQueryResponse::Epochs(
                 EpochsStateQueryResponse::NotFound,
             )) => Err(anyhow::anyhow!("Epoch not found")),
@@ -447,37 +428,6 @@ pub async fn handle_epoch_total_stakes_blockfrost(
         return Ok(RESTResponse::with_text(404, "Epoch not found"));
     }
 
-    // Query current network from parameters-state
-    let current_network_msg = Arc::new(Message::StateQuery(StateQuery::Parameters(
-        ParametersStateQuery::GetNetworkName,
-    )));
-    let current_network = query_state(
-        &context,
-        &handlers_config.parameters_query_topic,
-        current_network_msg,
-        |message| match message {
-            Message::StateQueryResponse(StateQueryResponse::Parameters(
-                ParametersStateQueryResponse::NetworkName(network),
-            )) => Ok(network),
-            _ => Err(anyhow::anyhow!(
-                "Unexpected message type while retrieving current network"
-            )),
-        },
-    )
-    .await?;
-
-    let network = match current_network.as_str() {
-        "mainnet" => AddressNetwork::Main,
-        "testnet" => AddressNetwork::Test,
-        unknown => {
-            return Ok(RESTResponse::with_text(
-                500,
-                format!("Internal server error while retrieving current network: {unknown}")
-                    .as_str(),
-            ))
-        }
-    };
-
     // Query SPDD by epoch from accounts-state
     let msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
         AccountsStateQuery::GetSPDDByEpoch {
@@ -505,16 +455,13 @@ pub async fn handle_epoch_total_stakes_blockfrost(
     .await?;
     let spdd_response = spdd
         .into_iter()
-        .map(|(pool_id, stake_key_hash, amount)| {
-            let stake_address = StakeAddress {
-                network: network.clone(),
-                payload: StakeAddressPayload::StakeKeyHash(stake_key_hash),
-            }
-            .to_string()
-            .map_err(|e| anyhow::anyhow!("Failed to convert stake address to string: {e}"))?;
+        .map(|(pool_id, stake_address, amount)| {
+            let bech32 = stake_address
+                .to_string()
+                .map_err(|e| anyhow::anyhow!("Failed to convert stake address to string {}", e))?;
             Ok(SPDDByEpochItemRest {
                 pool_id,
-                stake_address,
+                stake_address: bech32,
                 amount,
             })
         })
@@ -553,7 +500,7 @@ pub async fn handle_epoch_pool_stakes_blockfrost(
         }
     };
 
-    let Ok(pool_id) = Vec::<u8>::from_bech32_with_hrp(pool_id, "pool") else {
+    let Ok(pool_id) = PoolId::from_bech32(pool_id) else {
         return Ok(RESTResponse::with_text(
             400,
             &format!("Invalid Bech32 stake pool ID: {pool_id}"),
@@ -583,37 +530,6 @@ pub async fn handle_epoch_pool_stakes_blockfrost(
         return Ok(RESTResponse::with_text(404, "Epoch not found"));
     }
 
-    // Query current network from parameters-state
-    let current_network_msg = Arc::new(Message::StateQuery(StateQuery::Parameters(
-        ParametersStateQuery::GetNetworkName,
-    )));
-    let current_network = query_state(
-        &context,
-        &handlers_config.parameters_query_topic,
-        current_network_msg,
-        |message| match message {
-            Message::StateQueryResponse(StateQueryResponse::Parameters(
-                ParametersStateQueryResponse::NetworkName(network),
-            )) => Ok(network),
-            _ => Err(anyhow::anyhow!(
-                "Unexpected message type while retrieving current network"
-            )),
-        },
-    )
-    .await?;
-
-    let network = match current_network.as_str() {
-        "mainnet" => AddressNetwork::Main,
-        "testnet" => AddressNetwork::Test,
-        unknown => {
-            return Ok(RESTResponse::with_text(
-                500,
-                format!("Internal server error while retrieving current network: {unknown}")
-                    .as_str(),
-            ))
-        }
-    };
-
     // Query SPDD by epoch and pool from accounts-state
     let msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
         AccountsStateQuery::GetSPDDByEpochAndPool {
@@ -642,16 +558,12 @@ pub async fn handle_epoch_pool_stakes_blockfrost(
     .await?;
     let spdd_response = spdd
         .into_iter()
-        .map(|(stake_key_hash, amount)| {
-            let stake_address = StakeAddress {
-                network: network.clone(),
-                payload: StakeAddressPayload::StakeKeyHash(stake_key_hash),
-            }
-            .to_string()
-            .map_err(|e| anyhow::anyhow!("Failed to convert stake address to string: {e}"))?;
-
+        .map(|(stake_address, amount)| {
+            let bech32 = stake_address
+                .to_string()
+                .map_err(|e| anyhow::anyhow!("Failed to convert stake address to string {}", e))?;
             Ok(SPDDByEpochAndPoolItemRest {
-                stake_address,
+                stake_address: bech32,
                 amount,
             })
         })
@@ -698,7 +610,7 @@ pub async fn handle_epoch_pool_blocks_blockfrost(
         }
     };
 
-    let Ok(spo) = Vec::<u8>::from_bech32_with_hrp(pool_id_param, "pool") else {
+    let Ok(spo) = PoolId::from_bech32(pool_id_param) else {
         return Ok(RESTResponse::with_text(
             400,
             &format!("Invalid Bech32 stake pool ID: {pool_id_param}"),
@@ -708,7 +620,7 @@ pub async fn handle_epoch_pool_blocks_blockfrost(
     // query Pool's Blocks by epoch from spo-state
     let msg = Arc::new(Message::StateQuery(StateQuery::Pools(
         PoolsStateQuery::GetBlocksByPoolAndEpoch {
-            pool_id: spo.clone(),
+            pool_id: spo,
             epoch: epoch_number,
         },
     )));

@@ -2,10 +2,10 @@ use crate::{
     genesis_values::GenesisValues,
     rational_number::{ChameleonFraction, RationalNumber},
     BlockHash, BlockVersionData, Committee, Constitution, CostModel, DRepVotingThresholds, Era,
-    ExUnitPrices, ExUnits, GenesisDelegate, HeavyDelegate, NetworkId, PoolVotingThresholds,
+    ExUnitPrices, ExUnits, GenesisDelegate, HeavyDelegate, NetworkId, PoolId, PoolVotingThresholds,
     ProtocolConsts,
 };
-use anyhow::Result;
+use anyhow::{bail, Result};
 use blake2::{digest::consts::U32, Blake2b, Digest};
 use chrono::{DateTime, Utc};
 use serde_with::{hex::Hex, serde_as};
@@ -25,13 +25,16 @@ pub struct ProtocolParams {
 // Byron protocol parameters
 //
 
+#[serde_as]
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ByronParams {
     pub block_version_data: BlockVersionData,
     pub fts_seed: Option<Vec<u8>>,
     pub protocol_consts: ProtocolConsts,
     pub start_time: u64,
-    pub heavy_delegation: HashMap<Vec<u8>, HeavyDelegate>,
+
+    #[serde_as(as = "Vec<(_, _)>")]
+    pub heavy_delegation: HashMap<PoolId, HeavyDelegate>,
 }
 
 //
@@ -128,7 +131,7 @@ pub struct ShelleyParams {
     pub update_quorum: u32,
 
     #[serde_as(as = "HashMap<Hex, _>")]
-    pub gen_delegs: HashMap<Vec<u8>, GenesisDelegate>,
+    pub gen_delegs: HashMap<PoolId, GenesisDelegate>,
 }
 
 #[serde_as]
@@ -182,8 +185,8 @@ impl From<&ShelleyParams> for PraosParams {
             (security_param as u64) * active_slots_coeff.denom() / active_slots_coeff.numer() * 4;
 
         Self {
-            security_param: security_param,
-            active_slots_coeff: active_slots_coeff,
+            security_param,
+            active_slots_coeff,
             epoch_length: params.epoch_length,
             max_kes_evolutions: params.max_kes_evolutions,
             max_lovelace_supply: params.max_lovelace_supply,
@@ -191,8 +194,8 @@ impl From<&ShelleyParams> for PraosParams {
             slot_length: params.slot_length,
             slots_per_kes_period: params.slots_per_kes_period,
 
-            stability_window: stability_window,
-            randomness_stabilization_window: randomness_stabilization_window,
+            stability_window,
+            randomness_stabilization_window,
         }
     }
 }
@@ -227,11 +230,27 @@ pub struct ConwayParams {
     pub committee: Committee,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProtocolVersion {
-    pub minor: u64,
     pub major: u64,
+    pub minor: u64,
+}
+
+impl ProtocolVersion {
+    pub fn new(major: u64, minor: u64) -> Self {
+        Self { major, minor }
+    }
+
+    pub fn is_chang(&self) -> Result<bool> {
+        if self.major == 9 {
+            if self.minor != 0 {
+                bail!("Chang version 9.xx with nonzero xx is not supported")
+            }
+            return Ok(true);
+        }
+        Ok(false)
+    }
 }
 
 #[derive(
@@ -314,15 +333,13 @@ impl Nonces {
         // if prev_lab is Neutral then just return candidate
         // this is for second shelley epoch boundary (from 208 to 209 in mainnet)
         match prev_lab.tag {
-            NonceVariant::NeutralNonce => {
-                return Ok(candidate.clone());
-            }
+            NonceVariant::NeutralNonce => Ok(candidate.clone()),
             NonceVariant::Nonce => {
                 let Some(prev_lab_hash) = prev_lab.hash.as_ref() else {
                     return Err(anyhow::anyhow!("Prev lab hash is not set"));
                 };
                 let mut hasher = Blake2b::<U32>::new();
-                hasher.update(&[&candidate_hash.clone()[..], &prev_lab_hash.clone()[..]].concat());
+                hasher.update([&(*candidate_hash)[..], &(*prev_lab_hash)[..]].concat());
                 let hash: NonceHash = hasher.finalize().into();
                 Ok(Nonce::from(hash))
             }
@@ -344,7 +361,7 @@ impl Nonces {
         match current.hash.as_ref() {
             Some(nonce) => {
                 let mut hasher = Blake2b::<U32>::new();
-                hasher.update(&[&nonce.clone()[..], &nonce_vrf_output_hash[..]].concat());
+                hasher.update([&(*nonce)[..], &nonce_vrf_output_hash[..]].concat());
                 let hash: NonceHash = hasher.finalize().into();
                 Ok(Nonce::from(hash))
             }
@@ -370,5 +387,45 @@ impl Nonces {
         };
 
         slot + window < next_epoch_first_slot
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_protocol_version_order() {
+        let v9_0 = ProtocolVersion::new(9, 0);
+        let v9_1 = ProtocolVersion::new(9, 1);
+        let v9_10 = ProtocolVersion::new(9, 10);
+        let v10_0 = ProtocolVersion::new(10, 0);
+        let v10_9 = ProtocolVersion::new(10, 9);
+        let v10_10 = ProtocolVersion::new(10, 10);
+        let v10_11 = ProtocolVersion::new(10, 11);
+
+        assert!(v10_9 > v9_10);
+
+        let from = vec![v9_0, v9_1, v9_10, v10_0, v10_9, v10_10, v10_11];
+        let mut upd = from.clone();
+        upd.sort();
+
+        assert_eq!(from, upd);
+    }
+
+    #[test]
+    fn test_protocol_version_parsing() -> Result<()> {
+        let v9_0 = serde_json::from_slice::<ProtocolVersion>(b"{\"minor\": 0, \"major\": 9}")?;
+        let v9_0a = serde_json::from_slice::<ProtocolVersion>(b"{\"major\": 9, \"minor\": 0}")?;
+        let v0_9 = serde_json::from_slice::<ProtocolVersion>(b"{\"minor\": 9, \"major\": 0}")?;
+        let v0_9a = serde_json::from_slice::<ProtocolVersion>(b"{\"major\": 0, \"minor\": 9}")?;
+
+        assert_eq!(v9_0, v9_0a);
+        assert_eq!(v0_9, v0_9a);
+        assert_eq!(v9_0, ProtocolVersion::new(9, 0));
+        assert_eq!(v9_0.major, 9);
+        assert_eq!(v0_9, ProtocolVersion::new(0, 9));
+
+        Ok(())
     }
 }

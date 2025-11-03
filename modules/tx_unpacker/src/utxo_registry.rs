@@ -140,7 +140,7 @@ impl UTxORegistry {
     pub fn consume(&mut self, tx_ref: &TxOutRef) -> Result<TxIdentifier> {
         match self.live_map.remove(tx_ref) {
             Some(id) => {
-                self.spent.add((tx_ref.clone(), id));
+                self.spent.add((*tx_ref, id));
                 Ok(id)
             }
             None => Err(anyhow::anyhow!(
@@ -174,7 +174,7 @@ mod tests {
     use anyhow::Result;
 
     fn make_hash(byte: u8) -> TxHash {
-        TxHash([byte; 32])
+        TxHash::new([byte; 32])
     }
     impl UTxORegistry {
         /// Lookup unspent tx output

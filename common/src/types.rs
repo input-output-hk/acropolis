@@ -2,35 +2,78 @@
 // We don't use these types in the acropolis_common crate itself
 #![allow(dead_code)]
 
+use crate::hash::Hash;
+use crate::serialization::Bech32Conversion;
 use crate::{
     address::{Address, ShelleyAddress, StakeAddress},
-    protocol_params,
+    declare_hash_type, declare_hash_type_with_bech32, protocol_params,
     rational_number::RationalNumber,
-    BlockHash, TxHash,
 };
 use anyhow::{anyhow, bail, Error, Result};
 use bech32::{Bech32, Hrp};
 use bitmask_enum::bitmask;
 use hex::decode;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_with::{hex::Hex, serde_as};
-use std::collections::{HashMap, HashSet};
-use std::fmt::{Display, Formatter};
-use std::ops::{AddAssign, Neg};
-use std::{cmp::Ordering, fmt};
+use std::{
+    cmp::Ordering,
+    collections::{HashMap, HashSet},
+    fmt,
+    fmt::{Display, Formatter},
+    ops::{AddAssign, Neg},
+    str::FromStr,
+};
 
-#[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Network identifier
+#[derive(
+    Debug,
+    Clone,
+    Default,
+    PartialEq,
+    Eq,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    minicbor::Encode,
+    minicbor::Decode,
+)]
 pub enum NetworkId {
-    Testnet,
+    /// Main
+    #[n(0)]
     #[default]
     Mainnet,
+
+    /// Test
+    #[n(1)]
+    Testnet,
+}
+
+impl From<String> for NetworkId {
+    fn from(s: String) -> Self {
+        match s.as_str() {
+            "testnet" => NetworkId::Testnet,
+            "mainnet" => NetworkId::Mainnet,
+            _ => NetworkId::Mainnet,
+        }
+    }
 }
 
 /// Protocol era
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+    Debug,
+    Default,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    serde::Serialize,
+    serde::Deserialize,
 )]
 pub enum Era {
+    #[default]
     Byron,
     Shelley,
     Allegra,
@@ -38,12 +81,6 @@ pub enum Era {
     Alonzo,
     Babbage,
     Conway,
-}
-
-impl Default for Era {
-    fn default() -> Era {
-        Era::Byron
-    }
 }
 
 impl From<Era> for u8 {
@@ -175,8 +212,39 @@ pub struct StakeAddressDelta {
 /// Stake Address Reward change
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StakeRewardDelta {
-    pub hash: KeyHash,
-    pub delta: i64,
+    pub stake_address: StakeAddress,
+    pub delta: u64,
+    pub reward_type: RewardType,
+    pub pool: PoolId,
+}
+
+/// Type of reward being given
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    minicbor::Encode,
+    minicbor::Decode,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+pub enum RewardType {
+    #[n(0)]
+    Leader,
+    #[n(1)]
+    Member,
+    #[n(2)]
+    PoolRefund,
+}
+
+impl fmt::Display for RewardType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RewardType::Leader => write!(f, "leader"),
+            RewardType::Member => write!(f, "member"),
+            RewardType::PoolRefund => write!(f, "pool_deposit_refund"),
+        }
+    }
 }
 
 pub type PolicyId = [u8; 28];
@@ -218,6 +286,10 @@ impl AssetName {
 
     pub fn len(&self) -> usize {
         self.len as usize
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
     }
 
     pub fn as_slice(&self) -> &[u8] {
@@ -337,7 +409,7 @@ impl From<&Value> for ValueDelta {
                     let nas_delta = nas
                         .iter()
                         .map(|na| NativeAssetDelta {
-                            name: na.name.clone(),
+                            name: na.name,
                             amount: na.amount as i64,
                         })
                         .collect();
@@ -399,18 +471,27 @@ impl Default for UTXODelta {
     }
 }
 
-/// Key hash used for pool IDs etc.
-pub type KeyHash = Vec<u8>;
+/// Key hash
+pub type KeyHash = Hash<28>;
 
-pub type PoolId = Vec<u8>;
-
-/// Script identifier
+/// Script hash
 pub type ScriptHash = KeyHash;
 
 /// Address key hash
 pub type AddrKeyhash = KeyHash;
 
-pub type GenesisKeyhash = Vec<u8>;
+/// Script identifier
+pub type GenesisKeyhash = Hash<28>;
+
+declare_hash_type!(BlockHash, 32);
+declare_hash_type!(TxHash, 32);
+declare_hash_type_with_bech32!(VrfKeyHash, 32, "vrf_vk");
+declare_hash_type_with_bech32!(PoolId, 28, "pool");
+
+declare_hash_type_with_bech32!(ConstitutionalCommitteeKeyHash, 28, "cc_hot");
+declare_hash_type_with_bech32!(ConstitutionalCommitteeScriptHash, 28, "cc_hot_script");
+declare_hash_type_with_bech32!(DrepKeyHash, 28, "drep");
+declare_hash_type_with_bech32!(DRepScriptHash, 28, "drep_script");
 
 /// Data hash used for metadata, anchors (SHA256)
 pub type DataHash = Vec<u8>;
@@ -570,6 +651,9 @@ pub struct Withdrawal {
 
     /// Value to withdraw
     pub value: Lovelace,
+
+    // Identifier of withdrawal tx
+    pub tx_identifier: TxIdentifier,
 }
 
 /// Treasury pot account
@@ -590,16 +674,16 @@ pub struct PotDelta {
     pub delta: LovelaceDelta,
 }
 
-/// General credential
+#[serde_as]
 #[derive(
     Debug, Clone, Ord, Eq, PartialEq, PartialOrd, Hash, serde::Serialize, serde::Deserialize,
 )]
 pub enum Credential {
     /// Script hash. NOTE: Order matters when parsing Haskell Node Snapshot data.
-    ScriptHash(KeyHash),
+    ScriptHash(#[serde_as(as = "Hex")] ScriptHash),
 
     /// Address key hash
-    AddrKeyHash(KeyHash),
+    AddrKeyHash(#[serde_as(as = "Hex")] AddrKeyhash),
 }
 
 impl Credential {
@@ -611,7 +695,10 @@ impl Credential {
                 hex_str
             ))
         } else {
-            Ok(key_hash)
+            key_hash
+                .as_slice()
+                .try_into()
+                .map_err(|e| anyhow!("Failed to convert to KeyHash {}", e))
         }
     }
 
@@ -624,8 +711,7 @@ impl Credential {
             Err(anyhow!(
                 "Incorrect credential {}, expected scriptHash- or keyHash- prefix",
                 credential
-            )
-            .into())
+            ))
         }
     }
 
@@ -637,14 +723,13 @@ impl Credential {
     }
 
     pub fn get_hash(&self) -> KeyHash {
-        match self {
+        *match self {
             Self::AddrKeyHash(hash) => hash,
             Self::ScriptHash(hash) => hash,
         }
-        .clone()
     }
 
-    pub fn from_drep_bech32(bech32_str: &str) -> Result<Self, anyhow::Error> {
+    pub fn from_drep_bech32(bech32_str: &str) -> Result<Self, Error> {
         let (hrp, data) = bech32::decode(bech32_str)?;
         if data.len() != 28 {
             return Err(anyhow!(
@@ -653,7 +738,7 @@ impl Credential {
             ));
         }
 
-        let hash: KeyHash = data;
+        let hash = data.try_into().expect("failed to convert to fixed-size array");
 
         match hrp.as_str() {
             "drep" => Ok(Credential::AddrKeyHash(hash)),
@@ -692,7 +777,7 @@ impl Credential {
 
         let mut address_bytes = [0u8; 29];
         address_bytes[0] = header;
-        address_bytes[1..].copy_from_slice(&hash);
+        address_bytes[1..].copy_from_slice(hash.as_ref());
 
         let hrp = Hrp::parse("stake").map_err(|e| anyhow!("HRP parse error: {e}"))?;
         bech32::encode::<Bech32>(hrp, &address_bytes)
@@ -701,6 +786,17 @@ impl Credential {
 }
 
 pub type StakeCredential = Credential;
+
+impl StakeCredential {
+    pub fn to_string(&self) -> Result<String> {
+        let (hrp, data) = match &self {
+            Self::AddrKeyHash(data) => (Hrp::parse("stake_vkh")?, data.as_slice()),
+            Self::ScriptHash(data) => (Hrp::parse("script")?, data.as_slice()),
+        };
+
+        Ok(bech32::encode::<Bech32>(hrp, data)?)
+    }
+}
 
 /// Relay single host address
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize, Eq, PartialEq)]
@@ -763,16 +859,6 @@ pub struct PoolMetadata {
     pub hash: DataHash,
 }
 
-pub type RewardAccount = Vec<u8>;
-
-/// Pool registration with position
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PoolRegistrationWithPos {
-    pub reg: PoolRegistration,
-    pub tx_hash: TxHash,
-    pub cert_index: u64,
-}
-
 /// Pool registration data
 #[serde_as]
 #[derive(
@@ -790,12 +876,12 @@ pub struct PoolRegistration {
     /// Operator pool key hash - used as ID
     #[serde_as(as = "Hex")]
     #[n(0)]
-    pub operator: KeyHash,
+    pub operator: PoolId,
 
     /// VRF key hash
     #[serde_as(as = "Hex")]
     #[n(1)]
-    pub vrf_key_hash: KeyHash,
+    pub vrf_key_hash: VrfKeyHash,
 
     /// Pledged Ada
     #[n(2)]
@@ -810,14 +896,12 @@ pub struct PoolRegistration {
     pub margin: Ratio,
 
     /// Reward account
-    #[serde_as(as = "Hex")]
     #[n(5)]
-    pub reward_account: RewardAccount,
+    pub reward_account: StakeAddress,
 
     /// Pool owners by their key hash
-    #[serde_as(as = "Vec<Hex>")]
     #[n(6)]
-    pub pool_owners: Vec<KeyHash>,
+    pub pool_owners: Vec<StakeAddress>,
 
     // Relays
     #[n(7)]
@@ -828,19 +912,11 @@ pub struct PoolRegistration {
     pub pool_metadata: Option<PoolMetadata>,
 }
 
-// Pool Retirment with position
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PoolRetirementWithPos {
-    pub ret: PoolRetirement,
-    pub tx_hash: TxHash,
-    pub cert_index: u64,
-}
-
 /// Pool retirement data
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PoolRetirement {
     /// Operator pool key hash - used as ID
-    pub operator: KeyHash,
+    pub operator: PoolId,
 
     /// Epoch it will retire at the end of
     pub epoch: u64,
@@ -856,23 +932,23 @@ pub enum PoolUpdateAction {
 /// Pool Update Event
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PoolUpdateEvent {
-    pub tx_hash: TxHash,
+    pub tx_identifier: TxIdentifier,
     pub cert_index: u64,
     pub action: PoolUpdateAction,
 }
 
 impl PoolUpdateEvent {
-    pub fn register_event(tx_hash: TxHash, cert_index: u64) -> Self {
+    pub fn register_event(tx_identifier: TxIdentifier, cert_index: u64) -> Self {
         Self {
-            tx_hash,
+            tx_identifier,
             cert_index,
             action: PoolUpdateAction::Registered,
         }
     }
 
-    pub fn retire_event(tx_hash: TxHash, cert_index: u64) -> Self {
+    pub fn retire_event(tx_identifier: TxIdentifier, cert_index: u64) -> Self {
         Self {
-            tx_hash,
+            tx_identifier,
             cert_index,
             action: PoolUpdateAction::Deregistered,
         }
@@ -902,11 +978,11 @@ pub struct PoolEpochState {
 /// Stake delegation data
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StakeDelegation {
-    /// Stake credential
-    pub credential: StakeCredential,
+    /// Stake address
+    pub stake_address: StakeAddress,
 
     /// Pool ID to delegate to
-    pub operator: KeyHash,
+    pub operator: PoolId,
 }
 
 /// SPO total delegation data (for SPDD)
@@ -936,13 +1012,13 @@ pub struct SPORewards {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenesisKeyDelegation {
     /// Genesis hash
-    pub genesis_hash: KeyHash,
+    pub genesis_hash: Hash<28>,
 
     /// Genesis delegate hash
-    pub genesis_delegate_hash: KeyHash,
+    pub genesis_delegate_hash: PoolId,
 
     /// VRF key hash
-    pub vrf_key_hash: KeyHash,
+    pub vrf_key_hash: VrfKeyHash,
 }
 
 /// Source of a MIR
@@ -955,7 +1031,7 @@ pub enum InstantaneousRewardSource {
 /// Target of a MIR
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum InstantaneousRewardTarget {
-    StakeCredentials(Vec<(StakeCredential, i64)>),
+    StakeAddresses(Vec<(StakeAddress, i64)>),
     OtherAccountingPot(u64),
 }
 
@@ -972,8 +1048,8 @@ pub struct MoveInstantaneousReward {
 /// Register stake (Conway version) = 'reg_cert'
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Registration {
-    /// Stake credential
-    pub credential: StakeCredential,
+    /// Stake address
+    pub stake_address: StakeAddress,
 
     /// Deposit paid
     pub deposit: Lovelace,
@@ -982,8 +1058,8 @@ pub struct Registration {
 /// Deregister stake (Conway version) = 'unreg_cert'
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Deregistration {
-    /// Stake credential
-    pub credential: StakeCredential,
+    /// Stake address
+    pub stake_address: StakeAddress,
 
     /// Deposit to be refunded
     pub refund: Lovelace,
@@ -1008,8 +1084,8 @@ pub enum DRepChoice {
 /// Vote delegation (simple, existing registration) = vote_deleg_cert
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct VoteDelegation {
-    /// Stake credential
-    pub credential: StakeCredential,
+    /// Stake address
+    pub stake_address: StakeAddress,
 
     // DRep choice
     pub drep: DRepChoice,
@@ -1018,11 +1094,11 @@ pub struct VoteDelegation {
 /// Stake+vote delegation (to SPO and DRep) = stake_vote_deleg_cert
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StakeAndVoteDelegation {
-    /// Stake credential
-    pub credential: StakeCredential,
+    /// Stake address
+    pub stake_address: StakeAddress,
 
     /// Pool
-    pub operator: KeyHash,
+    pub operator: PoolId,
 
     // DRep vote
     pub drep: DRepChoice,
@@ -1031,11 +1107,11 @@ pub struct StakeAndVoteDelegation {
 /// Stake delegation to SPO + registration = stake_reg_deleg_cert
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StakeRegistrationAndDelegation {
-    /// Stake credential
-    pub credential: StakeCredential,
+    /// Stake address
+    pub stake_address: StakeAddress,
 
     /// Pool
-    pub operator: KeyHash,
+    pub operator: PoolId,
 
     // Deposit paid
     pub deposit: Lovelace,
@@ -1044,8 +1120,8 @@ pub struct StakeRegistrationAndDelegation {
 /// Vote delegation to DRep + registration = vote_reg_deleg_cert
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StakeRegistrationAndVoteDelegation {
-    /// Stake credential
-    pub credential: StakeCredential,
+    /// Stake address
+    pub stake_address: StakeAddress,
 
     /// DRep choice
     pub drep: DRepChoice,
@@ -1060,10 +1136,10 @@ pub struct StakeRegistrationAndVoteDelegation {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StakeRegistrationAndStakeAndVoteDelegation {
     /// Stake credential
-    pub credential: StakeCredential,
+    pub stake_address: StakeAddress,
 
     /// Pool
-    pub operator: KeyHash,
+    pub operator: PoolId,
 
     /// DRep choice
     pub drep: DRepChoice,
@@ -1099,13 +1175,6 @@ pub struct DRepRegistration {
     pub anchor: Option<Anchor>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct DRepRegistrationWithPos {
-    pub reg: DRepRegistration,
-    pub tx_hash: TxHash,
-    pub cert_index: u64,
-}
-
 /// DRep Deregistration = unreg_drep_cert
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DRepDeregistration {
@@ -1116,13 +1185,6 @@ pub struct DRepDeregistration {
     pub refund: Lovelace,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct DRepDeregistrationWithPos {
-    pub reg: DRepDeregistration,
-    pub tx_hash: TxHash,
-    pub cert_index: u64,
-}
-
 /// DRep Update = update_drep_cert
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DRepUpdate {
@@ -1131,13 +1193,6 @@ pub struct DRepUpdate {
 
     /// Optional anchor
     pub anchor: Option<Anchor>,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct DRepUpdateWithPos {
-    pub reg: DRepUpdate,
-    pub tx_hash: TxHash,
-    pub cert_index: u64,
 }
 
 pub type CommitteeCredential = Credential;
@@ -1325,7 +1380,7 @@ pub struct HeavyDelegate {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GenesisDelegate {
     #[serde_as(as = "Hex")]
-    pub delegate: Vec<u8>,
+    pub delegate: Hash<28>,
     #[serde_as(as = "Hex")]
     pub vrf: Vec<u8>,
 }
@@ -1547,7 +1602,7 @@ pub struct Committee {
 
 impl Committee {
     pub fn is_empty(&self) -> bool {
-        return self.members.len() == 0;
+        self.members.is_empty()
     }
 }
 
@@ -1561,7 +1616,7 @@ pub struct ParameterChangeAction {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct HardForkInitiationAction {
     pub previous_action_id: Option<GovActionId>,
-    pub protocol_version: (u64, u64),
+    pub protocol_version: protocol_params::ProtocolVersion,
 }
 
 #[serde_as]
@@ -1604,35 +1659,72 @@ pub enum GovernanceAction {
     Information,
 }
 
+impl GovernanceAction {
+    pub fn get_previous_action_id(&self) -> Option<GovActionId> {
+        match &self {
+            Self::ParameterChange(ParameterChangeAction {
+                previous_action_id: prev,
+                ..
+            }) => prev.clone(),
+            Self::HardForkInitiation(HardForkInitiationAction {
+                previous_action_id: prev,
+                ..
+            }) => prev.clone(),
+            Self::TreasuryWithdrawals(_) => None,
+            Self::NoConfidence(prev) => prev.clone(),
+            Self::UpdateCommittee(UpdateCommitteeAction {
+                previous_action_id: prev,
+                ..
+            }) => prev.clone(),
+            Self::NewConstitution(NewConstitutionAction {
+                previous_action_id: prev,
+                ..
+            }) => prev.clone(),
+            Self::Information => None,
+        }
+    }
+
+    pub fn get_action_name(&self) -> &str {
+        match &self {
+            GovernanceAction::ParameterChange(_) => "ParameterChange",
+            GovernanceAction::HardForkInitiation(_) => "HardForkInitiation",
+            GovernanceAction::TreasuryWithdrawals(_) => "TreasuryWithdrawals",
+            GovernanceAction::NoConfidence(_) => "NoConfidence",
+            GovernanceAction::UpdateCommittee(_) => "UpdateCommittee",
+            GovernanceAction::NewConstitution(_) => "NewConstitution",
+            GovernanceAction::Information => "Information",
+        }
+    }
+}
+
 #[derive(
     serde::Serialize, serde::Deserialize, Debug, PartialEq, PartialOrd, Eq, Ord, Clone, Hash,
 )]
 pub enum Voter {
-    ConstitutionalCommitteeKey(AddrKeyhash),
-    ConstitutionalCommitteeScript(ScriptHash),
-    DRepKey(AddrKeyhash),
-    DRepScript(ScriptHash),
-    StakePoolKey(AddrKeyhash),
+    ConstitutionalCommitteeKey(ConstitutionalCommitteeKeyHash),
+    ConstitutionalCommitteeScript(ConstitutionalCommitteeScriptHash),
+    DRepKey(DrepKeyHash),
+    DRepScript(DRepScriptHash),
+    StakePoolKey(PoolId),
 }
 
 impl Voter {
-    pub fn to_bech32(&self, hrp: &str, buf: &[u8]) -> String {
-        let voter_hrp: Hrp = Hrp::parse(hrp).unwrap();
-        bech32::encode::<Bech32>(voter_hrp, &buf)
-            .unwrap_or_else(|e| format!("Cannot convert {:?} to bech32: {e}", self))
+    pub fn to_bech32(&self) -> Result<String, Error> {
+        match self {
+            Voter::ConstitutionalCommitteeKey(h) => h.to_bech32(),
+            Voter::ConstitutionalCommitteeScript(s) => s.to_bech32(),
+            Voter::DRepKey(k) => k.to_bech32(),
+            Voter::DRepScript(s) => s.to_bech32(),
+            Voter::StakePoolKey(k) => k.to_bech32(),
+        }
     }
 }
 
 impl Display for Voter {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Voter::ConstitutionalCommitteeKey(h) => write!(f, "{}", self.to_bech32("cc_hot", &h)),
-            Voter::ConstitutionalCommitteeScript(s) => {
-                write!(f, "{}", self.to_bech32("cc_hot_script", &s))
-            }
-            Voter::DRepKey(k) => write!(f, "{}", self.to_bech32("drep", &k)),
-            Voter::DRepScript(s) => write!(f, "{}", self.to_bech32("drep_script", &s)),
-            Voter::StakePoolKey(k) => write!(f, "{}", self.to_bech32("pool", &k)),
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self.to_bech32() {
+            Ok(addr) => write!(f, "{}", addr),
+            Err(e) => write!(f, "<invalid voter: {}>", e),
         }
     }
 }
@@ -1665,45 +1757,111 @@ pub struct VotingProcedures {
     pub votes: HashMap<Voter, SingleVoterVotes>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct VotesCount {
-    pub committee: u64,
-    pub drep: u64,
-    pub pool: u64,
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct VoteCount {
+    pub yes: u64,
+    pub no: u64,
+    pub abstain: u64,
 }
 
-impl VotesCount {
+impl VoteCount {
     pub fn zero() -> Self {
         Self {
-            committee: 0,
-            drep: 0,
-            pool: 0,
+            yes: 0,
+            no: 0,
+            abstain: 0,
         }
     }
 
-    pub fn majorizes(&self, v: &VotesCount) -> bool {
-        self.committee >= v.committee && self.drep >= v.drep && self.pool >= v.pool
+    pub fn total(&self) -> u64 {
+        self.yes + self.no + self.abstain
     }
 }
 
-impl Display for VotesCount {
+impl Display for VoteCount {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "c{}:d{}:p{}", self.committee, self.drep, self.pool)
+        write!(f, "y{}/n{}/a{}", self.yes, self.no, self.abstain)
+    }
+}
+
+impl FromStr for VoteCount {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        let re = Regex::new(r"y(\d+)/n(\d+)/a(\d+)$").unwrap();
+        let caps = re.captures(s).ok_or_else(|| anyhow!("Invalid VoteCount string: '{s}'"))?;
+
+        let yes = u64::from_str(&caps[1])?;
+        let no = u64::from_str(&caps[2])?;
+        let abstain = u64::from_str(&caps[3])?;
+
+        Ok(VoteCount { yes, no, abstain })
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct VoteResult<E: FromStr + Display> {
+    pub committee: E,
+    pub drep: E,
+    pub pool: E,
+}
+
+impl<E: FromStr + Display> VoteResult<E> {
+    pub fn new(committee: E, drep: E, pool: E) -> Self {
+        Self {
+            committee,
+            drep,
+            pool,
+        }
+    }
+}
+
+impl<E: FromStr + Display> Display for VoteResult<E> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "c{}:d{}:s{}", self.committee, self.drep, self.pool)
+    }
+}
+
+impl<E: FromStr + Display> FromStr for VoteResult<E> {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        // Regex for capturing each section
+        let Ok(re) = Regex::new(r"^c([^:]+):d([^:]+):s([^:]+)$") else {
+            bail!("Cannot parse redex");
+        };
+        let caps = re.captures(s).ok_or_else(|| anyhow!("Invalid VoteResult string: '{s}'"))?;
+
+        let Ok(committee) = E::from_str(&caps[1]) else {
+            bail!("Incorrect committee value {}", &caps[1]);
+        };
+        let Ok(drep) = E::from_str(&caps[2]) else {
+            bail!("Incorrect DRep value {}", &caps[2]);
+        };
+        let Ok(pool) = E::from_str(&caps[3]) else {
+            bail!("Incorrect SPO value {}", &caps[3]);
+        };
+
+        Ok(VoteResult {
+            committee,
+            drep,
+            pool,
+        })
     }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct VotingOutcome {
     pub procedure: ProposalProcedure,
-    pub votes_cast: VotesCount,
-    pub votes_threshold: VotesCount,
+    pub votes_cast: VoteResult<VoteCount>,
+    pub votes_threshold: VoteResult<RationalNumber>,
     pub accepted: bool,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProposalProcedure {
     pub deposit: Lovelace,
-    pub reward_account: RewardAccount,
+    pub reward_account: StakeAddress,
     pub gov_action_id: GovActionId,
     pub gov_action: GovernanceAction,
     pub anchor: Anchor,
@@ -1722,6 +1880,7 @@ pub enum EnactStateElem {
     Params(Box<ProtocolParamUpdate>),
     Constitution(Constitution),
     Committee(CommitteeChange),
+    ProtVer(protocol_params::ProtocolVersion),
     NoConfidence,
 }
 
@@ -1753,13 +1912,6 @@ pub struct GovernanceOutcome {
     pub action_to_perform: GovernanceOutcomeVariant,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct StakeCredentialWithPos {
-    pub stake_credential: StakeCredential,
-    pub tx_index: u64,
-    pub cert_index: u64,
-}
-
 /// Certificate in a transaction
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum TxCertificate {
@@ -1767,19 +1919,19 @@ pub enum TxCertificate {
     None(()),
 
     /// Stake registration
-    StakeRegistration(StakeCredentialWithPos),
+    StakeRegistration(StakeAddress),
 
     /// Stake de-registration
-    StakeDeregistration(StakeCredential),
+    StakeDeregistration(StakeAddress),
 
     /// Stake Delegation to a pool
     StakeDelegation(StakeDelegation),
 
     /// Pool registration
-    PoolRegistrationWithPos(PoolRegistrationWithPos),
+    PoolRegistration(PoolRegistration),
 
     /// Pool retirement
-    PoolRetirementWithPos(PoolRetirementWithPos),
+    PoolRetirement(PoolRetirement),
 
     /// Genesis key delegation
     GenesisKeyDelegation(GenesisKeyDelegation),
@@ -1815,13 +1967,20 @@ pub enum TxCertificate {
     ResignCommitteeCold(ResignCommitteeCold),
 
     /// DRep registration
-    DRepRegistration(DRepRegistrationWithPos),
+    DRepRegistration(DRepRegistration),
 
     /// DRep deregistration
-    DRepDeregistration(DRepDeregistrationWithPos),
+    DRepDeregistration(DRepDeregistration),
 
     /// DRep update
-    DRepUpdate(DRepUpdateWithPos),
+    DRepUpdate(DRepUpdate),
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TxCertificateWithPos {
+    pub cert: TxCertificate,
+    pub tx_identifier: TxIdentifier,
+    pub cert_index: u64,
 }
 
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
@@ -1884,17 +2043,12 @@ impl AddressTotals {
         for (policy, assets) in &delta.assets {
             for a in assets {
                 if a.amount > 0 {
-                    Self::apply_asset(
-                        &mut self.received.assets,
-                        *policy,
-                        a.name.clone(),
-                        a.amount as u64,
-                    );
+                    Self::apply_asset(&mut self.received.assets, *policy, a.name, a.amount as u64);
                 } else if a.amount < 0 {
                     Self::apply_asset(
                         &mut self.sent.assets,
                         *policy,
-                        a.name.clone(),
+                        a.name,
                         a.amount.unsigned_abs(),
                     );
                 }
@@ -1922,6 +2076,7 @@ impl AddressTotals {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hash::Hash;
     use anyhow::Result;
 
     #[test]
@@ -1929,7 +2084,7 @@ mod tests {
         assert_eq!(Era::default() as u8, 0);
         assert_eq!(Era::Byron as u8, 0);
         assert_eq!(Era::Conway as u8, 6);
-        assert!(!Era::try_from(7).is_ok());
+        assert!(Era::try_from(7).is_err());
 
         for ei in 0..=6 {
             for ej in 0..=6 {
@@ -1952,10 +2107,12 @@ mod tests {
     }
 
     fn make_committee_credential(addr_key_hash: bool, val: u8) -> CommitteeCredential {
+        // Create a 28-byte array filled with the value
+        let hash_bytes = [val; 28];
         if addr_key_hash {
-            Credential::AddrKeyHash(vec![val])
+            Credential::AddrKeyHash(KeyHash::from(hash_bytes))
         } else {
-            Credential::ScriptHash(vec![val])
+            Credential::ScriptHash(KeyHash::from(hash_bytes))
         }
     }
 
@@ -1964,8 +2121,11 @@ mod tests {
         let gov_action_id = GovActionId::default();
 
         let mut voting = VotingProcedures::default();
+        // Create a test hash with pattern [1, 2, 3, 4, 0, 0, ...]
+        let mut test_hash_bytes = [0u8; 28];
+        test_hash_bytes[0..4].copy_from_slice(&[1, 2, 3, 4]);
         voting.votes.insert(
-            Voter::StakePoolKey(vec![1, 2, 3, 4]),
+            Voter::StakePoolKey(test_hash_bytes.into()),
             SingleVoterVotes::default(),
         );
 
@@ -1979,7 +2139,7 @@ mod tests {
             },
         );
         voting.votes.insert(
-            Voter::StakePoolKey(vec![1, 2, 3, 4]),
+            Voter::StakePoolKey(PoolId::new(Hash::new(test_hash_bytes))),
             SingleVoterVotes::default(),
         );
         println!("Json: {}", serde_json::to_string(&voting)?);
@@ -1987,23 +2147,21 @@ mod tests {
         let gov_action = GovernanceAction::UpdateCommittee(UpdateCommitteeAction {
             previous_action_id: None,
             data: CommitteeChange {
-                removed_committee_members: HashSet::from_iter(
-                    vec![
-                        make_committee_credential(true, 48),
-                        make_committee_credential(false, 12),
-                    ]
-                    .into_iter(),
-                ),
-                new_committee_members: HashMap::from_iter(
-                    vec![(make_committee_credential(false, 87), 1234)].into_iter(),
-                ),
+                removed_committee_members: HashSet::from_iter([
+                    make_committee_credential(true, 48),
+                    make_committee_credential(false, 12),
+                ]),
+                new_committee_members: HashMap::from_iter([(
+                    make_committee_credential(false, 87),
+                    1234,
+                )]),
                 terms: RationalNumber::from(1),
             },
         });
 
         let proposal = ProposalProcedure {
             deposit: 9876,
-            reward_account: vec![7, 4, 6, 7],
+            reward_account: StakeAddress::default(),
             gov_action_id,
             gov_action,
             anchor: Anchor {
@@ -2012,6 +2170,50 @@ mod tests {
             },
         };
         println!("Json: {}", serde_json::to_string(&proposal)?);
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_voting_values() -> Result<()> {
+        let count = VoteCount::from_str("y0/n5/a1")?;
+        assert_eq!(count.yes, 0);
+        assert_eq!(count.no, 5);
+        assert_eq!(count.abstain, 1);
+
+        let counts: VoteResult<VoteCount> =
+            VoteResult::from_str("cy0/n5/a1:dy0/n1/a2:sy123/n456/a0788890")?;
+        assert_eq!(counts.committee, count);
+        assert_eq!(counts.drep.yes, 0);
+        assert_eq!(counts.drep.no, 1);
+        assert_eq!(counts.drep.abstain, 2);
+        assert_eq!(counts.pool.yes, 123);
+        assert_eq!(counts.pool.no, 456);
+        assert_eq!(counts.pool.abstain, 788890);
+        Ok(())
+    }
+
+    #[test]
+    fn serialize_stake_addres() -> Result<()> {
+        let serialized = "{\
+            \"network\":\"Mainnet\",\
+            \"credential\":{\
+                \"AddrKeyHash\":\"45dee6ee5d7f631b6226d45f29da411c42fa7e816dc0948d31e0dba7\"\
+            }\
+        }";
+
+        let addr = serde_json::from_str::<StakeAddress>(serialized)?;
+        assert_eq!(addr.network, NetworkId::Mainnet);
+        assert_eq!(
+            addr.credential,
+            StakeCredential::AddrKeyHash(KeyHash::from([
+                0x45, 0xde, 0xe6, 0xee, 0x5d, 0x7f, 0x63, 0x1b, 0x62, 0x26, 0xd4, 0x5f, 0x29, 0xda,
+                0x41, 0x1c, 0x42, 0xfa, 0x7e, 0x81, 0x6d, 0xc0, 0x94, 0x8d, 0x31, 0xe0, 0xdb, 0xa7,
+            ]))
+        );
+
+        let serialized_back = serde_json::to_string(&addr)?;
+        assert_eq!(serialized_back, serialized);
 
         Ok(())
     }

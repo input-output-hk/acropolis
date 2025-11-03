@@ -84,7 +84,7 @@ impl AssetsState {
                     // Always handle the mint deltas (This is how assets get initialized)
                     {
                         let mut reg = registry.lock().await;
-                        state = match state.handle_mint_deltas(&deltas_msg.deltas, &mut *reg) {
+                        state = match state.handle_mint_deltas(&deltas_msg.deltas, &mut reg) {
                             Ok(new_state) => new_state,
                             Err(e) => {
                                 error!("Asset deltas handling error: {e:#}");
@@ -97,7 +97,7 @@ impl AssetsState {
                     if storage_config.store_info {
                         let mut reg = registry.lock().await;
                         state = match state
-                            .handle_cip25_metadata(&mut *reg, &deltas_msg.cip25_metadata_updates)
+                            .handle_cip25_metadata(&mut reg, &deltas_msg.cip25_metadata_updates)
                         {
                             Ok(new_state) => new_state,
                             Err(e) => {
@@ -125,20 +125,19 @@ impl AssetsState {
 
                         if storage_config.store_info {
                             let reg = registry.lock().await;
-                            state =
-                                match state.handle_cip68_metadata(&utxo_deltas_msg.deltas, &*reg) {
-                                    Ok(new_state) => new_state,
-                                    Err(e) => {
-                                        error!("CIP-68 metadata handling error: {e:#}");
-                                        state
-                                    }
-                                };
+                            state = match state.handle_cip68_metadata(&utxo_deltas_msg.deltas, &reg)
+                            {
+                                Ok(new_state) => new_state,
+                                Err(e) => {
+                                    error!("CIP-68 metadata handling error: {e:#}");
+                                    state
+                                }
+                            };
                         }
 
                         if storage_config.store_transactions.is_enabled() {
                             let reg = registry.lock().await;
-                            state = match state.handle_transactions(&utxo_deltas_msg.deltas, &*reg)
-                            {
+                            state = match state.handle_transactions(&utxo_deltas_msg.deltas, &reg) {
                                 Ok(new_state) => new_state,
                                 Err(e) => {
                                     error!("Transactions handling error: {e:#}");
@@ -161,7 +160,7 @@ impl AssetsState {
                         Self::check_sync(&current_block, block_info, "address");
 
                         let reg = registry.lock().await;
-                        state = match state.handle_address_deltas(&address_deltas_msg.deltas, &*reg)
+                        state = match state.handle_address_deltas(&address_deltas_msg.deltas, &reg)
                         {
                             Ok(new_state) => new_state,
                             Err(e) => {
@@ -299,7 +298,7 @@ impl AssetsState {
                     }
                     AssetsStateQuery::GetAssetInfo { policy, name } => {
                         let reg = registry.lock().await;
-                        match reg.lookup_id(&policy, &name) {
+                        match reg.lookup_id(policy, name) {
                             Some(asset_id) => match state.get_asset_info(&asset_id, &reg) {
                                 Ok(Some(info)) => AssetsStateQueryResponse::AssetInfo(info),
                                 Ok(None) => AssetsStateQueryResponse::NotFound,
@@ -318,7 +317,7 @@ impl AssetsState {
                     }
                     AssetsStateQuery::GetAssetHistory { policy, name } => {
                         let reg = registry.lock().await;
-                        match reg.lookup_id(&policy, &name) {
+                        match reg.lookup_id(policy, name) {
                             Some(asset_id) => match state.get_asset_history(&asset_id) {
                                 Ok(Some(history)) => {
                                     AssetsStateQueryResponse::AssetHistory(history)
@@ -339,7 +338,7 @@ impl AssetsState {
                     }
                     AssetsStateQuery::GetAssetAddresses { policy, name } => {
                         let reg = registry.lock().await;
-                        match reg.lookup_id(&policy, &name) {
+                        match reg.lookup_id(policy, name) {
                             Some(asset_id) => match state.get_asset_addresses(&asset_id) {
                                 Ok(Some(addresses)) => {
                                     AssetsStateQueryResponse::AssetAddresses(addresses)
@@ -360,7 +359,7 @@ impl AssetsState {
                     }
                     AssetsStateQuery::GetAssetTransactions { policy, name } => {
                         let reg = registry.lock().await;
-                        match reg.lookup_id(&policy, &name) {
+                        match reg.lookup_id(policy, name) {
                             Some(asset_id) => match state.get_asset_transactions(&asset_id) {
                                 Ok(Some(txs)) => AssetsStateQueryResponse::AssetTransactions(txs),
                                 Ok(None) => AssetsStateQueryResponse::NotFound,
@@ -379,7 +378,7 @@ impl AssetsState {
                     }
                     AssetsStateQuery::GetPolicyIdAssets { policy } => {
                         let reg = registry.lock().await;
-                        match state.get_policy_assets(&policy, &reg) {
+                        match state.get_policy_assets(policy, &reg) {
                             Ok(Some(assets)) => AssetsStateQueryResponse::PolicyIdAssets(assets),
                             Ok(None) => AssetsStateQueryResponse::NotFound,
                             Err(e) => AssetsStateQueryResponse::Error(e.to_string()),

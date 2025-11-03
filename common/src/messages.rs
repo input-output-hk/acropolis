@@ -3,6 +3,7 @@
 // We don't use these messages in the acropolis_common crate itself
 #![allow(dead_code)]
 
+use crate::commands::transactions::{TransactionsCommand, TransactionsCommandResponse};
 use crate::genesis_values::GenesisValues;
 use crate::ledger_state::SPOState;
 use crate::protocol_params::{NonceHash, ProtocolParams};
@@ -25,25 +26,21 @@ use crate::queries::{
     transactions::{TransactionsStateQuery, TransactionsStateQueryResponse},
 };
 
-use crate::byte_array::*;
 use crate::types::*;
+use crate::validation::ValidationStatus;
 
 // Caryatid core messages which we re-export
 pub use caryatid_module_clock::messages::ClockTickMessage;
 pub use caryatid_module_rest_server::messages::{GetRESTResponse, RESTRequest, RESTResponse};
 
-/// Block header message
+/// Raw block data message
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct BlockHeaderMessage {
-    /// Raw Data
-    pub raw: Vec<u8>,
-}
+pub struct RawBlockMessage {
+    /// Header raw data
+    pub header: Vec<u8>,
 
-/// Block body message
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct BlockBodyMessage {
-    /// Raw Data
-    pub raw: Vec<u8>,
+    /// Body raw data
+    pub body: Vec<u8>,
 }
 
 /// Snapshot completion message
@@ -93,7 +90,7 @@ pub struct AssetDeltasMessage {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TxCertificatesMessage {
     /// Ordered set of certificates
-    pub certificates: Vec<TxCertificate>,
+    pub certificates: Vec<TxCertificateWithPos>,
 }
 
 /// Address deltas message
@@ -182,7 +179,7 @@ pub struct EpochActivityMessage {
     pub total_fees: u64,
 
     /// Map of SPO IDs to blocks produced
-    pub spo_blocks: Vec<(KeyHash, usize)>,
+    pub spo_blocks: Vec<(PoolId, usize)>,
 
     /// Nonce
     pub nonce: Option<NonceHash>,
@@ -236,7 +233,7 @@ pub struct SPOStakeDistributionMessage {
     pub epoch: u64,
 
     /// SPO stake distribution by operator ID
-    pub spos: Vec<(KeyHash, DelegatedStake)>,
+    pub spos: Vec<(PoolId, DelegatedStake)>,
 }
 
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
@@ -245,7 +242,7 @@ pub struct SPORewardsMessage {
     pub epoch: u64,
 
     /// SPO rewards by operator ID (total rewards before distribution, pool operator's rewards)
-    pub spos: Vec<(KeyHash, SPORewards)>,
+    pub spos: Vec<(PoolId, SPORewards)>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -275,15 +272,16 @@ pub struct SPOStateMessage {
     pub spos: Vec<PoolRegistration>,
 
     /// SPOs in the above list which retired at the start of this epoch, by operator ID
-    pub retired_spos: Vec<KeyHash>,
+    pub retired_spos: Vec<PoolId>,
 }
 
 /// Cardano message enum
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[allow(clippy::large_enum_variant)]
 pub enum CardanoMessage {
-    BlockHeader(BlockHeaderMessage),         // Block header available
-    BlockBody(BlockBodyMessage),             // Block body available
-    SnapshotComplete,                        // Mithril or Node (file) snapshot loaded
+    BlockAvailable(RawBlockMessage),         // Block body available
+    BlockValidation(ValidationStatus),       // Result of a block validation
+    SnapshotComplete,                        // Mithril snapshot loaded
     ReceivedTxs(RawTxsMessage),              // Transaction available
     GenesisComplete(GenesisCompleteMessage), // Genesis UTXOs done + genesis params
     GenesisUTxOs(GenesisUTxOsMessage),       // Genesis UTxOs with their UTxOIdentifiers
@@ -353,6 +351,10 @@ pub enum Message {
     // State query messages
     StateQuery(StateQuery),
     StateQueryResponse(StateQueryResponse),
+
+    // Commands
+    Command(Command),
+    CommandResponse(CommandResponse),
 }
 
 // Casts from specific Caryatid messages
@@ -406,6 +408,7 @@ pub enum StateQuery {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[allow(clippy::large_enum_variant)]
 pub enum StateQueryResponse {
     Accounts(AccountsStateQueryResponse),
     Addresses(AddressStateQueryResponse),
@@ -423,4 +426,14 @@ pub enum StateQueryResponse {
     Transactions(TransactionsStateQueryResponse),
     UTxOs(UTxOStateQueryResponse),
     SPDD(SPDDStateQueryResponse),
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum Command {
+    Transactions(TransactionsCommand),
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum CommandResponse {
+    Transactions(TransactionsCommandResponse),
 }

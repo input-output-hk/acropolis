@@ -6,7 +6,7 @@ use acropolis_common::{
     messages::{BlockTxsMessage, EpochActivityMessage, ProtocolParamsMessage},
     params::EPOCH_LENGTH,
     protocol_params::{Nonces, PraosParams},
-    BlockHash, BlockInfo, KeyHash,
+    BlockHash, BlockInfo, PoolId,
 };
 use anyhow::Result;
 use imbl::HashMap;
@@ -39,8 +39,8 @@ pub struct State {
     // last block height
     last_block_height: u64,
 
-    // Map of counts by VRF key hashes
-    blocks_minted: HashMap<KeyHash, usize>,
+    // Map of counts by Pool ID
+    blocks_minted: HashMap<PoolId, usize>,
 
     // blocks seen this epoch
     epoch_blocks: usize,
@@ -134,7 +134,7 @@ impl State {
             let evolving = Nonces::evolve(&current_nonces.evolving, &nonce_vrf_output)?;
 
             // there must be parent hash
-            let Some(parent_hash) = header.previous_hash().map(|h| BlockHash(*h)) else {
+            let Some(parent_hash) = header.previous_hash().map(|h| BlockHash::from(*h)) else {
                 return Err(anyhow::anyhow!("Header Parent hash error"));
             };
 
@@ -188,10 +188,10 @@ impl State {
         self.last_block_time = block_info.timestamp;
         self.last_block_height = block_info.number;
         self.epoch_blocks += 1;
-        let spo_id = keyhash_224(issuer_vkey);
+        let spo_id = PoolId::from(keyhash_224(issuer_vkey));
 
         // Count one on this hash
-        *(self.blocks_minted.entry(spo_id.clone()).or_insert(0)) += 1;
+        *(self.blocks_minted.entry(spo_id).or_insert(0)) += 1;
     }
 
     // Handle Block Txs
@@ -250,12 +250,12 @@ impl State {
             total_txs: self.epoch_txs,
             total_outputs: self.epoch_outputs,
             total_fees: self.epoch_fees,
-            spo_blocks: self.blocks_minted.iter().map(|(k, v)| (k.clone(), *v)).collect(),
-            nonce: self.nonces.as_ref().map(|n| n.active.hash.clone()).flatten(),
+            spo_blocks: self.blocks_minted.iter().map(|(k, v)| (*k, *v)).collect(),
+            nonce: self.nonces.as_ref().and_then(|n| n.active.hash),
         }
     }
 
-    pub fn get_latest_epoch_blocks_minted_by_pool(&self, spo_id: &KeyHash) -> u64 {
+    pub fn get_latest_epoch_blocks_minted_by_pool(&self, spo_id: &PoolId) -> u64 {
         self.blocks_minted.get(spo_id).map(|v| *v as u64).unwrap_or(0)
     }
 }
@@ -336,7 +336,10 @@ mod tests {
 
         assert_eq!(state.epoch_blocks, 2);
         assert_eq!(state.blocks_minted.len(), 1);
-        assert_eq!(state.blocks_minted.get(&keyhash_224(issuer)), Some(&2));
+        assert_eq!(
+            state.blocks_minted.get(&keyhash_224(issuer).into()),
+            Some(&2)
+        );
     }
 
     #[test]
@@ -355,7 +358,7 @@ mod tests {
             state
                 .blocks_minted
                 .iter()
-                .find(|(k, _)| *k == &keyhash_224(b"issuer_1"))
+                .find(|(k, _)| *k == &keyhash_224(b"issuer_1").into())
                 .map(|(_, v)| *v),
             Some(1)
         );
@@ -363,12 +366,13 @@ mod tests {
             state
                 .blocks_minted
                 .iter()
-                .find(|(k, _)| *k == &keyhash_224(b"issuer_2"))
+                .find(|(k, _)| *k == &keyhash_224(b"issuer_2").into())
                 .map(|(_, v)| *v),
             Some(2)
         );
 
-        let blocks_minted = state.get_latest_epoch_blocks_minted_by_pool(&keyhash_224(b"issuer_2"));
+        let blocks_minted =
+            state.get_latest_epoch_blocks_minted_by_pool(&keyhash_224(b"issuer_2").into());
         assert_eq!(blocks_minted, 2);
     }
 
@@ -424,7 +428,10 @@ mod tests {
         assert_eq!(ea.total_fees, 123);
         assert_eq!(ea.spo_blocks.len(), 1);
         assert_eq!(
-            ea.spo_blocks.iter().find(|(k, _)| k == &keyhash_224(b"issuer_1")).map(|(_, v)| *v),
+            ea.spo_blocks
+                .iter()
+                .find(|(k, _)| k == &keyhash_224(b"issuer_1").into())
+                .map(|(_, v)| *v),
             Some(1)
         );
         assert_eq!(ea.epoch_start_time, genesis.byron_timestamp);
@@ -445,7 +452,8 @@ mod tests {
         assert_eq!(state.last_block_time, block.timestamp);
         assert_eq!(state.last_block_height, block.number);
 
-        let blocks_minted = state.get_latest_epoch_blocks_minted_by_pool(&keyhash_224(b"vrf_1"));
+        let blocks_minted =
+            state.get_latest_epoch_blocks_minted_by_pool(&keyhash_224(b"vrf_1").into());
         assert_eq!(blocks_minted, 0);
     }
 
@@ -480,7 +488,7 @@ mod tests {
             },
         );
         assert_eq!(
-            state.get_latest_epoch_blocks_minted_by_pool(&keyhash_224(b"issuer_1")),
+            state.get_latest_epoch_blocks_minted_by_pool(&keyhash_224(b"issuer_1").into()),
             2
         );
         history.lock().await.commit(block.number, state);
@@ -497,11 +505,11 @@ mod tests {
             },
         );
         assert_eq!(
-            state.get_latest_epoch_blocks_minted_by_pool(&keyhash_224(b"issuer_1")),
+            state.get_latest_epoch_blocks_minted_by_pool(&keyhash_224(b"issuer_1").into()),
             0
         );
         assert_eq!(
-            state.get_latest_epoch_blocks_minted_by_pool(&keyhash_224(b"issuer_2")),
+            state.get_latest_epoch_blocks_minted_by_pool(&keyhash_224(b"issuer_2").into()),
             1
         );
         history.lock().await.commit(block.number, state);
