@@ -1,0 +1,11 @@
+block-topic = "cardano.block.available"
+snapshot-completion-topic = "cardano.snapshot.complete"
+genesis-completion-topic = "cardano.sequence.bootstrapped"
+
+node-addresses = [
+    "backbone.cardano.iog.io:3001",
+]
+magic-number = 764824073
+
+sync-point = "origin"
+cache-dir = "upstream-cache"

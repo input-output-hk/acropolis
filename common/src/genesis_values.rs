@@ -6,6 +6,7 @@ const MAINNET_SHELLEY_GENESIS_HASH: &str =
     "1a3be38bcbb7911969283716ad7aa550250226b76a61fc51cc9a9a35d9276d81";
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub struct GenesisValues {
     pub byron_timestamp: u64,
     pub shelley_epoch: u64,
