@@ -321,7 +321,8 @@ pub fn process_message(
     block: &BlockInfo,
     mut tracker: Option<&mut Tracker>,
 ) -> StakeAddressDeltasMessage {
-    let mut grouped: HashMap<StakeAddress, (i64, HashSet<ShelleyAddress>)> = HashMap::new();
+    let mut grouped: HashMap<StakeAddress, (i64, Vec<ShelleyAddress>, HashSet<ShelleyAddress>)> =
+        HashMap::new();
     for d in delta.deltas.iter() {
         // Variants to be processed:
         // 1. Shelley Address delegation is a stake
@@ -388,24 +389,26 @@ pub fn process_message(
             Address::Stake(stake_address) => (stake_address.clone(), None),
         };
 
-        let entry = grouped.entry(stake_address).or_insert((0, HashSet::new()));
+        let entry = grouped.entry(stake_address).or_insert((0, Vec::new(), HashSet::new()));
         entry.0 += d.value.lovelace;
 
         if let Some(shelley) = shelley_opt {
-            entry.1.insert(shelley.clone());
+            if entry.2.insert(shelley.clone()) {
+                entry.1.push(shelley.clone());
+            }
         }
     }
 
     let deltas = grouped
         .into_iter()
         .map(
-            |(stake_address, (delta, shelley_addrs))| StakeAddressDelta {
+            |(stake_address, (delta, shelley_addrs, _))| StakeAddressDelta {
                 stake_address,
-                addresses: shelley_addrs.into_iter().collect(),
+                addresses: shelley_addrs,
                 delta,
             },
         )
-        .collect::<Vec<_>>();
+        .collect();
 
     StakeAddressDeltasMessage { deltas }
 }

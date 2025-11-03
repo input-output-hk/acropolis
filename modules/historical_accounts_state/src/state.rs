@@ -358,25 +358,25 @@ impl State {
         &self,
         account: &StakeAddress,
     ) -> Result<Option<Vec<ShelleyAddress>>> {
-        let immutable = self.immutable.get_addresses(account).await?;
+        let mut addresses = match self.immutable.get_addresses(account).await? {
+            Some(list) => list,
+            None => Vec::new(),
+        };
 
-        let mut volatile = HashSet::new();
+        let mut seen: HashSet<ShelleyAddress> = addresses.iter().cloned().collect();
         for block_map in self.volatile.window.iter() {
             if let Some(entry) = block_map.get(account) {
                 if let Some(pending) = &entry.addresses {
-                    volatile.extend(pending.iter().cloned());
+                    for addr in pending {
+                        if seen.insert(addr.clone()) {
+                            addresses.push(addr.clone());
+                        }
+                    }
                 }
             }
         }
 
-        match immutable {
-            Some(mut addresses) => {
-                addresses.extend(volatile);
-                Ok(Some(addresses.into_iter().collect()))
-            }
-            None if volatile.is_empty() => Ok(None),
-            None => Ok(Some(volatile.into_iter().collect())),
-        }
+        Ok((!addresses.is_empty()).then_some(addresses))
     }
 
     fn handle_stake_registration_change(

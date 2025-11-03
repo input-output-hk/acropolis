@@ -269,20 +269,27 @@ impl ImmutableHistoricalAccountStore {
     pub async fn get_addresses(
         &self,
         account: &StakeAddress,
-    ) -> Result<Option<HashSet<ShelleyAddress>>> {
+    ) -> Result<Option<Vec<ShelleyAddress>>> {
         let prefix = account.to_binary();
-        let mut addresses: HashSet<ShelleyAddress> = HashSet::new();
+        let mut addresses = Vec::new();
+        let mut seen = HashSet::new();
 
         for result in self.addresses.prefix(&prefix) {
             let (key, _) = result?;
-            let shelley = ShelleyAddress::from_bytes_key(&key[prefix.len()..])?;
-            addresses.insert(shelley);
+            let shelley = ShelleyAddress::from_bytes_key(&key[prefix.len() + 8..])?;
+            if seen.insert(shelley.clone()) {
+                addresses.push(shelley);
+            }
         }
 
         for block_map in self.pending.lock().await.iter() {
             if let Some(entry) = block_map.get(account) {
                 if let Some(addrs) = &entry.addresses {
-                    addresses.extend(addrs.iter().cloned());
+                    for addr in addrs {
+                        if seen.insert(addr.clone()) {
+                            addresses.push(addr.clone());
+                        }
+                    }
                 }
             }
         }
