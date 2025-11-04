@@ -8,7 +8,7 @@ use acropolis_common::queries::blocks::{
 };
 use acropolis_common::queries::utils::query_state;
 use acropolis_common::serialization::{Bech32Conversion, Bech32WithHrp};
-use acropolis_common::{DRepChoice, StakeAddress};
+use acropolis_common::{DRepChoice, ShelleyAddress, StakeAddress};
 use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
 
@@ -633,6 +633,71 @@ pub async fn handle_account_addresses_blockfrost(
             &format!("Internal server error while serializing addresses: {e}"),
         )),
     }
+}
+
+/// Handle `/accounts/{stake_address}/addresses/assets` Blockfrost-compatible endpoint
+pub async fn handle_account_assets_blockfrost(
+    _context: Arc<Context<Message>>,
+    _params: Vec<String>,
+    _handlers_config: Arc<HandlersConfig>,
+) -> Result<RESTResponse> {
+    Ok(RESTResponse::with_text(501, "Not implemented"))
+}
+
+/// Handle `/accounts/{stake_address}/addresses/total` Blockfrost-compatible endpoint
+pub async fn handle_account_totals_blockfrost(
+    context: Arc<Context<Message>>,
+    params: Vec<String>,
+    handlers_config: Arc<HandlersConfig>,
+) -> Result<RESTResponse> {
+    let account = match parse_stake_address(&params) {
+        Ok(addr) => addr,
+        Err(resp) => return Ok(resp),
+    };
+
+    // Prepare the message
+    let msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
+        AccountsStateQuery::GetAccountAssociatedAddresses { account },
+    )));
+
+    // Get addresses from historical accounts state
+    let addresses = query_state(
+        &context,
+        &handlers_config.historical_accounts_query_topic,
+        msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Accounts(
+                AccountsStateQueryResponse::AccountAssociatedAddresses(addresses),
+            )) => Ok(Some(addresses)),
+            Message::StateQueryResponse(StateQueryResponse::Accounts(
+                AccountsStateQueryResponse::NotFound,
+            )) => Ok(None),
+            Message::StateQueryResponse(StateQueryResponse::Accounts(
+                AccountsStateQueryResponse::Error(e),
+            )) => Err(anyhow::anyhow!(
+                "Internal server error while retrieving account addresses: {e}"
+            )),
+            _ => Err(anyhow::anyhow!(
+                "Unexpected message type while retrieving account addresses"
+            )),
+        },
+    )
+    .await?;
+
+    let Some(addresses) = addresses else {
+        return Ok(RESTResponse::with_text(404, "Account not found"));
+    };
+
+    Ok(RESTResponse::with_text(501, "Not implemented"))
+}
+
+/// Handle `/accounts/{stake_address}/utxos` Blockfrost-compatible endpoint
+pub async fn handle_account_utxos_blockfrost(
+    _context: Arc<Context<Message>>,
+    _params: Vec<String>,
+    _handlers_config: Arc<HandlersConfig>,
+) -> Result<RESTResponse> {
+    Ok(RESTResponse::with_text(501, "Not implemented"))
 }
 
 fn parse_stake_address(params: &[String]) -> Result<StakeAddress, RESTResponse> {
