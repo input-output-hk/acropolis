@@ -15,12 +15,13 @@ use tracing::{info, warn};
 
 pub struct NetworkManager {
     network_magic: u64,
+    security_param: u64,
     next_id: u64,
     peers: BTreeMap<PeerId, PeerConnection>,
     preferred_upstream: Option<PeerId>,
     blocks_to_fetch: VecDeque<Header>,
     blocks: HashMap<BlockHash, BlockStatus>,
-    head: Option<Point>,
+    chain_prefix: VecDeque<Point>,
     rolled_back: bool,
     events: mpsc::Receiver<NetworkEvent>,
     events_sender: mpsc::Sender<NetworkEvent>,
@@ -31,18 +32,20 @@ pub struct NetworkManager {
 impl NetworkManager {
     pub fn new(
         network_magic: u64,
+        security_param: u64,
         events: mpsc::Receiver<NetworkEvent>,
         events_sender: mpsc::Sender<NetworkEvent>,
         block_sink: BlockSink,
     ) -> Self {
         Self {
             network_magic,
+            security_param,
             next_id: 0,
             peers: BTreeMap::new(),
             preferred_upstream: None,
             blocks_to_fetch: VecDeque::new(),
             blocks: HashMap::new(),
-            head: None,
+            chain_prefix: VecDeque::new(),
             rolled_back: false,
             events,
             events_sender,
@@ -73,16 +76,17 @@ impl NetworkManager {
             id,
         };
         let conn = PeerConnection::new(address, self.network_magic, sender, delay);
-        if self.preferred_upstream.is_none() {
-            self.peers.insert(id, conn);
-            self.set_preferred_upstream(id);
-        } else {
-            if let Some(head) = self.head.clone()
-                && let Err(error) = conn.find_intersect(vec![head])
+        if self.preferred_upstream.is_some() {
+            let points = self.choose_points_for_find_intersect();
+            if !points.is_empty()
+                && let Err(error) = conn.find_intersect(points)
             {
-                warn!("could not sync {}: {error}", conn.address);
+                warn!("could not sync {}: {error:#}", conn.address);
             }
             self.peers.insert(id, conn);
+        } else {
+            self.peers.insert(id, conn);
+            self.set_preferred_upstream(id);
         }
     }
 
@@ -91,16 +95,16 @@ impl NetworkManager {
             let Some(upstream) = self.preferred_upstream else {
                 bail!("no peers");
             };
-            let Some(conn) = self.peers.get(&upstream) else {
+            let Some(peer) = self.peers.get(&upstream) else {
                 bail!("preferred upstream not found");
             };
-            match conn.find_tip().await {
+            match peer.find_tip().await {
                 Ok(point) => {
                     self.sync_to_point(point);
                     return Ok(());
                 }
                 Err(e) => {
-                    warn!("could not fetch tip from {}: {e}", conn.address);
+                    warn!("could not fetch tip from {}: {e:#}", peer.address);
                     self.handle_disconnect(upstream);
                 }
             }
@@ -108,13 +112,18 @@ impl NetworkManager {
     }
 
     pub fn sync_to_point(&mut self, point: Point) {
-        for conn in self.peers.values() {
-            if let Err(error) = conn.find_intersect(vec![point.clone()]) {
-                warn!("could not sync {}: {error}", conn.address);
+        for peer in self.peers.values() {
+            if let Err(error) = peer.find_intersect(vec![point.clone()]) {
+                warn!("could not sync {}: {error:#}", peer.address);
             }
         }
     }
 
+    // Implementation note: this method is deliberately synchronous/non-blocking.
+    // The task which handles network events should only block when waiting for new messages,
+    // or when publishing messages to other modules. This avoids deadlock; if our event queue
+    // is full and this method is blocked on writing to it, the queue can never drain.
+    // Returns true if we might have new events to publish downstream.
     fn handle_peer_update(&mut self, peer: PeerId, event: PeerEvent) -> Result<bool> {
         let is_preferred = self.preferred_upstream.is_some_and(|id| id == peer);
         match event {
@@ -132,8 +141,7 @@ impl NetworkManager {
                                 let Some(peer) = self.peers.get(&announcer) else {
                                     continue;
                                 };
-                                if let Err(e) = peer.request_block(header.hash, header.slot)
-                                {
+                                if let Err(e) = peer.request_block(header.hash, header.slot) {
                                     warn!("could not request block from {}: {e}", peer.address);
                                     self.handle_disconnect(announcer);
                                 }
@@ -153,20 +161,24 @@ impl NetworkManager {
                 if is_preferred {
                     match point {
                         Point::Origin => {
+                            self.rolled_back = !self.chain_prefix.is_empty();
+                            self.chain_prefix.clear();
                             self.blocks_to_fetch.clear();
-                            self.rolled_back = true;
                         }
                         Point::Specific(slot, _) => {
-                            let mut already_sent = true;
-                            while let Some(newest) = self.blocks_to_fetch.back() {
-                                if newest.slot == slot {
-                                    already_sent = false;
-                                    break;
-                                } else {
-                                    self.blocks_to_fetch.pop_back();
-                                }
+                            // don't bother fetching any blocks from after the rollback point
+                            while self.blocks_to_fetch.back().is_some_and(|b| b.slot > slot) {
+                                self.blocks_to_fetch.pop_back();
                             }
-                            if already_sent {
+
+                            // If we're rolling back to before a block which we've emitted events for,
+                            // set rolled_back to true so that we signal that in the next message.
+                            while self
+                                .chain_prefix
+                                .back()
+                                .is_some_and(|point| is_point_after(point, slot))
+                            {
+                                self.chain_prefix.pop_back();
                                 self.rolled_back = true;
                             }
                         }
@@ -188,32 +200,38 @@ impl NetworkManager {
         }
     }
 
-    fn handle_disconnect(&mut self, peer: PeerId) {
-        let Some(conn) = self.peers.remove(&peer) else {
+    fn handle_disconnect(&mut self, id: PeerId) {
+        let Some(peer) = self.peers.remove(&id) else {
             return;
         };
-        warn!("disconnected from {}", conn.address);
-        let is_preferred = self.preferred_upstream.is_some_and(|id| id == peer);
-        if is_preferred && let Some(new_preferred) = self.peers.keys().next().copied() {
+        warn!("disconnected from {}", peer.address);
+        let was_preferred = self.preferred_upstream.is_some_and(|i| i == id);
+        if was_preferred && let Some(new_preferred) = self.peers.keys().next().copied() {
             self.set_preferred_upstream(new_preferred);
         }
         if self.peers.is_empty() {
             warn!("no upstream peers!");
         }
-        let address = conn.address.clone();
-        drop(conn);
+        let address = peer.address.clone();
+        drop(peer);
         self.handle_new_connection(address, Duration::from_secs(5));
     }
 
-    fn set_preferred_upstream(&mut self, peer: PeerId) {
-        if let Some(conn) = self.peers.get(&peer) {
-            info!("setting preferred upstream to {}", conn.address);
-        } else {
-            warn!("setting preferred upstream to unrecognized node {peer:?}");
-        }
-        self.preferred_upstream = Some(peer);
-        if let Some(head) = self.head.clone() {
-            self.sync_to_point(head);
+    fn set_preferred_upstream(&mut self, id: PeerId) {
+        let Some(peer) = self.peers.get(&id) else {
+            warn!("setting preferred upstream to unrecognized node {id:?}");
+            return;
+        };
+        info!("setting preferred upstream to {}", peer.address);
+        self.preferred_upstream = Some(id);
+
+        // If our preferred upstream changed, resync all connections.
+        // That will trigger a rollback if needed.
+        let points = self.choose_points_for_find_intersect();
+        for peer in self.peers.values() {
+            if let Err(error) = peer.find_intersect(points.clone()) {
+                warn!("could not sync {}: {error:#}", peer.address)
+            }
         }
     }
 
@@ -227,11 +245,53 @@ impl NetworkManager {
             if self.published_blocks.is_multiple_of(100) {
                 info!("Published block {}", header.number);
             }
-            self.head = Some(Point::Specific(header.slot, header.hash.to_vec()));
+            let point = Point::Specific(header.slot, header.hash.to_vec());
+            self.chain_prefix.push_back(point);
+            while self.chain_prefix.len() > self.security_param as usize {
+                self.chain_prefix.pop_front();
+            }
             self.rolled_back = false;
             self.blocks_to_fetch.pop_front();
         }
         Ok(())
+    }
+
+    fn choose_points_for_find_intersect(&self) -> Vec<Point> {
+        let mut iterator = self.chain_prefix.iter().rev();
+        let mut result = vec![];
+
+        // send the 5 most recent points
+        for _ in 0..5 {
+            if let Some(next) = iterator.next() {
+                result.push(next.clone());
+            }
+        }
+
+        // then 5 more points, spaced out by 10 block heights each
+        let mut iterator = iterator.step_by(10);
+        for _ in 0..5 {
+            if let Some(next) = iterator.next() {
+                result.push(next.clone());
+            }
+        }
+
+        // then 5 more points, spaced out by a total of 100 block heights each
+        // (in case of an implausibly long rollback)
+        let mut iterator = iterator.step_by(10);
+        for _ in 0..5 {
+            if let Some(next) = iterator.next() {
+                result.push(next.clone());
+            }
+        }
+
+        result
+    }
+}
+
+const fn is_point_after(point: &Point, slot: u64) -> bool {
+    match point {
+        Point::Origin => false,
+        Point::Specific(s, _) => *s > slot,
     }
 }
 
