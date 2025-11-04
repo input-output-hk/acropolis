@@ -201,22 +201,11 @@ impl PeerConnectionWorker {
         let hdr_tag = header.byron_prefix.map(|p| p.0);
         let hdr_variant = header.variant;
         let hdr = MultiEraHeader::decode(hdr_variant, hdr_tag, &header.cbor)?;
-        let era = match hdr {
-            MultiEraHeader::EpochBoundary(_) => return Ok(None),
-            MultiEraHeader::Byron(_) => Era::Byron,
-            MultiEraHeader::ShelleyCompatible(_) => match hdr_variant {
-                1 => Era::Shelley,
-                2 => Era::Allegra,
-                3 => Era::Mary,
-                4 => Era::Alonzo,
-                x => bail!("Impossible header variant {x} for ShelleyCompatible (TPraos)"),
-            },
-            MultiEraHeader::BabbageCompatible(_) => match hdr_variant {
-                5 => Era::Babbage,
-                6 => Era::Conway,
-                x => bail!("Impossible header variant {x} for BabbageCompatible (Praos)"),
-            },
-        };
+        if hdr.as_eb().is_some() {
+            // skip EpochBoundary blocks
+            return Ok(None);
+        }
+        let era = Era::try_from(hdr_variant)?;
         Ok(Some(Header {
             hash: BlockHash::new(*hdr.hash()),
             slot: hdr.slot(),

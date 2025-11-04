@@ -6,6 +6,7 @@ use acropolis_common::{
     BlockInfo, BlockStatus,
     genesis_values::GenesisValues,
     messages::{CardanoMessage, Message, RawBlockMessage},
+    upstream_cache::{UpstreamCache, UpstreamCacheRecord},
 };
 use anyhow::{Result, bail};
 use caryatid_sdk::{Context, Module, Subscription, module};
@@ -50,10 +51,28 @@ impl PeerNetworkInterface {
             } else {
                 cfg.genesis_values.expect("genesis values not found")
             };
+
+            let mut upstream_cache = None;
+            let mut cache_sync_point = None;
+            if cfg.sync_point == SyncPoint::Cache {
+                let mut cache = UpstreamCache::new(&cfg.cache_dir);
+                cache.start_reading()?;
+                while let Some(record) = cache.read_record()? {
+                    cache_sync_point = Some((record.id.slot, record.id.hash));
+                    let message = Arc::new(Message::Cardano((
+                        record.id,
+                        CardanoMessage::BlockAvailable(Arc::unwrap_or_clone(record.message)),
+                    )));
+                    context.message_bus.publish(&cfg.block_topic, message).await?;
+                }
+                upstream_cache = Some(cache);
+            }
+
             let sink = BlockSink {
                 context,
                 topic: cfg.block_topic,
                 genesis_values,
+                upstream_cache,
             };
 
             let mut manager =
@@ -65,7 +84,13 @@ impl PeerNetworkInterface {
             match cfg.sync_point {
                 SyncPoint::Origin => manager.sync_to_point(Point::Origin),
                 SyncPoint::Tip => manager.sync_to_tip().await?,
-                SyncPoint::Cache => unimplemented!(),
+                SyncPoint::Cache => {
+                    let point = match cache_sync_point {
+                        Some((slot, hash)) => Point::Specific(slot, hash.to_vec()),
+                        None => Point::Origin,
+                    };
+                    manager.sync_to_point(point);
+                }
                 SyncPoint::Snapshot => {
                     let mut subscription =
                         snapshot_complete.expect("Snapshot topic subscription missing");
@@ -109,15 +134,31 @@ struct BlockSink {
     context: Arc<Context<Message>>,
     topic: String,
     genesis_values: GenesisValues,
+    upstream_cache: Option<UpstreamCache>,
 }
 impl BlockSink {
-    pub async fn announce(&self, header: &Header, body: &[u8], rolled_back: bool) -> Result<()> {
+    pub async fn announce(
+        &mut self,
+        header: &Header,
+        body: &[u8],
+        rolled_back: bool,
+    ) -> Result<()> {
         let info = self.make_block_info(header, rolled_back);
-        let available = CardanoMessage::BlockAvailable(RawBlockMessage {
+        let raw_block = RawBlockMessage {
             header: header.bytes.clone(),
             body: body.to_vec(),
-        });
-        let message = Arc::new(Message::Cardano((info, available)));
+        };
+        if let Some(cache) = self.upstream_cache.as_mut() {
+            let record = UpstreamCacheRecord {
+                id: info.clone(),
+                message: Arc::new(raw_block.clone()),
+            };
+            cache.write_record(&record)?;
+        }
+        let message = Arc::new(Message::Cardano((
+            info,
+            CardanoMessage::BlockAvailable(raw_block),
+        )));
         self.context.publish(&self.topic, message).await
     }
 
