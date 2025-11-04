@@ -311,6 +311,13 @@ impl Tracker {
     }
 }
 
+/// Internal helper used during `process_message` aggregation for deduplication.
+struct StakeEntry {
+        delta: i64,
+        addresses: Vec<ShelleyAddress>,
+        seen: HashSet<ShelleyAddress>,
+    }
+
 /// Iterates through all address deltas in `delta`, leaves only stake addresses
 /// (and removes all others). If the address is a pointer, tries to resolve it.
 /// If the pointer is incorrect, then filters it out too (incorrect pointers cannot
@@ -321,8 +328,9 @@ pub fn process_message(
     block: &BlockInfo,
     mut tracker: Option<&mut Tracker>,
 ) -> StakeAddressDeltasMessage {
-    let mut grouped: HashMap<StakeAddress, (i64, Vec<ShelleyAddress>, HashSet<ShelleyAddress>)> =
+    let mut grouped: HashMap<StakeAddress, StakeEntry> =
         HashMap::new();
+
     for d in delta.deltas.iter() {
         // Variants to be processed:
         // 1. Shelley Address delegation is a stake
@@ -389,25 +397,27 @@ pub fn process_message(
             Address::Stake(stake_address) => (stake_address.clone(), None),
         };
 
-        let entry = grouped.entry(stake_address).or_insert((0, Vec::new(), HashSet::new()));
-        entry.0 += d.value.lovelace;
+        let entry = grouped.entry(stake_address).or_insert_with(|| StakeEntry {
+            delta: 0,
+            addresses: Vec::new(),
+            seen: HashSet::new(),
+        });
+        entry.delta += d.value.lovelace;
 
         if let Some(shelley) = shelley_opt {
-            if entry.2.insert(shelley.clone()) {
-                entry.1.push(shelley.clone());
+            if entry.seen.insert(shelley.clone()) {
+                entry.addresses.push(shelley.clone());
             }
         }
     }
 
     let deltas = grouped
         .into_iter()
-        .map(
-            |(stake_address, (delta, shelley_addrs, _))| StakeAddressDelta {
-                stake_address,
-                addresses: shelley_addrs,
-                delta,
-            },
-        )
+        .map(|(stake_address, entry)| StakeAddressDelta {
+            stake_address,
+            addresses: entry.addresses,
+            delta: entry.delta,
+        })
         .collect();
 
     StakeAddressDeltasMessage { deltas }
