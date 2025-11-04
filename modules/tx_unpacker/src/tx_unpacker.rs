@@ -230,6 +230,7 @@ impl TxUnpacker {
                                                                         address,
                                                                         value: map_parameters::map_value(&output.value()),
                                                                         datum: map_parameters::map_datum(&output.datum()),
+                                                                        reference_script: map_parameters::map_reference_script(&output.script_ref())
                                                                     }));
 
                                                                     // catch all output lovelaces
