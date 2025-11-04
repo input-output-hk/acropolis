@@ -717,7 +717,7 @@ impl State {
                             margin = ?spo.margin,
                             reward = %spo.reward_account,
                             "Updated parameters for SPO {}",
-                            hex::encode(id)
+                            id
                         );
                     }
                 }
@@ -730,7 +730,7 @@ impl State {
                         margin = ?spo.margin,
                         reward = %spo.reward_account,
                         "Registered new SPO {}",
-                        hex::encode(id)
+                        id
                     );
                 }
             }
@@ -751,8 +751,7 @@ impl State {
             if let Some(retired_spo) = new_spos.get(id) {
                 debug!(
                     "SPO {} has retired - refunding their deposit to {}",
-                    hex::encode(id),
-                    retired_spo.reward_account
+                    id, retired_spo.reward_account
                 );
                 self.pool_refunds.push((retired_spo.operator, retired_spo.reward_account.clone()));
                 // Store full StakeAddress

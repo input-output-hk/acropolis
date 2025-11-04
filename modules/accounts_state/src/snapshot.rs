@@ -99,7 +99,7 @@ impl Snapshot {
                 epoch,
                 previous_epoch = two_previous_snapshot.epoch,
                 "Two previous reward account for SPO {} registered: {}",
-                hex::encode(spo_id),
+                spo_id,
                 two_previous_reward_account_is_registered
             );
 
@@ -135,9 +135,7 @@ impl Snapshot {
                         // SPO has retired - this stake is simply ignored
                         debug!(
                             epoch,
-                            "SPO {} for stake address {} retired?  Ignored",
-                            hex::encode(spo_id),
-                            stake_address
+                            "SPO {} for stake address {} retired?  Ignored", spo_id, stake_address
                         );
                         continue;
                     }
