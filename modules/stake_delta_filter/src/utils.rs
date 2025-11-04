@@ -313,10 +313,10 @@ impl Tracker {
 
 /// Internal helper used during `process_message` aggregation for deduplication.
 struct StakeEntry {
-        delta: i64,
-        addresses: Vec<ShelleyAddress>,
-        seen: HashSet<ShelleyAddress>,
-    }
+    delta: i64,
+    addresses: Vec<ShelleyAddress>,
+    seen: HashSet<ShelleyAddress>,
+}
 
 /// Iterates through all address deltas in `delta`, leaves only stake addresses
 /// (and removes all others). If the address is a pointer, tries to resolve it.
@@ -328,8 +328,7 @@ pub fn process_message(
     block: &BlockInfo,
     mut tracker: Option<&mut Tracker>,
 ) -> StakeAddressDeltasMessage {
-    let mut grouped: HashMap<StakeAddress, StakeEntry> =
-        HashMap::new();
+    let mut grouped: HashMap<StakeAddress, StakeEntry> = HashMap::new();
 
     for d in delta.deltas.iter() {
         // Variants to be processed:
