@@ -31,6 +31,9 @@ impl PeerData {
     }
 
     fn request_block(&mut self, hash: BlockHash, slot: u64) -> bool {
+        if self.reqs.contains(&(hash, slot)) {
+            return true;
+        }
         if let Err(error) = self.conn.request_block(hash, slot) {
             warn!("could not request block from {}: {error:#}", self.conn.address);
             return false;
@@ -49,7 +52,6 @@ pub struct NetworkManager {
     next_id: u64,
     peers: BTreeMap<PeerId, PeerData>,
     chain: ChainState,
-    rolled_back: bool,
     events: mpsc::Receiver<NetworkEvent>,
     events_sender: mpsc::Sender<NetworkEvent>,
     block_sink: BlockSink,
@@ -68,7 +70,6 @@ impl NetworkManager {
             next_id: 0,
             peers: BTreeMap::new(),
             chain: ChainState::new(),
-            rolled_back: false,
             events,
             events_sender,
             block_sink,
@@ -154,10 +155,7 @@ impl NetworkManager {
                 }
             }
             PeerEvent::ChainSync(PeerChainSyncEvent::RollBackward(point)) => {
-                let rolled_back = self.chain.handle_roll_backward(peer, point);
-                if rolled_back {
-                    self.rolled_back = true;
-                }
+                self.chain.handle_roll_backward(peer, point);
             }
             PeerEvent::BlockFetched(fetched) => {
                 for peer in self.peers.values_mut() {
@@ -239,7 +237,7 @@ pub enum NetworkEvent {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct PeerId(u64);
+pub struct PeerId(pub(crate) u64);
 
 pub struct PeerMessageSender {
     id: PeerId,

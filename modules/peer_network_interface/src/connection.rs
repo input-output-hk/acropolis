@@ -74,7 +74,7 @@ pub enum PeerChainSyncEvent {
     RollBackward(Point),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Header {
     pub hash: BlockHash,
     pub slot: u64,
