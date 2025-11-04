@@ -167,6 +167,9 @@ impl ChainState {
         for _ in 0..5 {
             if let Some((slot, hash)) = iterator.next() {
                 result.push(Point::Specific(*slot, hash.to_vec()));
+            } else {
+                result.push(Point::Origin);
+                return result;
             }
         }
 
@@ -175,6 +178,9 @@ impl ChainState {
         for _ in 0..5 {
             if let Some((slot, hash)) = iterator.next() {
                 result.push(Point::Specific(*slot, hash.to_vec()));
+            } else {
+                result.push(Point::Origin);
+                return result;
             }
         }
 
@@ -184,13 +190,16 @@ impl ChainState {
         for _ in 0..5 {
             if let Some((slot, hash)) = iterator.next() {
                 result.push(Point::Specific(*slot, hash.to_vec()));
+            } else {
+                result.push(Point::Origin);
+                return result;
             }
         }
 
         result
     }
 
-    fn block_announcers(&self, slot: u64, hash: BlockHash) -> Vec<PeerId> {
+    pub fn block_announcers(&self, slot: u64, hash: BlockHash) -> Vec<PeerId> {
         match self.blocks.get(&slot) {
             Some(slot_blocks) => slot_blocks.announcers(hash),
             None => vec![]
