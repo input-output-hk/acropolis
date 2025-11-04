@@ -30,6 +30,7 @@ acropolis_module_chain_store = { path = "../../modules/chain_store" }
 acropolis_module_address_state = { path = "../../modules/address_state" }
 acropolis_module_consensus = { path = "../../modules/consensus" }
 acropolis_module_historical_accounts_state = { path = "../../modules/historical_accounts_state" }
+acropolis_module_tx_validator_phase1 = { path = "../../modules/tx_validator_phase1" }
 
 caryatid_process = { workspace = true }
 caryatid_sdk = { workspace = true }

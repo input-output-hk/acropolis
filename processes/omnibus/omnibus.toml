@@ -137,6 +137,8 @@ store-totals = false
 # Enables /addresses/{address}/transactions endpoint
 store-transactions = false
 
+[module.tx-validator-phase1]
+
 [module.clock]
 
 [module.rest-server]

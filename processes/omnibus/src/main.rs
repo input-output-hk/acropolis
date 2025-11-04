@@ -29,6 +29,7 @@ use acropolis_module_stake_delta_filter::StakeDeltaFilter;
 use acropolis_module_tx_unpacker::TxUnpacker;
 use acropolis_module_upstream_chain_fetcher::UpstreamChainFetcher;
 use acropolis_module_utxo_state::UTXOState;
+use acropolis_module_tx_validator_phase1::TxValidatorPhase1;
 
 use caryatid_module_clock::Clock;
 use caryatid_module_rest_server::RESTServer;
@@ -119,6 +120,7 @@ pub async fn main() -> Result<()> {
     DRDDState::register(&mut process);
     Consensus::register(&mut process);
     ChainStore::register(&mut process);
+    TxValidatorPhase1::register(&mut process);
 
     Clock::<Message>::register(&mut process);
     RESTServer::<Message>::register(&mut process);
