@@ -1,3 +1,4 @@
+mod chain_state;
 mod configuration;
 mod connection;
 mod network;
@@ -72,7 +73,7 @@ impl PeerNetworkInterface {
             };
 
             let mut manager =
-                NetworkManager::new(cfg.magic_number, 2160, events, events_sender, sink);
+                NetworkManager::new(cfg.magic_number, events, events_sender, sink);
             for address in cfg.node_addresses {
                 manager.handle_new_connection(address, Duration::ZERO);
             }

@@ -55,8 +55,8 @@ impl PeerConnection {
         Ok(())
     }
 
-    pub fn request_block(&self, hash: BlockHash, height: u64) -> Result<()> {
-        self.blockfetch.send(BlockfetchCommand::Fetch(hash, height))?;
+    pub fn request_block(&self, hash: BlockHash, slot: u64) -> Result<()> {
+        self.blockfetch.send(BlockfetchCommand::Fetch(hash, slot))?;
         Ok(())
     }
 }
@@ -85,6 +85,7 @@ pub struct Header {
 
 #[derive(Debug)]
 pub struct BlockFetched {
+    pub slot: u64,
     pub hash: BlockHash,
     pub body: Vec<u8>,
 }
@@ -169,7 +170,7 @@ impl PeerConnectionWorker {
         while let Some(BlockfetchCommand::Fetch(hash, slot)) = commands.recv().await {
             let point = Point::Specific(slot, hash.to_vec());
             let body = client.fetch_single(point).await?;
-            self.sender.write(PeerEvent::BlockFetched(BlockFetched { hash, body })).await?;
+            self.sender.write(PeerEvent::BlockFetched(BlockFetched { slot, hash, body })).await?;
         }
         bail!("parent process has disconnected");
     }
