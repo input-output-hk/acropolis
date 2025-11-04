@@ -227,7 +227,7 @@ impl UpstreamChainFetcher {
                 Self::sync_to_point(cfg, None, Point::Origin).await?;
             }
             SyncPoint::Cache => {
-                let mut upstream_cache = UpstreamCache::new(&cfg.cache_dir);
+                let mut upstream_cache = UpstreamCache::new(&cfg.cache_dir)?;
                 let point = match Self::read_cache(cfg.clone(), &mut upstream_cache).await? {
                     None => Point::Origin,
                     Some(blk) => Point::Specific(blk.slot, blk.hash.to_vec()),

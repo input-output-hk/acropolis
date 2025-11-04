@@ -3,18 +3,16 @@ mod connection;
 mod network;
 
 use acropolis_common::{
-    BlockInfo, BlockStatus,
-    genesis_values::GenesisValues,
-    messages::{CardanoMessage, Message, RawBlockMessage},
-    upstream_cache::{UpstreamCache, UpstreamCacheRecord},
+    BlockInfo, BlockStatus, genesis_values::GenesisValues, messages::{CardanoMessage, Message, RawBlockMessage}, upstream_cache::{UpstreamCache, UpstreamCacheRecord}
 };
 use anyhow::{Result, bail};
 use caryatid_sdk::{Context, Module, Subscription, module};
 use config::Config;
 use pallas::network::miniprotocols::Point;
 use tokio::sync::mpsc;
+use tracing::{error, warn};
 
-use std::{sync::Arc, time::Duration};
+use std::{path::Path, sync::Arc, time::Duration};
 
 use crate::{
     configuration::{InterfaceConfig, SyncPoint},
@@ -53,19 +51,17 @@ impl PeerNetworkInterface {
             };
 
             let mut upstream_cache = None;
-            let mut cache_sync_point = None;
+            let mut cache_sync_point = Point::Origin;
             if cfg.sync_point == SyncPoint::Cache {
-                let mut cache = UpstreamCache::new(&cfg.cache_dir);
-                cache.start_reading()?;
-                while let Some(record) = cache.read_record()? {
-                    cache_sync_point = Some((record.id.slot, record.id.hash));
-                    let message = Arc::new(Message::Cardano((
-                        record.id,
-                        CardanoMessage::BlockAvailable(Arc::unwrap_or_clone(record.message)),
-                    )));
-                    context.message_bus.publish(&cfg.block_topic, message).await?;
+                match Self::init_cache(&cfg.cache_dir, &cfg.block_topic, &context).await {
+                    Ok((cache, sync_point)) => {
+                        upstream_cache = Some(cache);
+                        cache_sync_point = sync_point;
+                    }
+                    Err(e) => {
+                        warn!("could not initialize upstream cache: {e:#}");
+                    }
                 }
-                upstream_cache = Some(cache);
             }
 
             let sink = BlockSink {
@@ -83,26 +79,55 @@ impl PeerNetworkInterface {
 
             match cfg.sync_point {
                 SyncPoint::Origin => manager.sync_to_point(Point::Origin),
-                SyncPoint::Tip => manager.sync_to_tip().await?,
-                SyncPoint::Cache => {
-                    let point = match cache_sync_point {
-                        Some((slot, hash)) => Point::Specific(slot, hash.to_vec()),
-                        None => Point::Origin,
-                    };
-                    manager.sync_to_point(point);
+                SyncPoint::Tip => {
+                    if let Err(error) = manager.sync_to_tip().await {
+                        warn!("could not sync to tip: {error:#}");
+                        return;
+                    }
                 }
+                SyncPoint::Cache => manager.sync_to_point(cache_sync_point),
                 SyncPoint::Snapshot => {
                     let mut subscription =
                         snapshot_complete.expect("Snapshot topic subscription missing");
-                    let point = Self::wait_snapshot_completion(&mut subscription).await?;
-                    manager.sync_to_point(point);
+                    match Self::wait_snapshot_completion(&mut subscription).await {
+                        Ok(point) => manager.sync_to_point(point),
+                        Err(error) => {
+                            warn!("snapshot restoration never completed: {error:#}");
+                            return;                            
+                        }
+                    }
                 }
             }
 
-            manager.run().await
+            if let Err(err) = manager.run().await {
+                error!("chain sync failed: {err:#}");
+            }
         });
 
         Ok(())
+    }
+
+    async fn init_cache(
+        cache_dir: &Path,
+        block_topic: &str,
+        context: &Context<Message>,
+    ) -> Result<(UpstreamCache, Point)> {
+        let mut cache = UpstreamCache::new(cache_dir)?;
+        let mut cache_sync_point = None;
+        cache.start_reading()?;
+        while let Some(record) = cache.read_record()? {
+            cache_sync_point = Some((record.id.slot, record.id.hash));
+            let message = Arc::new(Message::Cardano((
+                record.id,
+                CardanoMessage::BlockAvailable(Arc::unwrap_or_clone(record.message)),
+            )));
+            context.message_bus.publish(block_topic, message).await?;
+        }
+        let sync_point = match cache_sync_point {
+            None => Point::Origin,
+            Some((slot, hash)) => Point::Specific(slot, hash.to_vec()),
+        };
+        Ok((cache, sync_point))
     }
 
     async fn wait_genesis_completion(

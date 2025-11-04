@@ -1,7 +1,7 @@
 # Top-level configuration for Acropolis omnibus process
 
 [module.genesis-bootstrapper]
-network-name = "preview" # "sanchonet", "mainnet"
+network-name = "preview" # "sanchonet", "preview", "mainnet"
 
 #[module.mithril-snapshot-fetcher]
 #Turned off with SanchoNet

@@ -23,10 +23,10 @@ pub struct FileStorage {
 }
 
 impl FileStorage {
-    pub fn new<P: AsRef<Path>>(path: P) -> Self {
-        Self {
-            path: path.as_ref().to_path_buf(),
-        }
+    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let path = path.as_ref().to_path_buf();
+        std::fs::create_dir_all(&path)?;
+        Ok(Self { path })
     }
 
     fn get_file_name(&self, chunk_no: usize) -> PathBuf {
@@ -37,8 +37,8 @@ impl FileStorage {
 pub type UpstreamCache = UpstreamCacheImpl<FileStorage>;
 
 impl UpstreamCache {
-    pub fn new<P: AsRef<Path>>(path: P) -> Self {
-        UpstreamCache::new_impl(FileStorage::new(path))
+    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
+        Ok(UpstreamCache::new_impl(FileStorage::new(path)?))
     }
 }
 
@@ -124,7 +124,7 @@ impl<S: Storage> UpstreamCacheImpl<S> {
 
     pub fn write_record(&mut self, record: &UpstreamCacheRecord) -> Result<()> {
         self.chunk_cached.push(record.clone());
-        self.storage.write_chunk(self.current_chunk, &self.chunk_cached)?;
+        self.storage.write_chunk(self.current_chunk, &self.chunk_cached).context("could not write cache record")?;
 
         self.current_record += 1;
         if self.current_record >= self.density {
@@ -155,7 +155,7 @@ impl Storage for FileStorage {
     }
 
     fn write_chunk(&mut self, chunk_no: usize, data: &[UpstreamCacheRecord]) -> Result<()> {
-        let mut file = File::create(self.get_file_name(chunk_no))?;
+        let mut file = File::create(self.get_file_name(chunk_no)).context("could not write chunk")?;
         file.write_all(&serde_json::to_vec(data)?)?;
         Ok(())
     }

@@ -4,6 +4,8 @@ genesis-completion-topic = "cardano.sequence.bootstrapped"
 
 node-addresses = [
     "backbone.cardano.iog.io:3001",
+    "backbone.mainnet.cardanofoundation.org:3001",
+    "backbone.mainnet.emurgornd.com:3001",
 ]
 magic-number = 764824073
 

@@ -58,7 +58,7 @@ impl NetworkManager {
         while let Some(event) = self.events.recv().await {
             match event {
                 NetworkEvent::PeerUpdate { peer, event } => {
-                    let maybe_publish_blocks = self.handle_peer_update(peer, event)?;
+                    let maybe_publish_blocks = self.handle_peer_update(peer, event);
                     if maybe_publish_blocks {
                         self.publish_blocks().await?;
                     }
@@ -124,7 +124,7 @@ impl NetworkManager {
     // or when publishing messages to other modules. This avoids deadlock; if our event queue
     // is full and this method is blocked on writing to it, the queue can never drain.
     // Returns true if we might have new events to publish downstream.
-    fn handle_peer_update(&mut self, peer: PeerId, event: PeerEvent) -> Result<bool> {
+    fn handle_peer_update(&mut self, peer: PeerId, event: PeerEvent) -> bool {
         let is_preferred = self.preferred_upstream.is_some_and(|id| id == peer);
         match event {
             PeerEvent::ChainSync(PeerChainSyncEvent::RollForward(header)) => {
@@ -148,12 +148,12 @@ impl NetworkManager {
                                 break; // only fetch from one
                             }
                         }
-                        Ok(false)
+                        false
                     }
                     BlockStatus::Fetched(_) => {
                         // If chainsync has requested a block which we've already fetched,
                         // we might be able to publish one or more.
-                        Ok(is_preferred)
+                        is_preferred
                     }
                 }
             }
@@ -184,18 +184,18 @@ impl NetworkManager {
                         }
                     }
                 }
-                Ok(false)
+                false
             }
             PeerEvent::BlockFetched(fetched) => {
                 let Some(block) = self.blocks.get_mut(&fetched.hash) else {
-                    return Ok(false);
+                    return false;
                 };
                 block.set_body(&fetched.body);
-                Ok(true)
+                true
             }
             PeerEvent::Disconnected => {
                 self.handle_disconnect(peer);
-                Ok(false)
+                false
             }
         }
     }
