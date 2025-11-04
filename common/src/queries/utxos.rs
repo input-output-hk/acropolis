@@ -1,4 +1,4 @@
-use crate::{UTxOIdentifier, Value};
+use crate::{UTXOValue, UTxOIdentifier, Value};
 
 pub const DEFAULT_UTXOS_QUERY_TOPIC: (&str, &str) =
     ("utxo-state-query-topic", "cardano.query.utxos");
@@ -8,7 +8,7 @@ pub enum UTxOStateQuery {
     GetUTxOsSum {
         utxo_identifiers: Vec<UTxOIdentifier>,
     },
-    GetUTxOsMap {
+    GetUTxOs {
         utxo_identifiers: Vec<UTxOIdentifier>,
     },
 }
@@ -16,7 +16,7 @@ pub enum UTxOStateQuery {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum UTxOStateQueryResponse {
     UTxOsSum(Value),
-    UTxOsMap(Vec<Value>),
+    UTxOs(Vec<UTXOValue>),
     NotFound,
     Error(String),
 }

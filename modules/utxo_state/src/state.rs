@@ -1,31 +1,15 @@
 //! Acropolis UTXOState: State storage
 use crate::volatile_index::VolatileIndex;
 use acropolis_common::{
-    messages::UTXODeltasMessage, params::SECURITY_PARAMETER_K, Address, BlockInfo, BlockStatus,
-    Datum, TxInput, TxOutput, UTXODelta,
+    messages::UTXODeltasMessage, params::SECURITY_PARAMETER_K, BlockInfo, BlockStatus, TxInput,
+    TxOutput, UTXODelta,
 };
-use acropolis_common::{AddressDelta, ReferenceScript, UTxOIdentifier, Value, ValueDelta};
+use acropolis_common::{AddressDelta, UTXOValue, UTxOIdentifier, Value, ValueDelta};
 use anyhow::Result;
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{debug, error, info};
-
-/// Value stored in UTXO
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct UTXOValue {
-    /// Address in binary
-    pub address: Address,
-
-    /// Value in Lovelace
-    pub value: Value,
-
-    /// Datum
-    pub datum: Option<Datum>,
-
-    /// Reference script
-    pub reference_script: Option<ReferenceScript>,
-}
 
 /// Address delta observer
 /// Note all methods are immutable to avoid locking in state - use channels
@@ -114,6 +98,21 @@ impl State {
             }
         }
         Ok(balance)
+    }
+
+    /// Get the stored entries for a set of UTxOs
+    pub async fn get_utxo_entries(
+        &self,
+        utxo_identifiers: &[UTxOIdentifier],
+    ) -> Result<Vec<UTXOValue>> {
+        let mut entries = Vec::new();
+        for id in utxo_identifiers {
+            match self.lookup_utxo(id).await? {
+                Some(utxo) => entries.push(utxo),
+                None => return Err(anyhow::anyhow!("UTxO {} does not exist", id)),
+            }
+        }
+        Ok(entries)
     }
 
     /// Register the delta observer

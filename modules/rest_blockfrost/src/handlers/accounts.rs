@@ -8,16 +8,17 @@ use acropolis_common::queries::blocks::{
     BlocksStateQuery, BlocksStateQueryResponse, TransactionHashes,
 };
 use acropolis_common::queries::utils::query_state;
-use acropolis_common::queries::utxos::UTxOStateQuery;
+use acropolis_common::queries::utxos::{UTxOStateQuery, UTxOStateQueryResponse};
 use acropolis_common::serialization::{Bech32Conversion, Bech32WithHrp};
-use acropolis_common::{DRepChoice, StakeAddress};
+use acropolis_common::{DRepChoice, Datum, ReferenceScript, StakeAddress};
 use anyhow::{anyhow, Result};
+use blake2::{Blake2b512, Digest};
 use caryatid_sdk::Context;
 
 use crate::handlers_config::HandlersConfig;
 use crate::types::{
-    AccountAddressREST, AccountRewardREST, AccountWithdrawalREST, DelegationUpdateREST,
-    RegistrationUpdateREST,
+    AccountAddressREST, AccountRewardREST, AccountUTxOREST, AccountWithdrawalREST,
+    DelegationUpdateREST, RegistrationUpdateREST,
 };
 
 #[derive(serde::Serialize)]
@@ -833,17 +834,12 @@ pub async fn handle_account_utxos_blockfrost(
     )));
     let utxo_identifiers = query_state(
         &context,
-        &handlers_config.historical_accounts_query_topic,
+        &handlers_config.addresses_query_topic,
         msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Addresses(
                 AddressStateQueryResponse::AddressesUTxOs(utxos),
             )) => Ok(utxos),
-            Message::StateQueryResponse(StateQueryResponse::Addresses(
-                AddressStateQueryResponse::NotFound,
-            )) => Err(anyhow::anyhow!(
-                "Internal server error while retrieving account UTxOs: No UTxOs found"
-            )),
             Message::StateQueryResponse(StateQueryResponse::Addresses(
                 AddressStateQueryResponse::Error(e),
             )) => Err(anyhow::anyhow!(
@@ -856,25 +852,25 @@ pub async fn handle_account_utxos_blockfrost(
     )
     .await?;
 
-    // Get UTxO balances from utxo state
-    let msg = Arc::new(Message::StateQuery(StateQuery::UTxOs(
-        UTxOStateQuery::GetUTxOsMap { utxo_identifiers },
+    // Get TxHashes and BlockHashes from UTxOIdentifiers
+    let msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
+        BlocksStateQuery::GetUTxOHashes {
+            utxo_ids: utxo_identifiers.clone(),
+        },
     )));
-    let balances = query_state(
+
+    let hashes = query_state(
         &context,
-        &handlers_config.historical_accounts_query_topic,
+        &handlers_config.blocks_query_topic,
         msg,
         |message| match message {
-            Message::StateQueryResponse(StateQueryResponse::Addresses(
-                AddressStateQueryResponse::AddressesUTxOs(utxos),
-            )) => Ok(Some(utxos)),
-            Message::StateQueryResponse(StateQueryResponse::Addresses(
-                AddressStateQueryResponse::NotFound,
-            )) => Ok(None),
-            Message::StateQueryResponse(StateQueryResponse::Addresses(
-                AddressStateQueryResponse::Error(e),
+            Message::StateQueryResponse(StateQueryResponse::Blocks(
+                BlocksStateQueryResponse::UTxOHashes(utxos),
+            )) => Ok(utxos),
+            Message::StateQueryResponse(StateQueryResponse::Blocks(
+                BlocksStateQueryResponse::Error(e),
             )) => Err(anyhow::anyhow!(
-                "Internal server error while retrieving account UTxOs: {e}"
+                "Internal server error while retrieving utxo hashes: {e}"
             )),
             _ => Err(anyhow::anyhow!(
                 "Unexpected message type while retrieving account UTxOs"
@@ -882,7 +878,78 @@ pub async fn handle_account_utxos_blockfrost(
         },
     )
     .await?;
-    Ok(RESTResponse::with_text(501, "Not implemented"))
+
+    // Get UTxO balances from utxo state
+    let msg = Arc::new(Message::StateQuery(StateQuery::UTxOs(
+        UTxOStateQuery::GetUTxOs {
+            utxo_identifiers: utxo_identifiers.clone(),
+        },
+    )));
+    let entries = query_state(
+        &context,
+        &handlers_config.utxos_query_topic,
+        msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::UTxOs(
+                UTxOStateQueryResponse::UTxOs(utxos),
+            )) => Ok(utxos),
+            Message::StateQueryResponse(StateQueryResponse::UTxOs(
+                UTxOStateQueryResponse::Error(e),
+            )) => Err(anyhow::anyhow!(
+                "Internal server error while retrieving UTxO entries: {e}"
+            )),
+            _ => Err(anyhow::anyhow!(
+                "Unexpected message type while retrieving UTxO entries"
+            )),
+        },
+    )
+    .await?;
+
+    let mut rest_response = Vec::with_capacity(entries.len());
+    for (i, entry) in entries.into_iter().enumerate() {
+        let tx_hash = hashes.tx_hashes.get(i).map(hex::encode).unwrap_or_default();
+        let block_hash = hashes.block_hashes.get(i).map(hex::encode).unwrap_or_default();
+        let output_index = utxo_identifiers.get(i).map(|id| id.output_index()).unwrap_or(0);
+        let (data_hash, inline_datum) = match &entry.datum {
+            Some(Datum::Hash(h)) => (Some(hex::encode(h)), None),
+            Some(Datum::Inline(bytes)) => (None, Some(hex::encode(bytes))),
+            None => (None, None),
+        };
+        let reference_script_hash = match &entry.reference_script {
+            Some(script) => {
+                let bytes = match script {
+                    ReferenceScript::Native(b)
+                    | ReferenceScript::PlutusV1(b)
+                    | ReferenceScript::PlutusV2(b)
+                    | ReferenceScript::PlutusV3(b) => b,
+                };
+                let mut hasher = Blake2b512::new();
+                hasher.update(bytes);
+                let result = hasher.finalize();
+                Some(hex::encode(&result[..32]))
+            }
+            None => None,
+        };
+
+        rest_response.push(AccountUTxOREST {
+            address: entry.address.to_string()?,
+            tx_hash,
+            output_index,
+            amount: entry.value.into(),
+            block: block_hash,
+            data_hash,
+            inline_datum,
+            reference_script_hash,
+        })
+    }
+
+    match serde_json::to_string_pretty(&rest_response) {
+        Ok(json) => Ok(RESTResponse::with_json(200, &json)),
+        Err(e) => Ok(RESTResponse::with_text(
+            500,
+            &format!("Internal server error while serializing addresses: {e}"),
+        )),
+    }
 }
 
 fn parse_stake_address(params: &[String]) -> Result<StakeAddress, RESTResponse> {

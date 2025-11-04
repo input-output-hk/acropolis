@@ -124,9 +124,9 @@ impl UTXOState {
                             Err(e) => UTxOStateQueryResponse::Error(e.to_string()),
                         }
                     }
-                    UTxOStateQuery::GetUTxOsMap { utxo_identifiers } => {
-                        match state.get_utxos_sum(utxo_identifiers).await {
-                            Ok(balance) => UTxOStateQueryResponse::UTxOsSum(balance),
+                    UTxOStateQuery::GetUTxOs { utxo_identifiers } => {
+                        match state.get_utxo_entries(utxo_identifiers).await {
+                            Ok(values) => UTxOStateQueryResponse::UTxOs(values),
                             Err(e) => UTxOStateQueryResponse::Error(e.to_string()),
                         }
                     }
