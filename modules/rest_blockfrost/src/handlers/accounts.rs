@@ -3,12 +3,14 @@ use std::sync::Arc;
 
 use acropolis_common::messages::{Message, RESTResponse, StateQuery, StateQueryResponse};
 use acropolis_common::queries::accounts::{AccountsStateQuery, AccountsStateQueryResponse};
+use acropolis_common::queries::addresses::{AddressStateQuery, AddressStateQueryResponse};
 use acropolis_common::queries::blocks::{
     BlocksStateQuery, BlocksStateQueryResponse, TransactionHashes,
 };
 use acropolis_common::queries::utils::query_state;
+use acropolis_common::queries::utxos::UTxOStateQuery;
 use acropolis_common::serialization::{Bech32Conversion, Bech32WithHrp};
-use acropolis_common::{DRepChoice, ShelleyAddress, StakeAddress};
+use acropolis_common::{DRepChoice, StakeAddress};
 use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
 
@@ -637,10 +639,75 @@ pub async fn handle_account_addresses_blockfrost(
 
 /// Handle `/accounts/{stake_address}/addresses/assets` Blockfrost-compatible endpoint
 pub async fn handle_account_assets_blockfrost(
-    _context: Arc<Context<Message>>,
-    _params: Vec<String>,
-    _handlers_config: Arc<HandlersConfig>,
+    context: Arc<Context<Message>>,
+    params: Vec<String>,
+    handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
+    let account = match parse_stake_address(&params) {
+        Ok(addr) => addr,
+        Err(resp) => return Ok(resp),
+    };
+
+    // Prepare the message
+    let msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
+        AccountsStateQuery::GetAccountAssociatedAddresses { account },
+    )));
+
+    // Get addresses from historical accounts state
+    let addresses = query_state(
+        &context,
+        &handlers_config.historical_accounts_query_topic,
+        msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Accounts(
+                AccountsStateQueryResponse::AccountAssociatedAddresses(addresses),
+            )) => Ok(Some(addresses)),
+            Message::StateQueryResponse(StateQueryResponse::Accounts(
+                AccountsStateQueryResponse::NotFound,
+            )) => Ok(None),
+            Message::StateQueryResponse(StateQueryResponse::Accounts(
+                AccountsStateQueryResponse::Error(e),
+            )) => Err(anyhow::anyhow!(
+                "Internal server error while retrieving account addresses: {e}"
+            )),
+            _ => Err(anyhow::anyhow!(
+                "Unexpected message type while retrieving account addresses"
+            )),
+        },
+    )
+    .await?;
+
+    let Some(addresses) = addresses else {
+        return Ok(RESTResponse::with_text(404, "Account not found"));
+    };
+
+    let msg = Arc::new(Message::StateQuery(StateQuery::Addresses(
+        AddressStateQuery::GetAddressesAssets { addresses },
+    )));
+
+    // Get assets from address state
+    let _assets = query_state(
+        &context,
+        &handlers_config.historical_accounts_query_topic,
+        msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Addresses(
+                AddressStateQueryResponse::AddressesAssets(assets),
+            )) => Ok(Some(assets)),
+            Message::StateQueryResponse(StateQueryResponse::Addresses(
+                AddressStateQueryResponse::NotFound,
+            )) => Ok(None),
+            Message::StateQueryResponse(StateQueryResponse::Addresses(
+                AddressStateQueryResponse::Error(e),
+            )) => Err(anyhow::anyhow!(
+                "Internal server error while retrieving account assets: {e}"
+            )),
+            _ => Err(anyhow::anyhow!(
+                "Unexpected message type while retrieving account assets"
+            )),
+        },
+    )
+    .await?;
     Ok(RESTResponse::with_text(501, "Not implemented"))
 }
 
@@ -688,15 +755,133 @@ pub async fn handle_account_totals_blockfrost(
         return Ok(RESTResponse::with_text(404, "Account not found"));
     };
 
+    let msg = Arc::new(Message::StateQuery(StateQuery::Addresses(
+        AddressStateQuery::GetAddressesTotals { addresses },
+    )));
+
+    // Get totals from address state
+    let _totals = query_state(
+        &context,
+        &handlers_config.historical_accounts_query_topic,
+        msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Addresses(
+                AddressStateQueryResponse::AddressesTotals(totals),
+            )) => Ok(Some(totals)),
+            Message::StateQueryResponse(StateQueryResponse::Addresses(
+                AddressStateQueryResponse::NotFound,
+            )) => Ok(None),
+            Message::StateQueryResponse(StateQueryResponse::Addresses(
+                AddressStateQueryResponse::Error(e),
+            )) => Err(anyhow::anyhow!(
+                "Internal server error while retrieving account totals: {e}"
+            )),
+            _ => Err(anyhow::anyhow!(
+                "Unexpected message type while retrieving account totals"
+            )),
+        },
+    )
+    .await?;
     Ok(RESTResponse::with_text(501, "Not implemented"))
 }
 
 /// Handle `/accounts/{stake_address}/utxos` Blockfrost-compatible endpoint
 pub async fn handle_account_utxos_blockfrost(
-    _context: Arc<Context<Message>>,
-    _params: Vec<String>,
-    _handlers_config: Arc<HandlersConfig>,
+    context: Arc<Context<Message>>,
+    params: Vec<String>,
+    handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
+    let account = match parse_stake_address(&params) {
+        Ok(addr) => addr,
+        Err(resp) => return Ok(resp),
+    };
+
+    // Get addresses from historical accounts state
+    let msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
+        AccountsStateQuery::GetAccountAssociatedAddresses { account },
+    )));
+    let addresses = query_state(
+        &context,
+        &handlers_config.historical_accounts_query_topic,
+        msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Accounts(
+                AccountsStateQueryResponse::AccountAssociatedAddresses(addresses),
+            )) => Ok(Some(addresses)),
+            Message::StateQueryResponse(StateQueryResponse::Accounts(
+                AccountsStateQueryResponse::NotFound,
+            )) => Ok(None),
+            Message::StateQueryResponse(StateQueryResponse::Accounts(
+                AccountsStateQueryResponse::Error(e),
+            )) => Err(anyhow::anyhow!(
+                "Internal server error while retrieving account addresses: {e}"
+            )),
+            _ => Err(anyhow::anyhow!(
+                "Unexpected message type while retrieving account addresses"
+            )),
+        },
+    )
+    .await?;
+
+    let Some(addresses) = addresses else {
+        return Ok(RESTResponse::with_text(404, "Account not found"));
+    };
+
+    // Get utxos from address state
+    let msg = Arc::new(Message::StateQuery(StateQuery::Addresses(
+        AddressStateQuery::GetAddressesUTxOs { addresses },
+    )));
+    let utxo_identifiers = query_state(
+        &context,
+        &handlers_config.historical_accounts_query_topic,
+        msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Addresses(
+                AddressStateQueryResponse::AddressesUTxOs(utxos),
+            )) => Ok(utxos),
+            Message::StateQueryResponse(StateQueryResponse::Addresses(
+                AddressStateQueryResponse::NotFound,
+            )) => Err(anyhow::anyhow!(
+                "Internal server error while retrieving account UTxOs: No UTxOs found"
+            )),
+            Message::StateQueryResponse(StateQueryResponse::Addresses(
+                AddressStateQueryResponse::Error(e),
+            )) => Err(anyhow::anyhow!(
+                "Internal server error while retrieving account UTxOs: {e}"
+            )),
+            _ => Err(anyhow::anyhow!(
+                "Unexpected message type while retrieving account UTxOs"
+            )),
+        },
+    )
+    .await?;
+
+    // Get UTxO balances from utxo state
+    let msg = Arc::new(Message::StateQuery(StateQuery::UTxOs(
+        UTxOStateQuery::GetUTxOsMap { utxo_identifiers },
+    )));
+    let balances = query_state(
+        &context,
+        &handlers_config.historical_accounts_query_topic,
+        msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Addresses(
+                AddressStateQueryResponse::AddressesUTxOs(utxos),
+            )) => Ok(Some(utxos)),
+            Message::StateQueryResponse(StateQueryResponse::Addresses(
+                AddressStateQueryResponse::NotFound,
+            )) => Ok(None),
+            Message::StateQueryResponse(StateQueryResponse::Addresses(
+                AddressStateQueryResponse::Error(e),
+            )) => Err(anyhow::anyhow!(
+                "Internal server error while retrieving account UTxOs: {e}"
+            )),
+            _ => Err(anyhow::anyhow!(
+                "Unexpected message type while retrieving account UTxOs"
+            )),
+        },
+    )
+    .await?;
     Ok(RESTResponse::with_text(501, "Not implemented"))
 }
 

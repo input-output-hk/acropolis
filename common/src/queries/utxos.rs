@@ -8,11 +8,15 @@ pub enum UTxOStateQuery {
     GetUTxOsSum {
         utxo_identifiers: Vec<UTxOIdentifier>,
     },
+    GetUTxOsMap {
+        utxo_identifiers: Vec<UTxOIdentifier>,
+    },
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum UTxOStateQueryResponse {
     UTxOsSum(Value),
+    UTxOsMap(Vec<Value>),
     NotFound,
     Error(String),
 }

@@ -124,6 +124,12 @@ impl UTXOState {
                             Err(e) => UTxOStateQueryResponse::Error(e.to_string()),
                         }
                     }
+                    UTxOStateQuery::GetUTxOsMap { utxo_identifiers } => {
+                        match state.get_utxos_sum(utxo_identifiers).await {
+                            Ok(balance) => UTxOStateQueryResponse::UTxOsSum(balance),
+                            Err(e) => UTxOStateQueryResponse::Error(e.to_string()),
+                        }
+                    }
                 };
                 Arc::new(Message::StateQueryResponse(StateQueryResponse::UTxOs(
                     response,
