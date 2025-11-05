@@ -19,9 +19,10 @@ mod types;
 mod utils;
 use handlers::{
     accounts::{
-        handle_account_delegations_blockfrost, handle_account_mirs_blockfrost,
-        handle_account_registrations_blockfrost, handle_account_rewards_blockfrost,
-        handle_account_withdrawals_blockfrost, handle_single_account_blockfrost,
+        handle_account_addresses_blockfrost, handle_account_delegations_blockfrost,
+        handle_account_mirs_blockfrost, handle_account_registrations_blockfrost,
+        handle_account_rewards_blockfrost, handle_account_withdrawals_blockfrost,
+        handle_single_account_blockfrost,
     },
     addresses::{
         handle_address_asset_utxos_blockfrost, handle_address_extended_blockfrost,
@@ -86,6 +87,10 @@ const DEFAULT_HANDLE_ACCOUNT_WITHDRAWALS_TOPIC: (&str, &str) = (
 const DEFAULT_HANDLE_ACCOUNT_REWARDS_TOPIC: (&str, &str) = (
     "handle-topic-account-rewards",
     "rest.get.accounts.*.rewards",
+);
+const DEFAULT_HANDLE_ACCOUNT_ADDRESSES_TOPIC: (&str, &str) = (
+    "handle-topic-account-addresses",
+    "rest.get.accounts.*.addresses",
 );
 
 // Blocks topics
@@ -311,6 +316,14 @@ impl BlockfrostREST {
             DEFAULT_HANDLE_ACCOUNT_REWARDS_TOPIC,
             handlers_config.clone(),
             handle_account_rewards_blockfrost,
+        );
+
+        // Handler for /accounts/{stake_address}/addresses
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_ACCOUNT_ADDRESSES_TOPIC,
+            handlers_config.clone(),
+            handle_account_addresses_blockfrost,
         );
 
         // Handler for /blocks/latest, /blocks/{hash_or_number}
