@@ -1,4 +1,5 @@
 //! REST handlers for Acropolis Blockfrost /blocks endpoints
+use acropolis_common::app_error::RESTError;
 use acropolis_common::{
     extract_strict_query_params,
     messages::{Message, RESTResponse, StateQuery, StateQueryResponse},
@@ -9,7 +10,6 @@ use acropolis_common::{
     },
     BlockHash,
 };
-use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -17,19 +17,19 @@ use std::sync::Arc;
 use crate::handlers_config::HandlersConfig;
 use crate::types::BlockInfoREST;
 
-fn parse_block_key(key: &str) -> Result<BlockKey> {
+/// Parse a block identifier as either a hash (64 hex chars) or number
+fn parse_block_key(key: &str) -> Result<BlockKey, RESTError> {
     match key.len() {
-        64 => match hex::decode(key) {
-            Ok(key) => match BlockHash::try_from(key) {
-                Ok(block_hash) => Ok(BlockKey::Hash(block_hash)),
-                Err(_) => Err(anyhow::Error::msg("Invalid block hash")),
-            },
-            Err(error) => Err(error.into()),
-        },
-        _ => match key.parse::<u64>() {
-            Ok(key) => Ok(BlockKey::Number(key)),
-            Err(error) => Err(error.into()),
-        },
+        64 => {
+            let bytes = hex::decode(key)?;
+            let block_hash = BlockHash::try_from(bytes)
+                .map_err(|_| RESTError::invalid_param("block_hash", "invalid hash format"))?;
+            Ok(BlockKey::Hash(block_hash))
+        }
+        _ => {
+            let number = key.parse::<u64>()?;
+            Ok(BlockKey::Number(number))
+        }
     }
 }
 
@@ -38,11 +38,9 @@ pub async fn handle_blocks_latest_hash_number_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
-    let param = match params.as_slice() {
-        [param] => param,
-        _ => return Ok(RESTResponse::with_text(400, "Invalid parameters")),
-    };
+) -> Result<RESTResponse, RESTError> {
+    let param =
+        params.first().ok_or_else(|| RESTError::invalid_param("block", "parameter is missing"))?;
 
     match param.as_str() {
         "latest" => handle_blocks_latest_blockfrost(context, handlers_config).await,
@@ -54,10 +52,11 @@ pub async fn handle_blocks_latest_hash_number_blockfrost(
 async fn handle_blocks_latest_blockfrost(
     context: Arc<Context<Message>>,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
+) -> Result<RESTResponse, RESTError> {
     let blocks_latest_msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
         BlocksStateQuery::GetLatestBlock,
     )));
+
     rest_query_state(
         &context,
         &handlers_config.blocks_query_topic,
@@ -68,7 +67,7 @@ async fn handle_blocks_latest_blockfrost(
             )) => Some(Ok(Some(BlockInfoREST(blocks_latest)))),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
-            )) => Some(Err(anyhow!(e))),
+            )) => Some(Err(RESTError::InternalServerError(e))),
             _ => None,
         },
     )
@@ -80,15 +79,13 @@ async fn handle_blocks_hash_number_blockfrost(
     context: Arc<Context<Message>>,
     hash_or_number: &str,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
-    let block_key = match parse_block_key(hash_or_number) {
-        Ok(block_key) => block_key,
-        Err(error) => return Err(error),
-    };
+) -> Result<RESTResponse, RESTError> {
+    let block_key = parse_block_key(hash_or_number)?;
 
     let block_info_msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
         BlocksStateQuery::GetBlockInfo { block_key },
     )));
+
     rest_query_state(
         &context,
         &handlers_config.blocks_query_topic,
@@ -102,7 +99,7 @@ async fn handle_blocks_hash_number_blockfrost(
             )) => Some(Ok(None)),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
-            )) => Some(Err(anyhow!(e))),
+            )) => Some(Err(RESTError::InternalServerError(e))),
             _ => None,
         },
     )
@@ -115,11 +112,9 @@ pub async fn handle_blocks_latest_hash_number_transactions_blockfrost(
     params: Vec<String>,
     query_params: HashMap<String, String>,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
-    let param = match params.as_slice() {
-        [param] => param,
-        _ => return Ok(RESTResponse::with_text(400, "Invalid parameters")),
-    };
+) -> Result<RESTResponse, RESTError> {
+    let param =
+        params.first().ok_or_else(|| RESTError::invalid_param("block", "parameter is missing"))?;
 
     extract_strict_query_params!(query_params, {
         "count" => limit: Option<u64>,
@@ -162,10 +157,11 @@ async fn handle_blocks_latest_transactions_blockfrost(
     skip: u64,
     order: Order,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
+) -> Result<RESTResponse, RESTError> {
     let blocks_latest_txs_msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
         BlocksStateQuery::GetLatestBlockTransactions { limit, skip, order },
     )));
+
     rest_query_state(
         &context,
         &handlers_config.blocks_query_topic,
@@ -176,7 +172,7 @@ async fn handle_blocks_latest_transactions_blockfrost(
             )) => Some(Ok(Some(blocks_txs))),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
-            )) => Some(Err(anyhow!(e))),
+            )) => Some(Err(RESTError::InternalServerError(e))),
             _ => None,
         },
     )
@@ -191,11 +187,8 @@ async fn handle_blocks_hash_number_transactions_blockfrost(
     skip: u64,
     order: Order,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
-    let block_key = match parse_block_key(hash_or_number) {
-        Ok(block_key) => block_key,
-        Err(error) => return Err(error),
-    };
+) -> Result<RESTResponse, RESTError> {
+    let block_key = parse_block_key(hash_or_number)?;
 
     let block_txs_msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
         BlocksStateQuery::GetBlockTransactions {
@@ -205,6 +198,7 @@ async fn handle_blocks_hash_number_transactions_blockfrost(
             order,
         },
     )));
+
     rest_query_state(
         &context,
         &handlers_config.blocks_query_topic,
@@ -218,7 +212,7 @@ async fn handle_blocks_hash_number_transactions_blockfrost(
             )) => Some(Ok(None)),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
-            )) => Some(Err(anyhow!(e))),
+            )) => Some(Err(RESTError::InternalServerError(e))),
             _ => None,
         },
     )
@@ -231,11 +225,9 @@ pub async fn handle_blocks_latest_hash_number_transactions_cbor_blockfrost(
     params: Vec<String>,
     query_params: HashMap<String, String>,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
-    let param = match params.as_slice() {
-        [param] => param,
-        _ => return Ok(RESTResponse::with_text(400, "Invalid parameters")),
-    };
+) -> Result<RESTResponse, RESTError> {
+    let param =
+        params.first().ok_or_else(|| RESTError::invalid_param("block", "parameter is missing"))?;
 
     extract_strict_query_params!(query_params, {
         "count" => limit: Option<u64>,
@@ -278,10 +270,11 @@ async fn handle_blocks_latest_transactions_cbor_blockfrost(
     skip: u64,
     order: Order,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
+) -> Result<RESTResponse, RESTError> {
     let blocks_latest_txs_msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
         BlocksStateQuery::GetLatestBlockTransactionsCBOR { limit, skip, order },
     )));
+
     rest_query_state(
         &context,
         &handlers_config.blocks_query_topic,
@@ -292,7 +285,7 @@ async fn handle_blocks_latest_transactions_cbor_blockfrost(
             )) => Some(Ok(Some(blocks_txs))),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
-            )) => Some(Err(anyhow!(e))),
+            )) => Some(Err(RESTError::InternalServerError(e))),
             _ => None,
         },
     )
@@ -307,11 +300,8 @@ async fn handle_blocks_hash_number_transactions_cbor_blockfrost(
     skip: u64,
     order: Order,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
-    let block_key = match parse_block_key(hash_or_number) {
-        Ok(block_key) => block_key,
-        Err(error) => return Err(error),
-    };
+) -> Result<RESTResponse, RESTError> {
+    let block_key = parse_block_key(hash_or_number)?;
 
     let block_txs_cbor_msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
         BlocksStateQuery::GetBlockTransactionsCBOR {
@@ -321,6 +311,7 @@ async fn handle_blocks_hash_number_transactions_cbor_blockfrost(
             order,
         },
     )));
+
     rest_query_state(
         &context,
         &handlers_config.blocks_query_topic,
@@ -334,7 +325,7 @@ async fn handle_blocks_hash_number_transactions_cbor_blockfrost(
             )) => Some(Ok(None)),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
-            )) => Some(Err(anyhow!(e))),
+            )) => Some(Err(RESTError::InternalServerError(e))),
             _ => None,
         },
     )
@@ -347,16 +338,11 @@ pub async fn handle_blocks_hash_number_next_blockfrost(
     params: Vec<String>,
     query_params: HashMap<String, String>,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
-    let param = match params.as_slice() {
-        [param] => param,
-        _ => return Ok(RESTResponse::with_text(400, "Invalid parameters")),
-    };
+) -> Result<RESTResponse, RESTError> {
+    let param =
+        params.first().ok_or_else(|| RESTError::invalid_param("block", "parameter is missing"))?;
 
-    let block_key = match parse_block_key(param) {
-        Ok(block_key) => block_key,
-        Err(error) => return Err(error),
-    };
+    let block_key = parse_block_key(param)?;
 
     extract_strict_query_params!(query_params, {
         "count" => limit: Option<u64>,
@@ -372,6 +358,7 @@ pub async fn handle_blocks_hash_number_next_blockfrost(
             skip,
         },
     )));
+
     rest_query_state(
         &context,
         &handlers_config.blocks_query_topic,
@@ -385,7 +372,7 @@ pub async fn handle_blocks_hash_number_next_blockfrost(
             )) => Some(Ok(None)),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
-            )) => Some(Err(anyhow!(e))),
+            )) => Some(Err(RESTError::InternalServerError(e))),
             _ => None,
         },
     )
@@ -398,16 +385,11 @@ pub async fn handle_blocks_hash_number_previous_blockfrost(
     params: Vec<String>,
     query_params: HashMap<String, String>,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
-    let param = match params.as_slice() {
-        [param] => param,
-        _ => return Ok(RESTResponse::with_text(400, "Invalid parameters")),
-    };
+) -> Result<RESTResponse, RESTError> {
+    let param =
+        params.first().ok_or_else(|| RESTError::invalid_param("block", "parameter is missing"))?;
 
-    let block_key = match parse_block_key(param) {
-        Ok(block_key) => block_key,
-        Err(error) => return Err(error),
-    };
+    let block_key = parse_block_key(param)?;
 
     extract_strict_query_params!(query_params, {
         "count" => limit: Option<u64>,
@@ -423,6 +405,7 @@ pub async fn handle_blocks_hash_number_previous_blockfrost(
             skip,
         },
     )));
+
     rest_query_state(
         &context,
         &handlers_config.blocks_query_topic,
@@ -436,7 +419,7 @@ pub async fn handle_blocks_hash_number_previous_blockfrost(
             )) => Some(Ok(None)),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
-            )) => Some(Err(anyhow!(e))),
+            )) => Some(Err(RESTError::InternalServerError(e))),
             _ => None,
         },
     )
@@ -448,20 +431,16 @@ pub async fn handle_blocks_slot_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
-    let slot = match params.as_slice() {
-        [param] => param,
-        _ => return Ok(RESTResponse::with_text(400, "Invalid parameters")),
-    };
+) -> Result<RESTResponse, RESTError> {
+    let slot_str =
+        params.first().ok_or_else(|| RESTError::invalid_param("slot", "parameter is missing"))?;
 
-    let slot = match slot.parse::<u64>() {
-        Ok(slot) => slot,
-        Err(error) => return Err(error.into()),
-    };
+    let slot = slot_str.parse::<u64>()?;
 
     let block_slot_msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
         BlocksStateQuery::GetBlockBySlot { slot },
     )));
+
     rest_query_state(
         &context,
         &handlers_config.blocks_query_topic,
@@ -475,7 +454,7 @@ pub async fn handle_blocks_slot_blockfrost(
             )) => Some(Ok(None)),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
-            )) => Some(Err(anyhow!(e))),
+            )) => Some(Err(RESTError::InternalServerError(e))),
             _ => None,
         },
     )
@@ -487,25 +466,24 @@ pub async fn handle_blocks_epoch_slot_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
-    let (epoch, slot) = match params.as_slice() {
-        [param1, param2] => (param1, param2),
-        _ => return Ok(RESTResponse::with_text(400, "Invalid parameters")),
+) -> Result<RESTResponse, RESTError> {
+    let (epoch_str, slot_str) = match params.as_slice() {
+        [e, s] => (e, s),
+        _ => {
+            return Err(RESTError::invalid_param(
+                "parameters",
+                "epoch and slot required",
+            ))
+        }
     };
 
-    let epoch = match epoch.parse::<u64>() {
-        Ok(epoch) => epoch,
-        Err(error) => return Err(error.into()),
-    };
-
-    let slot = match slot.parse::<u64>() {
-        Ok(slot) => slot,
-        Err(error) => return Err(error.into()),
-    };
+    let epoch = epoch_str.parse::<u64>()?;
+    let slot = slot_str.parse::<u64>()?;
 
     let block_epoch_slot_msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
         BlocksStateQuery::GetBlockByEpochSlot { epoch, slot },
     )));
+
     rest_query_state(
         &context,
         &handlers_config.blocks_query_topic,
@@ -519,7 +497,7 @@ pub async fn handle_blocks_epoch_slot_blockfrost(
             )) => Some(Ok(None)),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
-            )) => Some(Err(anyhow!(e))),
+            )) => Some(Err(RESTError::InternalServerError(e))),
             _ => None,
         },
     )
@@ -532,16 +510,11 @@ pub async fn handle_blocks_hash_number_addresses_blockfrost(
     params: Vec<String>,
     query_params: HashMap<String, String>,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
-    let param = match params.as_slice() {
-        [param] => param,
-        _ => return Ok(RESTResponse::with_text(400, "Invalid parameters")),
-    };
+) -> Result<RESTResponse, RESTError> {
+    let param =
+        params.first().ok_or_else(|| RESTError::invalid_param("block", "parameter is missing"))?;
 
-    let block_key = match parse_block_key(param) {
-        Ok(block_key) => block_key,
-        Err(error) => return Err(error),
-    };
+    let block_key = parse_block_key(param)?;
 
     extract_strict_query_params!(query_params, {
         "count" => limit: Option<u64>,
@@ -557,6 +530,7 @@ pub async fn handle_blocks_hash_number_addresses_blockfrost(
             skip,
         },
     )));
+
     rest_query_state(
         &context,
         &handlers_config.blocks_query_topic,
@@ -570,7 +544,7 @@ pub async fn handle_blocks_hash_number_addresses_blockfrost(
             )) => Some(Ok(None)),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
-            )) => Some(Err(anyhow!(e))),
+            )) => Some(Err(RESTError::InternalServerError(e))),
             _ => None,
         },
     )

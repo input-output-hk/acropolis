@@ -1,11 +1,12 @@
-use anyhow::Result;
+//! REST handlers for Acropolis Blockfrost /addresses endpoints
 use std::sync::Arc;
 
+use acropolis_common::app_error::RESTError;
 use acropolis_common::{
     messages::{Message, RESTResponse, StateQuery, StateQueryResponse},
     queries::{
         addresses::{AddressStateQuery, AddressStateQueryResponse},
-        utils::query_state,
+        utils::{query_state, serialize_to_json_response},
         utxos::{UTxOStateQuery, UTxOStateQueryResponse},
     },
     Address, Value,
@@ -19,48 +20,22 @@ pub async fn handle_address_single_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
-    let [address_str] = &params[..] else {
-        return Ok(RESTResponse::with_text(400, "Missing address parameter"));
-    };
+) -> Result<RESTResponse, RESTError> {
+    let address_str = params
+        .first()
+        .ok_or_else(|| RESTError::invalid_param("address", "parameter is missing"))?;
 
-    let (address, stake_address) = match Address::from_string(address_str) {
-        Ok(Address::None) | Ok(Address::Stake(_)) => {
-            return Ok(RESTResponse::with_text(
-                400,
-                &format!("Invalid address '{address_str}'"),
-            ));
-        }
-        Ok(Address::Byron(byron)) => (Address::Byron(byron), None),
-        Ok(Address::Shelley(shelley)) => {
-            let stake_addr = match shelley.stake_address_string() {
-                Ok(stake_addr) => stake_addr,
-                Err(e) => {
-                    return Ok(RESTResponse::with_text(
-                        400,
-                        &format!("Invalid address '{address_str}': {e}"),
-                    ));
-                }
-            };
-
-            (Address::Shelley(shelley), stake_addr)
-        }
-        Err(e) => {
-            return Ok(RESTResponse::with_text(
-                400,
-                &format!("Invalid address '{}': {e}", params[0]),
-            ));
-        }
-    };
+    let (address, stake_address) = parse_and_validate_address(address_str)?;
 
     let address_type = address.kind().to_string();
     let is_script = address.is_script();
 
+    // Query for UTxOs at this address
     let address_query_msg = Arc::new(Message::StateQuery(StateQuery::Addresses(
         AddressStateQuery::GetAddressUTxOs { address },
     )));
 
-    let utxo_query_result = query_state(
+    let utxo_identifiers = query_state(
         &context,
         &handlers_config.addresses_query_topic,
         address_query_msg,
@@ -68,23 +43,21 @@ pub async fn handle_address_single_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Addresses(
                 AddressStateQueryResponse::AddressUTxOs(utxo_identifiers),
             )) => Ok(Some(utxo_identifiers)),
-
             Message::StateQueryResponse(StateQueryResponse::Addresses(
                 AddressStateQueryResponse::NotFound,
             )) => Ok(None),
-
             Message::StateQueryResponse(StateQueryResponse::Addresses(
                 AddressStateQueryResponse::Error(_),
-            )) => Err(anyhow::anyhow!("Address info storage disabled")),
-
-            _ => Err(anyhow::anyhow!("Unexpected response")),
+            )) => Err(RESTError::storage_disabled("Address info")),
+            _ => Err(RESTError::unexpected_response("retrieving address UTxOs")),
         },
     )
-    .await;
+    .await?;
 
-    let utxo_identifiers = match utxo_query_result {
-        Ok(Some(utxo_identifiers)) => utxo_identifiers,
-        Ok(None) => {
+    // If no UTxOs found, return address with zero balance
+    let utxo_identifiers = match utxo_identifiers {
+        Some(ids) => ids,
+        None => {
             let rest_response = AddressInfoREST {
                 address: address_str.to_string(),
                 amount: Value {
@@ -96,20 +69,16 @@ pub async fn handle_address_single_blockfrost(
                 address_type,
                 script: is_script,
             };
-
-            let json = serde_json::to_string_pretty(&rest_response)
-                .map_err(|e| anyhow::anyhow!("JSON serialization error: {e}"))?;
-
-            return Ok(RESTResponse::with_json(200, &json));
+            return serialize_to_json_response(&rest_response);
         }
-        Err(e) => return Ok(RESTResponse::with_text(500, &format!("Query failed: {e}"))),
     };
 
+    // Query for the sum of UTxOs to get total balance
     let utxos_query_msg = Arc::new(Message::StateQuery(StateQuery::UTxOs(
         UTxOStateQuery::GetUTxOsSum { utxo_identifiers },
     )));
 
-    let address_balance = match query_state(
+    let address_balance = query_state(
         &context,
         &handlers_config.utxos_query_topic,
         utxos_query_msg,
@@ -119,18 +88,17 @@ pub async fn handle_address_single_blockfrost(
             )) => Ok(balance),
             Message::StateQueryResponse(StateQueryResponse::UTxOs(
                 UTxOStateQueryResponse::NotFound,
-            )) => Err(anyhow::anyhow!("UTxOs not found")),
+            )) => Err(RESTError::not_found("UTxOs")),
             Message::StateQueryResponse(StateQueryResponse::UTxOs(
                 UTxOStateQueryResponse::Error(e),
-            )) => Err(anyhow::anyhow!(format!("UTxO query error: {e}"))),
-            _ => Err(anyhow::anyhow!("Unexpected response")),
+            )) => Err(RESTError::InternalServerError(format!(
+                "UTxO query error: {}",
+                e
+            ))),
+            _ => Err(RESTError::unexpected_response("querying UTxO sum")),
         },
     )
-    .await
-    {
-        Ok(address_balance) => address_balance,
-        Err(e) => return Ok(RESTResponse::with_text(500, &format!("Query failed: {e}"))),
-    };
+    .await?;
 
     let rest_response = AddressInfoREST {
         address: address_str.to_string(),
@@ -140,13 +108,7 @@ pub async fn handle_address_single_blockfrost(
         script: is_script,
     };
 
-    match serde_json::to_string_pretty(&rest_response) {
-        Ok(json) => Ok(RESTResponse::with_json(200, &json)),
-        Err(e) => Ok(RESTResponse::with_text(
-            500,
-            &format!("Internal server error while retrieving address info: {e}"),
-        )),
-    }
+    serialize_to_json_response(&rest_response)
 }
 
 /// Handle `/addresses/{address}/extended` Blockfrost-compatible endpoint
@@ -154,8 +116,8 @@ pub async fn handle_address_extended_blockfrost(
     _context: Arc<Context<Message>>,
     _params: Vec<String>,
     _handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
-    Ok(RESTResponse::with_text(501, "Not implemented"))
+) -> Result<RESTResponse, RESTError> {
+    Err(RESTError::not_implemented("Address extended info"))
 }
 
 /// Handle `/addresses/{address}/totals` Blockfrost-compatible endpoint
@@ -163,8 +125,8 @@ pub async fn handle_address_totals_blockfrost(
     _context: Arc<Context<Message>>,
     _params: Vec<String>,
     _handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
-    Ok(RESTResponse::with_text(501, "Not implemented"))
+) -> Result<RESTResponse, RESTError> {
+    Err(RESTError::not_implemented("Address totals"))
 }
 
 /// Handle `/addresses/{address}/utxos` Blockfrost-compatible endpoint
@@ -172,8 +134,8 @@ pub async fn handle_address_utxos_blockfrost(
     _context: Arc<Context<Message>>,
     _params: Vec<String>,
     _handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
-    Ok(RESTResponse::with_text(501, "Not implemented"))
+) -> Result<RESTResponse, RESTError> {
+    Err(RESTError::not_implemented("Address UTxOs listing"))
 }
 
 /// Handle `/addresses/{address}/utxos/{asset}` Blockfrost-compatible endpoint
@@ -181,8 +143,8 @@ pub async fn handle_address_asset_utxos_blockfrost(
     _context: Arc<Context<Message>>,
     _params: Vec<String>,
     _handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
-    Ok(RESTResponse::with_text(501, "Not implemented"))
+) -> Result<RESTResponse, RESTError> {
+    Err(RESTError::not_implemented("Address asset UTxOs"))
 }
 
 /// Handle `/addresses/{address}/transactions` Blockfrost-compatible endpoint
@@ -190,6 +152,29 @@ pub async fn handle_address_transactions_blockfrost(
     _context: Arc<Context<Message>>,
     _params: Vec<String>,
     _handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
-    Ok(RESTResponse::with_text(501, "Not implemented"))
+) -> Result<RESTResponse, RESTError> {
+    Err(RESTError::not_implemented("Address transactions"))
+}
+
+/// Parse and validate an address string, extracting the address and optional stake address
+fn parse_and_validate_address(address_str: &str) -> Result<(Address, Option<String>), RESTError> {
+    let address = Address::from_string(address_str)
+        .map_err(|e| RESTError::invalid_param("address", &format!("parse error: {}", e)))?;
+
+    match address {
+        Address::None | Address::Stake(_) => {
+            Err(RESTError::invalid_param("address", "invalid address type"))
+        }
+        Address::Byron(byron) => Ok((Address::Byron(byron), None)),
+        Address::Shelley(shelley) => {
+            let stake_addr = shelley.stake_address_string().map_err(|e| {
+                RESTError::invalid_param(
+                    "address",
+                    &format!("stake address extraction failed: {}", e),
+                )
+            })?;
+
+            Ok((Address::Shelley(shelley), stake_addr))
+        }
+    }
 }

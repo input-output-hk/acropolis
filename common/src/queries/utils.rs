@@ -1,61 +1,71 @@
-use anyhow::Result;
 use caryatid_sdk::Context;
 use serde::Serialize;
 use std::sync::Arc;
-
+use crate::app_error::RESTError;
 use crate::messages::{Message, RESTResponse};
 
+/// Query state and extract result using a custom extractor function
 pub async fn query_state<T, F>(
     context: &Arc<Context<Message>>,
     topic: &str,
     request_msg: Arc<Message>,
     extractor: F,
-) -> Result<T, anyhow::Error>
+) -> Result<T, RESTError>
 where
-    F: FnOnce(Message) -> Result<T, anyhow::Error>,
+    F: FnOnce(Message) -> Result<T, RESTError>,
 {
-    // build message to query
-    let raw_msg = context.message_bus.request(topic, request_msg).await?;
+    // Send request and get response
+    let raw_msg = context
+        .message_bus
+        .request(topic, request_msg)
+        .await
+        .map_err(RESTError::query_failed)?;
 
     let message = Arc::try_unwrap(raw_msg).unwrap_or_else(|arc| (*arc).clone());
 
     extractor(message)
 }
 
-/// The outer option in the extractor return value is whether the response was handled by F
+/// Query state for REST endpoints with automatic JSON serialization
+/// Returns None when resource is not found, Some(T) when found
 pub async fn rest_query_state<T, F>(
     context: &Arc<Context<Message>>,
     topic: &str,
     request_msg: Arc<Message>,
     extractor: F,
-) -> Result<RESTResponse>
+) -> Result<RESTResponse, RESTError>
 where
-    F: FnOnce(Message) -> Option<Result<Option<T>, anyhow::Error>>,
+    F: FnOnce(Message) -> Option<Result<Option<T>, RESTError>>,
     T: Serialize,
 {
     let result = query_state(context, topic, request_msg, |response| {
-        match extractor(response) {
-            Some(response) => response,
-            None => Err(anyhow::anyhow!(
-                "Unexpected response message type while calling {topic}"
-            )),
-        }
+        extractor(response).unwrap_or_else(|| {
+            Err(RESTError::unexpected_response(&format!(
+                "calling {topic}"
+            )))
+        })
     })
-    .await;
+        .await?;
+
     match result {
-        Ok(result) => match result {
-            Some(result) => match serde_json::to_string(&result) {
-                Ok(json) => Ok(RESTResponse::with_json(200, &json)),
-                Err(e) => Ok(RESTResponse::with_text(
-                    500,
-                    &format!("Internal server error while calling {topic}: {e}"),
-                )),
-            },
-            None => Ok(RESTResponse::with_text(404, "Not found")),
-        },
-        Err(e) => Ok(RESTResponse::with_text(
-            500,
-            &format!("Internal server error while calling {topic}: {e}"),
-        )),
+        Some(result) => {
+            let json = serde_json::to_string_pretty(&result)?;
+            Ok(RESTResponse::with_json(200, &json))
+        }
+        None => Err(RESTError::not_found("Resource")),
+    }
+}
+
+/// Helper to serialize a result to JSON REST response
+pub fn serialize_to_json_response<T: Serialize>(data: &T) -> Result<RESTResponse, RESTError> {
+    let json = serde_json::to_string_pretty(data)?;
+    Ok(RESTResponse::with_json(200, &json))
+}
+
+/// Convert a Result to a RESTResponse, handling errors gracefully
+pub fn to_rest_response<T: Serialize>(result: Result<T, RESTError>) -> RESTResponse {
+    match result {
+        Ok(data) => serialize_to_json_response(&data).unwrap_or_else(|e| e.into()),
+        Err(e) => e.into(),
     }
 }

@@ -1,9 +1,11 @@
+//! REST handlers for Acropolis Blockfrost /epochs endpoints
 use crate::{
     handlers_config::HandlersConfig,
     types::{
         EpochActivityRest, ProtocolParamsRest, SPDDByEpochAndPoolItemRest, SPDDByEpochItemRest,
     },
 };
+use acropolis_common::app_error::RESTError;
 use acropolis_common::serialization::Bech32Conversion;
 use acropolis_common::{
     messages::{Message, RESTResponse, StateQuery, StateQueryResponse},
@@ -13,46 +15,30 @@ use acropolis_common::{
         parameters::{ParametersStateQuery, ParametersStateQueryResponse},
         pools::{PoolsStateQuery, PoolsStateQueryResponse},
         spdd::{SPDDStateQuery, SPDDStateQueryResponse},
-        utils::query_state,
+        utils::{query_state, serialize_to_json_response},
     },
     PoolId,
 };
-use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
 use std::sync::Arc;
 
+/// Handle `/epochs/latest` and `/epochs/{number}`
 pub async fn handle_epoch_info_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
-    if params.len() != 1 {
-        return Ok(RESTResponse::with_text(
-            400,
-            "Expected one parameter: 'latest' or an epoch number",
-        ));
-    }
-    let param = &params[0];
+) -> Result<RESTResponse, RESTError> {
+    let param =
+        params.first().ok_or_else(|| RESTError::invalid_param("epoch", "parameter is missing"))?;
 
-    // query to get latest epoch or epoch info
+    // Query to get latest epoch or specific epoch info
     let query = if param == "latest" {
         EpochsStateQuery::GetLatestEpoch
     } else {
-        let parsed = match param.parse::<u64>() {
-            Ok(num) => num,
-            Err(_) => {
-                return Ok(RESTResponse::with_text(
-                    400,
-                    "Invalid epoch number parameter",
-                ));
-            }
-        };
-        EpochsStateQuery::GetEpochInfo {
-            epoch_number: parsed,
-        }
+        let epoch_number = param.parse::<u64>()?;
+        EpochsStateQuery::GetEpochInfo { epoch_number }
     };
 
-    // Get the current epoch number from epochs-state
     let epoch_info_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(query)));
     let epoch_info_response = query_state(
         &context,
@@ -60,9 +46,7 @@ pub async fn handle_epoch_info_blockfrost(
         epoch_info_msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Epochs(response)) => Ok(response),
-            _ => Err(anyhow!(
-                "Unexpected message type while retrieving latest epoch"
-            )),
+            _ => Err(RESTError::unexpected_response("retrieving epoch info")),
         },
     )
     .await?;
@@ -70,18 +54,18 @@ pub async fn handle_epoch_info_blockfrost(
     let ea_message = match epoch_info_response {
         EpochsStateQueryResponse::LatestEpoch(response) => Ok(response.epoch),
         EpochsStateQueryResponse::EpochInfo(response) => Ok(response.epoch),
-        EpochsStateQueryResponse::NotFound => Err(anyhow!("Epoch not found")),
-        EpochsStateQueryResponse::Error(e) => Err(anyhow!(
-            "Internal server error while retrieving epoch info: {e}"
-        )),
-        _ => Err(anyhow!(
-            "Unexpected message type while retrieving epoch info"
-        )),
+        EpochsStateQueryResponse::NotFound => Err(RESTError::not_found("Epoch")),
+        EpochsStateQueryResponse::Error(e) => Err(RESTError::InternalServerError(format!(
+            "Error retrieving epoch info: {}",
+            e
+        ))),
+        _ => Err(RESTError::unexpected_response("retrieving epoch info")),
     }?;
+
     let epoch_number = ea_message.epoch;
 
-    // For the latest epoch, query accounts-state for the stake pool delegation distribution (SPDD)
-    // Otherwise, fall back to SPDD module to fetch historical epoch totals
+    // For the latest epoch, query accounts-state for active stakes
+    // Otherwise, fall back to SPDD module for historical data
     let total_active_stakes: u64 = if param == "latest" {
         let total_active_stakes_msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
             AccountsStateQuery::GetActiveStakes {},
@@ -94,8 +78,8 @@ pub async fn handle_epoch_info_blockfrost(
                 Message::StateQueryResponse(StateQueryResponse::Accounts(
                     AccountsStateQueryResponse::ActiveStakes(total_active_stake),
                 )) => Ok(total_active_stake),
-                _ => Err(anyhow::anyhow!(
-                    "Unexpected message type while retrieving the latest total active stakes",
+                _ => Err(RESTError::unexpected_response(
+                    "retrieving total active stakes",
                 )),
             },
         )
@@ -115,49 +99,33 @@ pub async fn handle_epoch_info_blockfrost(
                 Message::StateQueryResponse(StateQueryResponse::SPDD(
                     SPDDStateQueryResponse::EpochTotalActiveStakes(total_active_stakes),
                 )) => Ok(total_active_stakes),
-                _ => Err(anyhow::anyhow!(
-                    "Unexpected message type while retrieving total active stakes for epoch: {epoch_number}",
-                )),
+                _ => Err(RESTError::unexpected_response(&format!(
+                    "retrieving total active stakes for epoch {}",
+                    epoch_number
+                ))),
             },
         )
         .await?
     };
 
     let mut response = EpochActivityRest::from(ea_message);
-
-    if total_active_stakes == 0 {
-        response.active_stake = None;
+    response.active_stake = if total_active_stakes == 0 {
+        None
     } else {
-        response.active_stake = Some(total_active_stakes);
-    }
-
-    let json = match serde_json::to_string_pretty(&response) {
-        Ok(j) => j,
-        Err(e) => {
-            return Ok(RESTResponse::with_text(
-                500,
-                &format!("Internal server error while retrieving latest epoch: {e}"),
-            ));
-        }
+        Some(total_active_stakes)
     };
-    Ok(RESTResponse::with_json(200, &json))
+
+    serialize_to_json_response(&response)
 }
 
+/// Handle `/epochs/latest/parameters` and `/epochs/{number}/parameters`
 pub async fn handle_epoch_params_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
-    if params.len() != 1 {
-        return Ok(RESTResponse::with_text(
-            400,
-            "Expected one parameter: 'latest' or an epoch number",
-        ));
-    }
-    let param = &params[0];
-
-    let query;
-    let mut epoch_number: Option<u64> = None;
+) -> Result<RESTResponse, RESTError> {
+    let param =
+        params.first().ok_or_else(|| RESTError::invalid_param("epoch", "parameter is missing"))?;
 
     // Get current epoch number from epochs-state
     let latest_epoch_info_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
@@ -173,33 +141,26 @@ pub async fn handle_epoch_params_blockfrost(
             )) => Ok(res.epoch.epoch),
             Message::StateQueryResponse(StateQueryResponse::Epochs(
                 EpochsStateQueryResponse::Error(e),
-            )) => Err(anyhow::anyhow!(
-                "Internal server error while retrieving latest epoch: {e}"
-            )),
-            _ => Err(anyhow::anyhow!(
-                "Unexpected message type while retrieving latest epoch"
-            )),
+            )) => Err(RESTError::InternalServerError(format!(
+                "Error retrieving latest epoch: {}",
+                e
+            ))),
+            _ => Err(RESTError::unexpected_response("retrieving latest epoch")),
         },
     )
     .await?;
 
-    if param == "latest" {
-        query = ParametersStateQuery::GetLatestEpochParameters;
+    let (query, epoch_number) = if param == "latest" {
+        (ParametersStateQuery::GetLatestEpochParameters, None)
     } else {
-        let parsed = match param.parse::<u64>() {
-            Ok(num) => num,
-            Err(_) => {
-                return Ok(RESTResponse::with_text(
-                    400,
-                    "Invalid epoch number parameter",
-                ));
-            }
-        };
-        query = ParametersStateQuery::GetEpochParameters {
-            epoch_number: parsed,
-        };
-        epoch_number = Some(parsed);
-    }
+        let parsed = param.parse::<u64>()?;
+        (
+            ParametersStateQuery::GetEpochParameters {
+                epoch_number: parsed,
+            },
+            Some(parsed),
+        )
+    };
 
     let parameters_msg = Arc::new(Message::StateQuery(StateQuery::Parameters(query)));
     let parameters_response = query_state(
@@ -208,9 +169,7 @@ pub async fn handle_epoch_params_blockfrost(
         parameters_msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Parameters(resp)) => Ok(resp),
-            _ => Err(anyhow::anyhow!(
-                "Unexpected message type while retrieving parameters"
-            )),
+            _ => Err(RESTError::unexpected_response("retrieving parameters")),
         },
     )
     .await?;
@@ -218,72 +177,43 @@ pub async fn handle_epoch_params_blockfrost(
     match parameters_response {
         ParametersStateQueryResponse::LatestEpochParameters(params) => {
             let rest = ProtocolParamsRest::from((latest_epoch, params));
-            match serde_json::to_string_pretty(&rest) {
-                Ok(json) => Ok(RESTResponse::with_json(200, &json)),
-                Err(e) => Ok(RESTResponse::with_text(
-                    500,
-                    &format!("Failed to serialize parameters: {e}"),
-                )),
-            }
+            serialize_to_json_response(&rest)
         }
         ParametersStateQueryResponse::EpochParameters(params) => {
             let epoch = epoch_number.expect("epoch_number must exist for EpochParameters");
 
             if epoch > latest_epoch {
-                return Ok(RESTResponse::with_text(
-                    404,
-                    "Protocol parameters not found for requested epoch",
+                return Err(RESTError::not_found(
+                    "Protocol parameters for requested epoch",
                 ));
             }
+
             let rest = ProtocolParamsRest::from((epoch, params));
-            match serde_json::to_string_pretty(&rest) {
-                Ok(json) => Ok(RESTResponse::with_json(200, &json)),
-                Err(e) => Ok(RESTResponse::with_text(
-                    500,
-                    &format!("Failed to serialize parameters: {e}"),
-                )),
-            }
+            serialize_to_json_response(&rest)
         }
-        ParametersStateQueryResponse::NotFound => Ok(RESTResponse::with_text(
-            404,
-            "Protocol parameters not found for requested epoch",
+        ParametersStateQueryResponse::NotFound => Err(RESTError::not_found(
+            "Protocol parameters for requested epoch",
         )),
-        ParametersStateQueryResponse::Error(msg) => Ok(RESTResponse::with_text(400, &msg)),
-        _ => Ok(RESTResponse::with_text(
-            500,
-            "Unexpected message type while retrieving parameters",
-        )),
+        ParametersStateQueryResponse::Error(msg) => Err(RESTError::BadRequest(msg)),
+        _ => Err(RESTError::unexpected_response("retrieving parameters")),
     }
 }
 
+/// Handle `/epochs/{number}/next`
 pub async fn handle_epoch_next_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
-    if params.len() != 1 {
-        return Ok(RESTResponse::with_text(
-            400,
-            "Expected one parameter: an epoch number",
-        ));
-    }
-    let param = &params[0];
+) -> Result<RESTResponse, RESTError> {
+    let param =
+        params.first().ok_or_else(|| RESTError::invalid_param("epoch", "parameter is missing"))?;
 
-    let parsed = match param.parse::<u64>() {
-        Ok(num) => num,
-        Err(_) => {
-            return Ok(RESTResponse::with_text(
-                400,
-                "Invalid epoch number parameter",
-            ));
-        }
-    };
+    let epoch_number = param.parse::<u64>()?;
 
     let next_epochs_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
-        EpochsStateQuery::GetNextEpochs {
-            epoch_number: parsed,
-        },
+        EpochsStateQuery::GetNextEpochs { epoch_number },
     )));
+
     let next_epochs = query_state(
         &context,
         &handlers_config.epochs_query_topic,
@@ -294,59 +224,36 @@ pub async fn handle_epoch_next_blockfrost(
             )) => Ok(response.epochs.into_iter().map(EpochActivityRest::from).collect::<Vec<_>>()),
             Message::StateQueryResponse(StateQueryResponse::Epochs(
                 EpochsStateQueryResponse::Error(e),
-            )) => Err(anyhow::anyhow!(
-                "Internal server error while retrieving next epochs: {e}"
-            )),
+            )) => Err(RESTError::InternalServerError(format!(
+                "Error retrieving next epochs: {}",
+                e
+            ))),
             Message::StateQueryResponse(StateQueryResponse::Epochs(
                 EpochsStateQueryResponse::NotFound,
-            )) => Err(anyhow::anyhow!("Epoch not found")),
-            _ => Err(anyhow::anyhow!(
-                "Unexpected message type while retrieving next epochs"
-            )),
+            )) => Err(RESTError::not_found("Epoch")),
+            _ => Err(RESTError::unexpected_response("retrieving next epochs")),
         },
     )
     .await?;
 
-    let json = match serde_json::to_string_pretty(&next_epochs) {
-        Ok(j) => j,
-        Err(e) => {
-            return Ok(RESTResponse::with_text(
-                500,
-                &format!("Failed to serialize epoch info: {e}"),
-            ));
-        }
-    };
-    Ok(RESTResponse::with_json(200, &json))
+    serialize_to_json_response(&next_epochs)
 }
 
+/// Handle `/epochs/{number}/previous`
 pub async fn handle_epoch_previous_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
-    if params.len() != 1 {
-        return Ok(RESTResponse::with_text(
-            400,
-            "Expected one parameter: an epoch number",
-        ));
-    }
-    let param = &params[0];
+) -> Result<RESTResponse, RESTError> {
+    let param =
+        params.first().ok_or_else(|| RESTError::invalid_param("epoch", "parameter is missing"))?;
 
-    let parsed = match param.parse::<u64>() {
-        Ok(num) => num,
-        Err(_) => {
-            return Ok(RESTResponse::with_text(
-                400,
-                "Invalid epoch number parameter",
-            ));
-        }
-    };
+    let epoch_number = param.parse::<u64>()?;
 
     let previous_epochs_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
-        EpochsStateQuery::GetPreviousEpochs {
-            epoch_number: parsed,
-        },
+        EpochsStateQuery::GetPreviousEpochs { epoch_number },
     )));
+
     let previous_epochs = query_state(
         &context,
         &handlers_config.epochs_query_topic,
@@ -357,75 +264,37 @@ pub async fn handle_epoch_previous_blockfrost(
             )) => Ok(response.epochs.into_iter().map(EpochActivityRest::from).collect::<Vec<_>>()),
             Message::StateQueryResponse(StateQueryResponse::Epochs(
                 EpochsStateQueryResponse::Error(e),
-            )) => Err(anyhow::anyhow!(
-                "Internal server error while retrieving previous epochs: {e}"
-            )),
+            )) => Err(RESTError::InternalServerError(format!(
+                "Error retrieving previous epochs: {}",
+                e
+            ))),
             Message::StateQueryResponse(StateQueryResponse::Epochs(
                 EpochsStateQueryResponse::NotFound,
-            )) => Err(anyhow::anyhow!("Epoch not found")),
-            _ => Err(anyhow::anyhow!(
-                "Unexpected message type while retrieving previous epochs"
-            )),
+            )) => Err(RESTError::not_found("Epoch")),
+            _ => Err(RESTError::unexpected_response("retrieving previous epochs")),
         },
     )
     .await?;
 
-    let json = match serde_json::to_string_pretty(&previous_epochs) {
-        Ok(j) => j,
-        Err(e) => {
-            return Ok(RESTResponse::with_text(
-                500,
-                &format!("Failed to serialize epoch info: {e}"),
-            ));
-        }
-    };
-    Ok(RESTResponse::with_json(200, &json))
+    serialize_to_json_response(&previous_epochs)
 }
 
+/// Handle `/epochs/{number}/stakes`
 pub async fn handle_epoch_total_stakes_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
-    if params.len() != 1 {
-        return Ok(RESTResponse::with_text(
-            400,
-            "Expected one parameter: an epoch number",
-        ));
-    }
-    let param = &params[0];
+) -> Result<RESTResponse, RESTError> {
+    let param =
+        params.first().ok_or_else(|| RESTError::invalid_param("epoch", "parameter is missing"))?;
 
-    let epoch_number = match param.parse::<u64>() {
-        Ok(num) => num,
-        Err(_) => {
-            return Ok(RESTResponse::with_text(
-                400,
-                "Invalid epoch number parameter",
-            ));
-        }
-    };
+    let epoch_number = param.parse::<u64>()?;
 
     // Query latest epoch from epochs-state
-    let latest_epoch_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
-        EpochsStateQuery::GetLatestEpoch,
-    )));
-    let latest_epoch = query_state(
-        &context,
-        &handlers_config.epochs_query_topic,
-        latest_epoch_msg,
-        |message| match message {
-            Message::StateQueryResponse(StateQueryResponse::Epochs(
-                EpochsStateQueryResponse::LatestEpoch(res),
-            )) => Ok(res.epoch.epoch),
-            _ => Err(anyhow::anyhow!(
-                "Unexpected message type while retrieving latest epoch"
-            )),
-        },
-    )
-    .await?;
+    let latest_epoch = fetch_latest_epoch(&context, &handlers_config).await?;
 
     if epoch_number > latest_epoch {
-        return Ok(RESTResponse::with_text(404, "Epoch not found"));
+        return Err(RESTError::not_found("Epoch"));
     }
 
     // Query SPDD by epoch from accounts-state
@@ -434,6 +303,7 @@ pub async fn handle_epoch_total_stakes_blockfrost(
             epoch: epoch_number,
         },
     )));
+
     let spdd = query_state(
         &context,
         &handlers_config.accounts_query_topic,
@@ -444,90 +314,58 @@ pub async fn handle_epoch_total_stakes_blockfrost(
             )) => Ok(res),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
-            )) => Err(anyhow::anyhow!(
-                "Internal server error while retrieving SPDD by epoch: {e}"
-            )),
-            _ => Err(anyhow::anyhow!(
-                "Unexpected message type while retrieving SPDD by epoch"
-            )),
+            )) => Err(RESTError::InternalServerError(format!(
+                "Error retrieving SPDD by epoch: {}",
+                e
+            ))),
+            _ => Err(RESTError::unexpected_response("retrieving SPDD by epoch")),
         },
     )
     .await?;
-    let spdd_response = spdd
+
+    let spdd_response: Result<Vec<_>, RESTError> = spdd
         .into_iter()
         .map(|(pool_id, stake_address, amount)| {
             let bech32 = stake_address
                 .to_string()
-                .map_err(|e| anyhow::anyhow!("Failed to convert stake address to string {}", e))?;
+                .map_err(|e| RESTError::encoding_failed(&format!("stake address: {}", e)))?;
             Ok(SPDDByEpochItemRest {
                 pool_id,
                 stake_address: bech32,
                 amount,
             })
         })
-        .collect::<Result<Vec<_>>>()?;
+        .collect();
 
-    match serde_json::to_string_pretty(&spdd_response) {
-        Ok(json) => Ok(RESTResponse::with_json(200, &json)),
-        Err(e) => Ok(RESTResponse::with_text(
-            500,
-            &format!("Failed to serialize SPDD by epoch: {e}"),
-        )),
-    }
+    serialize_to_json_response(&spdd_response?)
 }
 
+/// Handle `/epochs/{number}/stakes/{pool_id}`
 pub async fn handle_epoch_pool_stakes_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
-    if params.len() != 2 {
-        return Ok(RESTResponse::with_text(
-            400,
-            "Expected two parameters: an epoch number and a pool ID",
-        ));
-    }
-    let param = &params[0];
-    let pool_id = &params[1];
-
-    let epoch_number = match param.parse::<u64>() {
-        Ok(num) => num,
-        Err(_) => {
-            return Ok(RESTResponse::with_text(
-                400,
-                "Invalid epoch number parameter",
-            ));
+) -> Result<RESTResponse, RESTError> {
+    let (epoch_param, pool_id_param) = match params.as_slice() {
+        [e, p] => (e, p),
+        _ => {
+            return Err(RESTError::invalid_param(
+                "parameters",
+                "epoch number and pool ID required",
+            ))
         }
     };
 
-    let Ok(pool_id) = PoolId::from_bech32(pool_id) else {
-        return Ok(RESTResponse::with_text(
-            400,
-            &format!("Invalid Bech32 stake pool ID: {pool_id}"),
-        ));
-    };
+    let epoch_number = epoch_param.parse::<u64>()?;
+
+    let pool_id = PoolId::from_bech32(pool_id_param)
+        .map_err(|_| RESTError::invalid_param("pool_id", "invalid Bech32 stake pool ID"))?;
 
     // Query latest epoch from epochs-state
-    let latest_epoch_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
-        EpochsStateQuery::GetLatestEpoch,
-    )));
-    let latest_epoch = query_state(
-        &context,
-        &handlers_config.epochs_query_topic,
-        latest_epoch_msg,
-        |message| match message {
-            Message::StateQueryResponse(StateQueryResponse::Epochs(
-                EpochsStateQueryResponse::LatestEpoch(res),
-            )) => Ok(res.epoch.epoch),
-            _ => Err(anyhow::anyhow!(
-                "Unexpected message type while retrieving latest epoch"
-            )),
-        },
-    )
-    .await?;
+    let latest_epoch = fetch_latest_epoch(&context, &handlers_config).await?;
 
     if epoch_number > latest_epoch {
-        return Ok(RESTResponse::with_text(404, "Epoch not found"));
+        return Err(RESTError::not_found("Epoch"));
     }
 
     // Query SPDD by epoch and pool from accounts-state
@@ -537,6 +375,7 @@ pub async fn handle_epoch_pool_stakes_blockfrost(
             pool_id,
         },
     )));
+
     let spdd = query_state(
         &context,
         &handlers_config.accounts_query_topic,
@@ -547,80 +386,67 @@ pub async fn handle_epoch_pool_stakes_blockfrost(
             )) => Ok(res),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
-            )) => Err(anyhow::anyhow!(
-                "Internal server error while retrieving SPDD by epoch and pool: {e}"
-            )),
-            _ => Err(anyhow::anyhow!(
-                "Unexpected message type while retrieving SPDD by epoch and pool"
+            )) => Err(RESTError::InternalServerError(format!(
+                "Error retrieving SPDD by epoch and pool: {}",
+                e
+            ))),
+            _ => Err(RESTError::unexpected_response(
+                "retrieving SPDD by epoch and pool",
             )),
         },
     )
     .await?;
-    let spdd_response = spdd
+
+    let spdd_response: Result<Vec<_>, RESTError> = spdd
         .into_iter()
         .map(|(stake_address, amount)| {
             let bech32 = stake_address
                 .to_string()
-                .map_err(|e| anyhow::anyhow!("Failed to convert stake address to string {}", e))?;
+                .map_err(|e| RESTError::encoding_failed(&format!("stake address: {}", e)))?;
             Ok(SPDDByEpochAndPoolItemRest {
                 stake_address: bech32,
                 amount,
             })
         })
-        .collect::<Result<Vec<_>>>()?;
+        .collect();
 
-    match serde_json::to_string_pretty(&spdd_response) {
-        Ok(json) => Ok(RESTResponse::with_json(200, &json)),
-        Err(e) => Ok(RESTResponse::with_text(
-            500,
-            &format!("Failed to serialize SPDD by epoch and pool: {e}"),
-        )),
-    }
+    serialize_to_json_response(&spdd_response?)
 }
 
+/// Handle `/epochs/{number}/blocks` - Not implemented
 pub async fn handle_epoch_total_blocks_blockfrost(
     _context: Arc<Context<Message>>,
     _params: Vec<String>,
     _handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
-    Ok(RESTResponse::with_text(501, "Not implemented"))
+) -> Result<RESTResponse, RESTError> {
+    Err(RESTError::not_implemented("Epoch total blocks"))
 }
 
+/// Handle `/epochs/{number}/blocks/{pool_id}`
 pub async fn handle_epoch_pool_blocks_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
-    if params.len() != 2 {
-        return Ok(RESTResponse::with_text(
-            400,
-            "Expected two parameters: an epoch number and a pool ID",
-        ));
-    }
-    let epoch_number_param = &params[0];
-    let pool_id_param = &params[1];
-
-    let epoch_number = match epoch_number_param.parse::<u64>() {
-        Ok(num) => num,
-        Err(_) => {
-            return Ok(RESTResponse::with_text(
-                400,
-                "Invalid epoch number parameter",
-            ));
+) -> Result<RESTResponse, RESTError> {
+    let (epoch_param, pool_id_param) = match params.as_slice() {
+        [e, p] => (e, p),
+        _ => {
+            return Err(RESTError::invalid_param(
+                "parameters",
+                "epoch number and pool ID required",
+            ))
         }
     };
 
-    let Ok(spo) = PoolId::from_bech32(pool_id_param) else {
-        return Ok(RESTResponse::with_text(
-            400,
-            &format!("Invalid Bech32 stake pool ID: {pool_id_param}"),
-        ));
-    };
+    let epoch_number = epoch_param.parse::<u64>()?;
 
-    // query Pool's Blocks by epoch from spo-state
+    let pool_id = PoolId::from_bech32(pool_id_param)
+        .map_err(|_| RESTError::invalid_param("pool_id", "invalid Bech32 stake pool ID"))?;
+
+    // Query pool's blocks by epoch from pools-state
     let msg = Arc::new(Message::StateQuery(StateQuery::Pools(
         PoolsStateQuery::GetBlocksByPoolAndEpoch {
-            pool_id: spo,
+            pool_id,
             epoch: epoch_number,
         },
     )));
@@ -635,23 +461,40 @@ pub async fn handle_epoch_pool_blocks_blockfrost(
             )) => Ok(blocks),
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::Error(e),
-            )) => Err(anyhow::anyhow!(
-                "Internal server error while retrieving pool block hashes by epoch: {e}"
+            )) => Err(RESTError::InternalServerError(format!(
+                "Error retrieving pool block hashes by epoch: {}",
+                e
+            ))),
+            _ => Err(RESTError::unexpected_response(
+                "retrieving pool block hashes by epoch",
             )),
-            _ => Err(anyhow::anyhow!("Unexpected message type")),
         },
     )
     .await?;
 
-    // NOTE:
-    // Need to query chain_store
-    // to get block_hash for each block height
+    // NOTE: Need to query chain_store to get block_hash for each block height
+    serialize_to_json_response(&blocks)
+}
 
-    match serde_json::to_string_pretty(&blocks) {
-        Ok(json) => Ok(RESTResponse::with_json(200, &json)),
-        Err(e) => Ok(RESTResponse::with_text(
-            500,
-            &format!("Internal server error while retrieving pool block hashes by epoch: {e}"),
-        )),
-    }
+/// Fetch the latest epoch number
+async fn fetch_latest_epoch(
+    context: &Arc<Context<Message>>,
+    handlers_config: &HandlersConfig,
+) -> Result<u64, RESTError> {
+    let latest_epoch_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
+        EpochsStateQuery::GetLatestEpoch,
+    )));
+
+    query_state(
+        context,
+        &handlers_config.epochs_query_topic,
+        latest_epoch_msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Epochs(
+                EpochsStateQueryResponse::LatestEpoch(res),
+            )) => Ok(res.epoch.epoch),
+            _ => Err(RESTError::unexpected_response("retrieving latest epoch")),
+        },
+    )
+    .await
 }

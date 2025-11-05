@@ -10,6 +10,8 @@ use anyhow::Result;
 use caryatid_sdk::{module, Context, Module};
 use config::Config;
 use tracing::info;
+use acropolis_common::app_error::RESTError;
+
 mod cost_models;
 mod handlers;
 mod handlers_config;
@@ -718,7 +720,7 @@ fn register_handler<F, Fut>(
         + Sync
         + Clone
         + 'static,
-    Fut: Future<Output = Result<RESTResponse>> + Send + 'static,
+    Fut: Future<Output = Result<RESTResponse, RESTError>> + Send + 'static,
 {
     let topic_name = context.config.get_string(topic.0).unwrap_or_else(|_| topic.1.to_string());
 
@@ -745,7 +747,7 @@ fn register_handler_with_query<F, Fut>(
         + Sync
         + Clone
         + 'static,
-    Fut: Future<Output = Result<RESTResponse>> + Send + 'static,
+    Fut: Future<Output = Result<RESTResponse, RESTError>> + Send + 'static,
 {
     let topic_name = context.config.get_string(topic.0).unwrap_or_else(|_| topic.1.to_string());
 
