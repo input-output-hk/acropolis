@@ -6,7 +6,7 @@ use crate::{
     },
 };
 use acropolis_common::app_error::RESTError;
-use acropolis_common::serialization::Bech32Conversion;
+use acropolis_common::serialization::{serialize_to_json_response, Bech32Conversion};
 use acropolis_common::{
     messages::{Message, RESTResponse, StateQuery, StateQueryResponse},
     queries::{
@@ -15,7 +15,7 @@ use acropolis_common::{
         parameters::{ParametersStateQuery, ParametersStateQueryResponse},
         pools::{PoolsStateQuery, PoolsStateQueryResponse},
         spdd::{SPDDStateQuery, SPDDStateQueryResponse},
-        utils::{query_state, serialize_to_json_response},
+        utils::query_state,
     },
     PoolId,
 };
@@ -54,7 +54,7 @@ pub async fn handle_epoch_info_blockfrost(
     let ea_message = match epoch_info_response {
         EpochsStateQueryResponse::LatestEpoch(response) => Ok(response.epoch),
         EpochsStateQueryResponse::EpochInfo(response) => Ok(response.epoch),
-        EpochsStateQueryResponse::NotFound => Err(RESTError::not_found("Epoch")),
+        EpochsStateQueryResponse::NotFound => Err(RESTError::NotFound("Epoch not found".to_string())),
         EpochsStateQueryResponse::Error(e) => Err(RESTError::InternalServerError(format!(
             "Error retrieving epoch info: {}",
             e

@@ -8,14 +8,14 @@ use crate::{
     utils::{fetch_pool_metadata_as_bytes, verify_pool_metadata_hash, PoolMetadataJson},
 };
 use acropolis_common::app_error::RESTError;
-use acropolis_common::serialization::Bech32Conversion;
+use acropolis_common::serialization::{serialize_to_json_response, Bech32Conversion};
 use acropolis_common::{
     messages::{Message, RESTResponse, StateQuery, StateQueryResponse},
     queries::{
         accounts::{AccountsStateQuery, AccountsStateQueryResponse},
         epochs::{EpochsStateQuery, EpochsStateQueryResponse},
         pools::{PoolsStateQuery, PoolsStateQueryResponse},
-        utils::{query_state, serialize_to_json_response},
+        utils::query_state,
     },
     rest_helper::ToCheckedF64,
     PoolId, PoolRetirement, PoolUpdateAction, TxIdentifier,

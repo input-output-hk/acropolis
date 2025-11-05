@@ -7,8 +7,8 @@ use acropolis_common::queries::accounts::{AccountsStateQuery, AccountsStateQuery
 use acropolis_common::queries::blocks::{
     BlocksStateQuery, BlocksStateQueryResponse, TransactionHashes,
 };
-use acropolis_common::queries::utils::{query_state, serialize_to_json_response};
-use acropolis_common::serialization::{Bech32Conversion, Bech32WithHrp};
+use acropolis_common::queries::utils::query_state;
+use acropolis_common::serialization::{serialize_to_json_response, Bech32Conversion, Bech32WithHrp};
 use acropolis_common::{DRepChoice, StakeAddress, TxHash};
 use caryatid_sdk::Context;
 

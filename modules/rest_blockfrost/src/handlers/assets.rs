@@ -10,7 +10,7 @@ use acropolis_common::{
     messages::{Message, RESTResponse, StateQuery, StateQueryResponse},
     queries::{
         assets::{AssetsStateQuery, AssetsStateQueryResponse},
-        utils::{query_state, serialize_to_json_response},
+        utils::query_state,
     },
     serialization::Bech32WithHrp,
     AssetMetadataStandard, AssetName, PolicyId,
@@ -22,6 +22,7 @@ use reqwest::Client;
 use serde_cbor::Value as CborValue;
 use serde_json::Value;
 use std::sync::Arc;
+use acropolis_common::serialization::serialize_to_json_response;
 
 /// Handler for /assets - list all assets
 pub async fn handle_assets_list_blockfrost(

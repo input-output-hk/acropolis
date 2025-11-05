@@ -33,23 +33,9 @@ impl RESTError {
         }
     }
 
-    /// Invalid hex string error
-    pub fn invalid_hex() -> Self {
-        RESTError::BadRequest("Invalid hex string".to_string())
-    }
-
-    /// Invalid parameter error with a custom message
-    pub fn invalid_param(param_name: &str, reason: &str) -> Self {
-        RESTError::BadRequest(format!("Invalid {}: {}", param_name, reason))
-    }
-
+    /// Parameter missing error
     pub fn param_missing(param_name: &str) -> Self {
         RESTError::BadRequest(format!("{} parameter is missing", param_name))
-    }
-
-    /// Resource wasn't found error
-    pub fn not_found(resource: &str) -> Self {
-        RESTError::NotFound(format!("{} not found", resource))
     }
 
     /// Feature hasn't been implemented error
@@ -61,6 +47,24 @@ impl RESTError {
     pub fn storage_disabled(storage_type: &str) -> Self {
         RESTError::NotImplemented(format!("{} storage is disabled in config", storage_type))
     }
+
+    /// Invalid hex string error
+    pub fn invalid_hex() -> Self {
+        RESTError::BadRequest("Invalid hex string".to_string())
+    }
+
+    /// Invalid parameter error
+    pub fn invalid_param(param_name: &str, reason: &str) -> Self {
+        RESTError::BadRequest(format!("Invalid {}: {}", param_name, reason))
+    }
+
+
+    /// Resource wasn't found error
+    pub fn not_found(resource: &str) -> Self {
+        RESTError::NotFound(format!("{} not found", resource))
+    }
+
+
 
     /// Unexpected response error
     pub fn unexpected_response(context: &str) -> Self {

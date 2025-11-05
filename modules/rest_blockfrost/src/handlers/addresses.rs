@@ -6,13 +6,13 @@ use acropolis_common::{
     messages::{Message, RESTResponse, StateQuery, StateQueryResponse},
     queries::{
         addresses::{AddressStateQuery, AddressStateQueryResponse},
-        utils::{query_state, serialize_to_json_response},
+        utils::query_state,
         utxos::{UTxOStateQuery, UTxOStateQueryResponse},
     },
     Address, Value,
 };
 use caryatid_sdk::Context;
-
+use acropolis_common::serialization::serialize_to_json_response;
 use crate::{handlers_config::HandlersConfig, types::AddressInfoREST};
 
 /// Handle `/addresses/{address}` Blockfrost-compatible endpoint

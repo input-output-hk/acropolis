@@ -56,16 +56,3 @@ where
     }
 }
 
-/// Helper to serialize a result to JSON REST response
-pub fn serialize_to_json_response<T: Serialize>(data: &T) -> Result<RESTResponse, RESTError> {
-    let json = serde_json::to_string_pretty(data)?;
-    Ok(RESTResponse::with_json(200, &json))
-}
-
-/// Convert a Result to a RESTResponse, handling errors gracefully
-pub fn to_rest_response<T: Serialize>(result: Result<T, RESTError>) -> RESTResponse {
-    match result {
-        Ok(data) => serialize_to_json_response(&data).unwrap_or_else(|e| e.into()),
-        Err(e) => e.into(),
-    }
-}

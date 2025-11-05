@@ -724,7 +724,7 @@ fn register_handler<F, Fut>(
 {
     let topic_name = context.config.get_string(topic.0).unwrap_or_else(|_| topic.1.to_string());
 
-    tracing::info!("Creating request handler on '{}'", topic_name);
+    info!("Creating request handler on '{}'", topic_name);
 
     handle_rest_with_path_parameter(context.clone(), &topic_name, move |params| {
         let context = context.clone();
@@ -751,7 +751,7 @@ fn register_handler_with_query<F, Fut>(
 {
     let topic_name = context.config.get_string(topic.0).unwrap_or_else(|_| topic.1.to_string());
 
-    tracing::info!("Creating request handler on '{}'", topic_name);
+    info!("Creating request handler on '{}'", topic_name);
 
     handle_rest_with_path_and_query_parameters(
         context.clone(),

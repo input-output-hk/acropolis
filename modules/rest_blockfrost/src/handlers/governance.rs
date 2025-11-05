@@ -10,7 +10,7 @@ use acropolis_common::{
     queries::{
         accounts::{AccountsStateQuery, AccountsStateQueryResponse},
         governance::{GovernanceStateQuery, GovernanceStateQueryResponse},
-        utils::{query_state, serialize_to_json_response},
+        utils::query_state,
     },
     Credential, GovActionId, TxHash, Voter,
 };
@@ -18,6 +18,7 @@ use caryatid_sdk::Context;
 use reqwest::Client;
 use serde_json::Value;
 use std::sync::Arc;
+use acropolis_common::serialization::serialize_to_json_response;
 
 pub async fn handle_dreps_list_blockfrost(
     context: Arc<Context<Message>>,
