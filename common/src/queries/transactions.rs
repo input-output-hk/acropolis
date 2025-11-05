@@ -1,6 +1,6 @@
 use crate::{BlockHash, Lovelace, NativeAsset, TxHash};
 use serde::ser::{Serialize, SerializeStruct, Serializer};
-use serde_with::{serde_as, DisplayFromStr};
+use serde_with::serde_as;
 
 pub const DEFAULT_TRANSACTIONS_QUERY_TOPIC: (&str, &str) = (
     "transactions-state-query-topic",
@@ -73,20 +73,14 @@ impl Serialize for TransactionOutputAmount {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TransactionInfo {
     pub hash: TxHash,
-    #[serde(rename = "block")]
     pub block_hash: BlockHash,
-    #[serde(rename = "height")]
     pub block_number: u64,
-    #[serde(rename = "time")]
     pub block_time: u64,
+    pub epoch: u64,
     pub slot: u64,
     pub index: u64,
-    #[serde(rename = "order_amount")]
     pub output_amounts: Vec<TransactionOutputAmount>,
-    #[serde(rename = "fees")]
-    #[serde_as(as = "DisplayFromStr")]
-    pub fee: u64,
-    pub deposit: u64,
+    pub recorded_fee: Option<u64>,
     pub size: u64,
     pub invalid_before: Option<u64>,
     pub invalid_after: Option<u64>,

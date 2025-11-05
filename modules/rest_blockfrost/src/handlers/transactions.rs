@@ -1,18 +1,55 @@
 //! REST handlers for Acropolis Blockfrost /txs endpoints
+use acropolis_cardano::transaction::calculate_deposit;
 use acropolis_common::{
     messages::{Message, RESTResponse, StateQuery, StateQueryResponse},
     queries::{
-        transactions::{TransactionsStateQuery, TransactionsStateQueryResponse},
-        utils::rest_query_state,
+        parameters::{ParametersStateQuery, ParametersStateQueryResponse},
+        transactions::{TransactionInfo, TransactionsStateQuery, TransactionsStateQueryResponse},
+        utils::{query_state, rest_query_state_async},
     },
-    TxHash,
+    Lovelace, TxHash,
 };
 use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
 use hex::FromHex;
+use serde::{ser::SerializeStruct, Serialize, Serializer};
 use std::sync::Arc;
 
 use crate::handlers_config::HandlersConfig;
+
+struct TxInfo(TransactionInfo, Lovelace, Lovelace);
+
+impl Serialize for TxInfo {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("TxInfo", 22)?;
+        state.serialize_field("hash", &self.0.hash)?;
+        state.serialize_field("block", &self.0.block_hash)?;
+        state.serialize_field("height", &self.0.block_number)?;
+        state.serialize_field("time", &self.0.block_time)?;
+        state.serialize_field("slot", &self.0.slot)?;
+        state.serialize_field("index", &self.0.index)?;
+        state.serialize_field("output_amount", &self.0.output_amounts)?;
+        state.serialize_field("fees", &self.1.to_string())?;
+        state.serialize_field("deposit", &self.2.to_string())?;
+        state.serialize_field("size", &self.0.size)?;
+        state.serialize_field("invalid_before", &self.0.invalid_before)?;
+        state.serialize_field("invalid_after", &self.0.invalid_after)?;
+        state.serialize_field("utxo_count", &self.0.utxo_count)?;
+        state.serialize_field("withdrawal_count", &self.0.withdrawal_count)?;
+        state.serialize_field("mir_cert_count", &self.0.mir_cert_count)?;
+        state.serialize_field("delegation_count", &self.0.delegation_count)?;
+        state.serialize_field("stake_cert_count", &self.0.stake_cert_count)?;
+        state.serialize_field("pool_update_count", &self.0.pool_update_count)?;
+        state.serialize_field("pool_retire_count", &self.0.pool_retire_count)?;
+        state.serialize_field("asset_mint_or_burn_count", &self.0.asset_mint_or_burn_count)?;
+        state.serialize_field("redeemer_count", &self.0.redeemer_count)?;
+        state.serialize_field("valid_contract", &self.0.valid_contract)?;
+        state.end()
+    }
+}
 
 /// Handle `/txs/{hash}`
 pub async fn handle_transactions_blockfrost(
@@ -33,14 +70,55 @@ pub async fn handle_transactions_blockfrost(
     let txs_info_msg = Arc::new(Message::StateQuery(StateQuery::Transactions(
         TransactionsStateQuery::GetTransactionInfo { tx_hash },
     )));
-    rest_query_state(
-        &context,
-        &handlers_config.transactions_query_topic,
+    rest_query_state_async(
+        &context.clone(),
+        &handlers_config.transactions_query_topic.clone(),
         txs_info_msg,
-        |message| match message {
+        async move |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Transactions(
                 TransactionsStateQueryResponse::TransactionInfo(txs_info),
-            )) => Some(Ok(Some(txs_info))),
+            )) => {
+                let params_msg = Arc::new(Message::StateQuery(StateQuery::Parameters(
+                    ParametersStateQuery::GetEpochParameters {
+                        epoch_number: txs_info.epoch,
+                    },
+                )));
+                let params = match query_state(
+                    &context,
+                    &handlers_config.parameters_query_topic,
+                    params_msg,
+                    |message| match message {
+                        Message::StateQueryResponse(StateQueryResponse::Parameters(
+                            ParametersStateQueryResponse::EpochParameters(params),
+                        )) => Ok(params),
+                        Message::StateQueryResponse(StateQueryResponse::Parameters(
+                            ParametersStateQueryResponse::NotFound,
+                        )) => Err(anyhow!("Could not query parameters")),
+                        Message::StateQueryResponse(StateQueryResponse::Parameters(
+                            ParametersStateQueryResponse::Error(e),
+                        )) => Err(anyhow!(e)),
+                        _ => Err(anyhow!("Unexpected response")),
+                    },
+                )
+                .await
+                {
+                    Ok(params) => params,
+                    Err(e) => return Some(Err(e)),
+                };
+                let fee = match txs_info.recorded_fee {
+                    Some(fee) => fee,
+                    None => 0, // TODO: calc from outputs and inputs
+                };
+                let deposit = match calculate_deposit(
+                    txs_info.pool_update_count,
+                    txs_info.stake_cert_count,
+                    &params,
+                ) {
+                    Ok(deposit) => deposit,
+                    Err(e) => return Some(Err(e)),
+                };
+                Some(Ok(Some(TxInfo(txs_info, fee, deposit))))
+            }
             Message::StateQueryResponse(StateQueryResponse::Transactions(
                 TransactionsStateQueryResponse::NotFound,
             )) => Some(Ok(None)),

@@ -571,15 +571,21 @@ impl ChainStore {
         for cert in tx_decoded.certs() {
             match cert {
                 MultiEraCert::AlonzoCompatible(cert) => match cert.as_ref().as_ref() {
-                    alonzo::Certificate::PoolRegistration { .. } => pool_update_count += 1,
+                    alonzo::Certificate::PoolRegistration { .. } => {
+                        pool_update_count += 1;
+                    }
                     alonzo::Certificate::PoolRetirement { .. } => pool_retire_count += 1,
                     alonzo::Certificate::MoveInstantaneousRewardsCert { .. } => mir_cert_count += 1,
                     _ => (),
                 },
                 MultiEraCert::Conway(cert) => match cert.as_ref().as_ref() {
-                    conway::Certificate::PoolRegistration { .. } => pool_update_count += 1,
+                    conway::Certificate::PoolRegistration { .. } => {
+                        pool_update_count += 1;
+                    }
                     conway::Certificate::PoolRetirement { .. } => pool_retire_count += 1,
-                    conway::Certificate::StakeRegistration { .. } => stake_cert_count += 1,
+                    conway::Certificate::StakeRegistration { .. } => {
+                        stake_cert_count += 1;
+                    }
                     conway::Certificate::StakeDelegation { .. } => delegation_count += 1,
                     _ => (),
                 },
@@ -591,14 +597,11 @@ impl ChainStore {
             block_hash: BlockHash::from(*block.hash()),
             block_number: block.number(),
             block_time: tx.block.extra.timestamp,
+            epoch: tx.block.extra.epoch,
             slot: block.slot(),
             index: tx.index,
             output_amounts,
-            // TODO: None for byron - needs to look up input utxo values in other txs and subtract
-            // outputs value?
-            fee: tx_decoded.fee().unwrap_or(0),
-            // TODO
-            deposit: 0,
+            recorded_fee: tx_decoded.fee(),
             // TODO reporting too many bytes (140)
             size: tx_decoded.size() as u64,
             invalid_before: tx_decoded.validity_start(),

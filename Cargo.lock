@@ -3,6 +3,14 @@
 version = 4
 
 [[package]]
+name = "acropolis_cardano"
+version = "0.1.0"
+dependencies = [
+ "acropolis_common",
+ "anyhow",
+]
+
+[[package]]
 name = "acropolis_codec"
 version = "0.1.0"
 dependencies = [
@@ -139,6 +147,7 @@ dependencies = [
  "hex",
  "imbl",
  "minicbor 0.26.5",
+ "pallas 0.33.0",
  "pallas-traverse 0.33.0",
  "tempfile",
  "tokio",
@@ -306,6 +315,7 @@ dependencies = [
 name = "acropolis_module_rest_blockfrost"
 version = "0.1.0"
 dependencies = [
+ "acropolis_cardano",
  "acropolis_common",
  "anyhow",
  "async-trait",
