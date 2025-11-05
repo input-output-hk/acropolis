@@ -15,6 +15,7 @@ use anyhow::Result;
 use pallas::ledger::primitives::VrfCert;
 use pallas::ledger::traverse::MultiEraHeader;
 
+#[allow(clippy::too_many_arguments)]
 pub fn validate_vrf_tpraos<'a>(
     block_info: &'a BlockInfo,
     header: &'a MultiEraHeader,
@@ -44,9 +45,7 @@ pub fn validate_vrf_tpraos<'a>(
             };
             let pool_id = PoolId::from(keyhash_224(issuer_vkey));
             let registered_vrf_key_hash =
-                active_spos.get(&pool_id).ok_or(VrfValidationError::UnknownPool {
-                    pool_id: pool_id.clone(),
-                })?;
+                active_spos.get(&pool_id).ok_or(VrfValidationError::UnknownPool { pool_id })?;
 
             let pool_stake = active_spdd.get(&pool_id).unwrap_or(&0);
             let relative_stake = RationalNumber::new(*pool_stake, total_active_stake);
@@ -256,10 +255,10 @@ mod tests {
             PoolId::from_bech32("pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy")
                 .unwrap();
         let active_spos: HashMap<PoolId, VrfKeyHash> = HashMap::from([(
-            pool_id.clone(),
+            pool_id,
             VrfKeyHash::from(keyhash_256(block_header.vrf_vkey().unwrap())),
         )]);
-        let active_spdd = HashMap::from([(pool_id.clone(), 75284250207839)]);
+        let active_spdd = HashMap::from([(pool_id, 75284250207839)]);
         let result = validate_vrf_tpraos(
             &block_info,
             &block_header,
@@ -312,10 +311,10 @@ mod tests {
             PoolId::from_bech32("pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy")
                 .unwrap();
         let active_spos: HashMap<PoolId, VrfKeyHash> = HashMap::from([(
-            pool_id.clone(),
+            pool_id,
             VrfKeyHash::from(keyhash_256(block_header.vrf_vkey().unwrap())),
         )]);
-        let active_spdd = HashMap::from([(pool_id.clone(), 75284250207839)]);
+        let active_spdd = HashMap::from([(pool_id, 75284250207839)]);
         let result = validate_vrf_tpraos(
             &block_info,
             &block_header,
@@ -425,8 +424,8 @@ mod tests {
             PoolId::from_bech32("pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy")
                 .unwrap();
         let active_spos: HashMap<PoolId, VrfKeyHash> =
-            HashMap::from([(pool_id.clone(), VrfKeyHash::from(keyhash_256(&[0; 64])))]);
-        let active_spdd = HashMap::from([(pool_id.clone(), 75284250207839)]);
+            HashMap::from([(pool_id, VrfKeyHash::from(keyhash_256(&[0; 64])))]);
+        let active_spdd = HashMap::from([(pool_id, 75284250207839)]);
         let result = validate_vrf_tpraos(
             &block_info,
             &block_header,
@@ -443,7 +442,7 @@ mod tests {
         assert_eq!(
             result.unwrap_err(),
             VrfValidationError::WrongLeaderVrfKey(WrongLeaderVrfKeyError {
-                pool_id: pool_id.clone(),
+                pool_id,
                 registered_vrf_key_hash: VrfKeyHash::from(keyhash_256(&[0; 64])),
                 header_vrf_key_hash: VrfKeyHash::from(keyhash_256(
                     block_header.vrf_vkey().unwrap()
@@ -489,11 +488,11 @@ mod tests {
             PoolId::from_bech32("pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy")
                 .unwrap();
         let active_spos: HashMap<PoolId, VrfKeyHash> = HashMap::from([(
-            pool_id.clone(),
+            pool_id,
             VrfKeyHash::from(keyhash_256(block_header.vrf_vkey().unwrap())),
         )]);
         // small active stake (correct one is 75284250207839)
-        let active_spdd = HashMap::from([(pool_id.clone(), 75284250207)]);
+        let active_spdd = HashMap::from([(pool_id, 75284250207)]);
         let result = validate_vrf_tpraos(
             &block_info,
             &block_header,

@@ -51,8 +51,6 @@ impl TryFrom<&[u8]> for PublicKey {
 }
 
 /// A VRF input
-///
-
 pub type VrfInputHash = [u8; 32];
 pub type VrfProofHash = [u8; 64];
 

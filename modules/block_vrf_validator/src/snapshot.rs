@@ -22,16 +22,11 @@ impl From<(&SPOStateMessage, &SPOStakeDistributionMessage)> for Snapshot {
         let active_spos: HashMap<PoolId, VrfKeyHash> = spo_state_msg
             .spos
             .iter()
-            .map(|registration| {
-                (
-                    registration.operator.clone(),
-                    registration.vrf_key_hash.clone(),
-                )
-            })
+            .map(|registration| (registration.operator, registration.vrf_key_hash))
             .collect();
         let active_stakes: HashMap<PoolId, u64> =
-            spdd_msg.spos.iter().map(|(pool_id, stake)| (pool_id.clone(), stake.live)).collect();
-        let total_active_stakes = active_stakes.iter().map(|(_, stake)| stake).sum();
+            spdd_msg.spos.iter().map(|(pool_id, stake)| (*pool_id, stake.live)).collect();
+        let total_active_stakes = active_stakes.values().sum();
         Self {
             active_spos,
             active_stakes,

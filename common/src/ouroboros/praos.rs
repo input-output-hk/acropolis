@@ -30,9 +30,7 @@ pub fn validate_vrf_praos<'a>(
     };
     let pool_id = PoolId::from(keyhash_224(issuer_vkey));
     let registered_vrf_key_hash =
-        active_spos.get(&pool_id).ok_or(VrfValidationError::UnknownPool {
-            pool_id: pool_id.clone(),
-        })?;
+        active_spos.get(&pool_id).ok_or(VrfValidationError::UnknownPool { pool_id })?;
 
     let pool_stake = active_spdd.get(&pool_id).unwrap_or(&0);
     let relative_stake = RationalNumber::new(*pool_stake, total_active_stake);
@@ -128,10 +126,10 @@ mod tests {
             PoolId::from_bech32("pool195gdnmj6smzuakm4etxsxw3fgh8asqc4awtcskpyfnkpcvh2v8t")
                 .unwrap();
         let active_spos = HashMap::from([(
-            pool_id.clone(),
+            pool_id,
             VrfKeyHash::from(keyhash_256(block_header.vrf_vkey().unwrap())),
         )]);
-        let active_spdd = HashMap::from([(pool_id.clone(), 64590523391239)]);
+        let active_spdd = HashMap::from([(pool_id, 64590523391239)]);
         let result = validate_vrf_praos(
             &block_info,
             &block_header,
@@ -142,7 +140,6 @@ mod tests {
             25069171797357766,
         )
         .and_then(|vrf_validations| vrf_validations.iter().try_for_each(|assert| assert()));
-        println!("{:?}", result);
         assert!(result.is_ok());
     }
 }

@@ -38,7 +38,7 @@ pub enum VrfValidationError {
     #[error("Praos Missing VRF Cert")]
     PraosMissingVrfCert,
     /// **Cause:** Block issuer's pool ID is not registered in current stake distribution
-    #[error("Unknown Pool: {}", hex::encode(&pool_id))]
+    #[error("Unknown Pool: {}", hex::encode(pool_id))]
     UnknownPool { pool_id: PoolId },
     /// **Cause:** The VRF key hash in the block header doesn't match the VRF key
     /// registered with this stake pool in the ledger state for Overlay slot
@@ -74,9 +74,9 @@ pub enum VrfValidationError {
 #[derive(Error, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[error(
     "Wrong Genesis Leader VRF Key: Genesis Key={}, Registered VRF Hash={}, Header VRF Hash={}",
-    hex::encode(&genesis_key),
-    hex::encode(&registered_vrf_hash),
-    hex::encode(&header_vrf_hash),
+    hex::encode(genesis_key),
+    hex::encode(registered_vrf_hash),
+    hex::encode(header_vrf_hash)
 )]
 pub struct WrongGenesisLeaderVrfKeyError {
     pub genesis_key: GenesisKeyhash,
@@ -94,8 +94,8 @@ impl WrongGenesisLeaderVrfKeyError {
         let registered_vrf_hash = &genesis_deleg.vrf;
         if !registered_vrf_hash.eq(&header_vrf_hash) {
             return Err(Self {
-                genesis_key: genesis_key.clone(),
-                registered_vrf_hash: registered_vrf_hash.clone(),
+                genesis_key: *genesis_key,
+                registered_vrf_hash: *registered_vrf_hash,
                 header_vrf_hash,
             });
         }
@@ -108,9 +108,9 @@ impl WrongGenesisLeaderVrfKeyError {
 #[derive(Error, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[error(
     "Wrong Leader VRF Key: Pool ID={}, Registered VRF Key Hash={}, Header VRF Key Hash={}",
-    hex::encode(&pool_id),
-    hex::encode(&registered_vrf_key_hash),
-    hex::encode(&header_vrf_key_hash),
+    hex::encode(pool_id),
+    hex::encode(registered_vrf_key_hash),
+    hex::encode(header_vrf_key_hash)
 )]
 pub struct WrongLeaderVrfKeyError {
     pub pool_id: PoolId,
@@ -127,8 +127,8 @@ impl WrongLeaderVrfKeyError {
         let header_vrf_key_hash = VrfKeyHash::from(keyhash_256(vrf_vkey));
         if !registered_vrf_key_hash.eq(&header_vrf_key_hash) {
             return Err(Self {
-                pool_id: pool_id.clone(),
-                registered_vrf_key_hash: registered_vrf_key_hash.clone(),
+                pool_id: *pool_id,
+                registered_vrf_key_hash: *registered_vrf_key_hash,
                 header_vrf_key_hash,
             });
         }
@@ -221,8 +221,8 @@ pub enum PraosBadVrfProofError {
 
     #[error(
         "Mismatch between the declared VRF output in block ({}) and the computed one ({}).",
-        hex::encode(&declared),
-        hex::encode(&computed),
+        hex::encode(declared),
+        hex::encode(computed)
     )]
     OutputMismatch {
         declared: Vec<u8>,
@@ -302,7 +302,6 @@ impl PraosBadVrfProofError {
 /// `p` = `certNat` / `certNatMax`. (`certNat` is 64bytes for TPraos and 32bytes for Praos)
 /// `σ` (sigma) = pool's relative stake (pools active stake / total active stake)
 /// `f` = active slot coefficient (e.g., 0.05 = 5%)
-
 /// let q = 1 - p and c = ln(1 - f)
 /// then p < 1 - (1 - f)^σ => 1 / (1 - p) < exp(-σ * c) => 1 / q < exp(-σ * c)
 /// Reference
@@ -343,7 +342,6 @@ impl VrfLeaderValueTooBigError {
 /// Check that the certified input natural is valid for being slot leader. This means we check that
 /// p < 1 - (1 - f)^σ
 /// where p = certNat / certNatMax. (certNat is 64bytes for TPraos and 32bytes for Praos)
-
 /// let q = 1 - p and c = ln(1 - f)
 /// then p < 1 - (1 - f)^σ => 1 / (1 - p) < exp(-σ * c) => 1 / q < exp(-σ * c)
 /// Reference
@@ -369,8 +367,8 @@ pub enum BadVrfProofError {
 
     #[error(
         "Mismatch between the declared VRF proof hash ({}) and the computed one ({}).",
-        hex::encode(&declared),
-        hex::encode(&computed),
+        hex::encode(declared),
+        hex::encode(computed)
     )]
     ProofMismatch {
         // this is Proof Hash (sha512 hash)

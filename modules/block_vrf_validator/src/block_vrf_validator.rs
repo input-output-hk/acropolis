@@ -50,6 +50,7 @@ const DEFAULT_SPDD_SUBSCRIBE_TOPIC: (&str, &str) =
 pub struct BlockVrfValidator;
 
 impl BlockVrfValidator {
+    #[allow(clippy::too_many_arguments)]
     async fn run(
         history: Arc<Mutex<StateHistory<State>>>,
         mut vrf_validation_publisher: VrfValidationPublisher,
@@ -73,7 +74,7 @@ impl BlockVrfValidator {
 
         loop {
             // Get a mutable state
-            let mut state = history.lock().await.get_or_init_with(|| State::new());
+            let mut state = history.lock().await.get_or_init_with(State::new);
             let mut current_block: Option<BlockInfo> = None;
 
             let (_, message) = blocks_subscription.read().await?;
@@ -138,7 +139,7 @@ impl BlockVrfValidator {
                             ) => {
                                 Self::check_sync(&current_block, block_info_1);
                                 Self::check_sync(&current_block, block_info_2);
-                                state.handle_new_snapshot(&spo_state_msg, &spdd_msg);
+                                state.handle_new_snapshot(spo_state_msg, spdd_msg);
                             }
                             _ => {
                                 error!("Unexpected message type: {spo_state_msg:?} or {spdd_msg:?}")

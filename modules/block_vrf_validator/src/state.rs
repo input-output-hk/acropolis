@@ -112,7 +112,7 @@ impl State {
             let result = ouroboros::tpraos::validate_vrf_tpraos(
                 block_info,
                 header,
-                &epoch_nonce,
+                epoch_nonce,
                 &genesis.genesis_delegs,
                 praos_params,
                 &self.epoch_snapshots.set.active_spos,
@@ -126,7 +126,7 @@ impl State {
             let result = ouroboros::praos::validate_vrf_praos(
                 block_info,
                 header,
-                &epoch_nonce,
+                epoch_nonce,
                 praos_params,
                 &self.epoch_snapshots.set.active_spos,
                 &self.epoch_snapshots.set.active_stakes,

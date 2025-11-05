@@ -5,11 +5,9 @@
 //!
 //! https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/libs/cardano-protocol-tpraos/src/Cardano/Protocol/TPraos/Rules/Overlay.hs#L332
 
-use crate::{
-    rational_number::RationalNumber, rest_helper::ToCheckedF64, GenesisDelegate, GenesisDelegates,
-    GenesisKeyhash,
-};
+use crate::{rational_number::RationalNumber, GenesisDelegate, GenesisDelegates, GenesisKeyhash};
 use anyhow::Result;
+use num_traits::ToPrimitive;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum OBftSlot {
@@ -33,9 +31,9 @@ pub enum OBftSlot {
 /// since this block is produced by genesis key (without "lottery")
 /// https://github.com/IntersectMBO/ouroboros-consensus/blob/e3c52b7c583bdb6708fac4fdaa8bf0b9588f5a88/ouroboros-consensus-protocol/src/ouroboros-consensus-protocol/Ouroboros/Consensus/Protocol/TPraos.hs#L334
 pub fn is_overlay_slot(epoch_slot: u64, decentralisation_param: &RationalNumber) -> Result<bool> {
-    let d = decentralisation_param.to_checked_f64("decentralisation_param").map_err(|e| {
-        anyhow::anyhow!("Failed to convert decentralisation parameter to f64: {}", e)
-    })?;
+    let d = decentralisation_param
+        .to_f64()
+        .ok_or_else(|| anyhow::anyhow!("Failed to convert decentralisation parameter to f64"))?;
 
     // step function: ceiling of (x * d)
     let step = |x: f64| (x * d).ceil() as i64;
@@ -60,16 +58,16 @@ pub fn classify_overlay_slot(
     decentralisation_param: &RationalNumber,
     active_slots_coeff: &RationalNumber,
 ) -> Result<OBftSlot> {
-    let d = decentralisation_param.to_checked_f64("decentralisation_param").map_err(|e| {
-        anyhow::anyhow!("Failed to convert decentralisation parameter to f64: {}", e)
-    })?;
+    let d = decentralisation_param
+        .to_f64()
+        .ok_or_else(|| anyhow::anyhow!("Failed to convert decentralisation parameter to f64"))?;
     let position = (epoch_slot as f64 * d).ceil() as i64;
 
     // Calculate active slot coefficient inverse
     let asc_inv = active_slots_coeff
         .recip()
-        .to_checked_f64("active_slots_coeff")
-        .map_err(|e| anyhow::anyhow!("Failed to convert active slots coefficient to f64: {}", e))?
+        .to_f64()
+        .ok_or_else(|| anyhow::anyhow!("Failed to convert active slots coefficient to f64"))?
         .floor() as i64;
 
     let is_active = position % asc_inv == 0;
@@ -79,7 +77,7 @@ pub fn classify_overlay_slot(
 
         // Get the element at index from the set
         let (key_hash, gen_deleg) = genesis_delegs.as_ref().iter().nth(genesis_idx).unwrap();
-        Ok(OBftSlot::ActiveSlot(key_hash.clone(), gen_deleg.clone()))
+        Ok(OBftSlot::ActiveSlot(*key_hash, gen_deleg.clone()))
     } else {
         Ok(OBftSlot::NonActiveSlot)
     }
@@ -149,8 +147,8 @@ mod tests {
         assert_eq!(
             obft_slot.unwrap(),
             OBftSlot::ActiveSlot(
-                genesis_delegs.as_ref().keys().nth(0).unwrap().clone(),
-                genesis_delegs.as_ref().values().nth(0).unwrap().clone()
+                *genesis_delegs.as_ref().keys().next().unwrap(),
+                genesis_delegs.as_ref().values().next().unwrap().clone()
             )
         );
     }
