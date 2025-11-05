@@ -1,6 +1,7 @@
 //! Acropolis Governance State module for Caryatid
 //! Accepts certificate events and derives the Governance State in memory
 
+use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
     messages::{
         CardanoMessage, DRepStakeDistributionMessage, GovernanceProceduresMessage, Message,
@@ -180,9 +181,9 @@ impl GovernanceState {
             async move {
                 let Message::StateQuery(StateQuery::Governance(query)) = message.as_ref() else {
                     return Arc::new(Message::StateQueryResponse(StateQueryResponse::Governance(
-                        GovernanceStateQueryResponse::Error(
-                            "Invalid message for governance-state".into(),
-                        ),
+                        GovernanceStateQueryResponse::Error(QueryError::query_failed(
+                            "Invalid message for governance-state",
+                        )),
                     )));
                 };
 
@@ -201,7 +202,9 @@ impl GovernanceState {
                                     procedure: proc.clone(),
                                 })
                             }
-                            None => GovernanceStateQueryResponse::NotFound,
+                            None => GovernanceStateQueryResponse::Error(QueryError::not_found(
+                                format!("Proposal not found {}", proposal),
+                            )),
                         }
                     }
                     GovernanceStateQuery::GetProposalVotes { proposal } => {
@@ -209,12 +212,14 @@ impl GovernanceState {
                             Ok(votes) => {
                                 GovernanceStateQueryResponse::ProposalVotes(ProposalVotes { votes })
                             }
-                            Err(_) => GovernanceStateQueryResponse::NotFound,
+                            Err(_) => GovernanceStateQueryResponse::Error(QueryError::not_found(
+                                format!("Proposal not found {}", proposal),
+                            )),
                         }
                     }
-                    _ => GovernanceStateQueryResponse::Error(format!(
+                    _ => GovernanceStateQueryResponse::Error(QueryError::not_implemented(format!(
                         "Unimplemented governance query: {query:?}"
-                    )),
+                    ))),
                 };
 
                 Arc::new(Message::StateQueryResponse(StateQueryResponse::Governance(

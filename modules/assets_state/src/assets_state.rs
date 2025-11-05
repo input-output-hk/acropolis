@@ -8,7 +8,10 @@ use crate::{
 };
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
-    queries::assets::{AssetsStateQuery, AssetsStateQueryResponse, DEFAULT_ASSETS_QUERY_TOPIC},
+    queries::{
+        assets::{AssetsStateQuery, AssetsStateQueryResponse, DEFAULT_ASSETS_QUERY_TOPIC},
+        errors::QueryError,
+    },
     state_history::{StateHistory, StateHistoryStore},
     BlockInfo, BlockStatus,
 };
@@ -224,7 +227,7 @@ impl AssetsState {
             }
         }
 
-        // Get configuration flags and topis
+        // Get configuration flags and topics
         let storage_config = AssetsStorageConfig {
             store_assets: get_bool_flag(&config, DEFAULT_STORE_ASSETS),
             store_info: get_bool_flag(&config, DEFAULT_STORE_INFO),
@@ -258,7 +261,7 @@ impl AssetsState {
         let assets_query_topic = get_string_flag(&config, DEFAULT_ASSETS_QUERY_TOPIC);
         info!("Creating asset query handler on '{assets_query_topic}'");
 
-        // Initalize state history
+        // Initialize state history
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "AssetsState",
             StateHistoryStore::default_block_store(),
@@ -279,7 +282,9 @@ impl AssetsState {
             async move {
                 let Message::StateQuery(StateQuery::Assets(query)) = message.as_ref() else {
                     return Arc::new(Message::StateQueryResponse(StateQueryResponse::Assets(
-                        AssetsStateQueryResponse::Error("Invalid message for assets-state".into()),
+                        AssetsStateQueryResponse::Error(QueryError::invalid_request(
+                            "Invalid message for assets-state",
+                        )),
                     )));
                 };
 
@@ -293,7 +298,9 @@ impl AssetsState {
                         let reg = registry.lock().await;
                         match state.get_assets_list(&reg) {
                             Ok(list) => AssetsStateQueryResponse::AssetsList(list),
-                            Err(e) => AssetsStateQueryResponse::Error(e.to_string()),
+                            Err(e) => AssetsStateQueryResponse::Error(QueryError::query_failed(
+                                e.to_string(),
+                            )),
                         }
                     }
                     AssetsStateQuery::GetAssetInfo { policy, name } => {
@@ -301,16 +308,28 @@ impl AssetsState {
                         match reg.lookup_id(policy, name) {
                             Some(asset_id) => match state.get_asset_info(&asset_id, &reg) {
                                 Ok(Some(info)) => AssetsStateQueryResponse::AssetInfo(info),
-                                Ok(None) => AssetsStateQueryResponse::NotFound,
-                                Err(e) => AssetsStateQueryResponse::Error(e.to_string()),
+                                Ok(None) => {
+                                    AssetsStateQueryResponse::Error(QueryError::not_found(format!(
+                                        "Asset {}:{}",
+                                        hex::encode(policy),
+                                        hex::encode(name.as_slice())
+                                    )))
+                                }
+                                Err(e) => AssetsStateQueryResponse::Error(
+                                    QueryError::query_failed(e.to_string()),
+                                ),
                             },
                             None => {
                                 if state.config.store_info && state.config.store_assets {
-                                    AssetsStateQueryResponse::NotFound
+                                    AssetsStateQueryResponse::Error(QueryError::not_found(format!(
+                                        "Asset {}:{}",
+                                        hex::encode(policy),
+                                        hex::encode(name.as_slice())
+                                    )))
                                 } else {
-                                    AssetsStateQueryResponse::Error(
-                                        "asset info storage disabled in config".to_string(),
-                                    )
+                                    AssetsStateQueryResponse::Error(QueryError::storage_disabled(
+                                        "asset info",
+                                    ))
                                 }
                             }
                         }
@@ -322,16 +341,28 @@ impl AssetsState {
                                 Ok(Some(history)) => {
                                     AssetsStateQueryResponse::AssetHistory(history)
                                 }
-                                Ok(None) => AssetsStateQueryResponse::NotFound,
-                                Err(e) => AssetsStateQueryResponse::Error(e.to_string()),
+                                Ok(None) => {
+                                    AssetsStateQueryResponse::Error(QueryError::not_found(format!(
+                                        "Asset history for {}:{}",
+                                        hex::encode(policy),
+                                        hex::encode(name.as_slice())
+                                    )))
+                                }
+                                Err(e) => AssetsStateQueryResponse::Error(
+                                    QueryError::query_failed(e.to_string()),
+                                ),
                             },
                             None => {
                                 if state.config.store_history {
-                                    AssetsStateQueryResponse::NotFound
+                                    AssetsStateQueryResponse::Error(QueryError::not_found(format!(
+                                        "Asset history for {}:{}",
+                                        hex::encode(policy),
+                                        hex::encode(name.as_slice())
+                                    )))
                                 } else {
-                                    AssetsStateQueryResponse::Error(
-                                        "asset history storage disabled in config".to_string(),
-                                    )
+                                    AssetsStateQueryResponse::Error(QueryError::storage_disabled(
+                                        "asset history",
+                                    ))
                                 }
                             }
                         }
@@ -343,16 +374,28 @@ impl AssetsState {
                                 Ok(Some(addresses)) => {
                                     AssetsStateQueryResponse::AssetAddresses(addresses)
                                 }
-                                Ok(None) => AssetsStateQueryResponse::NotFound,
-                                Err(e) => AssetsStateQueryResponse::Error(e.to_string()),
+                                Ok(None) => {
+                                    AssetsStateQueryResponse::Error(QueryError::not_found(format!(
+                                        "Asset addresses for {}:{}",
+                                        hex::encode(policy),
+                                        hex::encode(name.as_slice())
+                                    )))
+                                }
+                                Err(e) => AssetsStateQueryResponse::Error(
+                                    QueryError::query_failed(e.to_string()),
+                                ),
                             },
                             None => {
                                 if state.config.store_addresses {
-                                    AssetsStateQueryResponse::NotFound
+                                    AssetsStateQueryResponse::Error(QueryError::not_found(format!(
+                                        "Asset addresses for {}:{}",
+                                        hex::encode(policy),
+                                        hex::encode(name.as_slice())
+                                    )))
                                 } else {
-                                    AssetsStateQueryResponse::Error(
-                                        "asset addresses storage disabled in config".to_string(),
-                                    )
+                                    AssetsStateQueryResponse::Error(QueryError::storage_disabled(
+                                        "asset addresses",
+                                    ))
                                 }
                             }
                         }
@@ -362,16 +405,28 @@ impl AssetsState {
                         match reg.lookup_id(policy, name) {
                             Some(asset_id) => match state.get_asset_transactions(&asset_id) {
                                 Ok(Some(txs)) => AssetsStateQueryResponse::AssetTransactions(txs),
-                                Ok(None) => AssetsStateQueryResponse::NotFound,
-                                Err(e) => AssetsStateQueryResponse::Error(e.to_string()),
+                                Ok(None) => {
+                                    AssetsStateQueryResponse::Error(QueryError::not_found(format!(
+                                        "Asset transactions for {}:{}",
+                                        hex::encode(policy),
+                                        hex::encode(name.as_slice())
+                                    )))
+                                }
+                                Err(e) => AssetsStateQueryResponse::Error(
+                                    QueryError::query_failed(e.to_string()),
+                                ),
                             },
                             None => {
                                 if state.config.store_transactions.is_enabled() {
-                                    AssetsStateQueryResponse::NotFound
+                                    AssetsStateQueryResponse::Error(QueryError::not_found(format!(
+                                        "Asset transactions for {}:{}",
+                                        hex::encode(policy),
+                                        hex::encode(name.as_slice())
+                                    )))
                                 } else {
-                                    AssetsStateQueryResponse::Error(
-                                        "asset transactions storage disabled in config".to_string(),
-                                    )
+                                    AssetsStateQueryResponse::Error(QueryError::storage_disabled(
+                                        "asset transactions",
+                                    ))
                                 }
                             }
                         }
@@ -380,8 +435,12 @@ impl AssetsState {
                         let reg = registry.lock().await;
                         match state.get_policy_assets(policy, &reg) {
                             Ok(Some(assets)) => AssetsStateQueryResponse::PolicyIdAssets(assets),
-                            Ok(None) => AssetsStateQueryResponse::NotFound,
-                            Err(e) => AssetsStateQueryResponse::Error(e.to_string()),
+                            Ok(None) => AssetsStateQueryResponse::Error(QueryError::not_found(
+                                format!("Assets for policy {}", hex::encode(policy)),
+                            )),
+                            Err(e) => AssetsStateQueryResponse::Error(QueryError::query_failed(
+                                e.to_string(),
+                            )),
                         }
                     }
                 };

@@ -1,3 +1,4 @@
+use crate::queries::errors::QueryError;
 use crate::{
     queries::misc::Order,
     serialization::{Bech32Conversion, Bech32WithHrp},
@@ -7,8 +8,6 @@ use cryptoxide::hashing::blake2b::Blake2b;
 use serde::ser::{Serialize, SerializeStruct, Serializer};
 use serde_with::{hex::Hex, serde_as};
 use std::collections::HashMap;
-use std::path::Display;
-use crate::queries::errors::QueryError;
 
 pub const DEFAULT_BLOCKS_QUERY_TOPIC: (&str, &str) =
     ("blocks-state-query-topic", "cardano.query.blocks");

@@ -251,6 +251,7 @@ impl fmt::Display for RewardType {
 }
 
 pub type PolicyId = [u8; 28];
+
 pub type NativeAssets = Vec<(PolicyId, Vec<NativeAsset>)>;
 pub type NativeAssetsDelta = Vec<(PolicyId, Vec<NativeAssetDelta>)>;
 pub type NativeAssetsMap = HashMap<PolicyId, HashMap<AssetName, u64>>;

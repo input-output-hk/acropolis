@@ -15,6 +15,7 @@ pub mod protocol_params;
 pub mod queries;
 pub mod rational_number;
 pub mod resolver;
+pub mod rest_error;
 pub mod rest_helper;
 pub mod serialization;
 pub mod snapshot;
@@ -22,7 +23,6 @@ pub mod stake_addresses;
 pub mod state_history;
 pub mod types;
 pub mod validation;
-pub mod rest_error;
 
 // Flattened re-exports
 pub use self::address::*;

@@ -1,5 +1,6 @@
 //! Acropolis SPDD state module for Caryatid
 //! Stores historical stake pool delegation distributions
+use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::spdd::{SPDDStateQuery, SPDDStateQueryResponse, DEFAULT_SPDD_QUERY_TOPIC},
@@ -11,6 +12,7 @@ use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, info_span, Instrument};
+
 mod state;
 use state::State;
 mod rest;
@@ -52,6 +54,12 @@ impl SPDDState {
 
         let state_opt = if store_spdd {
             let state = Arc::new(Mutex::new(State::new()));
+
+            // Register /spdd REST endpoint
+            let state_rest = state.clone();
+            handle_rest_with_query_parameters(context.clone(), &handle_spdd_topic, move |params| {
+                handle_spdd(state_rest.clone(), params)
+            });
 
             // Subscribe for spdd messages from accounts_state
             let state_handler = state.clone();
@@ -118,12 +126,14 @@ impl SPDDState {
             async move {
                 let Message::StateQuery(StateQuery::SPDD(query)) = message.as_ref() else {
                     return Arc::new(Message::StateQueryResponse(StateQueryResponse::SPDD(
-                        SPDDStateQueryResponse::Error("Invalid message for spdd-state".into()),
+                        SPDDStateQueryResponse::Error(QueryError::query_failed(
+                            "Invalid message for spdd-state",
+                        )),
                     )));
                 };
                 let Some(state) = state else {
                     return Arc::new(Message::StateQueryResponse(StateQueryResponse::SPDD(
-                        SPDDStateQueryResponse::Error("SPDD storage is NOT enabled".into()),
+                        SPDDStateQueryResponse::Error(QueryError::storage_disabled("SPDD")),
                     )));
                 };
                 let state = state.lock().await;

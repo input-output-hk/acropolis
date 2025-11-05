@@ -4,15 +4,17 @@ use crate::types::{
     DRepInfoREST, DRepMetadataREST, DRepUpdateREST, DRepVoteREST, DRepsListREST, ProposalVoteREST,
     VoterRoleREST,
 };
+use acropolis_common::rest_error::RESTError;
 use acropolis_common::{
     messages::{Message, RESTResponse, StateQuery, StateQueryResponse},
     queries::{
         accounts::{AccountsStateQuery, AccountsStateQueryResponse},
+        errors::QueryError,
         governance::{GovernanceStateQuery, GovernanceStateQueryResponse},
+        utils::query_state,
     },
     Credential, GovActionId, TxHash, Voter,
 };
-use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
 use reqwest::Client;
 use serde_json::Value;
@@ -22,67 +24,52 @@ pub async fn handle_dreps_list_blockfrost(
     context: Arc<Context<Message>>,
     _params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
+) -> Result<RESTResponse, RESTError> {
     let msg = Arc::new(Message::StateQuery(StateQuery::Governance(
         GovernanceStateQuery::GetDRepsList,
     )));
 
-    let raw_msg = context.message_bus.request(&handlers_config.dreps_query_topic, msg).await?;
-    let message = Arc::try_unwrap(raw_msg).unwrap_or_else(|arc| (*arc).clone());
-    match message {
-        Message::StateQueryResponse(StateQueryResponse::Governance(
-            GovernanceStateQueryResponse::DRepsList(list),
-        )) => {
-            let response: Vec<DRepsListREST> = list
-                .dreps
-                .iter()
-                .map(|cred| {
-                    Ok(DRepsListREST {
-                        drep_id: cred.to_drep_bech32()?,
-                        hex: hex::encode(cred.get_hash()),
-                    })
-                })
-                .collect::<Result<_, anyhow::Error>>()?;
+    let list = query_state(
+        &context,
+        &handlers_config.dreps_query_topic,
+        msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Governance(
+                GovernanceStateQueryResponse::DRepsList(list),
+            )) => Ok(list),
+            Message::StateQueryResponse(StateQueryResponse::Governance(
+                GovernanceStateQueryResponse::Error(e),
+            )) => Err(e),
+            _ => Err(QueryError::query_failed("Unexpected message type")),
+        },
+    )
+    .await?;
 
-            match serde_json::to_string_pretty(&response) {
-                Ok(json) => Ok(RESTResponse::with_json(200, &json)),
-                Err(e) => Ok(RESTResponse::with_text(
-                    500,
-                    &format!("Failed to serialize response: {e}"),
-                )),
-            }
-        }
+    let response: Vec<DRepsListREST> = list
+        .dreps
+        .iter()
+        .map(|cred| {
+            Ok(DRepsListREST {
+                drep_id: cred
+                    .to_drep_bech32()
+                    .map_err(|e| RESTError::encoding_failed(&format!("DRep ID: {}", e)))?,
+                hex: hex::encode(cred.get_hash()),
+            })
+        })
+        .collect::<Result<Vec<_>, RESTError>>()?;
 
-        Message::StateQueryResponse(StateQueryResponse::Governance(
-            GovernanceStateQueryResponse::Error(e),
-        )) => Ok(RESTResponse::with_text(500, &format!("Query error: {e}"))),
-
-        Message::StateQueryResponse(StateQueryResponse::Governance(
-            GovernanceStateQueryResponse::NotFound,
-        )) => Ok(RESTResponse::with_text(404, "No DReps found")),
-
-        _ => Ok(RESTResponse::with_text(500, "Unexpected message type")),
-    }
+    let json = serde_json::to_string_pretty(&response)?;
+    Ok(RESTResponse::with_json(200, &json))
 }
 
 pub async fn handle_single_drep_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
-    let Some(drep_id) = params.first() else {
-        return Ok(RESTResponse::with_text(400, "Missing DRep ID parameter"));
-    };
+) -> Result<RESTResponse, RESTError> {
+    let drep_id = params.first().ok_or_else(|| RESTError::param_missing("drep_id"))?;
 
-    let credential = match Credential::from_drep_bech32(drep_id) {
-        Ok(c) => c,
-        Err(e) => {
-            return Ok(RESTResponse::with_text(
-                400,
-                &format!("Invalid Bech32 DRep ID: {drep_id}. Error: {e}"),
-            ));
-        }
-    };
+    let credential = parse_drep_credential(drep_id)?;
 
     let msg = Arc::new(Message::StateQuery(StateQuery::Governance(
         GovernanceStateQuery::GetDRepInfoWithDelegators {
@@ -90,93 +77,71 @@ pub async fn handle_single_drep_blockfrost(
         },
     )));
 
-    let raw_msg = context.message_bus.request(&handlers_config.dreps_query_topic, msg).await?;
-    let message = Arc::try_unwrap(raw_msg).unwrap_or_else(|arc| (*arc).clone());
+    let response = query_state(
+        &context,
+        &handlers_config.dreps_query_topic,
+        msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Governance(
+                GovernanceStateQueryResponse::DRepInfoWithDelegators(response),
+            )) => Ok(response),
+            Message::StateQueryResponse(StateQueryResponse::Governance(
+                GovernanceStateQueryResponse::Error(e),
+            )) => Err(e),
+            _ => Err(QueryError::query_failed("Unexpected message type")),
+        },
+    )
+    .await?;
 
-    match message {
-        Message::StateQueryResponse(StateQueryResponse::Governance(
-            GovernanceStateQueryResponse::DRepInfoWithDelegators(response),
-        )) => {
-            let active = !response.info.retired && !response.info.expired;
+    let active = !response.info.retired && !response.info.expired;
+    let stake_addresses = response.delegators.clone();
 
-            let stake_addresses = response.delegators.clone();
+    let sum_msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
+        AccountsStateQuery::GetAccountsBalancesSum { stake_addresses },
+    )));
 
-            let sum_msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
-                AccountsStateQuery::GetAccountsBalancesSum { stake_addresses },
-            )));
+    let amount = query_state(
+        &context,
+        &handlers_config.accounts_query_topic,
+        sum_msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Accounts(
+                AccountsStateQueryResponse::AccountsBalancesSum(sum),
+            )) => Ok(sum.to_string()),
+            Message::StateQueryResponse(StateQueryResponse::Accounts(
+                AccountsStateQueryResponse::Error(e),
+            )) => Err(e),
+            _ => Err(QueryError::query_failed(
+                "Unexpected response from accounts-state",
+            )),
+        },
+    )
+    .await?;
 
-            let raw_sum =
-                context.message_bus.request(&handlers_config.accounts_query_topic, sum_msg).await?;
-            let sum_response = Arc::try_unwrap(raw_sum).unwrap_or_else(|arc| (*arc).clone());
+    let response = DRepInfoREST {
+        drep_id: drep_id.to_string(),
+        hex: hex::encode(credential.get_hash()),
+        amount,
+        active,
+        active_epoch: response.info.active_epoch,
+        has_script: matches!(credential, Credential::ScriptHash(_)),
+        last_active_epoch: response.info.last_active_epoch,
+        retired: response.info.retired,
+        expired: response.info.expired,
+    };
 
-            let amount = match sum_response {
-                Message::StateQueryResponse(StateQueryResponse::Accounts(
-                    AccountsStateQueryResponse::AccountsBalancesSum(sum),
-                )) => sum.to_string(),
-
-                Message::StateQueryResponse(StateQueryResponse::Accounts(
-                    AccountsStateQueryResponse::Error(e),
-                )) => {
-                    return Ok(RESTResponse::with_text(
-                        500,
-                        &format!("Failed to sum balances: {e}"),
-                    ));
-                }
-
-                _ => {
-                    return Ok(RESTResponse::with_text(
-                        500,
-                        "Unexpected response from accounts-state",
-                    ));
-                }
-            };
-
-            let response = DRepInfoREST {
-                drep_id: drep_id.to_string(),
-                hex: hex::encode(credential.get_hash()),
-                amount,
-                active,
-                active_epoch: response.info.active_epoch,
-                has_script: matches!(credential, Credential::ScriptHash(_)),
-                last_active_epoch: response.info.last_active_epoch,
-                retired: response.info.retired,
-                expired: response.info.expired,
-            };
-
-            match serde_json::to_string_pretty(&response) {
-                Ok(json) => Ok(RESTResponse::with_json(200, &json)),
-                Err(e) => Ok(RESTResponse::with_text(
-                    500,
-                    &format!("Failed to serialize DRep info: {e}"),
-                )),
-            }
-        }
-
-        Message::StateQueryResponse(StateQueryResponse::Governance(
-            GovernanceStateQueryResponse::NotFound,
-        )) => Ok(RESTResponse::with_text(404, "DRep not found")),
-
-        Message::StateQueryResponse(StateQueryResponse::Governance(
-            GovernanceStateQueryResponse::Error(e),
-        )) => Ok(RESTResponse::with_text(500, &e.to_string())),
-
-        _ => Ok(RESTResponse::with_text(500, "Unexpected message type")),
-    }
+    let json = serde_json::to_string_pretty(&response)?;
+    Ok(RESTResponse::with_json(200, &json))
 }
 
 pub async fn handle_drep_delegators_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
-    let Some(drep_id) = params.first() else {
-        return Ok(RESTResponse::with_text(400, "Missing DRep ID parameter"));
-    };
+) -> Result<RESTResponse, RESTError> {
+    let drep_id = params.first().ok_or_else(|| RESTError::param_missing("drep_id"))?;
 
-    let credential = match parse_drep_credential(drep_id) {
-        Ok(c) => c,
-        Err(resp) => return Ok(resp),
-    };
+    let credential = parse_drep_credential(drep_id)?;
 
     let msg = Arc::new(Message::StateQuery(StateQuery::Governance(
         GovernanceStateQuery::GetDRepDelegators {
@@ -184,97 +149,72 @@ pub async fn handle_drep_delegators_blockfrost(
         },
     )));
 
-    let raw_msg = context.message_bus.request(&handlers_config.dreps_query_topic, msg).await?;
-    let message = Arc::try_unwrap(raw_msg).unwrap_or_else(|arc| (*arc).clone());
+    let delegators = query_state(
+        &context,
+        &handlers_config.dreps_query_topic,
+        msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Governance(
+                GovernanceStateQueryResponse::DRepDelegators(delegators),
+            )) => Ok(delegators),
+            Message::StateQueryResponse(StateQueryResponse::Governance(
+                GovernanceStateQueryResponse::Error(e),
+            )) => Err(e),
+            _ => Err(QueryError::query_failed("Unexpected message type")),
+        },
+    )
+    .await?;
 
-    match message {
-        Message::StateQueryResponse(StateQueryResponse::Governance(
-            GovernanceStateQueryResponse::DRepDelegators(delegators),
-        )) => {
-            let msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
-                AccountsStateQuery::GetAccountsUtxoValuesMap {
-                    stake_addresses: delegators.addresses.clone(),
-                },
-            )));
+    let msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
+        AccountsStateQuery::GetAccountsUtxoValuesMap {
+            stake_addresses: delegators.addresses.clone(),
+        },
+    )));
 
-            let raw_msg =
-                context.message_bus.request(&handlers_config.accounts_query_topic, msg).await?;
-            let message = Arc::try_unwrap(raw_msg).unwrap_or_else(|arc| (*arc).clone());
+    let map = query_state(
+        &context,
+        &handlers_config.accounts_query_topic,
+        msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Accounts(
+                AccountsStateQueryResponse::AccountsUtxoValuesMap(map),
+            )) => Ok(map),
+            Message::StateQueryResponse(StateQueryResponse::Accounts(
+                AccountsStateQueryResponse::Error(e),
+            )) => Err(e),
+            _ => Err(QueryError::query_failed(
+                "Unexpected response from accounts-state",
+            )),
+        },
+    )
+    .await?;
 
-            match message {
-                Message::StateQueryResponse(StateQueryResponse::Accounts(
-                    AccountsStateQueryResponse::AccountsUtxoValuesMap(map),
-                )) => {
-                    let response: Result<Vec<_>> = map
-                        .into_iter()
-                        .map(|(stake_address, amount)| {
-                            let bech32 = stake_address
-                                .to_string()
-                                .map_err(|e| anyhow!("Failed to encode stake address {}", e))?;
+    let response: Vec<Value> = map
+        .into_iter()
+        .map(|(stake_address, amount)| {
+            let bech32 = stake_address
+                .to_string()
+                .map_err(|e| RESTError::encoding_failed(&format!("stake address: {}", e)))?;
 
-                            Ok(serde_json::json!({
-                                "address": bech32,
-                                "amount": amount.to_string(),
-                            }))
-                        })
-                        .collect();
+            Ok(serde_json::json!({
+                "address": bech32,
+                "amount": amount.to_string(),
+            }))
+        })
+        .collect::<Result<Vec<_>, RESTError>>()?;
 
-                    match response {
-                        Ok(response) => match serde_json::to_string_pretty(&response) {
-                            Ok(json) => Ok(RESTResponse::with_json(200, &json)),
-                            Err(e) => Ok(RESTResponse::with_text(
-                                500,
-                                &format!("Failed to serialize DRep delegators: {e}"),
-                            )),
-                        },
-                        Err(e) => Ok(RESTResponse::with_text(
-                            500,
-                            &format!("Internal error: {e}"),
-                        )),
-                    }
-                }
-
-                Message::StateQueryResponse(StateQueryResponse::Accounts(
-                    AccountsStateQueryResponse::Error(e),
-                )) => Ok(RESTResponse::with_text(
-                    500,
-                    &format!("Account state error: {e}"),
-                )),
-
-                _ => Ok(RESTResponse::with_text(
-                    500,
-                    "Unexpected response from accounts-state",
-                )),
-            }
-        }
-
-        Message::StateQueryResponse(StateQueryResponse::Governance(
-            GovernanceStateQueryResponse::NotFound,
-        )) => Ok(RESTResponse::with_text(404, "DRep not found")),
-
-        Message::StateQueryResponse(StateQueryResponse::Governance(
-            GovernanceStateQueryResponse::Error(_),
-        )) => Ok(RESTResponse::with_text(
-            500,
-            "DRep delegator storage is disabled in config",
-        )),
-
-        _ => Ok(RESTResponse::with_text(500, "Unexpected message type")),
-    }
+    let json = serde_json::to_string_pretty(&response)?;
+    Ok(RESTResponse::with_json(200, &json))
 }
+
 pub async fn handle_drep_metadata_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
-    let Some(drep_id) = params.first() else {
-        return Ok(RESTResponse::with_text(400, "Missing DRep ID parameter"));
-    };
+) -> Result<RESTResponse, RESTError> {
+    let drep_id = params.first().ok_or_else(|| RESTError::param_missing("drep_id"))?;
 
-    let credential = match parse_drep_credential(drep_id) {
-        Ok(c) => c,
-        Err(resp) => return Ok(resp),
-    };
+    let credential = parse_drep_credential(drep_id)?;
 
     let msg = Arc::new(Message::StateQuery(StateQuery::Governance(
         GovernanceStateQuery::GetDRepMetadata {
@@ -282,81 +222,62 @@ pub async fn handle_drep_metadata_blockfrost(
         },
     )));
 
-    let raw_msg = context.message_bus.request(&handlers_config.dreps_query_topic, msg).await?;
-    let message = Arc::try_unwrap(raw_msg).unwrap_or_else(|arc| (*arc).clone());
+    let metadata = query_state(
+        &context,
+        &handlers_config.dreps_query_topic,
+        msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Governance(
+                GovernanceStateQueryResponse::DRepMetadata(metadata),
+            )) => Ok(metadata),
+            Message::StateQueryResponse(StateQueryResponse::Governance(
+                GovernanceStateQueryResponse::Error(e),
+            )) => Err(e),
+            _ => Err(QueryError::query_failed("Unexpected message type")),
+        },
+    )
+    .await?;
 
-    match message {
-        Message::StateQueryResponse(StateQueryResponse::Governance(
-            GovernanceStateQueryResponse::DRepMetadata(metadata),
-        )) => {
-            match metadata {
-                None => {
-                    // metadata feature disabled
-                    Ok(RESTResponse::with_text(
-                        500,
-                        "DRep metadata storage is disabled in config",
-                    ))
-                }
-                Some(None) => {
-                    // enabled, but nothing stored for this DRep
-                    Ok(RESTResponse::with_text(404, "DRep metadata not found"))
-                }
-                Some(Some(anchor)) => {
-                    // enabled + stored → fetch the JSON
-                    match Client::new().get(&anchor.url).send().await {
-                        Ok(resp) => match resp.bytes().await {
-                            Ok(raw_bytes) => match serde_json::from_slice::<Value>(&raw_bytes) {
-                                Ok(json) => {
-                                    let bytes_hex = format!("\\x{}", hex::encode(&raw_bytes));
-
-                                    let response = DRepMetadataREST {
-                                        drep_id: drep_id.to_string(),
-                                        hex: hex::encode(credential.get_hash()),
-                                        url: anchor.url.clone(),
-                                        hash: hex::encode(anchor.data_hash.clone()),
-                                        json_metadata: json,
-                                        bytes: bytes_hex,
-                                    };
-
-                                    match serde_json::to_string_pretty(&response) {
-                                        Ok(json) => Ok(RESTResponse::with_json(200, &json)),
-                                        Err(e) => Ok(RESTResponse::with_text(
-                                            500,
-                                            &format!("Failed to serialize DRep metadata: {e}"),
-                                        )),
-                                    }
-                                }
-                                Err(_) => Ok(RESTResponse::with_text(
-                                    500,
-                                    "Invalid JSON from DRep metadata URL",
-                                )),
-                            },
-                            Err(_) => Ok(RESTResponse::with_text(
-                                500,
-                                "Failed to read bytes from DRep metadata URL",
-                            )),
-                        },
-                        Err(_) => Ok(RESTResponse::with_text(
-                            500,
-                            "Failed to fetch DRep metadata URL",
-                        )),
-                    }
-                }
-            }
+    match metadata {
+        None => {
+            // metadata feature disabled
+            Err(RESTError::storage_disabled("DRep metadata"))
         }
+        Some(None) => {
+            // enabled, but nothing stored for this DRep
+            Err(RESTError::not_found("DRep metadata not found"))
+        }
+        Some(Some(anchor)) => {
+            // enabled + stored → fetch the JSON
+            let resp = Client::new().get(&anchor.url).send().await.map_err(|e| {
+                RESTError::query_failed(&format!("Failed to fetch DRep metadata URL: {}", e))
+            })?;
 
-        Message::StateQueryResponse(StateQueryResponse::Governance(
-            GovernanceStateQueryResponse::NotFound,
-        )) => Ok(RESTResponse::with_text(404, "DRep metadata not found")),
+            let raw_bytes = resp.bytes().await.map_err(|e| {
+                RESTError::query_failed(&format!(
+                    "Failed to read bytes from DRep metadata URL: {}",
+                    e
+                ))
+            })?;
 
-        Message::StateQueryResponse(StateQueryResponse::Governance(
-            GovernanceStateQueryResponse::Error(_),
-        )) => Ok(RESTResponse::with_text(
-            500,
-            "DRep metadata storage is disabled in config",
-        )),
+            let json: Value = serde_json::from_slice(&raw_bytes).map_err(|_| {
+                RESTError::BadRequest("Invalid JSON from DRep metadata URL".to_string())
+            })?;
 
-        _ => Ok(RESTResponse::with_text(500, "Unexpected message type")),
+            let bytes_hex = format!("\\x{}", hex::encode(&raw_bytes));
+
+            let response = DRepMetadataREST {
+                drep_id: drep_id.to_string(),
+                hex: hex::encode(credential.get_hash()),
+                url: anchor.url.clone(),
+                hash: hex::encode(anchor.data_hash.clone()),
+                json_metadata: json,
+                bytes: bytes_hex,
+            };
+
+            let json = serde_json::to_string_pretty(&response)?;
+            Ok(RESTResponse::with_json(200, &json))
+        }
     }
 }
 
@@ -364,15 +285,10 @@ pub async fn handle_drep_updates_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
-    let Some(drep_id) = params.first() else {
-        return Ok(RESTResponse::with_text(400, "Missing DRep ID parameter"));
-    };
+) -> Result<RESTResponse, RESTError> {
+    let drep_id = params.first().ok_or_else(|| RESTError::param_missing("drep_id"))?;
 
-    let credential = match parse_drep_credential(drep_id) {
-        Ok(c) => c,
-        Err(resp) => return Ok(resp),
-    };
+    let credential = parse_drep_credential(drep_id)?;
 
     let msg = Arc::new(Message::StateQuery(StateQuery::Governance(
         GovernanceStateQuery::GetDRepUpdates {
@@ -380,60 +296,44 @@ pub async fn handle_drep_updates_blockfrost(
         },
     )));
 
-    let raw_msg = context.message_bus.request(&handlers_config.dreps_query_topic, msg).await?;
-    let message = Arc::try_unwrap(raw_msg).unwrap_or_else(|arc| (*arc).clone());
+    let list = query_state(
+        &context,
+        &handlers_config.dreps_query_topic,
+        msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Governance(
+                GovernanceStateQueryResponse::DRepUpdates(list),
+            )) => Ok(list),
+            Message::StateQueryResponse(StateQueryResponse::Governance(
+                GovernanceStateQueryResponse::Error(e),
+            )) => Err(e),
+            _ => Err(QueryError::query_failed("Unexpected message type")),
+        },
+    )
+    .await?;
 
-    match message {
-        Message::StateQueryResponse(StateQueryResponse::Governance(
-            GovernanceStateQueryResponse::DRepUpdates(list),
-        )) => {
-            let response: Vec<DRepUpdateREST> = list
-                .updates
-                .iter()
-                .map(|event| DRepUpdateREST {
-                    tx_hash: "TxHash lookup not yet implemented".to_string(),
-                    cert_index: event.cert_index,
-                    action: event.action.clone(),
-                })
-                .collect();
+    let response: Vec<DRepUpdateREST> = list
+        .updates
+        .iter()
+        .map(|event| DRepUpdateREST {
+            tx_hash: "TxHash lookup not yet implemented".to_string(),
+            cert_index: event.cert_index,
+            action: event.action.clone(),
+        })
+        .collect();
 
-            match serde_json::to_string_pretty(&response) {
-                Ok(json) => Ok(RESTResponse::with_json(200, &json)),
-                Err(e) => Ok(RESTResponse::with_text(
-                    500,
-                    &format!("Failed to serialize DRep updates: {e}"),
-                )),
-            }
-        }
-
-        Message::StateQueryResponse(StateQueryResponse::Governance(
-            GovernanceStateQueryResponse::Error(_),
-        )) => Ok(RESTResponse::with_text(
-            503,
-            "DRep updates storage is disabled in config",
-        )),
-
-        Message::StateQueryResponse(StateQueryResponse::Governance(
-            GovernanceStateQueryResponse::NotFound,
-        )) => Ok(RESTResponse::with_text(404, "DRep not found")),
-
-        _ => Ok(RESTResponse::with_text(500, "Unexpected message type")),
-    }
+    let json = serde_json::to_string_pretty(&response)?;
+    Ok(RESTResponse::with_json(200, &json))
 }
 
 pub async fn handle_drep_votes_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
-    let Some(drep_id) = params.first() else {
-        return Ok(RESTResponse::with_text(400, "Missing DRep ID parameter"));
-    };
+) -> Result<RESTResponse, RESTError> {
+    let drep_id = params.first().ok_or_else(|| RESTError::param_missing("drep_id"))?;
 
-    let credential = match parse_drep_credential(drep_id) {
-        Ok(c) => c,
-        Err(resp) => return Ok(resp),
-    };
+    let credential = parse_drep_credential(drep_id)?;
 
     let msg = Arc::new(Message::StateQuery(StateQuery::Governance(
         GovernanceStateQuery::GetDRepVotes {
@@ -441,161 +341,129 @@ pub async fn handle_drep_votes_blockfrost(
         },
     )));
 
-    let raw_msg = context.message_bus.request(&handlers_config.dreps_query_topic, msg).await?;
-    let message = Arc::try_unwrap(raw_msg).unwrap_or_else(|arc| (*arc).clone());
-    match message {
-        Message::StateQueryResponse(StateQueryResponse::Governance(
-            GovernanceStateQueryResponse::DRepVotes(votes),
-        )) => {
-            let response: Vec<_> = votes
-                .votes
-                .iter()
-                .map(|vote| DRepVoteREST {
-                    tx_hash: hex::encode(vote.tx_hash),
-                    cert_index: vote.vote_index,
-                    vote: vote.vote.clone(),
-                })
-                .collect();
+    let votes = query_state(
+        &context,
+        &handlers_config.dreps_query_topic,
+        msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Governance(
+                GovernanceStateQueryResponse::DRepVotes(votes),
+            )) => Ok(votes),
+            Message::StateQueryResponse(StateQueryResponse::Governance(
+                GovernanceStateQueryResponse::Error(e),
+            )) => Err(e),
+            _ => Err(QueryError::query_failed("Unexpected message type")),
+        },
+    )
+    .await?;
 
-            match serde_json::to_string_pretty(&response) {
-                Ok(json) => Ok(RESTResponse::with_json(200, &json)),
-                Err(e) => Ok(RESTResponse::with_text(
-                    500,
-                    &format!("Failed to serialize DRep votes: {e}"),
-                )),
-            }
-        }
+    let response: Vec<_> = votes
+        .votes
+        .iter()
+        .map(|vote| DRepVoteREST {
+            tx_hash: hex::encode(vote.tx_hash),
+            cert_index: vote.vote_index,
+            vote: vote.vote.clone(),
+        })
+        .collect();
 
-        Message::StateQueryResponse(StateQueryResponse::Governance(
-            GovernanceStateQueryResponse::NotFound,
-        )) => Ok(RESTResponse::with_text(404, "DRep not found")),
-
-        Message::StateQueryResponse(StateQueryResponse::Governance(
-            GovernanceStateQueryResponse::Error(_),
-        )) => Ok(RESTResponse::with_text(
-            503,
-            "DRep vote storage is disabled in config",
-        )),
-
-        _ => Ok(RESTResponse::with_text(500, "Unexpected message type")),
-    }
+    let json = serde_json::to_string_pretty(&response)?;
+    Ok(RESTResponse::with_json(200, &json))
 }
 
 pub async fn handle_proposals_list_blockfrost(
     context: Arc<Context<Message>>,
     _params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
+) -> Result<RESTResponse, RESTError> {
     let msg = Arc::new(Message::StateQuery(StateQuery::Governance(
         GovernanceStateQuery::GetProposalsList,
     )));
 
-    let raw_msg = context.message_bus.request(&handlers_config.governance_query_topic, msg).await?;
-    let message = Arc::try_unwrap(raw_msg).unwrap_or_else(|arc| (*arc).clone());
+    let list = query_state(
+        &context,
+        &handlers_config.governance_query_topic,
+        msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Governance(
+                GovernanceStateQueryResponse::ProposalsList(list),
+            )) => Ok(list),
+            Message::StateQueryResponse(StateQueryResponse::Governance(
+                GovernanceStateQueryResponse::Error(e),
+            )) => Err(e),
+            _ => Err(QueryError::query_failed("Unexpected message type")),
+        },
+    )
+    .await?;
 
-    match message {
-        Message::StateQueryResponse(StateQueryResponse::Governance(
-            GovernanceStateQueryResponse::ProposalsList(list),
-        )) => {
-            if list.proposals.is_empty() {
-                return Ok(RESTResponse::with_json(200, "[]"));
-            }
-
-            let props_bech32: Result<Vec<String>, _> =
-                list.proposals.iter().map(|id| id.to_bech32()).collect();
-
-            match props_bech32 {
-                Ok(vec) => match serde_json::to_string(&vec) {
-                    Ok(json) => Ok(RESTResponse::with_json(200, &json)),
-                    Err(e) => Ok(RESTResponse::with_text(
-                        500,
-                        &format!("Failed to serialize proposals list: {e}"),
-                    )),
-                },
-                Err(e) => Ok(RESTResponse::with_text(
-                    500,
-                    &format!("Failed to convert proposal IDs to Bech32: {e}"),
-                )),
-            }
-        }
-
-        Message::StateQueryResponse(StateQueryResponse::Governance(
-            GovernanceStateQueryResponse::Error(e),
-        )) => Ok(RESTResponse::with_text(500, &format!("Query error: {e}"))),
-
-        Message::StateQueryResponse(StateQueryResponse::Governance(
-            GovernanceStateQueryResponse::NotFound,
-        )) => Ok(RESTResponse::with_text(404, "No proposals found")),
-
-        _ => Ok(RESTResponse::with_text(500, "Unexpected message type")),
+    if list.proposals.is_empty() {
+        return Ok(RESTResponse::with_json(200, "[]"));
     }
+
+    let props_bech32: Vec<String> = list
+        .proposals
+        .iter()
+        .map(|id| id.to_bech32())
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| RESTError::encoding_failed(&format!("proposal IDs: {}", e)))?;
+
+    let json = serde_json::to_string(&props_bech32)?;
+    Ok(RESTResponse::with_json(200, &json))
 }
 
 pub async fn handle_single_proposal_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
-    let proposal = match parse_gov_action_id(&params)? {
-        Ok(id) => id,
-        Err(resp) => return Ok(resp),
-    };
+) -> Result<RESTResponse, RESTError> {
+    let proposal = parse_gov_action_id(&params)?;
 
     let msg = Arc::new(Message::StateQuery(StateQuery::Governance(
         GovernanceStateQuery::GetProposalInfo { proposal },
     )));
 
-    let raw_msg = context.message_bus.request(&handlers_config.governance_query_topic, msg).await?;
-    let message = Arc::try_unwrap(raw_msg).unwrap_or_else(|arc| (*arc).clone());
-
-    match message {
-        Message::StateQueryResponse(StateQueryResponse::Governance(
-            GovernanceStateQueryResponse::ProposalInfo(info),
-        )) => match serde_json::to_string(&info) {
-            Ok(json) => Ok(RESTResponse::with_json(200, &json)),
-            Err(e) => Ok(RESTResponse::with_text(
-                500,
-                &format!("Failed to serialize proposal info: {e}"),
-            )),
+    let info = query_state(
+        &context,
+        &handlers_config.governance_query_topic,
+        msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Governance(
+                GovernanceStateQueryResponse::ProposalInfo(info),
+            )) => Ok(info),
+            Message::StateQueryResponse(StateQueryResponse::Governance(
+                GovernanceStateQueryResponse::Error(e),
+            )) => Err(e),
+            _ => Err(QueryError::query_failed("Unexpected message type")),
         },
+    )
+    .await?;
 
-        Message::StateQueryResponse(StateQueryResponse::Governance(
-            GovernanceStateQueryResponse::NotFound,
-        )) => Ok(RESTResponse::with_text(404, "Proposal not found")),
-
-        Message::StateQueryResponse(StateQueryResponse::Governance(
-            GovernanceStateQueryResponse::Error(e),
-        )) => Ok(RESTResponse::with_text(500, &format!("Query error: {e}"))),
-
-        _ => Ok(RESTResponse::with_text(500, "Unexpected message type")),
-    }
+    let json = serde_json::to_string(&info)?;
+    Ok(RESTResponse::with_json(200, &json))
 }
 
 pub async fn handle_proposal_parameters_blockfrost(
     _context: Arc<Context<Message>>,
     _params: Vec<String>,
     _handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
-    Ok(RESTResponse::with_text(501, "Not implemented"))
+) -> Result<RESTResponse, RESTError> {
+    Err(RESTError::not_implemented("Endpoint not yet implemented"))
 }
 
 pub async fn handle_proposal_withdrawals_blockfrost(
     _context: Arc<Context<Message>>,
     _params: Vec<String>,
     _handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
-    Ok(RESTResponse::with_text(501, "Not implemented"))
+) -> Result<RESTResponse, RESTError> {
+    Err(RESTError::not_implemented("Endpoint not yet implemented"))
 }
 
 pub async fn handle_proposal_votes_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
-    let proposal = match parse_gov_action_id(&params)? {
-        Ok(id) => id,
-        Err(resp) => return Ok(resp),
-    };
+) -> Result<RESTResponse, RESTError> {
+    let proposal = parse_gov_action_id(&params)?;
 
     let tx_hash = hex::encode(proposal.transaction_id);
     let cert_index = proposal.action_index;
@@ -604,115 +472,85 @@ pub async fn handle_proposal_votes_blockfrost(
         GovernanceStateQuery::GetProposalVotes { proposal },
     )));
 
-    let raw_msg = context.message_bus.request(&handlers_config.governance_query_topic, msg).await?;
-    let message = Arc::try_unwrap(raw_msg).unwrap_or_else(|arc| (*arc).clone());
+    let votes = query_state(
+        &context,
+        &handlers_config.governance_query_topic,
+        msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Governance(
+                GovernanceStateQueryResponse::ProposalVotes(votes),
+            )) => Ok(votes),
+            Message::StateQueryResponse(StateQueryResponse::Governance(
+                GovernanceStateQueryResponse::Error(e),
+            )) => Err(e),
+            _ => Err(QueryError::query_failed("Unexpected message type")),
+        },
+    )
+    .await?;
 
-    match message {
-        Message::StateQueryResponse(StateQueryResponse::Governance(
-            GovernanceStateQueryResponse::ProposalVotes(votes),
-        )) => {
-            let mut votes_list = Vec::new();
+    let mut votes_list = Vec::new();
 
-            for (voter, (_, voting_proc)) in votes.votes {
-                let voter_role = match voter {
-                    Voter::ConstitutionalCommitteeKey(_)
-                    | Voter::ConstitutionalCommitteeScript(_) => {
-                        VoterRoleREST::ConstitutionalCommittee
-                    }
-                    Voter::DRepKey(_) | Voter::DRepScript(_) => VoterRoleREST::Drep,
-                    Voter::StakePoolKey(_) => VoterRoleREST::Spo,
-                };
-
-                let voter_str = voter.to_string();
-
-                votes_list.push(ProposalVoteREST {
-                    tx_hash: tx_hash.clone(),
-                    cert_index,
-                    voter_role,
-                    voter: voter_str,
-                    vote: voting_proc.vote,
-                });
+    for (voter, (_, voting_proc)) in votes.votes {
+        let voter_role = match voter {
+            Voter::ConstitutionalCommitteeKey(_) | Voter::ConstitutionalCommitteeScript(_) => {
+                VoterRoleREST::ConstitutionalCommittee
             }
+            Voter::DRepKey(_) | Voter::DRepScript(_) => VoterRoleREST::Drep,
+            Voter::StakePoolKey(_) => VoterRoleREST::Spo,
+        };
 
-            match serde_json::to_string(&votes_list) {
-                Ok(json) => Ok(RESTResponse::with_json(200, &json)),
-                Err(e) => Ok(RESTResponse::with_text(
-                    500,
-                    &format!("Internal server error while retrieving proposal votes: {e}"),
-                )),
-            }
-        }
+        let voter_str = voter.to_string();
 
-        Message::StateQueryResponse(StateQueryResponse::Governance(
-            GovernanceStateQueryResponse::NotFound,
-        )) => Ok(RESTResponse::with_text(404, "Proposal not found")),
-
-        Message::StateQueryResponse(StateQueryResponse::Governance(
-            GovernanceStateQueryResponse::Error(e),
-        )) => Ok(RESTResponse::with_text(500, &format!("Query error: {e}"))),
-
-        _ => Ok(RESTResponse::with_text(500, "Unexpected message type")),
+        votes_list.push(ProposalVoteREST {
+            tx_hash: tx_hash.clone(),
+            cert_index,
+            voter_role,
+            voter: voter_str,
+            vote: voting_proc.vote,
+        });
     }
+
+    let json = serde_json::to_string(&votes_list)?;
+    Ok(RESTResponse::with_json(200, &json))
 }
 
 pub async fn handle_proposal_metadata_blockfrost(
     _context: Arc<Context<Message>>,
     _params: Vec<String>,
     _handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
-    Ok(RESTResponse::with_text(501, "Not implemented"))
+) -> Result<RESTResponse, RESTError> {
+    Err(RESTError::not_implemented("Endpoint not yet implemented"))
 }
 
-pub fn parse_gov_action_id(params: &[String]) -> Result<Result<GovActionId, RESTResponse>> {
+pub fn parse_gov_action_id(params: &[String]) -> Result<GovActionId, RESTError> {
     if params.len() != 2 {
-        return Ok(Err(RESTResponse::with_text(
-            400,
-            "Expected two parameters: tx_hash/cert_index",
-        )));
+        return Err(RESTError::BadRequest(
+            "Expected two parameters: tx_hash/cert_index".to_string(),
+        ));
     }
 
     let tx_hash_hex = &params[0];
     let cert_index_str = &params[1];
 
-    let transaction_id: TxHash = match hex::decode(tx_hash_hex) {
-        Ok(bytes) => match bytes.as_slice().try_into() {
-            Ok(arr) => arr,
-            Err(_) => {
-                return Ok(Err(RESTResponse::with_text(
-                    400,
-                    "Invalid tx_hash length, must be 32 bytes",
-                )));
-            }
-        },
-        Err(e) => {
-            return Ok(Err(RESTResponse::with_text(
-                400,
-                &format!("Invalid hex tx_hash: {e}"),
-            )));
-        }
-    };
+    let bytes = hex::decode(tx_hash_hex)
+        .map_err(|e| RESTError::invalid_param("tx_hash", &format!("invalid hex: {}", e)))?;
 
-    let action_index = match cert_index_str.parse::<u8>() {
-        Ok(i) => i,
-        Err(e) => {
-            return Ok(Err(RESTResponse::with_text(
-                400,
-                &format!("Invalid cert_index, expected u8: {e}"),
-            )));
-        }
-    };
+    let transaction_id: TxHash = bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| RESTError::invalid_param("tx_hash", "must be 32 bytes"))?;
 
-    Ok(Ok(GovActionId {
+    let action_index = cert_index_str
+        .parse::<u8>()
+        .map_err(|e| RESTError::invalid_param("cert_index", &format!("expected u8: {}", e)))?;
+
+    Ok(GovActionId {
         transaction_id,
         action_index,
-    }))
+    })
 }
 
-fn parse_drep_credential(drep_id: &str) -> Result<Credential, RESTResponse> {
-    Credential::from_drep_bech32(drep_id).map_err(|e| {
-        RESTResponse::with_text(
-            400,
-            &format!("Invalid Bech32 DRep ID: {drep_id}. Error: {e}"),
-        )
-    })
+fn parse_drep_credential(drep_id: &str) -> Result<Credential, RESTError> {
+    Credential::from_drep_bech32(drep_id)
+        .map_err(|e| RESTError::invalid_param("drep_id", &format!("Invalid Bech32 DRep ID: {}", e)))
 }

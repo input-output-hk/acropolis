@@ -5,70 +5,58 @@ use std::fmt;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum QueryError {
     /// The requested resource was not found
-    NotFound {
-        resource: String
-    },
+    NotFound { resource: String },
 
     /// An error occurred while processing the query
-    QueryFailed {
-        message: String
-    },
+    QueryFailed { message: String },
 
     /// Storage backend is disabled in configuration
-    StorageDisabled {
-        storage_type: String
-    },
+    StorageDisabled { storage_type: String },
 
     /// Invalid request parameters
-    InvalidRequest {
-        message: String
-    },
+    InvalidRequest { message: String },
 
     /// One or more resources in a batch query were not found
-    PartialNotFound {
-        message: String,
-    },
+    PartialNotFound { message: String },
 
     /// Query variant is not implemented yet
-    NotImplemented {
-        query: String,
-    },
+    NotImplemented { query: String },
 }
 
 impl QueryError {
     pub fn not_found(resource: impl Into<String>) -> Self {
         Self::NotFound {
-            resource: resource.into()
+            resource: resource.into(),
         }
     }
 
     pub fn query_failed(message: impl Into<String>) -> Self {
         Self::QueryFailed {
-            message: message.into()
+            message: message.into(),
         }
     }
 
     pub fn storage_disabled(storage_type: impl Into<String>) -> Self {
         Self::StorageDisabled {
-            storage_type: storage_type.into()
+            storage_type: storage_type.into(),
         }
     }
 
     pub fn invalid_request(message: impl Into<String>) -> Self {
         Self::InvalidRequest {
-            message: message.into()
+            message: message.into(),
         }
     }
 
     pub fn partial_not_found(message: impl Into<String>) -> Self {
         Self::PartialNotFound {
-            message: message.into()
+            message: message.into(),
         }
     }
 
     pub fn not_implemented(query: impl Into<String>) -> Self {
         Self::NotImplemented {
-            query: query.into()
+            query: query.into(),
         }
     }
 }
@@ -78,7 +66,9 @@ impl fmt::Display for QueryError {
         match self {
             Self::NotFound { resource } => write!(f, "Not found: {}", resource),
             Self::QueryFailed { message } => write!(f, "Query failed: {}", message),
-            Self::StorageDisabled { storage_type } => write!(f, "{} storage is not enabled", storage_type),
+            Self::StorageDisabled { storage_type } => {
+                write!(f, "{} storage is not enabled", storage_type)
+            }
             Self::InvalidRequest { message } => write!(f, "Invalid request: {}", message),
             Self::PartialNotFound { message } => write!(f, "Partial result: {}", message),
             Self::NotImplemented { query } => write!(f, "Query not implemented: {}", query),

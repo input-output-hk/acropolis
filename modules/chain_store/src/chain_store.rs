@@ -66,23 +66,21 @@ impl ChainStore {
             async move {
                 let Message::StateQuery(StateQuery::Blocks(query)) = req.as_ref() else {
                     return Arc::new(Message::StateQueryResponse(StateQueryResponse::Blocks(
-                        BlocksStateQueryResponse::Error(
-                            QueryError::invalid_request("Invalid message for blocks-state")
-                        ),
+                        BlocksStateQueryResponse::Error(QueryError::invalid_request(
+                            "Invalid message for blocks-state",
+                        )),
                     )));
                 };
                 let Some(state) = query_history.lock().await.current().cloned() else {
                     return Arc::new(Message::StateQueryResponse(StateQueryResponse::Blocks(
-                        BlocksStateQueryResponse::Error(
-                            QueryError::query_failed("Uninitialized state")
-                        ),
+                        BlocksStateQueryResponse::Error(QueryError::query_failed(
+                            "Uninitialized state",
+                        )),
                     )));
                 };
-                let res = Self::handle_blocks_query(&query_store, &state, query)
-                    .unwrap_or_else(|err| {
-                        BlocksStateQueryResponse::Error(
-                            QueryError::query_failed(err.to_string())
-                        )
+                let res =
+                    Self::handle_blocks_query(&query_store, &state, query).unwrap_or_else(|err| {
+                        BlocksStateQueryResponse::Error(QueryError::query_failed(err.to_string()))
                     });
                 Arc::new(Message::StateQueryResponse(StateQueryResponse::Blocks(res)))
             }

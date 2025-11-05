@@ -1,5 +1,5 @@
-use crate::{UTxOIdentifier, Value};
 use crate::queries::errors::QueryError;
+use crate::{UTxOIdentifier, Value};
 
 pub const DEFAULT_UTXOS_QUERY_TOPIC: (&str, &str) =
     ("utxo-state-query-topic", "cardano.query.utxos");

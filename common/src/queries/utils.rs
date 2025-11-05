@@ -41,11 +41,13 @@ where
     T: Serialize,
 {
     let data = query_state(context, topic, request_msg, |response| {
-        extractor(response).unwrap_or_else(|| Err(QueryError::query_failed(format!(
-            "Unexpected response message type from {topic}"
-        ))))
+        extractor(response).unwrap_or_else(|| {
+            Err(QueryError::query_failed(format!(
+                "Unexpected response message type from {topic}"
+            )))
+        })
     })
-        .await?; // QueryError auto-converts to RESTError via From trait
+    .await?; // QueryError auto-converts to RESTError via From trait
 
     let json = serde_json::to_string_pretty(&data)?; // Uses From<serde_json::Error> for RESTError
     Ok(RESTResponse::with_json(200, &json))

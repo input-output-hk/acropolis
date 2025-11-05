@@ -2,6 +2,7 @@
 
 use std::{collections::HashMap, future::Future, sync::Arc};
 
+use acropolis_common::rest_error::RESTError;
 use acropolis_common::{
     messages::{Message, RESTResponse},
     rest_helper::{handle_rest_with_path_and_query_parameters, handle_rest_with_path_parameter},
@@ -10,7 +11,6 @@ use anyhow::Result;
 use caryatid_sdk::{module, Context, Module};
 use config::Config;
 use tracing::info;
-use acropolis_common::rest_error::RESTError;
 
 mod cost_models;
 mod handlers;

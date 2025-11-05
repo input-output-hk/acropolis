@@ -1,4 +1,5 @@
 use crate::protocol_params::ProtocolParams;
+use crate::queries::errors::QueryError;
 
 pub const DEFAULT_PARAMETERS_QUERY_TOPIC: (&str, &str) =
     ("parameters-state-query-topic", "cardano.query.parameters");
@@ -16,8 +17,7 @@ pub enum ParametersStateQueryResponse {
     EpochParameters(ProtocolParams),
     NetworkName(String),
 
-    NotFound,
-    Error(String),
+    Error(QueryError),
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

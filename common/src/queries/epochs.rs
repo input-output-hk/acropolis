@@ -1,3 +1,4 @@
+use crate::queries::errors::QueryError;
 use crate::{messages::EpochActivityMessage, protocol_params::ProtocolParams, PoolId};
 
 pub const DEFAULT_EPOCHS_QUERY_TOPIC: (&str, &str) =
@@ -24,8 +25,7 @@ pub enum EpochsStateQueryResponse {
     EpochStakeDistributionByPool(EpochStakeDistributionByPool),
     LatestEpochBlocksMintedByPool(u64),
 
-    NotFound,
-    Error(String),
+    Error(QueryError),
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

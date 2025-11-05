@@ -1,12 +1,12 @@
 use std::marker::PhantomData;
 
+use crate::rest_error::RESTError;
 use crate::PoolId;
 use anyhow::anyhow;
 use bech32::{Bech32, Hrp};
+use caryatid_module_rest_server::messages::RESTResponse;
 use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
 use serde_with::{ser::SerializeAsWrap, DeserializeAs, SerializeAs};
-use caryatid_module_rest_server::messages::RESTResponse;
-use crate::rest_error::RESTError;
 
 pub struct SerializeMapAs<KAs, VAs>(std::marker::PhantomData<(KAs, VAs)>);
 

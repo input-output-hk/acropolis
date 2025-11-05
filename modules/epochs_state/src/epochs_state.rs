@@ -1,6 +1,7 @@
 //! Acropolis epochs state module for Caryatid
 //! Unpacks block bodies to get transaction fees
 
+use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::epochs::{
@@ -259,7 +260,9 @@ impl EpochsState {
             async move {
                 let Message::StateQuery(StateQuery::Epochs(query)) = message.as_ref() else {
                     return Arc::new(Message::StateQueryResponse(StateQueryResponse::Epochs(
-                        EpochsStateQueryResponse::Error("Invalid message for epochs-state".into()),
+                        EpochsStateQueryResponse::Error(QueryError::query_failed(
+                            "Invalid message for epochs-state",
+                        )),
                     )));
                 };
 
@@ -276,9 +279,11 @@ impl EpochsState {
                             Ok(Some(epoch_info)) => {
                                 EpochsStateQueryResponse::EpochInfo(EpochInfo { epoch: epoch_info })
                             }
-                            Ok(None) => EpochsStateQueryResponse::NotFound,
+                            Ok(None) => EpochsStateQueryResponse::Error(QueryError::not_found(
+                                format!("Epoch {}", epoch_number),
+                            )),
                             Err(_) => EpochsStateQueryResponse::Error(
-                                "Historical epoch storage is disabled".to_string(),
+                                QueryError::storage_disabled("historical epoch"),
                             ),
                         }
                     }
@@ -286,7 +291,10 @@ impl EpochsState {
                     EpochsStateQuery::GetNextEpochs { epoch_number } => {
                         let current_epoch = state.get_epoch_info();
                         if *epoch_number > current_epoch.epoch {
-                            EpochsStateQueryResponse::NotFound
+                            EpochsStateQueryResponse::Error(QueryError::not_found(format!(
+                                "Epoch {} is in the future",
+                                epoch_number
+                            )))
                         } else {
                             match epochs_history.get_next_epochs(*epoch_number) {
                                 Ok(mut epochs) => {
@@ -297,7 +305,7 @@ impl EpochsState {
                                     EpochsStateQueryResponse::NextEpochs(NextEpochs { epochs })
                                 }
                                 Err(_) => EpochsStateQueryResponse::Error(
-                                    "Historical epoch storage is disabled".to_string(),
+                                    QueryError::storage_disabled("historical epoch"),
                                 ),
                             }
                         }
@@ -306,7 +314,10 @@ impl EpochsState {
                     EpochsStateQuery::GetPreviousEpochs { epoch_number } => {
                         let current_epoch = state.get_epoch_info();
                         if *epoch_number > current_epoch.epoch {
-                            EpochsStateQueryResponse::NotFound
+                            EpochsStateQueryResponse::Error(QueryError::not_found(format!(
+                                "Epoch {} is in the future",
+                                epoch_number
+                            )))
                         } else {
                             match epochs_history.get_previous_epochs(*epoch_number) {
                                 Ok(epochs) => {
@@ -315,7 +326,7 @@ impl EpochsState {
                                     })
                                 }
                                 Err(_) => EpochsStateQueryResponse::Error(
-                                    "Historical epoch storage is disabled".to_string(),
+                                    QueryError::storage_disabled("historical epoch"),
                                 ),
                             }
                         }
@@ -327,10 +338,10 @@ impl EpochsState {
                         )
                     }
 
-                    _ => EpochsStateQueryResponse::Error(format!(
+                    _ => EpochsStateQueryResponse::Error(QueryError::invalid_request(format!(
                         "Unimplemented query variant: {:?}",
                         query
-                    )),
+                    ))),
                 };
                 Arc::new(Message::StateQueryResponse(StateQueryResponse::Epochs(
                     response,

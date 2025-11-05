@@ -1,5 +1,5 @@
-use crate::{Address, AddressTotals, TxIdentifier, UTxOIdentifier};
 use crate::queries::errors::QueryError;
+use crate::{Address, AddressTotals, TxIdentifier, UTxOIdentifier};
 
 pub const DEFAULT_ADDRESS_QUERY_TOPIC: (&str, &str) =
     ("address-state-query-topic", "cardano.query.address");

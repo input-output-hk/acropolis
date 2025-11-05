@@ -2,8 +2,8 @@ use anyhow::Result;
 use std::sync::Arc;
 
 use crate::{handlers_config::HandlersConfig, types::AddressInfoREST};
-use acropolis_common::rest_error::RESTError;
 use acropolis_common::queries::errors::QueryError;
+use acropolis_common::rest_error::RESTError;
 use acropolis_common::{
     messages::{Message, RESTResponse, StateQuery, StateQueryResponse},
     queries::{
@@ -148,7 +148,7 @@ pub async fn handle_address_extended_blockfrost(
     _context: Arc<Context<Message>>,
     _params: Vec<String>,
     _handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
+) -> Result<RESTResponse, RESTError> {
     Ok(RESTResponse::with_text(501, "Not implemented"))
 }
 
@@ -157,7 +157,7 @@ pub async fn handle_address_totals_blockfrost(
     _context: Arc<Context<Message>>,
     _params: Vec<String>,
     _handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
+) -> Result<RESTResponse, RESTError> {
     Ok(RESTResponse::with_text(501, "Not implemented"))
 }
 
@@ -166,7 +166,7 @@ pub async fn handle_address_utxos_blockfrost(
     _context: Arc<Context<Message>>,
     _params: Vec<String>,
     _handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
+) -> Result<RESTResponse, RESTError> {
     Ok(RESTResponse::with_text(501, "Not implemented"))
 }
 
@@ -175,7 +175,7 @@ pub async fn handle_address_asset_utxos_blockfrost(
     _context: Arc<Context<Message>>,
     _params: Vec<String>,
     _handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
+) -> Result<RESTResponse, RESTError> {
     Ok(RESTResponse::with_text(501, "Not implemented"))
 }
 
@@ -184,6 +184,6 @@ pub async fn handle_address_transactions_blockfrost(
     _context: Arc<Context<Message>>,
     _params: Vec<String>,
     _handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
+) -> Result<RESTResponse, RESTError> {
     Ok(RESTResponse::with_text(501, "Not implemented"))
 }
