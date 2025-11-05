@@ -353,6 +353,11 @@ impl ShelleyAddress {
         }
 
         let header = data[0];
+
+        if header & 0x80 != 0 {
+            return Err(anyhow!("invalid header: high bit set"));
+        }
+
         let network = match header & 0x0F {
             0 => NetworkId::Testnet,
             1 => NetworkId::Mainnet,
