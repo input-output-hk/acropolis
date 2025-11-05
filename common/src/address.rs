@@ -3,6 +3,7 @@
 #![allow(dead_code)]
 
 use crate::cip19::{VarIntDecoder, VarIntEncoder};
+use crate::hash::Hash;
 use crate::{Credential, KeyHash, NetworkId, ScriptHash, StakeCredential};
 use anyhow::{anyhow, bail, Result};
 use crc::{Crc, CRC_32_ISO_HDLC};
@@ -294,7 +295,7 @@ impl ShelleyAddress {
         Ok(bech32::encode::<bech32::Bech32>(hrp, &data)?)
     }
 
-    pub fn to_bytes_key(&self) -> Result<Vec<u8>> {
+    pub fn to_bytes_key(&self) -> Vec<u8> {
         let network_bits = match self.network {
             NetworkId::Mainnet => 1u8,
             NetworkId::Testnet => 0u8,
@@ -307,8 +308,10 @@ impl ShelleyAddress {
 
         let mut data = Vec::new();
 
-        let build_header =
-            |variant: u8| -> u8 { network_bits | (payment_bits << 4) | (variant << 5) };
+        let build_header = |delegation_bits: u8| -> u8 {
+            let addr_type = ((delegation_bits & 0x03) << 1) | (payment_bits & 0x01);
+            (addr_type << 4) | (network_bits & 0x0F)
+        };
 
         match &self.delegation {
             ShelleyAddressDelegationPart::None => {
@@ -341,7 +344,76 @@ impl ShelleyAddress {
             }
         }
 
-        Ok(data)
+        data
+    }
+
+    pub fn from_bytes_key(data: &[u8]) -> Result<Self> {
+        if data.is_empty() {
+            return Err(anyhow!("empty address bytes"));
+        }
+
+        let header = data[0];
+
+        if header & 0x80 != 0 {
+            return Err(anyhow!("invalid header: high bit set"));
+        }
+
+        let network = match header & 0x0F {
+            0 => NetworkId::Testnet,
+            1 => NetworkId::Mainnet,
+            _ => return Err(anyhow!("invalid network bits in header")),
+        };
+
+        let addr_type = (header >> 4) & 0x0F;
+
+        let payment_bits = addr_type & 0x01;
+        let delegation_bits = (addr_type >> 1) & 0x03;
+
+        let payment_hash = {
+            let mut arr = [0u8; 28];
+            arr.copy_from_slice(&data[1..29]);
+            Hash::<28>::new(arr)
+        };
+
+        let payment = match payment_bits {
+            0 => ShelleyAddressPaymentPart::PaymentKeyHash(payment_hash),
+            1 => ShelleyAddressPaymentPart::ScriptHash(payment_hash),
+            _ => return Err(anyhow!("invalid payment bits")),
+        };
+
+        let delegation = match delegation_bits {
+            0 => {
+                let mut arr = [0u8; 28];
+                arr.copy_from_slice(&data[29..57]);
+                ShelleyAddressDelegationPart::StakeKeyHash(Hash::<28>::new(arr))
+            }
+            1 => {
+                let mut arr = [0u8; 28];
+                arr.copy_from_slice(&data[29..57]);
+                ShelleyAddressDelegationPart::ScriptHash(Hash::<28>::new(arr))
+            }
+            2 => {
+                let mut decoder = VarIntDecoder::new(&data[29..]);
+                let slot = decoder.read()?;
+                let tx_index = decoder.read()?;
+                let cert_index = decoder.read()?;
+
+                ShelleyAddressDelegationPart::Pointer(ShelleyAddressPointer {
+                    slot,
+                    tx_index,
+                    cert_index,
+                })
+            }
+            3 => ShelleyAddressDelegationPart::None,
+
+            _ => return Err(anyhow!("invalid delegation bits")),
+        };
+
+        Ok(ShelleyAddress {
+            network,
+            payment,
+            delegation,
+        })
     }
 
     pub fn stake_address_string(&self) -> Result<Option<String>> {
@@ -600,7 +672,7 @@ impl Address {
         match self {
             Address::Byron(b) => b.to_bytes_key(),
 
-            Address::Shelley(s) => s.to_bytes_key(),
+            Address::Shelley(s) => Ok(s.to_bytes_key()),
 
             Address::Stake(stake) => stake.to_bytes_key(),
 
@@ -652,7 +724,7 @@ impl PartialOrd for BechOrdAddress {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::crypto::keyhash_224;
+    use crate::{crypto::keyhash_224, hash::Hash};
     use minicbor::{Decode, Encode};
 
     #[test]
@@ -1046,5 +1118,105 @@ mod tests {
 
         let result = StakeAddress::decode(&mut decoder, &mut ());
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_shelley_address_to_from_bytes_key_roundtrip() {
+        let payment_hash = Hash::new([0x11; 28]);
+        let stake_hash = Hash::new([0x22; 28]);
+        let script_hash = Hash::new([0x33; 28]);
+
+        // (KeyHash, StakeKeyHash)
+        let type_1 = ShelleyAddress {
+            network: NetworkId::Mainnet,
+            payment: ShelleyAddressPaymentPart::PaymentKeyHash(payment_hash),
+            delegation: ShelleyAddressDelegationPart::StakeKeyHash(stake_hash),
+        };
+        let bytes = type_1.to_bytes_key();
+        assert_eq!(bytes[0], 0x01);
+        let decoded = ShelleyAddress::from_bytes_key(&bytes).expect("decode base");
+        assert_eq!(type_1, decoded);
+
+        // (ScriptKeyHash, StakeKeyHash)
+        let type_2 = ShelleyAddress {
+            network: NetworkId::Mainnet,
+            payment: ShelleyAddressPaymentPart::ScriptHash(payment_hash),
+            delegation: ShelleyAddressDelegationPart::StakeKeyHash(stake_hash),
+        };
+        let bytes = type_2.to_bytes_key();
+        assert_eq!(bytes[0], 0x11);
+        let decoded = ShelleyAddress::from_bytes_key(&bytes).expect("decode base");
+        assert_eq!(type_2, decoded);
+
+        // (KeyHash, ScriptHash)
+        let type_3 = ShelleyAddress {
+            network: NetworkId::Mainnet,
+            payment: ShelleyAddressPaymentPart::PaymentKeyHash(payment_hash),
+            delegation: ShelleyAddressDelegationPart::ScriptHash(stake_hash),
+        };
+        let bytes = type_3.to_bytes_key();
+        assert_eq!(bytes[0], 0x21);
+        let decoded = ShelleyAddress::from_bytes_key(&bytes).expect("decode base");
+        assert_eq!(type_3, decoded);
+
+        // (ScriptHash, ScriptHash)
+        let type_4 = ShelleyAddress {
+            network: NetworkId::Mainnet,
+            payment: ShelleyAddressPaymentPart::ScriptHash(payment_hash),
+            delegation: ShelleyAddressDelegationPart::ScriptHash(script_hash),
+        };
+        let bytes = type_4.to_bytes_key();
+        assert_eq!(bytes[0], 0x31);
+        let decoded = ShelleyAddress::from_bytes_key(&bytes).expect("decode script");
+        assert_eq!(type_4, decoded);
+
+        // (KeyHash, Pointer)
+        let pointer = ShelleyAddressPointer {
+            slot: 1234,
+            tx_index: 56,
+            cert_index: 2,
+        };
+        let type_5 = ShelleyAddress {
+            network: NetworkId::Mainnet,
+            payment: ShelleyAddressPaymentPart::PaymentKeyHash(payment_hash),
+            delegation: ShelleyAddressDelegationPart::Pointer(pointer.clone()),
+        };
+        let bytes = type_5.to_bytes_key();
+        assert_eq!(bytes[0], 0x41);
+        let decoded = ShelleyAddress::from_bytes_key(&bytes).expect("decode pointer");
+        assert_eq!(type_5, decoded);
+
+        // (ScriptHash, Pointer)
+        let type_6 = ShelleyAddress {
+            network: NetworkId::Mainnet,
+            payment: ShelleyAddressPaymentPart::ScriptHash(payment_hash),
+            delegation: ShelleyAddressDelegationPart::Pointer(pointer),
+        };
+        let bytes = type_6.to_bytes_key();
+        assert_eq!(bytes[0], 0x51);
+        let decoded = ShelleyAddress::from_bytes_key(&bytes).expect("decode pointer");
+        assert_eq!(type_6, decoded);
+
+        // (KeyHash, None)
+        let type_7 = ShelleyAddress {
+            network: NetworkId::Mainnet,
+            payment: ShelleyAddressPaymentPart::PaymentKeyHash(payment_hash),
+            delegation: ShelleyAddressDelegationPart::None,
+        };
+        let bytes = type_7.to_bytes_key();
+        assert_eq!(bytes[0], 0x61);
+        let decoded = ShelleyAddress::from_bytes_key(&bytes).expect("decode none");
+        assert_eq!(type_7, decoded);
+
+        // (ScriptHash, None)
+        let type_8 = ShelleyAddress {
+            network: NetworkId::Mainnet,
+            payment: ShelleyAddressPaymentPart::ScriptHash(payment_hash),
+            delegation: ShelleyAddressDelegationPart::None,
+        };
+        let bytes = type_8.to_bytes_key();
+        assert_eq!(bytes[0], 0x71);
+        let decoded = ShelleyAddress::from_bytes_key(&bytes).expect("decode none");
+        assert_eq!(type_8, decoded);
     }
 }

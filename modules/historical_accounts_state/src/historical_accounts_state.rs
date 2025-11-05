@@ -26,8 +26,10 @@ mod volatile_historical_accounts;
 const DEFAULT_REWARDS_SUBSCRIBE_TOPIC: &str = "cardano.stake.reward.deltas";
 const DEFAULT_TX_CERTIFICATES_SUBSCRIBE_TOPIC: &str = "cardano.certificates";
 const DEFAULT_WITHDRAWALS_SUBSCRIBE_TOPIC: &str = "cardano.withdrawals";
-const DEFAULT_ADDRESS_DELTAS_SUBSCRIBE_TOPIC: (&str, &str) =
-    ("address-deltas-subscribe-topic", "cardano.address.delta");
+const DEFAULT_STAKE_ADDRESS_DELTAS_SUBSCRIBE_TOPIC: (&str, &str) = (
+    "stake-address-deltas-subscribe-topic",
+    "cardano.stake.deltas",
+);
 const DEFAULT_PARAMETERS_SUBSCRIBE_TOPIC: (&str, &str) =
     ("parameters-subscribe-topic", "cardano.protocol.parameters");
 
@@ -56,13 +58,13 @@ impl HistoricalAccountsState {
         mut rewards_subscription: Box<dyn Subscription<Message>>,
         mut certs_subscription: Box<dyn Subscription<Message>>,
         mut withdrawals_subscription: Box<dyn Subscription<Message>>,
-        mut address_deltas_subscription: Box<dyn Subscription<Message>>,
+        mut stake_address_deltas_subscription: Box<dyn Subscription<Message>>,
         mut params_subscription: Box<dyn Subscription<Message>>,
     ) -> Result<()> {
         let _ = params_subscription.read().await?;
         info!("Consumed initial genesis params from params_subscription");
-        let _ = address_deltas_subscription.read().await?;
-        info!("Consumed initial address deltas from address_deltas_subscription");
+        let _ = stake_address_deltas_subscription.read().await?;
+        info!("Consumed initial stake deltas from stake_address_deltas_subscription");
 
         // Background task to persist epochs sequentially
         const MAX_PENDING_PERSISTS: usize = 1;
@@ -82,7 +84,7 @@ impl HistoricalAccountsState {
         loop {
             // Create all per-block message futures upfront before processing messages sequentially
             let certs_message_f = certs_subscription.read();
-            let address_deltas_message_f = address_deltas_subscription.read();
+            let stake_address_deltas_message_f = stake_address_deltas_subscription.read();
             let withdrawals_message_f = withdrawals_subscription.read();
 
             let mut current_block: Option<BlockInfo> = None;
@@ -166,9 +168,9 @@ impl HistoricalAccountsState {
             }
 
             // Handle address deltas
-            let (_, message) = address_deltas_message_f.await?;
+            let (_, message) = stake_address_deltas_message_f.await?;
             match message.as_ref() {
-                Message::Cardano((block_info, CardanoMessage::AddressDeltas(deltas_msg))) => {
+                Message::Cardano((block_info, CardanoMessage::StakeAddressDeltas(deltas_msg))) => {
                     let span = info_span!(
                         "historical_account_state.handle_address_deltas",
                         block = block_info.number
@@ -178,10 +180,7 @@ impl HistoricalAccountsState {
                     Self::check_sync(&current_block, block_info);
                     {
                         let mut state = state_mutex.lock().await;
-                        state
-                            .handle_address_deltas(deltas_msg)
-                            .inspect_err(|e| error!("AddressDeltas handling error: {e:#}"))
-                            .ok();
+                        state.handle_address_deltas(deltas_msg);
                     }
                 }
 
@@ -249,8 +248,8 @@ impl HistoricalAccountsState {
             .unwrap_or(DEFAULT_REWARDS_SUBSCRIBE_TOPIC.to_string());
 
         let address_deltas_topic = config
-            .get_string(DEFAULT_ADDRESS_DELTAS_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_ADDRESS_DELTAS_SUBSCRIBE_TOPIC.1.to_string());
+            .get_string(DEFAULT_STAKE_ADDRESS_DELTAS_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_STAKE_ADDRESS_DELTAS_SUBSCRIBE_TOPIC.1.to_string());
 
         let params_topic = config
             .get_string(DEFAULT_PARAMETERS_SUBSCRIBE_TOPIC.0)
@@ -349,6 +348,15 @@ impl HistoricalAccountsState {
                         match state.lock().await.get_reward_history(account).await {
                             Ok(Some(rewards)) => {
                                 AccountsStateQueryResponse::AccountRewardHistory(rewards)
+                            }
+                            Ok(None) => AccountsStateQueryResponse::NotFound,
+                            Err(e) => AccountsStateQueryResponse::Error(e.to_string()),
+                        }
+                    }
+                    AccountsStateQuery::GetAccountAssociatedAddresses { account } => {
+                        match state.lock().await.get_addresses(account).await {
+                            Ok(Some(addresses)) => {
+                                AccountsStateQueryResponse::AccountAssociatedAddresses(addresses)
                             }
                             Ok(None) => AccountsStateQueryResponse::NotFound,
                             Err(e) => AccountsStateQueryResponse::Error(e.to_string()),
