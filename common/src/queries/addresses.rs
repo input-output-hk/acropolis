@@ -16,5 +16,5 @@ pub enum AddressStateQueryResponse {
     AddressTotals(AddressTotals),
     AddressUTxOs(Vec<UTxOIdentifier>),
     AddressTransactions(Vec<TxIdentifier>),
-    Error(QueryError)
+    Error(QueryError),
 }

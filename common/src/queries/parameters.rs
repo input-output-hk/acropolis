@@ -16,7 +16,6 @@ pub enum ParametersStateQueryResponse {
     LatestEpochParameters(ProtocolParams),
     EpochParameters(ProtocolParams),
     NetworkName(String),
-
     Error(QueryError),
 }
 

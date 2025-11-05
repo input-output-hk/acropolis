@@ -24,7 +24,6 @@ pub enum EpochsStateQueryResponse {
     EpochStakeDistribution(EpochStakeDistribution),
     EpochStakeDistributionByPool(EpochStakeDistributionByPool),
     LatestEpochBlocksMintedByPool(u64),
-
     Error(QueryError),
 }
 

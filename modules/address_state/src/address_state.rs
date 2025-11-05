@@ -4,6 +4,11 @@
 
 use std::sync::Arc;
 
+use crate::{
+    immutable_address_store::ImmutableAddressStore,
+    state::{AddressStorageConfig, State},
+};
+use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::addresses::{
@@ -16,11 +21,6 @@ use caryatid_sdk::{module, Context, Module, Subscription};
 use config::Config;
 use tokio::sync::{mpsc, Mutex};
 use tracing::{error, info};
-use acropolis_common::queries::errors::QueryError;
-use crate::{
-    immutable_address_store::ImmutableAddressStore,
-    state::{AddressStorageConfig, State},
-};
 mod immutable_address_store;
 mod state;
 mod volatile_addresses;

@@ -567,27 +567,27 @@ impl AccountsState {
                     AccountsStateQuery::GetAccountsUtxoValuesMap { stake_addresses } => {
                         match state.get_accounts_utxo_values_map(stake_addresses) {
                             Some(map) => AccountsStateQueryResponse::AccountsUtxoValuesMap(map),
-                            None => AccountsStateQueryResponse::Error(
-                                QueryError::not_found("One or more accounts not found"),
-                            ),
+                            None => AccountsStateQueryResponse::Error(QueryError::not_found(
+                                "One or more accounts not found",
+                            )),
                         }
                     }
 
                     AccountsStateQuery::GetAccountsUtxoValuesSum { stake_addresses } => {
                         match state.get_accounts_utxo_values_sum(stake_addresses) {
                             Some(sum) => AccountsStateQueryResponse::AccountsUtxoValuesSum(sum),
-                            None => AccountsStateQueryResponse::Error(
-                                QueryError::not_found("One or more accounts not found"),
-                            ),
+                            None => AccountsStateQueryResponse::Error(QueryError::not_found(
+                                "One or more accounts not found",
+                            )),
                         }
                     }
 
                     AccountsStateQuery::GetAccountsBalancesMap { stake_addresses } => {
                         match state.get_accounts_balances_map(stake_addresses) {
                             Some(map) => AccountsStateQueryResponse::AccountsBalancesMap(map),
-                            None => AccountsStateQueryResponse::Error(
-                                QueryError::not_found("One or more accounts not found"),
-                            ),
+                            None => AccountsStateQueryResponse::Error(QueryError::not_found(
+                                "One or more accounts not found",
+                            )),
                         }
                     }
 
@@ -600,18 +600,18 @@ impl AccountsState {
                     AccountsStateQuery::GetAccountsBalancesSum { stake_addresses } => {
                         match state.get_account_balances_sum(stake_addresses) {
                             Some(sum) => AccountsStateQueryResponse::AccountsBalancesSum(sum),
-                            None => AccountsStateQueryResponse::Error(
-                                QueryError::not_found("One or more accounts not found"),
-                            ),
+                            None => AccountsStateQueryResponse::Error(QueryError::not_found(
+                                "One or more accounts not found",
+                            )),
                         }
                     }
 
                     AccountsStateQuery::GetSPDDByEpoch { epoch } => match spdd_store_guard {
                         Some(spdd_store) => match spdd_store.query_by_epoch(*epoch) {
                             Ok(result) => AccountsStateQueryResponse::SPDDByEpoch(result),
-                            Err(e) => AccountsStateQueryResponse::Error(QueryError::internal_error(
-                                e.to_string(),
-                            )),
+                            Err(e) => AccountsStateQueryResponse::Error(
+                                QueryError::internal_error(e.to_string()),
+                            ),
                         },
                         None => {
                             AccountsStateQueryResponse::Error(QueryError::storage_disabled("SPDD"))

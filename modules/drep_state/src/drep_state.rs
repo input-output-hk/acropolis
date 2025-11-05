@@ -325,9 +325,9 @@ impl DRepState {
                                     QueryError::internal_error(msg),
                                 ),
                             },
-                            None => GovernanceStateQueryResponse::Error(QueryError::internal_error(
-                                "No current state",
-                            )),
+                            None => GovernanceStateQueryResponse::Error(
+                                QueryError::internal_error("No current state"),
+                            ),
                         }
                     }
                     GovernanceStateQuery::GetDRepDelegators { drep_credential } => {
@@ -349,9 +349,9 @@ impl DRepState {
                                     QueryError::internal_error(msg),
                                 ),
                             },
-                            None => GovernanceStateQueryResponse::Error(QueryError::internal_error(
-                                "No current state",
-                            )),
+                            None => GovernanceStateQueryResponse::Error(
+                                QueryError::internal_error("No current state"),
+                            ),
                         }
                     }
                     GovernanceStateQuery::GetDRepMetadata { drep_credential } => {
@@ -369,9 +369,9 @@ impl DRepState {
                                     QueryError::internal_error(msg),
                                 ),
                             },
-                            None => GovernanceStateQueryResponse::Error(QueryError::internal_error(
-                                "No current state",
-                            )),
+                            None => GovernanceStateQueryResponse::Error(
+                                QueryError::internal_error("No current state"),
+                            ),
                         }
                     }
 
@@ -392,9 +392,9 @@ impl DRepState {
                                     QueryError::internal_error(msg),
                                 ),
                             },
-                            None => GovernanceStateQueryResponse::Error(QueryError::internal_error(
-                                "No current state",
-                            )),
+                            None => GovernanceStateQueryResponse::Error(
+                                QueryError::internal_error("No current state"),
+                            ),
                         }
                     }
                     GovernanceStateQuery::GetDRepVotes { drep_credential } => {
@@ -414,9 +414,9 @@ impl DRepState {
                                     QueryError::internal_error(msg),
                                 ),
                             },
-                            None => GovernanceStateQueryResponse::Error(QueryError::internal_error(
-                                "No current state",
-                            )),
+                            None => GovernanceStateQueryResponse::Error(
+                                QueryError::internal_error("No current state"),
+                            ),
                         }
                     }
                     _ => GovernanceStateQueryResponse::Error(QueryError::invalid_request(format!(

@@ -91,7 +91,6 @@ pub enum BlocksStateQueryResponse {
     BlockInvolvedAddresses(BlockInvolvedAddresses),
     BlockHashes(BlockHashes),
     TransactionHashes(TransactionHashes),
-
     Error(QueryError),
 }
 

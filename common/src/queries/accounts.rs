@@ -81,7 +81,6 @@ pub enum AccountsStateQueryResponse {
     // DReps-related responses
     DrepDelegators(DrepDelegators),
     AccountsDrepDelegationsMap(HashMap<StakeAddress, Option<DRepChoice>>),
-
     Error(QueryError),
 }
 
