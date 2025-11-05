@@ -99,14 +99,12 @@ impl NetworkManager {
         };
         let conn = PeerConnection::new(address, self.network_magic, sender, delay);
         let peer = PeerData::new(conn);
-        if self.chain.preferred_upstream.is_some() {
-            let points = self.chain.choose_points_for_find_intersect();
-            if !points.is_empty() {
-                peer.find_intersect(points);
-            }
-            self.peers.insert(id, peer);
-        } else {
-            self.peers.insert(id, peer);
+        let points = self.chain.choose_points_for_find_intersect();
+        if !points.is_empty() {
+            peer.find_intersect(points);
+        }
+        self.peers.insert(id, peer);
+        if self.chain.preferred_upstream.is_none() {
             self.set_preferred_upstream(id);
         }
     }
@@ -155,6 +153,13 @@ impl NetworkManager {
             }
             PeerEvent::ChainSync(PeerChainSyncEvent::RollBackward(point)) => {
                 self.chain.handle_roll_backward(peer, point);
+            }
+            PeerEvent::ChainSync(PeerChainSyncEvent::IntersectNotFound(tip)) => {
+                // We called find_intersect on a peer, and it didn't recognize any of the points we passed.
+                // That peer must either be behind us or on a different fork; either way, that chain should sync from its own tip
+                if let Some(peer) = self.peers.get(&peer) {
+                    peer.find_intersect(vec![tip]);
+                }
             }
             PeerEvent::BlockFetched(fetched) => {
                 for peer in self.peers.values_mut() {
@@ -209,13 +214,6 @@ impl NetworkManager {
         };
         info!("setting preferred upstream to {}", peer.conn.address);
         self.chain.handle_new_preferred_upstream(id);
-
-        // If our preferred upstream changed, resync all connections.
-        // That will trigger a rollback if needed.
-        let points = self.chain.choose_points_for_find_intersect();
-        for peer in self.peers.values() {
-            peer.find_intersect(points.clone());
-        }
     }
 
     async fn publish_blocks(&mut self) -> Result<()> {

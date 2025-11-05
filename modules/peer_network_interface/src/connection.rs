@@ -72,6 +72,7 @@ pub enum PeerEvent {
 pub enum PeerChainSyncEvent {
     RollForward(Header),
     RollBackward(Point),
+    IntersectNotFound(Point),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -146,8 +147,11 @@ impl PeerConnectionWorker {
                     };
                     match cmd {
                         ChainsyncCommand::FindIntersect(points) => {
-                            let (point, _) = client.find_intersect(points).await?;
+                            let (point, tip) = client.find_intersect(points).await?;
                             reached = point;
+                            if reached.is_none() {
+                                self.sender.write(PeerEvent::ChainSync(PeerChainSyncEvent::IntersectNotFound(tip.0))).await?;
+                            }
                         }
                         ChainsyncCommand::FindTip(done) => {
                             let points = reached.as_slice().to_vec();

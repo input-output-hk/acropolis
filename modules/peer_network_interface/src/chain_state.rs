@@ -220,9 +220,6 @@ impl ChainState {
         for _ in 0..5 {
             if let Some((slot, hash)) = iterator.next() {
                 result.push(Point::Specific(*slot, hash.to_vec()));
-            } else {
-                result.push(Point::Origin);
-                return result;
             }
         }
 
@@ -231,9 +228,6 @@ impl ChainState {
         for _ in 0..5 {
             if let Some((slot, hash)) = iterator.next() {
                 result.push(Point::Specific(*slot, hash.to_vec()));
-            } else {
-                result.push(Point::Origin);
-                return result;
             }
         }
 
@@ -243,9 +237,6 @@ impl ChainState {
         for _ in 0..5 {
             if let Some((slot, hash)) = iterator.next() {
                 result.push(Point::Specific(*slot, hash.to_vec()));
-            } else {
-                result.push(Point::Origin);
-                return result;
             }
         }
 
