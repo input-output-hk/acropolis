@@ -2,14 +2,14 @@ use std::collections::HashMap;
 
 use acropolis_common::{
     messages::{SPOStakeDistributionMessage, SPOStateMessage},
-    KeyHash, PoolId,
+    PoolId, VrfKeyHash,
 };
 
 /// Epoch data for block vrf validation
 #[derive(Debug, Default)]
 pub struct Snapshot {
     /// Map of pool_id to its vrf_key_hash
-    pub active_spos: HashMap<KeyHash, KeyHash>,
+    pub active_spos: HashMap<PoolId, VrfKeyHash>,
 
     /// active stakes keyed by pool id
     pub active_stakes: HashMap<PoolId, u64>,
@@ -19,7 +19,7 @@ pub struct Snapshot {
 
 impl From<(&SPOStateMessage, &SPOStakeDistributionMessage)> for Snapshot {
     fn from((spo_state_msg, spdd_msg): (&SPOStateMessage, &SPOStakeDistributionMessage)) -> Self {
-        let active_spos: HashMap<PoolId, KeyHash> = spo_state_msg
+        let active_spos: HashMap<PoolId, VrfKeyHash> = spo_state_msg
             .spos
             .iter()
             .map(|registration| {

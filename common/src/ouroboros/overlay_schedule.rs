@@ -6,18 +6,17 @@
 //! https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/libs/cardano-protocol-tpraos/src/Cardano/Protocol/TPraos/Rules/Overlay.hs#L332
 
 use crate::{
-    genesis_values::{GenDeleg, GenesisDelegs, GenesisKey},
-    rational_number::RationalNumber,
-    rest_helper::ToCheckedF64,
+    rational_number::RationalNumber, rest_helper::ToCheckedF64, GenesisDelegate, GenesisDelegates,
+    GenesisKeyhash,
 };
 use anyhow::Result;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum OBftSlot {
     /// Overlay slot but no block should be produced (rare edge case)
     NonActiveSlot,
     /// Active overlay slot reserved for specific genesis key
-    ActiveSlot(GenesisKey, GenDeleg),
+    ActiveSlot(GenesisKeyhash, GenesisDelegate),
 }
 
 /// Determine if the given slot is reserved for the overlay schedule.
@@ -57,7 +56,7 @@ pub fn is_overlay_slot(epoch_slot: u64, decentralisation_param: &RationalNumber)
 /// Classification of the slot (NonActiveSlot or ActiveSlot with genesis key)
 pub fn classify_overlay_slot(
     epoch_slot: u64,
-    genesis_delegs: &GenesisDelegs,
+    genesis_delegs: &GenesisDelegates,
     decentralisation_param: &RationalNumber,
     active_slots_coeff: &RationalNumber,
 ) -> Result<OBftSlot> {
@@ -105,7 +104,7 @@ pub fn classify_overlay_slot(
 /// - active_slots_coeff is not a valid rational number
 pub fn lookup_in_overlay_schedule(
     epoch_slot: u64,
-    genesis_delegs: &GenesisDelegs,
+    genesis_delegs: &GenesisDelegates,
     decentralisation_param: &RationalNumber,
     active_slots_coeff: &RationalNumber,
 ) -> Result<Option<OBftSlot>> {

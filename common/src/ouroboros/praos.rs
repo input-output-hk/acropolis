@@ -9,7 +9,7 @@ use crate::ouroboros::vrf_validation::{
 use crate::protocol_params::Nonce;
 use crate::rational_number::RationalNumber;
 use crate::{protocol_params::PraosParams, BlockInfo};
-use crate::{KeyHash, PoolId};
+use crate::{PoolId, VrfKeyHash};
 use anyhow::Result;
 use pallas::ledger::primitives::VrfCert;
 use pallas::ledger::traverse::MultiEraHeader;
@@ -19,7 +19,7 @@ pub fn validate_vrf_praos<'a>(
     header: &'a MultiEraHeader,
     epoch_nonce: &'a Nonce,
     praos_params: &'a PraosParams,
-    active_spos: &'a HashMap<PoolId, KeyHash>,
+    active_spos: &'a HashMap<PoolId, VrfKeyHash>,
     active_spdd: &'a HashMap<PoolId, u64>,
     total_active_stake: u64,
 ) -> Result<Vec<VrfValidation<'a>>, VrfValidationError> {
@@ -28,7 +28,7 @@ pub fn validate_vrf_praos<'a>(
     let Some(issuer_vkey) = header.issuer_vkey() else {
         return Ok(vec![Box::new(|| Err(VrfValidationError::MissingIssuerKey))]);
     };
-    let pool_id: PoolId = keyhash_224(issuer_vkey);
+    let pool_id = PoolId::from(keyhash_224(issuer_vkey));
     let registered_vrf_key_hash =
         active_spos.get(&pool_id).ok_or(VrfValidationError::UnknownPool {
             pool_id: pool_id.clone(),
@@ -87,8 +87,8 @@ fn vrf_result<'a>(header: &'a MultiEraHeader) -> Option<&'a VrfCert> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        crypto::keyhash_256, protocol_params::NonceHash, serialization::Bech32WithHrp, BlockHash,
-        BlockStatus, Era,
+        crypto::keyhash_256, protocol_params::NonceHash, serialization::Bech32Conversion,
+        BlockHash, BlockStatus, Era,
     };
 
     use super::*;
@@ -124,14 +124,12 @@ mod tests {
         };
         let block_header =
             MultiEraHeader::decode(block_info.era as u8, None, &block_header_7854823).unwrap();
-        let pool_id = Vec::<u8>::from_bech32_with_hrp(
-            "pool195gdnmj6smzuakm4etxsxw3fgh8asqc4awtcskpyfnkpcvh2v8t",
-            "pool",
-        )
-        .unwrap();
+        let pool_id =
+            PoolId::from_bech32("pool195gdnmj6smzuakm4etxsxw3fgh8asqc4awtcskpyfnkpcvh2v8t")
+                .unwrap();
         let active_spos = HashMap::from([(
             pool_id.clone(),
-            keyhash_256(block_header.vrf_vkey().unwrap()),
+            VrfKeyHash::from(keyhash_256(block_header.vrf_vkey().unwrap())),
         )]);
         let active_spdd = HashMap::from([(pool_id.clone(), 64590523391239)]);
         let result = validate_vrf_praos(

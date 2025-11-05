@@ -16,6 +16,7 @@ use hex::decode;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_with::{hex::Hex, serde_as};
+use std::collections::BTreeMap;
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
@@ -1385,7 +1386,36 @@ pub struct GenesisDelegate {
     #[serde_as(as = "Hex")]
     pub delegate: Hash<28>,
     #[serde_as(as = "Hex")]
-    pub vrf: Vec<u8>,
+    pub vrf: VrfKeyHash,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct GenesisDelegates(pub BTreeMap<GenesisKeyhash, GenesisDelegate>);
+
+impl TryFrom<Vec<(&str, (&str, &str))>> for GenesisDelegates {
+    type Error = anyhow::Error;
+    fn try_from(entries: Vec<(&str, (&str, &str))>) -> Result<Self, Self::Error> {
+        Ok(GenesisDelegates(
+            entries
+                .into_iter()
+                .map(|(genesis_key_str, (delegate_str, vrf_str))| {
+                    let genesis_key = GenesisKeyhash::from_str(genesis_key_str)
+                        .map_err(|e| anyhow::anyhow!("Invalid genesis key hash: {}", e))?;
+                    let delegate = Hash::<28>::from_str(delegate_str)
+                        .map_err(|e| anyhow::anyhow!("Invalid genesis delegate: {}", e))?;
+                    let vrf = VrfKeyHash::from_str(vrf_str)
+                        .map_err(|e| anyhow::anyhow!("Invalid genesis VRF: {}", e))?;
+                    Ok((genesis_key, GenesisDelegate { delegate, vrf }))
+                })
+                .collect::<Result<_, Self::Error>>()?,
+        ))
+    }
+}
+
+impl AsRef<BTreeMap<GenesisKeyhash, GenesisDelegate>> for GenesisDelegates {
+    fn as_ref(&self) -> &BTreeMap<GenesisKeyhash, GenesisDelegate> {
+        &self.0
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]

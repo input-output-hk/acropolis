@@ -9,8 +9,8 @@ use crate::ouroboros::vrf_validation::{
 use crate::ouroboros::{overlay_schedule, vrf};
 use crate::protocol_params::Nonce;
 use crate::rational_number::RationalNumber;
-use crate::{genesis_values::GenesisDelegs, protocol_params::PraosParams, BlockInfo};
-use crate::{KeyHash, PoolId};
+use crate::{protocol_params::PraosParams, BlockInfo};
+use crate::{GenesisDelegates, PoolId, VrfKeyHash};
 use anyhow::Result;
 use pallas::ledger::primitives::VrfCert;
 use pallas::ledger::traverse::MultiEraHeader;
@@ -19,9 +19,9 @@ pub fn validate_vrf_tpraos<'a>(
     block_info: &'a BlockInfo,
     header: &'a MultiEraHeader,
     epoch_nonce: &'a Nonce,
-    genesis_delegs: &'a GenesisDelegs,
+    genesis_delegs: &'a GenesisDelegates,
     praos_params: &'a PraosParams,
-    active_spos: &'a HashMap<PoolId, KeyHash>,
+    active_spos: &'a HashMap<PoolId, VrfKeyHash>,
     active_spdd: &'a HashMap<PoolId, u64>,
     total_active_stake: u64,
     decentralisation_param: RationalNumber,
@@ -42,7 +42,7 @@ pub fn validate_vrf_tpraos<'a>(
             let Some(issuer_vkey) = header.issuer_vkey() else {
                 return Ok(vec![Box::new(|| Err(VrfValidationError::MissingIssuerKey))]);
             };
-            let pool_id: PoolId = keyhash_224(issuer_vkey);
+            let pool_id = PoolId::from(keyhash_224(issuer_vkey));
             let registered_vrf_key_hash =
                 active_spos.get(&pool_id).ok_or(VrfValidationError::UnknownPool {
                     pool_id: pool_id.clone(),
@@ -54,7 +54,7 @@ pub fn validate_vrf_tpraos<'a>(
             let Some(vrf_vkey) = header.vrf_vkey() else {
                 return Ok(vec![Box::new(|| Err(VrfValidationError::MissingVrfVkey))]);
             };
-            let declared_vrf_key: &[u8; vrf::PublicKey::HASH_SIZE] = vrf_vkey
+            let declared_vrf_key: &[u8; vrf::PublicKey::SIZE] = vrf_vkey
                 .try_into()
                 .map_err(|_| VrfValidationError::TryFromSlice("Invalid Vrf Key".to_string()))?;
             let nonce_vrf_cert =
@@ -104,7 +104,7 @@ pub fn validate_vrf_tpraos<'a>(
             let Some(vrf_vkey) = header.vrf_vkey() else {
                 return Ok(vec![Box::new(|| Err(VrfValidationError::MissingVrfVkey))]);
             };
-            let declared_vrf_key: &[u8; vrf::PublicKey::HASH_SIZE] = vrf_vkey
+            let declared_vrf_key: &[u8; vrf::PublicKey::SIZE] = vrf_vkey
                 .try_into()
                 .map_err(|_| VrfValidationError::TryFromSlice("Invalid Vrf Key".to_string()))?;
             let nonce_vrf_cert =
@@ -164,7 +164,7 @@ fn leader_vrf_cert<'a>(header: &'a MultiEraHeader) -> Option<&'a VrfCert> {
 mod tests {
     use crate::{
         crypto::keyhash_256, genesis_values::GenesisValues, protocol_params::NonceHash,
-        serialization::Bech32WithHrp, BlockHash, BlockStatus, Era,
+        serialization::Bech32Conversion, BlockHash, BlockStatus, Era,
     };
 
     use super::*;
@@ -252,14 +252,12 @@ mod tests {
         };
         let block_header =
             MultiEraHeader::decode(block_info.era as u8, None, &block_header_4556956).unwrap();
-        let pool_id = Vec::<u8>::from_bech32_with_hrp(
-            "pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy",
-            "pool",
-        )
-        .unwrap();
-        let active_spos: HashMap<PoolId, KeyHash> = HashMap::from([(
+        let pool_id =
+            PoolId::from_bech32("pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy")
+                .unwrap();
+        let active_spos: HashMap<PoolId, VrfKeyHash> = HashMap::from([(
             pool_id.clone(),
-            keyhash_256(block_header.vrf_vkey().unwrap()),
+            VrfKeyHash::from(keyhash_256(block_header.vrf_vkey().unwrap())),
         )]);
         let active_spdd = HashMap::from([(pool_id.clone(), 75284250207839)]);
         let result = validate_vrf_tpraos(
@@ -310,14 +308,12 @@ mod tests {
         };
         let block_header =
             MultiEraHeader::decode(block_info.era as u8, None, &block_header_4576496).unwrap();
-        let pool_id = Vec::<u8>::from_bech32_with_hrp(
-            "pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy",
-            "pool",
-        )
-        .unwrap();
-        let active_spos: HashMap<PoolId, KeyHash> = HashMap::from([(
+        let pool_id =
+            PoolId::from_bech32("pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy")
+                .unwrap();
+        let active_spos: HashMap<PoolId, VrfKeyHash> = HashMap::from([(
             pool_id.clone(),
-            keyhash_256(block_header.vrf_vkey().unwrap()),
+            VrfKeyHash::from(keyhash_256(block_header.vrf_vkey().unwrap())),
         )]);
         let active_spdd = HashMap::from([(pool_id.clone(), 75284250207839)]);
         let result = validate_vrf_tpraos(
@@ -368,12 +364,10 @@ mod tests {
         };
         let block_header =
             MultiEraHeader::decode(block_info.era as u8, None, &block_header_4576496).unwrap();
-        let pool_id = Vec::<u8>::from_bech32_with_hrp(
-            "pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy",
-            "pool",
-        )
-        .unwrap();
-        let active_spos: HashMap<PoolId, KeyHash> = HashMap::from([]);
+        let pool_id =
+            PoolId::from_bech32("pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy")
+                .unwrap();
+        let active_spos: HashMap<PoolId, VrfKeyHash> = HashMap::from([]);
         let active_spdd = HashMap::from([]);
         let result = validate_vrf_tpraos(
             &block_info,
@@ -427,13 +421,11 @@ mod tests {
         };
         let block_header =
             MultiEraHeader::decode(block_info.era as u8, None, &block_header_4576496).unwrap();
-        let pool_id = Vec::<u8>::from_bech32_with_hrp(
-            "pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy",
-            "pool",
-        )
-        .unwrap();
-        let active_spos: HashMap<PoolId, KeyHash> =
-            HashMap::from([(pool_id.clone(), keyhash_256(&[0; 64]))]);
+        let pool_id =
+            PoolId::from_bech32("pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy")
+                .unwrap();
+        let active_spos: HashMap<PoolId, VrfKeyHash> =
+            HashMap::from([(pool_id.clone(), VrfKeyHash::from(keyhash_256(&[0; 64])))]);
         let active_spdd = HashMap::from([(pool_id.clone(), 75284250207839)]);
         let result = validate_vrf_tpraos(
             &block_info,
@@ -452,8 +444,10 @@ mod tests {
             result.unwrap_err(),
             VrfValidationError::WrongLeaderVrfKey(WrongLeaderVrfKeyError {
                 pool_id: pool_id.clone(),
-                registered_vrf_hash: keyhash_256(&[0; 64]),
-                header_vrf_hash: keyhash_256(block_header.vrf_vkey().unwrap()),
+                registered_vrf_key_hash: VrfKeyHash::from(keyhash_256(&[0; 64])),
+                header_vrf_key_hash: VrfKeyHash::from(keyhash_256(
+                    block_header.vrf_vkey().unwrap()
+                )),
             })
         );
     }
@@ -491,14 +485,12 @@ mod tests {
         };
         let block_header =
             MultiEraHeader::decode(block_info.era as u8, None, &block_header_4576496).unwrap();
-        let pool_id = Vec::<u8>::from_bech32_with_hrp(
-            "pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy",
-            "pool",
-        )
-        .unwrap();
-        let active_spos: HashMap<PoolId, KeyHash> = HashMap::from([(
+        let pool_id =
+            PoolId::from_bech32("pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy")
+                .unwrap();
+        let active_spos: HashMap<PoolId, VrfKeyHash> = HashMap::from([(
             pool_id.clone(),
-            keyhash_256(block_header.vrf_vkey().unwrap()),
+            VrfKeyHash::from(keyhash_256(block_header.vrf_vkey().unwrap())),
         )]);
         // small active stake (correct one is 75284250207839)
         let active_spdd = HashMap::from([(pool_id.clone(), 75284250207)]);

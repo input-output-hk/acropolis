@@ -2,13 +2,14 @@
 //! Reads genesis files and outputs initial UTXO events
 
 use acropolis_common::{
-    genesis_values::{GenesisDelegs, GenesisValues},
+    genesis_values::GenesisValues,
     messages::{
         CardanoMessage, GenesisCompleteMessage, GenesisUTxOsMessage, Message, PotDeltasMessage,
         UTXODeltasMessage,
     },
-    Address, BlockHash, BlockInfo, BlockStatus, ByronAddress, Era, Lovelace, LovelaceDelta, Pot,
-    PotDelta, TxHash, TxIdentifier, TxOutRef, TxOutput, UTXODelta, UTxOIdentifier, Value,
+    Address, BlockHash, BlockInfo, BlockStatus, ByronAddress, Era, GenesisDelegates, Lovelace,
+    LovelaceDelta, Pot, PotDelta, TxHash, TxIdentifier, TxOutRef, TxOutput, UTXODelta,
+    UTxOIdentifier, Value,
 };
 use anyhow::Result;
 use blake2::{digest::consts::U32, Blake2b, Digest};
@@ -205,22 +206,23 @@ impl GenesisBootstrapper {
                     shelley_epoch: shelley_start_epoch,
                     shelley_epoch_len: shelley_genesis.epoch_length.unwrap() as u64,
                     shelley_genesis_hash,
-                    genesis_delegs: GenesisDelegs::from(
+                    genesis_delegs: GenesisDelegates::try_from(
                         shelley_genesis
                             .gen_delegs
                             .unwrap()
                             .iter()
                             .map(|(key, value)| {
                                 (
-                                    key.to_string(),
+                                    key.as_str(),
                                     (
-                                        value.delegate.as_ref().unwrap().to_string(),
-                                        value.vrf.as_ref().unwrap().to_string(),
+                                        value.delegate.as_ref().unwrap().as_str(),
+                                        value.vrf.as_ref().unwrap().as_str(),
                                     ),
                                 )
                             })
-                            .collect::<Vec<(String, (String, String))>>(),
-                    ),
+                            .collect::<Vec<(&str, (&str, &str))>>(),
+                    )
+                    .unwrap(),
                 };
 
                 // Send completion message

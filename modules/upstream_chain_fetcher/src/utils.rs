@@ -1,6 +1,7 @@
 use crate::UpstreamCacheRecord;
-use acropolis_common::genesis_values::{GenesisDelegs, GenesisValues};
+use acropolis_common::genesis_values::GenesisValues;
 use acropolis_common::messages::{CardanoMessage, Message};
+use acropolis_common::GenesisDelegates;
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::Context;
 use config::Config;
@@ -93,7 +94,7 @@ impl FetcherConfig {
             shelley_epoch_len,
             shelley_genesis_hash,
             // TODO: load genesis keys from config
-            genesis_delegs: GenesisDelegs::from(vec![]),
+            genesis_delegs: GenesisDelegates::try_from(vec![]).unwrap(),
         })
     }
 

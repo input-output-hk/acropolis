@@ -1,8 +1,7 @@
-use crate::genesis_values::{GenDeleg, GenesisKey};
 use crate::ouroboros::vrf;
 use crate::rational_number::RationalNumber;
-use crate::PoolId;
-use crate::{crypto::keyhash_256, protocol_params::Nonce, KeyHash, Slot};
+use crate::{crypto::keyhash_256, protocol_params::Nonce, Slot};
+use crate::{GenesisDelegate, GenesisKeyhash, PoolId, VrfKeyHash};
 use anyhow::Result;
 use dashu_int::UBig;
 use pallas::ledger::primitives::babbage::{derive_tagged_vrf_output, VrfDerivation};
@@ -80,23 +79,23 @@ pub enum VrfValidationError {
     hex::encode(&header_vrf_hash),
 )]
 pub struct WrongGenesisLeaderVrfKeyError {
-    pub genesis_key: GenesisKey,
-    pub registered_vrf_hash: KeyHash,
-    pub header_vrf_hash: KeyHash,
+    pub genesis_key: GenesisKeyhash,
+    pub registered_vrf_hash: VrfKeyHash,
+    pub header_vrf_hash: VrfKeyHash,
 }
 
 impl WrongGenesisLeaderVrfKeyError {
     pub fn new(
-        genesis_key: &GenesisKey,
-        genesis_deleg: &GenDeleg,
+        genesis_key: &GenesisKeyhash,
+        genesis_deleg: &GenesisDelegate,
         vrf_vkey: &[u8],
     ) -> Result<(), Self> {
-        let header_vrf_hash = keyhash_256(vrf_vkey);
-        let registered_vrf_hash = genesis_deleg.vrf.to_vec();
+        let header_vrf_hash = VrfKeyHash::from(keyhash_256(vrf_vkey));
+        let registered_vrf_hash = &genesis_deleg.vrf;
         if !registered_vrf_hash.eq(&header_vrf_hash) {
             return Err(Self {
                 genesis_key: genesis_key.clone(),
-                registered_vrf_hash,
+                registered_vrf_hash: registered_vrf_hash.clone(),
                 header_vrf_hash,
             });
         }
@@ -108,29 +107,29 @@ impl WrongGenesisLeaderVrfKeyError {
 
 #[derive(Error, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[error(
-    "Wrong Leader VRF Key: Pool ID={}, Registered VRF Hash={}, Header VRF Hash={}",
+    "Wrong Leader VRF Key: Pool ID={}, Registered VRF Key Hash={}, Header VRF Key Hash={}",
     hex::encode(&pool_id),
-    hex::encode(&registered_vrf_hash),
-    hex::encode(&header_vrf_hash),
+    hex::encode(&registered_vrf_key_hash),
+    hex::encode(&header_vrf_key_hash),
 )]
 pub struct WrongLeaderVrfKeyError {
     pub pool_id: PoolId,
-    pub registered_vrf_hash: KeyHash,
-    pub header_vrf_hash: KeyHash,
+    pub registered_vrf_key_hash: VrfKeyHash,
+    pub header_vrf_key_hash: VrfKeyHash,
 }
 
 impl WrongLeaderVrfKeyError {
     pub fn new(
         pool_id: &PoolId,
-        registered_vrf_hash: &KeyHash,
+        registered_vrf_key_hash: &VrfKeyHash,
         vrf_vkey: &[u8],
     ) -> Result<(), Self> {
-        let header_vrf_hash = keyhash_256(vrf_vkey);
-        if !registered_vrf_hash.eq(&header_vrf_hash) {
+        let header_vrf_key_hash = VrfKeyHash::from(keyhash_256(vrf_vkey));
+        if !registered_vrf_key_hash.eq(&header_vrf_key_hash) {
             return Err(Self {
                 pool_id: pool_id.clone(),
-                registered_vrf_hash: registered_vrf_hash.clone(),
-                header_vrf_hash,
+                registered_vrf_key_hash: registered_vrf_key_hash.clone(),
+                header_vrf_key_hash,
             });
         }
         Ok(())
