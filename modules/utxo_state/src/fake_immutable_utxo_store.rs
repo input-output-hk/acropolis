@@ -53,6 +53,7 @@ impl ImmutableUTXOStore for FakeImmutableUTXOStore {
             address: Address::None,
             value: Value::new(42, Vec::new()),
             datum: None,
+            reference_script: None,
         }))
     }
 

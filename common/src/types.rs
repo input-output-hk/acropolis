@@ -324,6 +324,15 @@ pub enum Datum {
     Inline(Vec<u8>),
 }
 
+// The full CBOR bytes of a reference script
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub enum ReferenceScript {
+    Native(Vec<u8>),
+    PlutusV1(Vec<u8>),
+    PlutusV2(Vec<u8>),
+    PlutusV3(Vec<u8>),
+}
+
 /// Value (lovelace + multiasset)
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Value {
@@ -448,6 +457,9 @@ pub struct TxOutput {
 
     /// Datum (Inline or Hash)
     pub datum: Option<Datum>,
+
+    /// Reference script
+    pub reference_script: Option<ReferenceScript>,
 }
 
 /// Transaction input (UTXO reference)
