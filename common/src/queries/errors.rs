@@ -8,16 +8,13 @@ pub enum QueryError {
     NotFound { resource: String },
 
     /// An error occurred while processing the query
-    QueryFailed { message: String },
+    Internal { message: String },
 
     /// Storage backend is disabled in configuration
     StorageDisabled { storage_type: String },
 
     /// Invalid request parameters
     InvalidRequest { message: String },
-
-    /// One or more resources in a batch query were not found
-    PartialNotFound { message: String },
 
     /// Query variant is not implemented yet
     NotImplemented { query: String },
@@ -30,8 +27,8 @@ impl QueryError {
         }
     }
 
-    pub fn query_failed(message: impl Into<String>) -> Self {
-        Self::QueryFailed {
+    pub fn internal_error(message: impl Into<String>) -> Self {
+        Self::Internal {
             message: message.into(),
         }
     }
@@ -48,12 +45,6 @@ impl QueryError {
         }
     }
 
-    pub fn partial_not_found(message: impl Into<String>) -> Self {
-        Self::PartialNotFound {
-            message: message.into(),
-        }
-    }
-
     pub fn not_implemented(query: impl Into<String>) -> Self {
         Self::NotImplemented {
             query: query.into(),
@@ -65,12 +56,11 @@ impl fmt::Display for QueryError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NotFound { resource } => write!(f, "Not found: {}", resource),
-            Self::QueryFailed { message } => write!(f, "Query failed: {}", message),
+            Self::Internal { message } => write!(f, "Query failed: {}", message),
             Self::StorageDisabled { storage_type } => {
                 write!(f, "{} storage is not enabled", storage_type)
             }
             Self::InvalidRequest { message } => write!(f, "Invalid request: {}", message),
-            Self::PartialNotFound { message } => write!(f, "Partial result: {}", message),
             Self::NotImplemented { query } => write!(f, "Query not implemented: {}", query),
         }
     }

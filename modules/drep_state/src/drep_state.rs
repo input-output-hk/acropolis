@@ -280,7 +280,7 @@ impl DRepState {
                             let dreps = state.list();
                             GovernanceStateQueryResponse::DRepsList(DRepsList { dreps })
                         }
-                        None => GovernanceStateQueryResponse::Error(QueryError::query_failed(
+                        None => GovernanceStateQueryResponse::Error(QueryError::internal_error(
                             "No current DRep state",
                         )),
                     },
@@ -313,7 +313,7 @@ impl DRepState {
                                             )),
                                         ),
                                         Err(msg) => GovernanceStateQueryResponse::Error(
-                                            QueryError::query_failed(msg),
+                                            QueryError::internal_error(msg),
                                         ),
                                     }
                                 }
@@ -322,10 +322,10 @@ impl DRepState {
                                     QueryError::not_found(format!("DRep {:?}", drep_credential)),
                                 ),
                                 Err(msg) => GovernanceStateQueryResponse::Error(
-                                    QueryError::query_failed(msg),
+                                    QueryError::internal_error(msg),
                                 ),
                             },
-                            None => GovernanceStateQueryResponse::Error(QueryError::query_failed(
+                            None => GovernanceStateQueryResponse::Error(QueryError::internal_error(
                                 "No current state",
                             )),
                         }
@@ -346,10 +346,10 @@ impl DRepState {
                                     ))
                                 }
                                 Err(msg) => GovernanceStateQueryResponse::Error(
-                                    QueryError::query_failed(msg),
+                                    QueryError::internal_error(msg),
                                 ),
                             },
-                            None => GovernanceStateQueryResponse::Error(QueryError::query_failed(
+                            None => GovernanceStateQueryResponse::Error(QueryError::internal_error(
                                 "No current state",
                             )),
                         }
@@ -366,10 +366,10 @@ impl DRepState {
                                     ))
                                 }
                                 Err(msg) => GovernanceStateQueryResponse::Error(
-                                    QueryError::query_failed(msg),
+                                    QueryError::internal_error(msg),
                                 ),
                             },
-                            None => GovernanceStateQueryResponse::Error(QueryError::query_failed(
+                            None => GovernanceStateQueryResponse::Error(QueryError::internal_error(
                                 "No current state",
                             )),
                         }
@@ -389,10 +389,10 @@ impl DRepState {
                                     ))
                                 }
                                 Err(msg) => GovernanceStateQueryResponse::Error(
-                                    QueryError::query_failed(msg),
+                                    QueryError::internal_error(msg),
                                 ),
                             },
-                            None => GovernanceStateQueryResponse::Error(QueryError::query_failed(
+                            None => GovernanceStateQueryResponse::Error(QueryError::internal_error(
                                 "No current state",
                             )),
                         }
@@ -411,10 +411,10 @@ impl DRepState {
                                     ))
                                 }
                                 Err(msg) => GovernanceStateQueryResponse::Error(
-                                    QueryError::query_failed(msg),
+                                    QueryError::internal_error(msg),
                                 ),
                             },
-                            None => GovernanceStateQueryResponse::Error(QueryError::query_failed(
+                            None => GovernanceStateQueryResponse::Error(QueryError::internal_error(
                                 "No current state",
                             )),
                         }

@@ -260,7 +260,7 @@ impl EpochsState {
             async move {
                 let Message::StateQuery(StateQuery::Epochs(query)) = message.as_ref() else {
                     return Arc::new(Message::StateQueryResponse(StateQueryResponse::Epochs(
-                        EpochsStateQueryResponse::Error(QueryError::query_failed(
+                        EpochsStateQueryResponse::Error(QueryError::internal_error(
                             "Invalid message for epochs-state",
                         )),
                     )));

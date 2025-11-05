@@ -54,7 +54,7 @@ pub async fn handle_epoch_info_blockfrost(
         epoch_info_msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Epochs(response)) => Ok(response),
-            _ => Err(QueryError::query_failed(
+            _ => Err(QueryError::internal_error(
                 "Unexpected message type while retrieving latest epoch",
             )),
         },
@@ -90,7 +90,7 @@ pub async fn handle_epoch_info_blockfrost(
                 Message::StateQueryResponse(StateQueryResponse::Accounts(
                     AccountsStateQueryResponse::Error(e),
                 )) => Err(e),
-                _ => Err(QueryError::query_failed(
+                _ => Err(QueryError::internal_error(
                     "Unexpected message type while retrieving the latest total active stakes",
                 )),
             },
@@ -114,7 +114,7 @@ pub async fn handle_epoch_info_blockfrost(
                 Message::StateQueryResponse(StateQueryResponse::SPDD(
                     SPDDStateQueryResponse::Error(e),
                 )) => Err(e),
-                _ => Err(QueryError::query_failed(&format!(
+                _ => Err(QueryError::internal_error(&format!(
                     "Unexpected message type while retrieving total active stakes for epoch: {}",
                     epoch_number
                 ))),
@@ -165,7 +165,7 @@ pub async fn handle_epoch_params_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Epochs(
                 EpochsStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed(
+            _ => Err(QueryError::internal_error(
                 "Unexpected message type while retrieving latest epoch",
             )),
         },
@@ -191,7 +191,7 @@ pub async fn handle_epoch_params_blockfrost(
         parameters_msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Parameters(resp)) => Ok(resp),
-            _ => Err(QueryError::query_failed(
+            _ => Err(QueryError::internal_error(
                 "Unexpected message type while retrieving parameters",
             )),
         },
@@ -255,7 +255,7 @@ pub async fn handle_epoch_next_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Epochs(
                 EpochsStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed(
+            _ => Err(QueryError::internal_error(
                 "Unexpected message type while retrieving next epochs",
             )),
         },
@@ -298,7 +298,7 @@ pub async fn handle_epoch_previous_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Epochs(
                 EpochsStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed(
+            _ => Err(QueryError::internal_error(
                 "Unexpected message type while retrieving previous epochs",
             )),
         },
@@ -340,7 +340,7 @@ pub async fn handle_epoch_total_stakes_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Epochs(
                 EpochsStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed(
+            _ => Err(QueryError::internal_error(
                 "Unexpected message type while retrieving latest epoch",
             )),
         },
@@ -368,7 +368,7 @@ pub async fn handle_epoch_total_stakes_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed(
+            _ => Err(QueryError::internal_error(
                 "Unexpected message type while retrieving SPDD by epoch",
             )),
         },
@@ -432,7 +432,7 @@ pub async fn handle_epoch_pool_stakes_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Epochs(
                 EpochsStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed(
+            _ => Err(QueryError::internal_error(
                 "Unexpected message type while retrieving latest epoch",
             )),
         },
@@ -461,7 +461,7 @@ pub async fn handle_epoch_pool_stakes_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed(
+            _ => Err(QueryError::internal_error(
                 "Unexpected message type while retrieving SPDD by epoch and pool",
             )),
         },
@@ -536,7 +536,7 @@ pub async fn handle_epoch_pool_blocks_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed(
+            _ => Err(QueryError::internal_error(
                 "Unexpected message type while retrieving pool block hashes by epoch",
             )),
         },

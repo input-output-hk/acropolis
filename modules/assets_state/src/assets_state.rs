@@ -298,7 +298,7 @@ impl AssetsState {
                         let reg = registry.lock().await;
                         match state.get_assets_list(&reg) {
                             Ok(list) => AssetsStateQueryResponse::AssetsList(list),
-                            Err(e) => AssetsStateQueryResponse::Error(QueryError::query_failed(
+                            Err(e) => AssetsStateQueryResponse::Error(QueryError::internal_error(
                                 e.to_string(),
                             )),
                         }
@@ -316,7 +316,7 @@ impl AssetsState {
                                     )))
                                 }
                                 Err(e) => AssetsStateQueryResponse::Error(
-                                    QueryError::query_failed(e.to_string()),
+                                    QueryError::internal_error(e.to_string()),
                                 ),
                             },
                             None => {
@@ -349,7 +349,7 @@ impl AssetsState {
                                     )))
                                 }
                                 Err(e) => AssetsStateQueryResponse::Error(
-                                    QueryError::query_failed(e.to_string()),
+                                    QueryError::internal_error(e.to_string()),
                                 ),
                             },
                             None => {
@@ -382,7 +382,7 @@ impl AssetsState {
                                     )))
                                 }
                                 Err(e) => AssetsStateQueryResponse::Error(
-                                    QueryError::query_failed(e.to_string()),
+                                    QueryError::internal_error(e.to_string()),
                                 ),
                             },
                             None => {
@@ -413,7 +413,7 @@ impl AssetsState {
                                     )))
                                 }
                                 Err(e) => AssetsStateQueryResponse::Error(
-                                    QueryError::query_failed(e.to_string()),
+                                    QueryError::internal_error(e.to_string()),
                                 ),
                             },
                             None => {
@@ -438,7 +438,7 @@ impl AssetsState {
                             Ok(None) => AssetsStateQueryResponse::Error(QueryError::not_found(
                                 format!("Assets for policy {}", hex::encode(policy)),
                             )),
-                            Err(e) => AssetsStateQueryResponse::Error(QueryError::query_failed(
+                            Err(e) => AssetsStateQueryResponse::Error(QueryError::internal_error(
                                 e.to_string(),
                             )),
                         }

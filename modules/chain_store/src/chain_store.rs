@@ -73,14 +73,14 @@ impl ChainStore {
                 };
                 let Some(state) = query_history.lock().await.current().cloned() else {
                     return Arc::new(Message::StateQueryResponse(StateQueryResponse::Blocks(
-                        BlocksStateQueryResponse::Error(QueryError::query_failed(
+                        BlocksStateQueryResponse::Error(QueryError::internal_error(
                             "Uninitialized state",
                         )),
                     )));
                 };
                 let res =
                     Self::handle_blocks_query(&query_store, &state, query).unwrap_or_else(|err| {
-                        BlocksStateQueryResponse::Error(QueryError::query_failed(err.to_string()))
+                        BlocksStateQueryResponse::Error(QueryError::internal_error(err.to_string()))
                     });
                 Arc::new(Message::StateQueryResponse(StateQueryResponse::Blocks(res)))
             }

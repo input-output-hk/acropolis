@@ -57,7 +57,7 @@ pub async fn handle_single_account_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed(
+            _ => Err(QueryError::internal_error(
                 "Unexpected message type while retrieving account info",
             )),
         },
@@ -114,7 +114,7 @@ pub async fn handle_account_registrations_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed(
+            _ => Err(QueryError::internal_error(
                 "Unexpected message type while retrieving account registrations",
             )),
         },
@@ -167,7 +167,7 @@ pub async fn handle_account_delegations_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed("Unexpected response type")),
+            _ => Err(QueryError::internal_error("Unexpected response type")),
         },
     )
     .await?;
@@ -223,7 +223,7 @@ pub async fn handle_account_mirs_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed("Unexpected response type")),
+            _ => Err(QueryError::internal_error("Unexpected response type")),
         },
     )
     .await?;
@@ -273,7 +273,7 @@ pub async fn handle_account_withdrawals_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed("Unexpected response type")),
+            _ => Err(QueryError::internal_error("Unexpected response type")),
         },
     )
     .await?;
@@ -323,7 +323,7 @@ pub async fn handle_account_rewards_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed("Unexpected response type")),
+            _ => Err(QueryError::internal_error("Unexpected response type")),
         },
     )
     .await?;
@@ -364,7 +364,7 @@ pub async fn handle_account_addresses_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed("Unexpected response type")),
+            _ => Err(QueryError::internal_error("Unexpected response type")),
         },
     )
     .await?;
@@ -445,7 +445,7 @@ async fn get_transaction_hashes(
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed("Unexpected response type")),
+            _ => Err(QueryError::internal_error("Unexpected response type")),
         },
     )
     .await?;

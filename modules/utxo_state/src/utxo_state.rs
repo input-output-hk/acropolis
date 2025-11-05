@@ -113,7 +113,7 @@ impl UTXOState {
             async move {
                 let Message::StateQuery(StateQuery::UTxOs(query)) = message.as_ref() else {
                     return Arc::new(Message::StateQueryResponse(StateQueryResponse::UTxOs(
-                        UTxOStateQueryResponse::Error(QueryError::query_failed(
+                        UTxOStateQueryResponse::Error(QueryError::internal_error(
                             "Invalid message for utxo-state",
                         )),
                     )));
@@ -124,7 +124,7 @@ impl UTXOState {
                     UTxOStateQuery::GetUTxOsSum { utxo_identifiers } => {
                         match state.get_utxos_sum(utxo_identifiers).await {
                             Ok(balance) => UTxOStateQueryResponse::UTxOsSum(balance),
-                            Err(e) => UTxOStateQueryResponse::Error(QueryError::query_failed(
+                            Err(e) => UTxOStateQueryResponse::Error(QueryError::internal_error(
                                 format!("Fetching UTxO sum failed: {}", e.to_string()),
                             )),
                         }

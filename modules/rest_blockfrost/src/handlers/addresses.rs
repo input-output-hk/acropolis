@@ -73,7 +73,7 @@ pub async fn handle_address_single_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::UTxOs(
                 UTxOStateQueryResponse::Error(e),
             )) => Err(e.into()),
-            _ => Err(QueryError::query_failed(
+            _ => Err(QueryError::internal_error(
                 "Unexpected response from addresses query",
             )),
         },
@@ -119,7 +119,7 @@ pub async fn handle_address_single_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::UTxOs(
                 UTxOStateQueryResponse::Error(e),
             )) => Err(e.into()),
-            _ => Err(QueryError::query_failed(
+            _ => Err(QueryError::internal_error(
                 "Unexpected  response querying UTxOs",
             )),
         },

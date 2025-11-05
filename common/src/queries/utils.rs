@@ -21,15 +21,14 @@ where
         .message_bus
         .request(topic, request_msg)
         .await
-        .map_err(|e| QueryError::query_failed(e.to_string()))?;
+        .map_err(|e| QueryError::internal_error(e.to_string()))?;
 
     let message = Arc::try_unwrap(raw_msg).unwrap_or_else(|arc| (*arc).clone());
 
     extractor(message)
 }
 
-/// Query state and return a REST response directly
-/// This is a convenience function for simple handlers that just fetch and serialize data
+/// The outer option in the extractor return value is whether the response was handled by F
 pub async fn rest_query_state<T, F>(
     context: &Arc<Context<Message>>,
     topic: &str,
@@ -42,13 +41,13 @@ where
 {
     let data = query_state(context, topic, request_msg, |response| {
         extractor(response).unwrap_or_else(|| {
-            Err(QueryError::query_failed(format!(
+            Err(QueryError::internal_error(format!(
                 "Unexpected response message type from {topic}"
             )))
         })
     })
-    .await?; // QueryError auto-converts to RESTError via From trait
+    .await?;
 
-    let json = serde_json::to_string_pretty(&data)?; // Uses From<serde_json::Error> for RESTError
+    let json = serde_json::to_string_pretty(&data)?;
     Ok(RESTResponse::with_json(200, &json))
 }

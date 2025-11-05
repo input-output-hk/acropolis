@@ -4,11 +4,6 @@
 
 use std::sync::Arc;
 
-use crate::{
-    immutable_address_store::ImmutableAddressStore,
-    state::{AddressStorageConfig, State},
-};
-use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::addresses::{
@@ -21,6 +16,11 @@ use caryatid_sdk::{module, Context, Module, Subscription};
 use config::Config;
 use tokio::sync::{mpsc, Mutex};
 use tracing::{error, info};
+use acropolis_common::queries::errors::QueryError;
+use crate::{
+    immutable_address_store::ImmutableAddressStore,
+    state::{AddressStorageConfig, State},
+};
 mod immutable_address_store;
 mod state;
 mod volatile_addresses;
@@ -213,7 +213,7 @@ impl AddressState {
                             Ok(None) => AddressStateQueryResponse::Error(QueryError::not_found(
                                 "Address not found",
                             )),
-                            Err(e) => AddressStateQueryResponse::Error(QueryError::query_failed(
+                            Err(e) => AddressStateQueryResponse::Error(QueryError::internal_error(
                                 e.to_string(),
                             )),
                         }
@@ -224,7 +224,7 @@ impl AddressState {
                             Ok(None) => AddressStateQueryResponse::Error(QueryError::not_found(
                                 "Address not found",
                             )),
-                            Err(e) => AddressStateQueryResponse::Error(QueryError::query_failed(
+                            Err(e) => AddressStateQueryResponse::Error(QueryError::internal_error(
                                 e.to_string(),
                             )),
                         }
@@ -232,7 +232,7 @@ impl AddressState {
                     AddressStateQuery::GetAddressTotals { address } => {
                         match state.get_address_totals(address).await {
                             Ok(totals) => AddressStateQueryResponse::AddressTotals(totals),
-                            Err(e) => AddressStateQueryResponse::Error(QueryError::query_failed(
+                            Err(e) => AddressStateQueryResponse::Error(QueryError::internal_error(
                                 e.to_string(),
                             )),
                         }

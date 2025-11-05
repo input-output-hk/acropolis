@@ -175,7 +175,7 @@ impl ParametersState {
             async move {
                 let Message::StateQuery(StateQuery::Parameters(query)) = message.as_ref() else {
                     return Arc::new(Message::StateQueryResponse(StateQueryResponse::Parameters(
-                        ParametersStateQueryResponse::Error(QueryError::query_failed(
+                        ParametersStateQueryResponse::Error(QueryError::internal_error(
                             "Invalid message for parameters-state",
                         )),
                     )));

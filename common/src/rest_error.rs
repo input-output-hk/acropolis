@@ -2,7 +2,6 @@ use crate::queries::errors::QueryError;
 use anyhow::Error as AnyhowError;
 use caryatid_module_rest_server::messages::RESTResponse;
 use std::fmt;
-use std::num::ParseIntError;
 
 /// Standard error types for the application
 #[derive(Debug)]
@@ -49,12 +48,12 @@ impl RESTError {
         RESTError::BadRequest("Invalid hex string".to_string())
     }
 
-    /// Resource not found error (flexible message)
+    /// Resource not found error
     pub fn not_found(message: &str) -> Self {
         RESTError::NotFound(message.to_string())
     }
 
-    /// Feature not implemented error (flexible message)
+    /// Feature not implemented error
     pub fn not_implemented(message: &str) -> Self {
         RESTError::NotImplemented(message.to_string())
     }
@@ -64,19 +63,14 @@ impl RESTError {
         RESTError::NotImplemented(format!("{} storage is disabled in config", storage_type))
     }
 
-    /// Unexpected response error (flexible message)
+    /// Unexpected response error
     pub fn unexpected_response(message: &str) -> Self {
         RESTError::InternalServerError(message.to_string())
     }
 
-    /// Query failed error (flexible message)
+    /// Query failed error
     pub fn query_failed(message: &str) -> Self {
         RESTError::InternalServerError(message.to_string())
-    }
-
-    /// Serialization failed error
-    pub fn serialization_failed(what: &str, error: impl fmt::Display) -> Self {
-        RESTError::InternalServerError(format!("Failed to serialize {}: {}", what, error))
     }
 
     /// Encoding failed error
@@ -107,12 +101,12 @@ impl From<AnyhowError> for RESTError {
     }
 }
 
-/// Convert ParseIntError to RESTError (400 Bad Request)
-impl From<ParseIntError> for RESTError {
-    fn from(error: ParseIntError) -> Self {
-        RESTError::BadRequest(error.to_string())
-    }
-}
+// /// Convert ParseIntError to RESTError (400 Bad Request)
+// impl From<ParseIntError> for RESTError {
+//     fn from(error: ParseIntError) -> Self {
+//         RESTError::BadRequest(error.to_string())
+//     }
+// }
 
 /// Convert hex decode errors to RESTError (400 Bad Request)
 impl From<hex::FromHexError> for RESTError {
@@ -147,8 +141,7 @@ impl From<QueryError> for RESTError {
     fn from(error: QueryError) -> Self {
         match error {
             QueryError::NotFound { resource } => RESTError::NotFound(resource),
-            QueryError::PartialNotFound { message } => RESTError::BadRequest(message),
-            QueryError::QueryFailed { message } => RESTError::InternalServerError(message),
+            QueryError::Internal { message } => RESTError::InternalServerError(message),
             QueryError::StorageDisabled { storage_type } => {
                 RESTError::storage_disabled(&storage_type)
             }
@@ -157,8 +150,6 @@ impl From<QueryError> for RESTError {
         }
     }
 }
-
-pub type AppResult<T> = Result<T, RESTError>;
 
 #[cfg(test)]
 mod tests {
@@ -190,13 +181,6 @@ mod tests {
         let anyhow_err = anyhow::anyhow!("Something went wrong");
         let app_error = RESTError::from(anyhow_err);
         assert_eq!(app_error.status_code(), 500);
-    }
-
-    #[test]
-    fn test_from_parse_int_error() {
-        let result: Result<u64, _> = "not_a_number".parse();
-        let app_error: RESTError = result.unwrap_err().into();
-        assert_eq!(app_error.status_code(), 400);
     }
 
     #[test]

@@ -40,7 +40,7 @@ pub async fn handle_dreps_list_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Governance(
                 GovernanceStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed("Unexpected message type")),
+            _ => Err(QueryError::internal_error("Unexpected message type")),
         },
     )
     .await?;
@@ -88,7 +88,7 @@ pub async fn handle_single_drep_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Governance(
                 GovernanceStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed("Unexpected message type")),
+            _ => Err(QueryError::internal_error("Unexpected message type")),
         },
     )
     .await?;
@@ -111,7 +111,7 @@ pub async fn handle_single_drep_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed(
+            _ => Err(QueryError::internal_error(
                 "Unexpected response from accounts-state",
             )),
         },
@@ -160,7 +160,7 @@ pub async fn handle_drep_delegators_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Governance(
                 GovernanceStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed("Unexpected message type")),
+            _ => Err(QueryError::internal_error("Unexpected message type")),
         },
     )
     .await?;
@@ -182,7 +182,7 @@ pub async fn handle_drep_delegators_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed(
+            _ => Err(QueryError::internal_error(
                 "Unexpected response from accounts-state",
             )),
         },
@@ -233,7 +233,7 @@ pub async fn handle_drep_metadata_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Governance(
                 GovernanceStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed("Unexpected message type")),
+            _ => Err(QueryError::internal_error("Unexpected message type")),
         },
     )
     .await?;
@@ -307,7 +307,7 @@ pub async fn handle_drep_updates_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Governance(
                 GovernanceStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed("Unexpected message type")),
+            _ => Err(QueryError::internal_error("Unexpected message type")),
         },
     )
     .await?;
@@ -352,7 +352,7 @@ pub async fn handle_drep_votes_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Governance(
                 GovernanceStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed("Unexpected message type")),
+            _ => Err(QueryError::internal_error("Unexpected message type")),
         },
     )
     .await?;
@@ -391,7 +391,7 @@ pub async fn handle_proposals_list_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Governance(
                 GovernanceStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed("Unexpected message type")),
+            _ => Err(QueryError::internal_error("Unexpected message type")),
         },
     )
     .await?;
@@ -433,7 +433,7 @@ pub async fn handle_single_proposal_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Governance(
                 GovernanceStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed("Unexpected message type")),
+            _ => Err(QueryError::internal_error("Unexpected message type")),
         },
     )
     .await?;
@@ -483,7 +483,7 @@ pub async fn handle_proposal_votes_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Governance(
                 GovernanceStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed("Unexpected message type")),
+            _ => Err(QueryError::internal_error("Unexpected message type")),
         },
     )
     .await?;

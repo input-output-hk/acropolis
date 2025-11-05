@@ -41,7 +41,7 @@ pub async fn handle_assets_list_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Assets(
                 AssetsStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed(
+            _ => Err(QueryError::internal_error(
                 "Unexpected response while retrieving asset list",
             )),
         },
@@ -93,7 +93,7 @@ pub async fn handle_asset_single_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Assets(
                 AssetsStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed(
+            _ => Err(QueryError::internal_error(
                 "Unexpected response while retrieving asset info",
             )),
         },
@@ -149,7 +149,7 @@ pub async fn handle_asset_history_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Assets(
                 AssetsStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed(
+            _ => Err(QueryError::internal_error(
                 "Unexpected response while retrieving asset history",
             )),
         },
@@ -183,7 +183,7 @@ pub async fn handle_asset_transactions_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Assets(
                 AssetsStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed(
+            _ => Err(QueryError::internal_error(
                 "Unexpected response while retrieving asset transactions",
             )),
         },
@@ -227,7 +227,7 @@ pub async fn handle_asset_addresses_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Assets(
                 AssetsStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed(
+            _ => Err(QueryError::internal_error(
                 "Unexpected response while retrieving asset addresses",
             )),
         },
@@ -266,7 +266,7 @@ pub async fn handle_policy_assets_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Assets(
                 AssetsStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed(
+            _ => Err(QueryError::internal_error(
                 "Unexpected response while retrieving policy assets",
             )),
         },

@@ -126,7 +126,7 @@ impl SPDDState {
             async move {
                 let Message::StateQuery(StateQuery::SPDD(query)) = message.as_ref() else {
                     return Arc::new(Message::StateQueryResponse(StateQueryResponse::SPDD(
-                        SPDDStateQueryResponse::Error(QueryError::query_failed(
+                        SPDDStateQueryResponse::Error(QueryError::internal_error(
                             "Invalid message for spdd-state",
                         )),
                     )));

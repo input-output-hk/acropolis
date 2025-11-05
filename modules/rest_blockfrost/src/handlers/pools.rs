@@ -48,7 +48,7 @@ pub async fn handle_pools_list_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed("Unexpected message type")),
+            _ => Err(QueryError::internal_error("Unexpected message type")),
         },
     )
     .await?;
@@ -112,7 +112,7 @@ async fn handle_pools_extended_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed(
+            _ => Err(QueryError::internal_error(
                 "Unexpected message type while retrieving pools list with info",
             )),
         },
@@ -133,7 +133,7 @@ async fn handle_pools_extended_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Epochs(
                 EpochsStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed(
+            _ => Err(QueryError::internal_error(
                 "Unexpected message type while retrieving latest epoch",
             )),
         },
@@ -154,7 +154,7 @@ async fn handle_pools_extended_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed("Unexpected message type")),
+            _ => Err(QueryError::internal_error("Unexpected message type")),
         },
     );
 
@@ -204,7 +204,7 @@ async fn handle_pools_extended_blockfrost(
                 // if epoch_history is not enabled
                 Ok(None)
             }
-            _ => Err(QueryError::query_failed(
+            _ => Err(QueryError::internal_error(
                 "Unexpected message type while retrieving pools active stakes",
             )),
         },
@@ -227,7 +227,7 @@ async fn handle_pools_extended_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed("Unexpected message type")),
+            _ => Err(QueryError::internal_error("Unexpected message type")),
         },
     );
 
@@ -248,7 +248,7 @@ async fn handle_pools_extended_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed("Unexpected message type")),
+            _ => Err(QueryError::internal_error("Unexpected message type")),
         },
     );
 
@@ -305,7 +305,7 @@ async fn handle_pools_retired_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed("Unexpected message type")),
+            _ => Err(QueryError::internal_error("Unexpected message type")),
         },
     )
     .await?;
@@ -344,7 +344,7 @@ async fn handle_pools_retiring_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed("Unexpected message type")),
+            _ => Err(QueryError::internal_error("Unexpected message type")),
         },
     )
     .await?;
@@ -388,7 +388,7 @@ async fn handle_pools_spo_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed("Unexpected message type")),
+            _ => Err(QueryError::internal_error("Unexpected message type")),
         },
     );
 
@@ -407,7 +407,7 @@ async fn handle_pools_spo_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Epochs(
                 EpochsStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed(
+            _ => Err(QueryError::internal_error(
                 "Unexpected message type while retrieving latest epoch",
             )),
         },
@@ -428,7 +428,7 @@ async fn handle_pools_spo_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed("Unexpected message type")),
+            _ => Err(QueryError::internal_error("Unexpected message type")),
         },
     );
 
@@ -447,7 +447,7 @@ async fn handle_pools_spo_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed("Unexpected message type")),
+            _ => Err(QueryError::internal_error("Unexpected message type")),
         },
     );
 
@@ -468,7 +468,7 @@ async fn handle_pools_spo_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::Error(_),
             )) => Ok(None),
-            _ => Err(QueryError::query_failed("Unexpected message type")),
+            _ => Err(QueryError::internal_error("Unexpected message type")),
         },
     );
 
@@ -489,7 +489,7 @@ async fn handle_pools_spo_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed("Unexpected message type")),
+            _ => Err(QueryError::internal_error("Unexpected message type")),
         },
     );
 
@@ -562,7 +562,7 @@ async fn handle_pools_spo_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Epochs(
                 EpochsStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed("Unexpected message type")),
+            _ => Err(QueryError::internal_error("Unexpected message type")),
         },
     );
 
@@ -584,7 +584,7 @@ async fn handle_pools_spo_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::Error(_),
             )) => Ok(None),
-            _ => Err(QueryError::query_failed("Unexpected message type")),
+            _ => Err(QueryError::internal_error("Unexpected message type")),
         },
     );
 
@@ -607,7 +607,7 @@ async fn handle_pools_spo_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed("Unexpected message type")),
+            _ => Err(QueryError::internal_error("Unexpected message type")),
         },
     );
 
@@ -693,7 +693,7 @@ pub async fn handle_pool_history_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Epochs(
                 EpochsStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed("Unexpected message type")),
+            _ => Err(QueryError::internal_error("Unexpected message type")),
         },
     )
     .await?;
@@ -714,7 +714,7 @@ pub async fn handle_pool_history_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed("Unexpected message type")),
+            _ => Err(QueryError::internal_error("Unexpected message type")),
         },
     )
     .await?;
@@ -754,7 +754,7 @@ pub async fn handle_pool_metadata_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed("Unexpected message type")),
+            _ => Err(QueryError::internal_error("Unexpected message type")),
         },
     )
     .await?;
@@ -818,7 +818,7 @@ pub async fn handle_pool_relays_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed("Unexpected message type")),
+            _ => Err(QueryError::internal_error("Unexpected message type")),
         },
     )
     .await?;
@@ -863,7 +863,7 @@ pub async fn handle_pool_delegators_blockfrost(
                 warn!("Fallback to query from accounts_state");
                 Ok(None)
             }
-            _ => Err(QueryError::query_failed("Unexpected message type")),
+            _ => Err(QueryError::internal_error("Unexpected message type")),
         },
     )
     .await?;
@@ -887,7 +887,7 @@ pub async fn handle_pool_delegators_blockfrost(
                     Message::StateQueryResponse(StateQueryResponse::Accounts(
                         AccountsStateQueryResponse::Error(e),
                     )) => Err(e),
-                    _ => Err(QueryError::query_failed("Unexpected message type")),
+                    _ => Err(QueryError::internal_error("Unexpected message type")),
                 },
             )
             .await?
@@ -940,7 +940,7 @@ pub async fn handle_pool_blocks_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed("Unexpected message type")),
+            _ => Err(QueryError::internal_error("Unexpected message type")),
         },
     )
     .await?;
@@ -982,7 +982,7 @@ pub async fn handle_pool_updates_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed("Unexpected message type")),
+            _ => Err(QueryError::internal_error("Unexpected message type")),
         },
     )
     .await?;
@@ -1029,7 +1029,7 @@ pub async fn handle_pool_votes_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed("Unexpected message type")),
+            _ => Err(QueryError::internal_error("Unexpected message type")),
         },
     )
     .await?;
