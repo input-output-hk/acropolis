@@ -1,7 +1,7 @@
 //! Verification of calculated values against captured CSV from Haskell node / DBSync
-use crate::rewards::{RewardDetail, RewardType, RewardsResult};
+use crate::rewards::{RewardDetail, RewardsResult};
 use crate::state::Pots;
-use acropolis_common::{KeyHash, StakeAddress};
+use acropolis_common::{PoolId, RewardType, StakeAddress};
 use hex::FromHex;
 use itertools::EitherOrBoth::{Both, Left, Right};
 use itertools::Itertools;
@@ -119,7 +119,8 @@ impl Verifier {
     }
 
     /// Verify rewards, logging any errors
-    pub fn verify_rewards(&self, epoch: u64, rewards: &RewardsResult) {
+    pub fn verify_rewards(&self, rewards: &RewardsResult) {
+        let epoch = rewards.epoch;
         if let Some(template) = &self.rewards_file_template {
             let path = template.replace("{}", &epoch.to_string());
 
@@ -130,7 +131,7 @@ impl Verifier {
             };
 
             // Expect CSV header: spo,address,type,amount
-            let mut expected_rewards: BTreeMap<KeyHash, Vec<RewardDetail>> = BTreeMap::new();
+            let mut expected_rewards: BTreeMap<PoolId, Vec<RewardDetail>> = BTreeMap::new();
             for result in reader.deserialize() {
                 let (spo, address, rtype, amount): (String, String, String, u64) = match result {
                     Ok(row) => row,
@@ -140,10 +141,13 @@ impl Verifier {
                     }
                 };
 
-                let Ok(spo) = Vec::from_hex(&spo) else {
-                    error!("Bad hex in {path} for SPO: {spo} - skipping");
+                let Some(spo) =
+                    Vec::from_hex(&spo).ok().and_then(|bytes| PoolId::try_from(bytes).ok())
+                else {
+                    error!("Bad hex/SPO in {path} for SPO: {spo} - skipping");
                     continue;
                 };
+
                 let Ok(account) = Vec::from_hex(&address) else {
                     error!("Bad hex in {path} for address: {address} - skipping");
                     continue;
@@ -170,6 +174,7 @@ impl Verifier {
                     account: stake_address,
                     rtype,
                     amount,
+                    pool: spo,
                 });
             }
 
@@ -190,7 +195,7 @@ impl Verifier {
                     Left(expected_spo) => {
                         error!(
                             "Missing rewards SPO: {} {} rewards",
-                            hex::encode(&expected_spo.0),
+                            expected_spo.0,
                             expected_spo.1.len()
                         );
                         errors += 1;
@@ -198,7 +203,7 @@ impl Verifier {
                     Right(actual_spo) => {
                         error!(
                             "Extra rewards SPO: {} {} rewards",
-                            hex::encode(&actual_spo.0),
+                            actual_spo.0,
                             actual_spo.1.len()
                         );
                         errors += 1;
@@ -217,7 +222,7 @@ impl Verifier {
                                 Left(expected) => {
                                     error!(
                                         "Missing reward: SPO {} account {} {:?} {}",
-                                        hex::encode(&expected_spo.0),
+                                        expected_spo.0,
                                         expected.account,
                                         expected.rtype,
                                         expected.amount
@@ -227,17 +232,14 @@ impl Verifier {
                                 Right(actual) => {
                                     error!(
                                         "Extra reward: SPO {} account {} {:?} {}",
-                                        hex::encode(&actual_spo.0),
-                                        actual.account,
-                                        actual.rtype,
-                                        actual.amount
+                                        actual_spo.0, actual.account, actual.rtype, actual.amount
                                     );
                                     errors += 1;
                                 }
                                 Both(expected, actual) => {
                                     if expected.amount != actual.amount {
                                         error!("Different reward: SPO {} account {} {:?} expected {}, actual {} ({})",
-                                               hex::encode(&expected_spo.0),
+                                               expected_spo.0,
                                                expected.account,
                                                expected.rtype,
                                                expected.amount,
@@ -247,7 +249,7 @@ impl Verifier {
                                     } else {
                                         debug!(
                                             "Reward match: SPO {} account {} {:?} {}",
-                                            hex::encode(&expected_spo.0),
+                                            expected_spo.0,
                                             expected.account,
                                             expected.rtype,
                                             expected.amount

@@ -23,10 +23,6 @@ pub struct TestModule;
 
 impl TestModule {
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
-        // temporarily forcing test to pass so CI looks happy :)
-        super::signal_test_completion();
-        return Ok(());
-
         // TODO: we need to somehow get test data into the context so this module can unpack it all
         // Currently just *assuming* it exists in the context as a string
         let transactions_topic = config
@@ -87,14 +83,12 @@ impl TestModule {
                     return;
                 };
 
-                match message.as_ref() {
-                    Message::Snapshot(SnapshotMessage::Dump(SnapshotStateMessage::SPOState(
-                        spo_state,
-                    ))) => {
-                        assert_eq!(&expected_final_state.spo_state, spo_state);
-                        super::signal_test_completion();
-                    }
-                    _ => {}
+                if let Message::Snapshot(SnapshotMessage::Dump(SnapshotStateMessage::SPOState(
+                    spo_state,
+                ))) = message.as_ref()
+                {
+                    assert_eq!(&expected_final_state.spo_state, spo_state);
+                    super::signal_test_completion();
                 }
             }
         });

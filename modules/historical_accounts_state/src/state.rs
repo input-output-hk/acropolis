@@ -8,9 +8,9 @@ use acropolis_common::{
         AddressDeltasMessage, StakeRewardDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
     },
     queries::accounts::{
-        AccountWithdrawal, DelegationUpdate, RegistrationStatus, RegistrationUpdate,
+        AccountReward, AccountWithdrawal, DelegationUpdate, RegistrationStatus, RegistrationUpdate,
     },
-    BlockInfo, InstantaneousRewardTarget, PoolId, ShelleyAddress, StakeAddress, StakeCredential,
+    BlockInfo, InstantaneousRewardTarget, PoolId, RewardType, ShelleyAddress, StakeAddress,
     TxCertificate, TxIdentifier,
 };
 use tracing::warn;
@@ -24,25 +24,13 @@ use anyhow::Result;
 
 #[derive(Debug, Default, Clone)]
 pub struct AccountEntry {
-    pub reward_history: Option<Vec<RewardHistory>>,
+    pub reward_history: Option<Vec<AccountReward>>,
     pub active_stake_history: Option<Vec<ActiveStakeHistory>>,
     pub delegation_history: Option<Vec<DelegationUpdate>>,
     pub registration_history: Option<Vec<RegistrationUpdate>>,
     pub withdrawal_history: Option<Vec<AccountWithdrawal>>,
     pub mir_history: Option<Vec<AccountWithdrawal>>,
     pub addresses: Option<Vec<ShelleyAddress>>,
-}
-
-#[derive(Debug, Clone, minicbor::Decode, minicbor::Encode)]
-pub struct RewardHistory {
-    #[n(0)]
-    pub epoch: u32,
-    #[n(1)]
-    pub amount: u64,
-    #[n(2)]
-    pub pool: PoolId,
-    #[n(3)]
-    pub is_owner: bool,
 }
 
 #[derive(Debug, Clone, minicbor::Decode, minicbor::Encode)]
@@ -116,29 +104,41 @@ impl State {
             && block_info.number > self.volatile.epoch_start_block + self.volatile.security_param_k
     }
 
-    pub fn handle_rewards(&mut self, _reward_deltas: &StakeRewardDeltasMessage) -> Result<()> {
-        Ok(())
+    pub fn handle_rewards(&mut self, reward_deltas: &StakeRewardDeltasMessage, epoch: u32) {
+        let volatile = self.volatile.window.back_mut().expect("window should never be empty");
+        for reward in reward_deltas.deltas.iter() {
+            let entry = volatile.entry(reward.stake_address.clone()).or_default();
+
+            let reward_epoch = match reward.reward_type {
+                RewardType::PoolRefund => epoch,
+                _ => epoch.saturating_sub(2),
+            };
+
+            let update = AccountReward {
+                epoch: reward_epoch,
+                amount: reward.delta,
+                pool: reward.pool,
+                reward_type: reward.reward_type.clone(),
+            };
+            entry.reward_history.get_or_insert_with(Vec::new).push(update);
+        }
     }
 
-    pub fn handle_tx_certificates(
-        &mut self,
-        tx_certs: &TxCertificatesMessage,
-        epoch: u32,
-    ) -> Result<()> {
+    pub fn handle_tx_certificates(&mut self, tx_certs: &TxCertificatesMessage, epoch: u32) {
         // Handle certificates
         for tx_cert in tx_certs.certificates.iter() {
             match &tx_cert.cert {
                 // Pre-Conway stake registration/deregistration certs
                 TxCertificate::StakeRegistration(stake_address) => {
                     self.handle_stake_registration_change(
-                        &stake_address,
+                        stake_address,
                         &tx_cert.tx_identifier,
                         RegistrationStatus::Registered,
                     );
                 }
                 TxCertificate::StakeDeregistration(stake_address) => {
                     self.handle_stake_registration_change(
-                        &stake_address,
+                        stake_address,
                         &tx_cert.tx_identifier,
                         RegistrationStatus::Deregistered,
                     );
@@ -221,22 +221,45 @@ impl State {
                 _ => (),
             };
         }
-        Ok(())
     }
 
     pub fn handle_address_deltas(&mut self, _address_deltas: &AddressDeltasMessage) -> Result<()> {
         Ok(())
     }
 
-    pub fn handle_withdrawals(&mut self, _withdrawals: &WithdrawalsMessage) -> Result<()> {
-        Ok(())
+    pub fn handle_withdrawals(&mut self, withdrawals_msg: &WithdrawalsMessage) {
+        let window = self.volatile.window.back_mut().expect("window should never be empty");
+
+        for w in &withdrawals_msg.withdrawals {
+            window
+                .entry(w.address.clone())
+                .or_default()
+                .withdrawal_history
+                .get_or_insert_with(Vec::new)
+                .push(AccountWithdrawal {
+                    tx_identifier: w.tx_identifier,
+                    amount: w.value,
+                })
+        }
     }
 
-    pub async fn _get_reward_history(
+    pub async fn get_reward_history(
         &self,
-        _account: &StakeCredential,
-    ) -> Result<Vec<RewardHistory>> {
-        Ok(Vec::new())
+        account: &StakeAddress,
+    ) -> Result<Option<Vec<AccountReward>>> {
+        let immutable = self.immutable.get_reward_history(account).await?;
+
+        let mut volatile = Vec::new();
+        self.merge_volatile_history(account, |e| e.reward_history.as_ref(), &mut volatile);
+
+        match immutable {
+            Some(mut rewards) => {
+                rewards.extend(volatile);
+                Ok(Some(rewards))
+            }
+            None if volatile.is_empty() => Ok(None),
+            None => Ok(Some(volatile)),
+        }
     }
 
     pub async fn _get_active_stake_history(
@@ -250,10 +273,10 @@ impl State {
         &self,
         account: &StakeAddress,
     ) -> Result<Option<Vec<RegistrationUpdate>>> {
-        let immutable = self.immutable.get_registration_history(&account).await?;
+        let immutable = self.immutable.get_registration_history(account).await?;
 
         let mut volatile = Vec::new();
-        self.merge_volatile_history(&account, |e| e.registration_history.as_ref(), &mut volatile);
+        self.merge_volatile_history(account, |e| e.registration_history.as_ref(), &mut volatile);
 
         match immutable {
             Some(mut registrations) => {
@@ -269,10 +292,10 @@ impl State {
         &self,
         account: &StakeAddress,
     ) -> Result<Option<Vec<DelegationUpdate>>> {
-        let immutable = self.immutable.get_delegation_history(&account).await?;
+        let immutable = self.immutable.get_delegation_history(account).await?;
 
         let mut volatile = Vec::new();
-        self.merge_volatile_history(&account, |e| e.delegation_history.as_ref(), &mut volatile);
+        self.merge_volatile_history(account, |e| e.delegation_history.as_ref(), &mut volatile);
 
         match immutable {
             Some(mut delegations) => {
@@ -288,10 +311,10 @@ impl State {
         &self,
         account: &StakeAddress,
     ) -> Result<Option<Vec<AccountWithdrawal>>> {
-        let immutable = self.immutable.get_mir_history(&account).await?;
+        let immutable = self.immutable.get_mir_history(account).await?;
 
         let mut volatile = Vec::new();
-        self.merge_volatile_history(&account, |e| e.mir_history.as_ref(), &mut volatile);
+        self.merge_volatile_history(account, |e| e.mir_history.as_ref(), &mut volatile);
 
         match immutable {
             Some(mut mirs) => {
@@ -303,11 +326,22 @@ impl State {
         }
     }
 
-    pub async fn _get_withdrawal_history(
+    pub async fn get_withdrawal_history(
         &self,
-        _account: &StakeAddress,
-    ) -> Result<Vec<AccountWithdrawal>> {
-        Ok(Vec::new())
+        account: &StakeAddress,
+    ) -> Result<Option<Vec<AccountWithdrawal>>> {
+        let immutable = self.immutable.get_withdrawal_history(account).await?;
+
+        let mut volatile = Vec::new();
+        self.merge_volatile_history(account, |e| e.withdrawal_history.as_ref(), &mut volatile);
+        match immutable {
+            Some(mut withdrawals) => {
+                withdrawals.extend(volatile);
+                Ok(Some(withdrawals))
+            }
+            None if volatile.is_empty() => Ok(None),
+            None => Ok(Some(volatile)),
+        }
     }
 
     pub async fn _get_addresses(&self, _account: StakeAddress) -> Result<Vec<ShelleyAddress>> {
@@ -342,7 +376,7 @@ impl State {
             active_epoch: epoch.saturating_add(2),
             tx_identifier: *tx_identifier,
             amount: 0, // Amount is set during persistence when active stake is known
-            pool: pool.clone(),
+            pool: *pool,
         };
         entry.delegation_history.get_or_insert_with(Vec::new).push(update);
     }

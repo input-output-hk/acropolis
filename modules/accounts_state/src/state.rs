@@ -4,6 +4,7 @@ use crate::rewards::{calculate_rewards, RewardsResult};
 use crate::snapshot::Snapshot;
 use crate::verifier::Verifier;
 use acropolis_common::queries::accounts::OptimalPoolSizing;
+use acropolis_common::RewardType;
 use acropolis_common::{
     math::update_value_with_delta,
     messages::{
@@ -14,7 +15,7 @@ use acropolis_common::{
     protocol_params::ProtocolParams,
     stake_addresses::{StakeAddressMap, StakeAddressState},
     BlockInfo, DRepChoice, DRepCredential, DelegatedStake, InstantaneousRewardSource,
-    InstantaneousRewardTarget, KeyHash, Lovelace, MoveInstantaneousReward, PoolLiveStakeInfo,
+    InstantaneousRewardTarget, Lovelace, MoveInstantaneousReward, PoolId, PoolLiveStakeInfo,
     PoolRegistration, Pot, SPORewards, StakeAddress, StakeRewardDelta, TxCertificate,
 };
 use anyhow::Result;
@@ -88,11 +89,11 @@ pub struct RegistrationChange {
 /// Overall state - stored per block
 #[derive(Debug, Default, Clone)]
 pub struct State {
-    /// Map of active SPOs by operator ID
-    spos: OrdMap<KeyHash, PoolRegistration>,
+    /// Map of active SPOs by pool ID
+    spos: OrdMap<PoolId, PoolRegistration>,
 
-    /// List of SPOs (by operator ID) retiring in the current epoch
-    retiring_spos: Vec<KeyHash>,
+    /// List of SPOs (by pool ID) retiring in the current epoch
+    retiring_spos: Vec<PoolId>,
 
     /// Map of staking address values
     /// Wrapped in an Arc so it doesn't get cloned in full by StateHistory
@@ -114,13 +115,7 @@ pub struct State {
     previous_protocol_parameters: Option<ProtocolParams>,
 
     /// Pool refunds to apply next epoch (list of reward accounts to refund to)
-    pool_refunds: Vec<StakeAddress>,
-
-    /// Stake address refunds to apply next epoch
-    stake_refunds: Vec<(StakeAddress, Lovelace)>,
-
-    /// MIRs to pay next epoch
-    mirs: Vec<MoveInstantaneousReward>,
+    pool_refunds: Vec<(PoolId, StakeAddress)>,
 
     /// Addresses registration changes in current epoch
     current_epoch_registration_changes: Arc<Mutex<Vec<RegistrationChange>>>,
@@ -164,22 +159,22 @@ impl State {
     }
 
     /// Get Pool Live Stake Info
-    pub fn get_pool_live_stake_info(&self, pool_operator: &KeyHash) -> PoolLiveStakeInfo {
+    pub fn get_pool_live_stake_info(&self, pool_operator: &PoolId) -> PoolLiveStakeInfo {
         self.stake_addresses.lock().unwrap().get_pool_live_stake_info(pool_operator)
     }
 
     /// Get Pools Live stake
-    pub fn get_pools_live_stakes(&self, pool_operators: &[KeyHash]) -> Vec<u64> {
+    pub fn get_pools_live_stakes(&self, pool_operators: &[PoolId]) -> Vec<u64> {
         self.stake_addresses.lock().unwrap().get_pools_live_stakes(pool_operators)
     }
 
     /// Get Pool Delegators with live_stakes
-    pub fn get_pool_delegators(&self, pool_operator: &KeyHash) -> Vec<(KeyHash, u64)> {
+    pub fn get_pool_delegators(&self, pool_operator: &PoolId) -> Vec<(StakeAddress, u64)> {
         self.stake_addresses.lock().unwrap().get_pool_delegators(pool_operator)
     }
 
     /// Get Drep Delegators with live_stakes
-    pub fn get_drep_delegators(&self, drep: &DRepChoice) -> Vec<(KeyHash, u64)> {
+    pub fn get_drep_delegators(&self, drep: &DRepChoice) -> Vec<(StakeAddress, u64)> {
         self.stake_addresses.lock().unwrap().get_drep_delegators(drep)
     }
 
@@ -187,7 +182,7 @@ impl State {
     pub fn get_accounts_utxo_values_map(
         &self,
         stake_keys: &[StakeAddress],
-    ) -> Option<HashMap<Vec<u8>, u64>> {
+    ) -> Option<HashMap<StakeAddress, u64>> {
         let stake_addresses = self.stake_addresses.lock().ok()?; // If lock fails, return None
         stake_addresses.get_accounts_utxo_values_map(stake_keys)
     }
@@ -202,7 +197,7 @@ impl State {
     pub fn get_accounts_balances_map(
         &self,
         stake_keys: &[StakeAddress],
-    ) -> Option<HashMap<Vec<u8>, u64>> {
+    ) -> Option<HashMap<StakeAddress, u64>> {
         let stake_addresses = self.stake_addresses.lock().ok()?; // If lock fails, return None
         stake_addresses.get_accounts_balances_map(stake_keys)
     }
@@ -222,7 +217,7 @@ impl State {
     pub fn get_drep_delegations_map(
         &self,
         stake_keys: &[StakeAddress],
-    ) -> Option<HashMap<KeyHash, Option<DRepChoice>>> {
+    ) -> Option<HashMap<StakeAddress, Option<DRepChoice>>> {
         let stake_addresses = self.stake_addresses.lock().ok()?; // If lock fails, return None
         stake_addresses.get_drep_delegations_map(stake_keys)
     }
@@ -255,7 +250,7 @@ impl State {
         &mut self,
         epoch: u64,
         total_fees: u64,
-        spo_block_counts: HashMap<KeyHash, usize>,
+        spo_block_counts: HashMap<PoolId, usize>,
         verifier: &Verifier,
     ) -> Result<Vec<StakeRewardDelta>> {
         // TODO HACK! Investigate why this differs to our calculated reserves after AVVM
@@ -305,7 +300,6 @@ impl State {
 
         // Pay MIRs before snapshot, so reserves is correct for total_supply in rewards
         let mut reward_deltas = Vec::<StakeRewardDelta>::new();
-        reward_deltas.extend(self.pay_mirs());
 
         // Capture a new snapshot for the end of the previous epoch and push it to state
         let snapshot = Snapshot::new(
@@ -324,7 +318,6 @@ impl State {
 
         // Pay the refunds after snapshot, so they don't appear in active_stake
         reward_deltas.extend(self.pay_pool_refunds());
-        reward_deltas.extend(self.pay_stake_refunds());
 
         // Verify pots state
         verifier.verify_pots(epoch, &self.pots);
@@ -473,13 +466,15 @@ impl State {
         }
 
         // Send them their deposits back
-        for stake_address in refunds {
+        for (pool, stake_address) in refunds {
             // If their reward account has been deregistered, it goes to Treasury
             let mut stake_addresses = self.stake_addresses.lock().unwrap();
             if stake_addresses.is_registered(&stake_address) {
                 reward_deltas.push(StakeRewardDelta {
                     stake_address: stake_address.clone(),
-                    delta: deposit as i64,
+                    delta: deposit,
+                    reward_type: RewardType::PoolRefund,
+                    pool,
                 });
                 stake_addresses.add_to_reward(&stake_address, deposit);
             } else {
@@ -496,113 +491,74 @@ impl State {
         reward_deltas
     }
 
-    /// Pay stake address refunds
-    fn pay_stake_refunds(&mut self) -> Vec<StakeRewardDelta> {
-        let mut reward_deltas = Vec::<StakeRewardDelta>::new();
-
-        let refunds = take(&mut self.stake_refunds);
-        if !refunds.is_empty() {
-            info!(
-                "{} deregistered stake addresses, total refunds {}",
-                refunds.len(),
-                refunds.iter().map(|(_, n)| n).sum::<Lovelace>()
-            );
-        }
-
-        // Send them their deposits back
-        for (stake_address, deposit) in refunds {
-            let mut stake_addresses = self.stake_addresses.lock().unwrap();
-            reward_deltas.push(StakeRewardDelta {
-                stake_address: stake_address.clone(), // Extract hash for delta
-                delta: deposit as i64,
-            });
-            stake_addresses.add_to_reward(&stake_address, deposit);
-            self.pots.deposits -= deposit;
-        }
-
-        reward_deltas
-    }
-
     /// Pay MIRs
-    fn pay_mirs(&mut self) -> Vec<StakeRewardDelta> {
-        let mut reward_deltas = Vec::<StakeRewardDelta>::new();
+    fn pay_mir(&mut self, mir: &MoveInstantaneousReward) {
+        let (source, source_name, other, other_name) = match &mir.source {
+            InstantaneousRewardSource::Reserves => (
+                &mut self.pots.reserves,
+                "reserves",
+                &mut self.pots.treasury,
+                "treasury",
+            ),
+            InstantaneousRewardSource::Treasury => (
+                &mut self.pots.treasury,
+                "treasury",
+                &mut self.pots.reserves,
+                "reserves",
+            ),
+        };
 
-        let mirs = take(&mut self.mirs);
-        for mir in mirs {
-            let (source, source_name, other, other_name) = match &mir.source {
-                InstantaneousRewardSource::Reserves => (
-                    &mut self.pots.reserves,
-                    "reserves",
-                    &mut self.pots.treasury,
-                    "treasury",
-                ),
-                InstantaneousRewardSource::Treasury => (
-                    &mut self.pots.treasury,
-                    "treasury",
-                    &mut self.pots.reserves,
-                    "reserves",
-                ),
-            };
+        match &mir.target {
+            InstantaneousRewardTarget::StakeAddresses(deltas) => {
+                // Transfer to a stake addresses from a pot
+                let mut total_value: u64 = 0;
+                for (stake_address, value) in deltas.iter() {
+                    // Get old stake address state, or create one
+                    let mut stake_addresses = self.stake_addresses.lock().unwrap();
+                    let sas = stake_addresses.entry(stake_address.clone()).or_default();
 
-            match &mir.target {
-                InstantaneousRewardTarget::StakeAddresses(deltas) => {
-                    // Transfer to (in theory also from) stake addresses from (to) a pot
-                    let mut total_value: u64 = 0;
-                    for (stake_address, value) in deltas.iter() {
-                        // Get old stake address state, or create one
-                        let mut stake_addresses = self.stake_addresses.lock().unwrap();
-                        let sas = stake_addresses.entry(stake_address.clone()).or_default();
-
-                        // Add to this one
-                        reward_deltas.push(StakeRewardDelta {
-                            stake_address: stake_address.clone(),
-                            delta: *value,
-                        });
-                        if let Err(e) = update_value_with_delta(&mut sas.rewards, *value) {
-                            error!("MIR to stake address {}: {e}", stake_address);
-                        }
-
-                        // Update the source
-                        if let Err(e) = update_value_with_delta(source, -*value) {
-                            error!("MIR from {source_name}: {e}");
-                        }
-
-                        let _ = update_value_with_delta(&mut total_value, *value);
+                    if let Err(e) = update_value_with_delta(&mut sas.rewards, *value) {
+                        error!("MIR to stake address {}: {e}", stake_address);
                     }
 
-                    info!(
-                        "MIR of {total_value} to {} stake addresses from {source_name}",
-                        deltas.len()
-                    );
-                }
-
-                InstantaneousRewardTarget::OtherAccountingPot(value) => {
-                    // Transfer between pots
-                    if let Err(e) = update_value_with_delta(source, -(*value as i64)) {
+                    // Update the source
+                    if let Err(e) = update_value_with_delta(source, -*value) {
                         error!("MIR from {source_name}: {e}");
                     }
-                    if let Err(e) = update_value_with_delta(other, *value as i64) {
-                        error!("MIR to {other_name}: {e}");
-                    }
 
-                    info!("MIR of {value} from {source_name} to {other_name}");
+                    let _ = update_value_with_delta(&mut total_value, *value);
                 }
+
+                info!(
+                    "MIR of {total_value} to {} stake addresses from {source_name}",
+                    deltas.len()
+                );
+            }
+
+            InstantaneousRewardTarget::OtherAccountingPot(value) => {
+                // Transfer between pots
+                if let Err(e) = update_value_with_delta(source, -(*value as i64)) {
+                    error!("MIR from {source_name}: {e}");
+                }
+                if let Err(e) = update_value_with_delta(other, *value as i64) {
+                    error!("MIR to {other_name}: {e}");
+                }
+
+                info!("MIR of {value} from {source_name} to {other_name}");
             }
         }
-
-        reward_deltas
     }
 
     /// Derive the Stake Pool Delegation Distribution (SPDD) - a map of total stake values
     /// (both with and without rewards) for each active SPO
     /// And Stake Pool Reward State (rewards and delegators_count for each pool)
     /// Key of returned map is the SPO 'operator' ID
-    pub fn generate_spdd(&self) -> BTreeMap<KeyHash, DelegatedStake> {
+    pub fn generate_spdd(&self) -> BTreeMap<PoolId, DelegatedStake> {
         let stake_addresses = self.stake_addresses.lock().unwrap();
         stake_addresses.generate_spdd()
     }
 
-    pub fn dump_spdd_state(&self) -> HashMap<KeyHash, Vec<(KeyHash, u64)>> {
+    pub fn dump_spdd_state(&self) -> HashMap<PoolId, Vec<(StakeAddress, u64)>> {
         let stake_addresses = self.stake_addresses.lock().unwrap();
         stake_addresses.dump_spdd_state()
     }
@@ -639,8 +595,8 @@ impl State {
         &mut self,
         ea_msg: &EpochActivityMessage,
         verifier: &Verifier,
-    ) -> Result<(Vec<(KeyHash, SPORewards)>, Vec<StakeRewardDelta>)> {
-        let mut spo_rewards: Vec<(KeyHash, SPORewards)> = Vec::new();
+    ) -> Result<(Vec<(PoolId, SPORewards)>, Vec<StakeRewardDelta>)> {
+        let mut spo_rewards: Vec<(PoolId, SPORewards)> = Vec::new();
         // Collect stake addresses reward deltas
         let mut reward_deltas = Vec::<StakeRewardDelta>::new();
 
@@ -657,45 +613,63 @@ impl State {
 
         // If rewards have been calculated, save the results
         if let Some(task) = task.take() {
-            if let Ok(Ok(reward_result)) = task.await {
-                // Collect rewards to stake addresses reward deltas
-                for rewards in reward_result.rewards.values() {
-                    reward_deltas.extend(
-                        rewards
-                            .iter()
-                            .map(|reward| StakeRewardDelta {
-                                stake_address: reward.account.clone(),
-                                delta: reward.amount as i64,
-                            })
-                            .collect::<Vec<_>>(),
-                    );
-                }
-
-                // Verify them
-                verifier.verify_rewards(reward_result.epoch, &reward_result);
-
+            if let Ok(Ok(rewards_result)) = task.await {
                 // Pay the rewards
                 let mut stake_addresses = self.stake_addresses.lock().unwrap();
-                for (_, rewards) in reward_result.rewards {
+                let mut filtered_rewards_result = rewards_result.clone();
+                for (spo, rewards) in rewards_result.rewards {
                     for reward in rewards {
-                        stake_addresses.add_to_reward(&reward.account, reward.amount);
+                        if stake_addresses.is_registered(&reward.account) {
+                            stake_addresses.add_to_reward(&reward.account, reward.amount);
+                            reward_deltas.push(StakeRewardDelta {
+                                stake_address: reward.account.clone(),
+                                delta: reward.amount,
+                                reward_type: reward.rtype.clone(),
+                                pool: reward.pool,
+                            });
+                        } else {
+                            warn!(
+                                "Reward account {} deregistered - paying reward {} to treasury",
+                                reward.account, reward.amount
+                            );
+                            self.pots.treasury += reward.amount;
+
+                            // Remove from filtered version for comparison and result
+                            if let Some(rewards) = filtered_rewards_result.rewards.get_mut(&spo) {
+                                rewards.retain(|r| r.account != reward.account);
+                            }
+
+                            if let Some((_, spor)) = filtered_rewards_result
+                                .spo_rewards
+                                .iter_mut()
+                                .find(|(fspo, _)| *fspo == spo)
+                            {
+                                spor.total_rewards -= reward.amount;
+                                if reward.rtype == RewardType::Leader {
+                                    spor.operator_rewards -= reward.amount;
+                                }
+                            }
+                        }
                     }
                 }
 
+                // Verify them
+                verifier.verify_rewards(&filtered_rewards_result);
+
                 // save SPO rewards
-                spo_rewards = reward_result.spo_rewards.into_iter().collect();
+                spo_rewards = filtered_rewards_result.spo_rewards.clone();
 
                 // Adjust the reserves for next time with amount actually paid
-                self.pots.reserves -= reward_result.total_paid;
+                self.pots.reserves -= rewards_result.total_paid;
             }
         };
 
         // Map block counts, filtering out SPOs we don't know (OBFT in early Shelley)
-        let spo_blocks: HashMap<KeyHash, usize> = ea_msg
+        let spo_blocks: HashMap<PoolId, usize> = ea_msg
             .spo_blocks
             .iter()
             .filter(|(hash, _)| self.spos.contains_key(hash))
-            .map(|(hash, count)| (hash.clone(), *count))
+            .map(|(hash, count)| (*hash, *count))
             .collect();
 
         // Enter epoch - note the message specifies the epoch that has just *ended*
@@ -713,8 +687,8 @@ impl State {
     /// epoch
     pub fn handle_spo_state(&mut self, spo_msg: &SPOStateMessage) -> Result<()> {
         // Capture current SPOs, mapped by operator ID
-        let new_spos: OrdMap<KeyHash, PoolRegistration> =
-            spo_msg.spos.iter().cloned().map(|spo| (spo.operator.clone(), spo)).collect();
+        let new_spos: OrdMap<PoolId, PoolRegistration> =
+            spo_msg.spos.iter().cloned().map(|spo| (spo.operator, spo)).collect();
 
         // Get pool deposit amount from parameters, or default
         let deposit = self
@@ -743,7 +717,7 @@ impl State {
                             margin = ?spo.margin,
                             reward = %spo.reward_account,
                             "Updated parameters for SPO {}",
-                            hex::encode(id)
+                            id
                         );
                     }
                 }
@@ -756,7 +730,7 @@ impl State {
                         margin = ?spo.margin,
                         reward = %spo.reward_account,
                         "Registered new SPO {}",
-                        hex::encode(id)
+                        id
                     );
                 }
             }
@@ -777,15 +751,15 @@ impl State {
             if let Some(retired_spo) = new_spos.get(id) {
                 debug!(
                     "SPO {} has retired - refunding their deposit to {}",
-                    hex::encode(id),
-                    retired_spo.reward_account
+                    id, retired_spo.reward_account
                 );
-                self.pool_refunds.push(retired_spo.reward_account.clone()); // Store full StakeAddress
+                self.pool_refunds.push((retired_spo.operator, retired_spo.reward_account.clone()));
+                // Store full StakeAddress
             }
 
             // Schedule to retire - we need them to still be in place when we count
             // blocks for the previous epoch
-            self.retiring_spos.push(id.to_vec());
+            self.retiring_spos.push(*id);
         }
 
         self.spos = new_spos;
@@ -841,8 +815,7 @@ impl State {
                 }
             };
 
-            // Schedule refund
-            self.stake_refunds.push((stake_address.clone(), deposit));
+            self.pots.deposits -= deposit;
 
             // Add to registration changes
             self.current_epoch_registration_changes.lock().unwrap().push(RegistrationChange {
@@ -857,15 +830,9 @@ impl State {
     }
 
     /// Record a stake delegation
-    fn record_stake_delegation(&mut self, stake_address: &StakeAddress, spo: &KeyHash) {
+    fn record_stake_delegation(&mut self, stake_address: &StakeAddress, spo: &PoolId) {
         let mut stake_addresses = self.stake_addresses.lock().unwrap();
         stake_addresses.record_stake_delegation(stake_address, spo);
-    }
-
-    /// Handle an MoveInstantaneousReward (pre-Conway only)
-    pub fn handle_mir(&mut self, mir: &MoveInstantaneousReward) -> Result<()> {
-        self.mirs.push(mir.clone());
-        Ok(())
     }
 
     /// record a drep delegation
@@ -888,7 +855,7 @@ impl State {
                 }
 
                 TxCertificate::MoveInstantaneousReward(mir) => {
-                    self.handle_mir(mir).unwrap_or_else(|e| error!("MIR failed: {e:#}"));
+                    self.pay_mir(mir);
                 }
 
                 TxCertificate::Registration(reg) => {
@@ -992,13 +959,14 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use acropolis_common::crypto::{keyhash_224, keyhash_256};
     use acropolis_common::{
         protocol_params::ConwayParams, rational_number::RationalNumber, Anchor, Committee,
-        Constitution, CostModel, DRepVotingThresholds, NetworkId, PoolVotingThresholds, Pot,
-        PotDelta, Ratio, Registration, StakeAddress, StakeAddressDelta, StakeAndVoteDelegation,
-        StakeCredential, StakeRegistrationAndStakeAndVoteDelegation,
+        Constitution, CostModel, DRepVotingThresholds, KeyHash, NetworkId, PoolVotingThresholds,
+        Pot, PotDelta, Ratio, Registration, StakeAddress, StakeAddressDelta,
+        StakeAndVoteDelegation, StakeCredential, StakeRegistrationAndStakeAndVoteDelegation,
         StakeRegistrationAndVoteDelegation, TxCertificateWithPos, TxIdentifier, VoteDelegation,
-        Withdrawal,
+        VrfKeyHash, Withdrawal,
     };
 
     // Helper to create a StakeAddress from a byte slice
@@ -1007,8 +975,20 @@ mod tests {
         full_hash[..hash.len().min(28)].copy_from_slice(&hash[..hash.len().min(28)]);
         StakeAddress {
             network: NetworkId::Mainnet,
-            credential: StakeCredential::AddrKeyHash(full_hash),
+            credential: StakeCredential::AddrKeyHash(full_hash.try_into().unwrap()),
         }
+    }
+
+    fn test_keyhash(byte: u8) -> KeyHash {
+        keyhash_224(&[byte])
+    }
+
+    fn test_keyhash_from_bytes(bytes: &[u8]) -> KeyHash {
+        keyhash_224(bytes)
+    }
+
+    fn test_vrf_keyhash(byte: u8) -> VrfKeyHash {
+        keyhash_256(&[byte]).into()
     }
 
     const STAKE_KEY_HASH: [u8; 3] = [0x99, 0x0f, 0x00];
@@ -1064,8 +1044,11 @@ mod tests {
     fn spdd_from_delegation_with_utxo_values_and_pledge() {
         let mut state = State::default();
 
-        let spo1: KeyHash = vec![0x01];
-        let spo2: KeyHash = vec![0x02];
+        let spo1 = test_keyhash(0x01).into();
+        let spo2 = test_keyhash(0x02).into();
+
+        let vrf_key_hash_1 = test_vrf_keyhash(0x03);
+        let vrf_key_hash_2 = test_vrf_keyhash(0x04);
 
         // Create the SPOs
         state
@@ -1073,8 +1056,8 @@ mod tests {
                 epoch: 1,
                 spos: vec![
                     PoolRegistration {
-                        operator: spo1.clone(),
-                        vrf_key_hash: spo1.clone(),
+                        operator: spo1,
+                        vrf_key_hash: vrf_key_hash_1,
                         pledge: 26,
                         cost: 0,
                         margin: Ratio {
@@ -1087,8 +1070,8 @@ mod tests {
                         pool_metadata: None,
                     },
                     PoolRegistration {
-                        operator: spo2.clone(),
-                        vrf_key_hash: spo2.clone(),
+                        operator: spo2,
+                        vrf_key_hash: vrf_key_hash_2,
                         pledge: 47,
                         cost: 10,
                         margin: Ratio {
@@ -1194,8 +1177,7 @@ mod tests {
             target: InstantaneousRewardTarget::OtherAccountingPot(42),
         };
 
-        state.handle_mir(&mir).unwrap();
-        state.pay_mirs();
+        state.pay_mir(&mir);
         assert_eq!(state.pots.reserves, 58);
         assert_eq!(state.pots.treasury, 42);
         assert_eq!(state.pots.deposits, 0);
@@ -1206,9 +1188,7 @@ mod tests {
             target: InstantaneousRewardTarget::OtherAccountingPot(10),
         };
 
-        state.handle_mir(&mir).unwrap();
-        let reward_deltas = state.pay_mirs();
-        assert_eq!(reward_deltas.len(), 0);
+        state.pay_mir(&mir);
         assert_eq!(state.pots.reserves, 68);
         assert_eq!(state.pots.treasury, 32);
         assert_eq!(state.pots.deposits, 0);
@@ -1250,8 +1230,7 @@ mod tests {
             ]),
         };
 
-        state.handle_mir(&mir).unwrap();
-        state.pay_mirs();
+        state.pay_mir(&mir);
         assert_eq!(state.pots.reserves, 58);
         assert_eq!(state.pots.treasury, 0);
         assert_eq!(state.pots.deposits, 2_000_000); // Paid deposit
@@ -1296,16 +1275,12 @@ mod tests {
             target: InstantaneousRewardTarget::StakeAddresses(vec![(stake_address.clone(), 42)]),
         };
 
-        state.handle_mir(&mir).unwrap();
-        let diffs = state.pay_mirs();
-        assert_eq!(state.pots.reserves, 58);
-        assert_eq!(diffs.len(), 1);
-        assert_eq!(diffs[0].stake_address.get_hash(), stake_address.get_hash());
-        assert_eq!(diffs[0].delta, 42);
+        state.pay_mir(&mir);
 
         {
             let stake_addresses = state.stake_addresses.lock().unwrap();
             let sas = stake_addresses.get(&stake_address).unwrap();
+            assert_eq!(state.pots.reserves, 58);
             assert_eq!(sas.rewards, 42);
         }
 
@@ -1314,6 +1289,7 @@ mod tests {
             withdrawals: vec![Withdrawal {
                 address: stake_address.clone(),
                 value: 39,
+                tx_identifier: TxIdentifier::default(),
             }],
         };
 
@@ -1335,7 +1311,7 @@ mod tests {
     fn drdd_includes_initial_deposit() {
         let mut state = State::default();
 
-        let drep_addr_cred = DRepCredential::AddrKeyHash(DREP_HASH.to_vec());
+        let drep_addr_cred = DRepCredential::AddrKeyHash(test_keyhash_from_bytes(&DREP_HASH));
         state.handle_drep_state(&DRepStateMessage {
             epoch: 1337,
             dreps: vec![(drep_addr_cred.clone(), 1_000_000)],
@@ -1356,8 +1332,8 @@ mod tests {
     fn drdd_respects_different_delegations() -> Result<()> {
         let mut state = State::default();
 
-        let drep_addr_cred = DRepCredential::AddrKeyHash(DREP_HASH.to_vec());
-        let drep_script_cred = DRepCredential::ScriptHash(DREP_HASH.to_vec());
+        let drep_addr_cred = DRepCredential::AddrKeyHash(test_keyhash_from_bytes(&DREP_HASH));
+        let drep_script_cred = DRepCredential::ScriptHash(test_keyhash_from_bytes(&DREP_HASH));
         state.handle_drep_state(&DRepStateMessage {
             epoch: 1337,
             dreps: vec![
@@ -1372,6 +1348,11 @@ mod tests {
         let spo4 = create_address(&[0x04]);
 
         let tx_identifier = TxIdentifier::default();
+
+        // Get the KeyHash once
+        let spo1_hash = spo1.get_hash();
+        let drep_key_hash = test_keyhash_from_bytes(&DREP_HASH);
+        let pool_id_1 = (*spo1_hash).into();
 
         let certificates = vec![
             // register the first two SPOs separately from their delegation
@@ -1394,7 +1375,7 @@ mod tests {
             TxCertificateWithPos {
                 cert: TxCertificate::VoteDelegation(VoteDelegation {
                     stake_address: spo1.clone(),
-                    drep: DRepChoice::Key(DREP_HASH.to_vec()),
+                    drep: DRepChoice::Key(drep_key_hash),
                 }),
                 tx_identifier,
                 cert_index: 0,
@@ -1402,8 +1383,8 @@ mod tests {
             TxCertificateWithPos {
                 cert: TxCertificate::StakeAndVoteDelegation(StakeAndVoteDelegation {
                     stake_address: spo2.clone(),
-                    operator: spo1.get_hash().to_vec(),
-                    drep: DRepChoice::Script(DREP_HASH.to_vec()),
+                    operator: pool_id_1,
+                    drep: DRepChoice::Script(drep_key_hash),
                 }),
                 tx_identifier,
                 cert_index: 0,
@@ -1423,7 +1404,7 @@ mod tests {
                 cert: TxCertificate::StakeRegistrationAndStakeAndVoteDelegation(
                     StakeRegistrationAndStakeAndVoteDelegation {
                         stake_address: spo4.clone(),
-                        operator: spo1.get_hash().to_vec(),
+                        operator: pool_id_1,
                         drep: DRepChoice::NoConfidence,
                         deposit: 1,
                     },

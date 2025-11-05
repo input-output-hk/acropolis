@@ -40,5 +40,5 @@ pub struct Tx {
 
 pub(crate) fn extract_tx_hashes(block: &[u8]) -> Result<Vec<TxHash>> {
     let block = pallas_traverse::MultiEraBlock::decode(block).context("could not decode block")?;
-    Ok(block.txs().into_iter().map(|tx| TxHash(*tx.hash())).collect())
+    Ok(block.txs().into_iter().map(|tx| TxHash::from(*tx.hash())).collect())
 }

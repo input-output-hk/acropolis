@@ -16,8 +16,8 @@ use acropolis_common::{
         TransactionsStateQueryResponse, DEFAULT_TRANSACTIONS_QUERY_TOPIC,
     },
     state_history::{StateHistory, StateHistoryStore},
-    AssetName, BechOrdAddress, BlockHash, GenesisDelegate, HeavyDelegate, NativeAsset, TxHash,
-    VRFKey,
+    AssetName, BechOrdAddress, BlockHash, GenesisDelegate, HeavyDelegate, NativeAsset, PoolId,
+    TxHash,
 };
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{module, Context, Module};
@@ -339,7 +339,7 @@ impl ChainStore {
     }
 
     fn get_block_hash(block: &Block) -> Result<BlockHash> {
-        Ok(BlockHash(
+        Ok(BlockHash::from(
             *pallas_traverse::MultiEraBlock::decode(&block.bytes)?.hash(),
         ))
     }
@@ -429,7 +429,7 @@ impl ChainStore {
             block_info.push(BlockInfo {
                 timestamp: block.extra.timestamp,
                 number: header.number(),
-                hash: BlockHash(*header.hash()),
+                hash: BlockHash::from(*header.hash()),
                 slot: header.slot(),
                 epoch: block.extra.epoch,
                 epoch_slot: block.extra.epoch_slot,
@@ -442,11 +442,11 @@ impl ChainStore {
                 tx_count: decoded.tx_count() as u64,
                 output,
                 fees,
-                block_vrf: header.vrf_vkey().map(|key| VRFKey::try_from(key).ok().unwrap()),
+                block_vrf: header.vrf_vkey().map(|key| key.try_into().ok().unwrap()),
                 op_cert,
                 op_cert_counter,
-                previous_block: header.previous_hash().map(|h| BlockHash(*h)),
-                next_block: next_hash.map(|h| BlockHash(*h)),
+                previous_block: header.previous_hash().map(|h| BlockHash::from(*h)),
+                next_block: next_hash.map(|h| BlockHash::from(*h)),
                 confirmations: latest_number - header.number(),
             });
 
@@ -460,7 +460,7 @@ impl ChainStore {
     fn to_block_transaction_hashes(block: &Block) -> Result<Vec<TxHash>> {
         let decoded = pallas_traverse::MultiEraBlock::decode(&block.bytes)?;
         let txs = decoded.txs();
-        Ok(txs.iter().map(|tx| TxHash(*tx.hash())).collect())
+        Ok(txs.iter().map(|tx| TxHash::from(*tx.hash())).collect())
     }
 
     fn to_block_transactions(
@@ -478,7 +478,7 @@ impl ChainStore {
         let hashes = txs_iter
             .skip(*skip as usize)
             .take(*limit as usize)
-            .map(|tx| TxHash(*tx.hash()))
+            .map(|tx| TxHash::from(*tx.hash()))
             .collect();
         Ok(BlockTransactions { hashes })
     }
@@ -499,7 +499,7 @@ impl ChainStore {
             .skip(*skip as usize)
             .take(*limit as usize)
             .map(|tx| {
-                let hash = TxHash(*tx.hash());
+                let hash = TxHash::from(*tx.hash());
                 let cbor = tx.encode();
                 BlockTransaction { hash, cbor }
             })
@@ -515,7 +515,7 @@ impl ChainStore {
         let decoded = pallas_traverse::MultiEraBlock::decode(&block.bytes)?;
         let mut addresses = BTreeMap::new();
         for tx in decoded.txs() {
-            let hash = TxHash(*tx.hash());
+            let hash = TxHash::from(*tx.hash());
             for output in tx.outputs() {
                 if let Ok(pallas_address) = output.address() {
                     if let Ok(address) = map_parameters::map_address(&pallas_address) {
@@ -587,8 +587,8 @@ impl ChainStore {
             }
         }
         Ok(TransactionInfo {
-            hash: TxHash(*tx_decoded.hash()),
-            block_hash: BlockHash(*block.hash()),
+            hash: TxHash::from(*tx_decoded.hash()),
+            block_hash: BlockHash::from(*block.hash()),
             block_number: block.number(),
             block_time: tx.block.extra.timestamp,
             slot: block.slot(),
@@ -655,8 +655,8 @@ impl ChainStore {
 
 #[derive(Default, Debug, Clone)]
 pub struct State {
-    pub byron_heavy_delegates: HashMap<Vec<u8>, HeavyDelegate>,
-    pub shelley_genesis_delegates: HashMap<Vec<u8>, GenesisDelegate>,
+    pub byron_heavy_delegates: HashMap<PoolId, HeavyDelegate>,
+    pub shelley_genesis_delegates: HashMap<PoolId, GenesisDelegate>,
 }
 
 impl State {

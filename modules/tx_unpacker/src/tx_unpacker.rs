@@ -49,16 +49,23 @@ impl TxUnpacker {
             enactment_epoch: epoch,
         };
 
-        for (hash, vote) in proposals.iter() {
+        for (hash_bytes, vote) in proposals.iter() {
+            let hash = match GenesisKeyhash::try_from(hash_bytes.as_ref()) {
+                Ok(h) => h,
+                Err(e) => {
+                    error!("Invalid genesis keyhash in protocol parameter update: {e}");
+                    continue;
+                }
+            };
+
             match map(vote) {
-                Ok(upd) => update.proposals.push((hash.to_vec(), upd)),
-                Err(e) => error!("Cannot convert alonzo protocol param update {vote:?}: {e}"),
+                Ok(upd) => update.proposals.push((hash, upd)),
+                Err(e) => error!("Cannot convert protocol param update {vote:?}: {e}"),
             }
         }
 
         dest.push(update);
     }
-
     /// Main init function
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // Get configuration
@@ -183,7 +190,7 @@ impl TxUnpacker {
                                             for input in inputs {  // MultiEraInput
                                                 // Lookup and remove UTxOIdentifier from registry 
                                                 let oref = input.output_ref();
-                                                let tx_ref = TxOutRef::new(TxHash(**oref.hash()), oref.index() as u16);
+                                                let tx_ref = TxOutRef::new(TxHash::from(**oref.hash()), oref.index() as u16);
 
                                                 match utxo_registry.consume(&tx_ref) {
                                                     Ok(tx_identifier) => {
@@ -286,11 +293,11 @@ impl TxUnpacker {
                                                 match StakeAddress::from_binary(key) {
                                                     Ok(stake_address) => {
                                                         withdrawals.push(Withdrawal {
-                                                            address: stake_address,
-                                                            value,
-                                                        });
-                                                    }
-
+                                                                address: stake_address,
+                                                                value,
+                                                                tx_identifier
+                                                            });
+                                                        }
                                                     Err(e) => error!("Bad stake address: {e:#}"),
                                                 }
                                             }
@@ -342,7 +349,7 @@ impl TxUnpacker {
                                         if publish_governance_procedures_topic.is_some() {
                                             if let Some(pp) = props {
                                                 // Nonempty set -- governance_message.proposal_procedures will not be empty
-                                                let mut proc_id = GovActionId { transaction_id: TxHash(*tx.hash()), action_index: 0 };
+                                                let mut proc_id = GovActionId { transaction_id: tx_hash, action_index: 0 };
                                                 for (action_index, pallas_governance_proposals) in pp.iter().enumerate() {
                                                     match proc_id.set_action_index(action_index)
                                                         .and_then (|proc_id| map_parameters::map_governance_proposals_procedures(proc_id, pallas_governance_proposals))
@@ -356,7 +363,7 @@ impl TxUnpacker {
                                             if let Some(pallas_vp) = votes {
                                                 // Nonempty set -- governance_message.voting_procedures will not be empty
                                                 match map_parameters::map_all_governance_voting_procedures(pallas_vp) {
-                                                    Ok(vp) => voting_procedures.push((TxHash(*tx.hash()), vp)),
+                                                    Ok(vp) => voting_procedures.push((tx_hash, vp)),
                                                     Err(e) => error!("Cannot decode governance voting procedures in slot {}: {e}", block.slot)
                                                 }
                                             }

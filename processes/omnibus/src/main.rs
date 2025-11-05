@@ -6,7 +6,6 @@ use caryatid_process::Process;
 use config::{Config, Environment, File};
 use std::sync::Arc;
 use tracing::info;
-use tracing_subscriber;
 
 // External modules
 use acropolis_module_accounts_state::AccountsState;
@@ -62,7 +61,7 @@ pub async fn main() -> Result<()> {
 
     // Standard logging using RUST_LOG for log levels default to INFO for events only
     let fmt_layer = fmt::layer()
-        .with_filter(EnvFilter::from_default_env().add_directive(filter::LevelFilter::INFO.into()))
+        .with_filter(EnvFilter::try_from_default_env().unwrap_or(EnvFilter::new("info")))
         .with_filter(filter::filter_fn(|meta| meta.is_event()));
 
     // Only turn on tracing if some OTEL environment variables exist
