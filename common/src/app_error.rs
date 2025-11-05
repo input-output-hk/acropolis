@@ -146,11 +146,13 @@ impl From<QueryError> for RESTError {
     fn from(error: QueryError) -> Self {
         match error {
             QueryError::NotFound { resource } => RESTError::NotFound(resource),
+            QueryError::PartialNotFound { message, .. } => RESTError::NotFound(message),
             QueryError::QueryFailed { message } => RESTError::InternalServerError(message),
             QueryError::StorageDisabled { storage_type } => {
                 RESTError::NotImplemented(format!("{} storage is disabled in config", storage_type))
             }
             QueryError::InvalidRequest { message } => RESTError::BadRequest(message),
+            QueryError::NotImplemented { query } => RESTError::NotImplemented(query),
         }
     }
 }

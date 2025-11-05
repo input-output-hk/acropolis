@@ -87,19 +87,4 @@ impl fmt::Display for QueryError {
     }
 }
 
-/// Convert QueryError to RESTResponse with appropriate status codes
-/// Not entirely sure where this should go
-impl From<QueryError> for RESTResponse {
-    fn from(error: QueryError) -> Self {
-        match &error {
-            QueryError::NotFound { .. } => RESTResponse::with_text(404, &error.to_string()),
-            QueryError::QueryFailed { .. } => RESTResponse::with_text(500, &error.to_string()),
-            QueryError::StorageDisabled { .. } => RESTResponse::with_text(501, &error.to_string()),
-            QueryError::NotImplemented { .. } => RESTResponse::with_text(501, &error.to_string()),
-            QueryError::InvalidRequest { .. } => RESTResponse::with_text(400, &error.to_string()),
-            QueryError::PartialNotFound { .. } => RESTResponse::with_text(206, &error.to_string()),
-        }
-    }
-}
-
 impl std::error::Error for QueryError {}
