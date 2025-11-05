@@ -552,9 +552,9 @@ impl AccountsState {
                             Some(map) => {
                                 AccountsStateQueryResponse::AccountsDrepDelegationsMap(map)
                             }
-                            None => AccountsStateQueryResponse::Error(
-                                QueryError::query_failed("Error retrieving DRep delegations map"),
-                            ),
+                            None => AccountsStateQueryResponse::Error(QueryError::query_failed(
+                                "Error retrieving DRep delegations map",
+                            )),
                         }
                     }
 

@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
+use crate::queries::errors::QueryError;
 use crate::{
     DRepChoice, PoolId, PoolLiveStakeInfo, RewardType, ShelleyAddress, StakeAddress, TxIdentifier,
 };
-use crate::queries::errors::QueryError;
 
 pub const DEFAULT_ACCOUNTS_QUERY_TOPIC: (&str, &str) =
     ("accounts-state-query-topic", "cardano.query.accounts");
