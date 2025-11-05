@@ -553,7 +553,7 @@ impl AccountsState {
                                 AccountsStateQueryResponse::AccountsDrepDelegationsMap(map)
                             }
                             None => AccountsStateQueryResponse::Error(
-                                QueryError::partial_not_found("One or more accounts not found"),
+                                QueryError::query_failed("Error retrieving DRep delegations map"),
                             ),
                         }
                     }
@@ -637,7 +637,7 @@ impl AccountsState {
                     }
 
                     _ => AccountsStateQueryResponse::Error(QueryError::not_implemented(format!(
-                        "{:?}",
+                        "Unimplemented query variant: {:?}",
                         query
                     ))),
                 };

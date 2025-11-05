@@ -12,8 +12,6 @@ use tokio::sync::Mutex;
 use tracing::{error, info, info_span, Instrument};
 mod state;
 use state::State;
-mod rest;
-use rest::handle_drdd;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.drep.distribution";
 const DEFAULT_HANDLE_DRDD_TOPIC: (&str, &str) = ("handle-topic-drdd", "rest.get.drdd");
@@ -105,12 +103,6 @@ impl DRDDState {
         } else {
             None
         };
-
-        // Register /drdd REST endpoint
-        handle_rest_with_query_parameters(context.clone(), &handle_drdd_topic, move |params| {
-            let state_rest = state_opt.clone();
-            handle_drdd(state_rest.clone(), params)
-        });
 
         Ok(())
     }

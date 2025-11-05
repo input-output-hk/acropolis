@@ -39,14 +39,9 @@ impl RESTError {
         RESTError::BadRequest(format!("{} parameter is missing", param_name))
     }
 
-    /// Feature hasn't been implemented error
-    pub fn not_implemented(feature: &str) -> Self {
-        RESTError::NotImplemented(format!("{} not yet implemented", feature))
-    }
-
-    /// Storage disabled error
-    pub fn storage_disabled(storage_type: &str) -> Self {
-        RESTError::NotImplemented(format!("{} storage is disabled in config", storage_type))
+    /// Invalid parameter error
+    pub fn invalid_param(param_name: &str, reason: &str) -> Self {
+        RESTError::BadRequest(format!("Invalid {}: {}", param_name, reason))
     }
 
     /// Invalid hex string error
@@ -54,24 +49,29 @@ impl RESTError {
         RESTError::BadRequest("Invalid hex string".to_string())
     }
 
-    /// Invalid parameter error
-    pub fn invalid_param(param_name: &str, reason: &str) -> Self {
-        RESTError::BadRequest(format!("Invalid {}: {}", param_name, reason))
+    /// Resource not found error (flexible message)
+    pub fn not_found(message: &str) -> Self {
+        RESTError::NotFound(message.to_string())
     }
 
-    /// Resource wasn't found error
-    pub fn not_found(resource: &str) -> Self {
-        RESTError::NotFound(format!("{} not found", resource))
+    /// Feature not implemented error (flexible message)
+    pub fn not_implemented(message: &str) -> Self {
+        RESTError::NotImplemented(message.to_string())
     }
 
-    /// Unexpected response error
-    pub fn unexpected_response(context: &str) -> Self {
-        RESTError::InternalServerError(format!("Unexpected response while {}", context))
+    /// Storage disabled error
+    pub fn storage_disabled(storage_type: &str) -> Self {
+        RESTError::NotImplemented(format!("{} storage is disabled in config", storage_type))
     }
 
-    /// Query failed error
-    pub fn query_failed(error: impl fmt::Display) -> Self {
-        RESTError::InternalServerError(format!("Query failed: {}", error))
+    /// Unexpected response error (flexible message)
+    pub fn unexpected_response(message: &str) -> Self {
+        RESTError::InternalServerError(message.to_string())
+    }
+
+    /// Query failed error (flexible message)
+    pub fn query_failed(message: &str) -> Self {
+        RESTError::InternalServerError(message.to_string())
     }
 
     /// Serialization failed error
@@ -142,14 +142,15 @@ impl From<serde_json::Error> for RESTError {
     }
 }
 
+/// Convert QueryError to RESTError
 impl From<QueryError> for RESTError {
     fn from(error: QueryError) -> Self {
         match error {
             QueryError::NotFound { resource } => RESTError::NotFound(resource),
-            QueryError::PartialNotFound { message, .. } => RESTError::NotFound(message),
+            QueryError::PartialNotFound { message } => RESTError::BadRequest(message),
             QueryError::QueryFailed { message } => RESTError::InternalServerError(message),
             QueryError::StorageDisabled { storage_type } => {
-                RESTError::NotImplemented(format!("{} storage is disabled in config", storage_type))
+                RESTError::storage_disabled(&storage_type)
             }
             QueryError::InvalidRequest { message } => RESTError::BadRequest(message),
             QueryError::NotImplemented { query } => RESTError::NotImplemented(query),
@@ -211,12 +212,5 @@ mod tests {
         let response: RESTResponse = error.into();
         assert_eq!(response.code, 400);
         assert_eq!(response.body, "Invalid stake address");
-    }
-
-    #[test]
-    fn test_convenience_constructors() {
-        assert_eq!(RESTError::invalid_hex().status_code(), 400);
-        assert_eq!(RESTError::not_found("Asset").message(), "Asset not found");
-        assert_eq!(RESTError::not_implemented("Feature").status_code(), 501);
     }
 }

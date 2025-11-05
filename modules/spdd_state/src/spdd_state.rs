@@ -53,12 +53,6 @@ impl SPDDState {
         let state_opt = if store_spdd {
             let state = Arc::new(Mutex::new(State::new()));
 
-            // Register /spdd REST endpoint
-            let state_rest = state.clone();
-            handle_rest_with_query_parameters(context.clone(), &handle_spdd_topic, move |params| {
-                handle_spdd(state_rest.clone(), params)
-            });
-
             // Subscribe for spdd messages from accounts_state
             let state_handler = state.clone();
             let mut message_subscription = context.subscribe(&subscribe_topic).await?;
