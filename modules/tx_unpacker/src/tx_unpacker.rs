@@ -49,16 +49,23 @@ impl TxUnpacker {
             enactment_epoch: epoch,
         };
 
-        for (hash, vote) in proposals.iter() {
+        for (hash_bytes, vote) in proposals.iter() {
+            let hash = match GenesisKeyhash::try_from(hash_bytes.as_ref()) {
+                Ok(h) => h,
+                Err(e) => {
+                    error!("Invalid genesis keyhash in protocol parameter update: {e}");
+                    continue;
+                }
+            };
+
             match map(vote) {
-                Ok(upd) => update.proposals.push((hash.to_vec(), upd)),
-                Err(e) => error!("Cannot convert alonzo protocol param update {vote:?}: {e}"),
+                Ok(upd) => update.proposals.push((hash, upd)),
+                Err(e) => error!("Cannot convert protocol param update {vote:?}: {e}"),
             }
         }
 
         dest.push(update);
     }
-
     /// Main init function
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // Get configuration

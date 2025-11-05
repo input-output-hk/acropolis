@@ -2,8 +2,8 @@
 
 use crate::snapshot::{Snapshot, SnapshotSPO};
 use acropolis_common::{
-    protocol_params::ShelleyParams, rational_number::RationalNumber, KeyHash, Lovelace, SPORewards,
-    StakeAddress,
+    protocol_params::ShelleyParams, rational_number::RationalNumber, Lovelace, PoolId, RewardType,
+    SPORewards, StakeAddress,
 };
 use anyhow::{bail, Result};
 use bigdecimal::{BigDecimal, One, ToPrimitive, Zero};
@@ -12,13 +12,6 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 use tracing::{debug, info, warn};
-
-/// Type of reward being given
-#[derive(Debug, Clone, PartialEq)]
-pub enum RewardType {
-    Leader,
-    Member,
-}
 
 /// Reward Detail
 #[derive(Debug, Clone)]
@@ -31,6 +24,9 @@ pub struct RewardDetail {
 
     /// Reward amount
     pub amount: Lovelace,
+
+    // Pool that reward came from
+    pub pool: PoolId,
 }
 
 /// Result of a rewards calculation
@@ -43,10 +39,10 @@ pub struct RewardsResult {
     pub total_paid: u64,
 
     /// Rewards to be paid
-    pub rewards: BTreeMap<KeyHash, Vec<RewardDetail>>,
+    pub rewards: BTreeMap<PoolId, Vec<RewardDetail>>,
 
     /// SPO rewards
-    pub spo_rewards: Vec<(KeyHash, SPORewards)>,
+    pub spo_rewards: Vec<(PoolId, SPORewards)>,
 }
 
 /// Calculate rewards for a given epoch based on current rewards state and protocol parameters
@@ -124,8 +120,7 @@ pub fn calculate_rewards(
 
         debug!(
             "SPO {} reward account registered two epochs ago: {}",
-            hex::encode(operator_id),
-            pay_to_pool_reward_account
+            operator_id, pay_to_pool_reward_account
         );
 
         // Also, to handle the early Shelley timing bug, we allow it if it was registered
@@ -142,8 +137,7 @@ pub fn calculate_rewards(
             if pay_to_pool_reward_account {
                 info!(
                     "SPO {}'s reward account {} was registered in this epoch",
-                    hex::encode(operator_id),
-                    staking_spo.reward_account
+                    operator_id, staking_spo.reward_account
                 );
             }
         }
@@ -164,18 +158,15 @@ pub fn calculate_rewards(
                     if performance.spos.get(other_id).map(|s| s.blocks_produced).unwrap_or(0) > 0 {
                         pay_to_pool_reward_account = false;
                         warn!("Shelley shared reward account bug: Dropping reward to {} in favour of {} on shared account {}",
-                              hex::encode(operator_id),
-                              hex::encode(other_id),
+                              operator_id,
+                              other_id,
                               staking_spo.reward_account);
                         break;
                     }
                 }
             }
         } else {
-            info!(
-                "Reward account for SPO {} isn't registered",
-                hex::encode(operator_id)
-            )
+            info!("Reward account for SPO {} isn't registered", operator_id)
         }
 
         // Calculate rewards for this SPO
@@ -211,13 +202,14 @@ pub fn calculate_rewards(
                         num_delegators_paid += 1;
                         total_paid_to_delegators += reward.amount;
                     }
+                    RewardType::PoolRefund => {}
                 }
                 spo_rewards.total_rewards += reward.amount;
                 result.total_paid += reward.amount;
             }
 
-            result.rewards.insert(operator_id.clone(), rewards);
-            result.spo_rewards.push((operator_id.clone(), spo_rewards));
+            result.rewards.insert(*operator_id, rewards);
+            result.spo_rewards.push((*operator_id, spo_rewards));
         }
     }
 
@@ -236,7 +228,7 @@ pub fn calculate_rewards(
 /// Calculate rewards for an individual SPO
 #[allow(clippy::too_many_arguments)]
 fn calculate_spo_rewards(
-    operator_id: &KeyHash,
+    operator_id: &PoolId,
     spo: &SnapshotSPO,
     blocks_produced: u64,
     total_blocks: usize,
@@ -253,7 +245,7 @@ fn calculate_spo_rewards(
     // Active stake (sigma)
     let pool_stake = BigDecimal::from(spo.total_stake);
     if pool_stake.is_zero() {
-        warn!("SPO {} has no stake - skipping", hex::encode(operator_id));
+        warn!("SPO {} has no stake - skipping", operator_id);
 
         // No stake, no rewards or earnings
         return vec![];
@@ -267,9 +259,7 @@ fn calculate_spo_rewards(
     if pool_owner_stake < spo.pledge {
         debug!(
             "SPO {} has owner stake {} less than pledge {} - skipping",
-            hex::encode(operator_id),
-            pool_owner_stake,
-            spo.pledge
+            operator_id, pool_owner_stake, spo.pledge
         );
         return vec![];
     }
@@ -316,7 +306,7 @@ fn calculate_spo_rewards(
 
     debug!(%pool_stake, %relative_pool_stake, %pool_performance,
            %optimum_rewards, %pool_rewards, pool_owner_stake, %pool_pledge,
-           "Pool {}", hex::encode(operator_id));
+           "Pool {}", operator_id);
 
     // Subtract fixed costs
     let fixed_cost = BigDecimal::from(spo.fixed_cost);
@@ -391,6 +381,7 @@ fn calculate_spo_rewards(
                     account: delegator_stake_address.clone(),
                     rtype: RewardType::Member,
                     amount: to_pay,
+                    pool: *operator_id,
                 });
                 total_paid += to_pay;
                 delegators_paid += 1;
@@ -408,13 +399,12 @@ fn calculate_spo_rewards(
             account: spo.reward_account.clone(),
             rtype: RewardType::Leader,
             amount: spo_benefit,
+            pool: *operator_id,
         });
     } else {
         info!(
             "SPO {}'s reward account {} not paid {}",
-            hex::encode(operator_id),
-            spo.reward_account,
-            spo_benefit,
+            operator_id, spo.reward_account, spo_benefit,
         );
     }
 

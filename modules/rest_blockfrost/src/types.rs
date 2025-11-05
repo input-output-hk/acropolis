@@ -2,12 +2,11 @@ use crate::cost_models::{PLUTUS_V1, PLUTUS_V2, PLUTUS_V3};
 use acropolis_common::{
     messages::EpochActivityMessage,
     protocol_params::{Nonce, NonceVariant, ProtocolParams},
-    queries::blocks::BlockInfo,
-    queries::governance::DRepActionUpdate,
+    queries::{accounts::AccountReward, blocks::BlockInfo, governance::DRepActionUpdate},
     rest_helper::ToCheckedF64,
-    serialization::{DisplayFromBech32, PoolPrefix},
+    serialization::{Bech32WithHrp, DisplayFromBech32, PoolPrefix},
     AssetAddressEntry, AssetMetadataStandard, AssetMintRecord, KeyHash, PolicyAsset,
-    PoolEpochState, PoolUpdateAction, Relay, TxHash, Vote,
+    PoolEpochState, PoolId, PoolUpdateAction, Relay, TxHash, Vote, VrfKeyHash,
 };
 use anyhow::Result;
 use num_traits::ToPrimitive;
@@ -63,7 +62,7 @@ pub struct BlockInfoREST(pub BlockInfo);
 pub struct SPDDByEpochItemRest {
     pub stake_address: String,
     #[serde_as(as = "DisplayFromBech32<PoolPrefix>")]
-    pub pool_id: KeyHash,
+    pub pool_id: PoolId,
     #[serde_as(as = "DisplayFromStr")]
     pub amount: u64,
 }
@@ -431,7 +430,7 @@ pub struct PoolInfoRest {
     #[serde_as(as = "Hex")]
     pub hex: KeyHash,
     #[serde_as(as = "Hex")]
-    pub vrf_key: KeyHash,
+    pub vrf_key: VrfKeyHash,
     pub blocks_minted: u64,
     pub blocks_epoch: u64,
     #[serde_as(as = "DisplayFromStr")]
@@ -873,4 +872,25 @@ pub struct DelegationUpdateREST {
 pub struct AccountWithdrawalREST {
     pub tx_hash: String,
     pub amount: String,
+}
+
+#[derive(Serialize)]
+pub struct AccountRewardREST {
+    pub epoch: u32,
+    pub amount: String,
+    pub pool_id: String,
+    #[serde(rename = "type")]
+    pub reward_type: String,
+}
+
+impl TryFrom<&AccountReward> for AccountRewardREST {
+    type Error = anyhow::Error;
+    fn try_from(value: &AccountReward) -> Result<Self, Self::Error> {
+        Ok(Self {
+            epoch: value.epoch,
+            amount: value.amount.to_string(),
+            pool_id: value.pool.to_bech32_with_hrp("pool")?,
+            reward_type: value.reward_type.to_string(),
+        })
+    }
 }

@@ -1,4 +1,4 @@
-use crate::{messages::EpochActivityMessage, protocol_params::ProtocolParams, KeyHash};
+use crate::{messages::EpochActivityMessage, protocol_params::ProtocolParams, PoolId};
 
 pub const DEFAULT_EPOCHS_QUERY_TOPIC: (&str, &str) =
     ("epochs-state-query-topic", "cardano.query.epochs");
@@ -11,7 +11,7 @@ pub enum EpochsStateQuery {
     GetPreviousEpochs { epoch_number: u64 },
     GetEpochStakeDistribution { epoch_number: u64 },
     GetEpochStakeDistributionByPool { epoch_number: u64 },
-    GetLatestEpochBlocksMintedByPool { spo_id: KeyHash },
+    GetLatestEpochBlocksMintedByPool { spo_id: PoolId },
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

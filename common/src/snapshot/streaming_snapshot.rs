@@ -66,13 +66,21 @@ impl<'b, C> minicbor::decode::Decode<'b, C> for StakeCredential {
             0 => {
                 // ScriptHash variant (first in enum) - decode bytes directly
                 let bytes = d.bytes()?;
-                let key_hash = bytes.to_vec();
+                let key_hash = bytes.try_into().map_err(|_| {
+                    minicbor::decode::Error::message(
+                        "invalid length for ScriptHash in StakeCredential",
+                    )
+                })?;
                 Ok(StakeCredential::ScriptHash(key_hash))
             }
             1 => {
-                // AddrKeyHash variant (second in enum) - decode bytes directly
+                // AddrKeyHash variant (second in enum) - decodes bytes directly
                 let bytes = d.bytes()?;
-                let key_hash = bytes.to_vec();
+                let key_hash = bytes.try_into().map_err(|_| {
+                    minicbor::decode::Error::message(
+                        "invalid length for AddrKeyHash in StakeCredential",
+                    )
+                })?;
                 Ok(StakeCredential::AddrKeyHash(key_hash))
             }
             _ => Err(minicbor::decode::Error::message(
@@ -299,20 +307,14 @@ impl<'b, C> minicbor::Decode<'b, C> for Account {
 // Type aliases for pool_params compatibility
 // -----------------------------------------------------------------------------
 
+pub use crate::types::AddrKeyhash;
+pub use crate::types::ScriptHash;
+use crate::PoolId;
 /// Alias minicbor as cbor for pool_params module
 pub use minicbor as cbor;
 
 /// Coin amount (Lovelace)
 pub type Coin = u64;
-
-/// Pool ID (28-byte hash)
-pub type PoolId = Hash<28>;
-
-pub type AddrKeyhash = Hash<28>;
-pub type ScriptHash = Hash<28>;
-
-/// VRF key hash (32-byte hash)
-pub type VrfKeyhash = Hash<32>;
 
 /// Reward account (stake address bytes) - wrapper to handle CBOR bytes encoding
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1079,15 +1081,15 @@ impl StreamingSnapshotParser {
                 // Convert SPO delegation from StrictMaybe<PoolId> to Option<KeyHash>
                 // PoolId is Hash<28>, we need to convert to Vec<u8>
                 let delegated_spo = match &account.pool {
-                    StrictMaybe::Just(pool_id) => Some(pool_id.as_ref().to_vec()),
+                    StrictMaybe::Just(pool_id) => Some(*pool_id),
                     StrictMaybe::Nothing => None,
                 };
 
                 // Convert DRep delegation from StrictMaybe<DRep> to Option<DRepChoice>
                 let delegated_drep = match &account.drep {
                     StrictMaybe::Just(drep) => Some(match drep {
-                        DRep::Key(hash) => crate::DRepChoice::Key(hash.as_ref().to_vec()),
-                        DRep::Script(hash) => crate::DRepChoice::Script(hash.as_ref().to_vec()),
+                        DRep::Key(hash) => crate::DRepChoice::Key(*hash),
+                        DRep::Script(hash) => crate::DRepChoice::Script(*hash),
                         DRep::Abstain => crate::DRepChoice::Abstain,
                         DRep::NoConfidence => crate::DRepChoice::NoConfidence,
                     }),
@@ -1445,15 +1447,15 @@ impl StreamingSnapshotParser {
 
                 // Convert SPO delegation from StrictMaybe<PoolId> to Option<KeyHash>
                 let delegated_spo = match &account.pool {
-                    StrictMaybe::Just(pool_id) => Some(pool_id.as_ref().to_vec()),
+                    StrictMaybe::Just(pool_id) => Some(*pool_id),
                     StrictMaybe::Nothing => None,
                 };
 
                 // Convert DRep delegation from StrictMaybe<DRep> to Option<DRepChoice>
                 let delegated_drep = match &account.drep {
                     StrictMaybe::Just(drep) => Some(match drep {
-                        DRep::Key(hash) => crate::DRepChoice::Key(hash.as_ref().to_vec()),
-                        DRep::Script(hash) => crate::DRepChoice::Script(hash.as_ref().to_vec()),
+                        DRep::Key(hash) => crate::DRepChoice::Key(*hash),
+                        DRep::Script(hash) => crate::DRepChoice::Script(*hash),
                         DRep::Abstain => crate::DRepChoice::Abstain,
                         DRep::NoConfidence => crate::DRepChoice::NoConfidence,
                     }),
@@ -2006,7 +2008,7 @@ impl StreamingSnapshotParser {
                     cost: params.cost,
                     margin: (params.margin.numerator as f64) / (params.margin.denominator as f64),
                     reward_account: hex::encode(&params.reward_account.0),
-                    pool_owners: params.owners.iter().map(|h| hex::encode(h)).collect(),
+                    pool_owners: params.owners.iter().map(|h| h.to_string()).collect(),
                     relays,
                     pool_metadata,
                     retirement_epoch,

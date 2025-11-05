@@ -2,9 +2,9 @@ use acropolis_common::messages::EpochActivityMessage;
 use acropolis_common::messages::SPORewardsMessage;
 use acropolis_common::messages::SPOStakeDistributionMessage;
 use acropolis_common::rational_number::RationalNumber;
-use acropolis_common::BlockInfo;
 use acropolis_common::KeyHash;
 use acropolis_common::PoolEpochState;
+use acropolis_common::{BlockInfo, PoolId};
 use dashmap::DashMap;
 use rayon::prelude::*;
 use std::collections::BTreeMap;
@@ -100,7 +100,7 @@ impl EpochsHistoryState {
     /// Return None if any of pool operators active stake is None
     pub fn get_pools_active_stakes(
         &self,
-        pool_operators: &Vec<KeyHash>,
+        pool_operators: &Vec<PoolId>,
         epoch: u64,
     ) -> Option<Vec<u64>> {
         let epochs_history = self.epochs_history.as_ref()?;
@@ -167,7 +167,7 @@ impl EpochsHistoryState {
         &self,
         _block: &BlockInfo,
         epoch_activity_message: &EpochActivityMessage,
-        spos: &[(KeyHash, usize)],
+        spos: &[(PoolId, usize)],
     ) {
         let Some(epochs_history) = self.epochs_history.as_ref() else {
             return;
@@ -187,7 +187,7 @@ impl EpochsHistoryState {
         epoch: u64,
         update_fn: impl FnOnce(&mut EpochState),
     ) {
-        let mut epochs = epochs_history.entry(spo.clone()).or_default();
+        let mut epochs = epochs_history.entry(*spo).or_default();
         let epoch_state = epochs.entry(epoch).or_insert_with(|| EpochState::new(epoch));
         update_fn(epoch_state);
     }
@@ -214,19 +214,22 @@ mod tests {
 
     #[test]
     fn get_pool_history_returns_none_when_spo_is_not_found() {
+        let key_hash = [1; 28].into();
         let epochs_history = EpochsHistoryState::new(save_history_store_config());
-        let pool_history = epochs_history.get_pool_history(&vec![1]);
+        let pool_history = epochs_history.get_pool_history(&key_hash);
         assert!(pool_history.is_none());
     }
 
     #[test]
     fn get_pool_history_returns_data() {
         let epochs_history = EpochsHistoryState::new(save_history_store_config());
+        let pool_id = [1; 28].into();
+        let spo_block_key_hash = [2; 28].into();
 
         let block = new_block(2);
         let mut spdd_msg = new_spdd_message(1);
         spdd_msg.spos = vec![(
-            vec![1],
+            pool_id,
             DelegatedStake {
                 active: 1,
                 active_delegators_count: 1,
@@ -236,14 +239,14 @@ mod tests {
         epochs_history.handle_spdd(&block, &spdd_msg);
 
         let mut epoch_activity_msg = new_epoch_activity_message(1);
-        epoch_activity_msg.spo_blocks = vec![(vec![11], 1)];
+        epoch_activity_msg.spo_blocks = vec![(spo_block_key_hash, 1)];
         epoch_activity_msg.total_blocks = 1;
         epoch_activity_msg.total_fees = 10;
-        epochs_history.handle_epoch_activity(&block, &epoch_activity_msg, &[(vec![1], 1)]);
+        epochs_history.handle_epoch_activity(&block, &epoch_activity_msg, &[(pool_id, 1)]);
 
         let mut spo_rewards_msg = new_spo_rewards_message(1);
         spo_rewards_msg.spos = vec![(
-            vec![1],
+            pool_id,
             SPORewards {
                 total_rewards: 100,
                 operator_rewards: 10,
@@ -251,7 +254,7 @@ mod tests {
         )];
         epochs_history.handle_spo_rewards(&block, &spo_rewards_msg);
 
-        let pool_history = epochs_history.get_pool_history(&vec![1]).unwrap();
+        let pool_history = epochs_history.get_pool_history(&pool_id).unwrap();
         assert_eq!(2, pool_history.len());
         let first_epoch = pool_history.first().unwrap();
         let third_epoch = pool_history.get(1).unwrap();

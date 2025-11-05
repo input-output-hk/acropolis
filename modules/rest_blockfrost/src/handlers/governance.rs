@@ -10,13 +10,13 @@ use acropolis_common::{
         accounts::{AccountsStateQuery, AccountsStateQueryResponse},
         governance::{GovernanceStateQuery, GovernanceStateQueryResponse},
     },
-    Credential, GovActionId, KeyHash, TxHash, Voter,
+    Credential, GovActionId, TxHash, Voter,
 };
 use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
 use reqwest::Client;
 use serde_json::Value;
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 pub async fn handle_dreps_list_blockfrost(
     context: Arc<Context<Message>>,
@@ -191,28 +191,6 @@ pub async fn handle_drep_delegators_blockfrost(
         Message::StateQueryResponse(StateQueryResponse::Governance(
             GovernanceStateQueryResponse::DRepDelegators(delegators),
         )) => {
-            let stake_key_to_bech32: HashMap<KeyHash, String> = match delegators
-                .addresses
-                .iter()
-                .map(|addr| {
-                    let credential = addr.get_credential();
-                    let bech32 = credential
-                        .to_stake_bech32()
-                        .map_err(|_| anyhow!("Failed to encode stake address"))?;
-                    let key_hash = credential.get_hash();
-                    Ok((key_hash, bech32))
-                })
-                .collect::<Result<HashMap<_, _>>>()
-            {
-                Ok(map) => map,
-                Err(e) => {
-                    return Ok(RESTResponse::with_text(
-                        500,
-                        &format!("Internal error: {e}"),
-                    ));
-                }
-            };
-
             let msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
                 AccountsStateQuery::GetAccountsUtxoValuesMap {
                     stake_addresses: delegators.addresses.clone(),
@@ -227,27 +205,31 @@ pub async fn handle_drep_delegators_blockfrost(
                 Message::StateQueryResponse(StateQueryResponse::Accounts(
                     AccountsStateQueryResponse::AccountsUtxoValuesMap(map),
                 )) => {
-                    let mut response = Vec::new();
+                    let response: Result<Vec<_>> = map
+                        .into_iter()
+                        .map(|(stake_address, amount)| {
+                            let bech32 = stake_address
+                                .to_string()
+                                .map_err(|e| anyhow!("Failed to encode stake address {}", e))?;
 
-                    for (key, amount) in map {
-                        let Some(bech32) = stake_key_to_bech32.get(&key) else {
-                            return Ok(RESTResponse::with_text(
+                            Ok(serde_json::json!({
+                                "address": bech32,
+                                "amount": amount.to_string(),
+                            }))
+                        })
+                        .collect();
+
+                    match response {
+                        Ok(response) => match serde_json::to_string_pretty(&response) {
+                            Ok(json) => Ok(RESTResponse::with_json(200, &json)),
+                            Err(e) => Ok(RESTResponse::with_text(
                                 500,
-                                "Internal error: missing Bech32 for stake key",
-                            ));
-                        };
-
-                        response.push(serde_json::json!({
-                            "address": bech32,
-                            "amount": amount.to_string(),
-                        }));
-                    }
-
-                    match serde_json::to_string_pretty(&response) {
-                        Ok(json) => Ok(RESTResponse::with_json(200, &json)),
+                                &format!("Failed to serialize DRep delegators: {e}"),
+                            )),
+                        },
                         Err(e) => Ok(RESTResponse::with_text(
                             500,
-                            &format!("Failed to serialize DRep delegators: {e}"),
+                            &format!("Internal error: {e}"),
                         )),
                     }
                 }
@@ -280,7 +262,6 @@ pub async fn handle_drep_delegators_blockfrost(
         _ => Ok(RESTResponse::with_text(500, "Unexpected message type")),
     }
 }
-
 pub async fn handle_drep_metadata_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,

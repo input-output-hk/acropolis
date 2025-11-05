@@ -1,6 +1,6 @@
 use crate::{
-    queries::governance::VoteRecord, rational_number::RationalNumber, KeyHash, PoolEpochState,
-    PoolMetadata, PoolRegistration, PoolRetirement, PoolUpdateEvent, Relay,
+    queries::governance::VoteRecord, rational_number::RationalNumber, PoolEpochState, PoolId,
+    PoolMetadata, PoolRegistration, PoolRetirement, PoolUpdateEvent, Relay, StakeAddress,
 };
 
 pub const DEFAULT_POOLS_QUERY_TOPIC: (&str, &str) =
@@ -13,52 +13,52 @@ pub enum PoolsStateQuery {
     GetPoolsRetiredList,
     GetPoolsRetiringList,
     GetPoolActiveStakeInfo {
-        pool_operator: KeyHash,
+        pool_operator: PoolId,
         epoch: u64,
     },
     GetPoolsActiveStakes {
-        pools_operators: Vec<KeyHash>,
+        pools_operators: Vec<PoolId>,
         epoch: u64,
     },
     GetPoolsTotalBlocksMinted {
-        pools_operators: Vec<KeyHash>,
+        pools_operators: Vec<PoolId>,
     },
     GetPoolInfo {
-        pool_id: KeyHash,
+        pool_id: PoolId,
     },
     GetPoolHistory {
-        pool_id: KeyHash,
+        pool_id: PoolId,
     },
     GetPoolMetadata {
-        pool_id: KeyHash,
+        pool_id: PoolId,
     },
     GetPoolRelays {
-        pool_id: KeyHash,
+        pool_id: PoolId,
     },
     GetPoolDelegators {
-        pool_id: KeyHash,
+        pool_id: PoolId,
     },
     GetPoolTotalBlocksMinted {
-        pool_id: KeyHash,
+        pool_id: PoolId,
     },
     GetBlocksByPool {
-        pool_id: KeyHash,
+        pool_id: PoolId,
     },
     GetBlocksByPoolAndEpoch {
-        pool_id: KeyHash,
+        pool_id: PoolId,
         epoch: u64,
     },
     GetPoolUpdates {
-        pool_id: KeyHash,
+        pool_id: PoolId,
     },
     GetPoolVotes {
-        pool_id: KeyHash,
+        pool_id: PoolId,
     },
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum PoolsStateQueryResponse {
-    PoolsList(Vec<KeyHash>),
+    PoolsList(Vec<PoolId>),
     PoolsListWithInfo(PoolsListWithInfo),
     PoolsRetiredList(Vec<PoolRetirement>),
     PoolsRetiringList(Vec<PoolRetirement>),
@@ -83,7 +83,7 @@ pub enum PoolsStateQueryResponse {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PoolsListWithInfo {
-    pub pools: Vec<(KeyHash, PoolRegistration)>,
+    pub pools: Vec<(PoolId, PoolRegistration)>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -94,5 +94,5 @@ pub struct PoolActiveStakeInfo {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PoolDelegators {
-    pub delegators: Vec<(KeyHash, u64)>,
+    pub delegators: Vec<(StakeAddress, u64)>,
 }

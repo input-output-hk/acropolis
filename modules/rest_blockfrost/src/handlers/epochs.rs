@@ -4,6 +4,7 @@ use crate::{
         EpochActivityRest, ProtocolParamsRest, SPDDByEpochAndPoolItemRest, SPDDByEpochItemRest,
     },
 };
+use acropolis_common::serialization::Bech32Conversion;
 use acropolis_common::{
     messages::{Message, RESTResponse, StateQuery, StateQueryResponse},
     queries::{
@@ -14,8 +15,7 @@ use acropolis_common::{
         spdd::{SPDDStateQuery, SPDDStateQueryResponse},
         utils::query_state,
     },
-    serialization::Bech32WithHrp,
-    NetworkId, StakeAddress, StakeCredential,
+    PoolId,
 };
 use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
@@ -428,37 +428,6 @@ pub async fn handle_epoch_total_stakes_blockfrost(
         return Ok(RESTResponse::with_text(404, "Epoch not found"));
     }
 
-    // Query current network from parameters-state
-    let current_network_msg = Arc::new(Message::StateQuery(StateQuery::Parameters(
-        ParametersStateQuery::GetNetworkName,
-    )));
-    let current_network = query_state(
-        &context,
-        &handlers_config.parameters_query_topic,
-        current_network_msg,
-        |message| match message {
-            Message::StateQueryResponse(StateQueryResponse::Parameters(
-                ParametersStateQueryResponse::NetworkName(network),
-            )) => Ok(network),
-            _ => Err(anyhow::anyhow!(
-                "Unexpected message type while retrieving current network"
-            )),
-        },
-    )
-    .await?;
-
-    let network = match current_network.as_str() {
-        "mainnet" => NetworkId::Mainnet,
-        "testnet" => NetworkId::Testnet,
-        unknown => {
-            return Ok(RESTResponse::with_text(
-                500,
-                format!("Internal server error while retrieving current network: {unknown}")
-                    .as_str(),
-            ))
-        }
-    };
-
     // Query SPDD by epoch from accounts-state
     let msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
         AccountsStateQuery::GetSPDDByEpoch {
@@ -486,16 +455,13 @@ pub async fn handle_epoch_total_stakes_blockfrost(
     .await?;
     let spdd_response = spdd
         .into_iter()
-        .map(|(pool_id, stake_key_hash, amount)| {
-            let stake_address = StakeAddress {
-                network: network.clone(),
-                credential: StakeCredential::AddrKeyHash(stake_key_hash),
-            }
-            .to_string()
-            .map_err(|e| anyhow::anyhow!("Failed to convert stake address to string: {e}"))?;
+        .map(|(pool_id, stake_address, amount)| {
+            let bech32 = stake_address
+                .to_string()
+                .map_err(|e| anyhow::anyhow!("Failed to convert stake address to string {}", e))?;
             Ok(SPDDByEpochItemRest {
                 pool_id,
-                stake_address,
+                stake_address: bech32,
                 amount,
             })
         })
@@ -534,7 +500,7 @@ pub async fn handle_epoch_pool_stakes_blockfrost(
         }
     };
 
-    let Ok(pool_id) = Vec::<u8>::from_bech32_with_hrp(pool_id, "pool") else {
+    let Ok(pool_id) = PoolId::from_bech32(pool_id) else {
         return Ok(RESTResponse::with_text(
             400,
             &format!("Invalid Bech32 stake pool ID: {pool_id}"),
@@ -564,37 +530,6 @@ pub async fn handle_epoch_pool_stakes_blockfrost(
         return Ok(RESTResponse::with_text(404, "Epoch not found"));
     }
 
-    // Query current network from parameters-state
-    let current_network_msg = Arc::new(Message::StateQuery(StateQuery::Parameters(
-        ParametersStateQuery::GetNetworkName,
-    )));
-    let current_network = query_state(
-        &context,
-        &handlers_config.parameters_query_topic,
-        current_network_msg,
-        |message| match message {
-            Message::StateQueryResponse(StateQueryResponse::Parameters(
-                ParametersStateQueryResponse::NetworkName(network),
-            )) => Ok(network),
-            _ => Err(anyhow::anyhow!(
-                "Unexpected message type while retrieving current network"
-            )),
-        },
-    )
-    .await?;
-
-    let network = match current_network.as_str() {
-        "mainnet" => NetworkId::Mainnet,
-        "testnet" => NetworkId::Testnet,
-        unknown => {
-            return Ok(RESTResponse::with_text(
-                500,
-                format!("Internal server error while retrieving current network: {unknown}")
-                    .as_str(),
-            ))
-        }
-    };
-
     // Query SPDD by epoch and pool from accounts-state
     let msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
         AccountsStateQuery::GetSPDDByEpochAndPool {
@@ -623,16 +558,12 @@ pub async fn handle_epoch_pool_stakes_blockfrost(
     .await?;
     let spdd_response = spdd
         .into_iter()
-        .map(|(key_hash, amount)| {
-            let stake_address = StakeAddress {
-                network: network.clone(),
-                credential: StakeCredential::AddrKeyHash(key_hash),
-            }
-            .to_string()
-            .map_err(|e| anyhow::anyhow!("Failed to convert stake address to string: {e}"))?;
-
+        .map(|(stake_address, amount)| {
+            let bech32 = stake_address
+                .to_string()
+                .map_err(|e| anyhow::anyhow!("Failed to convert stake address to string {}", e))?;
             Ok(SPDDByEpochAndPoolItemRest {
-                stake_address,
+                stake_address: bech32,
                 amount,
             })
         })
@@ -679,7 +610,7 @@ pub async fn handle_epoch_pool_blocks_blockfrost(
         }
     };
 
-    let Ok(spo) = Vec::<u8>::from_bech32_with_hrp(pool_id_param, "pool") else {
+    let Ok(spo) = PoolId::from_bech32(pool_id_param) else {
         return Ok(RESTResponse::with_text(
             400,
             &format!("Invalid Bech32 stake pool ID: {pool_id_param}"),
@@ -689,7 +620,7 @@ pub async fn handle_epoch_pool_blocks_blockfrost(
     // query Pool's Blocks by epoch from spo-state
     let msg = Arc::new(Message::StateQuery(StateQuery::Pools(
         PoolsStateQuery::GetBlocksByPoolAndEpoch {
-            pool_id: spo.clone(),
+            pool_id: spo,
             epoch: epoch_number,
         },
     )));

@@ -5,7 +5,7 @@ use acropolis_common::{
         CardanoMessage, DRepStakeDistributionMessage, GovernanceOutcomesMessage,
         GovernanceProceduresMessage, Message, ProtocolParamsMessage, SPOStakeDistributionMessage,
     },
-    BlockInfo, DRepCredential, DelegatedStake, Era, GovActionId, KeyHash, Lovelace,
+    BlockInfo, DRepCredential, DelegatedStake, Era, GovActionId, Lovelace, PoolId,
     ProposalProcedure, TxHash, Voter, VotingProcedure,
 };
 use anyhow::{anyhow, bail, Result};
@@ -29,7 +29,7 @@ pub struct State {
     drep_stake: HashMap<DRepCredential, Lovelace>,
     drep_no_confidence: u64,
     drep_abstain: u64,
-    spo_stake: HashMap<KeyHash, DelegatedStake>,
+    spo_stake: HashMap<PoolId, DelegatedStake>,
 
     alonzo_babbage_voting: AlonzoBabbageVoting,
     conway_voting: ConwayVoting,

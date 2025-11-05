@@ -345,12 +345,12 @@ pub fn process_message(
                     // Base addresses (stake delegated to itself)
                     ShelleyAddressDelegationPart::StakeKeyHash(keyhash) => StakeAddress {
                         network: shelley.network.clone(),
-                        credential: StakeCredential::AddrKeyHash(keyhash.clone()),
+                        credential: StakeCredential::AddrKeyHash(*keyhash),
                     },
 
                     ShelleyAddressDelegationPart::ScriptHash(scripthash) => StakeAddress {
                         network: shelley.network.clone(),
-                        credential: StakeCredential::ScriptHash(scripthash.clone()),
+                        credential: StakeCredential::ScriptHash(*scripthash),
                     },
 
                     // Shelley addresses (stake delegated to some different address)
@@ -401,12 +401,14 @@ pub fn process_message(
 #[cfg(test)]
 mod test {
     use crate::*;
+    use acropolis_common::hash::Hash;
     use acropolis_common::{
         messages::AddressDeltasMessage, Address, AddressDelta, BlockHash, BlockInfo, BlockStatus,
         ByronAddress, Era, ShelleyAddress, ShelleyAddressDelegationPart, ShelleyAddressPaymentPart,
         ShelleyAddressPointer, StakeAddress, StakeCredential, UTxOIdentifier, ValueDelta,
     };
     use bech32::{Bech32, Hrp};
+    use pallas::ledger::addresses::{PaymentKeyHash, ScriptHash, StakeKeyHash};
 
     fn parse_addr(s: &str) -> Result<AddressDelta> {
         let a = pallas::ledger::addresses::Address::from_bech32(s)?;
@@ -427,6 +429,18 @@ mod test {
         }
     }
 
+    pub fn script_to_hash(pallas_hash: ScriptHash) -> Hash<28> {
+        pallas_hash.as_ref().try_into().unwrap()
+    }
+
+    pub fn stake_to_hash(pallas_hash: StakeKeyHash) -> Hash<28> {
+        pallas_hash.as_ref().try_into().unwrap()
+    }
+
+    pub fn payment_to_hash(pallas_hash: PaymentKeyHash) -> Hash<28> {
+        pallas_hash.as_ref().try_into().unwrap()
+    }
+
     /// Derive our Address from a Pallas address
     // This is essentially a 1:1 mapping but makes the Message definitions independent
     // of Pallas
@@ -442,20 +456,20 @@ mod test {
 
                 payment: match shelley_address.payment() {
                     addresses::ShelleyPaymentPart::Key(hash) => {
-                        ShelleyAddressPaymentPart::PaymentKeyHash(hash.to_vec())
+                        ShelleyAddressPaymentPart::PaymentKeyHash(payment_to_hash(*hash))
                     }
                     addresses::ShelleyPaymentPart::Script(hash) => {
-                        ShelleyAddressPaymentPart::ScriptHash(hash.to_vec())
+                        ShelleyAddressPaymentPart::ScriptHash(script_to_hash(*hash))
                     }
                 },
 
                 delegation: match shelley_address.delegation() {
                     addresses::ShelleyDelegationPart::Null => ShelleyAddressDelegationPart::None,
                     addresses::ShelleyDelegationPart::Key(hash) => {
-                        ShelleyAddressDelegationPart::StakeKeyHash(hash.to_vec())
+                        ShelleyAddressDelegationPart::StakeKeyHash(stake_to_hash(*hash))
                     }
                     addresses::ShelleyDelegationPart::Script(hash) => {
-                        ShelleyAddressDelegationPart::ScriptHash(hash.to_vec())
+                        ShelleyAddressDelegationPart::ScriptHash(script_to_hash(*hash))
                     }
                     addresses::ShelleyDelegationPart::Pointer(pointer) => {
                         ShelleyAddressDelegationPart::Pointer(ShelleyAddressPointer {
@@ -471,10 +485,10 @@ mod test {
                 network: map_network(stake_address.network())?,
                 credential: match stake_address.payload() {
                     addresses::StakePayload::Stake(hash) => {
-                        StakeCredential::AddrKeyHash(hash.to_vec())
+                        StakeCredential::AddrKeyHash(stake_to_hash(*hash))
                     }
                     addresses::StakePayload::Script(hash) => {
-                        StakeCredential::ScriptHash(hash.to_vec())
+                        StakeCredential::ScriptHash(script_to_hash(*hash))
                     }
                 },
             })),

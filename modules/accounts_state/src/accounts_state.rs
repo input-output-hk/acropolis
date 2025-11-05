@@ -505,12 +505,12 @@ impl AccountsState {
                 };
 
                 let response = match query {
-                    AccountsStateQuery::GetAccountInfo { stake_address } => {
-                        if let Some(account) = state.get_stake_state(stake_address) {
+                    AccountsStateQuery::GetAccountInfo { account } => {
+                        if let Some(account) = state.get_stake_state(account) {
                             AccountsStateQueryResponse::AccountInfo(AccountInfo {
                                 utxo_value: account.utxo_value,
                                 rewards: account.rewards,
-                                delegated_spo: account.delegated_spo.clone(),
+                                delegated_spo: account.delegated_spo,
                                 delegated_drep: account.delegated_drep.clone(),
                             })
                         } else {

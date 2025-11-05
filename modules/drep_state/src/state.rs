@@ -261,8 +261,8 @@ impl State {
         for (tx_hash, voting_procedures) in voting_procedures {
             for (voter, single_votes) in &voting_procedures.votes {
                 let drep_cred = match voter {
-                    Voter::DRepKey(k) => DRepCredential::AddrKeyHash(k.to_vec()),
-                    Voter::DRepScript(s) => DRepCredential::ScriptHash(s.to_vec()),
+                    Voter::DRepKey(k) => DRepCredential::AddrKeyHash(k.into_inner()),
+                    Voter::DRepScript(s) => DRepCredential::ScriptHash(s.into_inner()),
                     _ => continue,
                 };
 
@@ -474,12 +474,12 @@ impl State {
         context: &Arc<Context<Message>>,
         delegators: &[(&StakeAddress, &DRepChoice)],
     ) -> Result<()> {
-        let mut stake_key_to_input = HashMap::with_capacity(delegators.len());
+        let mut stake_address_to_drep = HashMap::with_capacity(delegators.len());
         let mut stake_addresses = Vec::with_capacity(delegators.len());
 
-        for &(sc, drep) in delegators {
-            stake_addresses.push(sc.clone());
-            stake_key_to_input.insert(sc.get_credential().get_hash(), (sc, drep));
+        for &(stake_address, drep) in delegators {
+            stake_addresses.push(stake_address.clone());
+            stake_address_to_drep.insert(stake_address, drep);
         }
 
         let msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
@@ -500,9 +500,9 @@ impl State {
             }
         };
 
-        for (stake_key, old_drep_opt) in result_map {
-            let &(delegator, new_drep_choice) = match stake_key_to_input.get(&stake_key) {
-                Some(pair) => pair,
+        for (stake_address, old_drep_opt) in result_map {
+            let new_drep_choice = match stake_address_to_drep.get(&stake_address) {
+                Some(&drep) => drep,
                 None => continue,
             };
 
@@ -516,10 +516,7 @@ impl State {
                     if old_drep_cred != new_drep_cred {
                         self.update_historical(&old_drep_cred, false, |entry| {
                             if let Some(delegators) = entry.delegators.as_mut() {
-                                delegators.retain(|s| {
-                                    s.get_credential().get_hash()
-                                        != delegator.get_credential().get_hash()
-                                });
+                                delegators.retain(|s| s.get_hash() != stake_address.get_hash());
                             }
                         })?;
                     }
@@ -529,8 +526,8 @@ impl State {
             // Add delegator to new DRep
             match self.update_historical(&new_drep_cred, true, |entry| {
                 if let Some(delegators) = entry.delegators.as_mut() {
-                    if !delegators.contains(delegator) {
-                        delegators.push(delegator.clone());
+                    if !delegators.contains(&stake_address) {
+                        delegators.push(stake_address.clone());
                     }
                 }
             }) {
@@ -559,8 +556,8 @@ impl State {
 
 fn drep_choice_to_credential(choice: &DRepChoice) -> Option<DRepCredential> {
     match choice {
-        DRepChoice::Key(k) => Some(DRepCredential::AddrKeyHash(k.clone())),
-        DRepChoice::Script(k) => Some(DRepCredential::ScriptHash(k.clone())),
+        DRepChoice::Key(k) => Some(DRepCredential::AddrKeyHash(*k)),
+        DRepChoice::Script(k) => Some(DRepCredential::ScriptHash(*k)),
         _ => None,
     }
 }
@@ -584,7 +581,7 @@ mod tests {
 
     #[test]
     fn test_drep_process_one_certificate() {
-        let tx_cred = Credential::AddrKeyHash(CRED_1.to_vec());
+        let tx_cred = Credential::AddrKeyHash(CRED_1.into());
         let tx_cert = TxCertificateWithPos {
             cert: TxCertificate::DRepRegistration(DRepRegistration {
                 credential: tx_cred.clone(),
@@ -609,7 +606,7 @@ mod tests {
 
     #[test]
     fn test_drep_do_not_replace_existing_certificate() {
-        let tx_cred = Credential::AddrKeyHash(CRED_1.to_vec());
+        let tx_cred = Credential::AddrKeyHash(CRED_1.into());
         let tx_cert = TxCertificateWithPos {
             cert: TxCertificate::DRepRegistration(DRepRegistration {
                 credential: tx_cred.clone(),
@@ -647,7 +644,7 @@ mod tests {
 
     #[test]
     fn test_drep_update_certificate() {
-        let tx_cred = Credential::AddrKeyHash(CRED_1.to_vec());
+        let tx_cred = Credential::AddrKeyHash(CRED_1.into());
         let tx_cert = TxCertificateWithPos {
             cert: TxCertificate::DRepRegistration(DRepRegistration {
                 credential: tx_cred.clone(),
@@ -688,7 +685,7 @@ mod tests {
 
     #[test]
     fn test_drep_do_not_update_nonexistent_certificate() {
-        let tx_cred = Credential::AddrKeyHash(CRED_1.to_vec());
+        let tx_cred = Credential::AddrKeyHash(CRED_1.into());
         let tx_cert = TxCertificateWithPos {
             cert: TxCertificate::DRepRegistration(DRepRegistration {
                 credential: tx_cred.clone(),
@@ -707,7 +704,7 @@ mod tests {
         };
         let update_anchor_tx_cert = TxCertificateWithPos {
             cert: TxCertificate::DRepUpdate(DRepUpdate {
-                credential: Credential::AddrKeyHash(CRED_2.to_vec()),
+                credential: Credential::AddrKeyHash(CRED_2.into()),
                 anchor: Some(anchor.clone()),
             }),
             tx_identifier: TxIdentifier::default(),
@@ -728,7 +725,7 @@ mod tests {
 
     #[test]
     fn test_drep_deregister() {
-        let tx_cred = Credential::AddrKeyHash(CRED_1.to_vec());
+        let tx_cred = Credential::AddrKeyHash(CRED_1.into());
         let tx_cert = TxCertificateWithPos {
             cert: TxCertificate::DRepRegistration(DRepRegistration {
                 credential: tx_cred.clone(),
@@ -756,7 +753,7 @@ mod tests {
 
     #[test]
     fn test_drep_do_not_deregister_nonexistent_cert() {
-        let tx_cred = Credential::AddrKeyHash(CRED_1.to_vec());
+        let tx_cred = Credential::AddrKeyHash(CRED_1.into());
         let tx_cert = TxCertificateWithPos {
             cert: TxCertificate::DRepRegistration(DRepRegistration {
                 credential: tx_cred.clone(),
@@ -771,7 +768,7 @@ mod tests {
 
         let unregister_tx_cert = TxCertificateWithPos {
             cert: TxCertificate::DRepDeregistration(DRepDeregistration {
-                credential: Credential::AddrKeyHash(CRED_2.to_vec()),
+                credential: Credential::AddrKeyHash(CRED_2.into()),
                 refund: 500000000,
             }),
             tx_identifier: TxIdentifier::default(),

@@ -12,6 +12,7 @@ use pallas::ledger::{
     *,
 };
 
+use acropolis_common::hash::Hash;
 use acropolis_common::{
     protocol_params::{Nonce, NonceVariant, ProtocolVersion},
     rational_number::RationalNumber,
@@ -28,6 +29,34 @@ pub fn map_network(network: addresses::Network) -> Result<NetworkId> {
     }
 }
 
+/// Convert a Pallas Hash reference to an Acropolis Hash (owned)
+/// Works for any hash size N
+pub fn to_hash<const N: usize>(pallas_hash: &pallas_primitives::Hash<N>) -> Hash<N> {
+    Hash::try_from(pallas_hash.as_ref()).unwrap()
+}
+
+/// Convert a Pallas Hash reference to an Acropolis Hash (owned)
+/// Works for any hash size N
+pub fn genesis_to_hash(pallas_hash: &pallas_primitives::Genesishash) -> Hash<28> {
+    Hash::try_from(pallas_hash.as_ref()).unwrap()
+}
+
+/// Convert a Pallas Hash reference to an Acropolis Hash (owned)
+/// Works for any hash size N
+pub fn genesis_delegate_to_hash(pallas_hash: &pallas_primitives::GenesisDelegateHash) -> PoolId {
+    PoolId::try_from(pallas_hash.as_ref()).unwrap()
+}
+
+/// Convert a Pallas Hash<28> reference to an Acropolis PoolId
+pub fn to_pool_id(pallas_hash: &pallas_primitives::Hash<28>) -> PoolId {
+    to_hash(pallas_hash).into()
+}
+
+/// Convert a Pallas Hash<32> reference to an Acropolis VRFKey
+pub fn to_vrf_key(pallas_hash: &pallas_primitives::Hash<32>) -> VrfKeyHash {
+    VrfKeyHash::try_from(pallas_hash.as_ref()).unwrap()
+}
+
 /// Derive our Address from a Pallas address
 // This is essentially a 1:1 mapping but makes the Message definitions independent
 // of Pallas
@@ -42,20 +71,20 @@ pub fn map_address(address: &addresses::Address) -> Result<Address> {
 
             payment: match shelley_address.payment() {
                 addresses::ShelleyPaymentPart::Key(hash) => {
-                    ShelleyAddressPaymentPart::PaymentKeyHash(hash.to_vec())
+                    ShelleyAddressPaymentPart::PaymentKeyHash(to_hash(hash))
                 }
                 addresses::ShelleyPaymentPart::Script(hash) => {
-                    ShelleyAddressPaymentPart::ScriptHash(hash.to_vec())
+                    ShelleyAddressPaymentPart::ScriptHash(to_hash(hash))
                 }
             },
 
             delegation: match shelley_address.delegation() {
                 addresses::ShelleyDelegationPart::Null => ShelleyAddressDelegationPart::None,
                 addresses::ShelleyDelegationPart::Key(hash) => {
-                    ShelleyAddressDelegationPart::StakeKeyHash(hash.to_vec())
+                    ShelleyAddressDelegationPart::StakeKeyHash(to_hash(hash))
                 }
                 addresses::ShelleyDelegationPart::Script(hash) => {
-                    ShelleyAddressDelegationPart::ScriptHash(hash.to_vec())
+                    ShelleyAddressDelegationPart::ScriptHash(to_hash(hash))
                 }
                 addresses::ShelleyDelegationPart::Pointer(pointer) => {
                     ShelleyAddressDelegationPart::Pointer(ShelleyAddressPointer {
@@ -70,8 +99,8 @@ pub fn map_address(address: &addresses::Address) -> Result<Address> {
         addresses::Address::Stake(stake_address) => Ok(Address::Stake(StakeAddress {
             network: map_network(stake_address.network())?,
             credential: match stake_address.payload() {
-                addresses::StakePayload::Stake(hash) => StakeCredential::AddrKeyHash(hash.to_vec()),
-                addresses::StakePayload::Script(hash) => StakeCredential::ScriptHash(hash.to_vec()),
+                addresses::StakePayload::Stake(hash) => StakeCredential::AddrKeyHash(to_hash(hash)),
+                addresses::StakePayload::Script(hash) => StakeCredential::ScriptHash(to_hash(hash)),
             },
         })),
     }
@@ -81,10 +110,10 @@ pub fn map_address(address: &addresses::Address) -> Result<Address> {
 pub fn map_stake_credential(cred: &PallasStakeCredential) -> StakeCredential {
     match cred {
         PallasStakeCredential::AddrKeyhash(key_hash) => {
-            StakeCredential::AddrKeyHash(key_hash.to_vec())
+            StakeCredential::AddrKeyHash(to_hash(key_hash))
         }
         PallasStakeCredential::ScriptHash(script_hash) => {
-            StakeCredential::ScriptHash(script_hash.to_vec())
+            StakeCredential::ScriptHash(to_hash(script_hash))
         }
     }
 }
@@ -93,10 +122,10 @@ pub fn map_stake_credential(cred: &PallasStakeCredential) -> StakeCredential {
 pub fn map_stake_address(cred: &PallasStakeCredential, network_id: NetworkId) -> StakeAddress {
     let payload = match cred {
         PallasStakeCredential::AddrKeyhash(key_hash) => {
-            StakeCredential::AddrKeyHash(key_hash.to_vec())
+            StakeCredential::AddrKeyHash(to_hash(key_hash))
         }
         PallasStakeCredential::ScriptHash(script_hash) => {
-            StakeCredential::ScriptHash(script_hash.to_vec())
+            StakeCredential::ScriptHash(to_hash(script_hash))
         }
     };
 
@@ -106,8 +135,8 @@ pub fn map_stake_address(cred: &PallasStakeCredential, network_id: NetworkId) ->
 /// Map a Pallas DRep to our DRepChoice
 pub fn map_drep(drep: &conway::DRep) -> DRepChoice {
     match drep {
-        conway::DRep::Key(key_hash) => DRepChoice::Key(key_hash.to_vec()),
-        conway::DRep::Script(script_hash) => DRepChoice::Script(script_hash.to_vec()),
+        conway::DRep::Key(key_hash) => DRepChoice::Key(to_hash(key_hash)),
+        conway::DRep::Script(script_hash) => DRepChoice::Script(to_hash(script_hash)),
         conway::DRep::Abstain => DRepChoice::Abstain,
         conway::DRep::NoConfidence => DRepChoice::NoConfidence,
     }
@@ -169,7 +198,7 @@ pub fn map_nullable_gov_action_id(
 fn map_constitution(constitution: &conway::Constitution) -> Constitution {
     Constitution {
         anchor: map_anchor(&constitution.anchor),
-        guardrail_script: map_nullable(|x| x.to_vec(), &constitution.guardrail_script),
+        guardrail_script: map_nullable(to_hash, &constitution.guardrail_script),
     }
 }
 
@@ -231,7 +260,7 @@ pub fn map_certificate(
             alonzo::Certificate::StakeDelegation(cred, pool_key_hash) => Ok(TxCertificateWithPos {
                 cert: TxCertificate::StakeDelegation(StakeDelegation {
                     stake_address: map_stake_address(cred, network_id),
-                    operator: pool_key_hash.to_vec(),
+                    operator: to_pool_id(pool_key_hash),
                 }),
                 tx_identifier,
                 cert_index: cert_index.try_into().unwrap(),
@@ -248,8 +277,8 @@ pub fn map_certificate(
                 pool_metadata,
             } => Ok(TxCertificateWithPos {
                 cert: TxCertificate::PoolRegistration(PoolRegistration {
-                    operator: operator.to_vec(),
-                    vrf_key_hash: vrf_keyhash.to_vec(),
+                    operator: to_pool_id(operator),
+                    vrf_key_hash: to_vrf_key(vrf_keyhash),
                     pledge: *pledge,
                     cost: *cost,
                     margin: Ratio {
@@ -261,7 +290,7 @@ pub fn map_certificate(
                         .iter()
                         .map(|v| {
                             StakeAddress::new(
-                                StakeCredential::AddrKeyHash(v.to_vec()),
+                                StakeCredential::AddrKeyHash(to_hash(v)),
                                 network_id.clone(),
                             )
                         })
@@ -280,7 +309,7 @@ pub fn map_certificate(
             }),
             alonzo::Certificate::PoolRetirement(pool_key_hash, epoch) => Ok(TxCertificateWithPos {
                 cert: TxCertificate::PoolRetirement(PoolRetirement {
-                    operator: pool_key_hash.to_vec(),
+                    operator: to_pool_id(pool_key_hash),
                     epoch: *epoch,
                 }),
                 tx_identifier,
@@ -292,9 +321,9 @@ pub fn map_certificate(
                 vrf_key_hash,
             ) => Ok(TxCertificateWithPos {
                 cert: TxCertificate::GenesisKeyDelegation(GenesisKeyDelegation {
-                    genesis_hash: genesis_hash.to_vec(),
-                    genesis_delegate_hash: genesis_delegate_hash.to_vec(),
-                    vrf_key_hash: vrf_key_hash.to_vec(),
+                    genesis_hash: genesis_to_hash(genesis_hash),
+                    genesis_delegate_hash: genesis_delegate_to_hash(genesis_delegate_hash),
+                    vrf_key_hash: to_vrf_key(vrf_key_hash),
                 }),
                 tx_identifier,
                 cert_index: cert_index as u64,
@@ -348,7 +377,7 @@ pub fn map_certificate(
                     Ok(TxCertificateWithPos {
                         cert: TxCertificate::StakeDelegation(StakeDelegation {
                             stake_address: map_stake_address(cred, network_id),
-                            operator: pool_key_hash.to_vec(),
+                            operator: to_pool_id(pool_key_hash),
                         }),
                         tx_identifier,
                         cert_index: cert_index.try_into().unwrap(),
@@ -368,8 +397,8 @@ pub fn map_certificate(
                     pool_metadata,
                 } => Ok(TxCertificateWithPos {
                     cert: TxCertificate::PoolRegistration(PoolRegistration {
-                        operator: operator.to_vec(),
-                        vrf_key_hash: vrf_keyhash.to_vec(),
+                        operator: to_pool_id(operator),
+                        vrf_key_hash: to_vrf_key(vrf_keyhash),
                         pledge: *pledge,
                         cost: *cost,
                         margin: Ratio {
@@ -388,7 +417,7 @@ pub fn map_certificate(
                             .into_iter()
                             .map(|v| {
                                 StakeAddress::new(
-                                    StakeCredential::AddrKeyHash(v.to_vec()),
+                                    StakeCredential::AddrKeyHash(to_hash(v)),
                                     network_id.clone(),
                                 )
                             })
@@ -408,7 +437,7 @@ pub fn map_certificate(
                 conway::Certificate::PoolRetirement(pool_key_hash, epoch) => {
                     Ok(TxCertificateWithPos {
                         cert: TxCertificate::PoolRetirement(PoolRetirement {
-                            operator: pool_key_hash.to_vec(),
+                            operator: to_pool_id(pool_key_hash),
                             epoch: *epoch,
                         }),
                         tx_identifier,
@@ -447,7 +476,7 @@ pub fn map_certificate(
                     Ok(TxCertificateWithPos {
                         cert: TxCertificate::StakeAndVoteDelegation(StakeAndVoteDelegation {
                             stake_address: map_stake_address(cred, network_id),
-                            operator: pool_key_hash.to_vec(),
+                            operator: to_pool_id(pool_key_hash),
                             drep: map_drep(drep),
                         }),
                         tx_identifier,
@@ -460,7 +489,7 @@ pub fn map_certificate(
                         cert: TxCertificate::StakeRegistrationAndDelegation(
                             StakeRegistrationAndDelegation {
                                 stake_address: map_stake_address(cred, network_id),
-                                operator: pool_key_hash.to_vec(),
+                                operator: to_pool_id(pool_key_hash),
                                 deposit: *coin,
                             },
                         ),
@@ -486,7 +515,7 @@ pub fn map_certificate(
                         cert: TxCertificate::StakeRegistrationAndStakeAndVoteDelegation(
                             StakeRegistrationAndStakeAndVoteDelegation {
                                 stake_address: map_stake_address(cred, network_id),
-                                operator: pool_key_hash.to_vec(),
+                                operator: to_pool_id(pool_key_hash),
                                 drep: map_drep(drep),
                                 deposit: *coin,
                             },
@@ -881,14 +910,14 @@ pub fn map_governance_proposals_procedures(
 fn map_voter(voter: &conway::Voter) -> Voter {
     match voter {
         conway::Voter::ConstitutionalCommitteeKey(key_hash) => {
-            Voter::ConstitutionalCommitteeKey(key_hash.to_vec())
+            Voter::ConstitutionalCommitteeKey(to_hash(key_hash).into())
         }
         conway::Voter::ConstitutionalCommitteeScript(script_hash) => {
-            Voter::ConstitutionalCommitteeScript(script_hash.to_vec())
+            Voter::ConstitutionalCommitteeScript(to_hash(script_hash).into())
         }
-        conway::Voter::DRepKey(addr_key_hash) => Voter::DRepKey(addr_key_hash.to_vec()),
-        conway::Voter::DRepScript(script_hash) => Voter::DRepScript(script_hash.to_vec()),
-        conway::Voter::StakePoolKey(key_hash) => Voter::StakePoolKey(key_hash.to_vec()),
+        conway::Voter::DRepKey(addr_key_hash) => Voter::DRepKey(to_hash(addr_key_hash).into()),
+        conway::Voter::DRepScript(script_hash) => Voter::DRepScript(to_hash(script_hash).into()),
+        conway::Voter::StakePoolKey(key_hash) => Voter::StakePoolKey(to_pool_id(key_hash)),
     }
 }
 
