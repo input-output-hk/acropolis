@@ -410,7 +410,8 @@ mod tests {
     use super::*;
     use crate::InMemoryImmutableUTXOStore;
     use acropolis_common::{
-        AssetName, BlockHash, ByronAddress, Era, NativeAsset, ReferenceScript, Value,
+        Address, AssetName, BlockHash, ByronAddress, Datum, Era, NativeAsset, ReferenceScript,
+        Value,
     };
     use config::Config;
     use tokio::sync::Mutex;
