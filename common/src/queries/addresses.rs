@@ -1,4 +1,5 @@
 use crate::{Address, AddressTotals, TxIdentifier, UTxOIdentifier};
+use crate::queries::errors::QueryError;
 
 pub const DEFAULT_ADDRESS_QUERY_TOPIC: (&str, &str) =
     ("address-state-query-topic", "cardano.query.address");
@@ -15,6 +16,5 @@ pub enum AddressStateQueryResponse {
     AddressTotals(AddressTotals),
     AddressUTxOs(Vec<UTxOIdentifier>),
     AddressTransactions(Vec<TxIdentifier>),
-    NotFound,
-    Error(String),
+    Error(QueryError)
 }

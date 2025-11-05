@@ -32,6 +32,7 @@ mod verifier;
 use acropolis_common::queries::accounts::{
     AccountInfo, AccountsStateQuery, AccountsStateQueryResponse,
 };
+use acropolis_common::queries::errors::QueryError;
 use verifier::Verifier;
 
 use crate::spo_distribution_store::SPDDStore;
@@ -484,9 +485,9 @@ impl AccountsState {
             async move {
                 let Message::StateQuery(StateQuery::Accounts(query)) = message.as_ref() else {
                     return Arc::new(Message::StateQueryResponse(StateQueryResponse::Accounts(
-                        AccountsStateQueryResponse::Error(
-                            "Invalid message for accounts-state".into(),
-                        ),
+                        AccountsStateQueryResponse::Error(QueryError::invalid_request(
+                            "Invalid message for accounts-state",
+                        )),
                     )));
                 };
 
@@ -495,26 +496,30 @@ impl AccountsState {
                     Some(s) => Some(s.lock().await),
                     None => None,
                 };
+
                 let state = match guard.current() {
                     Some(s) => s,
                     None => {
                         return Arc::new(Message::StateQueryResponse(
-                            StateQueryResponse::Accounts(AccountsStateQueryResponse::NotFound),
+                            StateQueryResponse::Accounts(AccountsStateQueryResponse::Error(
+                                QueryError::not_found("Current state"),
+                            )),
                         ));
                     }
                 };
 
                 let response = match query {
                     AccountsStateQuery::GetAccountInfo { account } => {
-                        if let Some(account) = state.get_stake_state(account) {
-                            AccountsStateQueryResponse::AccountInfo(AccountInfo {
+                        match state.get_stake_state(account) {
+                            Some(account) => AccountsStateQueryResponse::AccountInfo(AccountInfo {
                                 utxo_value: account.utxo_value,
                                 rewards: account.rewards,
                                 delegated_spo: account.delegated_spo,
                                 delegated_drep: account.delegated_drep.clone(),
-                            })
-                        } else {
-                            AccountsStateQueryResponse::NotFound
+                            }),
+                            None => AccountsStateQueryResponse::Error(QueryError::not_found(
+                                format!("Account {}", account),
+                            )),
                         }
                     }
 
@@ -548,7 +553,7 @@ impl AccountsState {
                                 AccountsStateQueryResponse::AccountsDrepDelegationsMap(map)
                             }
                             None => AccountsStateQueryResponse::Error(
-                                "Error retrieving DRep delegations map".to_string(),
+                                QueryError::partial_not_found("One or more accounts not found"),
                             ),
                         }
                     }
@@ -563,7 +568,7 @@ impl AccountsState {
                         match state.get_accounts_utxo_values_map(stake_addresses) {
                             Some(map) => AccountsStateQueryResponse::AccountsUtxoValuesMap(map),
                             None => AccountsStateQueryResponse::Error(
-                                "One or more accounts not found".to_string(),
+                                QueryError::partial_not_found("One or more accounts not found"),
                             ),
                         }
                     }
@@ -572,7 +577,7 @@ impl AccountsState {
                         match state.get_accounts_utxo_values_sum(stake_addresses) {
                             Some(sum) => AccountsStateQueryResponse::AccountsUtxoValuesSum(sum),
                             None => AccountsStateQueryResponse::Error(
-                                "One or more accounts not found".to_string(),
+                                QueryError::partial_not_found("One or more accounts not found"),
                             ),
                         }
                     }
@@ -581,7 +586,7 @@ impl AccountsState {
                         match state.get_accounts_balances_map(stake_addresses) {
                             Some(map) => AccountsStateQueryResponse::AccountsBalancesMap(map),
                             None => AccountsStateQueryResponse::Error(
-                                "One or more accounts not found".to_string(),
+                                QueryError::partial_not_found("One or more accounts not found"),
                             ),
                         }
                     }
@@ -596,7 +601,7 @@ impl AccountsState {
                         match state.get_account_balances_sum(stake_addresses) {
                             Some(sum) => AccountsStateQueryResponse::AccountsBalancesSum(sum),
                             None => AccountsStateQueryResponse::Error(
-                                "One or more accounts not found".to_string(),
+                                QueryError::partial_not_found("One or more accounts not found"),
                             ),
                         }
                     }
@@ -604,11 +609,13 @@ impl AccountsState {
                     AccountsStateQuery::GetSPDDByEpoch { epoch } => match spdd_store_guard {
                         Some(spdd_store) => match spdd_store.query_by_epoch(*epoch) {
                             Ok(result) => AccountsStateQueryResponse::SPDDByEpoch(result),
-                            Err(e) => AccountsStateQueryResponse::Error(e.to_string()),
+                            Err(e) => AccountsStateQueryResponse::Error(QueryError::query_failed(
+                                e.to_string(),
+                            )),
                         },
-                        None => AccountsStateQueryResponse::Error(
-                            "SPDD store is not enabled".to_string(),
-                        ),
+                        None => {
+                            AccountsStateQueryResponse::Error(QueryError::storage_disabled("SPDD"))
+                        }
                     },
 
                     AccountsStateQuery::GetSPDDByEpochAndPool { epoch, pool_id } => {
@@ -618,19 +625,21 @@ impl AccountsState {
                                     Ok(result) => {
                                         AccountsStateQueryResponse::SPDDByEpochAndPool(result)
                                     }
-                                    Err(e) => AccountsStateQueryResponse::Error(e.to_string()),
+                                    Err(e) => AccountsStateQueryResponse::Error(
+                                        QueryError::query_failed(e.to_string()),
+                                    ),
                                 }
                             }
                             None => AccountsStateQueryResponse::Error(
-                                "SPDD store is not enabled".to_string(),
+                                QueryError::storage_disabled("SPDD"),
                             ),
                         }
                     }
 
-                    _ => AccountsStateQueryResponse::Error(format!(
-                        "Unimplemented query variant: {:?}",
+                    _ => AccountsStateQueryResponse::Error(QueryError::not_implemented(format!(
+                        "{:?}",
                         query
-                    )),
+                    ))),
                 };
 
                 Arc::new(Message::StateQueryResponse(StateQueryResponse::Accounts(

@@ -1,4 +1,5 @@
 use crate::state::State;
+use acropolis_common::app_error::RESTError;
 use acropolis_common::{extract_strict_query_params, messages::RESTResponse, DRepCredential};
 use anyhow::Result;
 use serde::Serialize;
@@ -17,14 +18,11 @@ struct DRDDResponse {
 pub async fn handle_drdd(
     state: Option<Arc<Mutex<State>>>,
     params: HashMap<String, String>,
-) -> Result<RESTResponse> {
+) -> Result<RESTResponse, RESTError> {
     let locked = match state.as_ref() {
         Some(state) => state.lock().await,
         None => {
-            return Ok(RESTResponse::with_text(
-                503,
-                "DRDD storage is disabled by configuration",
-            ));
+            return Err(RESTError::storage_disabled("DRDD"));
         }
     };
 
@@ -36,10 +34,7 @@ pub async fn handle_drdd(
         Some(epoch) => match locked.get_epoch(epoch) {
             Some(drdd) => Some(drdd),
             None => {
-                return Ok(RESTResponse::with_text(
-                    404,
-                    &format!("DRDD not found for epoch {}", epoch),
-                ));
+                return Err(RESTError::not_found(&format!("DRDD for epoch {}", epoch)));
             }
         },
         None => locked.get_latest(),
@@ -67,9 +62,9 @@ pub async fn handle_drdd(
 
         match serde_json::to_string(&response) {
             Ok(body) => Ok(RESTResponse::with_json(200, &body)),
-            Err(e) => Ok(RESTResponse::with_text(
-                500,
-                &format!("Internal server error retrieving DRep delegation distribution: {e}"),
+            Err(e) => Err(RESTError::serialization_failed(
+                "DRep delegation distribution",
+                e,
             )),
         }
     } else {
@@ -81,10 +76,7 @@ pub async fn handle_drdd(
 
         match serde_json::to_string(&response) {
             Ok(body) => Ok(RESTResponse::with_json(200, &body)),
-            Err(_) => Ok(RESTResponse::with_text(
-                500,
-                "Internal server error serializing empty DRDD response",
-            )),
+            Err(e) => Err(RESTError::serialization_failed("empty DRDD response", e)),
         }
     }
 }

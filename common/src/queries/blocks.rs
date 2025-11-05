@@ -7,6 +7,7 @@ use cryptoxide::hashing::blake2b::Blake2b;
 use serde::ser::{Serialize, SerializeStruct, Serializer};
 use serde_with::{hex::Hex, serde_as};
 use std::collections::HashMap;
+use crate::queries::errors::QueryError;
 
 pub const DEFAULT_BLOCKS_QUERY_TOPIC: (&str, &str) =
     ("blocks-state-query-topic", "cardano.query.blocks");
@@ -90,8 +91,8 @@ pub enum BlocksStateQueryResponse {
     BlockInvolvedAddresses(BlockInvolvedAddresses),
     BlockHashes(BlockHashes),
     TransactionHashes(TransactionHashes),
-    NotFound,
-    Error(String),
+
+    Error(QueryError),
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

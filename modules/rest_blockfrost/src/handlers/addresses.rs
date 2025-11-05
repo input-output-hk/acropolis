@@ -1,6 +1,9 @@
 use anyhow::Result;
 use std::sync::Arc;
 
+use crate::{handlers_config::HandlersConfig, types::AddressInfoREST};
+use acropolis_common::app_error::RESTError;
+use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
     messages::{Message, RESTResponse, StateQuery, StateQueryResponse},
     queries::{
@@ -12,14 +15,12 @@ use acropolis_common::{
 };
 use caryatid_sdk::Context;
 
-use crate::{handlers_config::HandlersConfig, types::AddressInfoREST};
-
 /// Handle `/addresses/{address}` Blockfrost-compatible endpoint
 pub async fn handle_address_single_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
+) -> Result<RESTResponse, RESTError> {
     let [address_str] = &params[..] else {
         return Ok(RESTResponse::with_text(400, "Missing address parameter"));
     };
@@ -69,15 +70,12 @@ pub async fn handle_address_single_blockfrost(
                 AddressStateQueryResponse::AddressUTxOs(utxo_identifiers),
             )) => Ok(Some(utxo_identifiers)),
 
-            Message::StateQueryResponse(StateQueryResponse::Addresses(
-                AddressStateQueryResponse::NotFound,
-            )) => Ok(None),
-
-            Message::StateQueryResponse(StateQueryResponse::Addresses(
-                AddressStateQueryResponse::Error(_),
-            )) => Err(anyhow::anyhow!("Address info storage disabled")),
-
-            _ => Err(anyhow::anyhow!("Unexpected response")),
+            Message::StateQueryResponse(StateQueryResponse::UTxOs(
+                UTxOStateQueryResponse::Error(e),
+            )) => Err(e.into()),
+            _ => Err(QueryError::query_failed(
+                "Unexpected response from addresses query",
+            )),
         },
     )
     .await;
@@ -97,8 +95,9 @@ pub async fn handle_address_single_blockfrost(
                 script: is_script,
             };
 
-            let json = serde_json::to_string_pretty(&rest_response)
-                .map_err(|e| anyhow::anyhow!("JSON serialization error: {e}"))?;
+            let json = serde_json::to_string_pretty(&rest_response).map_err(|e| {
+                RESTError::InternalServerError(format!("JSON serialization error: {e}"))
+            })?;
 
             return Ok(RESTResponse::with_json(200, &json));
         }
@@ -109,7 +108,7 @@ pub async fn handle_address_single_blockfrost(
         UTxOStateQuery::GetUTxOsSum { utxo_identifiers },
     )));
 
-    let address_balance = match query_state(
+    let address_balance = query_state(
         &context,
         &handlers_config.utxos_query_topic,
         utxos_query_msg,
@@ -118,19 +117,14 @@ pub async fn handle_address_single_blockfrost(
                 UTxOStateQueryResponse::UTxOsSum(balance),
             )) => Ok(balance),
             Message::StateQueryResponse(StateQueryResponse::UTxOs(
-                UTxOStateQueryResponse::NotFound,
-            )) => Err(anyhow::anyhow!("UTxOs not found")),
-            Message::StateQueryResponse(StateQueryResponse::UTxOs(
                 UTxOStateQueryResponse::Error(e),
-            )) => Err(anyhow::anyhow!(format!("UTxO query error: {e}"))),
-            _ => Err(anyhow::anyhow!("Unexpected response")),
+            )) => Err(e.into()),
+            _ => Err(QueryError::query_failed(
+                "Unexpected  response querying UTxOs",
+            )),
         },
     )
-    .await
-    {
-        Ok(address_balance) => address_balance,
-        Err(e) => return Ok(RESTResponse::with_text(500, &format!("Query failed: {e}"))),
-    };
+    .await?; // Let middleware handle the error
 
     let rest_response = AddressInfoREST {
         address: address_str.to_string(),

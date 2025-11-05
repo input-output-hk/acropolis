@@ -10,6 +10,8 @@ use anyhow::Result;
 use caryatid_sdk::{module, Context, Module};
 use config::Config;
 use tracing::info;
+use acropolis_common::app_error::RESTError;
+
 mod cost_models;
 mod handlers;
 mod handlers_config;
@@ -17,10 +19,9 @@ mod types;
 mod utils;
 use handlers::{
     accounts::{
-        handle_account_addresses_blockfrost, handle_account_delegations_blockfrost,
-        handle_account_mirs_blockfrost, handle_account_registrations_blockfrost,
-        handle_account_rewards_blockfrost, handle_account_withdrawals_blockfrost,
-        handle_single_account_blockfrost,
+        handle_account_delegations_blockfrost, handle_account_mirs_blockfrost,
+        handle_account_registrations_blockfrost, handle_account_rewards_blockfrost,
+        handle_account_withdrawals_blockfrost, handle_single_account_blockfrost,
     },
     addresses::{
         handle_address_asset_utxos_blockfrost, handle_address_extended_blockfrost,
@@ -85,10 +86,6 @@ const DEFAULT_HANDLE_ACCOUNT_WITHDRAWALS_TOPIC: (&str, &str) = (
 const DEFAULT_HANDLE_ACCOUNT_REWARDS_TOPIC: (&str, &str) = (
     "handle-topic-account-rewards",
     "rest.get.accounts.*.rewards",
-);
-const DEFAULT_HANDLE_ACCOUNT_ADDRESSES_TOPIC: (&str, &str) = (
-    "handle-topic-account-addresses",
-    "rest.get.accounts.*.addresses",
 );
 
 // Blocks topics
@@ -314,14 +311,6 @@ impl BlockfrostREST {
             DEFAULT_HANDLE_ACCOUNT_REWARDS_TOPIC,
             handlers_config.clone(),
             handle_account_rewards_blockfrost,
-        );
-
-        // Handler for /accounts/{stake_address}/addresses
-        register_handler(
-            context.clone(),
-            DEFAULT_HANDLE_ACCOUNT_ADDRESSES_TOPIC,
-            handlers_config.clone(),
-            handle_account_addresses_blockfrost,
         );
 
         // Handler for /blocks/latest, /blocks/{hash_or_number}
@@ -731,11 +720,11 @@ fn register_handler<F, Fut>(
         + Sync
         + Clone
         + 'static,
-    Fut: Future<Output = Result<RESTResponse>> + Send + 'static,
+    Fut: Future<Output = Result<RESTResponse, RESTError>> + Send + 'static,
 {
     let topic_name = context.config.get_string(topic.0).unwrap_or_else(|_| topic.1.to_string());
 
-    tracing::info!("Creating request handler on '{}'", topic_name);
+    info!("Creating request handler on '{}'", topic_name);
 
     handle_rest_with_path_parameter(context.clone(), &topic_name, move |params| {
         let context = context.clone();
@@ -758,11 +747,11 @@ fn register_handler_with_query<F, Fut>(
         + Sync
         + Clone
         + 'static,
-    Fut: Future<Output = Result<RESTResponse>> + Send + 'static,
+    Fut: Future<Output = Result<RESTResponse, RESTError>> + Send + 'static,
 {
     let topic_name = context.config.get_string(topic.0).unwrap_or_else(|_| topic.1.to_string());
 
-    tracing::info!("Creating request handler on '{}'", topic_name);
+    info!("Creating request handler on '{}'", topic_name);
 
     handle_rest_with_path_and_query_parameters(
         context.clone(),

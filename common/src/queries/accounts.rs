@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use crate::{
     DRepChoice, PoolId, PoolLiveStakeInfo, RewardType, ShelleyAddress, StakeAddress, TxIdentifier,
 };
+use crate::queries::errors::QueryError;
 
 pub const DEFAULT_ACCOUNTS_QUERY_TOPIC: (&str, &str) =
     ("accounts-state-query-topic", "cardano.query.accounts");
@@ -81,8 +82,7 @@ pub enum AccountsStateQueryResponse {
     DrepDelegators(DrepDelegators),
     AccountsDrepDelegationsMap(HashMap<StakeAddress, Option<DRepChoice>>),
 
-    NotFound,
-    Error(String),
+    Error(QueryError),
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
