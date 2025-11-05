@@ -13,7 +13,7 @@ use acropolis_common::{
     stake_addresses::AccountState,
     BlockHash, BlockInfo, BlockStatus, Era,
 };
-use anyhow::{Result};
+use anyhow::Result;
 use caryatid_sdk::{module, Context, Module};
 use config::Config;
 use tokio::time::Instant;
@@ -96,15 +96,18 @@ impl SnapshotHandler {
     }
 
     async fn publish_start(&self) -> Result<()> {
-        anyhow::Context::context(self.context
-            .message_bus
-            .publish(
-                &self.snapshot_topic,
-                Arc::new(Message::Snapshot(
-                    acropolis_common::messages::SnapshotMessage::Startup,
-                )),
-            )
-            .await, "Failed to publish start message")
+        anyhow::Context::context(
+            self.context
+                .message_bus
+                .publish(
+                    &self.snapshot_topic,
+                    Arc::new(Message::Snapshot(
+                        acropolis_common::messages::SnapshotMessage::Startup,
+                    )),
+                )
+                .await,
+            "Failed to publish start message",
+        )
     }
 
     async fn publish_completion(
@@ -119,10 +122,10 @@ impl SnapshotHandler {
             }),
         ));
 
-        anyhow::Context::context(self.context
-            .message_bus
-            .publish(&self.snapshot_topic, Arc::new(message))
-            .await, "Failed to publish completion")
+        anyhow::Context::context(
+            self.context.message_bus.publish(&self.snapshot_topic, Arc::new(message)).await,
+            "Failed to publish completion",
+        )
     }
 }
 
