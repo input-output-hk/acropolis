@@ -283,12 +283,9 @@ impl State {
         let deregistrations = self.pending_deregistrations.remove(&self.epoch);
         if let Some(deregistrations) = deregistrations {
             for dr in deregistrations {
-                debug!("Retiring SPO {}", hex::encode(dr));
+                debug!("Retiring SPO {}", dr);
                 match self.spos.remove(&dr) {
-                    None => error!(
-                        "Retirement requested for unregistered SPO {}",
-                        hex::encode(dr),
-                    ),
+                    None => error!("Retirement requested for unregistered SPO {}", dr,),
                     Some(_de_reg) => {
                         retired_spos.push(dr);
                     }
@@ -318,7 +315,7 @@ impl State {
                 epoch = self.epoch,
                 block = block.number,
                 "New pending SPO update {} {:?}",
-                hex::encode(reg.operator),
+                reg.operator,
                 reg
             );
             self.pending_updates.insert(reg.operator, reg.clone());
@@ -327,7 +324,7 @@ impl State {
                 epoch = self.epoch,
                 block = block.number,
                 "Registering SPO {} {:?}",
-                hex::encode(reg.operator),
+                reg.operator,
                 reg
             );
             self.spos.insert(reg.operator, reg.clone());
@@ -340,8 +337,7 @@ impl State {
             if deregistrations.len() != old_len {
                 debug!(
                     "Removed pending deregistration of SPO {} from epoch {}",
-                    hex::encode(reg.operator),
-                    epoch
+                    reg.operator, epoch
                 );
             }
         }
@@ -368,21 +364,17 @@ impl State {
     ) {
         debug!(
             "SPO {} wants to retire at the end of epoch {} (cert in block number {})",
-            hex::encode(ret.operator),
-            ret.epoch,
-            block.number
+            ret.operator, ret.epoch, block.number
         );
         if ret.epoch <= self.epoch {
             error!(
                 "SPO retirement received for current or past epoch {} for SPO {}",
-                ret.epoch,
-                hex::encode(ret.operator)
+                ret.epoch, ret.operator
             );
         } else if ret.epoch > self.epoch + TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH {
             error!(
                 "SPO retirement received for epoch {} that exceeds future limit for SPO {}",
-                ret.epoch,
-                hex::encode(ret.operator)
+                ret.epoch, ret.operator
             );
         } else {
             // Replace any existing queued deregistrations
@@ -392,8 +384,7 @@ impl State {
                 if deregistrations.len() != old_len {
                     debug!(
                         "Replaced pending deregistration of SPO {} from epoch {}",
-                        hex::encode(ret.operator),
-                        epoch
+                        ret.operator, epoch
                     );
                 }
             }
@@ -412,7 +403,7 @@ impl State {
             } else {
                 error!(
                     "Historical SPO for {} not registered when try to retire it",
-                    hex::encode(ret.operator)
+                    ret.operator
                 );
             }
         }
@@ -443,8 +434,7 @@ impl State {
                             if !removed {
                                 error!(
                                     "Historical SPO state for {} does not contain delegator {}",
-                                    hex::encode(old_spo),
-                                    stake_address
+                                    old_spo, stake_address
                                 );
                             }
                         }
@@ -474,14 +464,13 @@ impl State {
                                 if !removed {
                                     error!(
                                         "Historical SPO state for {} does not contain delegator {}",
-                                        hex::encode(old_spo),
-                                        stake_address
+                                        old_spo, stake_address
                                     );
                                 }
                             }
                         }
                         _ => {
-                            error!("Missing Historical SPO state for {}", hex::encode(old_spo));
+                            error!("Missing Historical SPO state for {}", old_spo);
                         }
                     }
                 }
@@ -494,8 +483,7 @@ impl State {
                     if !added {
                         error!(
                             "Historical SPO state for {} already contains delegator {}",
-                            hex::encode(spo),
-                            stake_address
+                            spo, stake_address
                         );
                     }
                 }
