@@ -114,7 +114,7 @@ pub async fn handle_epoch_info_blockfrost(
                 Message::StateQueryResponse(StateQueryResponse::SPDD(
                     SPDDStateQueryResponse::Error(e),
                 )) => Err(e),
-                _ => Err(QueryError::internal_error(&format!(
+                _ => Err(QueryError::internal_error(format!(
                     "Unexpected message type while retrieving total active stakes for epoch: {}",
                     epoch_number
                 ))),

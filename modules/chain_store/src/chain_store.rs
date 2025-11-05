@@ -166,7 +166,7 @@ impl ChainStore {
             BlocksStateQuery::GetBlockInfo { block_key } => {
                 let Some(block) = Self::get_block_by_key(store, block_key)? else {
                     return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
-                        &format!("Block {:?} not found", block_key),
+                        format!("Block {:?} not found", block_key),
                     )));
                 };
                 let info = Self::to_block_info(block, store, state, false)?;
@@ -175,7 +175,7 @@ impl ChainStore {
             BlocksStateQuery::GetBlockBySlot { slot } => {
                 let Some(block) = store.get_block_by_slot(*slot)? else {
                     return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
-                        &format!("Block at slot {} not found", slot),
+                        format!("Block at slot {} not found", slot),
                     )));
                 };
                 let info = Self::to_block_info(block, store, state, false)?;
@@ -184,7 +184,7 @@ impl ChainStore {
             BlocksStateQuery::GetBlockByEpochSlot { epoch, slot } => {
                 let Some(block) = store.get_block_by_epoch_slot(*epoch, *slot)? else {
                     return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
-                        &format!("Block at epoch {} slot {} not found", epoch, slot),
+                        format!("Block at epoch {} slot {} not found", epoch, slot),
                     )));
                 };
                 let info = Self::to_block_info(block, store, state, false)?;
@@ -202,7 +202,7 @@ impl ChainStore {
                 }
                 let Some(block) = Self::get_block_by_key(store, block_key)? else {
                     return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
-                        &format!("Block {:?} not found", block_key),
+                        format!("Block {:?} not found", block_key),
                     )));
                 };
                 let number = match block_key {
@@ -229,7 +229,7 @@ impl ChainStore {
                 }
                 let Some(block) = Self::get_block_by_key(store, block_key)? else {
                     return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
-                        &format!("Block {:?} not found", block_key),
+                        format!("Block {:?} not found", block_key),
                     )));
                 };
                 let number = match block_key {
@@ -256,7 +256,7 @@ impl ChainStore {
             } => {
                 let Some(block) = Self::get_block_by_key(store, block_key)? else {
                     return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
-                        &format!("Block {:?} not found", block_key),
+                        format!("Block {:?} not found", block_key),
                     )));
                 };
                 let txs = Self::to_block_transactions(block, limit, skip, order)?;
@@ -270,7 +270,7 @@ impl ChainStore {
             } => {
                 let Some(block) = Self::get_block_by_key(store, block_key)? else {
                     return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
-                        &format!("Block {:?} not found", block_key),
+                        format!("Block {:?} not found", block_key),
                     )));
                 };
                 let txs = Self::to_block_transactions_cbor(block, limit, skip, order)?;
@@ -283,7 +283,7 @@ impl ChainStore {
             } => {
                 let Some(block) = Self::get_block_by_key(store, block_key)? else {
                     return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
-                        &format!("Block {:?} not found", block_key),
+                        format!("Block {:?} not found", block_key),
                     )));
                 };
                 let addresses = Self::to_block_involved_addresses(block, limit, skip)?;

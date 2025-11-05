@@ -514,7 +514,7 @@ impl SPOState {
                     // for BF's compatibility
                     PoolsStateQuery::GetPoolInfo { pool_id } => match state.get(pool_id) {
                         Some(pool) => PoolsStateQueryResponse::PoolInfo(pool.clone()),
-                        None => PoolsStateQueryResponse::Error(QueryError::not_found(&format!(
+                        None => PoolsStateQueryResponse::Error(QueryError::not_found(format!(
                             "Pool {}",
                             pool_id
                         ))),
@@ -610,7 +610,7 @@ impl SPOState {
                         if let Some(pool_metadata) = pool_metadata {
                             PoolsStateQueryResponse::PoolMetadata(pool_metadata)
                         } else {
-                            PoolsStateQueryResponse::Error(QueryError::not_found(&format!(
+                            PoolsStateQueryResponse::Error(QueryError::not_found(format!(
                                 "Pool metadata for {}",
                                 pool_id
                             )))
@@ -622,7 +622,7 @@ impl SPOState {
                         if let Some(relays) = pool_relays {
                             PoolsStateQueryResponse::PoolRelays(relays)
                         } else {
-                            PoolsStateQueryResponse::Error(QueryError::not_found(&format!(
+                            PoolsStateQueryResponse::Error(QueryError::not_found(format!(
                                 "Pool relays for {}",
                                 pool_id
                             )))
@@ -639,7 +639,7 @@ impl SPOState {
                                     delegators: pool_delegators,
                                 })
                             } else {
-                                PoolsStateQueryResponse::Error(QueryError::not_found(&format!(
+                                PoolsStateQueryResponse::Error(QueryError::not_found(format!(
                                     "Pool delegators for {}",
                                     pool_id
                                 )))
@@ -689,7 +689,7 @@ impl SPOState {
                             if let Some(pool_updates) = pool_updates {
                                 PoolsStateQueryResponse::PoolUpdates(pool_updates)
                             } else {
-                                PoolsStateQueryResponse::Error(QueryError::not_found(&format!(
+                                PoolsStateQueryResponse::Error(QueryError::not_found(format!(
                                     "Pool updates for {}",
                                     pool_id
                                 )))
