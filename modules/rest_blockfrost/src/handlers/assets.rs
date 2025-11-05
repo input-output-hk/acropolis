@@ -170,14 +170,14 @@ pub async fn handle_asset_history_blockfrost(
         AssetsStateQuery::GetAssetHistory { policy, name },
     )));
 
-    let response = match query_state(
+    let response = query_state(
         &context,
         &handlers_config.assets_query_topic,
         asset_query_msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Assets(
-                AssetsStateQueryResponse::AssetHistory(history),
-            )) => {
+                                            AssetsStateQueryResponse::AssetHistory(history),
+                                        )) => {
                 let rest_history: Vec<AssetMintRecordRest> =
                     history.iter().map(Into::into).collect();
                 match serde_json::to_string_pretty(&rest_history) {
@@ -189,11 +189,11 @@ pub async fn handle_asset_history_blockfrost(
                 }
             }
             Message::StateQueryResponse(StateQueryResponse::Assets(
-                AssetsStateQueryResponse::NotFound,
-            )) => Ok(RESTResponse::with_text(404, "Asset history not found")),
+                                            AssetsStateQueryResponse::NotFound,
+                                        )) => Ok(RESTResponse::with_text(404, "Asset history not found")),
             Message::StateQueryResponse(StateQueryResponse::Assets(
-                AssetsStateQueryResponse::Error(_),
-            )) => Ok(RESTResponse::with_text(
+                                            AssetsStateQueryResponse::Error(_),
+                                        )) => Ok(RESTResponse::with_text(
                 501,
                 "Asset history storage is disabled in config",
             )),
@@ -203,11 +203,7 @@ pub async fn handle_asset_history_blockfrost(
             )),
         },
     )
-    .await
-    {
-        Ok(rest) => rest,
-        Err(e) => RESTResponse::with_text(500, &format!("Query failed: {e}")),
-    };
+        .await.unwrap_or_else(|e| RESTResponse::with_text(500, &format!("Query failed: {e}")));
 
     Ok(response)
 }
