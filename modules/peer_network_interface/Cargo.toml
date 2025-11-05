@@ -4,7 +4,7 @@
 name = "acropolis_module_peer_network_interface"
 version = "0.2.0"
 edition = "2024"
-authors = ["Paul Clark <paul.clark@iohk.io>"]
+authors = ["Simon Gellis <simon@sundae.fi>"]
 description = "Multiplexed chain fetcher Caryatid module for Acropolis"
 license = "Apache-2.0"
 
