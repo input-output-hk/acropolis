@@ -1,6 +1,6 @@
 //! Helper functions for REST handlers
 
-use crate::app_error::RESTError;
+use crate::rest_error::RESTError;
 use crate::messages::{Message, RESTResponse};
 use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;

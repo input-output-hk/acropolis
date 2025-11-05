@@ -2,7 +2,7 @@ use anyhow::Result;
 use std::sync::Arc;
 
 use crate::{handlers_config::HandlersConfig, types::AddressInfoREST};
-use acropolis_common::app_error::RESTError;
+use acropolis_common::rest_error::RESTError;
 use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
     messages::{Message, RESTResponse, StateQuery, StateQueryResponse},

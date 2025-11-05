@@ -1,4 +1,3 @@
-use caryatid_module_rest_server::messages::RESTResponse;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 

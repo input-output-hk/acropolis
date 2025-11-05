@@ -10,7 +10,7 @@ use anyhow::Result;
 use caryatid_sdk::{module, Context, Module};
 use config::Config;
 use tracing::info;
-use acropolis_common::app_error::RESTError;
+use acropolis_common::rest_error::RESTError;
 
 mod cost_models;
 mod handlers;

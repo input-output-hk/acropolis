@@ -6,7 +6,6 @@ use crate::types::{
     AccountAddressREST, AccountRewardREST, AccountWithdrawalREST, DelegationUpdateREST,
     RegistrationUpdateREST,
 };
-use acropolis_common::app_error::RESTError;
 use acropolis_common::messages::{Message, RESTResponse, StateQuery, StateQueryResponse};
 use acropolis_common::queries::accounts::{AccountsStateQuery, AccountsStateQueryResponse};
 use acropolis_common::queries::blocks::{
@@ -14,6 +13,7 @@ use acropolis_common::queries::blocks::{
 };
 use acropolis_common::queries::errors::QueryError;
 use acropolis_common::queries::utils::query_state;
+use acropolis_common::rest_error::RESTError;
 use acropolis_common::serialization::{Bech32Conversion, Bech32WithHrp};
 use acropolis_common::{DRepChoice, StakeAddress, TxHash};
 use anyhow::{anyhow, Result};
@@ -57,7 +57,9 @@ pub async fn handle_single_account_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed("Unexpected response type")),
+            _ => Err(QueryError::query_failed(
+                "Unexpected message type while retrieving account info",
+            )),
         },
     )
     .await?;
@@ -112,7 +114,9 @@ pub async fn handle_account_registrations_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::query_failed("Unexpected response type")),
+            _ => Err(QueryError::query_failed(
+                "Unexpected message type while retrieving account registrations",
+            )),
         },
     )
     .await?;

@@ -1,5 +1,5 @@
 use crate::state::State;
-use acropolis_common::app_error::RESTError;
+use acropolis_common::rest_error::RESTError;
 use acropolis_common::{extract_strict_query_params, messages::RESTResponse, DRepCredential};
 use anyhow::Result;
 use serde::Serialize;
