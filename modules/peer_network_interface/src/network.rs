@@ -1,10 +1,9 @@
-use std::{
-    collections::BTreeMap,
-    time::Duration,
-};
+use std::{collections::BTreeMap, time::Duration};
 
 use crate::{
-    BlockSink, chain_state::ChainState, connection::{PeerChainSyncEvent, PeerConnection, PeerEvent}
+    BlockSink,
+    chain_state::ChainState,
+    connection::{PeerChainSyncEvent, PeerConnection, PeerEvent},
 };
 use acropolis_common::BlockHash;
 use anyhow::{Context as _, Result, bail};
@@ -18,10 +17,7 @@ struct PeerData {
 }
 impl PeerData {
     fn new(conn: PeerConnection) -> Self {
-        Self {
-            conn,
-            reqs: vec![]
-        }
+        Self { conn, reqs: vec![] }
     }
 
     fn find_intersect(&self, points: Vec<Point>) {
@@ -35,7 +31,10 @@ impl PeerData {
             return true;
         }
         if let Err(error) = self.conn.request_block(hash, slot) {
-            warn!("could not request block from {}: {error:#}", self.conn.address);
+            warn!(
+                "could not request block from {}: {error:#}",
+                self.conn.address
+            );
             return false;
         }
         self.reqs.push((hash, slot));

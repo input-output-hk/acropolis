@@ -21,7 +21,11 @@ impl SlotBlockData {
         if let Some(block) = self.blocks.iter_mut().find(|b| b.header.hash == header.hash) {
             block.announced_by.push(id);
         } else {
-            self.blocks.push(BlockData { header, announced_by: vec![id], body: None });
+            self.blocks.push(BlockData {
+                header,
+                announced_by: vec![id],
+                body: None,
+            });
         }
     }
 
@@ -50,7 +54,7 @@ impl SlotBlockData {
     fn announcers(&self, hash: BlockHash) -> Vec<PeerId> {
         match self.blocks.iter().find(|b| b.header.hash == hash) {
             Some(b) => b.announced_by.clone(),
-            None => vec![]
+            None => vec![],
         }
     }
 
@@ -180,7 +184,7 @@ impl ChainState {
         // queue them to be published as soon as we have their bodies
         let head_slot = self.published_blocks.back().map(|(s, _)| *s);
         if let Some(slot) = head_slot {
-            for (slot, blocks) in self.blocks.range(slot+1..) {
+            for (slot, blocks) in self.blocks.range(slot + 1..) {
                 if let Some(hash) = blocks.find_announced_hash(id) {
                     self.unpublished_blocks.push_back((*slot, hash));
                 }
@@ -251,7 +255,7 @@ impl ChainState {
     pub fn block_announcers(&self, slot: u64, hash: BlockHash) -> Vec<PeerId> {
         match self.blocks.get(&slot) {
             Some(slot_blocks) => slot_blocks.announcers(hash),
-            None => vec![]
+            None => vec![],
         }
     }
 }
@@ -298,7 +302,10 @@ mod tests {
         state.handle_body_fetched(header.slot, header.hash, body.clone());
 
         // NOW we have a new block to report
-        assert_eq!(state.next_unpublished_block(), Some((&header, body.as_slice(), false)));
+        assert_eq!(
+            state.next_unpublished_block(),
+            Some((&header, body.as_slice(), false))
+        );
         state.handle_block_published();
         assert_eq!(state.next_unpublished_block(), None);
     }
@@ -329,9 +336,15 @@ mod tests {
         state.handle_body_fetched(h1.slot, h1.hash, b1.clone());
 
         // NOW we have TWO new blocks to report
-        assert_eq!(state.next_unpublished_block(), Some((&h1, b1.as_slice(), false)));
+        assert_eq!(
+            state.next_unpublished_block(),
+            Some((&h1, b1.as_slice(), false))
+        );
         state.handle_block_published();
-        assert_eq!(state.next_unpublished_block(), Some((&h2, b2.as_slice(), false)));
+        assert_eq!(
+            state.next_unpublished_block(),
+            Some((&h2, b2.as_slice(), false))
+        );
         state.handle_block_published();
         assert_eq!(state.next_unpublished_block(), None);
     }
@@ -350,13 +363,19 @@ mod tests {
         // publish the first block
         assert_eq!(state.handle_roll_forward(p1, h1.clone()), vec![p1]);
         state.handle_body_fetched(h1.slot, h1.hash, b1.clone());
-        assert_eq!(state.next_unpublished_block(), Some((&h1, b1.as_slice(), false)));
+        assert_eq!(
+            state.next_unpublished_block(),
+            Some((&h1, b1.as_slice(), false))
+        );
         state.handle_block_published();
 
         // publish the second block
         assert_eq!(state.handle_roll_forward(p1, h2.clone()), vec![p1]);
         state.handle_body_fetched(h2.slot, h2.hash, b2.clone());
-        assert_eq!(state.next_unpublished_block(), Some((&h2, b2.as_slice(), false)));
+        assert_eq!(
+            state.next_unpublished_block(),
+            Some((&h2, b2.as_slice(), false))
+        );
         state.handle_block_published();
         assert_eq!(state.next_unpublished_block(), None);
 
@@ -367,13 +386,19 @@ mod tests {
         // and when we advance to the new second block, the system should report it as a rollback
         assert_eq!(state.handle_roll_forward(p1, h3.clone()), vec![p1]);
         state.handle_body_fetched(h3.slot, h3.hash, b3.clone());
-        assert_eq!(state.next_unpublished_block(), Some((&h3, b3.as_slice(), true)));
+        assert_eq!(
+            state.next_unpublished_block(),
+            Some((&h3, b3.as_slice(), true))
+        );
         state.handle_block_published();
 
         // and the new third block should not be a rollback
         assert_eq!(state.handle_roll_forward(p1, h4.clone()), vec![p1]);
         state.handle_body_fetched(h4.slot, h4.hash, b4.clone());
-        assert_eq!(state.next_unpublished_block(), Some((&h4, b4.as_slice(), false)));
+        assert_eq!(
+            state.next_unpublished_block(),
+            Some((&h4, b4.as_slice(), false))
+        );
         state.handle_block_published();
     }
 
@@ -390,7 +415,10 @@ mod tests {
         // publish the first block
         assert_eq!(state.handle_roll_forward(p1, h1.clone()), vec![p1]);
         state.handle_body_fetched(h1.slot, h1.hash, b1.clone());
-        assert_eq!(state.next_unpublished_block(), Some((&h1, b1.as_slice(), false)));
+        assert_eq!(
+            state.next_unpublished_block(),
+            Some((&h1, b1.as_slice(), false))
+        );
         state.handle_block_published();
 
         // roll forward to the second block, but pretend the body is taking a while to download
@@ -408,7 +436,10 @@ mod tests {
         // and when we advance to the new second block, the system should not report it as a rollback
         assert_eq!(state.handle_roll_forward(p1, h3.clone()), vec![p1]);
         state.handle_body_fetched(h3.slot, h3.hash, b3.clone());
-        assert_eq!(state.next_unpublished_block(), Some((&h3, b3.as_slice(), false)));
+        assert_eq!(
+            state.next_unpublished_block(),
+            Some((&h3, b3.as_slice(), false))
+        );
         state.handle_block_published();
         assert_eq!(state.next_unpublished_block(), None);
     }
@@ -429,17 +460,26 @@ mod tests {
         // publish three blocks on our current chain
         assert_eq!(state.handle_roll_forward(p1, h1.clone()), vec![p1]);
         state.handle_body_fetched(h1.slot, h1.hash, b1.clone());
-        assert_eq!(state.next_unpublished_block(), Some((&h1, b1.as_slice(), false)));
+        assert_eq!(
+            state.next_unpublished_block(),
+            Some((&h1, b1.as_slice(), false))
+        );
         state.handle_block_published();
 
         assert_eq!(state.handle_roll_forward(p1, p1h2.clone()), vec![p1]);
         state.handle_body_fetched(p1h2.slot, p1h2.hash, p1b2.clone());
-        assert_eq!(state.next_unpublished_block(), Some((&p1h2, p1b2.as_slice(), false)));
+        assert_eq!(
+            state.next_unpublished_block(),
+            Some((&p1h2, p1b2.as_slice(), false))
+        );
         state.handle_block_published();
 
         assert_eq!(state.handle_roll_forward(p1, p1h3.clone()), vec![p1]);
         state.handle_body_fetched(p1h3.slot, p1h3.hash, p1b3.clone());
-        assert_eq!(state.next_unpublished_block(), Some((&p1h3, p1b3.as_slice(), false)));
+        assert_eq!(
+            state.next_unpublished_block(),
+            Some((&p1h3, p1b3.as_slice(), false))
+        );
         state.handle_block_published();
 
         // that other chain forked
@@ -454,11 +494,16 @@ mod tests {
         state.handle_new_preferred_upstream(p2);
 
         // now we should publish two blocks, and the first should be marked as "rollback"
-        assert_eq!(state.next_unpublished_block(), Some((&p2h2, p2b2.as_slice(), true)));
+        assert_eq!(
+            state.next_unpublished_block(),
+            Some((&p2h2, p2b2.as_slice(), true))
+        );
         state.handle_block_published();
-        assert_eq!(state.next_unpublished_block(), Some((&p2h3, p2b3.as_slice(), false)));
+        assert_eq!(
+            state.next_unpublished_block(),
+            Some((&p2h3, p2b3.as_slice(), false))
+        );
         state.handle_block_published();
         assert_eq!(state.next_unpublished_block(), None);
-
     }
 }

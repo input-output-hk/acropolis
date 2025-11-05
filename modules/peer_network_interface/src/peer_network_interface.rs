@@ -4,7 +4,10 @@ mod connection;
 mod network;
 
 use acropolis_common::{
-    BlockInfo, BlockStatus, genesis_values::GenesisValues, messages::{CardanoMessage, Message, RawBlockMessage}, upstream_cache::{UpstreamCache, UpstreamCacheRecord}
+    BlockInfo, BlockStatus,
+    genesis_values::GenesisValues,
+    messages::{CardanoMessage, Message, RawBlockMessage},
+    upstream_cache::{UpstreamCache, UpstreamCacheRecord},
 };
 use anyhow::{Result, bail};
 use caryatid_sdk::{Context, Module, Subscription, module};
@@ -72,8 +75,7 @@ impl PeerNetworkInterface {
                 upstream_cache,
             };
 
-            let mut manager =
-                NetworkManager::new(cfg.magic_number, events, events_sender, sink);
+            let mut manager = NetworkManager::new(cfg.magic_number, events, events_sender, sink);
             for address in cfg.node_addresses {
                 manager.handle_new_connection(address, Duration::ZERO);
             }
@@ -94,7 +96,7 @@ impl PeerNetworkInterface {
                         Ok(point) => manager.sync_to_point(point),
                         Err(error) => {
                             warn!("snapshot restoration never completed: {error:#}");
-                            return;                            
+                            return;
                         }
                     }
                 }

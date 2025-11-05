@@ -124,7 +124,9 @@ impl<S: Storage> UpstreamCacheImpl<S> {
 
     pub fn write_record(&mut self, record: &UpstreamCacheRecord) -> Result<()> {
         self.chunk_cached.push(record.clone());
-        self.storage.write_chunk(self.current_chunk, &self.chunk_cached).context("could not write cache record")?;
+        self.storage
+            .write_chunk(self.current_chunk, &self.chunk_cached)
+            .context("could not write cache record")?;
 
         self.current_record += 1;
         if self.current_record >= self.density {
@@ -155,7 +157,8 @@ impl Storage for FileStorage {
     }
 
     fn write_chunk(&mut self, chunk_no: usize, data: &[UpstreamCacheRecord]) -> Result<()> {
-        let mut file = File::create(self.get_file_name(chunk_no)).context("could not write chunk")?;
+        let mut file =
+            File::create(self.get_file_name(chunk_no)).context("could not write chunk")?;
         file.write_all(&serde_json::to_vec(data)?)?;
         Ok(())
     }
