@@ -203,7 +203,7 @@ impl GovernanceState {
                                 })
                             }
                             None => GovernanceStateQueryResponse::Error(QueryError::not_found(
-                                format!("Proposal not found {}", proposal),
+                                format!("Proposal {} not found", proposal),
                             )),
                         }
                     }
@@ -213,7 +213,7 @@ impl GovernanceState {
                                 GovernanceStateQueryResponse::ProposalVotes(ProposalVotes { votes })
                             }
                             Err(_) => GovernanceStateQueryResponse::Error(QueryError::not_found(
-                                format!("Proposal not found {}", proposal),
+                                format!("Proposal {} not found", proposal),
                             )),
                         }
                     }

@@ -499,7 +499,7 @@ impl SPOState {
             async move {
                 let Message::StateQuery(StateQuery::Pools(query)) = message.as_ref() else {
                     return Arc::new(Message::StateQueryResponse(StateQueryResponse::Pools(
-                        PoolsStateQueryResponse::Error(QueryError::invalid_request(
+                        PoolsStateQueryResponse::Error(QueryError::internal_error(
                             "Invalid message for pools-state",
                         )),
                     )));

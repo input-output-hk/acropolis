@@ -125,7 +125,7 @@ impl UTXOState {
                         match state.get_utxos_sum(utxo_identifiers).await {
                             Ok(balance) => UTxOStateQueryResponse::UTxOsSum(balance),
                             Err(e) => UTxOStateQueryResponse::Error(QueryError::internal_error(
-                                format!("Fetching UTxO sum failed: {e}"),
+                                e.to_string(),
                             )),
                         }
                     }

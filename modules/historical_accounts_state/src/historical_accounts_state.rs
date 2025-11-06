@@ -302,7 +302,7 @@ impl HistoricalAccountsState {
             async move {
                 let Message::StateQuery(StateQuery::Accounts(query)) = message.as_ref() else {
                     return Arc::new(Message::StateQueryResponse(StateQueryResponse::Accounts(
-                        AccountsStateQueryResponse::Error(QueryError::invalid_request(
+                        AccountsStateQueryResponse::Error(QueryError::internal_error(
                             "Invalid message for accounts-state",
                         )),
                     )));
@@ -317,13 +317,11 @@ impl HistoricalAccountsState {
                                 )
                             }
                             Ok(None) => AccountsStateQueryResponse::Error(QueryError::not_found(
-                                format!("Account {}", account),
+                                format!("Account {} not found", account),
                             )),
-                            Err(e) => {
-                                AccountsStateQueryResponse::Error(QueryError::internal_error(
-                                    format!("Failed to get registration history: {}", e),
-                                ))
-                            }
+                            Err(e) => AccountsStateQueryResponse::Error(
+                                QueryError::internal_error(e.to_string()),
+                            ),
                         }
                     }
                     AccountsStateQuery::GetAccountDelegationHistory { account } => {
@@ -334,11 +332,9 @@ impl HistoricalAccountsState {
                             Ok(None) => AccountsStateQueryResponse::Error(QueryError::not_found(
                                 format!("Account {}", account),
                             )),
-                            Err(e) => {
-                                AccountsStateQueryResponse::Error(QueryError::internal_error(
-                                    format!("Failed to get delegation history: {}", e),
-                                ))
-                            }
+                            Err(e) => AccountsStateQueryResponse::Error(
+                                QueryError::internal_error(e.to_string()),
+                            ),
                         }
                     }
                     AccountsStateQuery::GetAccountMIRHistory { account } => {
@@ -347,11 +343,9 @@ impl HistoricalAccountsState {
                             Ok(None) => AccountsStateQueryResponse::Error(QueryError::not_found(
                                 format!("Account {}", account),
                             )),
-                            Err(e) => {
-                                AccountsStateQueryResponse::Error(QueryError::internal_error(
-                                    format!("Failed to get MIR history: {}", e),
-                                ))
-                            }
+                            Err(e) => AccountsStateQueryResponse::Error(
+                                QueryError::internal_error(e.to_string()),
+                            ),
                         }
                     }
                     AccountsStateQuery::GetAccountWithdrawalHistory { account } => {
@@ -362,11 +356,9 @@ impl HistoricalAccountsState {
                             Ok(None) => AccountsStateQueryResponse::Error(QueryError::not_found(
                                 format!("Account {}", account),
                             )),
-                            Err(e) => {
-                                AccountsStateQueryResponse::Error(QueryError::internal_error(
-                                    format!("Failed to get withdrawal history: {}", e),
-                                ))
-                            }
+                            Err(e) => AccountsStateQueryResponse::Error(
+                                QueryError::internal_error(e.to_string()),
+                            ),
                         }
                     }
                     AccountsStateQuery::GetAccountRewardHistory { account } => {
@@ -377,11 +369,9 @@ impl HistoricalAccountsState {
                             Ok(None) => AccountsStateQueryResponse::Error(QueryError::not_found(
                                 format!("Account {}", account),
                             )),
-                            Err(e) => {
-                                AccountsStateQueryResponse::Error(QueryError::internal_error(
-                                    format!("Failed to get reward history: {}", e),
-                                ))
-                            }
+                            Err(e) => AccountsStateQueryResponse::Error(
+                                QueryError::internal_error(e.to_string()),
+                            ),
                         }
                     }
                     AccountsStateQuery::GetAccountAssociatedAddresses { account } => {
@@ -392,11 +382,9 @@ impl HistoricalAccountsState {
                             Ok(None) => AccountsStateQueryResponse::Error(QueryError::not_found(
                                 format!("Account {}", account),
                             )),
-                            Err(e) => {
-                                AccountsStateQueryResponse::Error(QueryError::internal_error(
-                                    format!("Failed to get associated addresses: {}", e),
-                                ))
-                            }
+                            Err(e) => AccountsStateQueryResponse::Error(
+                                QueryError::internal_error(e.to_string()),
+                            ),
                         }
                     }
                     _ => AccountsStateQueryResponse::Error(QueryError::not_implemented(format!(

@@ -485,7 +485,7 @@ impl AccountsState {
             async move {
                 let Message::StateQuery(StateQuery::Accounts(query)) = message.as_ref() else {
                     return Arc::new(Message::StateQueryResponse(StateQueryResponse::Accounts(
-                        AccountsStateQueryResponse::Error(QueryError::invalid_request(
+                        AccountsStateQueryResponse::Error(QueryError::internal_error(
                             "Invalid message for accounts-state",
                         )),
                     )));

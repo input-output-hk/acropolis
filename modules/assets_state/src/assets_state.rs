@@ -282,7 +282,7 @@ impl AssetsState {
             async move {
                 let Message::StateQuery(StateQuery::Assets(query)) = message.as_ref() else {
                     return Arc::new(Message::StateQueryResponse(StateQueryResponse::Assets(
-                        AssetsStateQueryResponse::Error(QueryError::invalid_request(
+                        AssetsStateQueryResponse::Error(QueryError::internal_error(
                             "Invalid message for assets-state",
                         )),
                     )));

@@ -199,7 +199,7 @@ impl AddressState {
             async move {
                 let Message::StateQuery(StateQuery::Addresses(query)) = message.as_ref() else {
                     return Arc::new(Message::StateQueryResponse(StateQueryResponse::Addresses(
-                        AddressStateQueryResponse::Error(QueryError::invalid_request(
+                        AddressStateQueryResponse::Error(QueryError::internal_error(
                             "Invalid message for address-state",
                         )),
                     )));
@@ -210,9 +210,16 @@ impl AddressState {
                     AddressStateQuery::GetAddressUTxOs { address } => {
                         match state.get_address_utxos(address).await {
                             Ok(Some(utxos)) => AddressStateQueryResponse::AddressUTxOs(utxos),
-                            Ok(None) => AddressStateQueryResponse::Error(QueryError::not_found(
-                                "Address not found",
-                            )),
+                            Ok(None) => match address.to_string() {
+                                Ok(addr_str) => AddressStateQueryResponse::Error(
+                                    QueryError::not_found(format!("Address {}", addr_str)),
+                                ),
+                                Err(e) => {
+                                    AddressStateQueryResponse::Error(QueryError::internal_error(
+                                        format!("Could not convert address to string: {}", e),
+                                    ))
+                                }
+                            },
                             Err(e) => AddressStateQueryResponse::Error(QueryError::internal_error(
                                 e.to_string(),
                             )),
@@ -221,9 +228,16 @@ impl AddressState {
                     AddressStateQuery::GetAddressTransactions { address } => {
                         match state.get_address_transactions(address).await {
                             Ok(Some(txs)) => AddressStateQueryResponse::AddressTransactions(txs),
-                            Ok(None) => AddressStateQueryResponse::Error(QueryError::not_found(
-                                "Address not found",
-                            )),
+                            Ok(None) => match address.to_string() {
+                                Ok(addr_str) => AddressStateQueryResponse::Error(
+                                    QueryError::not_found(format!("Address {}", addr_str)),
+                                ),
+                                Err(e) => {
+                                    AddressStateQueryResponse::Error(QueryError::internal_error(
+                                        format!("Could not convert address to string: {}", e),
+                                    ))
+                                }
+                            },
                             Err(e) => AddressStateQueryResponse::Error(QueryError::internal_error(
                                 e.to_string(),
                             )),

@@ -338,7 +338,7 @@ impl EpochsState {
                         )
                     }
 
-                    _ => EpochsStateQueryResponse::Error(QueryError::invalid_request(format!(
+                    _ => EpochsStateQueryResponse::Error(QueryError::not_implemented(format!(
                         "Unimplemented query variant: {:?}",
                         query
                     ))),
@@ -349,7 +349,7 @@ impl EpochsState {
             }
         });
 
-        // Start run task
+        // Start the run task
         context.run(async move {
             Self::run(
                 history,

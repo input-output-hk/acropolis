@@ -266,7 +266,7 @@ impl DRepState {
             async move {
                 let Message::StateQuery(StateQuery::Governance(query)) = message.as_ref() else {
                     return Arc::new(Message::StateQueryResponse(StateQueryResponse::Governance(
-                        GovernanceStateQueryResponse::Error(QueryError::invalid_request(
+                        GovernanceStateQueryResponse::Error(QueryError::internal_error(
                             "Invalid message for governance-state",
                         )),
                     )));
@@ -318,9 +318,11 @@ impl DRepState {
                                     }
                                 }
 
-                                Ok(None) => GovernanceStateQueryResponse::Error(
-                                    QueryError::not_found(format!("DRep {:?}", drep_credential)),
-                                ),
+                                Ok(None) => {
+                                    GovernanceStateQueryResponse::Error(QueryError::not_found(
+                                        format!("DRep {:?} not found", drep_credential),
+                                    ))
+                                }
                                 Err(msg) => GovernanceStateQueryResponse::Error(
                                     QueryError::internal_error(msg),
                                 ),
@@ -340,11 +342,12 @@ impl DRepState {
                                         },
                                     )
                                 }
-                                Ok(None) => {
-                                    GovernanceStateQueryResponse::Error(QueryError::not_found(
-                                        format!("DRep delegators for {:?}", drep_credential),
-                                    ))
-                                }
+                                Ok(None) => GovernanceStateQueryResponse::Error(
+                                    QueryError::not_found(format!(
+                                        "DRep delegators for {:?} not found",
+                                        drep_credential
+                                    )),
+                                ),
                                 Err(msg) => GovernanceStateQueryResponse::Error(
                                     QueryError::internal_error(msg),
                                 ),
@@ -360,11 +363,12 @@ impl DRepState {
                                 Ok(Some(anchor)) => GovernanceStateQueryResponse::DRepMetadata(
                                     Some(Some(anchor.clone())),
                                 ),
-                                Ok(None) => {
-                                    GovernanceStateQueryResponse::Error(QueryError::not_found(
-                                        format!("DRep metadata for {:?}", drep_credential),
-                                    ))
-                                }
+                                Ok(None) => GovernanceStateQueryResponse::Error(
+                                    QueryError::not_found(format!(
+                                        "DRep metadata for {:?} not found",
+                                        drep_credential
+                                    )),
+                                ),
                                 Err(msg) => GovernanceStateQueryResponse::Error(
                                     QueryError::internal_error(msg),
                                 ),
@@ -385,7 +389,7 @@ impl DRepState {
                                 }
                                 Ok(None) => {
                                     GovernanceStateQueryResponse::Error(QueryError::not_found(
-                                        format!("DRep updates for {:?}", drep_credential),
+                                        format!("DRep updates for {:?} not found", drep_credential),
                                     ))
                                 }
                                 Err(msg) => GovernanceStateQueryResponse::Error(
@@ -419,7 +423,7 @@ impl DRepState {
                             ),
                         }
                     }
-                    _ => GovernanceStateQueryResponse::Error(QueryError::invalid_request(format!(
+                    _ => GovernanceStateQueryResponse::Error(QueryError::internal_error(format!(
                         "Unimplemented governance query: {query:?}"
                     ))),
                 };
