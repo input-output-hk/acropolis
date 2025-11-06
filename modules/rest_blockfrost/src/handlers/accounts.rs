@@ -17,8 +17,8 @@ use caryatid_sdk::Context;
 
 use crate::handlers_config::HandlersConfig;
 use crate::types::{
-    AccountAddressREST, AccountRewardREST, AccountUTxOREST, AccountWithdrawalREST, AmountList,
-    DelegationUpdateREST, RegistrationUpdateREST,
+    AccountAddressREST, AccountRewardREST, AccountTotalsREST, AccountUTxOREST,
+    AccountWithdrawalREST, AmountList, DelegationUpdateREST, RegistrationUpdateREST,
 };
 
 #[derive(serde::Serialize)]
@@ -710,7 +710,7 @@ pub async fn handle_account_assets_blockfrost(
     )));
     let utxos_balance = query_state(
         &context,
-        &handlers_config.addresses_query_topic,
+        &handlers_config.utxos_query_topic,
         msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::UTxOs(
@@ -719,10 +719,10 @@ pub async fn handle_account_assets_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::UTxOs(
                 UTxOStateQueryResponse::Error(e),
             )) => Err(anyhow::anyhow!(
-                "Internal server error while retrieving account UTxOs: {e}"
+                "Internal server error while retrieving UTxO sum: {e}"
             )),
             _ => Err(anyhow::anyhow!(
-                "Unexpected message type while retrieving account UTxOs"
+                "Unexpected message type while retrieving UTxO sum"
             )),
         },
     )
@@ -737,18 +737,93 @@ pub async fn handle_account_assets_blockfrost(
         Ok(json) => Ok(RESTResponse::with_json(200, &json)),
         Err(e) => Ok(RESTResponse::with_text(
             500,
-            &format!("Internal server error while serializing addresses: {e}"),
+            &format!("Internal server error while serializing assets: {e}"),
         )),
     }
 }
 
 /// Handle `/accounts/{stake_address}/addresses/total` Blockfrost-compatible endpoint
 pub async fn handle_account_totals_blockfrost(
-    _context: Arc<Context<Message>>,
-    _params: Vec<String>,
-    _handlers_config: Arc<HandlersConfig>,
+    context: Arc<Context<Message>>,
+    params: Vec<String>,
+    handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
-    Ok(RESTResponse::with_text(501, "Not implemented"))
+    let account = match parse_stake_address(&params) {
+        Ok(addr) => addr,
+        Err(resp) => return Ok(resp),
+    };
+
+    // Get addresses from historical accounts state
+    let msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
+        AccountsStateQuery::GetAccountAssociatedAddresses {
+            account: account.clone(),
+        },
+    )));
+    let addresses = query_state(
+        &context,
+        &handlers_config.historical_accounts_query_topic,
+        msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Accounts(
+                AccountsStateQueryResponse::AccountAssociatedAddresses(addresses),
+            )) => Ok(Some(addresses)),
+            Message::StateQueryResponse(StateQueryResponse::Accounts(
+                AccountsStateQueryResponse::NotFound,
+            )) => Ok(None),
+            Message::StateQueryResponse(StateQueryResponse::Accounts(
+                AccountsStateQueryResponse::Error(e),
+            )) => Err(anyhow::anyhow!(
+                "Internal server error while retrieving account addresses: {e}"
+            )),
+            _ => Err(anyhow::anyhow!(
+                "Unexpected message type while retrieving account addresses"
+            )),
+        },
+    )
+    .await?;
+
+    let Some(addresses) = addresses else {
+        return Ok(RESTResponse::with_text(404, "Account not found"));
+    };
+
+    // Get totals from address state
+    let msg = Arc::new(Message::StateQuery(StateQuery::Addresses(
+        AddressStateQuery::GetAddressesTotals { addresses },
+    )));
+    let totals = query_state(
+        &context,
+        &handlers_config.addresses_query_topic,
+        msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Addresses(
+                AddressStateQueryResponse::AddressesTotals(utxos),
+            )) => Ok(utxos),
+            Message::StateQueryResponse(StateQueryResponse::Addresses(
+                AddressStateQueryResponse::Error(e),
+            )) => Err(anyhow::anyhow!(
+                "Internal server error while retrieving address totals: {e}"
+            )),
+            _ => Err(anyhow::anyhow!(
+                "Unexpected message type while retrieving address totals"
+            )),
+        },
+    )
+    .await?;
+
+    let rest_response = AccountTotalsREST {
+        stake_address: account.to_string()?,
+        received_sum: totals.received.into(),
+        sent_sum: totals.sent.into(),
+        tx_count: totals.tx_count,
+    };
+
+    match serde_json::to_string_pretty(&rest_response) {
+        Ok(json) => Ok(RESTResponse::with_json(200, &json)),
+        Err(e) => Ok(RESTResponse::with_text(
+            500,
+            &format!("Internal server error while serializing totals: {e}"),
+        )),
+    }
 }
 
 /// Handle `/accounts/{stake_address}/utxos` Blockfrost-compatible endpoint
@@ -912,7 +987,7 @@ pub async fn handle_account_utxos_blockfrost(
         Ok(json) => Ok(RESTResponse::with_json(200, &json)),
         Err(e) => Ok(RESTResponse::with_text(
             500,
-            &format!("Internal server error while serializing addresses: {e}"),
+            &format!("Internal server error while serializing utxos: {e}"),
         )),
     }
 }

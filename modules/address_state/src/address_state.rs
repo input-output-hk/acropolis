@@ -228,12 +228,6 @@ impl AddressState {
                             Err(e) => AddressStateQueryResponse::Error(e.to_string()),
                         }
                     }
-                    AddressStateQuery::GetAddressesAssets { addresses } => {
-                        match state.get_addresses_assets(addresses).await {
-                            Ok(assets) => AddressStateQueryResponse::AddressesAssets(assets),
-                            Err(e) => AddressStateQueryResponse::Error(e.to_string()),
-                        }
-                    }
                     AddressStateQuery::GetAddressesTotals { addresses } => {
                         match state.get_addresses_totals(addresses).await {
                             Ok(totals) => AddressStateQueryResponse::AddressesTotals(totals),

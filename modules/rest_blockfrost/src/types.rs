@@ -6,7 +6,7 @@ use acropolis_common::{
     rest_helper::ToCheckedF64,
     serialization::{Bech32WithHrp, DisplayFromBech32, PoolPrefix},
     AssetAddressEntry, AssetMetadataStandard, AssetMintRecord, KeyHash, PolicyAsset,
-    PoolEpochState, PoolId, PoolUpdateAction, Relay, TxHash, Vote, VrfKeyHash,
+    PoolEpochState, PoolId, PoolUpdateAction, Relay, TxHash, ValueMap, Vote, VrfKeyHash,
 };
 use anyhow::Result;
 use num_traits::ToPrimitive;
@@ -854,6 +854,32 @@ impl From<acropolis_common::Value> for AmountList {
     }
 }
 
+impl From<ValueMap> for AmountList {
+    fn from(value: ValueMap) -> Self {
+        let mut out = Vec::new();
+
+        out.push(AmountEntry {
+            unit: "lovelace".to_string(),
+            quantity: value.lovelace.to_string(),
+        });
+
+        for (policy_id, assets) in value.assets {
+            for (asset_name, amount) in assets {
+                out.push(AmountEntry {
+                    unit: format!(
+                        "{}{}",
+                        hex::encode(policy_id),
+                        hex::encode(asset_name.as_slice())
+                    ),
+                    quantity: amount.to_string(),
+                });
+            }
+        }
+
+        Self(out)
+    }
+}
+
 #[derive(Serialize)]
 pub struct RegistrationUpdateREST {
     pub tx_hash: String,
@@ -910,4 +936,12 @@ pub struct AccountUTxOREST {
     pub data_hash: Option<String>,
     pub inline_datum: Option<String>,
     pub reference_script_hash: Option<String>,
+}
+
+#[derive(serde::Serialize)]
+pub struct AccountTotalsREST {
+    pub stake_address: String,
+    pub received_sum: AmountList,
+    pub sent_sum: AmountList,
+    pub tx_count: u64,
 }
