@@ -6,8 +6,6 @@ use crate::messages::{Message, RESTResponse};
 use crate::queries::errors::QueryError;
 use crate::rest_error::RESTError;
 
-/// Query state and get typed result or QueryError
-/// This is the low-level building block for handlers that need to do more processing
 pub async fn query_state<T, F>(
     context: &Arc<Context<Message>>,
     topic: &str,
@@ -21,7 +19,7 @@ where
         .message_bus
         .request(topic, request_msg)
         .await
-        .map_err(|e| QueryError::internal_error(e.to_string()))?;
+        .map_err(|e| QueryError::internal_error(format!("Failed to query '{topic}': {e:#}")))?;
 
     let message = Arc::try_unwrap(raw_msg).unwrap_or_else(|arc| (*arc).clone());
 

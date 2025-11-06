@@ -1,14 +1,21 @@
 use crate::queries::errors::QueryError;
 use anyhow::Error as AnyhowError;
 use caryatid_module_rest_server::messages::RESTResponse;
-use std::fmt;
+use thiserror::Error;
 
-/// Standard error types for the application
-#[derive(Debug)]
+/// Standard REST error types
+#[derive(Debug, Error)]
 pub enum RESTError {
+    #[error("{0}")]
     BadRequest(String),
+
+    #[error("{0}")]
     NotFound(String),
+
+    #[error("{0}")]
     InternalServerError(String),
+
+    #[error("{0}")]
     NotImplemented(String),
 }
 
@@ -24,12 +31,12 @@ impl RESTError {
     }
 
     /// Get the error message
-    pub fn message(&self) -> String {
+    pub fn message(&self) -> &str {
         match self {
-            RESTError::BadRequest(msg) => msg.clone(),
-            RESTError::NotFound(msg) => msg.clone(),
-            RESTError::InternalServerError(msg) => msg.clone(),
-            RESTError::NotImplemented(msg) => msg.clone(),
+            RESTError::BadRequest(msg) => msg,
+            RESTError::NotFound(msg) => msg,
+            RESTError::InternalServerError(msg) => msg,
+            RESTError::NotImplemented(msg) => msg,
         }
     }
 
@@ -79,18 +86,10 @@ impl RESTError {
     }
 }
 
-impl fmt::Display for RESTError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.message())
-    }
-}
-
-impl std::error::Error for RESTError {}
-
 /// Convert RESTError to RESTResponse
 impl From<RESTError> for RESTResponse {
     fn from(error: RESTError) -> Self {
-        RESTResponse::with_text(error.status_code(), &error.message())
+        RESTResponse::with_text(error.status_code(), error.message())
     }
 }
 
@@ -100,13 +99,6 @@ impl From<AnyhowError> for RESTError {
         RESTError::InternalServerError(error.to_string())
     }
 }
-
-// /// Convert ParseIntError to RESTError (400 Bad Request)
-// impl From<ParseIntError> for RESTError {
-//     fn from(error: ParseIntError) -> Self {
-//         RESTError::BadRequest(error.to_string())
-//     }
-// }
 
 /// Convert hex decode errors to RESTError (400 Bad Request)
 impl From<hex::FromHexError> for RESTError {

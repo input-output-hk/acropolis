@@ -1,22 +1,27 @@
 use serde::{Deserialize, Serialize};
-use std::fmt;
+use thiserror::Error;
 
 /// Common error type for all state query responses
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Error, Serialize, Deserialize)]
 pub enum QueryError {
     /// The requested resource was not found
+    #[error("Not found: {resource}")]
     NotFound { resource: String },
 
     /// An error occurred while processing the query
+    #[error("Internal error: {message}")]
     Internal { message: String },
 
     /// Storage backend is disabled in configuration
+    #[error("{storage_type} storage is not enabled")]
     StorageDisabled { storage_type: String },
 
     /// Invalid request parameters
+    #[error("Invalid request: {message}")]
     InvalidRequest { message: String },
 
     /// Query variant is not implemented yet
+    #[error("Query not implemented: {query}")]
     NotImplemented { query: String },
 }
 
@@ -51,19 +56,3 @@ impl QueryError {
         }
     }
 }
-
-impl fmt::Display for QueryError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::NotFound { resource } => write!(f, "Not found: {}", resource),
-            Self::Internal { message } => write!(f, "Query failed: {}", message),
-            Self::StorageDisabled { storage_type } => {
-                write!(f, "{} storage is not enabled", storage_type)
-            }
-            Self::InvalidRequest { message } => write!(f, "Invalid request: {}", message),
-            Self::NotImplemented { query } => write!(f, "Query not implemented: {}", query),
-        }
-    }
-}
-
-impl std::error::Error for QueryError {}
