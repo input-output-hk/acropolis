@@ -28,6 +28,7 @@ help:
 	@echo "Build & Test:"
 	@echo "  all                      Format, lint, and test"
 	@echo "  build                    Build the omnibus process"
+	@echo "  run 					  Run the omnibus"
 	@echo "  test                     Run all tests"
 	@echo "  fmt                      Run cargo fmt"
 	@echo "  clippy                   Run cargo clippy -D warnings"
@@ -51,7 +52,7 @@ test:
 	$(CARGO) test
 
 run:
-	$(CARGO) run -p $(PROCESS_PKG)
+	cd processes/omnibus && $(CARGO) run --release --bin $(PROCESS_PKG)
 
 fmt:
 	$(CARGO) fmt --all
