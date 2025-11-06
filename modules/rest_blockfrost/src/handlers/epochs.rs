@@ -4,6 +4,7 @@ use crate::{
         EpochActivityRest, ProtocolParamsRest, SPDDByEpochAndPoolItemRest, SPDDByEpochItemRest,
     },
 };
+use acropolis_common::queries::errors::QueryError;
 use acropolis_common::serialization::Bech32Conversion;
 use acropolis_common::{
     messages::{Message, RESTResponse, StateQuery, StateQueryResponse},
@@ -70,7 +71,9 @@ pub async fn handle_epoch_info_blockfrost(
     let ea_message = match epoch_info_response {
         EpochsStateQueryResponse::LatestEpoch(response) => Ok(response.epoch),
         EpochsStateQueryResponse::EpochInfo(response) => Ok(response.epoch),
-        EpochsStateQueryResponse::NotFound => Err(anyhow!("Epoch not found")),
+        EpochsStateQueryResponse::Error(QueryError::NotFound { .. }) => {
+            Err(anyhow!("Epoch not found"))
+        }
         EpochsStateQueryResponse::Error(e) => Err(anyhow!(
             "Internal server error while retrieving epoch info: {e}"
         )),
@@ -244,11 +247,10 @@ pub async fn handle_epoch_params_blockfrost(
                 )),
             }
         }
-        ParametersStateQueryResponse::NotFound => Ok(RESTResponse::with_text(
-            404,
-            "Protocol parameters not found for requested epoch",
-        )),
-        ParametersStateQueryResponse::Error(msg) => Ok(RESTResponse::with_text(400, &msg)),
+        ParametersStateQueryResponse::Error(QueryError::NotFound { .. }) => Ok(
+            RESTResponse::with_text(404, "Protocol parameters not found for requested epoch"),
+        ),
+        ParametersStateQueryResponse::Error(e) => Ok(RESTResponse::with_text(400, &e.to_string())),
         _ => Ok(RESTResponse::with_text(
             500,
             "Unexpected message type while retrieving parameters",
@@ -293,13 +295,14 @@ pub async fn handle_epoch_next_blockfrost(
                 EpochsStateQueryResponse::NextEpochs(response),
             )) => Ok(response.epochs.into_iter().map(EpochActivityRest::from).collect::<Vec<_>>()),
             Message::StateQueryResponse(StateQueryResponse::Epochs(
+                EpochsStateQueryResponse::Error(QueryError::NotFound { .. }),
+            )) => Err(anyhow::anyhow!("Epoch not found")),
+            Message::StateQueryResponse(StateQueryResponse::Epochs(
                 EpochsStateQueryResponse::Error(e),
             )) => Err(anyhow::anyhow!(
                 "Internal server error while retrieving next epochs: {e}"
             )),
-            Message::StateQueryResponse(StateQueryResponse::Epochs(
-                EpochsStateQueryResponse::NotFound,
-            )) => Err(anyhow::anyhow!("Epoch not found")),
+
             _ => Err(anyhow::anyhow!(
                 "Unexpected message type while retrieving next epochs"
             )),
@@ -356,13 +359,13 @@ pub async fn handle_epoch_previous_blockfrost(
                 EpochsStateQueryResponse::PreviousEpochs(response),
             )) => Ok(response.epochs.into_iter().map(EpochActivityRest::from).collect::<Vec<_>>()),
             Message::StateQueryResponse(StateQueryResponse::Epochs(
+                EpochsStateQueryResponse::Error(QueryError::NotFound { .. }),
+            )) => Err(anyhow::anyhow!("Epoch not found")),
+            Message::StateQueryResponse(StateQueryResponse::Epochs(
                 EpochsStateQueryResponse::Error(e),
             )) => Err(anyhow::anyhow!(
                 "Internal server error while retrieving previous epochs: {e}"
             )),
-            Message::StateQueryResponse(StateQueryResponse::Epochs(
-                EpochsStateQueryResponse::NotFound,
-            )) => Err(anyhow::anyhow!("Epoch not found")),
             _ => Err(anyhow::anyhow!(
                 "Unexpected message type while retrieving previous epochs"
             )),

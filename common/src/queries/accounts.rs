@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use crate::queries::errors::QueryError;
 use crate::{
     DRepChoice, PoolId, PoolLiveStakeInfo, RewardType, ShelleyAddress, StakeAddress, TxIdentifier,
 };
@@ -80,9 +81,7 @@ pub enum AccountsStateQueryResponse {
     // DReps-related responses
     DrepDelegators(DrepDelegators),
     AccountsDrepDelegationsMap(HashMap<StakeAddress, Option<DRepChoice>>),
-
-    NotFound,
-    Error(String),
+    Error(QueryError),
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
