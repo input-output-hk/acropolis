@@ -221,6 +221,7 @@ impl SnapshotCallbacks for SnapshotHandler {
 
 impl SnapshotBootstrapper {
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
+        // TODO: read a config file path, not the snapshot-path; implement TODOs below.
         let file_path = config
             .get_string("snapshot-path")
             .inspect_err(|e| error!("failed to find snapshot-path config: {e}"))?;
@@ -243,6 +244,12 @@ impl SnapshotBootstrapper {
                 return;
             };
             info!("Received startup message");
+
+            // TODO:
+            // Read config file per docs in NOTES.md
+            // read nonces
+            // read headers
+            // read and process ALL of the snapshot files, not just one.
 
             let span = info_span!("snapshot_bootstrapper.handle");
             async {

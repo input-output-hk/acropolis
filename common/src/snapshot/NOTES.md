@@ -30,6 +30,8 @@ There is a path for each network bootstrap configuration file. Network Should
 be one of 'mainnet', 'preprod', 'preview' or 'testnet_<magic>' where
 `magic` is a 32-bits unsigned value denoting a particular testnet.
 
+Data structure, e.g. as [Amaru mainnet](https://github.com/pragma-org/amaru/tree/main/data/mainnet)
+
 The bootstrapper will be given a path to a directory that is expected to contain
 the following files: snapshots.json, nonces.json, and headers.json. The path will
 be used as a prefix to resolve per-network configuration files
