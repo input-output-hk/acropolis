@@ -7,6 +7,7 @@ use acropolis_common::{
 };
 use caryatid_sdk::{module, Context, Module};
 
+use acropolis_common::queries::errors::QueryError;
 use anyhow::{anyhow, Result};
 use config::Config;
 use std::sync::Arc;
@@ -112,7 +113,9 @@ impl UTXOState {
             async move {
                 let Message::StateQuery(StateQuery::UTxOs(query)) = message.as_ref() else {
                     return Arc::new(Message::StateQueryResponse(StateQueryResponse::UTxOs(
-                        UTxOStateQueryResponse::Error("Invalid message for utxo-state".into()),
+                        UTxOStateQueryResponse::Error(QueryError::internal_error(
+                            "Invalid message for utxo-state",
+                        )),
                     )));
                 };
 
@@ -121,7 +124,9 @@ impl UTXOState {
                     UTxOStateQuery::GetUTxOsSum { utxo_identifiers } => {
                         match state.get_utxos_sum(utxo_identifiers).await {
                             Ok(balance) => UTxOStateQueryResponse::UTxOsSum(balance),
-                            Err(e) => UTxOStateQueryResponse::Error(e.to_string()),
+                            Err(e) => UTxOStateQueryResponse::Error(QueryError::internal_error(
+                                format!("Fetching UTxO sum failed: {e}"),
+                            )),
                         }
                     }
                 };

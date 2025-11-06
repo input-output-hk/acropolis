@@ -1,6 +1,8 @@
 use anyhow::Result;
 use std::sync::Arc;
 
+use crate::{handlers_config::HandlersConfig, types::AddressInfoREST};
+use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
     messages::{Message, RESTResponse, StateQuery, StateQueryResponse},
     queries::{
@@ -11,8 +13,6 @@ use acropolis_common::{
     Address, Value,
 };
 use caryatid_sdk::Context;
-
-use crate::{handlers_config::HandlersConfig, types::AddressInfoREST};
 
 /// Handle `/addresses/{address}` Blockfrost-compatible endpoint
 pub async fn handle_address_single_blockfrost(
@@ -68,11 +68,9 @@ pub async fn handle_address_single_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Addresses(
                 AddressStateQueryResponse::AddressUTxOs(utxo_identifiers),
             )) => Ok(Some(utxo_identifiers)),
-
             Message::StateQueryResponse(StateQueryResponse::Addresses(
-                AddressStateQueryResponse::NotFound,
+                AddressStateQueryResponse::Error(QueryError::NotFound { .. }),
             )) => Ok(None),
-
             Message::StateQueryResponse(StateQueryResponse::Addresses(
                 AddressStateQueryResponse::Error(_),
             )) => Err(anyhow::anyhow!("Address info storage disabled")),
@@ -117,9 +115,6 @@ pub async fn handle_address_single_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::UTxOs(
                 UTxOStateQueryResponse::UTxOsSum(balance),
             )) => Ok(balance),
-            Message::StateQueryResponse(StateQueryResponse::UTxOs(
-                UTxOStateQueryResponse::NotFound,
-            )) => Err(anyhow::anyhow!("UTxOs not found")),
             Message::StateQueryResponse(StateQueryResponse::UTxOs(
                 UTxOStateQueryResponse::Error(e),
             )) => Err(anyhow::anyhow!(format!("UTxO query error: {e}"))),

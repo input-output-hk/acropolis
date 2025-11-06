@@ -1,3 +1,5 @@
+use crate::queries::errors::QueryError;
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum MempoolStateQuery {
     GetMempoolList,
@@ -10,8 +12,7 @@ pub enum MempoolStateQueryResponse {
     MempoolList(MempoolList),
     MempoolTransaction(MempoolTransaction),
     MempoolTransactionByAddress(MempoolTransactionByAddress),
-    NotFound,
-    Error(String),
+    Error(QueryError),
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

@@ -1,3 +1,5 @@
+use crate::queries::errors::QueryError;
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum ScriptsStateQuery {
     GetScriptsList,
@@ -18,8 +20,7 @@ pub enum ScriptsStateQueryResponse {
     ScriptRedeemers(ScriptRedeemers),
     ScriptDatumJSON(ScriptDatumJSON),
     ScriptDatumCBOR(ScriptDatumCBOR),
-    NotFound,
-    Error(String),
+    Error(QueryError),
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

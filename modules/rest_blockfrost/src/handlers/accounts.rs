@@ -1,22 +1,22 @@
 //! REST handlers for Acropolis Blockfrost /accounts endpoints
 use std::sync::Arc;
 
-use acropolis_common::messages::{Message, RESTResponse, StateQuery, StateQueryResponse};
-use acropolis_common::queries::accounts::{AccountsStateQuery, AccountsStateQueryResponse};
-use acropolis_common::queries::blocks::{
-    BlocksStateQuery, BlocksStateQueryResponse, TransactionHashes,
-};
-use acropolis_common::queries::utils::query_state;
-use acropolis_common::serialization::{Bech32Conversion, Bech32WithHrp};
-use acropolis_common::{DRepChoice, StakeAddress};
-use anyhow::{anyhow, Result};
-use caryatid_sdk::Context;
-
 use crate::handlers_config::HandlersConfig;
 use crate::types::{
     AccountAddressREST, AccountRewardREST, AccountWithdrawalREST, DelegationUpdateREST,
     RegistrationUpdateREST,
 };
+use acropolis_common::messages::{Message, RESTResponse, StateQuery, StateQueryResponse};
+use acropolis_common::queries::accounts::{AccountsStateQuery, AccountsStateQueryResponse};
+use acropolis_common::queries::blocks::{
+    BlocksStateQuery, BlocksStateQueryResponse, TransactionHashes,
+};
+use acropolis_common::queries::errors::QueryError;
+use acropolis_common::queries::utils::query_state;
+use acropolis_common::serialization::{Bech32Conversion, Bech32WithHrp};
+use acropolis_common::{DRepChoice, StakeAddress};
+use anyhow::{anyhow, Result};
+use caryatid_sdk::Context;
 
 #[derive(serde::Serialize)]
 pub struct StakeAccountRest {
@@ -55,7 +55,7 @@ pub async fn handle_single_account_blockfrost(
                 AccountsStateQueryResponse::AccountInfo(account),
             )) => Ok(Some(account)),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
-                AccountsStateQueryResponse::NotFound,
+                AccountsStateQueryResponse::Error(QueryError::NotFound { .. }),
             )) => Ok(None),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
@@ -141,7 +141,7 @@ pub async fn handle_account_registrations_blockfrost(
                 AccountsStateQueryResponse::AccountRegistrationHistory(registrations),
             )) => Ok(Some(registrations)),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
-                AccountsStateQueryResponse::NotFound,
+                AccountsStateQueryResponse::Error(QueryError::NotFound { .. }),
             )) => Ok(None),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
@@ -235,7 +235,7 @@ pub async fn handle_account_delegations_blockfrost(
                 AccountsStateQueryResponse::AccountDelegationHistory(delegations),
             )) => Ok(Some(delegations)),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
-                AccountsStateQueryResponse::NotFound,
+                AccountsStateQueryResponse::Error(QueryError::NotFound { .. }),
             )) => Ok(None),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
@@ -341,7 +341,7 @@ pub async fn handle_account_mirs_blockfrost(
                 AccountsStateQueryResponse::AccountMIRHistory(mirs),
             )) => Ok(Some(mirs)),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
-                AccountsStateQueryResponse::NotFound,
+                AccountsStateQueryResponse::Error(QueryError::NotFound { .. }),
             )) => Ok(None),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
@@ -434,7 +434,7 @@ pub async fn handle_account_withdrawals_blockfrost(
                 AccountsStateQueryResponse::AccountWithdrawalHistory(withdrawals),
             )) => Ok(Some(withdrawals)),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
-                AccountsStateQueryResponse::NotFound,
+                AccountsStateQueryResponse::Error(QueryError::NotFound { .. }),
             )) => Ok(None),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
@@ -527,7 +527,7 @@ pub async fn handle_account_rewards_blockfrost(
                 AccountsStateQueryResponse::AccountRewardHistory(rewards),
             )) => Ok(Some(rewards)),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
-                AccountsStateQueryResponse::NotFound,
+                AccountsStateQueryResponse::Error(QueryError::NotFound { .. }),
             )) => Ok(None),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
@@ -590,7 +590,7 @@ pub async fn handle_account_addresses_blockfrost(
                 AccountsStateQueryResponse::AccountAssociatedAddresses(addresses),
             )) => Ok(Some(addresses)),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
-                AccountsStateQueryResponse::NotFound,
+                AccountsStateQueryResponse::Error(QueryError::NotFound { .. }),
             )) => Ok(None),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
