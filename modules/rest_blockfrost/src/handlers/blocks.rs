@@ -1,4 +1,7 @@
 //! REST handlers for Acropolis Blockfrost /blocks endpoints
+use crate::handlers_config::HandlersConfig;
+use crate::types::BlockInfoREST;
+use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
     extract_strict_query_params,
     messages::{Message, RESTResponse, StateQuery, StateQueryResponse},
@@ -13,9 +16,6 @@ use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
 use std::collections::HashMap;
 use std::sync::Arc;
-
-use crate::handlers_config::HandlersConfig;
-use crate::types::BlockInfoREST;
 
 fn parse_block_key(key: &str) -> Result<BlockKey> {
     match key.len() {
@@ -98,7 +98,7 @@ async fn handle_blocks_hash_number_blockfrost(
                 BlocksStateQueryResponse::BlockInfo(block_info),
             )) => Some(Ok(Some(BlockInfoREST(block_info)))),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
-                BlocksStateQueryResponse::NotFound,
+                BlocksStateQueryResponse::Error(QueryError::NotFound { .. }),
             )) => Some(Ok(None)),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
@@ -214,7 +214,7 @@ async fn handle_blocks_hash_number_transactions_blockfrost(
                 BlocksStateQueryResponse::BlockTransactions(block_txs),
             )) => Some(Ok(Some(block_txs))),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
-                BlocksStateQueryResponse::NotFound,
+                BlocksStateQueryResponse::Error(QueryError::NotFound { .. }),
             )) => Some(Ok(None)),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
@@ -330,7 +330,7 @@ async fn handle_blocks_hash_number_transactions_cbor_blockfrost(
                 BlocksStateQueryResponse::BlockTransactionsCBOR(block_txs_cbor),
             )) => Some(Ok(Some(block_txs_cbor))),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
-                BlocksStateQueryResponse::NotFound,
+                BlocksStateQueryResponse::Error(QueryError::NotFound { .. }),
             )) => Some(Ok(None)),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
@@ -381,7 +381,7 @@ pub async fn handle_blocks_hash_number_next_blockfrost(
                 BlocksStateQueryResponse::NextBlocks(blocks_next),
             )) => Some(Ok(Some(blocks_next))),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
-                BlocksStateQueryResponse::NotFound,
+                BlocksStateQueryResponse::Error(QueryError::NotFound { .. }),
             )) => Some(Ok(None)),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
@@ -432,7 +432,7 @@ pub async fn handle_blocks_hash_number_previous_blockfrost(
                 BlocksStateQueryResponse::PreviousBlocks(blocks_previous),
             )) => Some(Ok(Some(blocks_previous))),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
-                BlocksStateQueryResponse::NotFound,
+                BlocksStateQueryResponse::Error(QueryError::NotFound { .. }),
             )) => Some(Ok(None)),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
@@ -471,7 +471,7 @@ pub async fn handle_blocks_slot_blockfrost(
                 BlocksStateQueryResponse::BlockBySlot(block_info),
             )) => Some(Ok(Some(block_info))),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
-                BlocksStateQueryResponse::NotFound,
+                BlocksStateQueryResponse::Error(QueryError::NotFound { .. }),
             )) => Some(Ok(None)),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
@@ -515,7 +515,7 @@ pub async fn handle_blocks_epoch_slot_blockfrost(
                 BlocksStateQueryResponse::BlockByEpochSlot(block_info),
             )) => Some(Ok(Some(block_info))),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
-                BlocksStateQueryResponse::NotFound,
+                BlocksStateQueryResponse::Error(QueryError::NotFound { .. }),
             )) => Some(Ok(None)),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
@@ -566,7 +566,7 @@ pub async fn handle_blocks_hash_number_addresses_blockfrost(
                 BlocksStateQueryResponse::BlockInvolvedAddresses(block_addresses),
             )) => Some(Ok(Some(block_addresses))),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
-                BlocksStateQueryResponse::NotFound,
+                BlocksStateQueryResponse::Error(QueryError::NotFound { .. }),
             )) => Some(Ok(None)),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),

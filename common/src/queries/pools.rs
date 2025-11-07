@@ -1,3 +1,4 @@
+use crate::queries::errors::QueryError;
 use crate::{
     queries::governance::VoteRecord, rational_number::RationalNumber, PoolEpochState, PoolId,
     PoolMetadata, PoolRegistration, PoolRetirement, PoolUpdateEvent, Relay, StakeAddress,
@@ -77,8 +78,7 @@ pub enum PoolsStateQueryResponse {
     BlocksByPoolAndEpoch(Vec<u64>),
     PoolUpdates(Vec<PoolUpdateEvent>),
     PoolVotes(Vec<VoteRecord>),
-    NotFound,
-    Error(String),
+    Error(QueryError),
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

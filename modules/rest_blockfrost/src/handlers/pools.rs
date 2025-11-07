@@ -7,6 +7,7 @@ use crate::{
     types::{PoolEpochStateRest, PoolExtendedRest, PoolMetadataRest, PoolRetirementRest},
     utils::{fetch_pool_metadata_as_bytes, verify_pool_metadata_hash, PoolMetadataJson},
 };
+use acropolis_common::queries::errors::QueryError;
 use acropolis_common::serialization::Bech32Conversion;
 use acropolis_common::{
     messages::{Message, RESTResponse, StateQuery, StateQueryResponse},
@@ -434,7 +435,7 @@ async fn handle_pools_spo_blockfrost(
                 PoolsStateQueryResponse::PoolInfo(pool_info),
             )) => Ok(pool_info),
             Message::StateQueryResponse(StateQueryResponse::Pools(
-                PoolsStateQueryResponse::NotFound,
+                PoolsStateQueryResponse::Error(QueryError::NotFound { .. }),
             )) => Err(anyhow::anyhow!("Pool Not found")),
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::Error(e),
@@ -515,7 +516,7 @@ async fn handle_pools_spo_blockfrost(
                 PoolsStateQueryResponse::PoolUpdates(pool_updates),
             )) => Ok(Some(pool_updates)),
             Message::StateQueryResponse(StateQueryResponse::Pools(
-                PoolsStateQueryResponse::NotFound,
+                PoolsStateQueryResponse::Error(QueryError::NotFound { .. }),
             )) => Err(anyhow::anyhow!("Pool Not found")),
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::Error(_e),
@@ -815,7 +816,7 @@ pub async fn handle_pool_metadata_blockfrost(
                 PoolsStateQueryResponse::PoolMetadata(pool_metadata),
             )) => Ok(pool_metadata),
             Message::StateQueryResponse(StateQueryResponse::Pools(
-                PoolsStateQueryResponse::NotFound,
+                PoolsStateQueryResponse::Error(QueryError::NotFound { .. }),
             )) => Err(anyhow::anyhow!("Not found")),
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::Error(e),
@@ -895,7 +896,7 @@ pub async fn handle_pool_relays_blockfrost(
                 PoolsStateQueryResponse::PoolRelays(pool_relays),
             )) => Ok(pool_relays),
             Message::StateQueryResponse(StateQueryResponse::Pools(
-                PoolsStateQueryResponse::NotFound,
+                PoolsStateQueryResponse::Error(QueryError::NotFound { .. }),
             )) => Err(anyhow::anyhow!("Pool Relays Not found")),
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::Error(e),
@@ -948,7 +949,7 @@ pub async fn handle_pool_delegators_blockfrost(
                 PoolsStateQueryResponse::PoolDelegators(pool_delegators),
             )) => Ok(Some(pool_delegators.delegators)),
             Message::StateQueryResponse(StateQueryResponse::Pools(
-                PoolsStateQueryResponse::NotFound,
+                PoolsStateQueryResponse::Error(QueryError::NotFound { .. }),
             )) => Err(anyhow::anyhow!("Pool Delegators Not found")),
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::Error(_e),
@@ -1090,7 +1091,7 @@ pub async fn handle_pool_updates_blockfrost(
                 PoolsStateQueryResponse::PoolUpdates(pool_updates),
             )) => Ok(pool_updates),
             Message::StateQueryResponse(StateQueryResponse::Pools(
-                PoolsStateQueryResponse::NotFound,
+                PoolsStateQueryResponse::Error(QueryError::NotFound { .. }),
             )) => Err(anyhow::anyhow!("Pool not found")),
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::Error(e),

@@ -1,3 +1,4 @@
+use crate::queries::errors::QueryError;
 use crate::{
     queries::misc::Order,
     serialization::{Bech32Conversion, Bech32WithHrp},
@@ -90,8 +91,7 @@ pub enum BlocksStateQueryResponse {
     BlockInvolvedAddresses(BlockInvolvedAddresses),
     BlockHashes(BlockHashes),
     TransactionHashes(TransactionHashes),
-    NotFound,
-    Error(String),
+    Error(QueryError),
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

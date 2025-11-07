@@ -153,6 +153,7 @@ impl GenesisBootstrapper {
                         }),
                         value: Value::new(*amount, Vec::new()),
                         datum: None,
+                        reference_script: None,
                     };
 
                     utxo_deltas_message.deltas.push(UTXODelta::Output(tx_output));
