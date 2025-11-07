@@ -1,21 +1,22 @@
 //! REST handlers for Acropolis Blockfrost /accounts endpoints
 use std::sync::Arc;
 
+use crate::handlers_config::HandlersConfig;
+use crate::types::{
+    AccountAddressREST, AccountRewardREST, AccountWithdrawalREST, DelegationUpdateREST,
+    RegistrationUpdateREST,
+};
 use acropolis_common::messages::{Message, RESTResponse, StateQuery, StateQueryResponse};
 use acropolis_common::queries::accounts::{AccountsStateQuery, AccountsStateQueryResponse};
 use acropolis_common::queries::blocks::{
     BlocksStateQuery, BlocksStateQueryResponse, TransactionHashes,
 };
+use acropolis_common::queries::errors::QueryError;
 use acropolis_common::queries::utils::query_state;
 use acropolis_common::serialization::{Bech32Conversion, Bech32WithHrp};
 use acropolis_common::{DRepChoice, StakeAddress};
 use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
-
-use crate::handlers_config::HandlersConfig;
-use crate::types::{
-    AccountRewardREST, AccountWithdrawalREST, DelegationUpdateREST, RegistrationUpdateREST,
-};
 
 #[derive(serde::Serialize)]
 pub struct StakeAccountRest {
@@ -54,7 +55,7 @@ pub async fn handle_single_account_blockfrost(
                 AccountsStateQueryResponse::AccountInfo(account),
             )) => Ok(Some(account)),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
-                AccountsStateQueryResponse::NotFound,
+                AccountsStateQueryResponse::Error(QueryError::NotFound { .. }),
             )) => Ok(None),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
@@ -140,7 +141,7 @@ pub async fn handle_account_registrations_blockfrost(
                 AccountsStateQueryResponse::AccountRegistrationHistory(registrations),
             )) => Ok(Some(registrations)),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
-                AccountsStateQueryResponse::NotFound,
+                AccountsStateQueryResponse::Error(QueryError::NotFound { .. }),
             )) => Ok(None),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
@@ -234,7 +235,7 @@ pub async fn handle_account_delegations_blockfrost(
                 AccountsStateQueryResponse::AccountDelegationHistory(delegations),
             )) => Ok(Some(delegations)),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
-                AccountsStateQueryResponse::NotFound,
+                AccountsStateQueryResponse::Error(QueryError::NotFound { .. }),
             )) => Ok(None),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
@@ -340,7 +341,7 @@ pub async fn handle_account_mirs_blockfrost(
                 AccountsStateQueryResponse::AccountMIRHistory(mirs),
             )) => Ok(Some(mirs)),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
-                AccountsStateQueryResponse::NotFound,
+                AccountsStateQueryResponse::Error(QueryError::NotFound { .. }),
             )) => Ok(None),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
@@ -433,7 +434,7 @@ pub async fn handle_account_withdrawals_blockfrost(
                 AccountsStateQueryResponse::AccountWithdrawalHistory(withdrawals),
             )) => Ok(Some(withdrawals)),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
-                AccountsStateQueryResponse::NotFound,
+                AccountsStateQueryResponse::Error(QueryError::NotFound { .. }),
             )) => Ok(None),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
@@ -526,7 +527,7 @@ pub async fn handle_account_rewards_blockfrost(
                 AccountsStateQueryResponse::AccountRewardHistory(rewards),
             )) => Ok(Some(rewards)),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
-                AccountsStateQueryResponse::NotFound,
+                AccountsStateQueryResponse::Error(QueryError::NotFound { .. }),
             )) => Ok(None),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
@@ -560,6 +561,76 @@ pub async fn handle_account_rewards_blockfrost(
         Err(e) => Ok(RESTResponse::with_text(
             500,
             &format!("Internal server error while serializing reward history: {e}"),
+        )),
+    }
+}
+
+pub async fn handle_account_addresses_blockfrost(
+    context: Arc<Context<Message>>,
+    params: Vec<String>,
+    handlers_config: Arc<HandlersConfig>,
+) -> Result<RESTResponse> {
+    let account = match parse_stake_address(&params) {
+        Ok(addr) => addr,
+        Err(resp) => return Ok(resp),
+    };
+
+    // Prepare the message
+    let msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
+        AccountsStateQuery::GetAccountAssociatedAddresses { account },
+    )));
+
+    // Get addresses from historical accounts state
+    let addresses = query_state(
+        &context,
+        &handlers_config.historical_accounts_query_topic,
+        msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Accounts(
+                AccountsStateQueryResponse::AccountAssociatedAddresses(addresses),
+            )) => Ok(Some(addresses)),
+            Message::StateQueryResponse(StateQueryResponse::Accounts(
+                AccountsStateQueryResponse::Error(QueryError::NotFound { .. }),
+            )) => Ok(None),
+            Message::StateQueryResponse(StateQueryResponse::Accounts(
+                AccountsStateQueryResponse::Error(e),
+            )) => Err(anyhow::anyhow!(
+                "Internal server error while retrieving account addresses: {e}"
+            )),
+            _ => Err(anyhow::anyhow!(
+                "Unexpected message type while retrieving account addresses"
+            )),
+        },
+    )
+    .await?;
+
+    let Some(addresses) = addresses else {
+        return Ok(RESTResponse::with_text(404, "Account not found"));
+    };
+
+    let rest_response = match addresses
+        .iter()
+        .map(|r| {
+            Ok::<_, anyhow::Error>(AccountAddressREST {
+                address: r.to_string().map_err(|e| anyhow!("invalid address: {e}"))?,
+            })
+        })
+        .collect::<Result<Vec<AccountAddressREST>, _>>()
+    {
+        Ok(v) => v,
+        Err(e) => {
+            return Ok(RESTResponse::with_text(
+                500,
+                &format!("Failed to convert address entry: {e}"),
+            ));
+        }
+    };
+
+    match serde_json::to_string_pretty(&rest_response) {
+        Ok(json) => Ok(RESTResponse::with_json(200, &json)),
+        Err(e) => Ok(RESTResponse::with_text(
+            500,
+            &format!("Internal server error while serializing addresses: {e}"),
         )),
     }
 }

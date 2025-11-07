@@ -5,6 +5,7 @@ use crate::{
         PolicyAssetRest,
     },
 };
+use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
     messages::{Message, RESTResponse, StateQuery, StateQueryResponse},
     queries::{
@@ -134,7 +135,7 @@ pub async fn handle_asset_single_blockfrost(
                     .map_err(|e| anyhow::anyhow!("Failed to serialize asset info: {e}"))
             }
             Message::StateQueryResponse(StateQueryResponse::Assets(
-                AssetsStateQueryResponse::NotFound,
+                AssetsStateQueryResponse::Error(QueryError::NotFound { .. }),
             )) => Ok(RESTResponse::with_text(404, "Asset not found")),
             Message::StateQueryResponse(StateQueryResponse::Assets(
                 AssetsStateQueryResponse::Error(_),
@@ -170,7 +171,7 @@ pub async fn handle_asset_history_blockfrost(
         AssetsStateQuery::GetAssetHistory { policy, name },
     )));
 
-    let response = match query_state(
+    let response = query_state(
         &context,
         &handlers_config.assets_query_topic,
         asset_query_msg,
@@ -189,7 +190,7 @@ pub async fn handle_asset_history_blockfrost(
                 }
             }
             Message::StateQueryResponse(StateQueryResponse::Assets(
-                AssetsStateQueryResponse::NotFound,
+                AssetsStateQueryResponse::Error(QueryError::NotFound { .. }),
             )) => Ok(RESTResponse::with_text(404, "Asset history not found")),
             Message::StateQueryResponse(StateQueryResponse::Assets(
                 AssetsStateQueryResponse::Error(_),
@@ -204,10 +205,7 @@ pub async fn handle_asset_history_blockfrost(
         },
     )
     .await
-    {
-        Ok(rest) => rest,
-        Err(e) => RESTResponse::with_text(500, &format!("Query failed: {e}")),
-    };
+    .unwrap_or_else(|e| RESTResponse::with_text(500, &format!("Query failed: {e}")));
 
     Ok(response)
 }
@@ -250,7 +248,7 @@ pub async fn handle_asset_transactions_blockfrost(
                     .map_err(|e| anyhow::anyhow!("Failed to serialize asset transactions: {e}"))
             }
             Message::StateQueryResponse(StateQueryResponse::Assets(
-                AssetsStateQueryResponse::NotFound,
+                AssetsStateQueryResponse::Error(QueryError::NotFound { .. }),
             )) => Ok(RESTResponse::with_text(404, "Asset not found")),
             Message::StateQueryResponse(StateQueryResponse::Assets(
                 AssetsStateQueryResponse::Error(_),
@@ -312,7 +310,7 @@ pub async fn handle_asset_addresses_blockfrost(
                 }
             }
             Message::StateQueryResponse(StateQueryResponse::Assets(
-                AssetsStateQueryResponse::NotFound,
+                AssetsStateQueryResponse::Error(QueryError::NotFound { .. }),
             )) => Ok(RESTResponse::with_text(404, "Asset not found")),
             Message::StateQueryResponse(StateQueryResponse::Assets(
                 AssetsStateQueryResponse::Error(_),
@@ -364,7 +362,7 @@ pub async fn handle_policy_assets_blockfrost(
                     .map_err(|e| anyhow::anyhow!("Failed to serialize assets list: {e}"))
             }
             Message::StateQueryResponse(StateQueryResponse::Assets(
-                AssetsStateQueryResponse::NotFound,
+                AssetsStateQueryResponse::Error(QueryError::NotFound { .. }),
             )) => Ok(RESTResponse::with_text(404, "Policy assets not found")),
             Message::StateQueryResponse(StateQueryResponse::Assets(
                 AssetsStateQueryResponse::Error(_),

@@ -1,3 +1,5 @@
+use crate::queries::errors::QueryError;
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum MetadataStateQuery {
     GetMetadataLabels,
@@ -10,8 +12,7 @@ pub enum MetadataStateQueryResponse {
     MetadataLabels(MetadataLabels),
     TransactionMetadataJSON(TransactionMetadataJSON),
     TransactionMetadataCBOR(TransactionMetadataCBOR),
-    NotFound,
-    Error(String),
+    Error(QueryError),
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

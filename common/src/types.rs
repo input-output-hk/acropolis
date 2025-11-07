@@ -202,8 +202,11 @@ pub struct AddressDelta {
 /// Stake balance change
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StakeAddressDelta {
-    /// Address
-    pub address: StakeAddress,
+    /// Stake address
+    pub stake_address: StakeAddress,
+
+    /// Shelley addresses contributing to the delta
+    pub addresses: Vec<ShelleyAddress>,
 
     /// Balance change
     pub delta: i64,
@@ -322,6 +325,15 @@ pub struct NativeAssetDelta {
 pub enum Datum {
     Hash(Vec<u8>),
     Inline(Vec<u8>),
+}
+
+// The full CBOR bytes of a reference script
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub enum ReferenceScript {
+    Native(Vec<u8>),
+    PlutusV1(Vec<u8>),
+    PlutusV2(Vec<u8>),
+    PlutusV3(Vec<u8>),
 }
 
 /// Value (lovelace + multiasset)
@@ -448,6 +460,9 @@ pub struct TxOutput {
 
     /// Datum (Inline or Hash)
     pub datum: Option<Datum>,
+
+    /// Reference script
+    pub reference_script: Option<ReferenceScript>,
 }
 
 /// Transaction input (UTXO reference)

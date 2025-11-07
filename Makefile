@@ -6,6 +6,8 @@ SHELL := bash
 CARGO := cargo
 PYTHON := python3
 PROCESS_PKG := acropolis_process_omnibus
+LOG_LEVEL ?= info
+
 
 # Test snapshots
 SNAPSHOT_SMALL ?= tests/fixtures/snapshot-small.cbor
@@ -28,6 +30,7 @@ help:
 	@echo "Build & Test:"
 	@echo "  all                      Format, lint, and test"
 	@echo "  build                    Build the omnibus process"
+	@echo "  run 					  Run the omnibus"
 	@echo "  test                     Run all tests"
 	@echo "  fmt                      Run cargo fmt"
 	@echo "  clippy                   Run cargo clippy -D warnings"
@@ -37,9 +40,11 @@ help:
 	@echo ""
 	@echo "Variables:"
 	@echo "  SNAPSHOT=<path>          Path to snapshot file (default: Conway epoch 507)"
+	@echo "  LOG_LEVEL=<level>        Set log level (default: info, options: error, warn, info, debug, trace)"
 	@echo ""
 	@echo "Examples:"
 	@echo "  make snap-test-streaming"
+	@echo "  make run LOG_LEVEL=debug"
 	@echo "  make snap-test-streaming SNAPSHOT=path/to/snapshot.cbor"
 
 all: fmt clippy test
@@ -51,7 +56,7 @@ test:
 	$(CARGO) test
 
 run:
-	$(CARGO) run -p $(PROCESS_PKG)
+	cd processes/omnibus && RUST_LOG=$(LOG_LEVEL) $(CARGO) run --release --bin $(PROCESS_PKG)
 
 fmt:
 	$(CARGO) fmt --all

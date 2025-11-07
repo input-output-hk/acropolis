@@ -1,6 +1,7 @@
 //! Acropolis Parameter State module for Caryatid
 //! Accepts certificate events and derives the Governance State in memory
 
+use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
     messages::{CardanoMessage, Message, ProtocolParamsMessage, StateQuery, StateQueryResponse},
     queries::parameters::{
@@ -15,6 +16,7 @@ use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, info_span, Instrument};
+
 mod alonzo_genesis;
 mod genesis_params;
 mod parameters_updater;
@@ -173,9 +175,9 @@ impl ParametersState {
             async move {
                 let Message::StateQuery(StateQuery::Parameters(query)) = message.as_ref() else {
                     return Arc::new(Message::StateQueryResponse(StateQueryResponse::Parameters(
-                        ParametersStateQueryResponse::Error(
-                            "Invalid message for parameters-state".into(),
-                        ),
+                        ParametersStateQueryResponse::Error(QueryError::internal_error(
+                            "Invalid message for parameters-state",
+                        )),
                     )));
                 };
 
@@ -188,16 +190,17 @@ impl ParametersState {
                     }
                     ParametersStateQuery::GetEpochParameters { epoch_number } => {
                         if !store_history {
-                            ParametersStateQueryResponse::Error(
-                                "Historical protocol parameter storage disabled by config"
-                                    .to_string(),
-                            )
+                            ParametersStateQueryResponse::Error(QueryError::storage_disabled(
+                                "Historical protocol parameter",
+                            ))
                         } else {
                             match lock.get_at_or_before(*epoch_number) {
                                 Some(state) => ParametersStateQueryResponse::EpochParameters(
                                     state.current_params.get_params(),
                                 ),
-                                None => ParametersStateQueryResponse::NotFound,
+                                None => ParametersStateQueryResponse::Error(QueryError::not_found(
+                                    format!("Epoch {} not found in history", epoch_number),
+                                )),
                             }
                         }
                     }

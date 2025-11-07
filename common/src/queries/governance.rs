@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use crate::queries::errors::QueryError;
 use crate::{
     Anchor, DRepCredential, GovActionId, Lovelace, ProposalProcedure, StakeAddress, TxHash,
     TxIdentifier, Vote, Voter, VotingProcedure,
@@ -41,8 +42,7 @@ pub enum GovernanceStateQueryResponse {
     ProposalWithdrawals(ProposalWithdrawals),
     ProposalVotes(ProposalVotes),
     ProposalMetadata(ProposalMetadata),
-    NotFound,
-    Error(String),
+    Error(QueryError),
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -124,14 +124,3 @@ pub struct ProposalVotes {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProposalMetadata {}
-
-pub fn handle_governance_query_result<T>(
-    result: anyhow::Result<Option<T>>,
-    mapper: impl FnOnce(T) -> GovernanceStateQueryResponse,
-) -> GovernanceStateQueryResponse {
-    match result {
-        Ok(Some(val)) => mapper(val),
-        Ok(None) => GovernanceStateQueryResponse::NotFound,
-        Err(e) => GovernanceStateQueryResponse::Error(e.to_string()),
-    }
-}

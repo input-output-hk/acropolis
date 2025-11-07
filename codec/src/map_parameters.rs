@@ -18,6 +18,7 @@ use acropolis_common::{
     rational_number::RationalNumber,
     *,
 };
+use pallas_primitives::conway::PseudoScript;
 use std::collections::{HashMap, HashSet};
 
 /// Map Pallas Network to our NetworkId
@@ -1096,6 +1097,24 @@ pub fn map_datum(datum: &Option<conway::MintedDatumOption>) -> Option<Datum> {
         }
         Some(pallas::ledger::primitives::conway::MintedDatumOption::Data(d)) => {
             Some(Datum::Inline(d.raw_cbor().to_vec()))
+        }
+        None => None,
+    }
+}
+
+pub fn map_reference_script(script: &Option<conway::MintedScriptRef>) -> Option<ReferenceScript> {
+    match script {
+        Some(PseudoScript::NativeScript(script)) => {
+            Some(ReferenceScript::Native(script.raw_cbor().to_vec()))
+        }
+        Some(PseudoScript::PlutusV1Script(script)) => {
+            Some(ReferenceScript::PlutusV1(script.as_ref().to_vec()))
+        }
+        Some(PseudoScript::PlutusV2Script(script)) => {
+            Some(ReferenceScript::PlutusV2(script.as_ref().to_vec()))
+        }
+        Some(PseudoScript::PlutusV3Script(script)) => {
+            Some(ReferenceScript::PlutusV3(script.as_ref().to_vec()))
         }
         None => None,
     }
