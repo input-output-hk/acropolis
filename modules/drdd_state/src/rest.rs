@@ -30,10 +30,7 @@ pub async fn handle_drdd(
         Some(epoch) => match locked.get_epoch(epoch) {
             Some(drdd) => Some(drdd),
             None => {
-                return Err(RESTError::not_found(&format!(
-                    "DRDD in epoch {}",
-                    epoch
-                )));
+                return Err(RESTError::not_found(&format!("DRDD in epoch {}", epoch)));
             }
         },
         None => locked.get_latest(),
