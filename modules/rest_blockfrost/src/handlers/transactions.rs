@@ -57,16 +57,45 @@ pub async fn handle_transactions_blockfrost(
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
-    let param = match params.as_slice() {
-        [param] => param,
+    let (tx_hash, param, param2) = match params.as_slice() {
+        [tx_hash] => (tx_hash, None, None),
+        [tx_hash, param] => (tx_hash, Some(param.as_str()), None),
+        [tx_hash, param, param2] => (tx_hash, Some(param.as_str()), Some(param2.as_str())),
         _ => return Ok(RESTResponse::with_text(400, "Invalid parameters")),
     };
 
-    let tx_hash = match TxHash::from_hex(param) {
+    let tx_hash = match TxHash::from_hex(tx_hash) {
         Ok(hash) => hash,
         Err(_) => return Ok(RESTResponse::with_text(400, "Invalid transaction hash")),
     };
 
+    match param {
+        None => handle_transaction_query(context, tx_hash, handlers_config).await,
+        Some("utxo") => Ok(RESTResponse::with_text(501, "Not implemented")),
+        Some("stakes") => Ok(RESTResponse::with_text(501, "Not implemented")),
+        Some("delegations") => Ok(RESTResponse::with_text(501, "Not implemented")),
+        Some("withdrawals") => Ok(RESTResponse::with_text(501, "Not implemented")),
+        Some("mirs") => Ok(RESTResponse::with_text(501, "Not implemented")),
+        Some("pool_updates") => Ok(RESTResponse::with_text(501, "Not implemented")),
+        Some("pool_retires") => Ok(RESTResponse::with_text(501, "Not implemented")),
+        Some("metadata") => match param2 {
+            None => Ok(RESTResponse::with_text(501, "Not implemented")),
+            Some("cbor") => Ok(RESTResponse::with_text(501, "Not implemented")),
+            _ => Ok(RESTResponse::with_text(400, "Invalid parameters")),
+        },
+        Some("redeemers") => Ok(RESTResponse::with_text(501, "Not implemented")),
+        Some("required_signers") => Ok(RESTResponse::with_text(501, "Not implemented")),
+        Some("cbor") => Ok(RESTResponse::with_text(501, "Not implemented")),
+        _ => Ok(RESTResponse::with_text(400, "Invalid parameters")),
+    }
+}
+
+/// Handle `/txs/{hash}`
+async fn handle_transaction_query(
+    context: Arc<Context<Message>>,
+    tx_hash: TxHash,
+    handlers_config: Arc<HandlersConfig>,
+) -> Result<RESTResponse> {
     let txs_info_msg = Arc::new(Message::StateQuery(StateQuery::Transactions(
         TransactionsStateQuery::GetTransactionInfo { tx_hash },
     )));
