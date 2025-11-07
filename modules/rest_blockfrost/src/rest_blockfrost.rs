@@ -343,7 +343,7 @@ impl BlockfrostREST {
             handle_account_assets_blockfrost,
         );
 
-        // Handler for /accounts/{stake_address}/addreesses/total
+        // Handler for /accounts/{stake_address}/addresses/total
         register_handler(
             context.clone(),
             DEFAULT_HANDLE_ACCOUNT_TOTALS_TOPIC,
