@@ -46,6 +46,7 @@ struct TxValidatorPhase1StateConfig {
     pub genesis_utxos_subscribe_topic: String,
     pub publish_validation_result: String,
     pub params_subscribe_topic: String,
+    #[allow(dead_code)]
     pub network_name: String,
 }
 
