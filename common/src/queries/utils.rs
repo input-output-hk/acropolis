@@ -15,12 +15,7 @@ pub async fn query_state<T, F>(
 where
     F: FnOnce(Message) -> Result<T, QueryError>,
 {
-    let raw_msg = context
-        .message_bus
-        .request(topic, request_msg)
-        .await
-        .map_err(|e| QueryError::internal_error(format!("Failed to query '{topic}': {e:#}")))?;
-
+    let raw_msg = context.message_bus.request(topic, request_msg).await?;
     let message = Arc::try_unwrap(raw_msg).unwrap_or_else(|arc| (*arc).clone());
 
     extractor(message)
@@ -38,7 +33,7 @@ where
     T: Serialize,
 {
     let data = query_state(context, topic, request_msg, |response| {
-        extractor(response).unwrap_or_else(|| {
+        extractor(response).unwrap_or_else(|e| {
             Err(QueryError::internal_error(format!(
                 "Unexpected response message type while calling {topic}"
             )))
