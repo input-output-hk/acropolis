@@ -148,10 +148,12 @@ pub struct ShelleyAddressPointer {
     serde::Deserialize,
     minicbor::Encode,
     minicbor::Decode,
+    Default,
 )]
 pub enum ShelleyAddressDelegationPart {
     /// No delegation (enterprise addresses)
     #[n(0)]
+    #[default]
     None,
 
     /// Delegation to stake key
@@ -165,12 +167,6 @@ pub enum ShelleyAddressDelegationPart {
     /// Delegation to pointer
     #[n(3)]
     Pointer(#[n(0)] ShelleyAddressPointer),
-}
-
-impl Default for ShelleyAddressDelegationPart {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 /// A Shelley-era address
@@ -619,18 +615,13 @@ impl Default for StakeAddress {
 }
 
 /// A Cardano address
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, Default)]
 pub enum Address {
+    #[default]
     None,
     Byron(ByronAddress),
     Shelley(ShelleyAddress),
     Stake(StakeAddress),
-}
-
-impl Default for Address {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 impl Address {

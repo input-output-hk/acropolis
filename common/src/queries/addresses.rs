@@ -1,3 +1,4 @@
+use crate::queries::errors::QueryError;
 use crate::{
     Address, AddressTotals, NativeAssets, ShelleyAddress, TxIdentifier, UTxOIdentifier, ValueDelta,
 };
@@ -27,6 +28,5 @@ pub enum AddressStateQueryResponse {
     AddressesAssets(NativeAssets),
     AddressesTotals(ValueDelta),
     AddressesUTxOs(Vec<UTxOIdentifier>),
-    NotFound,
-    Error(String),
+    Error(QueryError),
 }

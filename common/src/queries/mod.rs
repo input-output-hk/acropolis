@@ -7,6 +7,7 @@ pub mod addresses;
 pub mod assets;
 pub mod blocks;
 pub mod epochs;
+pub mod errors;
 pub mod governance;
 pub mod ledger;
 pub mod mempool;

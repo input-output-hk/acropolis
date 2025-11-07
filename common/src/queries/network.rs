@@ -1,3 +1,5 @@
+use crate::queries::errors::QueryError;
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum NetworkStateQuery {
     GetNetworkInformation,
@@ -8,8 +10,7 @@ pub enum NetworkStateQuery {
 pub enum NetworkStateQueryResponse {
     NetworkInformation(NetworkInformation),
     EraSummary(EraSummary),
-    NotFound,
-    Error(String),
+    Error(QueryError),
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

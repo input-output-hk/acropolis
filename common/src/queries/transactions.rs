@@ -1,3 +1,5 @@
+use crate::queries::errors::QueryError;
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum TransactionsStateQuery {
     GetTransactionInfo,
@@ -30,8 +32,7 @@ pub enum TransactionsStateQueryResponse {
     TransactionRedeemers(TransactionRedeemers),
     TransactionRequiredSigners(TransactionRequiredSigners),
     TransactionCBOR(TransactionCBOR),
-    NotFound,
-    Error(String),
+    Error(QueryError),
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
