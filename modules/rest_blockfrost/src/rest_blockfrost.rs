@@ -736,7 +736,6 @@ fn register_handler<F, Fut>(
     Fut: Future<Output = Result<RESTResponse, RESTError>> + Send + 'static,
 {
     let topic_name = context.config.get_string(topic.0).unwrap_or_else(|_| topic.1.to_string());
-
     info!("Creating request handler on '{}'", topic_name);
 
     handle_rest_with_path_parameter(context.clone(), &topic_name, move |params| {
@@ -763,7 +762,6 @@ fn register_handler_with_query<F, Fut>(
     Fut: Future<Output = Result<RESTResponse, RESTError>> + Send + 'static,
 {
     let topic_name = context.config.get_string(topic.0).unwrap_or_else(|_| topic.1.to_string());
-
     info!("Creating request handler on '{}'", topic_name);
 
     handle_rest_with_path_and_query_parameters(

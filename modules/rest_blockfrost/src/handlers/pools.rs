@@ -7,7 +7,7 @@ use crate::{
     types::{PoolEpochStateRest, PoolExtendedRest, PoolMetadataRest, PoolRetirementRest},
     utils::{fetch_pool_metadata_as_bytes, verify_pool_metadata_hash, PoolMetadataJson},
 };
-use acropolis_common::queries::utils::query_state;
+use acropolis_common::queries::errors::QueryError;
 use acropolis_common::rest_error::RESTError;
 use acropolis_common::serialization::Bech32Conversion;
 use acropolis_common::{
@@ -15,8 +15,8 @@ use acropolis_common::{
     queries::{
         accounts::{AccountsStateQuery, AccountsStateQueryResponse},
         epochs::{EpochsStateQuery, EpochsStateQueryResponse},
-        errors::QueryError,
         pools::{PoolsStateQuery, PoolsStateQueryResponse},
+        utils::query_state,
     },
     rest_helper::ToCheckedF64,
     PoolId, PoolRetirement, PoolUpdateAction, TxIdentifier,
@@ -33,32 +33,34 @@ pub async fn handle_pools_list_blockfrost(
     _params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse, RESTError> {
+    // Prepare the message
     let msg = Arc::new(Message::StateQuery(StateQuery::Pools(
         PoolsStateQuery::GetPoolsList,
     )));
 
-    let pool_operators = query_state(
-        &context,
-        &handlers_config.pools_query_topic,
-        msg,
-        |message| match message {
-            Message::StateQueryResponse(StateQueryResponse::Pools(
-                PoolsStateQueryResponse::PoolsList(pool_operators),
-            )) => Ok(pool_operators),
-            Message::StateQueryResponse(StateQueryResponse::Pools(
-                PoolsStateQueryResponse::Error(e),
-            )) => Err(e),
-            _ => Err(QueryError::internal_error("Unexpected message type")),
-        },
-    )
-    .await?;
+    // Send message via message bus
+    let raw = context.message_bus.request(&handlers_config.pools_query_topic, msg).await?;
+    // Unwrap and match
+    let message = Arc::try_unwrap(raw).unwrap_or_else(|arc| (*arc).clone());
 
-    let pool_ids: Vec<String> = pool_operators
-        .iter()
-        .map(|operator| operator.to_bech32())
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| RESTError::encoding_failed(&format!("pool IDs: {}", e)))?;
+    let pool_operators = match message {
+        Message::StateQueryResponse(StateQueryResponse::Pools(
+            PoolsStateQueryResponse::PoolsList(pool_operators),
+        )) => pool_operators,
 
+        Message::StateQueryResponse(StateQueryResponse::Pools(PoolsStateQueryResponse::Error(
+            e,
+        ))) => {
+            return Err(e.into());
+        }
+
+        _ => return Err(RESTError::unexpected_response("Unexpected message type")),
+    };
+
+    let pool_ids: Result<Vec<String>, _> =
+        pool_operators.iter().map(|operator| operator.to_bech32()).collect();
+
+    let pool_ids = pool_ids.map_err(|e| RESTError::encoding_failed(&format!("pool IDs: {e}")))?;
     let json = serde_json::to_string(&pool_ids)?;
     Ok(RESTResponse::with_json(200, &json))
 }
@@ -86,7 +88,7 @@ pub async fn handle_pools_extended_retired_retiring_single_blockfrost(
         }
         _ => {
             let pool_id = PoolId::from_bech32(param).map_err(|e| {
-                RESTError::invalid_param("pool_id", &format!("Invalid Bech32 stake pool ID: {}", e))
+                RESTError::invalid_param("pool_id", &format!("invalid Bech32 stake pool ID: {e}"))
             })?;
             handle_pools_spo_blockfrost(context.clone(), pool_id, handlers_config.clone()).await
         }
@@ -175,7 +177,7 @@ async fn handle_pools_extended_blockfrost(
 
     // check optimal_pool_sizing is Some
     let Some(optimal_pool_sizing) = optimal_pool_sizing else {
-        // if it is before Shelley Era
+        // if it is before Shelly Era
         return Ok(RESTResponse::with_json(200, "[]"));
     };
 
@@ -199,7 +201,7 @@ async fn handle_pools_extended_blockfrost(
                 PoolsStateQueryResponse::PoolsActiveStakes(active_stakes),
             )) => Ok(Some(active_stakes)),
             Message::StateQueryResponse(StateQueryResponse::Pools(
-                PoolsStateQueryResponse::Error(_),
+                PoolsStateQueryResponse::Error(_e),
             )) => {
                 // if epoch_history is not enabled
                 Ok(None)
@@ -224,6 +226,7 @@ async fn handle_pools_extended_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::PoolsLiveStakes(pools_live_stakes),
             )) => Ok(pools_live_stakes),
+
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
             )) => Err(e),
@@ -261,14 +264,14 @@ async fn handle_pools_extended_blockfrost(
     let pools_live_stakes = pools_live_stakes?;
     let total_blocks_minted = total_blocks_minted?;
 
-    let pools_extended_rest: Vec<PoolExtendedRest> = pools_list_with_info
+    let pools_extened_rest_results: Result<Vec<PoolExtendedRest>, RESTError> = pools_list_with_info
         .iter()
         .enumerate()
         .map(|(i, (pool_operator, pool_registration))| {
             Ok(PoolExtendedRest {
                 pool_id: pool_operator
                     .to_bech32()
-                    .map_err(|e| RESTError::encoding_failed(&format!("pool ID: {}", e)))?,
+                    .map_err(|e| RESTError::encoding_failed(&format!("pool ID: {e}")))?,
                 hex: pool_operator.to_vec(),
                 active_stake: pools_active_stakes.as_ref().map(|active_stakes| active_stakes[i]),
                 live_stake: pools_live_stakes[i],
@@ -281,9 +284,10 @@ async fn handle_pools_extended_blockfrost(
                 fixed_cost: pool_registration.cost,
             })
         })
-        .collect::<Result<Vec<_>, RESTError>>()?;
+        .collect();
 
-    let json = serde_json::to_string(&pools_extended_rest)?;
+    let pools_extened_rest = pools_extened_rest_results?;
+    let json = serde_json::to_string(&pools_extened_rest)?;
     Ok(RESTResponse::with_json(200, &json))
 }
 
@@ -291,6 +295,7 @@ async fn handle_pools_retired_blockfrost(
     context: Arc<Context<Message>>,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse, RESTError> {
+    // Get retired pools from spo-state
     let retired_pools_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
         PoolsStateQuery::GetPoolsRetiredList,
     )));
@@ -310,17 +315,16 @@ async fn handle_pools_retired_blockfrost(
     )
     .await?;
 
-    let retired_pools_rest: Vec<PoolRetirementRest> = retired_pools
+    let retired_pools_rest = retired_pools
         .iter()
-        .map(|PoolRetirement { operator, epoch }| {
-            Ok(PoolRetirementRest {
-                pool_id: operator
-                    .to_bech32()
-                    .map_err(|e| RESTError::encoding_failed(&format!("pool ID: {}", e)))?,
+        .filter_map(|PoolRetirement { operator, epoch }| {
+            let pool_id = operator.to_bech32().ok()?;
+            Some(PoolRetirementRest {
+                pool_id,
                 epoch: *epoch,
             })
         })
-        .collect::<Result<Vec<_>, RESTError>>()?;
+        .collect::<Vec<_>>();
 
     let json = serde_json::to_string(&retired_pools_rest)?;
     Ok(RESTResponse::with_json(200, &json))
@@ -330,6 +334,7 @@ async fn handle_pools_retiring_blockfrost(
     context: Arc<Context<Message>>,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse, RESTError> {
+    // Get retiring pools from spo-state
     let retiring_pools_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
         PoolsStateQuery::GetPoolsRetiringList,
     )));
@@ -349,17 +354,16 @@ async fn handle_pools_retiring_blockfrost(
     )
     .await?;
 
-    let retiring_pools_rest: Vec<PoolRetirementRest> = retiring_pools
+    let retiring_pools_rest = retiring_pools
         .iter()
-        .map(|PoolRetirement { operator, epoch }| {
-            Ok(PoolRetirementRest {
-                pool_id: operator
-                    .to_bech32()
-                    .map_err(|e| RESTError::encoding_failed(&format!("pool ID: {}", e)))?,
+        .filter_map(|PoolRetirement { operator, epoch }| {
+            let pool_id = operator.to_bech32().ok()?;
+            Some(PoolRetirementRest {
+                pool_id,
                 epoch: *epoch,
             })
         })
-        .collect::<Result<Vec<_>, RESTError>>()?;
+        .collect::<Vec<_>>();
 
     let json = serde_json::to_string(&retiring_pools_rest)?;
     Ok(RESTResponse::with_json(200, &json))
@@ -385,6 +389,9 @@ async fn handle_pools_spo_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::PoolInfo(pool_info),
             )) => Ok(pool_info),
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::Error(QueryError::NotFound { .. }),
+            )) => Err(QueryError::not_found("Pool")),
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::Error(e),
             )) => Err(e),
@@ -466,7 +473,10 @@ async fn handle_pools_spo_blockfrost(
                 PoolsStateQueryResponse::PoolUpdates(pool_updates),
             )) => Ok(Some(pool_updates)),
             Message::StateQueryResponse(StateQueryResponse::Pools(
-                PoolsStateQueryResponse::Error(_),
+                PoolsStateQueryResponse::Error(QueryError::NotFound { .. }),
+            )) => Err(QueryError::not_found("Pool")),
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::Error(_e),
             )) => Ok(None),
             _ => Err(QueryError::internal_error("Unexpected message type")),
         },
@@ -514,8 +524,8 @@ async fn handle_pools_spo_blockfrost(
     let live_stakes_info = live_stakes_info?;
     let total_blocks_minted = total_blocks_minted?;
     let Some(optimal_pool_sizing) = optimal_pool_sizing? else {
-        // if it is before Shelley Era
-        return Err(RESTError::not_found("Pool not found"));
+        // if it is before Shelly Era
+        return Err(RESTError::not_found("Pool Not Found"));
     };
     let pool_updates = pool_updates?;
 
@@ -582,7 +592,7 @@ async fn handle_pools_spo_blockfrost(
                 PoolsStateQueryResponse::PoolActiveStakeInfo(res),
             )) => Ok(Some(res)),
             Message::StateQueryResponse(StateQueryResponse::Pools(
-                PoolsStateQueryResponse::Error(_),
+                PoolsStateQueryResponse::Error(_e),
             )) => Ok(None),
             _ => Err(QueryError::internal_error("Unexpected message type")),
         },
@@ -620,18 +630,19 @@ async fn handle_pools_spo_blockfrost(
     let pool_id = pool_info
         .operator
         .to_bech32()
-        .map_err(|e| RESTError::encoding_failed(&format!("pool ID: {}", e)))?;
+        .map_err(|e| RESTError::encoding_failed(&format!("pool ID: {e}")))?;
     let reward_account = pool_info
         .reward_account
         .get_credential()
         .to_stake_bech32()
-        .map_err(|e| RESTError::encoding_failed(&format!("reward account: {}", e)))?;
-    let pool_owners: Vec<String> = pool_info
+        .map_err(|e| RESTError::encoding_failed(&format!("reward account: {e}")))?;
+
+    let pool_owners = pool_info
         .pool_owners
         .iter()
         .map(|owner| owner.get_credential().to_stake_bech32())
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| RESTError::encoding_failed(&format!("pool owners: {}", e)))?;
+        .collect::<Result<Vec<String>, _>>()
+        .map_err(|e| RESTError::encoding_failed(&format!("pool owners: {e}")))?;
 
     let pool_info_rest: PoolInfoRest = PoolInfoRest {
         pool_id,
@@ -669,14 +680,12 @@ pub async fn handle_pool_history_blockfrost(
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse, RESTError> {
-    let pool_id = params.first().ok_or_else(|| RESTError::param_missing("pool_id"))?;
+    let Some(pool_id) = params.first() else {
+        return Err(RESTError::param_missing("pool ID"));
+    };
 
-    let spo = PoolId::from_bech32(pool_id).map_err(|_| {
-        RESTError::invalid_param(
-            "pool_id",
-            &format!("Invalid Bech32 stake pool ID: {}", pool_id),
-        )
-    })?;
+    let spo = PoolId::from_bech32(pool_id)
+        .map_err(|_| RESTError::invalid_param("pool_id", "invalid Bech32 stake pool ID"))?;
 
     // get latest epoch from epochs-state
     let latest_epoch_info_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
@@ -731,14 +740,12 @@ pub async fn handle_pool_metadata_blockfrost(
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse, RESTError> {
-    let pool_id = params.first().ok_or_else(|| RESTError::param_missing("pool_id"))?;
+    let Some(pool_id) = params.first() else {
+        return Err(RESTError::param_missing("pool ID"));
+    };
 
-    let spo = PoolId::from_bech32(pool_id).map_err(|_| {
-        RESTError::invalid_param(
-            "pool_id",
-            &format!("Invalid Bech32 stake pool ID: {}", pool_id),
-        )
-    })?;
+    let spo = PoolId::from_bech32(pool_id)
+        .map_err(|_| RESTError::invalid_param("pool_id", "invalid Bech32 stake pool ID"))?;
 
     let pool_metadata_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
         PoolsStateQuery::GetPoolMetadata { pool_id: spo },
@@ -752,6 +759,9 @@ pub async fn handle_pool_metadata_blockfrost(
                 PoolsStateQueryResponse::PoolMetadata(pool_metadata),
             )) => Ok(pool_metadata),
             Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::Error(QueryError::NotFound { .. }),
+            )) => Err(QueryError::not_found("Pool metadata")),
+            Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::Error(e),
             )) => Err(e),
             _ => Err(QueryError::internal_error("Unexpected message type")),
@@ -764,13 +774,13 @@ pub async fn handle_pool_metadata_blockfrost(
         Duration::from_secs(handlers_config.external_api_timeout),
     )
     .await
-    .map_err(|e| RESTError::query_failed(&format!("Failed to fetch pool metadata: {}", e)))?;
+    .map_err(|e| RESTError::InternalServerError(format!("Failed to fetch pool metadata: {e}")))?;
 
-    // Verify hash of the fetched pool metadata
+    // Verify hash of the fetched pool metadata, matches with the metadata hash provided by PoolRegistration
     verify_pool_metadata_hash(&pool_metadata_bytes, &pool_metadata.hash)
         .map_err(|e| RESTError::not_found(&e))?;
 
-    // Convert bytes into PoolMetadata structure
+    // Convert bytes into an understandable PoolMetadata structure
     let pool_metadata_json = PoolMetadataJson::try_from(pool_metadata_bytes)
         .map_err(|_| RESTError::BadRequest("Failed PoolMetadata Json conversion".to_string()))?;
 
@@ -794,14 +804,12 @@ pub async fn handle_pool_relays_blockfrost(
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse, RESTError> {
-    let pool_id = params.first().ok_or_else(|| RESTError::param_missing("pool_id"))?;
+    let Some(pool_id) = params.first() else {
+        return Err(RESTError::param_missing("pool ID"));
+    };
 
-    let spo = PoolId::from_bech32(pool_id).map_err(|_| {
-        RESTError::invalid_param(
-            "pool_id",
-            &format!("Invalid Bech32 stake pool ID: {}", pool_id),
-        )
-    })?;
+    let spo = PoolId::from_bech32(pool_id)
+        .map_err(|_| RESTError::invalid_param("pool_id", "invalid Bech32 stake pool ID"))?;
 
     let pool_relay_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
         PoolsStateQuery::GetPoolRelays { pool_id: spo },
@@ -815,6 +823,9 @@ pub async fn handle_pool_relays_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::PoolRelays(pool_relays),
             )) => Ok(pool_relays),
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::Error(QueryError::NotFound { .. }),
+            )) => Err(QueryError::not_found("Pool Relays")),
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::Error(e),
             )) => Err(e),
@@ -834,14 +845,12 @@ pub async fn handle_pool_delegators_blockfrost(
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse, RESTError> {
-    let pool_id = params.first().ok_or_else(|| RESTError::param_missing("pool_id"))?;
+    let Some(pool_id) = params.first() else {
+        return Err(RESTError::param_missing("pool ID"));
+    };
 
-    let spo = PoolId::from_bech32(pool_id).map_err(|_| {
-        RESTError::invalid_param(
-            "pool_id",
-            &format!("Invalid Bech32 stake pool ID: {}", pool_id),
-        )
-    })?;
+    let spo = PoolId::from_bech32(pool_id)
+        .map_err(|_| RESTError::invalid_param("pool_id", "invalid Bech32 stake pool ID"))?;
 
     // Get Pool delegators from spo-state
     let pool_delegators_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
@@ -857,7 +866,10 @@ pub async fn handle_pool_delegators_blockfrost(
                 PoolsStateQueryResponse::PoolDelegators(pool_delegators),
             )) => Ok(Some(pool_delegators.delegators)),
             Message::StateQueryResponse(StateQueryResponse::Pools(
-                PoolsStateQueryResponse::Error(_),
+                PoolsStateQueryResponse::Error(QueryError::NotFound { .. }),
+            )) => Err(QueryError::not_found("Pool Delegators")),
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::Error(_e),
             )) => {
                 // store-stake-addresses is not enabled
                 warn!("Fallback to query from accounts_state");
@@ -876,7 +888,7 @@ pub async fn handle_pool_delegators_blockfrost(
             let pool_delegators_msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
                 AccountsStateQuery::GetPoolDelegators { pool_operator: spo },
             )));
-            query_state(
+            let pool_delegators = query_state(
                 &context,
                 &handlers_config.accounts_query_topic,
                 pool_delegators_msg,
@@ -890,21 +902,21 @@ pub async fn handle_pool_delegators_blockfrost(
                     _ => Err(QueryError::internal_error("Unexpected message type")),
                 },
             )
-            .await?
+            .await?;
+            pool_delegators
         }
     };
 
-    let delegators_rest: Vec<PoolDelegatorRest> = pool_delegators
-        .into_iter()
-        .map(|(stake_address, l)| {
-            Ok(PoolDelegatorRest {
-                address: stake_address
-                    .to_string()
-                    .map_err(|e| RESTError::encoding_failed(&format!("stake address: {}", e)))?,
-                live_stake: l.to_string(),
-            })
-        })
-        .collect::<Result<Vec<_>, RESTError>>()?;
+    let mut delegators_rest = Vec::<PoolDelegatorRest>::new();
+    for (stake_address, l) in pool_delegators {
+        let bech32 = stake_address.to_string().map_err(|e| {
+            RESTError::InternalServerError(format!("Invalid stake address in pool delegators: {e}"))
+        })?;
+        delegators_rest.push(PoolDelegatorRest {
+            address: bech32,
+            live_stake: l.to_string(),
+        });
+    }
 
     let json = serde_json::to_string(&delegators_rest)?;
     Ok(RESTResponse::with_json(200, &json))
@@ -915,14 +927,12 @@ pub async fn handle_pool_blocks_blockfrost(
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse, RESTError> {
-    let pool_id = params.first().ok_or_else(|| RESTError::param_missing("pool_id"))?;
+    let Some(pool_id) = params.first() else {
+        return Err(RESTError::param_missing("pool ID"));
+    };
 
-    let spo = PoolId::from_bech32(pool_id).map_err(|_| {
-        RESTError::invalid_param(
-            "pool_id",
-            &format!("Invalid Bech32 stake pool ID: {}", pool_id),
-        )
-    })?;
+    let spo = PoolId::from_bech32(pool_id)
+        .map_err(|_| RESTError::invalid_param("pool_id", "invalid Bech32 stake pool ID"))?;
 
     // Get blocks by pool_id from spo_state
     let pool_blocks_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
@@ -958,14 +968,12 @@ pub async fn handle_pool_updates_blockfrost(
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse, RESTError> {
-    let pool_id = params.first().ok_or_else(|| RESTError::param_missing("pool_id"))?;
+    let Some(pool_id) = params.first() else {
+        return Err(RESTError::param_missing("pool ID"));
+    };
 
-    let spo = PoolId::from_bech32(pool_id).map_err(|_| {
-        RESTError::invalid_param(
-            "pool_id",
-            &format!("Invalid Bech32 stake pool ID: {}", pool_id),
-        )
-    })?;
+    let spo = PoolId::from_bech32(pool_id)
+        .map_err(|_| RESTError::invalid_param("pool_id", "invalid Bech32 stake pool ID"))?;
 
     // query from spo_state
     let pool_updates_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
@@ -979,6 +987,9 @@ pub async fn handle_pool_updates_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::PoolUpdates(pool_updates),
             )) => Ok(pool_updates),
+            Message::StateQueryResponse(StateQueryResponse::Pools(
+                PoolsStateQueryResponse::Error(QueryError::NotFound { .. }),
+            )) => Err(QueryError::not_found("Pool")),
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::Error(e),
             )) => Err(e),
@@ -1005,14 +1016,12 @@ pub async fn handle_pool_votes_blockfrost(
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse, RESTError> {
-    let pool_id = params.first().ok_or_else(|| RESTError::param_missing("pool_id"))?;
+    let Some(pool_id) = params.first() else {
+        return Err(RESTError::param_missing("pool ID"));
+    };
 
-    let spo = PoolId::from_bech32(pool_id).map_err(|_| {
-        RESTError::invalid_param(
-            "pool_id",
-            &format!("Invalid Bech32 stake pool ID: {}", pool_id),
-        )
-    })?;
+    let spo = PoolId::from_bech32(pool_id)
+        .map_err(|_| RESTError::invalid_param("pool_id", "invalid Bech32 stake pool ID"))?;
 
     // query from spo_state
     let pool_votes_msg = Arc::new(Message::StateQuery(StateQuery::Pools(

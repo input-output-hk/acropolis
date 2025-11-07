@@ -15,8 +15,7 @@ use acropolis_common::queries::errors::QueryError;
 use acropolis_common::queries::utils::query_state;
 use acropolis_common::rest_error::RESTError;
 use acropolis_common::serialization::{Bech32Conversion, Bech32WithHrp};
-use acropolis_common::{DRepChoice, StakeAddress, TxHash};
-use anyhow::{anyhow, Result};
+use acropolis_common::{DRepChoice, StakeAddress};
 use caryatid_sdk::Context;
 
 #[derive(serde::Serialize)]
@@ -53,7 +52,10 @@ pub async fn handle_single_account_blockfrost(
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::AccountInfo(account),
-            )) => Ok(account),
+            )) => Ok(Some(account)),
+            Message::StateQueryResponse(StateQueryResponse::Accounts(
+                AccountsStateQueryResponse::Error(QueryError::NotFound { .. }),
+            )) => Ok(None),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
             )) => Err(e),
@@ -64,19 +66,23 @@ pub async fn handle_single_account_blockfrost(
     )
     .await?;
 
-    let delegated_spo = match &account.delegated_spo {
-        Some(spo) => {
-            Some(spo.to_bech32().map_err(|e| RESTError::encoding_failed(&format!("SPO: {e}")))?)
-        }
-        None => None,
+    let Some(account) = account else {
+        return Err(RESTError::not_found("Account not found"));
     };
 
-    let delegated_drep = match &account.delegated_drep {
-        Some(drep) => Some(
-            map_drep_choice(drep).map_err(|e| RESTError::encoding_failed(&format!("dRep: {e}")))?,
-        ),
-        None => None,
-    };
+    let delegated_spo = account
+        .delegated_spo
+        .as_ref()
+        .map(|spo| spo.to_bech32())
+        .transpose()
+        .map_err(|e| RESTError::encoding_failed(&format!("SPO: {e}")))?;
+
+    let delegated_drep = account
+        .delegated_drep
+        .as_ref()
+        .map(map_drep_choice)
+        .transpose()
+        .map_err(|e| RESTError::encoding_failed(&format!("dRep: {e}")))?;
 
     let rest_response = StakeAccountRest {
         utxo_value: account.utxo_value,
@@ -110,10 +116,13 @@ pub async fn handle_account_registrations_blockfrost(
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::AccountRegistrationHistory(registrations),
-            )) => Ok(registrations),
+            )) => Ok(Some(registrations)),
+            Message::StateQueryResponse(StateQueryResponse::Accounts(
+                AccountsStateQueryResponse::Error(QueryError::NotFound { .. }),
+            )) => Ok(None),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
-            )) => Err(e),
+            )) => Err(e.into()),
             _ => Err(QueryError::internal_error(
                 "Unexpected message type while retrieving account registrations",
             )),
@@ -121,16 +130,41 @@ pub async fn handle_account_registrations_blockfrost(
     )
     .await?;
 
+    let Some(registrations) = registrations else {
+        return Err(RESTError::not_found("Account not found"));
+    };
+
     // Get TxHashes from TxIdentifiers
     let tx_ids: Vec<_> = registrations.iter().map(|r| r.tx_identifier).collect();
-    let tx_hashes = get_transaction_hashes(&context, &handlers_config, tx_ids).await?;
+    let msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
+        BlocksStateQuery::GetTransactionHashes { tx_ids },
+    )));
+    let tx_hashes = query_state(
+        &context,
+        &handlers_config.blocks_query_topic,
+        msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Blocks(
+                BlocksStateQueryResponse::TransactionHashes(TransactionHashes { tx_hashes }),
+            )) => Ok(tx_hashes),
+            Message::StateQueryResponse(StateQueryResponse::Blocks(
+                BlocksStateQueryResponse::Error(e),
+            )) => Err(e.into()),
+            _ => Err(QueryError::internal_error(
+                "Unexpected message type while resolving transaction hashes",
+            )),
+        },
+    )
+    .await?;
 
     let mut rest_response = Vec::new();
 
     for r in registrations {
-        let tx_hash = tx_hashes.get(&r.tx_identifier).ok_or_else(|| {
-            RESTError::InternalServerError("Missing tx hash for registration".to_string())
-        })?;
+        let Some(tx_hash) = tx_hashes.get(&r.tx_identifier) else {
+            return Err(RESTError::InternalServerError(
+                "Missing tx hash for registration".to_string(),
+            ));
+        };
 
         rest_response.push(RegistrationUpdateREST {
             tx_hash: hex::encode(tx_hash),
@@ -163,25 +197,55 @@ pub async fn handle_account_delegations_blockfrost(
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::AccountDelegationHistory(delegations),
-            )) => Ok(delegations),
+            )) => Ok(Some(delegations)),
+            Message::StateQueryResponse(StateQueryResponse::Accounts(
+                AccountsStateQueryResponse::Error(QueryError::NotFound { .. }),
+            )) => Ok(None),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
-            )) => Err(e),
-            _ => Err(QueryError::internal_error("Unexpected response type")),
+            )) => Err(e.into()),
+            _ => Err(QueryError::internal_error(
+                "Unexpected message type while retrieving account delegations",
+            )),
         },
     )
     .await?;
 
+    let Some(delegations) = delegations else {
+        return Err(RESTError::not_found("Account not found"));
+    };
+
     // Get TxHashes from TxIdentifiers
     let tx_ids: Vec<_> = delegations.iter().map(|r| r.tx_identifier).collect();
-    let tx_hashes = get_transaction_hashes(&context, &handlers_config, tx_ids).await?;
+    let msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
+        BlocksStateQuery::GetTransactionHashes { tx_ids },
+    )));
+    let tx_hashes = query_state(
+        &context,
+        &handlers_config.blocks_query_topic,
+        msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Blocks(
+                BlocksStateQueryResponse::TransactionHashes(TransactionHashes { tx_hashes }),
+            )) => Ok(tx_hashes),
+            Message::StateQueryResponse(StateQueryResponse::Blocks(
+                BlocksStateQueryResponse::Error(e),
+            )) => Err(e.into()),
+            _ => Err(QueryError::internal_error(
+                "Unexpected message type while resolving transaction hashes",
+            )),
+        },
+    )
+    .await?;
 
     let mut rest_response = Vec::new();
 
     for r in delegations {
-        let tx_hash = tx_hashes.get(&r.tx_identifier).ok_or_else(|| {
-            RESTError::InternalServerError("Missing tx hash for delegation".to_string())
-        })?;
+        let Some(tx_hash) = tx_hashes.get(&r.tx_identifier) else {
+            return Err(RESTError::InternalServerError(
+                "Missing tx hash for delegation".to_string(),
+            ));
+        };
 
         let pool_id =
             r.pool.to_bech32().map_err(|e| RESTError::encoding_failed(&format!("pool ID: {e}")))?;
@@ -219,25 +283,55 @@ pub async fn handle_account_mirs_blockfrost(
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::AccountMIRHistory(mirs),
-            )) => Ok(mirs),
+            )) => Ok(Some(mirs)),
+            Message::StateQueryResponse(StateQueryResponse::Accounts(
+                AccountsStateQueryResponse::Error(QueryError::NotFound { .. }),
+            )) => Ok(None),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
-            )) => Err(e),
-            _ => Err(QueryError::internal_error("Unexpected response type")),
+            )) => Err(e.into()),
+            _ => Err(QueryError::internal_error(
+                "Unexpected message type while retrieving account mirs",
+            )),
         },
     )
     .await?;
 
+    let Some(mirs) = mirs else {
+        return Err(RESTError::not_found("Account not found"));
+    };
+
     // Get TxHashes from TxIdentifiers
     let tx_ids: Vec<_> = mirs.iter().map(|r| r.tx_identifier).collect();
-    let tx_hashes = get_transaction_hashes(&context, &handlers_config, tx_ids).await?;
+    let msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
+        BlocksStateQuery::GetTransactionHashes { tx_ids },
+    )));
+    let tx_hashes = query_state(
+        &context,
+        &handlers_config.blocks_query_topic,
+        msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Blocks(
+                BlocksStateQueryResponse::TransactionHashes(TransactionHashes { tx_hashes }),
+            )) => Ok(tx_hashes),
+            Message::StateQueryResponse(StateQueryResponse::Blocks(
+                BlocksStateQueryResponse::Error(e),
+            )) => Err(e.into()),
+            _ => Err(QueryError::internal_error(
+                "Unexpected message type while resolving transaction hashes",
+            )),
+        },
+    )
+    .await?;
 
     let mut rest_response = Vec::new();
 
     for r in mirs {
-        let tx_hash = tx_hashes.get(&r.tx_identifier).ok_or_else(|| {
-            RESTError::InternalServerError("Missing tx hash for MIR record".to_string())
-        })?;
+        let Some(tx_hash) = tx_hashes.get(&r.tx_identifier) else {
+            return Err(RESTError::InternalServerError(
+                "Missing tx hash for MIR record".to_string(),
+            ));
+        };
 
         rest_response.push(AccountWithdrawalREST {
             tx_hash: hex::encode(tx_hash),
@@ -258,7 +352,7 @@ pub async fn handle_account_withdrawals_blockfrost(
 
     // Prepare the message
     let msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
-        AccountsStateQuery::GetAccountWithdrawalHistory { account },
+        AccountsStateQuery::GetAccountRegistrationHistory { account },
     )));
 
     // Get withdrawals from historical accounts state
@@ -269,25 +363,55 @@ pub async fn handle_account_withdrawals_blockfrost(
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::AccountWithdrawalHistory(withdrawals),
-            )) => Ok(withdrawals),
+            )) => Ok(Some(withdrawals)),
+            Message::StateQueryResponse(StateQueryResponse::Accounts(
+                AccountsStateQueryResponse::Error(QueryError::NotFound { .. }),
+            )) => Ok(None),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
-            )) => Err(e),
-            _ => Err(QueryError::internal_error("Unexpected response type")),
+            )) => Err(e.into()),
+            _ => Err(QueryError::internal_error(
+                "Unexpected message type while retrieving account withdrawals",
+            )),
         },
     )
     .await?;
 
+    let Some(withdrawals) = withdrawals else {
+        return Err(RESTError::not_found("Account not found"));
+    };
+
     // Get TxHashes from TxIdentifiers
     let tx_ids: Vec<_> = withdrawals.iter().map(|r| r.tx_identifier).collect();
-    let tx_hashes = get_transaction_hashes(&context, &handlers_config, tx_ids).await?;
+    let msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
+        BlocksStateQuery::GetTransactionHashes { tx_ids },
+    )));
+    let tx_hashes = query_state(
+        &context,
+        &handlers_config.blocks_query_topic,
+        msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Blocks(
+                BlocksStateQueryResponse::TransactionHashes(TransactionHashes { tx_hashes }),
+            )) => Ok(tx_hashes),
+            Message::StateQueryResponse(StateQueryResponse::Blocks(
+                BlocksStateQueryResponse::Error(e),
+            )) => Err(e.into()),
+            _ => Err(QueryError::internal_error(
+                "Unexpected message type while resolving transaction hashes",
+            )),
+        },
+    )
+    .await?;
 
     let mut rest_response = Vec::new();
 
     for w in withdrawals {
-        let tx_hash = tx_hashes.get(&w.tx_identifier).ok_or_else(|| {
-            RESTError::InternalServerError("Missing tx hash for withdrawal".to_string())
-        })?;
+        let Some(tx_hash) = tx_hashes.get(&w.tx_identifier) else {
+            return Err(RESTError::InternalServerError(
+                "Missing tx hash for withdrawal".to_string(),
+            ));
+        };
 
         rest_response.push(AccountWithdrawalREST {
             tx_hash: hex::encode(tx_hash),
@@ -319,20 +443,29 @@ pub async fn handle_account_rewards_blockfrost(
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::AccountRewardHistory(rewards),
-            )) => Ok(rewards),
+            )) => Ok(Some(rewards)),
+            Message::StateQueryResponse(StateQueryResponse::Accounts(
+                AccountsStateQueryResponse::Error(QueryError::NotFound { .. }),
+            )) => Ok(None),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
-            )) => Err(e),
-            _ => Err(QueryError::internal_error("Unexpected response type")),
+            )) => Err(e.into()),
+            _ => Err(QueryError::internal_error(
+                "Unexpected message type while retrieving account rewards",
+            )),
         },
     )
     .await?;
+
+    let Some(rewards) = rewards else {
+        return Err(RESTError::not_found("Account not found"));
+    };
 
     let rest_response = rewards
         .iter()
         .map(|r| r.try_into())
         .collect::<Result<Vec<AccountRewardREST>, _>>()
-        .map_err(|e: anyhow::Error| {
+        .map_err(|e| {
             RESTError::InternalServerError(format!("Failed to convert reward entry: {e}"))
         })?;
 
@@ -360,19 +493,28 @@ pub async fn handle_account_addresses_blockfrost(
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::AccountAssociatedAddresses(addresses),
-            )) => Ok(addresses),
+            )) => Ok(Some(addresses)),
+            Message::StateQueryResponse(StateQueryResponse::Accounts(
+                AccountsStateQueryResponse::Error(QueryError::NotFound { .. }),
+            )) => Ok(None),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
-            )) => Err(e),
-            _ => Err(QueryError::internal_error("Unexpected response type")),
+            )) => Err(e.into()),
+            _ => Err(QueryError::internal_error(
+                "Unexpected message type while retrieving account addresses",
+            )),
         },
     )
     .await?;
 
+    let Some(addresses) = addresses else {
+        return Err(RESTError::not_found("Account not found"));
+    };
+
     let rest_response = addresses
         .iter()
         .map(|r| {
-            Ok::<_, RESTError>(AccountAddressREST {
+            Ok(AccountAddressREST {
                 address: r
                     .to_string()
                     .map_err(|e| RESTError::InternalServerError(format!("Invalid address: {e}")))?,
@@ -385,19 +527,21 @@ pub async fn handle_account_addresses_blockfrost(
 }
 
 fn parse_stake_address(params: &[String]) -> Result<StakeAddress, RESTError> {
-    let stake_key = params.first().ok_or_else(|| RESTError::param_missing("stake address"))?;
+    let Some(stake_key) = params.first() else {
+        return Err(RESTError::param_missing("stake address"));
+    };
 
     StakeAddress::from_string(stake_key)
-        .map_err(|_| RESTError::invalid_param("stake address", stake_key))
+        .map_err(|_| RESTError::invalid_param("stake address", "not a valid stake address"))
 }
 
-fn map_drep_choice(drep: &DRepChoice) -> Result<DRepChoiceRest, anyhow::Error> {
+fn map_drep_choice(drep: &DRepChoice) -> Result<DRepChoiceRest, RESTError> {
     match drep {
         DRepChoice::Key(hash) => {
             let val = hash
                 .to_vec()
                 .to_bech32_with_hrp("drep")
-                .map_err(|e| anyhow!("Bech32 encoding failed for DRep Key: {e}"))?;
+                .map_err(|e| RESTError::encoding_failed(&format!("DRep Key: {e}")))?;
             Ok(DRepChoiceRest {
                 drep_type: "Key".to_string(),
                 value: Some(val),
@@ -407,7 +551,7 @@ fn map_drep_choice(drep: &DRepChoice) -> Result<DRepChoiceRest, anyhow::Error> {
             let val = hash
                 .to_vec()
                 .to_bech32_with_hrp("drep_script")
-                .map_err(|e| anyhow!("Bech32 encoding failed for DRep Script: {e}"))?;
+                .map_err(|e| RESTError::encoding_failed(&format!("DRep Script: {e}")))?;
             Ok(DRepChoiceRest {
                 drep_type: "Script".to_string(),
                 value: Some(val),
@@ -422,33 +566,4 @@ fn map_drep_choice(drep: &DRepChoice) -> Result<DRepChoiceRest, anyhow::Error> {
             value: None,
         }),
     }
-}
-
-/// Helper to fetch transaction hashes (used by multiple handlers)
-async fn get_transaction_hashes(
-    context: &Arc<Context<Message>>,
-    handlers_config: &Arc<HandlersConfig>,
-    tx_ids: Vec<acropolis_common::TxIdentifier>,
-) -> Result<std::collections::HashMap<acropolis_common::TxIdentifier, TxHash>, RESTError> {
-    let msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
-        BlocksStateQuery::GetTransactionHashes { tx_ids },
-    )));
-
-    let result = query_state(
-        context,
-        &handlers_config.blocks_query_topic,
-        msg,
-        |message| match message {
-            Message::StateQueryResponse(StateQueryResponse::Blocks(
-                BlocksStateQueryResponse::TransactionHashes(TransactionHashes { tx_hashes }),
-            )) => Ok(tx_hashes),
-            Message::StateQueryResponse(StateQueryResponse::Blocks(
-                BlocksStateQueryResponse::Error(e),
-            )) => Err(e),
-            _ => Err(QueryError::internal_error("Unexpected response type")),
-        },
-    )
-    .await?;
-
-    Ok(result)
 }

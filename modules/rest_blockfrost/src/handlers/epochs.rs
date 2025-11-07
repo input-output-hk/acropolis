@@ -4,6 +4,7 @@ use crate::{
         EpochActivityRest, ProtocolParamsRest, SPDDByEpochAndPoolItemRest, SPDDByEpochItemRest,
     },
 };
+use acropolis_common::queries::errors::QueryError;
 use acropolis_common::rest_error::RESTError;
 use acropolis_common::serialization::Bech32Conversion;
 use acropolis_common::{
@@ -11,7 +12,6 @@ use acropolis_common::{
     queries::{
         accounts::{AccountsStateQuery, AccountsStateQueryResponse},
         epochs::{EpochsStateQuery, EpochsStateQueryResponse},
-        errors::QueryError,
         parameters::{ParametersStateQuery, ParametersStateQueryResponse},
         pools::{PoolsStateQuery, PoolsStateQueryResponse},
         spdd::{SPDDStateQuery, SPDDStateQueryResponse},
@@ -40,7 +40,7 @@ pub async fn handle_epoch_info_blockfrost(
     } else {
         let parsed = param
             .parse::<u64>()
-            .map_err(|_| RESTError::invalid_param("epoch", "must be a valid number"))?;
+            .map_err(|_| RESTError::invalid_param("epoch", "invalid epoch number"))?;
         EpochsStateQuery::GetEpochInfo {
             epoch_number: parsed,
         }
@@ -64,11 +64,16 @@ pub async fn handle_epoch_info_blockfrost(
     let ea_message = match epoch_info_response {
         EpochsStateQueryResponse::LatestEpoch(response) => response.epoch,
         EpochsStateQueryResponse::EpochInfo(response) => response.epoch,
-        EpochsStateQueryResponse::Error(e) => return Err(e.into()),
+        EpochsStateQueryResponse::Error(QueryError::NotFound { .. }) => {
+            return Err(RESTError::not_found("Epoch not found"));
+        }
+        EpochsStateQueryResponse::Error(e) => {
+            return Err(e.into());
+        }
         _ => {
             return Err(RESTError::unexpected_response(
-                "Unexpected response type while retrieving epoch info",
-            ))
+                "Unexpected message type while retrieving epoch info",
+            ));
         }
     };
     let epoch_number = ea_message.epoch;
@@ -109,18 +114,17 @@ pub async fn handle_epoch_info_blockfrost(
             total_active_stakes_msg,
             |message| match message {
                 Message::StateQueryResponse(StateQueryResponse::SPDD(
-                    SPDDStateQueryResponse::EpochTotalActiveStakes(total_active_stakes),
-                )) => Ok(total_active_stakes),
+                                                SPDDStateQueryResponse::EpochTotalActiveStakes(total_active_stakes),
+                                            )) => Ok(total_active_stakes),
                 Message::StateQueryResponse(StateQueryResponse::SPDD(
-                    SPDDStateQueryResponse::Error(e),
-                )) => Err(e),
-                _ => Err(QueryError::internal_error(format!(
-                    "Unexpected message type while retrieving total active stakes for epoch: {}",
-                    epoch_number
-                ))),
+                                                SPDDStateQueryResponse::Error(e),
+                                            )) => Err(e),
+                _ => Err(QueryError::internal_error(
+                    format!("Unexpected message type while retrieving total active stakes for epoch: {epoch_number}"),
+                )),
             },
         )
-        .await?
+            .await?
     };
 
     let mut response = EpochActivityRest::from(ea_message);
@@ -177,7 +181,7 @@ pub async fn handle_epoch_params_blockfrost(
     } else {
         let parsed = param
             .parse::<u64>()
-            .map_err(|_| RESTError::invalid_param("epoch", "must be a valid number"))?;
+            .map_err(|_| RESTError::invalid_param("epoch", "invalid epoch number"))?;
         query = ParametersStateQuery::GetEpochParameters {
             epoch_number: parsed,
         };
@@ -216,9 +220,12 @@ pub async fn handle_epoch_params_blockfrost(
             let json = serde_json::to_string_pretty(&rest)?;
             Ok(RESTResponse::with_json(200, &json))
         }
+        ParametersStateQueryResponse::Error(QueryError::NotFound { .. }) => Err(
+            RESTError::not_found("Protocol parameters not found for requested epoch"),
+        ),
         ParametersStateQueryResponse::Error(e) => Err(e.into()),
         _ => Err(RESTError::unexpected_response(
-            "Unexpected response type while retrieving parameters",
+            "Unexpected message type while retrieving parameters",
         )),
     }
 }
@@ -237,7 +244,7 @@ pub async fn handle_epoch_next_blockfrost(
 
     let parsed = param
         .parse::<u64>()
-        .map_err(|_| RESTError::invalid_param("epoch", "must be a valid number"))?;
+        .map_err(|_| RESTError::invalid_param("epoch", "invalid epoch number"))?;
 
     let next_epochs_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
         EpochsStateQuery::GetNextEpochs {
@@ -252,6 +259,9 @@ pub async fn handle_epoch_next_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Epochs(
                 EpochsStateQueryResponse::NextEpochs(response),
             )) => Ok(response.epochs.into_iter().map(EpochActivityRest::from).collect::<Vec<_>>()),
+            Message::StateQueryResponse(StateQueryResponse::Epochs(
+                EpochsStateQueryResponse::Error(QueryError::NotFound { .. }),
+            )) => Err(QueryError::not_found("Epoch")),
             Message::StateQueryResponse(StateQueryResponse::Epochs(
                 EpochsStateQueryResponse::Error(e),
             )) => Err(e),
@@ -280,7 +290,7 @@ pub async fn handle_epoch_previous_blockfrost(
 
     let parsed = param
         .parse::<u64>()
-        .map_err(|_| RESTError::invalid_param("epoch", "must be a valid number"))?;
+        .map_err(|_| RESTError::invalid_param("epoch", "invalid epoch number"))?;
 
     let previous_epochs_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
         EpochsStateQuery::GetPreviousEpochs {
@@ -295,6 +305,9 @@ pub async fn handle_epoch_previous_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Epochs(
                 EpochsStateQueryResponse::PreviousEpochs(response),
             )) => Ok(response.epochs.into_iter().map(EpochActivityRest::from).collect::<Vec<_>>()),
+            Message::StateQueryResponse(StateQueryResponse::Epochs(
+                EpochsStateQueryResponse::Error(QueryError::NotFound { .. }),
+            )) => Err(QueryError::not_found("Epoch")),
             Message::StateQueryResponse(StateQueryResponse::Epochs(
                 EpochsStateQueryResponse::Error(e),
             )) => Err(e),
@@ -323,7 +336,7 @@ pub async fn handle_epoch_total_stakes_blockfrost(
 
     let epoch_number = param
         .parse::<u64>()
-        .map_err(|_| RESTError::invalid_param("epoch", "must be a valid number"))?;
+        .map_err(|_| RESTError::invalid_param("epoch", "invalid epoch number"))?;
 
     // Query latest epoch from epochs-state
     let latest_epoch_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
@@ -375,12 +388,15 @@ pub async fn handle_epoch_total_stakes_blockfrost(
     )
     .await?;
 
-    let spdd_response: Vec<SPDDByEpochItemRest> = spdd
+    let spdd_response = spdd
         .into_iter()
         .map(|(pool_id, stake_address, amount)| {
-            let bech32 = stake_address
-                .to_string()
-                .map_err(|e| RESTError::encoding_failed(&format!("stake address: {}", e)))?;
+            let bech32 = stake_address.to_string().map_err(|e| {
+                RESTError::InternalServerError(format!(
+                    "Failed to convert stake address to string: {}",
+                    e
+                ))
+            })?;
             Ok(SPDDByEpochItemRest {
                 pool_id,
                 stake_address: bech32,
@@ -404,18 +420,14 @@ pub async fn handle_epoch_pool_stakes_blockfrost(
         ));
     }
     let param = &params[0];
-    let pool_id = &params[1];
+    let pool_id_str = &params[1];
 
     let epoch_number = param
         .parse::<u64>()
-        .map_err(|_| RESTError::invalid_param("epoch", "must be a valid number"))?;
+        .map_err(|_| RESTError::invalid_param("epoch", "invalid epoch number"))?;
 
-    let pool_id = PoolId::from_bech32(pool_id).map_err(|_| {
-        RESTError::invalid_param(
-            "pool_id",
-            &format!("Invalid Bech32 stake pool ID: {}", pool_id),
-        )
-    })?;
+    let pool_id = PoolId::from_bech32(pool_id_str)
+        .map_err(|_| RESTError::invalid_param("pool_id", "invalid Bech32 stake pool ID"))?;
 
     // Query latest epoch from epochs-state
     let latest_epoch_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
@@ -468,12 +480,15 @@ pub async fn handle_epoch_pool_stakes_blockfrost(
     )
     .await?;
 
-    let spdd_response: Vec<SPDDByEpochAndPoolItemRest> = spdd
+    let spdd_response = spdd
         .into_iter()
         .map(|(stake_address, amount)| {
-            let bech32 = stake_address
-                .to_string()
-                .map_err(|e| RESTError::encoding_failed(&format!("stake address: {}", e)))?;
+            let bech32 = stake_address.to_string().map_err(|e| {
+                RESTError::InternalServerError(format!(
+                    "Failed to convert stake address to string: {}",
+                    e
+                ))
+            })?;
             Ok(SPDDByEpochAndPoolItemRest {
                 stake_address: bech32,
                 amount,
@@ -490,7 +505,7 @@ pub async fn handle_epoch_total_blocks_blockfrost(
     _params: Vec<String>,
     _handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse, RESTError> {
-    Err(RESTError::not_implemented("Endpoint not yet implemented"))
+    Err(RESTError::not_implemented("Epoch total blocks endpoint"))
 }
 
 pub async fn handle_epoch_pool_blocks_blockfrost(
@@ -508,14 +523,10 @@ pub async fn handle_epoch_pool_blocks_blockfrost(
 
     let epoch_number = epoch_number_param
         .parse::<u64>()
-        .map_err(|_| RESTError::invalid_param("epoch", "must be a valid number"))?;
+        .map_err(|_| RESTError::invalid_param("epoch", "invalid epoch number"))?;
 
-    let spo = PoolId::from_bech32(pool_id_param).map_err(|_| {
-        RESTError::invalid_param(
-            "pool_id",
-            &format!("Invalid Bech32 stake pool ID: {}", pool_id_param),
-        )
-    })?;
+    let spo = PoolId::from_bech32(pool_id_param)
+        .map_err(|_| RESTError::invalid_param("pool_id", "invalid Bech32 stake pool ID"))?;
 
     // query Pool's Blocks by epoch from spo-state
     let msg = Arc::new(Message::StateQuery(StateQuery::Pools(
@@ -536,9 +547,7 @@ pub async fn handle_epoch_pool_blocks_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Pools(
                 PoolsStateQueryResponse::Error(e),
             )) => Err(e),
-            _ => Err(QueryError::internal_error(
-                "Unexpected message type while retrieving pool block hashes by epoch",
-            )),
+            _ => Err(QueryError::internal_error("Unexpected message type")),
         },
     )
     .await?;
@@ -546,6 +555,7 @@ pub async fn handle_epoch_pool_blocks_blockfrost(
     // NOTE:
     // Need to query chain_store
     // to get block_hash for each block height
+
     let json = serde_json::to_string_pretty(&blocks)?;
     Ok(RESTResponse::with_json(200, &json))
 }

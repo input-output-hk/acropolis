@@ -42,7 +42,7 @@ impl RESTError {
 
     /// Parameter missing error
     pub fn param_missing(param_name: &str) -> Self {
-        RESTError::BadRequest(format!("{} parameter is missing", param_name))
+        RESTError::BadRequest(format!("Missing {} parameter", param_name))
     }
 
     /// Invalid parameter error

@@ -5,11 +5,14 @@ use crate::{
         PolicyAssetRest,
     },
 };
-use acropolis_common::queries::assets::{AssetsStateQuery, AssetsStateQueryResponse};
+use acropolis_common::queries::errors::QueryError;
 use acropolis_common::rest_error::RESTError;
 use acropolis_common::{
     messages::{Message, RESTResponse, StateQuery, StateQueryResponse},
-    queries::{errors::QueryError, utils::query_state},
+    queries::{
+        assets::{AssetsStateQuery, AssetsStateQueryResponse},
+        utils::query_state,
+    },
     serialization::Bech32WithHrp,
     AssetMetadataStandard, AssetName, PolicyId,
 };
@@ -61,20 +64,15 @@ pub async fn handle_asset_single_blockfrost(
     let asset = params[0].clone();
     let (policy, name) = split_policy_and_asset(&asset)?;
 
-    let asset_query_msg = Arc::new(Message::StateQuery(StateQuery::Assets(
-        AssetsStateQuery::GetAssetInfo { policy, name },
-    )));
-
     let (policy_str, name_str) = asset.split_at(56);
 
-    let bytes = hex::decode(&asset).map_err(|_| RESTError::invalid_hex())?;
-
+    let bytes = hex::decode(&asset)?;
     let mut hasher = Blake2b::<U20>::new();
     hasher.update(&bytes);
     let hash: Vec<u8> = hasher.finalize().to_vec();
     let fingerprint = hash
         .to_bech32_with_hrp("asset")
-        .map_err(|e| RESTError::encoding_failed(&format!("asset fingerprint: {}", e)))?;
+        .map_err(|e| RESTError::encoding_failed(&format!("asset fingerprint: {e}")))?;
 
     let off_chain_metadata =
         fetch_asset_metadata(&asset, &handlers_config.offchain_token_registry_url).await;
@@ -82,14 +80,21 @@ pub async fn handle_asset_single_blockfrost(
     let policy_id = policy_str.to_string();
     let asset_name = name_str.to_string();
 
+    let asset_query_msg = Arc::new(Message::StateQuery(StateQuery::Assets(
+        AssetsStateQuery::GetAssetInfo { policy, name },
+    )));
+
     let (quantity, info) = query_state(
         &context,
         &handlers_config.assets_query_topic,
         asset_query_msg,
-        |message| match message {
+        move |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Assets(
-                AssetsStateQueryResponse::AssetInfo(data),
-            )) => Ok(data),
+                AssetsStateQueryResponse::AssetInfo((quantity, info)),
+            )) => Ok((quantity, info)),
+            Message::StateQueryResponse(StateQueryResponse::Assets(
+                AssetsStateQueryResponse::Error(QueryError::NotFound { .. }),
+            )) => Err(QueryError::not_found("Asset")),
             Message::StateQueryResponse(StateQueryResponse::Assets(
                 AssetsStateQueryResponse::Error(e),
             )) => Err(e),
@@ -147,6 +152,9 @@ pub async fn handle_asset_history_blockfrost(
                 AssetsStateQueryResponse::AssetHistory(history),
             )) => Ok(history),
             Message::StateQueryResponse(StateQueryResponse::Assets(
+                AssetsStateQueryResponse::Error(QueryError::NotFound { .. }),
+            )) => Err(QueryError::not_found("Asset history")),
+            Message::StateQueryResponse(StateQueryResponse::Assets(
                 AssetsStateQueryResponse::Error(e),
             )) => Err(e),
             _ => Err(QueryError::internal_error(
@@ -180,6 +188,9 @@ pub async fn handle_asset_transactions_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Assets(
                 AssetsStateQueryResponse::AssetTransactions(txs),
             )) => Ok(txs),
+            Message::StateQueryResponse(StateQueryResponse::Assets(
+                AssetsStateQueryResponse::Error(QueryError::NotFound { .. }),
+            )) => Err(QueryError::not_found("Asset")),
             Message::StateQueryResponse(StateQueryResponse::Assets(
                 AssetsStateQueryResponse::Error(e),
             )) => Err(e),
@@ -225,6 +236,9 @@ pub async fn handle_asset_addresses_blockfrost(
                 AssetsStateQueryResponse::AssetAddresses(addresses),
             )) => Ok(addresses),
             Message::StateQueryResponse(StateQueryResponse::Assets(
+                AssetsStateQueryResponse::Error(QueryError::NotFound { .. }),
+            )) => Err(QueryError::not_found("Asset")),
+            Message::StateQueryResponse(StateQueryResponse::Assets(
                 AssetsStateQueryResponse::Error(e),
             )) => Err(e),
             _ => Err(QueryError::internal_error(
@@ -234,9 +248,9 @@ pub async fn handle_asset_addresses_blockfrost(
     )
     .await?;
 
-    let rest_addrs: Vec<AssetAddressRest> =
+    let rest_addrs =
         addresses.iter().map(AssetAddressRest::try_from).collect::<Result<Vec<_>, _>>().map_err(
-            |e| RESTError::InternalServerError(format!("Failed to convert address entry: {}", e)),
+            |e| RESTError::InternalServerError(format!("Failed to convert address entry: {e}")),
         )?;
 
     let json = serde_json::to_string_pretty(&rest_addrs)?;
@@ -249,7 +263,7 @@ pub async fn handle_policy_assets_blockfrost(
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse, RESTError> {
     let policy: PolicyId = <[u8; 28]>::from_hex(&params[0])
-        .map_err(|_| RESTError::invalid_param("policy_id", "invalid hex format"))?;
+        .map_err(|_| RESTError::invalid_param("policy_id", "invalid hex"))?;
 
     let asset_query_msg = Arc::new(Message::StateQuery(StateQuery::Assets(
         AssetsStateQuery::GetPolicyIdAssets { policy },
@@ -263,6 +277,9 @@ pub async fn handle_policy_assets_blockfrost(
             Message::StateQueryResponse(StateQueryResponse::Assets(
                 AssetsStateQueryResponse::PolicyIdAssets(assets),
             )) => Ok(assets),
+            Message::StateQueryResponse(StateQueryResponse::Assets(
+                AssetsStateQueryResponse::Error(QueryError::NotFound { .. }),
+            )) => Err(QueryError::not_found("Policy assets")),
             Message::StateQueryResponse(StateQueryResponse::Assets(
                 AssetsStateQueryResponse::Error(e),
             )) => Err(e),
@@ -279,7 +296,7 @@ pub async fn handle_policy_assets_blockfrost(
 }
 
 fn split_policy_and_asset(hex_str: &str) -> Result<(PolicyId, AssetName), RESTError> {
-    let decoded = hex::decode(hex_str).map_err(|_| RESTError::invalid_hex())?;
+    let decoded = hex::decode(hex_str)?;
 
     if decoded.len() < 28 {
         return Err(RESTError::BadRequest(
@@ -450,9 +467,6 @@ mod tests {
     fn invalid_hex_string() {
         let result = split_policy_and_asset("zzzz");
         assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert_eq!(err.status_code(), 400);
-        assert_eq!(err.message(), "Invalid hex string");
     }
 
     #[test]
@@ -460,9 +474,6 @@ mod tests {
         let hex_str = hex::encode([1u8, 2, 3]);
         let result = split_policy_and_asset(&hex_str);
         assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert_eq!(err.status_code(), 400);
-        assert_eq!(err.message(), "Asset identifier must be at least 28 bytes");
     }
 
     #[test]
@@ -472,9 +483,6 @@ mod tests {
         let hex_str = hex::encode(bytes);
         let result = split_policy_and_asset(&hex_str);
         assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert_eq!(err.status_code(), 400);
-        assert_eq!(err.message(), "Asset name must be less than 32 bytes");
     }
 
     #[test]

@@ -31,7 +31,7 @@ pub async fn handle_drdd(
             Some(drdd) => Some(drdd),
             None => {
                 return Err(RESTError::not_found(&format!(
-                    "DRDD not found for epoch {}",
+                    "DRDD in epoch {}",
                     epoch
                 )));
             }
