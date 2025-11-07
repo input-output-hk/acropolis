@@ -5,7 +5,8 @@ use std::{
 };
 
 use acropolis_common::{
-    Address, AddressDelta, AddressTotals, BlockInfo, TxIdentifier, UTxOIdentifier, ValueDelta,
+    Address, AddressDelta, AddressTotals, BlockInfo, NativeAssets, ShelleyAddress, TxIdentifier,
+    UTxOIdentifier, ValueDelta,
 };
 use anyhow::Result;
 
@@ -198,6 +199,31 @@ impl State {
         }
 
         Ok(())
+    }
+
+    pub async fn get_addresses_assets(
+        &self,
+        _addresses: &[ShelleyAddress],
+    ) -> Result<NativeAssets> {
+        Ok(NativeAssets::default())
+    }
+
+    pub async fn get_addresses_totals(&self, _addresses: &[ShelleyAddress]) -> Result<ValueDelta> {
+        Ok(ValueDelta::default())
+    }
+
+    pub async fn get_addresses_utxos(
+        &self,
+        addresses: &[ShelleyAddress],
+    ) -> Result<Vec<UTxOIdentifier>> {
+        let mut utxos = Vec::new();
+
+        for addr in addresses {
+            if let Some(list) = self.get_address_utxos(&Address::Shelley(addr.clone())).await? {
+                utxos.extend(list);
+            }
+        }
+        Ok(utxos)
     }
 }
 

@@ -2,8 +2,8 @@
 // Faster and API is simpler because it uses internally sharded locks
 // but it takes a lot more memory than HashMap
 
-use crate::state::{ImmutableUTXOStore, UTXOValue};
-use acropolis_common::UTxOIdentifier;
+use crate::state::ImmutableUTXOStore;
+use acropolis_common::{UTXOValue, UTxOIdentifier};
 use anyhow::Result;
 use async_trait::async_trait;
 use config::Config;
