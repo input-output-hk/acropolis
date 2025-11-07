@@ -16,7 +16,7 @@ pub enum ValidationError {
     BadVRF(#[from] VrfValidationError),
 
     #[error("KES failure")]
-    BadKES,
+    BadKES(#[from] KesValidationError),
 
     #[error("Doubly spent UTXO: {0}")]
     DoubleSpendUTXO(String),
@@ -219,4 +219,71 @@ impl PartialEq for BadVrfProofError {
             _ => false,
         }
     }
+}
+
+/// Reference
+/// https://github.com/IntersectMBO/ouroboros-consensus/blob/e3c52b7c583bdb6708fac4fdaa8bf0b9588f5a88/ouroboros-consensus-protocol/src/ouroboros-consensus-protocol/Ouroboros/Consensus/Protocol/Praos.hs#L342
+#[derive(Error, Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
+pub enum KesValidationError {
+    /// Current KES period is before the OCert start period
+    #[error(
+        "KES Before Start OCert: OCert Start Period={}, Current Period={}",
+        ocert_start_period,
+        current_period
+    )]
+    KesBeforeStartOcert {
+        ocert_start_period: u64,
+        current_period: u64,
+    },
+    /// Current KES period is after the valid range
+    #[error(
+        "KES After End OCert: Current Period={}, OCert Start Period={}, Max KES Evolutions={}",
+        current_period,
+        ocert_start_period,
+        max_kes_evolutions
+    )]
+    KesAfterEndOcert {
+        current_period: u64,
+        ocert_start_period: u64,
+        max_kes_evolutions: u64,
+    },
+    /// The OCert counter is too small
+    #[error(
+        "Counter Too Small OCert: Last Counter={}, Current Counter={}",
+        last_counter,
+        current_counter
+    )]
+    CounterTooSmallOcert {
+        last_counter: u64,
+        current_counter: u64,
+    },
+    /// The OCert counter incremented by more than 1 (Praos only)
+    #[error(
+        "Counter Over Incremented OCert: Last Counter={}, Current Counter={}",
+        last_counter,
+        current_counter
+    )]
+    CounterOverIncrementedOcert {
+        last_counter: u64,
+        current_counter: u64,
+    },
+    /// The cold key signature on the OCert is invalid
+    #[error(
+        "Invalid Signature OCert: Counter={}, KES Period={}",
+        counter,
+        kes_period
+    )]
+    InvalidSignatureOcert { counter: u64, kes_period: u64 },
+    /// The KES signature verification failed
+    #[error("Invalid KES Signature OCert: Current KES Period={}, KES Start Period={}, Expected Evolutions={}, Max KES Evolutions={}, Error Message={}", current_kes_period, kes_start_period, expected_evolutions, max_kes_evolutions, error_message)]
+    InvalidKesSignatureOcert {
+        current_kes_period: u64,
+        kes_start_period: u64,
+        expected_evolutions: u64,
+        max_kes_evolutions: u64,
+        error_message: String,
+    },
+    /// No counter found for this key hash (not a stake pool or genesis delegate)
+    #[error("No Counter For Key Hash OCert: Pool ID={}", hex::encode(pool_id))]
+    NoCounterForKeyHashOcert { pool_id: PoolId },
 }

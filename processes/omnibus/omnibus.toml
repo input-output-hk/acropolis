@@ -139,6 +139,8 @@ store-transactions = false
 
 [module.block-vrf-validator]
 
+[module.block-kes-validator]
+
 [module.clock]
 
 [module.rest-server]
