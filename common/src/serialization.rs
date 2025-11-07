@@ -1,11 +1,9 @@
 use std::marker::PhantomData;
 
-use crate::rest_error::RESTError;
 use crate::PoolId;
 use anyhow::anyhow;
 use bech32::{Bech32, Hrp};
-use caryatid_module_rest_server::messages::RESTResponse;
-use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
+use serde::{ser::SerializeMap, Deserialize, Serializer};
 use serde_with::{ser::SerializeAsWrap, DeserializeAs, SerializeAs};
 
 pub struct SerializeMapAs<KAs, VAs>(std::marker::PhantomData<(KAs, VAs)>);
@@ -159,10 +157,4 @@ impl Bech32WithHrp for [u8] {
 
         Ok(data.to_vec())
     }
-}
-
-/// Helper to serialize a result to JSON REST response
-pub fn serialize_to_json_response<T: Serialize>(data: &T) -> Result<RESTResponse, RESTError> {
-    let json = serde_json::to_string_pretty(data)?;
-    Ok(RESTResponse::with_json(200, &json))
 }
