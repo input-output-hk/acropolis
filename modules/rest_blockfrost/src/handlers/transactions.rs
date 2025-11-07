@@ -5,8 +5,8 @@ use acropolis_common::{
     queries::{
         parameters::{ParametersStateQuery, ParametersStateQueryResponse},
         transactions::{
-            TransactionInfo, TransactionStakeCertificate, TransactionsStateQuery,
-            TransactionsStateQueryResponse,
+            TransactionDelegationCertificate, TransactionInfo, TransactionStakeCertificate,
+            TransactionsStateQuery, TransactionsStateQueryResponse,
         },
         utils::{query_state, rest_query_state_async},
     },
@@ -79,7 +79,9 @@ pub async fn handle_transactions_blockfrost(
         None => handle_transaction_query(context, tx_hash, handlers_config).await,
         Some("utxo") => Ok(RESTResponse::with_text(501, "Not implemented")),
         Some("stakes") => handle_transaction_stakes_query(context, tx_hash, handlers_config).await,
-        Some("delegations") => Ok(RESTResponse::with_text(501, "Not implemented")),
+        Some("delegations") => {
+            handle_transaction_delegations_query(context, tx_hash, handlers_config).await
+        }
         Some("withdrawals") => Ok(RESTResponse::with_text(501, "Not implemented")),
         Some("mirs") => Ok(RESTResponse::with_text(501, "Not implemented")),
         Some("pool_updates") => Ok(RESTResponse::with_text(501, "Not implemented")),
@@ -196,6 +198,53 @@ async fn handle_transaction_stakes_query(
                 TransactionsStateQueryResponse::TransactionStakeCertificates(stakes),
             )) => Some(Ok(Some(
                 stakes.certificates.into_iter().map(TxStake).collect::<Vec<_>>(),
+            ))),
+            Message::StateQueryResponse(StateQueryResponse::Transactions(
+                TransactionsStateQueryResponse::Error(e),
+            )) => Some(Err(anyhow!(e))),
+            _ => None,
+        },
+    )
+    .await
+}
+
+struct TxDelegation(TransactionDelegationCertificate);
+
+impl Serialize for TxDelegation {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let Ok(address) = self.0.address.to_string() else {
+            return Err(S::Error::custom("Can't stringify address"));
+        };
+        let mut state = serializer.serialize_struct("TxDelegation", 4)?;
+        state.serialize_field("index", &self.0.index)?;
+        state.serialize_field("address", &address)?;
+        state.serialize_field("pool_id", &self.0.pool.to_string())?;
+        state.serialize_field("active_epoch", &self.0.active_epoch)?;
+        state.end()
+    }
+}
+
+/// Handle `/txs/{hash}/delegations`
+async fn handle_transaction_delegations_query(
+    context: Arc<Context<Message>>,
+    tx_hash: TxHash,
+    handlers_config: Arc<HandlersConfig>,
+) -> Result<RESTResponse> {
+    let txs_info_msg = Arc::new(Message::StateQuery(StateQuery::Transactions(
+        TransactionsStateQuery::GetTransactionDelegationCertificates { tx_hash },
+    )));
+    rest_query_state_async(
+        &context.clone(),
+        &handlers_config.transactions_query_topic.clone(),
+        txs_info_msg,
+        async move |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Transactions(
+                TransactionsStateQueryResponse::TransactionDelegationCertificates(delegations),
+            )) => Some(Ok(Some(
+                delegations.certificates.into_iter().map(TxDelegation).collect::<Vec<_>>(),
             ))),
             Message::StateQueryResponse(StateQueryResponse::Transactions(
                 TransactionsStateQueryResponse::Error(e),

@@ -1,7 +1,9 @@
 mod stores;
 
 use acropolis_codec::{
-    block::map_to_block_issuer, map_parameters, map_parameters::map_stake_address,
+    block::map_to_block_issuer,
+    map_parameters,
+    map_parameters::{map_stake_address, to_pool_id},
 };
 use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
@@ -15,9 +17,9 @@ use acropolis_common::{
     },
     queries::misc::Order,
     queries::transactions::{
-        TransactionInfo, TransactionOutputAmount, TransactionStakeCertificate,
-        TransactionStakeCertificates, TransactionsStateQuery, TransactionsStateQueryResponse,
-        DEFAULT_TRANSACTIONS_QUERY_TOPIC,
+        TransactionDelegationCertificate, TransactionDelegationCertificates, TransactionInfo,
+        TransactionOutputAmount, TransactionStakeCertificate, TransactionStakeCertificates,
+        TransactionsStateQuery, TransactionsStateQueryResponse, DEFAULT_TRANSACTIONS_QUERY_TOPIC,
     },
     state_history::{StateHistory, StateHistoryStore},
     AssetName, BechOrdAddress, BlockHash, GenesisDelegate, HeavyDelegate, NativeAsset, NetworkId,
@@ -716,6 +718,46 @@ impl ChainStore {
         Ok(certs)
     }
 
+    fn to_tx_delegations(
+        tx: &Tx,
+        network_id: NetworkId,
+    ) -> Result<Vec<TransactionDelegationCertificate>> {
+        let block = pallas_traverse::MultiEraBlock::decode(&tx.block.bytes)?;
+        let txs = block.txs();
+        let Some(tx_decoded) = txs.get(tx.index as usize) else {
+            return Err(anyhow!("Transaction not found in block for given index"));
+        };
+        let mut certs = Vec::new();
+        for (index, cert) in tx_decoded.certs().iter().enumerate() {
+            match cert {
+                MultiEraCert::AlonzoCompatible(cert) => match cert.as_ref().as_ref() {
+                    alonzo::Certificate::StakeDelegation(cred, pool_key_hash) => {
+                        certs.push(TransactionDelegationCertificate {
+                            index: index as u64,
+                            address: map_stake_address(cred, network_id.clone()),
+                            pool: to_pool_id(pool_key_hash),
+                            active_epoch: tx.block.extra.epoch + 1,
+                        });
+                    }
+                    _ => (),
+                },
+                MultiEraCert::Conway(cert) => match cert.as_ref().as_ref() {
+                    conway::Certificate::StakeDelegation(cred, pool_key_hash) => {
+                        certs.push(TransactionDelegationCertificate {
+                            index: index as u64,
+                            address: map_stake_address(cred, network_id.clone()),
+                            pool: to_pool_id(pool_key_hash),
+                            active_epoch: tx.block.extra.epoch + 1,
+                        });
+                    }
+                    _ => (),
+                },
+                _ => (),
+            }
+        }
+        Ok(certs)
+    }
+
     fn handle_txs_query(
         store: &Arc<dyn Store>,
         query: &TransactionsStateQuery,
@@ -742,6 +784,20 @@ impl ChainStore {
                     TransactionsStateQueryResponse::TransactionStakeCertificates(
                         TransactionStakeCertificates {
                             certificates: Self::to_tx_stakes(&tx, network_id)?,
+                        },
+                    ),
+                )
+            }
+            TransactionsStateQuery::GetTransactionDelegationCertificates { tx_hash } => {
+                let Some(tx) = store.get_tx_by_hash(tx_hash.as_ref())? else {
+                    return Ok(TransactionsStateQueryResponse::Error(
+                        QueryError::not_found("Transaction not found"),
+                    ));
+                };
+                Ok(
+                    TransactionsStateQueryResponse::TransactionDelegationCertificates(
+                        TransactionDelegationCertificates {
+                            certificates: Self::to_tx_delegations(&tx, network_id)?,
                         },
                     ),
                 )

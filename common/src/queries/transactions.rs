@@ -1,4 +1,4 @@
-use crate::{BlockHash, Lovelace, NativeAsset, StakeAddress, TxHash};
+use crate::{BlockHash, Lovelace, NativeAsset, PoolId, StakeAddress, TxHash};
 use serde::ser::{Serialize, SerializeStruct, Serializer};
 use serde_with::serde_as;
 
@@ -13,7 +13,7 @@ pub enum TransactionsStateQuery {
     GetTransactionInfo { tx_hash: TxHash },
     GetTransactionUTxOs,
     GetTransactionStakeCertificates { tx_hash: TxHash },
-    GetTransactionDelegationCertificates,
+    GetTransactionDelegationCertificates { tx_hash: TxHash },
     GetTransactionWithdrawals,
     GetTransactionMIRs,
     GetTransactionPoolUpdateCertificates,
@@ -112,7 +112,17 @@ pub struct TransactionStakeCertificates {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct TransactionDelegationCertificates {}
+pub struct TransactionDelegationCertificate {
+    pub index: u64,
+    pub address: StakeAddress,
+    pub pool: PoolId,
+    pub active_epoch: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TransactionDelegationCertificates {
+    pub certificates: Vec<TransactionDelegationCertificate>,
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TransactionWithdrawals {}
