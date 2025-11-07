@@ -33,11 +33,9 @@ where
     T: Serialize,
 {
     let data = query_state(context, topic, request_msg, |response| {
-        extractor(response).unwrap_or_else(|e| {
-            Err(QueryError::internal_error(format!(
-                "Unexpected response message type while calling {topic}"
-            )))
-        })
+        extractor(response).ok_or_else(Err(QueryError::internal_error(format!(
+            "Unexpected response message type while calling {topic}"
+        ))))
     })
     .await?;
 
