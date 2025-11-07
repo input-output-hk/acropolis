@@ -1,14 +1,32 @@
 Validate transactions phase 1
 =============================
 
-Haskell sources
----------------
+Haskell sources. Shelley epoch UTxO rule
+----------------------------------------
 
 1. Transaction validation takes place in ledger, in file
 `shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxo.hs`
 
-Validation is performed in rule "PPUP", in function
+Validation is performed in rule "UTXO" ("PPUP"), in function
 `utxoInductive`
+
+This is the context of validation rules:
+```
+  TRC (UtxoEnv slot pp certState, utxos, tx) <- judgmentContext
+  let utxo = utxos ^. utxoL
+      UTxOState _ _ _ ppup _ _ = utxos
+      txBody = tx ^. bodyTxL
+      outputs = txBody ^. outputsTxBodyL
+      genDelegs = dsGenDelegs (certState ^. certDStateL)
+  netId <- liftSTS $ asks networkId
+  -- process Protocol Parameter Update Proposals
+  ppup' <-
+    trans @(EraRule "PPUP" era) $ TRC (PPUPEnv slot pp genDelegs, ppup, txBody ^. updateTxBodyL)
+```
+
+* Values `utxo`, `ppup`, `genDelegs` require knowledge of `judgementContext`,
+that is previous state of Ledger.
+* `pp` is parameters state, already sent.
 
 The following sub-functions are called there:
 ```
@@ -49,7 +67,34 @@ The following sub-functions are called there:
   runTest $ validateMaxTxSizeUTxO pp tx
 ```
 
-2. Another validation step, UTXOW, rule UTXOW
+2. The following checks require knowledge of ledger:
+
+
+```
+  {- txins txb ⊆ dom utxo -}
+  runTest $ validateBadInputsUTxO utxo $ txBody ^. inputsTxBodyL
+```
+
+where in `cardano-ledger-core/src/Cardano/Ledger/TxIn.hs` and
+`cardano-ledger-core/src/Cardano/Ledger/State/UTxO.hs`:
+
+```
+-- | A unique ID of a transaction, which is computable from the transaction.
+newtype TxId = TxId {unTxId :: SafeHash EraIndependentTxBody}
+  deriving (Show, Eq, Ord, Generic)
+  deriving newtype (NoThunks, ToJSON, FromJSON, HeapWords, EncCBOR, DecCBOR, NFData, MemPack)
+
+-- | The input of a UTxO.
+data TxIn = TxIn !TxId {-# UNPACK #-} !TxIx
+  deriving (Generic, Eq, Ord, Show)
+
+-- | The unspent transaction outputs.
+newtype UTxO era = UTxO {unUTxO :: Map.Map TxIn (TxOut era)}
+  deriving (Default, Generic, Semigroup)
+```
+
+Shelley checks for UTXOW, rule "UTXOW"
+--------------------------------------
 
 ```
   -- * Individual validation steps
@@ -101,3 +146,28 @@ transitionRulesUTXOW = do
 
   trans @(EraRule "UTXO" era) $ TRC (utxoEnv, u, tx)
 ```
+
+
+Some notes from consensus meeting
+---------------------------------
+
+applyTx     -- 1st phase                --- applyShelleyTx
+                                            dig into applyShelleyBaseTx
+                                                     applyAlonzoBasedTx
+            -- 2nd phase
+
+           Core.Tx ==> has 'isValid' code for transaction
+    defaultApplyShelleyBasedTx (basic function from Shelley?)
+
+reapplyShelleyTx -- skips some checks (e.g. signatures, 
+if user keys didn't change; does not scripts again); we see
+validity interval
+    * Applied same transactions to different Ledger state
+    * If my selection changes, I need to revalidate all
+    transactions.
+
+everything applies to Shelley. 
+Either Byron, or Shelley.
+
+Block diagram of a full block (Ouroboros consensus)
+... intersect-mbo.org ...
