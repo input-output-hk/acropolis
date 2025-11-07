@@ -129,6 +129,14 @@ impl UTXOState {
                             )),
                         }
                     }
+                    UTxOStateQuery::GetUTxOs { utxo_identifiers } => {
+                        match state.get_utxo_entries(utxo_identifiers).await {
+                            Ok(values) => UTxOStateQueryResponse::UTxOs(values),
+                            Err(e) => UTxOStateQueryResponse::Error(QueryError::internal_error(
+                                e.to_string(),
+                            )),
+                        }
+                    }
                 };
                 Arc::new(Message::StateQueryResponse(StateQueryResponse::UTxOs(
                     response,

@@ -6,13 +6,15 @@ use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
     crypto::keyhash_224,
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
-    queries::blocks::{
-        BlockHashes, BlockInfo, BlockInvolvedAddress, BlockInvolvedAddresses, BlockKey,
-        BlockTransaction, BlockTransactions, BlockTransactionsCBOR, BlocksStateQuery,
-        BlocksStateQueryResponse, NextBlocks, PreviousBlocks, TransactionHashes,
-        DEFAULT_BLOCKS_QUERY_TOPIC,
+    queries::{
+        blocks::{
+            BlockHashes, BlockInfo, BlockInvolvedAddress, BlockInvolvedAddresses, BlockKey,
+            BlockTransaction, BlockTransactions, BlockTransactionsCBOR, BlocksStateQuery,
+            BlocksStateQueryResponse, NextBlocks, PreviousBlocks, TransactionHashes, UTxOHashes,
+            DEFAULT_BLOCKS_QUERY_TOPIC,
+        },
+        misc::Order,
     },
-    queries::misc::Order,
     state_history::{StateHistory, StateHistoryStore},
     BechOrdAddress, BlockHash, GenesisDelegate, HeavyDelegate, PoolId, TxHash,
 };
@@ -322,6 +324,32 @@ impl ChainStore {
                 Ok(BlocksStateQueryResponse::TransactionHashes(
                     TransactionHashes { tx_hashes },
                 ))
+            }
+            BlocksStateQuery::GetUTxOHashes { utxo_ids } => {
+                let mut tx_hashes = Vec::with_capacity(utxo_ids.len());
+                let mut block_hashes = Vec::with_capacity(utxo_ids.len());
+
+                for utxo in utxo_ids {
+                    if let Ok(Some(block)) = store.get_block_by_number(utxo.block_number().into()) {
+                        if let Ok(hash) = Self::get_block_hash(&block) {
+                            if let Ok(tx_hashes_in_block) =
+                                Self::to_block_transaction_hashes(&block)
+                            {
+                                if let Some(tx_hash) =
+                                    tx_hashes_in_block.get(utxo.tx_index() as usize)
+                                {
+                                    tx_hashes.push(*tx_hash);
+                                    block_hashes.push(hash);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Ok(BlocksStateQueryResponse::UTxOHashes(UTxOHashes {
+                    block_hashes,
+                    tx_hashes,
+                }))
             }
         }
     }
