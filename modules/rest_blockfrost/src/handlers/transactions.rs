@@ -6,7 +6,7 @@ use acropolis_common::{
         parameters::{ParametersStateQuery, ParametersStateQueryResponse},
         transactions::{
             TransactionDelegationCertificate, TransactionInfo, TransactionStakeCertificate,
-            TransactionsStateQuery, TransactionsStateQueryResponse,
+            TransactionWithdrawal, TransactionsStateQuery, TransactionsStateQueryResponse,
         },
         utils::{query_state, rest_query_state_async},
     },
@@ -82,7 +82,9 @@ pub async fn handle_transactions_blockfrost(
         Some("delegations") => {
             handle_transaction_delegations_query(context, tx_hash, handlers_config).await
         }
-        Some("withdrawals") => Ok(RESTResponse::with_text(501, "Not implemented")),
+        Some("withdrawals") => {
+            handle_transaction_withdrawals_query(context, tx_hash, handlers_config).await
+        }
         Some("mirs") => Ok(RESTResponse::with_text(501, "Not implemented")),
         Some("pool_updates") => Ok(RESTResponse::with_text(501, "Not implemented")),
         Some("pool_retires") => Ok(RESTResponse::with_text(501, "Not implemented")),
@@ -245,6 +247,51 @@ async fn handle_transaction_delegations_query(
                 TransactionsStateQueryResponse::TransactionDelegationCertificates(delegations),
             )) => Some(Ok(Some(
                 delegations.certificates.into_iter().map(TxDelegation).collect::<Vec<_>>(),
+            ))),
+            Message::StateQueryResponse(StateQueryResponse::Transactions(
+                TransactionsStateQueryResponse::Error(e),
+            )) => Some(Err(anyhow!(e))),
+            _ => None,
+        },
+    )
+    .await
+}
+
+struct TxWithdrawal(TransactionWithdrawal);
+
+impl Serialize for TxWithdrawal {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let Ok(address) = self.0.address.to_string() else {
+            return Err(S::Error::custom("Can't stringify address"));
+        };
+        let mut state = serializer.serialize_struct("TxWithdrawal", 4)?;
+        state.serialize_field("address", &address)?;
+        state.serialize_field("amount", &self.0.amount.to_string())?;
+        state.end()
+    }
+}
+
+/// Handle `/txs/{hash}/withdrawals`
+async fn handle_transaction_withdrawals_query(
+    context: Arc<Context<Message>>,
+    tx_hash: TxHash,
+    handlers_config: Arc<HandlersConfig>,
+) -> Result<RESTResponse> {
+    let txs_info_msg = Arc::new(Message::StateQuery(StateQuery::Transactions(
+        TransactionsStateQuery::GetTransactionWithdrawals { tx_hash },
+    )));
+    rest_query_state_async(
+        &context.clone(),
+        &handlers_config.transactions_query_topic.clone(),
+        txs_info_msg,
+        async move |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Transactions(
+                TransactionsStateQueryResponse::TransactionWithdrawals(withdrawals),
+            )) => Some(Ok(Some(
+                withdrawals.withdrawals.into_iter().map(TxWithdrawal).collect::<Vec<_>>(),
             ))),
             Message::StateQueryResponse(StateQueryResponse::Transactions(
                 TransactionsStateQueryResponse::Error(e),

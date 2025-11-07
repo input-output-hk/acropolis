@@ -14,7 +14,7 @@ pub enum TransactionsStateQuery {
     GetTransactionUTxOs,
     GetTransactionStakeCertificates { tx_hash: TxHash },
     GetTransactionDelegationCertificates { tx_hash: TxHash },
-    GetTransactionWithdrawals,
+    GetTransactionWithdrawals { tx_hash: TxHash },
     GetTransactionMIRs,
     GetTransactionPoolUpdateCertificates,
     GetTransactionPoolRetirementCertificates,
@@ -125,7 +125,15 @@ pub struct TransactionDelegationCertificates {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct TransactionWithdrawals {}
+pub struct TransactionWithdrawal {
+    pub address: StakeAddress,
+    pub amount: Lovelace,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TransactionWithdrawals {
+    pub withdrawals: Vec<TransactionWithdrawal>,
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ScriptDatumJSON {}

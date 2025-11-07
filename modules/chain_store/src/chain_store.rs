@@ -19,11 +19,12 @@ use acropolis_common::{
     queries::transactions::{
         TransactionDelegationCertificate, TransactionDelegationCertificates, TransactionInfo,
         TransactionOutputAmount, TransactionStakeCertificate, TransactionStakeCertificates,
-        TransactionsStateQuery, TransactionsStateQueryResponse, DEFAULT_TRANSACTIONS_QUERY_TOPIC,
+        TransactionWithdrawal, TransactionWithdrawals, TransactionsStateQuery,
+        TransactionsStateQueryResponse, DEFAULT_TRANSACTIONS_QUERY_TOPIC,
     },
     state_history::{StateHistory, StateHistoryStore},
     AssetName, BechOrdAddress, BlockHash, GenesisDelegate, HeavyDelegate, NativeAsset, NetworkId,
-    PoolId, TxHash,
+    PoolId, StakeAddress, TxHash,
 };
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{module, Context, Module};
@@ -730,8 +731,10 @@ impl ChainStore {
         let mut certs = Vec::new();
         for (index, cert) in tx_decoded.certs().iter().enumerate() {
             match cert {
-                MultiEraCert::AlonzoCompatible(cert) => match cert.as_ref().as_ref() {
-                    alonzo::Certificate::StakeDelegation(cred, pool_key_hash) => {
+                MultiEraCert::AlonzoCompatible(cert) => {
+                    if let alonzo::Certificate::StakeDelegation(cred, pool_key_hash) =
+                        cert.as_ref().as_ref()
+                    {
                         certs.push(TransactionDelegationCertificate {
                             index: index as u64,
                             address: map_stake_address(cred, network_id.clone()),
@@ -739,10 +742,11 @@ impl ChainStore {
                             active_epoch: tx.block.extra.epoch + 1,
                         });
                     }
-                    _ => (),
-                },
-                MultiEraCert::Conway(cert) => match cert.as_ref().as_ref() {
-                    conway::Certificate::StakeDelegation(cred, pool_key_hash) => {
+                }
+                MultiEraCert::Conway(cert) => {
+                    if let conway::Certificate::StakeDelegation(cred, pool_key_hash) =
+                        cert.as_ref().as_ref()
+                    {
                         certs.push(TransactionDelegationCertificate {
                             index: index as u64,
                             address: map_stake_address(cred, network_id.clone()),
@@ -750,12 +754,27 @@ impl ChainStore {
                             active_epoch: tx.block.extra.epoch + 1,
                         });
                     }
-                    _ => (),
-                },
+                }
                 _ => (),
             }
         }
         Ok(certs)
+    }
+
+    fn to_tx_withdrawals(tx: &Tx) -> Result<Vec<TransactionWithdrawal>> {
+        let block = pallas_traverse::MultiEraBlock::decode(&tx.block.bytes)?;
+        let txs = block.txs();
+        let Some(tx_decoded) = txs.get(tx.index as usize) else {
+            return Err(anyhow!("Transaction not found in block for given index"));
+        };
+        let mut withdrawals = Vec::new();
+        for (address, amount) in tx_decoded.withdrawals_sorted_set() {
+            withdrawals.push(TransactionWithdrawal {
+                address: StakeAddress::from_binary(address)?,
+                amount,
+            });
+        }
+        Ok(withdrawals)
     }
 
     fn handle_txs_query(
@@ -801,6 +820,18 @@ impl ChainStore {
                         },
                     ),
                 )
+            }
+            TransactionsStateQuery::GetTransactionWithdrawals { tx_hash } => {
+                let Some(tx) = store.get_tx_by_hash(tx_hash.as_ref())? else {
+                    return Ok(TransactionsStateQueryResponse::Error(
+                        QueryError::not_found("Transaction not found"),
+                    ));
+                };
+                Ok(TransactionsStateQueryResponse::TransactionWithdrawals(
+                    TransactionWithdrawals {
+                        withdrawals: Self::to_tx_withdrawals(&tx)?,
+                    },
+                ))
             }
             _ => Ok(TransactionsStateQueryResponse::Error(
                 QueryError::not_implemented("Unimplemented".to_string()),
