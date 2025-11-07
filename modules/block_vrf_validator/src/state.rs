@@ -21,13 +21,11 @@ use tracing::error;
 pub struct EpochSnapshots {
     pub mark: Arc<Snapshot>,
     pub set: Arc<Snapshot>,
-    pub go: Arc<Snapshot>,
 }
 
 impl EpochSnapshots {
     /// Push a new snapshot
     pub fn push(&mut self, latest: Snapshot) {
-        self.go = self.set.clone();
         self.set = self.mark.clone();
         self.mark = Arc::new(latest);
     }
