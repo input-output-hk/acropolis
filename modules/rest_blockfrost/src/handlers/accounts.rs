@@ -525,13 +525,8 @@ pub async fn handle_account_addresses_blockfrost(
         })
         .collect::<Result<Vec<AccountAddressREST>, RESTError>>()?;
 
-    match serde_json::to_string_pretty(&rest_response) {
-        Ok(json) => Ok(RESTResponse::with_json(200, &json)),
-        Err(e) => Ok(RESTResponse::with_text(
-            500,
-            &format!("Internal server error while serializing addresses: {e}"),
-        )),
-    }
+    let json = serde_json::to_string_pretty(&rest_response)?;
+    Ok(RESTResponse::with_json(200, &json))
 }
 
 /// Handle `/accounts/{stake_address}/addresses/assets` Blockfrost-compatible endpoint
@@ -540,7 +535,7 @@ pub async fn handle_account_assets_blockfrost(
     _params: Vec<String>,
     _handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse, RESTError> {
-    Ok(RESTResponse::with_text(501, "Not implemented"))
+    Err(RESTError::not_implemented("Account assets not implemented"))
 }
 
 /// Handle `/accounts/{stake_address}/addresses/total` Blockfrost-compatible endpoint
@@ -549,7 +544,7 @@ pub async fn handle_account_totals_blockfrost(
     _params: Vec<String>,
     _handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse, RESTError> {
-    Ok(RESTResponse::with_text(501, "Not implemented"))
+    Err(RESTError::not_implemented("Account totals not implemented"))
 }
 
 /// Handle `/accounts/{stake_address}/utxos` Blockfrost-compatible endpoint
@@ -695,13 +690,8 @@ pub async fn handle_account_utxos_blockfrost(
         })
     }
 
-    match serde_json::to_string_pretty(&rest_response) {
-        Ok(json) => Ok(RESTResponse::with_json(200, &json)),
-        Err(e) => Ok(RESTResponse::with_text(
-            500,
-            &format!("Internal server error while serializing addresses: {e}"),
-        )),
-    }
+    let json = serde_json::to_string_pretty(&rest_response)?;
+    Ok(RESTResponse::with_json(200, &json))
 }
 
 fn parse_stake_address(params: &[String]) -> Result<StakeAddress, RESTError> {
