@@ -122,7 +122,7 @@ pub async fn handle_account_registrations_blockfrost(
             )) => Ok(None),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
-            )) => Err(e.into()),
+            )) => Err(e),
             _ => Err(QueryError::internal_error(
                 "Unexpected message type while retrieving account registrations",
             )),
@@ -149,7 +149,7 @@ pub async fn handle_account_registrations_blockfrost(
             )) => Ok(tx_hashes),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
-            )) => Err(e.into()),
+            )) => Err(e),
             _ => Err(QueryError::internal_error(
                 "Unexpected message type while resolving transaction hashes",
             )),
@@ -203,7 +203,7 @@ pub async fn handle_account_delegations_blockfrost(
             )) => Ok(None),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
-            )) => Err(e.into()),
+            )) => Err(e),
             _ => Err(QueryError::internal_error(
                 "Unexpected message type while retrieving account delegations",
             )),
@@ -230,7 +230,7 @@ pub async fn handle_account_delegations_blockfrost(
             )) => Ok(tx_hashes),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
-            )) => Err(e.into()),
+            )) => Err(e),
             _ => Err(QueryError::internal_error(
                 "Unexpected message type while resolving transaction hashes",
             )),
@@ -289,7 +289,7 @@ pub async fn handle_account_mirs_blockfrost(
             )) => Ok(None),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
-            )) => Err(e.into()),
+            )) => Err(e),
             _ => Err(QueryError::internal_error(
                 "Unexpected message type while retrieving account mirs",
             )),
@@ -316,7 +316,7 @@ pub async fn handle_account_mirs_blockfrost(
             )) => Ok(tx_hashes),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
-            )) => Err(e.into()),
+            )) => Err(e),
             _ => Err(QueryError::internal_error(
                 "Unexpected message type while resolving transaction hashes",
             )),
@@ -369,7 +369,7 @@ pub async fn handle_account_withdrawals_blockfrost(
             )) => Ok(None),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
-            )) => Err(e.into()),
+            )) => Err(e),
             _ => Err(QueryError::internal_error(
                 "Unexpected message type while retrieving account withdrawals",
             )),
@@ -396,7 +396,7 @@ pub async fn handle_account_withdrawals_blockfrost(
             )) => Ok(tx_hashes),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
-            )) => Err(e.into()),
+            )) => Err(e),
             _ => Err(QueryError::internal_error(
                 "Unexpected message type while resolving transaction hashes",
             )),
@@ -449,7 +449,7 @@ pub async fn handle_account_rewards_blockfrost(
             )) => Ok(None),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
-            )) => Err(e.into()),
+            )) => Err(e),
             _ => Err(QueryError::internal_error(
                 "Unexpected message type while retrieving account rewards",
             )),
@@ -499,7 +499,7 @@ pub async fn handle_account_addresses_blockfrost(
             )) => Ok(None),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
-            )) => Err(e.into()),
+            )) => Err(e),
             _ => Err(QueryError::internal_error(
                 "Unexpected message type while retrieving account addresses",
             )),
