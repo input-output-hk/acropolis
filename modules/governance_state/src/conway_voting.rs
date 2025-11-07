@@ -632,7 +632,7 @@ mod tests {
             expiration_epoch: None,
         };
         voting.action_status.insert(oc2.voting.procedure.gov_action_id.clone(), as2.clone());
-        match voting.update_action_status_with_outcomes(2, &[oc2.clone()]) {
+        match voting.update_action_status_with_outcomes(2, std::slice::from_ref(&oc2)) {
             Err(e) => assert_eq!(
                 e.to_string(),
                 "Impossible outcome: gov_action1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq\
@@ -645,7 +645,7 @@ mod tests {
             *voting.action_status.get(&oc2.voting.procedure.gov_action_id).unwrap(),
             as2
         );
-        voting.update_action_status_with_outcomes(5, &[oc2.clone()])?;
+        voting.update_action_status_with_outcomes(5, std::slice::from_ref(&oc2))?;
         assert_eq!(
             voting.action_status.get(&oc2.voting.procedure.gov_action_id).unwrap().expiration_epoch,
             Some(5)
