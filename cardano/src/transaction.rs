@@ -3,8 +3,8 @@ use anyhow::{Error, anyhow};
 
 pub fn calculate_transaction_fee(
     recorded_fee: &Option<Lovelace>,
-    inputs: &Vec<Lovelace>,
-    outputs: &Vec<Lovelace>,
+    inputs: &[Lovelace],
+    outputs: &[Lovelace],
 ) -> Lovelace {
     match recorded_fee {
         Some(fee) => *fee,

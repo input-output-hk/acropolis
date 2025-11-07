@@ -4,7 +4,10 @@ use acropolis_common::{
     messages::{Message, RESTResponse, StateQuery, StateQueryResponse},
     queries::{
         parameters::{ParametersStateQuery, ParametersStateQueryResponse},
-        transactions::{TransactionInfo, TransactionsStateQuery, TransactionsStateQueryResponse},
+        transactions::{
+            TransactionInfo, TransactionStakeCertificate, TransactionsStateQuery,
+            TransactionsStateQueryResponse,
+        },
         utils::{query_state, rest_query_state_async},
     },
     Lovelace, TxHash,
@@ -12,7 +15,10 @@ use acropolis_common::{
 use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
 use hex::FromHex;
-use serde::{ser::SerializeStruct, Serialize, Serializer};
+use serde::{
+    ser::{Error, SerializeStruct},
+    Serialize, Serializer,
+};
 use std::sync::Arc;
 
 use crate::handlers_config::HandlersConfig;
@@ -72,7 +78,7 @@ pub async fn handle_transactions_blockfrost(
     match param {
         None => handle_transaction_query(context, tx_hash, handlers_config).await,
         Some("utxo") => Ok(RESTResponse::with_text(501, "Not implemented")),
-        Some("stakes") => Ok(RESTResponse::with_text(501, "Not implemented")),
+        Some("stakes") => handle_transaction_stakes_query(context, tx_hash, handlers_config).await,
         Some("delegations") => Ok(RESTResponse::with_text(501, "Not implemented")),
         Some("withdrawals") => Ok(RESTResponse::with_text(501, "Not implemented")),
         Some("mirs") => Ok(RESTResponse::with_text(501, "Not implemented")),
@@ -145,6 +151,52 @@ async fn handle_transaction_query(
                 };
                 Some(Ok(Some(TxInfo(txs_info, fee, deposit))))
             }
+            Message::StateQueryResponse(StateQueryResponse::Transactions(
+                TransactionsStateQueryResponse::Error(e),
+            )) => Some(Err(anyhow!(e))),
+            _ => None,
+        },
+    )
+    .await
+}
+
+struct TxStake(TransactionStakeCertificate);
+
+impl Serialize for TxStake {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let Ok(address) = self.0.address.to_string() else {
+            return Err(S::Error::custom("Can't stringify address"));
+        };
+        let mut state = serializer.serialize_struct("TxStake", 3)?;
+        state.serialize_field("index", &self.0.index)?;
+        state.serialize_field("address", &address)?;
+        state.serialize_field("registration", &self.0.registration)?;
+        state.end()
+    }
+}
+
+/// Handle `/txs/{hash}/stakes`
+async fn handle_transaction_stakes_query(
+    context: Arc<Context<Message>>,
+    tx_hash: TxHash,
+    handlers_config: Arc<HandlersConfig>,
+) -> Result<RESTResponse> {
+    let txs_info_msg = Arc::new(Message::StateQuery(StateQuery::Transactions(
+        TransactionsStateQuery::GetTransactionStakeCertificates { tx_hash },
+    )));
+    rest_query_state_async(
+        &context.clone(),
+        &handlers_config.transactions_query_topic.clone(),
+        txs_info_msg,
+        async move |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Transactions(
+                TransactionsStateQueryResponse::TransactionStakeCertificates(stakes),
+            )) => Some(Ok(Some(
+                stakes.certificates.into_iter().map(TxStake).collect::<Vec<_>>(),
+            ))),
             Message::StateQueryResponse(StateQueryResponse::Transactions(
                 TransactionsStateQueryResponse::Error(e),
             )) => Some(Err(anyhow!(e))),

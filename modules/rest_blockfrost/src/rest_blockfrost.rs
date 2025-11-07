@@ -217,6 +217,12 @@ const DEFAULT_HANDLE_EPOCH_POOL_BLOCKS_TOPIC: (&str, &str) = (
 
 // Transactions topics
 const DEFAULT_HANDLE_TRANSACTIONS_TOPIC: (&str, &str) = ("handle-transactions", "rest.get.txs.*");
+const DEFAULT_HANDLE_TRANSACTIONS_SUB_TOPIC: (&str, &str) =
+    ("handle-transactions-sub", "rest.get.txs.*.*");
+const DEFAULT_HANDLE_TRANSACTIONS_METADATA_SUB_TOPIC: (&str, &str) = (
+    "handle-transactions-metadata-sub",
+    "rest.get.txs.metadata.*",
+);
 
 // Assets topics
 const DEFAULT_HANDLE_ASSETS_LIST_TOPIC: (&str, &str) =
@@ -724,6 +730,22 @@ impl BlockfrostREST {
         register_handler(
             context.clone(),
             DEFAULT_HANDLE_TRANSACTIONS_TOPIC,
+            handlers_config.clone(),
+            handle_transactions_blockfrost,
+        );
+
+        // Handler for /txs/{hash}/*
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_TRANSACTIONS_SUB_TOPIC,
+            handlers_config.clone(),
+            handle_transactions_blockfrost,
+        );
+
+        // Handler for /txs/{hash}/*/*
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_TRANSACTIONS_METADATA_SUB_TOPIC,
             handlers_config.clone(),
             handle_transactions_blockfrost,
         );

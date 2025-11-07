@@ -1,6 +1,8 @@
 mod stores;
 
-use acropolis_codec::{block::map_to_block_issuer, map_parameters};
+use acropolis_codec::{
+    block::map_to_block_issuer, map_parameters, map_parameters::map_stake_address,
+};
 use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
     crypto::keyhash_224,
@@ -13,12 +15,13 @@ use acropolis_common::{
     },
     queries::misc::Order,
     queries::transactions::{
-        TransactionInfo, TransactionOutputAmount, TransactionsStateQuery,
-        TransactionsStateQueryResponse, DEFAULT_TRANSACTIONS_QUERY_TOPIC,
+        TransactionInfo, TransactionOutputAmount, TransactionStakeCertificate,
+        TransactionStakeCertificates, TransactionsStateQuery, TransactionsStateQueryResponse,
+        DEFAULT_TRANSACTIONS_QUERY_TOPIC,
     },
     state_history::{StateHistory, StateHistoryStore},
-    AssetName, BechOrdAddress, BlockHash, GenesisDelegate, HeavyDelegate, NativeAsset, PoolId,
-    TxHash,
+    AssetName, BechOrdAddress, BlockHash, GenesisDelegate, HeavyDelegate, NativeAsset, NetworkId,
+    PoolId, TxHash,
 };
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{module, Context, Module};
@@ -56,6 +59,8 @@ impl ChainStore {
         let txs_queries_topic = config
             .get_string(DEFAULT_TRANSACTIONS_QUERY_TOPIC.0)
             .unwrap_or(DEFAULT_TRANSACTIONS_QUERY_TOPIC.1.to_string());
+        let network_id: NetworkId =
+            config.get_string("network-id").unwrap_or("mainnet".to_string()).into();
 
         let store_type = config.get_string("store").unwrap_or(DEFAULT_STORE.to_string());
         let store: Arc<dyn Store> = match store_type.as_str() {
@@ -100,6 +105,7 @@ impl ChainStore {
         let query_store = store.clone();
         context.handle(&txs_queries_topic, move |req| {
             let query_store = query_store.clone();
+            let network_id = network_id.clone();
             async move {
                 let Message::StateQuery(StateQuery::Transactions(query)) = req.as_ref() else {
                     return Arc::new(Message::StateQueryResponse(
@@ -108,11 +114,12 @@ impl ChainStore {
                         )),
                     ));
                 };
-                let res = Self::handle_txs_query(&query_store, &query).unwrap_or_else(|err| {
-                    TransactionsStateQueryResponse::Error(QueryError::internal_error(
-                        err.to_string(),
-                    ))
-                });
+                let res =
+                    Self::handle_txs_query(&query_store, query, network_id).unwrap_or_else(|err| {
+                        TransactionsStateQueryResponse::Error(QueryError::internal_error(
+                            err.to_string(),
+                        ))
+                    });
                 Arc::new(Message::StateQueryResponse(
                     StateQueryResponse::Transactions(res),
                 ))
@@ -571,7 +578,7 @@ impl ChainStore {
         Ok(BlockInvolvedAddresses { addresses })
     }
 
-    fn to_tx_info(tx: Tx) -> Result<TransactionInfo> {
+    fn to_tx_info(tx: &Tx) -> Result<TransactionInfo> {
         let block = pallas_traverse::MultiEraBlock::decode(&tx.block.bytes)?;
         let txs = block.txs();
         let Some(tx_decoded) = txs.get(tx.index as usize) else {
@@ -608,6 +615,10 @@ impl ChainStore {
                     }
                     alonzo::Certificate::PoolRetirement { .. } => pool_retire_count += 1,
                     alonzo::Certificate::MoveInstantaneousRewardsCert { .. } => mir_cert_count += 1,
+                    alonzo::Certificate::StakeRegistration { .. } => {
+                        stake_cert_count += 1;
+                    }
+                    alonzo::Certificate::StakeDelegation { .. } => delegation_count += 1,
                     _ => (),
                 },
                 MultiEraCert::Conway(cert) => match cert.as_ref().as_ref() {
@@ -656,9 +667,59 @@ impl ChainStore {
         })
     }
 
+    fn to_tx_stakes(tx: &Tx, network_id: NetworkId) -> Result<Vec<TransactionStakeCertificate>> {
+        let block = pallas_traverse::MultiEraBlock::decode(&tx.block.bytes)?;
+        let txs = block.txs();
+        let Some(tx_decoded) = txs.get(tx.index as usize) else {
+            return Err(anyhow!("Transaction not found in block for given index"));
+        };
+        let mut certs = Vec::new();
+        for (index, cert) in tx_decoded.certs().iter().enumerate() {
+            match cert {
+                MultiEraCert::AlonzoCompatible(cert) => match cert.as_ref().as_ref() {
+                    alonzo::Certificate::StakeRegistration(cred) => {
+                        certs.push(TransactionStakeCertificate {
+                            index: index as u64,
+                            address: map_stake_address(cred, network_id.clone()),
+                            registration: true,
+                        });
+                    }
+                    alonzo::Certificate::StakeDeregistration(cred) => {
+                        certs.push(TransactionStakeCertificate {
+                            index: index as u64,
+                            address: map_stake_address(cred, network_id.clone()),
+                            registration: false,
+                        });
+                    }
+                    _ => (),
+                },
+                MultiEraCert::Conway(cert) => match cert.as_ref().as_ref() {
+                    conway::Certificate::StakeRegistration(cred) => {
+                        certs.push(TransactionStakeCertificate {
+                            index: index as u64,
+                            address: map_stake_address(cred, network_id.clone()),
+                            registration: true,
+                        });
+                    }
+                    conway::Certificate::StakeDeregistration(cred) => {
+                        certs.push(TransactionStakeCertificate {
+                            index: index as u64,
+                            address: map_stake_address(cred, network_id.clone()),
+                            registration: false,
+                        });
+                    }
+                    _ => (),
+                },
+                _ => (),
+            }
+        }
+        Ok(certs)
+    }
+
     fn handle_txs_query(
         store: &Arc<dyn Store>,
         query: &TransactionsStateQuery,
+        network_id: NetworkId,
     ) -> Result<TransactionsStateQueryResponse> {
         match query {
             TransactionsStateQuery::GetTransactionInfo { tx_hash } => {
@@ -668,8 +729,22 @@ impl ChainStore {
                     ));
                 };
                 Ok(TransactionsStateQueryResponse::TransactionInfo(
-                    Self::to_tx_info(tx)?,
+                    Self::to_tx_info(&tx)?,
                 ))
+            }
+            TransactionsStateQuery::GetTransactionStakeCertificates { tx_hash } => {
+                let Some(tx) = store.get_tx_by_hash(tx_hash.as_ref())? else {
+                    return Ok(TransactionsStateQueryResponse::Error(
+                        QueryError::not_found("Transaction not found"),
+                    ));
+                };
+                Ok(
+                    TransactionsStateQueryResponse::TransactionStakeCertificates(
+                        TransactionStakeCertificates {
+                            certificates: Self::to_tx_stakes(&tx, network_id)?,
+                        },
+                    ),
+                )
             }
             _ => Ok(TransactionsStateQueryResponse::Error(
                 QueryError::not_implemented("Unimplemented".to_string()),
