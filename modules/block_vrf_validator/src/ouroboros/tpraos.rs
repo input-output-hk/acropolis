@@ -1,19 +1,21 @@
-use std::collections::HashMap;
-
-use crate::crypto::keyhash_224;
-use crate::ouroboros::overlay_schedule::OBftSlot;
-use crate::ouroboros::vrf_validation::{
-    TPraosBadLeaderVrfProofError, TPraosBadNonceVrfProofError, VrfLeaderValueTooBigError,
-    VrfValidation, VrfValidationError, WrongGenesisLeaderVrfKeyError, WrongLeaderVrfKeyError,
+use crate::ouroboros::{
+    overlay_schedule::{self, OBftSlot},
+    vrf,
+    vrf_validation::{
+        validate_genesis_leader_vrf_key, validate_leader_vrf_key, validate_tpraos_leader_vrf_proof,
+        validate_tpraos_nonce_vrf_proof, validate_vrf_leader_value,
+    },
 };
-use crate::ouroboros::{overlay_schedule, vrf};
-use crate::protocol_params::Nonce;
-use crate::rational_number::RationalNumber;
-use crate::{protocol_params::PraosParams, BlockInfo};
-use crate::{GenesisDelegates, PoolId, VrfKeyHash};
+use acropolis_common::{
+    crypto::keyhash_224,
+    protocol_params::{Nonce, PraosParams},
+    rational_number::RationalNumber,
+    validation::{VrfValidation, VrfValidationError},
+    BlockInfo, GenesisDelegates, PoolId, VrfKeyHash,
+};
 use anyhow::Result;
-use pallas::ledger::primitives::VrfCert;
-use pallas::ledger::traverse::MultiEraHeader;
+use pallas::ledger::{primitives::VrfCert, traverse::MultiEraHeader};
+use std::collections::HashMap;
 
 #[allow(clippy::too_many_arguments)]
 pub fn validate_vrf_tpraos<'a>(
@@ -26,7 +28,7 @@ pub fn validate_vrf_tpraos<'a>(
     active_spdd: &'a HashMap<PoolId, u64>,
     total_active_stake: u64,
     decentralisation_param: RationalNumber,
-) -> Result<Vec<VrfValidation<'a>>, VrfValidationError> {
+) -> Result<Vec<VrfValidation<'a>>, Box<VrfValidationError>> {
     let active_slots_coeff = praos_params.active_slots_coeff;
 
     // first look up for overlay slot
@@ -36,12 +38,16 @@ pub fn validate_vrf_tpraos<'a>(
         &decentralisation_param,
         &active_slots_coeff,
     )
-    .map_err(|e| VrfValidationError::InvalidShelleyParams(e.to_string()))?;
+    .map_err(|e| VrfValidationError::Other(e.to_string()))?;
 
     match obft_slot {
         None => {
             let Some(issuer_vkey) = header.issuer_vkey() else {
-                return Ok(vec![Box::new(|| Err(VrfValidationError::MissingIssuerKey))]);
+                return Ok(vec![Box::new(|| {
+                    Err(VrfValidationError::Other(
+                        "Issuer Key is not set".to_string(),
+                    ))
+                })]);
             };
             let pool_id = PoolId::from(keyhash_224(issuer_vkey));
             let registered_vrf_key_hash =
@@ -51,24 +57,28 @@ pub fn validate_vrf_tpraos<'a>(
             let relative_stake = RationalNumber::new(*pool_stake, total_active_stake);
 
             let Some(vrf_vkey) = header.vrf_vkey() else {
-                return Ok(vec![Box::new(|| Err(VrfValidationError::MissingVrfVkey))]);
+                return Ok(vec![Box::new(|| {
+                    Err(VrfValidationError::Other("VRF Key is not set".to_string()))
+                })]);
             };
             let declared_vrf_key: &[u8; vrf::PublicKey::SIZE] = vrf_vkey
                 .try_into()
                 .map_err(|_| VrfValidationError::TryFromSlice("Invalid Vrf Key".to_string()))?;
-            let nonce_vrf_cert =
-                nonce_vrf_cert(header).ok_or(VrfValidationError::TPraosMissingNonceVrfCert)?;
-            let leader_vrf_cert =
-                leader_vrf_cert(header).ok_or(VrfValidationError::TPraosMissingLeaderVrfCert)?;
+            let nonce_vrf_cert = nonce_vrf_cert(header).ok_or(VrfValidationError::Other(
+                "Nonce VRF Cert is not set".to_string(),
+            ))?;
+            let leader_vrf_cert = leader_vrf_cert(header).ok_or(VrfValidationError::Other(
+                "Leader VRF Cert is not set".to_string(),
+            ))?;
 
             // Regular TPraos rules apply
             Ok(vec![
                 Box::new(move || {
-                    WrongLeaderVrfKeyError::new(&pool_id, registered_vrf_key_hash, vrf_vkey)?;
+                    validate_leader_vrf_key(&pool_id, registered_vrf_key_hash, vrf_vkey)?;
                     Ok(())
                 }),
                 Box::new(move || {
-                    TPraosBadNonceVrfProofError::new(
+                    validate_tpraos_nonce_vrf_proof(
                         block_info.slot,
                         epoch_nonce,
                         &vrf::PublicKey::from(declared_vrf_key),
@@ -78,7 +88,7 @@ pub fn validate_vrf_tpraos<'a>(
                     Ok(())
                 }),
                 Box::new(move || {
-                    TPraosBadLeaderVrfProofError::new(
+                    validate_tpraos_leader_vrf_proof(
                         block_info.slot,
                         epoch_nonce,
                         &vrf::PublicKey::from(declared_vrf_key),
@@ -88,7 +98,7 @@ pub fn validate_vrf_tpraos<'a>(
                     Ok(())
                 }),
                 Box::new(move || {
-                    VrfLeaderValueTooBigError::new(
+                    validate_vrf_leader_value(
                         &leader_vrf_cert.0.to_vec()[..],
                         &relative_stake,
                         &active_slots_coeff,
@@ -101,23 +111,27 @@ pub fn validate_vrf_tpraos<'a>(
             // The given genesis key has authority to produce a block in this
             // slot. Check whether we're its delegate.
             let Some(vrf_vkey) = header.vrf_vkey() else {
-                return Ok(vec![Box::new(|| Err(VrfValidationError::MissingVrfVkey))]);
+                return Ok(vec![Box::new(|| {
+                    Err(VrfValidationError::Other("VRF Key is not set".to_string()))
+                })]);
             };
             let declared_vrf_key: &[u8; vrf::PublicKey::SIZE] = vrf_vkey
                 .try_into()
                 .map_err(|_| VrfValidationError::TryFromSlice("Invalid Vrf Key".to_string()))?;
-            let nonce_vrf_cert =
-                nonce_vrf_cert(header).ok_or(VrfValidationError::TPraosMissingNonceVrfCert)?;
-            let leader_vrf_cert =
-                leader_vrf_cert(header).ok_or(VrfValidationError::TPraosMissingLeaderVrfCert)?;
+            let nonce_vrf_cert = nonce_vrf_cert(header).ok_or(VrfValidationError::Other(
+                "Nonce VRF Cert is not set".to_string(),
+            ))?;
+            let leader_vrf_cert = leader_vrf_cert(header).ok_or(VrfValidationError::Other(
+                "Leader VRF Cert is not set".to_string(),
+            ))?;
 
             Ok(vec![
                 Box::new(move || {
-                    WrongGenesisLeaderVrfKeyError::new(&genesis_key, &gen_deleg, vrf_vkey)?;
+                    validate_genesis_leader_vrf_key(&genesis_key, &gen_deleg, vrf_vkey)?;
                     Ok(())
                 }),
                 Box::new(move || {
-                    TPraosBadNonceVrfProofError::new(
+                    validate_tpraos_nonce_vrf_proof(
                         block_info.slot,
                         epoch_nonce,
                         &vrf::PublicKey::from(declared_vrf_key),
@@ -127,7 +141,7 @@ pub fn validate_vrf_tpraos<'a>(
                     Ok(())
                 }),
                 Box::new(move || {
-                    TPraosBadLeaderVrfProofError::new(
+                    validate_tpraos_leader_vrf_proof(
                         block_info.slot,
                         epoch_nonce,
                         &vrf::PublicKey::from(declared_vrf_key),
@@ -161,9 +175,13 @@ fn leader_vrf_cert<'a>(header: &'a MultiEraHeader) -> Option<&'a VrfCert> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        crypto::keyhash_256, genesis_values::GenesisValues, protocol_params::NonceHash,
-        serialization::Bech32Conversion, BlockHash, BlockStatus, Era,
+    use acropolis_common::{
+        crypto::keyhash_256,
+        genesis_values::GenesisValues,
+        protocol_params::NonceHash,
+        serialization::Bech32Conversion,
+        validation::{VrfLeaderValueTooBigError, WrongLeaderVrfKeyError},
+        BlockHash, BlockStatus, Era,
     };
 
     use super::*;
@@ -214,7 +232,9 @@ mod tests {
             1,
             decentralisation_param,
         )
-        .and_then(|vrf_validations| vrf_validations.iter().try_for_each(|assert| assert()));
+        .and_then(|vrf_validations| {
+            vrf_validations.iter().try_for_each(|assert| assert().map_err(Box::new))
+        });
         assert!(result.is_ok());
     }
 
@@ -270,7 +290,9 @@ mod tests {
             10177811974823000,
             decentralisation_param,
         )
-        .and_then(|vrf_validations| vrf_validations.iter().try_for_each(|assert| assert()));
+        .and_then(|vrf_validations| {
+            vrf_validations.iter().try_for_each(|assert| assert().map_err(Box::new))
+        });
         assert!(result.is_ok());
     }
 
@@ -326,7 +348,9 @@ mod tests {
             10177811974823000,
             decentralisation_param,
         )
-        .and_then(|vrf_validations| vrf_validations.iter().try_for_each(|assert| assert()));
+        .and_then(|vrf_validations| {
+            vrf_validations.iter().try_for_each(|assert| assert().map_err(Box::new))
+        });
         assert!(result.is_ok());
     }
 
@@ -379,11 +403,13 @@ mod tests {
             10177811974823000,
             decentralisation_param,
         )
-        .and_then(|vrf_validations| vrf_validations.iter().try_for_each(|assert| assert()));
+        .and_then(|vrf_validations| {
+            vrf_validations.iter().try_for_each(|assert| assert().map_err(Box::new))
+        });
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err(),
-            VrfValidationError::UnknownPool { pool_id }
+            Box::new(VrfValidationError::UnknownPool { pool_id })
         );
     }
 
@@ -437,17 +463,21 @@ mod tests {
             10177811974823000,
             decentralisation_param,
         )
-        .and_then(|vrf_validations| vrf_validations.iter().try_for_each(|assert| assert()));
+        .and_then(|vrf_validations| {
+            vrf_validations.iter().try_for_each(|assert| assert().map_err(Box::new))
+        });
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err(),
-            VrfValidationError::WrongLeaderVrfKey(WrongLeaderVrfKeyError {
-                pool_id,
-                registered_vrf_key_hash: VrfKeyHash::from(keyhash_256(&[0; 64])),
-                header_vrf_key_hash: VrfKeyHash::from(keyhash_256(
-                    block_header.vrf_vkey().unwrap()
-                )),
-            })
+            Box::new(VrfValidationError::WrongLeaderVrfKey(
+                WrongLeaderVrfKeyError {
+                    pool_id,
+                    registered_vrf_key_hash: VrfKeyHash::from(keyhash_256(&[0; 64])),
+                    header_vrf_key_hash: VrfKeyHash::from(keyhash_256(
+                        block_header.vrf_vkey().unwrap()
+                    )),
+                }
+            ))
         );
     }
 
@@ -504,13 +534,15 @@ mod tests {
             10177811974823000,
             decentralisation_param,
         )
-        .and_then(|vrf_validations| vrf_validations.iter().try_for_each(|assert| assert()));
+        .and_then(|vrf_validations| {
+            vrf_validations.iter().try_for_each(|assert| assert().map_err(Box::new))
+        });
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err(),
-            VrfValidationError::VrfLeaderValueTooBig(
+            Box::new(VrfValidationError::VrfLeaderValueTooBig(
                 VrfLeaderValueTooBigError::VrfLeaderValueTooBig
-            )
+            ))
         );
     }
 }

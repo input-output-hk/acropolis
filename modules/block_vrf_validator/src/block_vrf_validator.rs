@@ -9,12 +9,12 @@ use acropolis_common::{
 use anyhow::Result;
 use caryatid_sdk::{module, Context, Module, Subscription};
 use config::Config;
-use pallas::ledger::traverse::MultiEraHeader;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, info_span, Instrument};
 mod state;
 use state::State;
+mod ouroboros;
 
 use crate::vrf_validation_publisher::VrfValidationPublisher;
 mod snapshot;
@@ -33,8 +33,8 @@ const DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC: (&str, &str) = (
 );
 const DEFAULT_BLOCKS_SUBSCRIBE_TOPIC: (&str, &str) =
     ("blocks-subscribe-topic", "cardano.block.proposed");
-const DEFAULT_EPOCH_NONCE_SUBSCRIBE_TOPIC: (&str, &str) =
-    ("epoch-nonce-subscribe-topic", "cardano.epoch.nonce");
+const DEFAULT_EPOCH_ACTIVITY_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("epoch-activity-subscribe-topic", "cardano.epoch.activity");
 const DEFAULT_SPO_STATE_SUBSCRIBE_TOPIC: (&str, &str) =
     ("spo-state-subscribe-topic", "cardano.spo.state");
 const DEFAULT_SPDD_SUBSCRIBE_TOPIC: (&str, &str) =
@@ -57,7 +57,7 @@ impl BlockVrfValidator {
         mut bootstrapped_subscription: Box<dyn Subscription<Message>>,
         mut blocks_subscription: Box<dyn Subscription<Message>>,
         mut protocol_parameters_subscription: Box<dyn Subscription<Message>>,
-        mut epoch_nonce_subscription: Box<dyn Subscription<Message>>,
+        mut epoch_activity_subscription: Box<dyn Subscription<Message>>,
         mut spo_state_subscription: Box<dyn Subscription<Message>>,
         mut spdd_subscription: Box<dyn Subscription<Message>>,
     ) -> Result<()> {
@@ -90,7 +90,7 @@ impl BlockVrfValidator {
                     if is_new_epoch {
                         // read epoch boundary messages
                         let protocol_parameters_message_f = protocol_parameters_subscription.read();
-                        let epoch_nonce_message_f = epoch_nonce_subscription.read();
+                        let epoch_activity_message_f = epoch_activity_subscription.read();
                         let spo_state_message_f = spo_state_subscription.read();
                         let spdd_msg_f = spdd_subscription.read();
 
@@ -107,17 +107,17 @@ impl BlockVrfValidator {
                             _ => error!("Unexpected message type: {protocol_parameters_msg:?}"),
                         });
 
-                        let (_, epoch_nonce_msg) = epoch_nonce_message_f.await?;
+                        let (_, epoch_activity_msg) = epoch_activity_message_f.await?;
                         let span = info_span!(
-                            "block_vrf_validator.handle_epoch_nonce",
+                            "block_vrf_validator.handle_epoch_activity",
                             epoch = block_info.epoch
                         );
-                        span.in_scope(|| match epoch_nonce_msg.as_ref() {
-                            Message::Cardano((block_info, CardanoMessage::EpochNonce(msg))) => {
+                        span.in_scope(|| match epoch_activity_msg.as_ref() {
+                            Message::Cardano((block_info, CardanoMessage::EpochActivity(msg))) => {
                                 Self::check_sync(&current_block, block_info);
-                                state.handle_epoch_nonce(msg);
+                                state.handle_epoch_activity(msg);
                             }
-                            _ => error!("Unexpected message type: {epoch_nonce_msg:?}"),
+                            _ => error!("Unexpected message type: {epoch_activity_msg:?}"),
                         });
 
                         let (_, spo_state_msg) = spo_state_message_f.await?;
@@ -147,39 +147,17 @@ impl BlockVrfValidator {
                         });
                     }
 
-                    // decode header
-                    // Derive the variant from the era - just enough to make
-                    // MultiEraHeader::decode() work.
-                    let span = info_span!(
-                        "block_vrf_validator.decode_header",
-                        block = block_info.number
-                    );
-                    let mut header = None;
-                    span.in_scope(|| {
-                        header = match MultiEraHeader::decode(
-                            block_info.era as u8,
-                            None,
-                            &block_msg.header,
-                        ) {
-                            Ok(header) => Some(header),
-                            Err(e) => {
-                                error!("Can't decode header {}: {e}", block_info.slot);
-                                None
-                            }
-                        };
-                    });
-
                     let span =
                         info_span!("block_vrf_validator.validate", block = block_info.number);
                     async {
-                        if let Some(header) = header.as_ref() {
-                            let result = state.validate_block_vrf(block_info, header, &genesis);
-                            if let Err(e) = vrf_validation_publisher
-                                .publish_vrf_validation(block_info, result)
-                                .await
-                            {
-                                error!("Failed to publish VRF validation: {e}")
-                            }
+                        let result = state
+                            .validate_block_vrf(block_info, &block_msg.header, &genesis)
+                            .map_err(|e| *e);
+                        if let Err(e) = vrf_validation_publisher
+                            .publish_vrf_validation(block_info, result)
+                            .await
+                        {
+                            error!("Failed to publish VRF validation: {e}")
                         }
                     }
                     .instrument(span)
@@ -217,10 +195,10 @@ impl BlockVrfValidator {
             .unwrap_or(DEFAULT_BLOCKS_SUBSCRIBE_TOPIC.1.to_string());
         info!("Creating blocks subscription on '{blocks_subscribe_topic}'");
 
-        let epoch_nonce_subscribe_topic = config
-            .get_string(DEFAULT_EPOCH_NONCE_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_EPOCH_NONCE_SUBSCRIBE_TOPIC.1.to_string());
-        info!("Creating epoch nonce subscription on '{epoch_nonce_subscribe_topic}'");
+        let epoch_activity_subscribe_topic = config
+            .get_string(DEFAULT_EPOCH_ACTIVITY_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_EPOCH_ACTIVITY_SUBSCRIBE_TOPIC.1.to_string());
+        info!("Creating epoch activity subscription on '{epoch_activity_subscribe_topic}'");
 
         let spo_state_subscribe_topic = config
             .get_string(DEFAULT_SPO_STATE_SUBSCRIBE_TOPIC.0)
@@ -241,7 +219,8 @@ impl BlockVrfValidator {
         let protocol_parameters_subscription =
             context.subscribe(&protocol_parameters_subscribe_topic).await?;
         let blocks_subscription = context.subscribe(&blocks_subscribe_topic).await?;
-        let epoch_nonce_subscription = context.subscribe(&epoch_nonce_subscribe_topic).await?;
+        let epoch_activity_subscription =
+            context.subscribe(&epoch_activity_subscribe_topic).await?;
         let spo_state_subscription = context.subscribe(&spo_state_subscribe_topic).await?;
         let spdd_subscription = context.subscribe(&spdd_subscribe_topic).await?;
 
@@ -259,7 +238,7 @@ impl BlockVrfValidator {
                 bootstrapped_subscription,
                 blocks_subscription,
                 protocol_parameters_subscription,
-                epoch_nonce_subscription,
+                epoch_activity_subscription,
                 spo_state_subscription,
                 spdd_subscription,
             )

@@ -1,7 +1,6 @@
 use acropolis_common::{
     messages::{CardanoMessage, Message},
-    ouroboros::vrf_validation::VrfValidationError,
-    validation::{ValidationError, ValidationStatus},
+    validation::{ValidationError, ValidationStatus, VrfValidationError},
     BlockInfo,
 };
 use caryatid_sdk::Context;
@@ -23,7 +22,6 @@ impl VrfValidationPublisher {
         Self { context, topic }
     }
 
-    /// Publish the SPDD
     pub async fn publish_vrf_validation(
         &mut self,
         block: &BlockInfo,

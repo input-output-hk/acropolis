@@ -5,7 +5,9 @@
 //!
 //! https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/libs/cardano-protocol-tpraos/src/Cardano/Protocol/TPraos/Rules/Overlay.hs#L332
 
-use crate::{rational_number::RationalNumber, GenesisDelegate, GenesisDelegates, GenesisKeyhash};
+use acropolis_common::{
+    rational_number::RationalNumber, GenesisDelegate, GenesisDelegates, GenesisKeyhash,
+};
 use anyhow::Result;
 use num_traits::ToPrimitive;
 
@@ -125,7 +127,7 @@ pub fn lookup_in_overlay_schedule(
 
 #[cfg(test)]
 mod tests {
-    use crate::genesis_values::GenesisValues;
+    use acropolis_common::genesis_values::GenesisValues;
 
     use super::*;
 

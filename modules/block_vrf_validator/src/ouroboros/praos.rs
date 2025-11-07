@@ -1,18 +1,19 @@
-use std::collections::HashMap;
-
-use crate::crypto::keyhash_224;
-use crate::ouroboros::vrf;
-use crate::ouroboros::vrf_validation::{
-    PraosBadVrfProofError, VrfLeaderValueTooBigError, VrfValidation, VrfValidationError,
-    WrongLeaderVrfKeyError,
+use crate::ouroboros::{
+    vrf,
+    vrf_validation::{
+        validate_leader_vrf_key, validate_praos_vrf_proof, validate_vrf_leader_value,
+    },
 };
-use crate::protocol_params::Nonce;
-use crate::rational_number::RationalNumber;
-use crate::{protocol_params::PraosParams, BlockInfo};
-use crate::{PoolId, VrfKeyHash};
+use acropolis_common::{
+    crypto::keyhash_224,
+    protocol_params::{Nonce, PraosParams},
+    rational_number::RationalNumber,
+    validation::{VrfValidation, VrfValidationError},
+    BlockInfo, PoolId, VrfKeyHash,
+};
 use anyhow::Result;
-use pallas::ledger::primitives::VrfCert;
-use pallas::ledger::traverse::MultiEraHeader;
+use pallas::ledger::{primitives::VrfCert, traverse::MultiEraHeader};
+use std::collections::HashMap;
 
 pub fn validate_vrf_praos<'a>(
     block_info: &'a BlockInfo,
@@ -22,11 +23,15 @@ pub fn validate_vrf_praos<'a>(
     active_spos: &'a HashMap<PoolId, VrfKeyHash>,
     active_spdd: &'a HashMap<PoolId, u64>,
     total_active_stake: u64,
-) -> Result<Vec<VrfValidation<'a>>, VrfValidationError> {
+) -> Result<Vec<VrfValidation<'a>>, Box<VrfValidationError>> {
     let active_slots_coeff = praos_params.active_slots_coeff;
 
     let Some(issuer_vkey) = header.issuer_vkey() else {
-        return Ok(vec![Box::new(|| Err(VrfValidationError::MissingIssuerKey))]);
+        return Ok(vec![Box::new(|| {
+            Err(VrfValidationError::Other(
+                "Issuer Key is not set".to_string(),
+            ))
+        })]);
     };
     let pool_id = PoolId::from(keyhash_224(issuer_vkey));
     let registered_vrf_key_hash =
@@ -36,26 +41,29 @@ pub fn validate_vrf_praos<'a>(
     let relative_stake = RationalNumber::new(*pool_stake, total_active_stake);
 
     let Some(vrf_vkey) = header.vrf_vkey() else {
-        return Ok(vec![Box::new(|| Err(VrfValidationError::MissingVrfVkey))]);
+        return Ok(vec![Box::new(|| {
+            Err(VrfValidationError::Other("VRF Key is not set".to_string()))
+        })]);
     };
     let declared_vrf_key: &[u8; vrf::PublicKey::HASH_SIZE] = vrf_vkey
         .try_into()
         .map_err(|_| VrfValidationError::TryFromSlice("Invalid Vrf Key".to_string()))?;
-    let vrf_cert = vrf_result(header).ok_or(VrfValidationError::PraosMissingVrfCert)?;
+    let vrf_cert =
+        vrf_result(header).ok_or(VrfValidationError::Other("VRF Cert is not set".to_string()))?;
 
     // Regular TPraos rules apply
     Ok(vec![
         Box::new(move || {
-            WrongLeaderVrfKeyError::new(&pool_id, registered_vrf_key_hash, vrf_vkey)?;
+            validate_leader_vrf_key(&pool_id, registered_vrf_key_hash, vrf_vkey)?;
             Ok(())
         }),
         Box::new(move || {
-            PraosBadVrfProofError::new(
+            validate_praos_vrf_proof(
                 block_info.slot,
                 epoch_nonce,
-                &header
-                    .leader_vrf_output()
-                    .map_err(|_| VrfValidationError::PraosMissingLeaderVrfOutput)?[..],
+                &header.leader_vrf_output().map_err(|_| {
+                    VrfValidationError::Other("Leader VRF Output is not set".to_string())
+                })?[..],
                 &vrf::PublicKey::from(declared_vrf_key),
                 &vrf_cert.0.to_vec()[..],
                 &vrf_cert.1.to_vec()[..],
@@ -63,10 +71,10 @@ pub fn validate_vrf_praos<'a>(
             Ok(())
         }),
         Box::new(move || {
-            VrfLeaderValueTooBigError::new(
-                &header
-                    .leader_vrf_output()
-                    .map_err(|_| VrfValidationError::PraosMissingLeaderVrfOutput)?[..],
+            validate_vrf_leader_value(
+                &header.leader_vrf_output().map_err(|_| {
+                    VrfValidationError::Other("Leader VRF Output is not set".to_string())
+                })?[..],
                 &relative_stake,
                 &active_slots_coeff,
             )?;
@@ -84,7 +92,7 @@ fn vrf_result<'a>(header: &'a MultiEraHeader) -> Option<&'a VrfCert> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
+    use acropolis_common::{
         crypto::keyhash_256, protocol_params::NonceHash, serialization::Bech32Conversion,
         BlockHash, BlockStatus, Era,
     };
@@ -139,7 +147,9 @@ mod tests {
             &active_spdd,
             25069171797357766,
         )
-        .and_then(|vrf_validations| vrf_validations.iter().try_for_each(|assert| assert()));
+        .and_then(|vrf_validations| {
+            vrf_validations.iter().try_for_each(|assert| assert().map_err(Box::new))
+        });
         assert!(result.is_ok());
     }
 }

@@ -2,19 +2,20 @@
 
 use std::sync::Arc;
 
+use crate::{ouroboros, snapshot::Snapshot};
 use acropolis_common::{
     genesis_values::GenesisValues,
     messages::{
-        EpochNonceMessage, ProtocolParamsMessage, SPOStakeDistributionMessage, SPOStateMessage,
+        EpochActivityMessage, ProtocolParamsMessage, SPOStakeDistributionMessage, SPOStateMessage,
     },
-    ouroboros::{self, vrf_validation::VrfValidationError},
-    protocol_params::{Nonce, PraosParams, ShelleyParams},
+    protocol_params::{Nonce, PraosParams},
+    rational_number::RationalNumber,
+    validation::VrfValidationError,
     BlockInfo, Era,
 };
 use anyhow::Result;
 use pallas::ledger::traverse::MultiEraHeader;
-
-use crate::snapshot::Snapshot;
+use tracing::error;
 
 #[derive(Default, Debug, Clone)]
 pub struct EpochSnapshots {
@@ -35,7 +36,7 @@ impl EpochSnapshots {
 #[derive(Default, Debug, Clone)]
 pub struct State {
     /// shelley params
-    pub shelley_params: Option<ShelleyParams>,
+    pub decentralisation_param: Option<RationalNumber>,
 
     /// protocol parameter for Praos and TPraos
     pub praos_params: Option<PraosParams>,
@@ -51,7 +52,7 @@ impl State {
     pub fn new() -> Self {
         Self {
             praos_params: None,
-            shelley_params: None,
+            decentralisation_param: None,
             epoch_nonce: None,
             epoch_snapshots: EpochSnapshots::default(),
         }
@@ -59,12 +60,13 @@ impl State {
 
     pub fn handle_protocol_parameters(&mut self, msg: &ProtocolParamsMessage) {
         if let Some(shelley_params) = msg.params.shelley.as_ref() {
-            self.shelley_params = Some(shelley_params.clone());
+            self.decentralisation_param =
+                Some(shelley_params.protocol_params.decentralisation_param);
             self.praos_params = Some(shelley_params.into());
         }
     }
 
-    pub fn handle_epoch_nonce(&mut self, msg: &EpochNonceMessage) {
+    pub fn handle_epoch_activity(&mut self, msg: &EpochActivityMessage) {
         self.epoch_nonce = msg.nonce.clone();
     }
 
@@ -80,28 +82,40 @@ impl State {
     pub fn validate_block_vrf(
         &self,
         block_info: &BlockInfo,
-        header: &MultiEraHeader,
+        raw_header: &[u8],
         genesis: &GenesisValues,
-    ) -> Result<(), VrfValidationError> {
+    ) -> Result<(), Box<VrfValidationError>> {
+        let header = match MultiEraHeader::decode(block_info.era as u8, None, raw_header) {
+            Ok(header) => header,
+            Err(e) => {
+                error!("Can't decode header {}: {e}", block_info.slot);
+                return Err(Box::new(VrfValidationError::Other(format!(
+                    "Can't decode header {}: {e}",
+                    block_info.slot
+                ))));
+            }
+        };
+
         // Validation starts after Shelley Era
         if block_info.epoch < genesis.shelley_epoch {
             return Ok(());
         }
 
-        let Some(shelley_params) = self.shelley_params.as_ref() else {
-            return Err(VrfValidationError::InvalidShelleyParams(
-                "Shelley Params are not set".to_string(),
-            ));
+        let Some(decentralisation_param) = self.decentralisation_param else {
+            return Err(Box::new(VrfValidationError::Other(
+                "Decentralisation Param is not set".to_string(),
+            )));
         };
         let Some(praos_params) = self.praos_params.as_ref() else {
-            return Err(VrfValidationError::InvalidShelleyParams(
+            return Err(Box::new(VrfValidationError::Other(
                 "Praos Params are not set".to_string(),
-            ));
+            )));
         };
         let Some(epoch_nonce) = self.epoch_nonce.as_ref() else {
-            return Err(VrfValidationError::MissingEpochNonce);
+            return Err(Box::new(VrfValidationError::Other(
+                "Epoch Nonce is not set".to_string(),
+            )));
         };
-        let decentralisation_param = shelley_params.protocol_params.decentralisation_param;
 
         let is_tpraos = matches!(
             block_info.era,
@@ -111,7 +125,7 @@ impl State {
         if is_tpraos {
             let result = ouroboros::tpraos::validate_vrf_tpraos(
                 block_info,
-                header,
+                &header,
                 epoch_nonce,
                 &genesis.genesis_delegs,
                 praos_params,
@@ -120,19 +134,23 @@ impl State {
                 self.epoch_snapshots.set.total_active_stakes,
                 decentralisation_param,
             )
-            .and_then(|vrf_validations| vrf_validations.iter().try_for_each(|assert| assert()));
+            .and_then(|vrf_validations| {
+                vrf_validations.iter().try_for_each(|assert| assert().map_err(Box::new))
+            });
             result
         } else {
             let result = ouroboros::praos::validate_vrf_praos(
                 block_info,
-                header,
+                &header,
                 epoch_nonce,
                 praos_params,
                 &self.epoch_snapshots.set.active_spos,
                 &self.epoch_snapshots.set.active_stakes,
                 self.epoch_snapshots.set.total_active_stakes,
             )
-            .and_then(|vrf_validations| vrf_validations.iter().try_for_each(|assert| assert()));
+            .and_then(|vrf_validations| {
+                vrf_validations.iter().try_for_each(|assert| assert().map_err(Box::new))
+            });
             result
         }
     }

@@ -116,7 +116,7 @@ impl TryFrom<u8> for Era {
 
 impl Display for Era {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self)
+        write!(f, "{self:?}")
     }
 }
 
@@ -695,14 +695,10 @@ impl Credential {
         let key_hash = decode(hex_str.to_owned().into_bytes())?;
         if key_hash.len() != 28 {
             Err(anyhow!(
-                "Invalid hash length for {:?}, expected 28 bytes",
-                hex_str
+                "Invalid hash length for {hex_str:?}, expected 28 bytes"
             ))
         } else {
-            key_hash
-                .as_slice()
-                .try_into()
-                .map_err(|e| anyhow!("Failed to convert to KeyHash {}", e))
+            key_hash.as_slice().try_into().map_err(|e| anyhow!("Failed to convert to KeyHash {e}"))
         }
     }
 
@@ -713,16 +709,15 @@ impl Credential {
             Ok(Credential::AddrKeyHash(Self::hex_string_to_hash(hash)?))
         } else {
             Err(anyhow!(
-                "Incorrect credential {}, expected scriptHash- or keyHash- prefix",
-                credential
+                "Incorrect credential {credential}, expected scriptHash- or keyHash- prefix"
             ))
         }
     }
 
     pub fn to_json_string(&self) -> String {
         match self {
-            Self::ScriptHash(hash) => format!("scriptHash-{}", hash),
-            Self::AddrKeyHash(hash) => format!("keyHash-{}", hash),
+            Self::ScriptHash(hash) => format!("scriptHash-{hash}"),
+            Self::AddrKeyHash(hash) => format!("keyHash-{hash}"),
         }
     }
 
@@ -748,8 +743,7 @@ impl Credential {
             "drep" => Ok(Credential::AddrKeyHash(hash)),
             "drep_script" => Ok(Credential::ScriptHash(hash)),
             _ => Err(anyhow!(
-                "Invalid HRP for DRep Bech32, expected 'drep' or 'drep_script', got '{}'",
-                hrp
+                "Invalid HRP for DRep Bech32, expected 'drep' or 'drep_script', got '{hrp}'"
             )),
         }
     }
@@ -1256,7 +1250,7 @@ impl GovActionId {
         let (hrp, data) = bech32::decode(bech32_str)?;
 
         if hrp != Hrp::parse("gov_action")? {
-            return Err(anyhow!("Invalid HRP, expected 'gov_action', got: {}", hrp));
+            return Err(anyhow!("Invalid HRP, expected 'gov_action', got: {hrp}"));
         }
 
         if data.len() < 33 {
@@ -1288,7 +1282,7 @@ impl GovActionId {
 impl Display for GovActionId {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self.to_bech32() {
-            Ok(s) => write!(f, "{}", s),
+            Ok(s) => write!(f, "{s}"),
             Err(e) => {
                 tracing::error!("GovActionId to_bech32 failed: {:?}", e);
                 write!(f, "<invalid-govactionid>")
@@ -1400,11 +1394,11 @@ impl TryFrom<Vec<(&str, (&str, &str))>> for GenesisDelegates {
                 .into_iter()
                 .map(|(genesis_key_str, (delegate_str, vrf_str))| {
                     let genesis_key = GenesisKeyhash::from_str(genesis_key_str)
-                        .map_err(|e| anyhow::anyhow!("Invalid genesis key hash: {}", e))?;
+                        .map_err(|e| anyhow::anyhow!("Invalid genesis key hash: {e}"))?;
                     let delegate = Hash::<28>::from_str(delegate_str)
-                        .map_err(|e| anyhow::anyhow!("Invalid genesis delegate: {}", e))?;
+                        .map_err(|e| anyhow::anyhow!("Invalid genesis delegate: {e}"))?;
                     let vrf = VrfKeyHash::from_str(vrf_str)
-                        .map_err(|e| anyhow::anyhow!("Invalid genesis VRF: {}", e))?;
+                        .map_err(|e| anyhow::anyhow!("Invalid genesis VRF: {e}"))?;
                     Ok((genesis_key, GenesisDelegate { delegate, vrf }))
                 })
                 .collect::<Result<_, Self::Error>>()?,

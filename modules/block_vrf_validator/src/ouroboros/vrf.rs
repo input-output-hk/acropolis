@@ -1,5 +1,6 @@
 use std::{array::TryFromSliceError, ops::Deref};
 
+use acropolis_common::protocol_params::Nonce;
 use anyhow::Result;
 use blake2::{digest::consts::U32, Blake2b, Digest};
 use thiserror::Error;
@@ -8,12 +9,9 @@ use vrf_dalek::{
     vrf03::{PublicKey03, VrfProof03},
 };
 
-use crate::protocol_params::Nonce;
-
 /// A VRF public key
 #[derive(Debug, PartialEq)]
 pub struct PublicKey(PublicKey03);
-pub type PublicKeyHash = [u8; PublicKey::HASH_SIZE];
 impl PublicKey {
     /// Size of a VRF public key, in bytes.
     pub const SIZE: usize = 32;

@@ -302,7 +302,7 @@ impl From<NonceHash> for Nonce {
 impl Nonce {
     pub fn from_number(n: u64) -> Self {
         let mut hasher = Blake2b::<U32>::new();
-        hasher.update(&n.to_be_bytes());
+        hasher.update(n.to_be_bytes());
         let hash: NonceHash = hasher.finalize().into();
         Self::from(hash)
     }
