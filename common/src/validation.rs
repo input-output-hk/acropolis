@@ -63,6 +63,10 @@ pub enum VrfValidationError {
     /// The pool lost the slot lottery
     #[error("VRF Leader Value Too Big")]
     VrfLeaderValueTooBig(#[from] VrfLeaderValueTooBigError),
+    /// **Cause:** This slot is in the overlay schedule but marked as non-active.
+    /// It's an intentional gap slot where no blocks should be produced.
+    #[error("Not Active slot in overlay schedule: {slot}")]
+    NotActiveSlotInOverlaySchedule { slot: Slot },
     /// **Cause:** Some data has incorrect bytes
     #[error("TryFromSlice: {0}")]
     TryFromSlice(String),

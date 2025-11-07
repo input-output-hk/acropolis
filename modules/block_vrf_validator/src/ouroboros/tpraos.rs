@@ -152,7 +152,11 @@ pub fn validate_vrf_tpraos<'a>(
         }
         Some(OBftSlot::NonActiveSlot) => {
             // This is a non-active slot; nobody may produce a block
-            Ok(vec![])
+            Ok(vec![Box::new(|| {
+                Err(VrfValidationError::NotActiveSlotInOverlaySchedule {
+                    slot: block_info.slot,
+                })
+            })])
         }
     }
 }
