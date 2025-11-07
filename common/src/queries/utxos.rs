@@ -1,3 +1,4 @@
+use crate::queries::errors::QueryError;
 use crate::{UTxOIdentifier, Value};
 
 pub const DEFAULT_UTXOS_QUERY_TOPIC: (&str, &str) =
@@ -13,6 +14,5 @@ pub enum UTxOStateQuery {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum UTxOStateQueryResponse {
     UTxOsSum(Value),
-    NotFound,
-    Error(String),
+    Error(QueryError),
 }

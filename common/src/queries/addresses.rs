@@ -1,3 +1,4 @@
+use crate::queries::errors::QueryError;
 use crate::{Address, AddressTotals, TxIdentifier, UTxOIdentifier};
 
 pub const DEFAULT_ADDRESS_QUERY_TOPIC: (&str, &str) =
@@ -15,6 +16,5 @@ pub enum AddressStateQueryResponse {
     AddressTotals(AddressTotals),
     AddressUTxOs(Vec<UTxOIdentifier>),
     AddressTransactions(Vec<TxIdentifier>),
-    NotFound,
-    Error(String),
+    Error(QueryError),
 }

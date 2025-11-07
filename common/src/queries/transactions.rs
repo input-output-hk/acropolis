@@ -6,6 +6,7 @@ pub const DEFAULT_TRANSACTIONS_QUERY_TOPIC: (&str, &str) = (
     "transactions-state-query-topic",
     "cardano.query.transactions",
 );
+use crate::queries::errors::QueryError;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum TransactionsStateQuery {
@@ -39,8 +40,7 @@ pub enum TransactionsStateQueryResponse {
     TransactionRedeemers(TransactionRedeemers),
     TransactionRequiredSigners(TransactionRequiredSigners),
     TransactionCBOR(TransactionCBOR),
-    NotFound,
-    Error(String),
+    Error(QueryError),
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]

@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
-use crate::{DRepChoice, PoolId, PoolLiveStakeInfo, RewardType, StakeAddress, TxIdentifier};
+use crate::queries::errors::QueryError;
+use crate::{
+    DRepChoice, PoolId, PoolLiveStakeInfo, RewardType, ShelleyAddress, StakeAddress, TxIdentifier,
+};
 
 pub const DEFAULT_ACCOUNTS_QUERY_TOPIC: (&str, &str) =
     ("accounts-state-query-topic", "cardano.query.accounts");
@@ -19,7 +22,7 @@ pub enum AccountsStateQuery {
     GetAccountDelegationHistory { account: StakeAddress },
     GetAccountMIRHistory { account: StakeAddress },
     GetAccountWithdrawalHistory { account: StakeAddress },
-    GetAccountAssociatedAddresses { stake_key: Vec<u8> },
+    GetAccountAssociatedAddresses { account: StakeAddress },
     GetAccountAssets { stake_key: Vec<u8> },
     GetAccountAssetsTotals { stake_key: Vec<u8> },
     GetAccountUTxOs { stake_key: Vec<u8> },
@@ -53,7 +56,7 @@ pub enum AccountsStateQueryResponse {
     AccountDelegationHistory(Vec<DelegationUpdate>),
     AccountMIRHistory(Vec<AccountWithdrawal>),
     AccountWithdrawalHistory(Vec<AccountWithdrawal>),
-    AccountAssociatedAddresses(AccountAssociatedAddresses),
+    AccountAssociatedAddresses(Vec<ShelleyAddress>),
     AccountAssets(AccountAssets),
     AccountAssetsTotals(AccountAssetsTotals),
     AccountUTxOs(AccountUTxOs),
@@ -78,9 +81,7 @@ pub enum AccountsStateQueryResponse {
     // DReps-related responses
     DrepDelegators(DrepDelegators),
     AccountsDrepDelegationsMap(HashMap<StakeAddress, Option<DRepChoice>>),
-
-    NotFound,
-    Error(String),
+    Error(QueryError),
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

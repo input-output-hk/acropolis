@@ -1,6 +1,7 @@
 mod stores;
 
 use acropolis_codec::{block::map_to_block_issuer, map_parameters};
+use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
     crypto::keyhash_224,
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
@@ -76,16 +77,22 @@ impl ChainStore {
             async move {
                 let Message::StateQuery(StateQuery::Blocks(query)) = req.as_ref() else {
                     return Arc::new(Message::StateQueryResponse(StateQueryResponse::Blocks(
-                        BlocksStateQueryResponse::Error("Invalid message for blocks-state".into()),
+                        BlocksStateQueryResponse::Error(QueryError::internal_error(
+                            "Invalid message for blocks-state",
+                        )),
                     )));
                 };
                 let Some(state) = query_history.lock().await.current().cloned() else {
                     return Arc::new(Message::StateQueryResponse(StateQueryResponse::Blocks(
-                        BlocksStateQueryResponse::Error("unitialised state".to_string()),
+                        BlocksStateQueryResponse::Error(QueryError::internal_error(
+                            "uninitialized state",
+                        )),
                     )));
                 };
-                let res = Self::handle_blocks_query(&query_store, &state, query)
-                    .unwrap_or_else(|err| BlocksStateQueryResponse::Error(err.to_string()));
+                let res =
+                    Self::handle_blocks_query(&query_store, &state, query).unwrap_or_else(|err| {
+                        BlocksStateQueryResponse::Error(QueryError::internal_error(err.to_string()))
+                    });
                 Arc::new(Message::StateQueryResponse(StateQueryResponse::Blocks(res)))
             }
         });
@@ -97,12 +104,15 @@ impl ChainStore {
                 let Message::StateQuery(StateQuery::Transactions(query)) = req.as_ref() else {
                     return Arc::new(Message::StateQueryResponse(
                         StateQueryResponse::Transactions(TransactionsStateQueryResponse::Error(
-                            "Invalid message for txs-state".into(),
+                            QueryError::internal_error("Invalid message for txs-state"),
                         )),
                     ));
                 };
-                let res = Self::handle_txs_query(&query_store, &query)
-                    .unwrap_or_else(|err| TransactionsStateQueryResponse::Error(err.to_string()));
+                let res = Self::handle_txs_query(&query_store, &query).unwrap_or_else(|err| {
+                    TransactionsStateQueryResponse::Error(QueryError::internal_error(
+                        err.to_string(),
+                    ))
+                });
                 Arc::new(Message::StateQueryResponse(
                     StateQueryResponse::Transactions(res),
                 ))
@@ -161,42 +171,54 @@ impl ChainStore {
         match query {
             BlocksStateQuery::GetLatestBlock => {
                 let Some(block) = store.get_latest_block()? else {
-                    return Ok(BlocksStateQueryResponse::NotFound);
+                    return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
+                        "Latest block not found",
+                    )));
                 };
                 let info = Self::to_block_info(block, store, state, true)?;
                 Ok(BlocksStateQueryResponse::LatestBlock(info))
             }
             BlocksStateQuery::GetLatestBlockTransactions { limit, skip, order } => {
                 let Some(block) = store.get_latest_block()? else {
-                    return Ok(BlocksStateQueryResponse::NotFound);
+                    return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
+                        "Latest block not found",
+                    )));
                 };
                 let txs = Self::to_block_transactions(block, limit, skip, order)?;
                 Ok(BlocksStateQueryResponse::LatestBlockTransactions(txs))
             }
             BlocksStateQuery::GetLatestBlockTransactionsCBOR { limit, skip, order } => {
                 let Some(block) = store.get_latest_block()? else {
-                    return Ok(BlocksStateQueryResponse::NotFound);
+                    return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
+                        "Latest block not found",
+                    )));
                 };
                 let txs = Self::to_block_transactions_cbor(block, limit, skip, order)?;
                 Ok(BlocksStateQueryResponse::LatestBlockTransactionsCBOR(txs))
             }
             BlocksStateQuery::GetBlockInfo { block_key } => {
                 let Some(block) = Self::get_block_by_key(store, block_key)? else {
-                    return Ok(BlocksStateQueryResponse::NotFound);
+                    return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
+                        format!("Block {:?} not found", block_key),
+                    )));
                 };
                 let info = Self::to_block_info(block, store, state, false)?;
                 Ok(BlocksStateQueryResponse::BlockInfo(info))
             }
             BlocksStateQuery::GetBlockBySlot { slot } => {
                 let Some(block) = store.get_block_by_slot(*slot)? else {
-                    return Ok(BlocksStateQueryResponse::NotFound);
+                    return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
+                        format!("Block at slot {} not found", slot),
+                    )));
                 };
                 let info = Self::to_block_info(block, store, state, false)?;
                 Ok(BlocksStateQueryResponse::BlockBySlot(info))
             }
             BlocksStateQuery::GetBlockByEpochSlot { epoch, slot } => {
                 let Some(block) = store.get_block_by_epoch_slot(*epoch, *slot)? else {
-                    return Ok(BlocksStateQueryResponse::NotFound);
+                    return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
+                        format!("Block at epoch {} slot {} not found", epoch, slot),
+                    )));
                 };
                 let info = Self::to_block_info(block, store, state, false)?;
                 Ok(BlocksStateQueryResponse::BlockByEpochSlot(info))
@@ -212,7 +234,9 @@ impl ChainStore {
                     }));
                 }
                 let Some(block) = Self::get_block_by_key(store, block_key)? else {
-                    return Ok(BlocksStateQueryResponse::NotFound);
+                    return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
+                        format!("Block {:?} not found", block_key),
+                    )));
                 };
                 let number = match block_key {
                     BlockKey::Number(number) => *number,
@@ -237,7 +261,9 @@ impl ChainStore {
                     }));
                 }
                 let Some(block) = Self::get_block_by_key(store, block_key)? else {
-                    return Ok(BlocksStateQueryResponse::NotFound);
+                    return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
+                        format!("Block {:?} not found", block_key),
+                    )));
                 };
                 let number = match block_key {
                     BlockKey::Number(number) => *number,
@@ -262,7 +288,9 @@ impl ChainStore {
                 order,
             } => {
                 let Some(block) = Self::get_block_by_key(store, block_key)? else {
-                    return Ok(BlocksStateQueryResponse::NotFound);
+                    return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
+                        format!("Block {:?} not found", block_key),
+                    )));
                 };
                 let txs = Self::to_block_transactions(block, limit, skip, order)?;
                 Ok(BlocksStateQueryResponse::BlockTransactions(txs))
@@ -274,7 +302,9 @@ impl ChainStore {
                 order,
             } => {
                 let Some(block) = Self::get_block_by_key(store, block_key)? else {
-                    return Ok(BlocksStateQueryResponse::NotFound);
+                    return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
+                        format!("Block {:?} not found", block_key),
+                    )));
                 };
                 let txs = Self::to_block_transactions_cbor(block, limit, skip, order)?;
                 Ok(BlocksStateQueryResponse::BlockTransactionsCBOR(txs))
@@ -285,7 +315,9 @@ impl ChainStore {
                 skip,
             } => {
                 let Some(block) = Self::get_block_by_key(store, block_key)? else {
-                    return Ok(BlocksStateQueryResponse::NotFound);
+                    return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
+                        format!("Block {:?} not found", block_key),
+                    )));
                 };
                 let addresses = Self::to_block_involved_addresses(block, limit, skip)?;
                 Ok(BlocksStateQueryResponse::BlockInvolvedAddresses(addresses))
@@ -631,14 +663,16 @@ impl ChainStore {
         match query {
             TransactionsStateQuery::GetTransactionInfo { tx_hash } => {
                 let Some(tx) = store.get_tx_by_hash(tx_hash.as_ref())? else {
-                    return Ok(TransactionsStateQueryResponse::NotFound);
+                    return Ok(TransactionsStateQueryResponse::Error(
+                        QueryError::not_found("Transaction not found"),
+                    ));
                 };
                 Ok(TransactionsStateQueryResponse::TransactionInfo(
                     Self::to_tx_info(tx)?,
                 ))
             }
             _ => Ok(TransactionsStateQueryResponse::Error(
-                "Unimplemented".to_string(),
+                QueryError::not_implemented("Unimplemented".to_string()),
             )),
         }
     }

@@ -1,6 +1,7 @@
 //! Acropolis SPO state module for Caryatid
 //! Accepts certificate events and derives the SPO state in memory
 
+use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
     ledger_state::SPOState as LedgerSPOState,
     messages::{
@@ -498,7 +499,9 @@ impl SPOState {
             async move {
                 let Message::StateQuery(StateQuery::Pools(query)) = message.as_ref() else {
                     return Arc::new(Message::StateQueryResponse(StateQueryResponse::Pools(
-                        PoolsStateQueryResponse::Error("Invalid message for pools-state".into()),
+                        PoolsStateQueryResponse::Error(QueryError::internal_error(
+                            "Invalid message for pools-state",
+                        )),
                     )));
                 };
 
@@ -507,14 +510,15 @@ impl SPOState {
                 let response = match query {
                     // NOTE:
                     // For now, we only store active pools
-                    // But we need to store retired pool's information also 
+                    // But we need to store retired pool's information also
                     // for BF's compatibility
-                    PoolsStateQuery::GetPoolInfo { pool_id } => {
-                        match state.get(pool_id) {
-                            Some(pool) => PoolsStateQueryResponse::PoolInfo(pool.clone()),
-                            None => PoolsStateQueryResponse::NotFound,
-                        }
-                    }
+                    PoolsStateQuery::GetPoolInfo { pool_id } => match state.get(pool_id) {
+                        Some(pool) => PoolsStateQueryResponse::PoolInfo(pool.clone()),
+                        None => PoolsStateQueryResponse::Error(QueryError::not_found(format!(
+                            "Pool {}",
+                            pool_id
+                        ))),
+                    },
 
                     PoolsStateQuery::GetPoolsList => {
                         PoolsStateQueryResponse::PoolsList(state.list_pool_operators())
@@ -544,7 +548,9 @@ impl SPOState {
                                     .unwrap_or(RationalNumber::from(0)),
                             })
                         } else {
-                            PoolsStateQueryResponse::Error("Epochs history is not enabled".into())
+                            PoolsStateQueryResponse::Error(QueryError::storage_disabled(
+                                "epochs history",
+                            ))
                         }
                     }
 
@@ -559,14 +565,16 @@ impl SPOState {
                                 active_stakes.unwrap_or(vec![0; pools_operators.len()]),
                             )
                         } else {
-                            PoolsStateQueryResponse::Error("Epochs history is not enabled".into())
+                            PoolsStateQueryResponse::Error(QueryError::storage_disabled(
+                                "epochs history",
+                            ))
                         }
                     }
 
-                    PoolsStateQuery::GetPoolsTotalBlocksMinted {
-                        pools_operators
-                    } => {
-                        PoolsStateQueryResponse::PoolsTotalBlocksMinted(state.get_total_blocks_minted_by_pools(pools_operators))
+                    PoolsStateQuery::GetPoolsTotalBlocksMinted { pools_operators } => {
+                        PoolsStateQueryResponse::PoolsTotalBlocksMinted(
+                            state.get_total_blocks_minted_by_pools(pools_operators),
+                        )
                     }
 
                     PoolsStateQuery::GetPoolHistory { pool_id } => {
@@ -575,9 +583,9 @@ impl SPOState {
                                 epochs_history.get_pool_history(pool_id).unwrap_or_default();
                             PoolsStateQueryResponse::PoolHistory(history)
                         } else {
-                            PoolsStateQueryResponse::Error(
-                                "Pool Epoch history is not enabled".into(),
-                            )
+                            PoolsStateQueryResponse::Error(QueryError::storage_disabled(
+                                "pool epoch history",
+                            ))
                         }
                     }
 
@@ -591,9 +599,9 @@ impl SPOState {
                             let retired_pools = retired_pools_history.get_retired_pools();
                             PoolsStateQueryResponse::PoolsRetiredList(retired_pools)
                         } else {
-                            PoolsStateQueryResponse::Error(
-                                "Pool retirement history is not enabled".into(),
-                            )
+                            PoolsStateQueryResponse::Error(QueryError::storage_disabled(
+                                "pool retirement history",
+                            ))
                         }
                     }
 
@@ -602,7 +610,10 @@ impl SPOState {
                         if let Some(pool_metadata) = pool_metadata {
                             PoolsStateQueryResponse::PoolMetadata(pool_metadata)
                         } else {
-                            PoolsStateQueryResponse::NotFound
+                            PoolsStateQueryResponse::Error(QueryError::not_found(format!(
+                                "Pool metadata for {}",
+                                pool_id
+                            )))
                         }
                     }
 
@@ -611,42 +622,64 @@ impl SPOState {
                         if let Some(relays) = pool_relays {
                             PoolsStateQueryResponse::PoolRelays(relays)
                         } else {
-                            PoolsStateQueryResponse::NotFound
+                            PoolsStateQueryResponse::Error(QueryError::not_found(format!(
+                                "Pool relays for {}",
+                                pool_id
+                            )))
                         }
                     }
 
                     PoolsStateQuery::GetPoolDelegators { pool_id } => {
-                        if state.is_historical_delegators_enabled() && state.is_stake_address_enabled() {
+                        if state.is_historical_delegators_enabled()
+                            && state.is_stake_address_enabled()
+                        {
                             let pool_delegators = state.get_pool_delegators(pool_id);
                             if let Some(pool_delegators) = pool_delegators {
                                 PoolsStateQueryResponse::PoolDelegators(PoolDelegators {
                                     delegators: pool_delegators,
                                 })
                             } else {
-                                PoolsStateQueryResponse::NotFound
+                                PoolsStateQueryResponse::Error(QueryError::not_found(format!(
+                                    "Pool delegators for {}",
+                                    pool_id
+                                )))
                             }
                         } else {
-                            PoolsStateQueryResponse::Error("Pool delegators are not enabled or stake addresses are not enabled".into())
+                            PoolsStateQueryResponse::Error(QueryError::storage_disabled(
+                                "pool delegators or stake addresses",
+                            ))
                         }
                     }
 
                     PoolsStateQuery::GetPoolTotalBlocksMinted { pool_id } => {
-                        PoolsStateQueryResponse::PoolTotalBlocksMinted(state.get_total_blocks_minted_by_pool(pool_id))
+                        PoolsStateQueryResponse::PoolTotalBlocksMinted(
+                            state.get_total_blocks_minted_by_pool(pool_id),
+                        )
                     }
 
                     PoolsStateQuery::GetBlocksByPool { pool_id } => {
                         if state.is_historical_blocks_enabled() {
-                            PoolsStateQueryResponse::BlocksByPool(state.get_blocks_by_pool(pool_id).unwrap_or_default())
+                            PoolsStateQueryResponse::BlocksByPool(
+                                state.get_blocks_by_pool(pool_id).unwrap_or_default(),
+                            )
                         } else {
-                            PoolsStateQueryResponse::Error("Blocks are not enabled".into())
+                            PoolsStateQueryResponse::Error(QueryError::storage_disabled(
+                                "historical blocks",
+                            ))
                         }
                     }
 
                     PoolsStateQuery::GetBlocksByPoolAndEpoch { pool_id, epoch } => {
                         if state.is_historical_blocks_enabled() {
-                            PoolsStateQueryResponse::BlocksByPoolAndEpoch(state.get_blocks_by_pool_and_epoch(pool_id, *epoch).unwrap_or_default())
+                            PoolsStateQueryResponse::BlocksByPoolAndEpoch(
+                                state
+                                    .get_blocks_by_pool_and_epoch(pool_id, *epoch)
+                                    .unwrap_or_default(),
+                            )
                         } else {
-                            PoolsStateQueryResponse::Error("Blocks are not enabled".into())
+                            PoolsStateQueryResponse::Error(QueryError::storage_disabled(
+                                "historical blocks",
+                            ))
                         }
                     }
 
@@ -656,18 +689,27 @@ impl SPOState {
                             if let Some(pool_updates) = pool_updates {
                                 PoolsStateQueryResponse::PoolUpdates(pool_updates)
                             } else {
-                                PoolsStateQueryResponse::NotFound
+                                PoolsStateQueryResponse::Error(QueryError::not_found(format!(
+                                    "Pool updates for {}",
+                                    pool_id
+                                )))
                             }
                         } else {
-                            PoolsStateQueryResponse::Error("Pool updates are not enabled".into())
+                            PoolsStateQueryResponse::Error(QueryError::storage_disabled(
+                                "pool updates",
+                            ))
                         }
                     }
 
                     PoolsStateQuery::GetPoolVotes { pool_id } => {
                         if state.is_historical_votes_enabled() {
-                            PoolsStateQueryResponse::PoolVotes(state.get_pool_votes(pool_id).unwrap_or_default())
+                            PoolsStateQueryResponse::PoolVotes(
+                                state.get_pool_votes(pool_id).unwrap_or_default(),
+                            )
                         } else {
-                            PoolsStateQueryResponse::Error("Pool votes are not enabled".into())
+                            PoolsStateQueryResponse::Error(QueryError::storage_disabled(
+                                "pool votes",
+                            ))
                         }
                     }
                 };

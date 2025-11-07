@@ -1,4 +1,8 @@
-use std::{collections::HashMap, path::Path};
+use std::{
+    collections::{HashMap, HashSet},
+    hash::Hash,
+    path::Path,
+};
 
 use acropolis_common::{
     queries::accounts::{AccountReward, AccountWithdrawal, DelegationUpdate, RegistrationUpdate},
@@ -127,10 +131,14 @@ impl ImmutableHistoricalAccountStore {
             }
 
             // Persist address updates
-            // TODO: Deduplicate addresses across epochs
             if config.store_addresses {
                 if let Some(updates) = &entry.addresses {
-                    batch.insert(&self.addresses, epoch_key, to_vec(updates)?);
+                    for (index, address) in updates.iter().enumerate() {
+                        let idx = index as u32;
+                        let address_key =
+                            Self::make_address_key(&account, epoch, idx, address.clone());
+                        batch.insert(&self.addresses, address_key, []);
+                    }
                 }
             }
         }
@@ -258,16 +266,35 @@ impl ImmutableHistoricalAccountStore {
         Ok((!immutable_withdrawals.is_empty()).then_some(immutable_withdrawals))
     }
 
-    pub async fn _get_addresses(
+    pub async fn get_addresses(
         &self,
         account: &StakeAddress,
     ) -> Result<Option<Vec<ShelleyAddress>>> {
-        let mut immutable_addresses =
-            self.collect_partition::<ShelleyAddress>(&self.addresses, account.get_hash().as_ref())?;
+        let prefix = account.to_binary();
+        let mut addresses = Vec::new();
+        let mut seen = HashSet::new();
 
-        self.merge_pending(account, |e| e.addresses.as_ref(), &mut immutable_addresses).await;
+        for result in self.addresses.prefix(&prefix) {
+            let (key, _) = result?;
+            let shelley = ShelleyAddress::from_bytes_key(&key[prefix.len() + 8..])?;
+            if seen.insert(shelley.clone()) {
+                addresses.push(shelley);
+            }
+        }
 
-        Ok((!immutable_addresses.is_empty()).then_some(immutable_addresses))
+        for block_map in self.pending.lock().await.iter() {
+            if let Some(entry) = block_map.get(account) {
+                if let Some(addrs) = &entry.addresses {
+                    for addr in addrs {
+                        if seen.insert(addr.clone()) {
+                            addresses.push(addr.clone());
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok((!addresses.is_empty()).then_some(addresses))
     }
 
     fn merge_block_deltas(
@@ -289,13 +316,12 @@ impl ImmutableHistoricalAccountStore {
                 );
                 Self::extend_opt_vec(&mut agg_entry.withdrawal_history, entry.withdrawal_history);
                 Self::extend_opt_vec(&mut agg_entry.mir_history, entry.mir_history);
-                Self::extend_opt_vec(&mut agg_entry.addresses, entry.addresses);
+                Self::extend_opt_vec_ordered(&mut agg_entry.addresses, entry.addresses);
             }
             acc
         })
     }
 
-    #[allow(dead_code)]
     fn collect_partition<T>(&self, partition: &Partition, prefix: &[u8]) -> Result<Vec<T>>
     where
         T: for<'a> minicbor::Decode<'a, ()>,
@@ -309,7 +335,6 @@ impl ImmutableHistoricalAccountStore {
         Ok(out)
     }
 
-    #[allow(dead_code)]
     async fn merge_pending<T, F>(&self, account: &StakeAddress, f: F, out: &mut Vec<T>)
     where
         F: Fn(&AccountEntry) -> Option<&Vec<T>>,
@@ -331,10 +356,44 @@ impl ImmutableHistoricalAccountStore {
         key
     }
 
+    fn make_address_key(
+        account: &StakeAddress,
+        epoch: u32,
+        index: u32,
+        address: ShelleyAddress,
+    ) -> Vec<u8> {
+        let mut key = Vec::new();
+        key.extend_from_slice(&account.to_binary());
+        key.extend_from_slice(&epoch.to_be_bytes());
+        key.extend_from_slice(&index.to_be_bytes());
+        key.extend_from_slice(&address.to_bytes_key());
+        key
+    }
+
     fn extend_opt_vec<T>(target: &mut Option<Vec<T>>, src: Option<Vec<T>>) {
         if let Some(mut v) = src {
             if !v.is_empty() {
                 target.get_or_insert_with(Vec::new).append(&mut v);
+            }
+        }
+    }
+
+    fn extend_opt_vec_ordered<T>(target: &mut Option<Vec<T>>, src: Option<Vec<T>>)
+    where
+        T: Eq + Hash + Clone,
+    {
+        if let Some(src_vec) = src {
+            if src_vec.is_empty() {
+                return;
+            }
+
+            let target_vec = target.get_or_insert_with(Vec::new);
+            let mut seen: HashSet<T> = target_vec.iter().cloned().collect();
+
+            for item in src_vec {
+                if seen.insert(item.clone()) {
+                    target_vec.push(item);
+                }
             }
         }
     }

@@ -121,9 +121,6 @@ async fn handle_transaction_query(
                             ParametersStateQueryResponse::EpochParameters(params),
                         )) => Ok(params),
                         Message::StateQueryResponse(StateQueryResponse::Parameters(
-                            ParametersStateQueryResponse::NotFound,
-                        )) => Err(anyhow!("Could not query parameters")),
-                        Message::StateQueryResponse(StateQueryResponse::Parameters(
                             ParametersStateQueryResponse::Error(e),
                         )) => Err(anyhow!(e)),
                         _ => Err(anyhow!("Unexpected response")),
@@ -148,9 +145,6 @@ async fn handle_transaction_query(
                 };
                 Some(Ok(Some(TxInfo(txs_info, fee, deposit))))
             }
-            Message::StateQueryResponse(StateQueryResponse::Transactions(
-                TransactionsStateQueryResponse::NotFound,
-            )) => Some(Ok(None)),
             Message::StateQueryResponse(StateQueryResponse::Transactions(
                 TransactionsStateQueryResponse::Error(e),
             )) => Some(Err(anyhow!(e))),
