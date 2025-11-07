@@ -8,7 +8,7 @@ use acropolis_common::{
     messages::{
         EpochActivityMessage, ProtocolParamsMessage, SPOStakeDistributionMessage, SPOStateMessage,
     },
-    protocol_params::{Nonce, PraosParams},
+    protocol_params::Nonce,
     rational_number::RationalNumber,
     validation::VrfValidationError,
     BlockInfo, Era,
@@ -33,11 +33,9 @@ impl EpochSnapshots {
 
 #[derive(Default, Debug, Clone)]
 pub struct State {
-    /// shelley params
     pub decentralisation_param: Option<RationalNumber>,
 
-    /// protocol parameter for Praos and TPraos
-    pub praos_params: Option<PraosParams>,
+    pub active_slots_coeff: Option<RationalNumber>,
 
     /// epoch nonce
     pub epoch_nonce: Option<Nonce>,
@@ -49,7 +47,7 @@ pub struct State {
 impl State {
     pub fn new() -> Self {
         Self {
-            praos_params: None,
+            active_slots_coeff: None,
             decentralisation_param: None,
             epoch_nonce: None,
             epoch_snapshots: EpochSnapshots::default(),
@@ -60,7 +58,7 @@ impl State {
         if let Some(shelley_params) = msg.params.shelley.as_ref() {
             self.decentralisation_param =
                 Some(shelley_params.protocol_params.decentralisation_param);
-            self.praos_params = Some(shelley_params.into());
+            self.active_slots_coeff = Some(shelley_params.active_slots_coeff);
         }
     }
 
@@ -104,9 +102,9 @@ impl State {
                 "Decentralisation Param is not set".to_string(),
             )));
         };
-        let Some(praos_params) = self.praos_params.as_ref() else {
+        let Some(active_slots_coeff) = self.active_slots_coeff else {
             return Err(Box::new(VrfValidationError::Other(
-                "Praos Params are not set".to_string(),
+                "Active Slots Coeff is not set".to_string(),
             )));
         };
         let Some(epoch_nonce) = self.epoch_nonce.as_ref() else {
@@ -126,11 +124,11 @@ impl State {
                 &header,
                 epoch_nonce,
                 &genesis.genesis_delegs,
-                praos_params,
+                active_slots_coeff,
+                decentralisation_param,
                 &self.epoch_snapshots.set.active_spos,
                 &self.epoch_snapshots.set.active_stakes,
                 self.epoch_snapshots.set.total_active_stakes,
-                decentralisation_param,
             )
             .and_then(|vrf_validations| {
                 vrf_validations.iter().try_for_each(|assert| assert().map_err(Box::new))
@@ -141,7 +139,7 @@ impl State {
                 block_info,
                 &header,
                 epoch_nonce,
-                praos_params,
+                active_slots_coeff,
                 &self.epoch_snapshots.set.active_spos,
                 &self.epoch_snapshots.set.active_stakes,
                 self.epoch_snapshots.set.total_active_stakes,

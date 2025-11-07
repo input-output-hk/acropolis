@@ -6,7 +6,7 @@ use crate::ouroboros::{
 };
 use acropolis_common::{
     crypto::keyhash_224,
-    protocol_params::{Nonce, PraosParams},
+    protocol_params::Nonce,
     rational_number::RationalNumber,
     validation::{VrfValidation, VrfValidationError},
     BlockInfo, PoolId, VrfKeyHash,
@@ -19,13 +19,11 @@ pub fn validate_vrf_praos<'a>(
     block_info: &'a BlockInfo,
     header: &'a MultiEraHeader,
     epoch_nonce: &'a Nonce,
-    praos_params: &'a PraosParams,
+    active_slots_coeff: RationalNumber,
     active_spos: &'a HashMap<PoolId, VrfKeyHash>,
     active_spdd: &'a HashMap<PoolId, u64>,
     total_active_stake: u64,
 ) -> Result<Vec<VrfValidation<'a>>, Box<VrfValidationError>> {
-    let active_slots_coeff = praos_params.active_slots_coeff;
-
     let Some(issuer_vkey) = header.issuer_vkey() else {
         return Ok(vec![Box::new(|| {
             Err(VrfValidationError::Other(
@@ -101,7 +99,6 @@ mod tests {
 
     #[test]
     fn test_7854823_block() {
-        let praos_params = PraosParams::mainnet();
         let epoch_nonce = Nonce::from(
             NonceHash::try_from(
                 hex::decode("8dad163edf4607452fec9c5955d593fb598ca728bae162138f88da6667bba79b")
@@ -110,6 +107,7 @@ mod tests {
             )
             .unwrap(),
         );
+        let active_slots_coeff = RationalNumber::new(1, 20);
 
         let block_header_7854823: Vec<u8> =
             hex::decode(include_str!("./data/7854823.cbor")).unwrap();
@@ -142,7 +140,7 @@ mod tests {
             &block_info,
             &block_header,
             &epoch_nonce,
-            &praos_params,
+            active_slots_coeff,
             &active_spos,
             &active_spdd,
             25069171797357766,

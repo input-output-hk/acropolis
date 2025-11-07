@@ -8,7 +8,7 @@ use crate::ouroboros::{
 };
 use acropolis_common::{
     crypto::keyhash_224,
-    protocol_params::{Nonce, PraosParams},
+    protocol_params::Nonce,
     rational_number::RationalNumber,
     validation::{VrfValidation, VrfValidationError},
     BlockInfo, GenesisDelegates, PoolId, VrfKeyHash,
@@ -23,14 +23,12 @@ pub fn validate_vrf_tpraos<'a>(
     header: &'a MultiEraHeader,
     epoch_nonce: &'a Nonce,
     genesis_delegs: &'a GenesisDelegates,
-    praos_params: &'a PraosParams,
+    active_slots_coeff: RationalNumber,
+    decentralisation_param: RationalNumber,
     active_spos: &'a HashMap<PoolId, VrfKeyHash>,
     active_spdd: &'a HashMap<PoolId, u64>,
     total_active_stake: u64,
-    decentralisation_param: RationalNumber,
 ) -> Result<Vec<VrfValidation<'a>>, Box<VrfValidationError>> {
-    let active_slots_coeff = praos_params.active_slots_coeff;
-
     // first look up for overlay slot
     let obft_slot = overlay_schedule::lookup_in_overlay_schedule(
         block_info.epoch_slot,
@@ -189,7 +187,6 @@ mod tests {
     #[test]
     fn test_4490511_block_produced_by_genesis_key() {
         let genesis_value = GenesisValues::mainnet();
-        let praos_params = PraosParams::mainnet();
         let epoch_nonce = Nonce::from(
             NonceHash::try_from(
                 hex::decode("1a3be38bcbb7911969283716ad7aa550250226b76a61fc51cc9a9a35d9276d81")
@@ -198,6 +195,7 @@ mod tests {
             )
             .unwrap(),
         );
+        let active_slots_coeff = RationalNumber::new(1, 20);
         let decentralisation_param = RationalNumber::from(1);
 
         let block_header_4490511: Vec<u8> =
@@ -226,11 +224,11 @@ mod tests {
             &block_header,
             &epoch_nonce,
             &genesis_value.genesis_delegs,
-            &praos_params,
+            active_slots_coeff,
+            decentralisation_param,
             &active_spos,
             &active_spdd,
             1,
-            decentralisation_param,
         )
         .and_then(|vrf_validations| {
             vrf_validations.iter().try_for_each(|assert| assert().map_err(Box::new))
@@ -241,7 +239,6 @@ mod tests {
     #[test]
     fn test_4556956_block() {
         let genesis_value = GenesisValues::mainnet();
-        let praos_params = PraosParams::mainnet();
         let epoch_nonce = Nonce::from(
             NonceHash::try_from(
                 hex::decode("3fac34ac3d7d1ac6c976ba68b1509b1ee3aafdbf6de96e10789e488e13e16bd7")
@@ -250,6 +247,7 @@ mod tests {
             )
             .unwrap(),
         );
+        let active_slots_coeff = RationalNumber::new(1, 20);
         let decentralisation_param = RationalNumber::new(9, 10);
 
         let block_header_4556956: Vec<u8> =
@@ -284,11 +282,11 @@ mod tests {
             &block_header,
             &epoch_nonce,
             &genesis_value.genesis_delegs,
-            &praos_params,
+            active_slots_coeff,
+            decentralisation_param,
             &active_spos,
             &active_spdd,
             10177811974823000,
-            decentralisation_param,
         )
         .and_then(|vrf_validations| {
             vrf_validations.iter().try_for_each(|assert| assert().map_err(Box::new))
@@ -299,7 +297,6 @@ mod tests {
     #[test]
     fn test_4576496_block() {
         let genesis_value = GenesisValues::mainnet();
-        let praos_params = PraosParams::mainnet();
         let epoch_nonce = Nonce::from(
             NonceHash::try_from(
                 hex::decode("3fac34ac3d7d1ac6c976ba68b1509b1ee3aafdbf6de96e10789e488e13e16bd7")
@@ -308,6 +305,7 @@ mod tests {
             )
             .unwrap(),
         );
+        let active_slots_coeff = RationalNumber::new(1, 20);
         let decentralisation_param = RationalNumber::new(9, 10);
 
         let block_header_4576496: Vec<u8> =
@@ -342,11 +340,11 @@ mod tests {
             &block_header,
             &epoch_nonce,
             &genesis_value.genesis_delegs,
-            &praos_params,
+            active_slots_coeff,
+            decentralisation_param,
             &active_spos,
             &active_spdd,
             10177811974823000,
-            decentralisation_param,
         )
         .and_then(|vrf_validations| {
             vrf_validations.iter().try_for_each(|assert| assert().map_err(Box::new))
@@ -357,7 +355,6 @@ mod tests {
     #[test]
     fn test_4576496_block_as_unknown_pool() {
         let genesis_value = GenesisValues::mainnet();
-        let praos_params = PraosParams::mainnet();
         let epoch_nonce = Nonce::from(
             NonceHash::try_from(
                 hex::decode("3fac34ac3d7d1ac6c976ba68b1509b1ee3aafdbf6de96e10789e488e13e16bd7")
@@ -366,6 +363,7 @@ mod tests {
             )
             .unwrap(),
         );
+        let active_slots_coeff = RationalNumber::new(1, 20);
         let decentralisation_param = RationalNumber::new(9, 10);
 
         let block_header_4576496: Vec<u8> =
@@ -397,11 +395,11 @@ mod tests {
             &block_header,
             &epoch_nonce,
             &genesis_value.genesis_delegs,
-            &praos_params,
+            active_slots_coeff,
+            decentralisation_param,
             &active_spos,
             &active_spdd,
             10177811974823000,
-            decentralisation_param,
         )
         .and_then(|vrf_validations| {
             vrf_validations.iter().try_for_each(|assert| assert().map_err(Box::new))
@@ -416,7 +414,6 @@ mod tests {
     #[test]
     fn test_4576496_block_as_wrong_leader_vrf_key() {
         let genesis_value = GenesisValues::mainnet();
-        let praos_params = PraosParams::mainnet();
         let epoch_nonce = Nonce::from(
             NonceHash::try_from(
                 hex::decode("3fac34ac3d7d1ac6c976ba68b1509b1ee3aafdbf6de96e10789e488e13e16bd7")
@@ -425,6 +422,7 @@ mod tests {
             )
             .unwrap(),
         );
+        let active_slots_coeff = RationalNumber::new(1, 20);
         let decentralisation_param = RationalNumber::new(9, 10);
 
         let block_header_4576496: Vec<u8> =
@@ -457,11 +455,11 @@ mod tests {
             &block_header,
             &epoch_nonce,
             &genesis_value.genesis_delegs,
-            &praos_params,
+            active_slots_coeff,
+            decentralisation_param,
             &active_spos,
             &active_spdd,
             10177811974823000,
-            decentralisation_param,
         )
         .and_then(|vrf_validations| {
             vrf_validations.iter().try_for_each(|assert| assert().map_err(Box::new))
@@ -484,7 +482,6 @@ mod tests {
     #[test]
     fn test_4576496_block_with_small_active_stake() {
         let genesis_value = GenesisValues::mainnet();
-        let praos_params = PraosParams::mainnet();
         let epoch_nonce = Nonce::from(
             NonceHash::try_from(
                 hex::decode("3fac34ac3d7d1ac6c976ba68b1509b1ee3aafdbf6de96e10789e488e13e16bd7")
@@ -493,6 +490,7 @@ mod tests {
             )
             .unwrap(),
         );
+        let active_slots_coeff = RationalNumber::new(1, 20);
         let decentralisation_param = RationalNumber::new(9, 10);
 
         let block_header_4576496: Vec<u8> =
@@ -528,11 +526,11 @@ mod tests {
             &block_header,
             &epoch_nonce,
             &genesis_value.genesis_delegs,
-            &praos_params,
+            active_slots_coeff,
+            decentralisation_param,
             &active_spos,
             &active_spdd,
             10177811974823000,
-            decentralisation_param,
         )
         .and_then(|vrf_validations| {
             vrf_validations.iter().try_for_each(|assert| assert().map_err(Box::new))
