@@ -5,8 +5,12 @@ use anyhow::Result;
 use caryatid_process::Process;
 use caryatid_sdk::ModuleRegistry;
 use config::{Config, Environment, File};
+use opentelemetry::trace::TracerProvider as _;
+use opentelemetry_otlp::SpanExporter;
+use opentelemetry_sdk::trace::SdkTracerProvider;
 use std::sync::Arc;
 use tracing::info;
+use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{filter, fmt, EnvFilter, Registry};
 
@@ -41,6 +45,12 @@ mod replayer_config;
 use playback::Playback;
 use recorder::Recorder;
 use recorder_alonzo_governance::RecorderAlonzoGovernance;
+
+#[cfg(not(target_env = "msvc"))]
+use tikv_jemallocator::Jemalloc;
+#[cfg(not(target_env = "msvc"))]
+#[global_allocator]
+static GLOBAL: Jemalloc = Jemalloc;
 
 fn setup_governance_collect(process: &mut dyn ModuleRegistry<Message>) {
     tracing::info!("Collecting");
@@ -131,14 +141,31 @@ struct Args {
 pub async fn main() -> Result<()> {
     let args = <self::Args as clap::Parser>::parse();
 
-    // Initialise tracing
+    // Standard logging using RUST_LOG for log levels default to INFO for events only
     let fmt_layer = fmt::layer()
-        .with_filter(EnvFilter::from_default_env().add_directive(filter::LevelFilter::INFO.into()))
+        .with_filter(EnvFilter::try_from_default_env().unwrap_or(EnvFilter::new("info")))
         .with_filter(filter::filter_fn(|meta| meta.is_event()));
-    //tracing_subscriber::fmt::init();
-    Registry::default().with(fmt_layer).init();
 
-    info!("Acropolis omnibus process");
+    // Only turn on tracing if some OTEL environment variables exist
+    if std::env::vars().any(|(name, _)| name.starts_with("OTEL_")) {
+        // Send span tracing to opentelemetry
+        // Should pick up standard OTEL_* environment variables
+        let otel_exporter = SpanExporter::builder().with_tonic().build()?;
+        let otel_tracer = SdkTracerProvider::builder()
+            .with_batch_exporter(otel_exporter)
+            .build()
+            .tracer("rust-otel-otlp");
+        let otel_layer = OpenTelemetryLayer::new(otel_tracer)
+            .with_filter(
+                EnvFilter::from_default_env().add_directive(filter::LevelFilter::INFO.into()),
+            )
+            .with_filter(filter::filter_fn(|meta| meta.is_span()));
+        Registry::default().with(fmt_layer).with(otel_layer).init();
+    } else {
+        Registry::default().with(fmt_layer).init();
+    }
+
+    info!("Acropolis replayer process");
 
     // Read the config
     let config = Arc::new(

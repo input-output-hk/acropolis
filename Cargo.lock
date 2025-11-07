@@ -19,7 +19,6 @@ name = "acropolis_common"
 version = "0.3.0"
 dependencies = [
  "anyhow",
- "async-trait",
  "bech32 0.11.0",
  "bigdecimal",
  "bitmask-enum",
@@ -35,12 +34,8 @@ dependencies = [
  "crc",
  "cryptoxide 0.5.1",
  "dashmap",
- "fraction",
  "futures",
- "gcd",
  "hex",
- "imbl",
- "lf-queue",
  "memmap2",
  "minicbor 0.26.5",
  "num-rational",
@@ -84,14 +79,10 @@ version = "0.1.0"
 dependencies = [
  "acropolis_common",
  "anyhow",
- "async-trait",
  "caryatid_sdk",
  "config",
  "fjall",
- "hex",
- "imbl",
  "minicbor 0.26.5",
- "serde_cbor",
  "tempfile",
  "tokio",
  "tracing",
@@ -122,7 +113,6 @@ dependencies = [
  "caryatid_sdk",
  "config",
  "pallas 0.33.0",
- "tokio",
  "tracing",
 ]
 
@@ -137,7 +127,6 @@ dependencies = [
  "config",
  "fjall",
  "hex",
- "imbl",
  "minicbor 0.26.5",
  "pallas-traverse 0.33.0",
  "tempfile",
@@ -154,7 +143,6 @@ dependencies = [
  "caryatid_sdk",
  "config",
  "futures",
- "pallas 0.33.0",
  "tokio",
  "tracing",
 ]
@@ -183,9 +171,7 @@ dependencies = [
  "anyhow",
  "caryatid_sdk",
  "config",
- "hex",
  "serde",
- "serde_json",
  "serde_with 3.15.1",
  "tokio",
  "tracing",
@@ -203,8 +189,6 @@ dependencies = [
  "hex",
  "imbl",
  "pallas 0.33.0",
- "serde",
- "serde_json",
  "tokio",
  "tracing",
 ]
@@ -218,7 +202,6 @@ dependencies = [
  "blake2 0.10.6",
  "caryatid_sdk",
  "config",
- "hex",
  "pallas 0.33.0",
  "reqwest 0.12.24",
  "serde_json",
@@ -232,7 +215,6 @@ version = "0.1.0"
 dependencies = [
  "acropolis_common",
  "anyhow",
- "async-trait",
  "caryatid_sdk",
  "config",
  "csv",
@@ -274,7 +256,6 @@ dependencies = [
  "mithril-client",
  "mithril-common",
  "pallas 0.32.1",
- "reqwest 0.11.27",
  "serde_json",
  "tokio",
  "tracing",
@@ -286,18 +267,15 @@ version = "0.1.0"
 dependencies = [
  "acropolis_common",
  "anyhow",
- "async-trait",
  "base64 0.22.1",
  "blake2 0.10.6",
  "caryatid_sdk",
  "config",
  "hex",
- "num-rational",
  "pallas 0.33.0",
  "reqwest 0.11.27",
  "serde",
  "serde_json",
- "serde_with 3.15.1",
  "tokio",
  "tracing",
 ]
@@ -308,10 +286,7 @@ version = "0.1.0"
 dependencies = [
  "acropolis_common",
  "anyhow",
- "async-trait",
- "bech32 0.11.0",
  "blake2 0.10.6",
- "caryatid_module_rest_server",
  "caryatid_sdk",
  "config",
  "hex",
@@ -334,10 +309,6 @@ dependencies = [
  "anyhow",
  "caryatid_sdk",
  "config",
- "fraction",
- "hex",
- "pallas 0.33.0",
- "serde_json",
  "tokio",
  "tracing",
 ]
@@ -366,13 +337,10 @@ dependencies = [
  "caryatid_sdk",
  "config",
  "dashmap",
- "hex",
  "imbl",
  "pallas 0.33.0",
  "rayon",
  "serde",
- "serde_json",
- "serde_with 3.15.1",
  "tokio",
  "tracing",
 ]
@@ -383,15 +351,12 @@ version = "0.1.0"
 dependencies = [
  "acropolis_common",
  "anyhow",
- "async-trait",
  "bech32 0.11.0",
  "caryatid_sdk",
  "config",
- "hex",
  "pallas 0.33.0",
  "serde",
  "serde_json",
- "serde_json_any_key",
  "serde_with 3.15.1",
  "tokio",
  "tracing",
@@ -419,15 +384,11 @@ dependencies = [
  "acropolis_codec",
  "acropolis_common",
  "anyhow",
- "async-trait",
  "caryatid_sdk",
  "config",
  "futures",
  "hex",
  "pallas 0.33.0",
- "serde",
- "serde_json",
- "tokio",
  "tracing",
 ]
 
@@ -458,10 +419,8 @@ dependencies = [
  "config",
  "dashmap",
  "fjall",
- "hex",
  "serde",
  "serde_cbor",
- "serde_json",
  "sled",
  "tokio",
  "tracing",
@@ -498,16 +457,11 @@ dependencies = [
  "caryatid_module_rest_server",
  "caryatid_module_spy",
  "caryatid_process",
- "caryatid_sdk",
- "chrono",
  "clap",
  "config",
  "opentelemetry",
  "opentelemetry-otlp",
- "opentelemetry-stdout",
  "opentelemetry_sdk",
- "serde",
- "serde_json",
  "tikv-jemallocator",
  "tokio",
  "tracing",
@@ -521,17 +475,13 @@ version = "0.1.0"
 dependencies = [
  "acropolis_common",
  "acropolis_module_accounts_state",
- "acropolis_module_address_state",
- "acropolis_module_assets_state",
  "acropolis_module_block_unpacker",
- "acropolis_module_chain_store",
  "acropolis_module_consensus",
  "acropolis_module_drdd_state",
  "acropolis_module_drep_state",
  "acropolis_module_epochs_state",
  "acropolis_module_genesis_bootstrapper",
  "acropolis_module_governance_state",
- "acropolis_module_historical_accounts_state",
  "acropolis_module_mithril_snapshot_fetcher",
  "acropolis_module_parameters_state",
  "acropolis_module_rest_blockfrost",
@@ -547,12 +497,10 @@ dependencies = [
  "caryatid_module_spy",
  "caryatid_process",
  "caryatid_sdk",
- "chrono",
  "clap",
  "config",
  "opentelemetry",
  "opentelemetry-otlp",
- "opentelemetry-stdout",
  "opentelemetry_sdk",
  "serde",
  "serde_json",
@@ -569,33 +517,15 @@ name = "acropolis_process_testing"
 version = "0.1.0"
 dependencies = [
  "acropolis_common",
- "acropolis_module_accounts_state",
- "acropolis_module_block_unpacker",
- "acropolis_module_drep_state",
- "acropolis_module_epochs_state",
- "acropolis_module_governance_state",
- "acropolis_module_mithril_snapshot_fetcher",
- "acropolis_module_parameters_state",
  "acropolis_module_snapshot_bootstrapper",
  "acropolis_module_spo_state",
- "acropolis_module_stake_delta_filter",
  "acropolis_module_tx_unpacker",
- "acropolis_module_upstream_chain_fetcher",
- "acropolis_module_utxo_state",
  "anyhow",
- "caryatid_module_clock",
- "caryatid_module_rest_server",
- "caryatid_module_spy",
  "caryatid_process",
  "caryatid_sdk",
- "chrono",
  "config",
  "hex",
- "serde",
- "serde_json",
  "tokio",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -609,8 +539,6 @@ dependencies = [
  "caryatid_sdk",
  "clap",
  "config",
- "hex",
- "pallas 0.33.0",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -2425,16 +2353,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fraction"
-version = "0.15.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f158e3ff0a1b334408dc9fb811cd99b446986f4d8b741bb08f9df1604085ae7"
-dependencies = [
- "lazy_static",
- "num",
-]
-
-[[package]]
 name = "fs2"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2574,25 +2492,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c31b6d751ae2c7f11320402d34e41349dd1016f8d5d45e48c4312bc8625af50c"
 dependencies = [
  "byteorder",
-]
-
-[[package]]
-name = "gcd"
-version = "2.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d758ba1b47b00caf47f24925c0074ecb20d6dfcffe7f6d53395c0465674841a"
-
-[[package]]
-name = "generator"
-version = "0.7.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5cc16584ff22b460a382b7feec54b23d2908d858152e5739a120b949293bd74e"
-dependencies = [
- "cc",
- "libc",
- "log",
- "rustversion",
- "windows",
 ]
 
 [[package]]
@@ -3333,15 +3232,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
-name = "lf-queue"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4e2c450d70f884e4d9eab71db8b6228d2c1c51cc9847a3e15530b522d511ed68"
-dependencies = [
- "loom",
-]
-
-[[package]]
 name = "libc"
 version = "0.2.177"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3406,19 +3296,6 @@ name = "log"
 version = "0.4.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "34080505efa8e45a4b816c349525ebe327ceaa8559756f0356cba97ef3bf7432"
-
-[[package]]
-name = "loom"
-version = "0.5.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff50ecb28bb86013e935fb6683ab1f6d3a20016f123c76fd4c27470076ac30f5"
-dependencies = [
- "cfg-if",
- "generator",
- "scoped-tls",
- "tracing",
- "tracing-subscriber",
-]
 
 [[package]]
 name = "lru-slab"
@@ -3741,35 +3618,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "num"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "35bd024e8b2ff75562e5f34e7f4905839deb4b22955ef5e73d2fea1b9813cb23"
-dependencies = [
- "num-bigint",
- "num-complex",
- "num-integer",
- "num-iter",
- "num-rational",
- "num-traits",
-]
-
-[[package]]
 name = "num-bigint"
 version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a5e44f723f1133c9deac646763579fdb3ac745e418f2a7af9cd0c431da1f20b9"
 dependencies = [
  "num-integer",
- "num-traits",
-]
-
-[[package]]
-name = "num-complex"
-version = "0.4.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "73f88a1307638156682bada9d7604135552957b7818057dcef22705b4d509495"
-dependencies = [
  "num-traits",
 ]
 
@@ -3785,17 +3639,6 @@ version = "0.1.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7969661fd2958a5cb096e56c8e1ad0444ac2bbcd0061bd28660485a44879858f"
 dependencies = [
- "num-traits",
-]
-
-[[package]]
-name = "num-iter"
-version = "0.1.45"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1429034a0490724d0075ebb2bc9e875d6503c3cf69e235a8941aa757d83ef5bf"
-dependencies = [
- "autocfg",
- "num-integer",
  "num-traits",
 ]
 
@@ -3957,17 +3800,6 @@ dependencies = [
  "opentelemetry_sdk",
  "prost",
  "tonic 0.13.1",
-]
-
-[[package]]
-name = "opentelemetry-stdout"
-version = "0.30.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "447191061af41c3943e082ea359ab8b64ff27d6d34d30d327df309ddef1eef6f"
-dependencies = [
- "chrono",
- "opentelemetry",
- "opentelemetry_sdk",
 ]
 
 [[package]]
@@ -5528,12 +5360,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "scoped-tls"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e1cf6437eb19a8f4a6cc0f7dca544973b0b78843adbfeb3683d1a94a0024a294"
-
-[[package]]
 name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5664,16 +5490,6 @@ dependencies = [
  "ryu",
  "serde",
  "serde_core",
-]
-
-[[package]]
-name = "serde_json_any_key"
-version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b2c409ca1209f6c4741028b9e1e56d973c868ffaef25ffbaf2471e486c2a74b3"
-dependencies = [
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -6926,15 +6742,6 @@ name = "winapi-x86_64-pc-windows-gnu"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
-
-[[package]]
-name = "windows"
-version = "0.48.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e686886bc078bc1b0b600cac0147aadb815089b6e4da64016cbd754b6342700f"
-dependencies = [
- "windows-targets 0.48.5",
-]
 
 [[package]]
 name = "windows-core"
