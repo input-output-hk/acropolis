@@ -21,7 +21,6 @@ where
     extractor(message)
 }
 
-/// The outer option in the extractor return value is whether the response was handled by F
 pub async fn rest_query_state<T, F>(
     context: &Arc<Context<Message>>,
     topic: &str,
@@ -33,9 +32,11 @@ where
     T: Serialize,
 {
     let data = query_state(context, topic, request_msg, |response| {
-        extractor(response).ok_or_else(Err(QueryError::internal_error(format!(
-            "Unexpected response message type while calling {topic}"
-        ))))
+        extractor(response).ok_or_else(|| {
+            QueryError::internal_error(format!(
+                "Unexpected response message type while calling {topic}"
+            ))
+        })?
     })
     .await?;
 
