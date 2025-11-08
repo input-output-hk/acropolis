@@ -1,8 +1,11 @@
+use std::str::FromStr;
+
 use crate::{
     calculations::{
         epoch_to_first_slot_with_shelley_params, slot_to_epoch_with_shelley_params,
         slot_to_timestamp_with_params,
     },
+    hash::Hash,
     GenesisDelegates,
 };
 const MAINNET_SHELLEY_GENESIS_HASH: &str =
@@ -13,7 +16,7 @@ pub struct GenesisValues {
     pub byron_timestamp: u64,
     pub shelley_epoch: u64,
     pub shelley_epoch_len: u64,
-    pub shelley_genesis_hash: [u8; 32],
+    pub shelley_genesis_hash: Hash<32>,
     pub genesis_delegs: GenesisDelegates,
 }
 
@@ -23,10 +26,7 @@ impl GenesisValues {
             byron_timestamp: 1506203091,
             shelley_epoch: 208,
             shelley_epoch_len: 432000,
-            shelley_genesis_hash: hex::decode(MAINNET_SHELLEY_GENESIS_HASH)
-                .unwrap()
-                .try_into()
-                .unwrap(),
+            shelley_genesis_hash: Hash::<32>::from_str(MAINNET_SHELLEY_GENESIS_HASH).unwrap(),
             genesis_delegs: GenesisDelegates::try_from(vec![
                 (
                     "ad5463153dc3d24b9ff133e46136028bdc1edbb897f5a7cf1b37950c",

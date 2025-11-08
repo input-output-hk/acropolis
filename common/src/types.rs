@@ -1765,8 +1765,8 @@ impl Voter {
 impl Display for Voter {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self.to_bech32() {
-            Ok(addr) => write!(f, "{}", addr),
-            Err(e) => write!(f, "<invalid voter: {}>", e),
+            Ok(addr) => write!(f, "{addr}"),
+            Err(e) => write!(f, "<invalid voter: {e}>"),
         }
     }
 }
