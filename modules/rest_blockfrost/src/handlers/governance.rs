@@ -4,6 +4,7 @@ use crate::types::{
     DRepInfoREST, DRepMetadataREST, DRepUpdateREST, DRepVoteREST, DRepsListREST, ProposalVoteREST,
     VoterRoleREST,
 };
+use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
     messages::{Message, RESTResponse, StateQuery, StateQueryResponse},
     queries::{
@@ -54,12 +55,12 @@ pub async fn handle_dreps_list_blockfrost(
         }
 
         Message::StateQueryResponse(StateQueryResponse::Governance(
-            GovernanceStateQueryResponse::Error(e),
-        )) => Ok(RESTResponse::with_text(500, &format!("Query error: {e}"))),
+            GovernanceStateQueryResponse::Error(QueryError::NotFound { .. }),
+        )) => Ok(RESTResponse::with_text(404, "No DReps found")),
 
         Message::StateQueryResponse(StateQueryResponse::Governance(
-            GovernanceStateQueryResponse::NotFound,
-        )) => Ok(RESTResponse::with_text(404, "No DReps found")),
+            GovernanceStateQueryResponse::Error(e),
+        )) => Ok(RESTResponse::with_text(500, &format!("Query error: {e}"))),
 
         _ => Ok(RESTResponse::with_text(500, "Unexpected message type")),
     }
@@ -153,7 +154,7 @@ pub async fn handle_single_drep_blockfrost(
         }
 
         Message::StateQueryResponse(StateQueryResponse::Governance(
-            GovernanceStateQueryResponse::NotFound,
+            GovernanceStateQueryResponse::Error(QueryError::NotFound { .. }),
         )) => Ok(RESTResponse::with_text(404, "DRep not found")),
 
         Message::StateQueryResponse(StateQueryResponse::Governance(
@@ -249,7 +250,7 @@ pub async fn handle_drep_delegators_blockfrost(
         }
 
         Message::StateQueryResponse(StateQueryResponse::Governance(
-            GovernanceStateQueryResponse::NotFound,
+            GovernanceStateQueryResponse::Error(QueryError::NotFound { .. }),
         )) => Ok(RESTResponse::with_text(404, "DRep not found")),
 
         Message::StateQueryResponse(StateQueryResponse::Governance(
@@ -346,7 +347,7 @@ pub async fn handle_drep_metadata_blockfrost(
         }
 
         Message::StateQueryResponse(StateQueryResponse::Governance(
-            GovernanceStateQueryResponse::NotFound,
+            GovernanceStateQueryResponse::Error(QueryError::NotFound { .. }),
         )) => Ok(RESTResponse::with_text(404, "DRep metadata not found")),
 
         Message::StateQueryResponse(StateQueryResponse::Governance(
@@ -407,15 +408,15 @@ pub async fn handle_drep_updates_blockfrost(
         }
 
         Message::StateQueryResponse(StateQueryResponse::Governance(
+            GovernanceStateQueryResponse::Error(QueryError::NotFound { .. }),
+        )) => Ok(RESTResponse::with_text(404, "DRep not found")),
+
+        Message::StateQueryResponse(StateQueryResponse::Governance(
             GovernanceStateQueryResponse::Error(_),
         )) => Ok(RESTResponse::with_text(
             503,
             "DRep updates storage is disabled in config",
         )),
-
-        Message::StateQueryResponse(StateQueryResponse::Governance(
-            GovernanceStateQueryResponse::NotFound,
-        )) => Ok(RESTResponse::with_text(404, "DRep not found")),
 
         _ => Ok(RESTResponse::with_text(500, "Unexpected message type")),
     }
@@ -467,7 +468,7 @@ pub async fn handle_drep_votes_blockfrost(
         }
 
         Message::StateQueryResponse(StateQueryResponse::Governance(
-            GovernanceStateQueryResponse::NotFound,
+            GovernanceStateQueryResponse::Error(QueryError::NotFound { .. }),
         )) => Ok(RESTResponse::with_text(404, "DRep not found")),
 
         Message::StateQueryResponse(StateQueryResponse::Governance(
@@ -520,12 +521,12 @@ pub async fn handle_proposals_list_blockfrost(
         }
 
         Message::StateQueryResponse(StateQueryResponse::Governance(
-            GovernanceStateQueryResponse::Error(e),
-        )) => Ok(RESTResponse::with_text(500, &format!("Query error: {e}"))),
+            GovernanceStateQueryResponse::Error(QueryError::NotFound { .. }),
+        )) => Ok(RESTResponse::with_text(404, "No proposals found")),
 
         Message::StateQueryResponse(StateQueryResponse::Governance(
-            GovernanceStateQueryResponse::NotFound,
-        )) => Ok(RESTResponse::with_text(404, "No proposals found")),
+            GovernanceStateQueryResponse::Error(e),
+        )) => Ok(RESTResponse::with_text(500, &format!("Query error: {e}"))),
 
         _ => Ok(RESTResponse::with_text(500, "Unexpected message type")),
     }
@@ -560,7 +561,7 @@ pub async fn handle_single_proposal_blockfrost(
         },
 
         Message::StateQueryResponse(StateQueryResponse::Governance(
-            GovernanceStateQueryResponse::NotFound,
+            GovernanceStateQueryResponse::Error(QueryError::NotFound { .. }),
         )) => Ok(RESTResponse::with_text(404, "Proposal not found")),
 
         Message::StateQueryResponse(StateQueryResponse::Governance(
@@ -644,7 +645,7 @@ pub async fn handle_proposal_votes_blockfrost(
         }
 
         Message::StateQueryResponse(StateQueryResponse::Governance(
-            GovernanceStateQueryResponse::NotFound,
+            GovernanceStateQueryResponse::Error(QueryError::NotFound { .. }),
         )) => Ok(RESTResponse::with_text(404, "Proposal not found")),
 
         Message::StateQueryResponse(StateQueryResponse::Governance(

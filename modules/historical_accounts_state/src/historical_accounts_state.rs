@@ -4,6 +4,7 @@
 use acropolis_common::queries::accounts::{
     AccountsStateQuery, AccountsStateQueryResponse, DEFAULT_HISTORICAL_ACCOUNTS_QUERY_TOPIC,
 };
+use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     BlockInfo, BlockStatus,
@@ -301,9 +302,9 @@ impl HistoricalAccountsState {
             async move {
                 let Message::StateQuery(StateQuery::Accounts(query)) = message.as_ref() else {
                     return Arc::new(Message::StateQueryResponse(StateQueryResponse::Accounts(
-                        AccountsStateQueryResponse::Error(
-                            "Invalid message for accounts-state".into(),
-                        ),
+                        AccountsStateQueryResponse::Error(QueryError::internal_error(
+                            "Invalid message for accounts-state",
+                        )),
                     )));
                 };
 
@@ -315,8 +316,12 @@ impl HistoricalAccountsState {
                                     registrations,
                                 )
                             }
-                            Ok(None) => AccountsStateQueryResponse::NotFound,
-                            Err(e) => AccountsStateQueryResponse::Error(e.to_string()),
+                            Ok(None) => AccountsStateQueryResponse::Error(QueryError::not_found(
+                                format!("Account {} not found", account),
+                            )),
+                            Err(e) => AccountsStateQueryResponse::Error(
+                                QueryError::internal_error(e.to_string()),
+                            ),
                         }
                     }
                     AccountsStateQuery::GetAccountDelegationHistory { account } => {
@@ -324,15 +329,23 @@ impl HistoricalAccountsState {
                             Ok(Some(delegations)) => {
                                 AccountsStateQueryResponse::AccountDelegationHistory(delegations)
                             }
-                            Ok(None) => AccountsStateQueryResponse::NotFound,
-                            Err(e) => AccountsStateQueryResponse::Error(e.to_string()),
+                            Ok(None) => AccountsStateQueryResponse::Error(QueryError::not_found(
+                                format!("Account {}", account),
+                            )),
+                            Err(e) => AccountsStateQueryResponse::Error(
+                                QueryError::internal_error(e.to_string()),
+                            ),
                         }
                     }
                     AccountsStateQuery::GetAccountMIRHistory { account } => {
                         match state.lock().await.get_mir_history(account).await {
                             Ok(Some(mirs)) => AccountsStateQueryResponse::AccountMIRHistory(mirs),
-                            Ok(None) => AccountsStateQueryResponse::NotFound,
-                            Err(e) => AccountsStateQueryResponse::Error(e.to_string()),
+                            Ok(None) => AccountsStateQueryResponse::Error(QueryError::not_found(
+                                format!("Account {}", account),
+                            )),
+                            Err(e) => AccountsStateQueryResponse::Error(
+                                QueryError::internal_error(e.to_string()),
+                            ),
                         }
                     }
                     AccountsStateQuery::GetAccountWithdrawalHistory { account } => {
@@ -340,8 +353,12 @@ impl HistoricalAccountsState {
                             Ok(Some(withdrawals)) => {
                                 AccountsStateQueryResponse::AccountWithdrawalHistory(withdrawals)
                             }
-                            Ok(None) => AccountsStateQueryResponse::NotFound,
-                            Err(e) => AccountsStateQueryResponse::Error(e.to_string()),
+                            Ok(None) => AccountsStateQueryResponse::Error(QueryError::not_found(
+                                format!("Account {}", account),
+                            )),
+                            Err(e) => AccountsStateQueryResponse::Error(
+                                QueryError::internal_error(e.to_string()),
+                            ),
                         }
                     }
                     AccountsStateQuery::GetAccountRewardHistory { account } => {
@@ -349,8 +366,12 @@ impl HistoricalAccountsState {
                             Ok(Some(rewards)) => {
                                 AccountsStateQueryResponse::AccountRewardHistory(rewards)
                             }
-                            Ok(None) => AccountsStateQueryResponse::NotFound,
-                            Err(e) => AccountsStateQueryResponse::Error(e.to_string()),
+                            Ok(None) => AccountsStateQueryResponse::Error(QueryError::not_found(
+                                format!("Account {}", account),
+                            )),
+                            Err(e) => AccountsStateQueryResponse::Error(
+                                QueryError::internal_error(e.to_string()),
+                            ),
                         }
                     }
                     AccountsStateQuery::GetAccountAssociatedAddresses { account } => {
@@ -358,14 +379,18 @@ impl HistoricalAccountsState {
                             Ok(Some(addresses)) => {
                                 AccountsStateQueryResponse::AccountAssociatedAddresses(addresses)
                             }
-                            Ok(None) => AccountsStateQueryResponse::NotFound,
-                            Err(e) => AccountsStateQueryResponse::Error(e.to_string()),
+                            Ok(None) => AccountsStateQueryResponse::Error(QueryError::not_found(
+                                format!("Account {}", account),
+                            )),
+                            Err(e) => AccountsStateQueryResponse::Error(
+                                QueryError::internal_error(e.to_string()),
+                            ),
                         }
                     }
-                    _ => AccountsStateQueryResponse::Error(format!(
+                    _ => AccountsStateQueryResponse::Error(QueryError::not_implemented(format!(
                         "Unimplemented query variant: {:?}",
                         query
-                    )),
+                    ))),
                 };
 
                 Arc::new(Message::StateQueryResponse(StateQueryResponse::Accounts(

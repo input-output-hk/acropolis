@@ -1,3 +1,4 @@
+use crate::queries::errors::QueryError;
 use crate::{
     AssetAddressEntry, AssetInfoRecord, AssetMintRecord, AssetName, PolicyAsset, PolicyId,
     TxIdentifier,
@@ -36,6 +37,5 @@ pub enum AssetsStateQueryResponse {
     AssetAddresses(AssetAddresses),
     AssetTransactions(AssetTransactions),
     PolicyIdAssets(PolicyAssets),
-    NotFound,
-    Error(String),
+    Error(QueryError),
 }
