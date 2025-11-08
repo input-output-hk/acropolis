@@ -8,7 +8,7 @@ genesis-key = "5b3139312c36362c3134302c3138352c3133382c31312c3233372c3230372c323
 # Download max age in hours. E.g. 8 means 8 hours (if there isn't any snapshot within this time range download from Mithril)
 download-max-age = "never"
 # Pause constraint E.g. "epoch:100", "block:1200"
-pause = "epoch:300"
+pause = "none"
 
 [module.upstream-chain-fetcher]
 sync-point = "snapshot"
@@ -71,7 +71,7 @@ store-registration-history = false
 store-delegation-history = false
 store-mir-history = false
 store-withdrawal-history = false
-store-addresses = true
+store-addresses = false
 
 [module.drep-state]
 # Enables /governance/dreps/{drep_id} endpoint (Requires store-delegators to be enabled)
@@ -131,9 +131,9 @@ clear-on-start = true
 [module.address-state]
 # Enables /addresses/{address}, /addresses/{address}/extended,
 # /addresses/{address}/utxos/{asset}, and /addresses/{address}/utxos endpoints
-store-info = true
+store-info = false
 # Enables /addresses/{address}/totals endpoint
-store-totals = true
+store-totals = false
 # Enables /addresses/{address}/transactions endpoint
 store-transactions = false
 

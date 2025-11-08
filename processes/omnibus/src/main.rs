@@ -118,7 +118,7 @@ pub async fn main() -> Result<()> {
     SPDDState::register(&mut process);
     DRDDState::register(&mut process);
     Consensus::register(&mut process);
-    //ChainStore::register(&mut process);
+    ChainStore::register(&mut process);
 
     Clock::<Message>::register(&mut process);
     RESTServer::<Message>::register(&mut process);
