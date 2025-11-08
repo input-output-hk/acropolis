@@ -939,7 +939,7 @@ pub struct AccountUTxOREST {
 }
 
 #[derive(serde::Serialize)]
-pub struct AccountTotalsREST {
+pub struct _AccountTotalsREST {
     pub stake_address: String,
     pub received_sum: AmountList,
     pub sent_sum: AmountList,

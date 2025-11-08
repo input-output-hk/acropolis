@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use crate::handlers_config::HandlersConfig;
 use crate::types::{
-    AccountAddressREST, AccountRewardREST, AccountUTxOREST, AccountWithdrawalREST,
+    AccountAddressREST, AccountRewardREST, AccountUTxOREST, AccountWithdrawalREST, AmountList,
     DelegationUpdateREST, RegistrationUpdateREST,
 };
 use acropolis_common::messages::{Message, RESTResponse, StateQuery, StateQueryResponse};
@@ -20,12 +20,6 @@ use acropolis_common::{DRepChoice, Datum, ReferenceScript, StakeAddress};
 use anyhow::{anyhow, Result};
 use blake2::{Blake2b512, Digest};
 use caryatid_sdk::Context;
-
-use crate::handlers_config::HandlersConfig;
-use crate::types::{
-    AccountAddressREST, AccountRewardREST, AccountTotalsREST, AccountUTxOREST,
-    AccountWithdrawalREST, AmountList, DelegationUpdateREST, RegistrationUpdateREST,
-};
 
 #[derive(serde::Serialize)]
 pub struct StakeAccountRest {
@@ -668,7 +662,7 @@ pub async fn handle_account_assets_blockfrost(
                 AccountsStateQueryResponse::AccountAssociatedAddresses(addresses),
             )) => Ok(Some(addresses)),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
-                AccountsStateQueryResponse::NotFound,
+                AccountsStateQueryResponse::Error(QueryError::NotFound { .. }),
             )) => Ok(None),
             Message::StateQueryResponse(StateQueryResponse::Accounts(
                 AccountsStateQueryResponse::Error(e),
@@ -750,9 +744,9 @@ pub async fn handle_account_assets_blockfrost(
 
 /// Handle `/accounts/{stake_address}/addresses/total` Blockfrost-compatible endpoint
 pub async fn handle_account_totals_blockfrost(
-    context: Arc<Context<Message>>,
-    params: Vec<String>,
-    handlers_config: Arc<HandlersConfig>,
+    _context: Arc<Context<Message>>,
+    _params: Vec<String>,
+    _handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse> {
     Ok(RESTResponse::with_text(501, "Not implemented"))
 }
