@@ -88,7 +88,7 @@ pub async fn handle_pools_extended_retired_retiring_single_blockfrost(
         }
         _ => {
             let pool_id = PoolId::from_bech32(param).map_err(|e| {
-                RESTError::invalid_param("pool_id", &format!("invalid Bech32 stake pool ID: {e}"))
+                RESTError::invalid_param("pool ID", &format!("invalid Bech32 stake pool ID: {e}"))
             })?;
             handle_pools_spo_blockfrost(context.clone(), pool_id, handlers_config.clone()).await
         }
@@ -685,7 +685,7 @@ pub async fn handle_pool_history_blockfrost(
     };
 
     let spo = PoolId::from_bech32(pool_id)
-        .map_err(|_| RESTError::invalid_param("pool_id", "invalid Bech32 stake pool ID"))?;
+        .map_err(|_| RESTError::invalid_param("pool ID", "invalid Bech32 stake pool ID"))?;
 
     // get latest epoch from epochs-state
     let latest_epoch_info_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
@@ -745,7 +745,7 @@ pub async fn handle_pool_metadata_blockfrost(
     };
 
     let spo = PoolId::from_bech32(pool_id)
-        .map_err(|_| RESTError::invalid_param("pool_id", "invalid Bech32 stake pool ID"))?;
+        .map_err(|_| RESTError::invalid_param("pool ID", "invalid Bech32 stake pool ID"))?;
 
     let pool_metadata_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
         PoolsStateQuery::GetPoolMetadata { pool_id: spo },
@@ -809,7 +809,7 @@ pub async fn handle_pool_relays_blockfrost(
     };
 
     let spo = PoolId::from_bech32(pool_id)
-        .map_err(|_| RESTError::invalid_param("pool_id", "invalid Bech32 stake pool ID"))?;
+        .map_err(|_| RESTError::invalid_param("pool ID", "invalid Bech32 stake pool ID"))?;
 
     let pool_relay_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
         PoolsStateQuery::GetPoolRelays { pool_id: spo },
@@ -850,7 +850,7 @@ pub async fn handle_pool_delegators_blockfrost(
     };
 
     let spo = PoolId::from_bech32(pool_id)
-        .map_err(|_| RESTError::invalid_param("pool_id", "invalid Bech32 stake pool ID"))?;
+        .map_err(|_| RESTError::invalid_param("pool ID", "invalid Bech32 stake pool ID"))?;
 
     // Get Pool delegators from spo-state
     let pool_delegators_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
@@ -932,7 +932,7 @@ pub async fn handle_pool_blocks_blockfrost(
     };
 
     let spo = PoolId::from_bech32(pool_id)
-        .map_err(|_| RESTError::invalid_param("pool_id", "invalid Bech32 stake pool ID"))?;
+        .map_err(|_| RESTError::invalid_param("pool ID", "invalid Bech32 stake pool ID"))?;
 
     // Get blocks by pool_id from spo_state
     let pool_blocks_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
@@ -973,7 +973,7 @@ pub async fn handle_pool_updates_blockfrost(
     };
 
     let spo = PoolId::from_bech32(pool_id)
-        .map_err(|_| RESTError::invalid_param("pool_id", "invalid Bech32 stake pool ID"))?;
+        .map_err(|_| RESTError::invalid_param("pool ID", "invalid Bech32 stake pool ID"))?;
 
     // query from spo_state
     let pool_updates_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
@@ -1021,7 +1021,7 @@ pub async fn handle_pool_votes_blockfrost(
     };
 
     let spo = PoolId::from_bech32(pool_id)
-        .map_err(|_| RESTError::invalid_param("pool_id", "invalid Bech32 stake pool ID"))?;
+        .map_err(|_| RESTError::invalid_param("pool ID", "invalid Bech32 stake pool ID"))?;
 
     // query from spo_state
     let pool_votes_msg = Arc::new(Message::StateQuery(StateQuery::Pools(
