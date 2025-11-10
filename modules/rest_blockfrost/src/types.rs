@@ -945,3 +945,11 @@ pub struct AccountTotalsREST {
     pub sent_sum: AmountList,
     pub tx_count: u64,
 }
+
+#[derive(serde::Serialize)]
+pub struct AddressTotalsREST {
+    pub address: String,
+    pub received_sum: AmountList,
+    pub sent_sum: AmountList,
+    pub tx_count: u64,
+}

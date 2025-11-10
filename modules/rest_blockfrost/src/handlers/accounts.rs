@@ -668,8 +668,8 @@ pub async fn handle_account_totals_blockfrost(
         msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Addresses(
-                AddressStateQueryResponse::AddressesTotals(utxos),
-            )) => Ok(utxos),
+                AddressStateQueryResponse::AddressesTotals(totals),
+            )) => Ok(totals),
             Message::StateQueryResponse(StateQueryResponse::Addresses(
                 AddressStateQueryResponse::Error(e),
             )) => Err(e),
