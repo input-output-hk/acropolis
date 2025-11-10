@@ -47,7 +47,7 @@ impl RESTError {
 
     /// Invalid parameter error
     pub fn invalid_param(param_name: &str, reason: &str) -> Self {
-        RESTError::BadRequest(format!("Invalid {}: {}", param_name, reason))
+        RESTError::BadRequest(format!("Invalid {} parameter: {}", param_name, reason))
     }
 
     /// Invalid hex string error

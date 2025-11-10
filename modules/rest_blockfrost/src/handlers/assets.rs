@@ -467,6 +467,12 @@ mod tests {
     fn invalid_hex_string() {
         let result = split_policy_and_asset("zzzz");
         assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.status_code(), 400);
+        assert_eq!(
+            err.message(),
+            "Invalid hex string: Invalid character 'z' at position 0"
+        );
     }
 
     #[test]
@@ -474,6 +480,9 @@ mod tests {
         let hex_str = hex::encode([1u8, 2, 3]);
         let result = split_policy_and_asset(&hex_str);
         assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.status_code(), 400);
+        assert_eq!(err.message(), "Asset identifier must be at least 28 bytes");
     }
 
     #[test]
@@ -483,6 +492,9 @@ mod tests {
         let hex_str = hex::encode(bytes);
         let result = split_policy_and_asset(&hex_str);
         assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.status_code(), 400);
+        assert_eq!(err.message(), "Asset name must be less than 32 bytes");
     }
 
     #[test]

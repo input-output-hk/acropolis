@@ -535,3 +535,54 @@ pub async fn handle_blocks_hash_number_addresses_blockfrost(
     )
     .await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_valid_block_hash() {
+        let valid_hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        let result = parse_block_key(valid_hash);
+
+        let expected_bytes: [u8; 32] = [
+            0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab,
+            0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67,
+            0x89, 0xab, 0xcd, 0xef,
+        ];
+
+        match result.unwrap() {
+            BlockKey::Hash(hash) => assert_eq!(hash, BlockHash::from(expected_bytes)),
+            BlockKey::Number(_) => panic!("Expected BlockKey::Hash"),
+        }
+    }
+
+    #[test]
+    fn test_invalid_hex_format() {
+        let invalid_hex = "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz";
+        let result = parse_block_key(invalid_hex);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.status_code(), 400);
+        assert!(err.message().contains("invalid hex format"));
+    }
+
+    #[test]
+    fn test_valid_block_number() {
+        let result = parse_block_key("12345");
+        assert!(result.is_ok());
+        match result.unwrap() {
+            BlockKey::Number(n) => assert_eq!(n, 12345),
+            _ => panic!("Expected BlockKey::Number"),
+        }
+    }
+
+    #[test]
+    fn test_invalid_block_number() {
+        let result = parse_block_key("not_a_number");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.status_code(), 400);
+        assert!(err.message().contains("must be a valid block number or 64-character hex hash"));
+    }
+}
