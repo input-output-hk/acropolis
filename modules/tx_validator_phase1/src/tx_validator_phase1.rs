@@ -101,6 +101,10 @@ impl TxValidatorPhase1 {
         block: BlockInfo,
         result: ValidationStatus,
     ) -> Result<()> {
+        if let ValidationStatus::NoGo(res) = &result {
+            error!("Cannot validate transaction: {:?}", res);
+        }
+        
         let packed_message = Arc::new(Message::Cardano((
             block.clone(),
             CardanoMessage::BlockValidation(result),
@@ -132,7 +136,7 @@ impl TxValidatorPhase1 {
                 }
                 state.process_params(prm_b, prm).await?;
             }
-            let response = state.process_transactions(&trx_b, &trx).await?;
+            let response = state.process_transactions(&trx_b, &trx)?;
             Self::publish_result(&state.config, trx_b, response).await?;
         }
     }

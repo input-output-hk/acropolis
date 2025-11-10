@@ -14,6 +14,9 @@ pub enum ValidationError {
     #[error("KES failure")]
     BadKES,
 
+    #[error("CBOR Decoding error")]
+    CborDecodeError(usize, String),
+
     #[error("Doubly spent UTXO: {0}")]
     DoubleSpendUTXO(String),
 }
