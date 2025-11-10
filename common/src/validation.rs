@@ -229,7 +229,16 @@ impl PartialEq for BadVrfProofError {
 /// https://github.com/IntersectMBO/ouroboros-consensus/blob/e3c52b7c583bdb6708fac4fdaa8bf0b9588f5a88/ouroboros-consensus-protocol/src/ouroboros-consensus-protocol/Ouroboros/Consensus/Protocol/Praos.hs#L342
 #[derive(Error, Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
 pub enum KesValidationError {
-    /// Current KES period is before the OCert start period
+    #[error("{0}")]
+    KesSignatureError(#[from] KesSignatureError),
+    #[error("{0}")]
+    OperationalCertificateError(#[from] OperationalCertificateError),
+}
+
+#[derive(Error, Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
+pub enum KesSignatureError {
+    /// **Cause:** Current KES period is before the operational certificate's
+    /// start period.
     #[error(
         "KES Before Start OCert: OCert Start Period={}, Current Period={}",
         ocert_start_period,
@@ -239,7 +248,8 @@ pub enum KesValidationError {
         ocert_start_period: u64,
         current_period: u64,
     },
-    /// Current KES period is after the valid range
+    /// **Cause:** Current KES period exceeds the operational certificate's
+    /// validity period.
     #[error(
         "KES After End OCert: Current Period={}, OCert Start Period={}, Max KES Evolutions={}",
         current_period,
@@ -251,7 +261,21 @@ pub enum KesValidationError {
         ocert_start_period: u64,
         max_kes_evolutions: u64,
     },
-    /// The OCert counter is too small
+    /// **Cause:** The KES signature on the block header is cryptographically invalid.
+    #[error("Invalid KES Signature OCert: Current KES Period={}, KES Start Period={}, Expected Evolutions={}, Max KES Evolutions={}, Error Message={}", current_kes_period, kes_start_period, expected_evolutions, max_kes_evolutions, error_message)]
+    InvalidKesSignatureOcert {
+        current_kes_period: u64,
+        kes_start_period: u64,
+        expected_evolutions: u64,
+        max_kes_evolutions: u64,
+        error_message: String,
+    },
+}
+
+#[derive(Error, Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
+pub enum OperationalCertificateError {
+    /// **Cause:** The operational certificate counter in the header is not greater
+    /// than the last counter used by this pool.
     #[error(
         "Counter Too Small OCert: Last Counter={}, Current Counter={}",
         last_counter,
@@ -261,7 +285,8 @@ pub enum KesValidationError {
         last_counter: u64,
         current_counter: u64,
     },
-    /// The OCert counter incremented by more than 1 (Praos only)
+    /// **Cause:** OCert counter jumped by more than 1. While not strictly invalid,
+    /// this is suspicious and may indicate key compromise. (Praos Only)
     #[error(
         "Counter Over Incremented OCert: Last Counter={}, Current Counter={}",
         last_counter,
@@ -271,23 +296,15 @@ pub enum KesValidationError {
         last_counter: u64,
         current_counter: u64,
     },
-    /// The cold key signature on the OCert is invalid
+    /// **Cause:** The cold key signature on the operational certificate is invalid.
+    /// The OCert was not properly signed by the pool's cold key.
     #[error(
         "Invalid Signature OCert: Counter={}, KES Period={}",
         counter,
         kes_period
     )]
     InvalidSignatureOcert { counter: u64, kes_period: u64 },
-    /// The KES signature verification failed
-    #[error("Invalid KES Signature OCert: Current KES Period={}, KES Start Period={}, Expected Evolutions={}, Max KES Evolutions={}, Error Message={}", current_kes_period, kes_start_period, expected_evolutions, max_kes_evolutions, error_message)]
-    InvalidKesSignatureOcert {
-        current_kes_period: u64,
-        kes_start_period: u64,
-        expected_evolutions: u64,
-        max_kes_evolutions: u64,
-        error_message: String,
-    },
-    /// No counter found for this key hash (not a stake pool or genesis delegate)
+    /// **Cause:** No counter found for this key hash (not a stake pool or genesis delegate)
     #[error("No Counter For Key Hash OCert: Pool ID={}", hex::encode(pool_id))]
     NoCounterForKeyHashOcert { pool_id: PoolId },
 }
