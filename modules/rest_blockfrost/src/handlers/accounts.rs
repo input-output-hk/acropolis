@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use crate::handlers_config::HandlersConfig;
 use crate::types::{
-    AccountAddressREST, AccountRewardREST, AccountUTxOREST, AccountWithdrawalREST, AmountList,
-    DelegationUpdateREST, RegistrationUpdateREST,
+    AccountAddressREST, AccountRewardREST, AccountTotalsREST, AccountUTxOREST,
+    AccountWithdrawalREST, AmountList, DelegationUpdateREST, RegistrationUpdateREST,
 };
 use acropolis_common::messages::{Message, RESTResponse, StateQuery, StateQueryResponse};
 use acropolis_common::queries::accounts::{AccountsStateQuery, AccountsStateQueryResponse};
@@ -563,7 +563,7 @@ pub async fn handle_account_assets_blockfrost(
     .await?;
 
     let Some(addresses) = addresses else {
-        return Ok(RESTResponse::with_text(404, "Account not found"));
+        return Err(RESTError::not_found("Account not found"));
     };
 
     // Get utxos from address state
@@ -621,11 +621,74 @@ pub async fn handle_account_assets_blockfrost(
 
 /// Handle `/accounts/{stake_address}/addresses/total` Blockfrost-compatible endpoint
 pub async fn handle_account_totals_blockfrost(
-    _context: Arc<Context<Message>>,
-    _params: Vec<String>,
-    _handlers_config: Arc<HandlersConfig>,
+    context: Arc<Context<Message>>,
+    params: Vec<String>,
+    handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse, RESTError> {
-    Err(RESTError::not_implemented("Account totals not implemented"))
+    let account = parse_stake_address(&params)?;
+
+    // Get addresses from historical accounts state
+    let msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
+        AccountsStateQuery::GetAccountAssociatedAddresses {
+            account: account.clone(),
+        },
+    )));
+    let addresses = query_state(
+        &context,
+        &handlers_config.historical_accounts_query_topic,
+        msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Accounts(
+                AccountsStateQueryResponse::AccountAssociatedAddresses(addresses),
+            )) => Ok(Some(addresses)),
+            Message::StateQueryResponse(StateQueryResponse::Accounts(
+                AccountsStateQueryResponse::Error(QueryError::NotFound { .. }),
+            )) => Ok(None),
+            Message::StateQueryResponse(StateQueryResponse::Addresses(
+                AddressStateQueryResponse::Error(e),
+            )) => Err(e),
+            _ => Err(QueryError::internal_error(
+                "Unexpected message type while retrieving account addresses",
+            )),
+        },
+    )
+    .await?;
+
+    let Some(addresses) = addresses else {
+        return Err(RESTError::not_found("Account not found"));
+    };
+
+    // Get totals from address state
+    let msg = Arc::new(Message::StateQuery(StateQuery::Addresses(
+        AddressStateQuery::GetAddressesTotals { addresses },
+    )));
+    let totals = query_state(
+        &context,
+        &handlers_config.addresses_query_topic,
+        msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Addresses(
+                AddressStateQueryResponse::AddressesTotals(utxos),
+            )) => Ok(utxos),
+            Message::StateQueryResponse(StateQueryResponse::Addresses(
+                AddressStateQueryResponse::Error(e),
+            )) => Err(e),
+            _ => Err(QueryError::internal_error(
+                "Unexpected message type while retrieving account totals",
+            )),
+        },
+    )
+    .await?;
+
+    let rest_response = AccountTotalsREST {
+        stake_address: account.to_string()?,
+        received_sum: totals.received.into(),
+        sent_sum: totals.sent.into(),
+        tx_count: totals.tx_count,
+    };
+
+    let json = serde_json::to_string_pretty(&rest_response)?;
+    Ok(RESTResponse::with_json(200, &json))
 }
 
 /// Handle `/accounts/{stake_address}/utxos` Blockfrost-compatible endpoint
@@ -659,7 +722,7 @@ pub async fn handle_account_utxos_blockfrost(
     .await?;
 
     let Some(addresses) = addresses else {
-        return Ok(RESTResponse::with_text(404, "Account not found"));
+        return Err(RESTError::not_found("Account not found"));
     };
 
     // Get utxos from address state
