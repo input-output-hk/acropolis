@@ -3,6 +3,7 @@
 
 use acropolis_common::{
     genesis_values::GenesisValues,
+    hash::Hash,
     messages::{
         CardanoMessage, GenesisCompleteMessage, GenesisUTxOsMessage, Message, PotDeltasMessage,
         UTXODeltasMessage,
@@ -41,11 +42,11 @@ const SANCHONET_SHELLEY_START_EPOCH: u64 = 0;
 // Initial reserves (=maximum ever Lovelace supply)
 const INITIAL_RESERVES: Lovelace = 45_000_000_000_000_000;
 
-fn hash_genesis_bytes(raw_bytes: &[u8]) -> [u8; 32] {
+fn hash_genesis_bytes(raw_bytes: &[u8]) -> Hash<32> {
     let mut hasher = Blake2b::<U32>::new();
     hasher.update(raw_bytes);
     let hash: [u8; 32] = hasher.finalize().into();
-    hash
+    Hash::<32>::new(hash)
 }
 
 /// Genesis bootstrapper module

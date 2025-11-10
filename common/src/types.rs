@@ -447,6 +447,22 @@ impl Neg for ValueDelta {
     }
 }
 
+/// Value stored in UTXO
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct UTXOValue {
+    /// Address in binary
+    pub address: Address,
+
+    /// Value in Lovelace
+    pub value: Value,
+
+    /// Datum
+    pub datum: Option<Datum>,
+
+    /// Reference script
+    pub reference_script: Option<ReferenceScript>,
+}
+
 /// Transaction output (UTXO)
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TxOutput {
@@ -1765,8 +1781,8 @@ impl Voter {
 impl Display for Voter {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self.to_bech32() {
-            Ok(addr) => write!(f, "{}", addr),
-            Err(e) => write!(f, "<invalid voter: {}>", e),
+            Ok(addr) => write!(f, "{addr}"),
+            Err(e) => write!(f, "<invalid voter: {e}>"),
         }
     }
 }

@@ -17,10 +17,11 @@ mod types;
 mod utils;
 use handlers::{
     accounts::{
-        handle_account_addresses_blockfrost, handle_account_delegations_blockfrost,
-        handle_account_mirs_blockfrost, handle_account_registrations_blockfrost,
-        handle_account_rewards_blockfrost, handle_account_withdrawals_blockfrost,
-        handle_single_account_blockfrost,
+        handle_account_addresses_blockfrost, handle_account_assets_blockfrost,
+        handle_account_delegations_blockfrost, handle_account_mirs_blockfrost,
+        handle_account_registrations_blockfrost, handle_account_rewards_blockfrost,
+        handle_account_totals_blockfrost, handle_account_utxos_blockfrost,
+        handle_account_withdrawals_blockfrost, handle_single_account_blockfrost,
     },
     addresses::{
         handle_address_asset_utxos_blockfrost, handle_address_extended_blockfrost,
@@ -90,6 +91,16 @@ const DEFAULT_HANDLE_ACCOUNT_ADDRESSES_TOPIC: (&str, &str) = (
     "handle-topic-account-addresses",
     "rest.get.accounts.*.addresses",
 );
+const DEFAULT_HANDLE_ACCOUNT_ASSETS_TOPIC: (&str, &str) = (
+    "handle-topic-account-assets",
+    "rest.get.accounts.*.addresses.assets",
+);
+const DEFAULT_HANDLE_ACCOUNT_TOTALS_TOPIC: (&str, &str) = (
+    "handle-topic-account-totals",
+    "rest.get.accounts.*.addresses.total",
+);
+const DEFAULT_HANDLE_ACCOUNT_UTXOS_TOPIC: (&str, &str) =
+    ("handle-topic-account-utxos", "rest.get.accounts.*.utxos");
 
 // Blocks topics
 const DEFAULT_HANDLE_BLOCKS_LATEST_HASH_NUMBER_TOPIC: (&str, &str) =
@@ -322,6 +333,30 @@ impl BlockfrostREST {
             DEFAULT_HANDLE_ACCOUNT_ADDRESSES_TOPIC,
             handlers_config.clone(),
             handle_account_addresses_blockfrost,
+        );
+
+        // Handler for /accounts/{stake_address}/addresses/assets
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_ACCOUNT_ASSETS_TOPIC,
+            handlers_config.clone(),
+            handle_account_assets_blockfrost,
+        );
+
+        // Handler for /accounts/{stake_address}/addreesses/total
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_ACCOUNT_TOTALS_TOPIC,
+            handlers_config.clone(),
+            handle_account_totals_blockfrost,
+        );
+
+        // Handler for /accounts/{stake_address}/utxos
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_ACCOUNT_UTXOS_TOPIC,
+            handlers_config.clone(),
+            handle_account_utxos_blockfrost,
         );
 
         // Handler for /blocks/latest, /blocks/{hash_or_number}
