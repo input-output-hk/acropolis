@@ -81,6 +81,11 @@ impl State {
         raw_header: &[u8],
         genesis: &GenesisValues,
     ) -> Result<(), Box<VrfValidationError>> {
+        // Validation starts after Shelley Era
+        if block_info.epoch < genesis.shelley_epoch {
+            return Ok(());
+        }
+
         let header = match MultiEraHeader::decode(block_info.era as u8, None, raw_header) {
             Ok(header) => header,
             Err(e) => {
@@ -91,11 +96,6 @@ impl State {
                 ))));
             }
         };
-
-        // Validation starts after Shelley Era
-        if block_info.epoch < genesis.shelley_epoch {
-            return Ok(());
-        }
 
         let Some(decentralisation_param) = self.decentralisation_param else {
             return Err(Box::new(VrfValidationError::Other(
