@@ -419,7 +419,6 @@ dependencies = [
  "config",
  "dashmap",
  "fjall",
- "serde",
  "serde_cbor",
  "sled",
  "tokio",
