@@ -420,4 +420,67 @@ mod tests {
 
         Ok(())
     }
+
+    #[tokio::test]
+    async fn test_same_tx_deltas_sums_totals_in_volatile() -> Result<()> {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let mut state = setup_state_and_store().await?;
+
+        let addr = dummy_address();
+        let delta_1 = UTxOIdentifier::new(0, 1, 0);
+        let delta_2 = UTxOIdentifier::new(0, 1, 1);
+
+        state.volatile.epoch_start_block = 1;
+
+        state.apply_address_deltas(&[delta(&addr, &delta_1, 1), delta(&addr, &delta_2, 1)]);
+
+        // Verify only 1 totals entry with delta of 2
+        let volatile = state
+            .volatile
+            .window
+            .back()
+            .expect("Window should have a delta")
+            .get(&addr)
+            .expect("Entry should be populated")
+            .totals
+            .as_ref()
+            .expect("Totals should be populated");
+
+        assert_eq!(volatile.len(), 1);
+        assert_eq!(volatile.first().expect("Should be populated").lovelace, 2);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_same_tx_deltas_prevents_duplicate_identifier_in_volatile() -> Result<()> {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let mut state = setup_state_and_store().await?;
+
+        let addr = dummy_address();
+        let delta_1 = UTxOIdentifier::new(0, 1, 0);
+        let delta_2 = UTxOIdentifier::new(0, 1, 1);
+
+        state.volatile.epoch_start_block = 1;
+
+        state.apply_address_deltas(&[delta(&addr, &delta_1, 1), delta(&addr, &delta_2, 1)]);
+
+        // Verify only 1 transactions entry
+        let volatile = state
+            .volatile
+            .window
+            .back()
+            .expect("Window should have a delta")
+            .get(&addr)
+            .expect("Entry should be populated")
+            .transactions
+            .as_ref()
+            .expect("Transactions should be populated");
+
+        assert_eq!(volatile.len(), 1);
+
+        Ok(())
+    }
 }
