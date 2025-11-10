@@ -16,6 +16,12 @@ pub const DEFAULT_HISTORICAL_ACCOUNTS_QUERY_TOPIC: (&str, &str) = (
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum AccountsStateQuery {
     GetAccountInfo { account: StakeAddress },
+    GetAccountsUtxoValuesMap { stake_addresses: Vec<StakeAddress> },
+    GetAccountsUtxoValuesSum { stake_addresses: Vec<StakeAddress> },
+    GetAccountsBalancesMap { stake_addresses: Vec<StakeAddress> },
+    GetAccountsBalancesSum { stake_addresses: Vec<StakeAddress> },
+
+    // Served from historical accounts state
     GetAccountRewardHistory { account: StakeAddress },
     GetAccountHistory { stake_key: Vec<u8> },
     GetAccountRegistrationHistory { account: StakeAddress },
@@ -23,13 +29,6 @@ pub enum AccountsStateQuery {
     GetAccountMIRHistory { account: StakeAddress },
     GetAccountWithdrawalHistory { account: StakeAddress },
     GetAccountAssociatedAddresses { account: StakeAddress },
-    GetAccountAssets { stake_key: Vec<u8> },
-    GetAccountAssetsTotals { stake_key: Vec<u8> },
-    GetAccountUTxOs { stake_key: Vec<u8> },
-    GetAccountsUtxoValuesMap { stake_addresses: Vec<StakeAddress> },
-    GetAccountsUtxoValuesSum { stake_addresses: Vec<StakeAddress> },
-    GetAccountsBalancesMap { stake_addresses: Vec<StakeAddress> },
-    GetAccountsBalancesSum { stake_addresses: Vec<StakeAddress> },
 
     // Epochs-related queries
     GetActiveStakes {},
@@ -50,6 +49,12 @@ pub enum AccountsStateQuery {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum AccountsStateQueryResponse {
     AccountInfo(AccountInfo),
+    AccountsUtxoValuesMap(HashMap<StakeAddress, u64>),
+    AccountsUtxoValuesSum(u64),
+    AccountsBalancesMap(HashMap<StakeAddress, u64>),
+    AccountsBalancesSum(u64),
+
+    // Served from historical accounts state
     AccountRewardHistory(Vec<AccountReward>),
     AccountHistory(AccountHistory),
     AccountRegistrationHistory(Vec<RegistrationUpdate>),
@@ -57,13 +62,6 @@ pub enum AccountsStateQueryResponse {
     AccountMIRHistory(Vec<AccountWithdrawal>),
     AccountWithdrawalHistory(Vec<AccountWithdrawal>),
     AccountAssociatedAddresses(Vec<ShelleyAddress>),
-    AccountAssets(AccountAssets),
-    AccountAssetsTotals(AccountAssetsTotals),
-    AccountUTxOs(AccountUTxOs),
-    AccountsUtxoValuesMap(HashMap<StakeAddress, u64>),
-    AccountsUtxoValuesSum(u64),
-    AccountsBalancesMap(HashMap<StakeAddress, u64>),
-    AccountsBalancesSum(u64),
 
     // Epochs-related responses
     ActiveStakes(u64),
@@ -161,21 +159,6 @@ pub struct AccountReward {
     #[n(3)]
     pub reward_type: RewardType,
 }
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct AccountWithdrawalHistory {}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct AccountAssociatedAddresses {}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct AccountAssets {}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct AccountAssetsTotals {}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct AccountUTxOs {}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct OptimalPoolSizing {

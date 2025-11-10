@@ -899,3 +899,15 @@ impl TryFrom<&AccountReward> for AccountRewardREST {
 pub struct AccountAddressREST {
     pub address: String,
 }
+
+#[derive(serde::Serialize)]
+pub struct AccountUTxOREST {
+    pub address: String,
+    pub tx_hash: String,
+    pub output_index: u16,
+    pub amount: AmountList,
+    pub block: String,
+    pub data_hash: Option<String>,
+    pub inline_datum: Option<String>,
+    pub reference_script_hash: Option<String>,
+}

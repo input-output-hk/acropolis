@@ -446,6 +446,22 @@ impl Neg for ValueDelta {
     }
 }
 
+/// Value stored in UTXO
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct UTXOValue {
+    /// Address in binary
+    pub address: Address,
+
+    /// Value in Lovelace
+    pub value: Value,
+
+    /// Datum
+    pub datum: Option<Datum>,
+
+    /// Reference script
+    pub reference_script: Option<ReferenceScript>,
+}
+
 /// Transaction output (UTXO)
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TxOutput {
