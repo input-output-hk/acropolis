@@ -15,15 +15,12 @@ acropolis_common = { path = "../../common" }
 caryatid_sdk = { workspace = true }
 
 anyhow = { workspace = true }
-async-trait = "0.1"
 blake2 = "0.10.6"
 config = { workspace = true }
 hex = { workspace = true }
-num-rational = "0.4.2"
 pallas = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-serde_with = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 base64 = "0.22.1"

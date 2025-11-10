@@ -18,7 +18,6 @@ minicbor = { version = "0.26.0", features = ["std", "half", "derive"] }
 pallas-traverse = { workspace = true }
 tracing = "0.1.40"
 tokio.workspace = true
-imbl.workspace = true
 
 [dev-dependencies]
 tempfile = "3"
