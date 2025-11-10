@@ -19,8 +19,6 @@ dashmap = { workspace = true }
 hex = { workspace = true }
 imbl = { workspace = true }
 pallas = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 

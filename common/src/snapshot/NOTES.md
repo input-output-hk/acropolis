@@ -1,7 +1,10 @@
 # Bootstrapping from a Snapshot file
+
 We can boot an Acropolis node either from geneis and replay all of the blocks up to
 some point, or we can boot from a snapshot file. This module provides the components
-needed to boot from a snapshot file. See [snapshot_bootsrapper](../../../modules/snapshot_bootstrapper/src/snapshot_bootstrapper.rs) for the process that references and runs with these helpers.
+needed to boot from a snapshot file.
+See [snapshot_bootsrapper](../../../modules/snapshot_bootstrapper/src/snapshot_bootstrapper.rs) for the process that
+references and runs with these helpers.
 
 Booting from a snapshot takes minutes instead of the hours it takes to boot from
 genesis. It also allows booting from a given epoch which allows one to create tests
@@ -10,22 +13,27 @@ eras and will typically boot from Conway around epoch 305, 306, and 307. It take
 three epochs to have enough context to correctly calculate the rewards.
 
 The required data for boostrapping are:
+
 - snapshot files (each has an associated epoch number and point)
 - nonces
 - headers
 
 ## Snapshot Files
+
 The snapshots come from the Amaru project. In their words,
 "the snapshots we generated are different [from a Mithril snapshot]: they're
-the actual ledger state; i.e. the in-memory state that is constructed by iterating over each block up to a specific point. So, it's all the UTxOs, the set of pending governance actions, the account balance, etc.
+the actual ledger state; i.e. the in-memory state that is constructed by iterating over each block up to a specific
+point. So, it's all the UTxOs, the set of pending governance actions, the account balance, etc.
 If you get this from a trusted source, you don't need to do any replay, you can just start up and load this from disk.
-The format of these is completely non-standard; we just forked the haskell node and spit out whatever we needed to in CBOR."
+The format of these is completely non-standard; we just forked the haskell node and spit out whatever we needed to in
+CBOR."
 
 Snapshot files are referenced by their epoch number in the config.json file below.
 
 See [Amaru snapshot format](../../../docs/amaru-snapshot-structure.md)
 
 ## Configuration files
+
 There is a path for each network bootstrap configuration file. Network Should
 be one of 'mainnet', 'preprod', 'preview' or 'testnet_<magic>' where
 `magic` is a 32-bits unsigned value denoting a particular testnet.
@@ -43,7 +51,8 @@ a network name of `preview`, the expected layout for configuration files would b
 * `data/preview/nonces.json`: a list of `InitialNonces` values,
 * `data/preview/headers.json`: a list of `Point`s.
 
-These files are loaded by [snapshot_bootsrapper](../../../modules/snapshot_bootstrapper/src/snapshot_bootstrapper.rs) during bootup.
+These files are loaded by [snapshot_bootsrapper](../../../modules/snapshot_bootstrapper/src/snapshot_bootstrapper.rs)
+during bootup.
 
 ## Bootstrapping sequence
 
@@ -75,7 +84,8 @@ headers. Snapshot parsing is done while streaming the data to keep the memory
 footprint lower. As elements of the file are parsed, callbacks provide the data
 to the boostrapper which publishes the data on the message bus.
 
-There are TODO markers in [snapshot_bootsrapper](../../../modules/snapshot_bootstrapper/src/snapshot_bootstrapper.rs) that show where to add the
+There are TODO markers in [snapshot_bootsrapper](../../../modules/snapshot_bootstrapper/src/snapshot_bootstrapper.rs)
+that show where to add the
 publishing of the parsed snapshot data.
 
 

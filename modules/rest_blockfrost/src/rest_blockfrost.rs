@@ -2,6 +2,7 @@
 
 use std::{collections::HashMap, future::Future, sync::Arc};
 
+use acropolis_common::rest_error::RESTError;
 use acropolis_common::{
     messages::{Message, RESTResponse},
     rest_helper::{handle_rest_with_path_and_query_parameters, handle_rest_with_path_parameter},
@@ -10,6 +11,7 @@ use anyhow::Result;
 use caryatid_sdk::{module, Context, Module};
 use config::Config;
 use tracing::info;
+
 mod cost_models;
 mod handlers;
 mod handlers_config;
@@ -766,11 +768,10 @@ fn register_handler<F, Fut>(
         + Sync
         + Clone
         + 'static,
-    Fut: Future<Output = Result<RESTResponse>> + Send + 'static,
+    Fut: Future<Output = Result<RESTResponse, RESTError>> + Send + 'static,
 {
     let topic_name = context.config.get_string(topic.0).unwrap_or_else(|_| topic.1.to_string());
-
-    tracing::info!("Creating request handler on '{}'", topic_name);
+    info!("Creating request handler on '{}'", topic_name);
 
     handle_rest_with_path_parameter(context.clone(), &topic_name, move |params| {
         let context = context.clone();
@@ -793,11 +794,10 @@ fn register_handler_with_query<F, Fut>(
         + Sync
         + Clone
         + 'static,
-    Fut: Future<Output = Result<RESTResponse>> + Send + 'static,
+    Fut: Future<Output = Result<RESTResponse, RESTError>> + Send + 'static,
 {
     let topic_name = context.config.get_string(topic.0).unwrap_or_else(|_| topic.1.to_string());
-
-    tracing::info!("Creating request handler on '{}'", topic_name);
+    info!("Creating request handler on '{}'", topic_name);
 
     handle_rest_with_path_and_query_parameters(
         context.clone(),
