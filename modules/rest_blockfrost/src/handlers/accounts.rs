@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use crate::handlers_config::HandlersConfig;
 use crate::types::{
-    AccountAddressREST, AccountRewardREST, AccountUTxOREST, AccountWithdrawalREST,
+    AccountAddressREST, AccountRewardREST, AccountUTxOREST, AccountWithdrawalREST, AmountList,
     DelegationUpdateREST, RegistrationUpdateREST,
 };
 use acropolis_common::messages::{Message, RESTResponse, StateQuery, StateQueryResponse};
@@ -531,11 +531,92 @@ pub async fn handle_account_addresses_blockfrost(
 
 /// Handle `/accounts/{stake_address}/addresses/assets` Blockfrost-compatible endpoint
 pub async fn handle_account_assets_blockfrost(
-    _context: Arc<Context<Message>>,
-    _params: Vec<String>,
-    _handlers_config: Arc<HandlersConfig>,
+    context: Arc<Context<Message>>,
+    params: Vec<String>,
+    handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse, RESTError> {
-    Err(RESTError::not_implemented("Account assets not implemented"))
+    let account = parse_stake_address(&params)?;
+
+    // Get addresses from historical accounts state
+    let msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
+        AccountsStateQuery::GetAccountAssociatedAddresses { account },
+    )));
+    let addresses = query_state(
+        &context,
+        &handlers_config.historical_accounts_query_topic,
+        msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Accounts(
+                AccountsStateQueryResponse::AccountAssociatedAddresses(addresses),
+            )) => Ok(Some(addresses)),
+            Message::StateQueryResponse(StateQueryResponse::Accounts(
+                AccountsStateQueryResponse::Error(QueryError::NotFound { .. }),
+            )) => Ok(None),
+            Message::StateQueryResponse(StateQueryResponse::Accounts(
+                AccountsStateQueryResponse::Error(e),
+            )) => Err(e),
+            _ => Err(QueryError::internal_error(
+                "Unexpected message type while retrieving account addresses",
+            )),
+        },
+    )
+    .await?;
+
+    let Some(addresses) = addresses else {
+        return Ok(RESTResponse::with_text(404, "Account not found"));
+    };
+
+    // Get utxos from address state
+    let msg = Arc::new(Message::StateQuery(StateQuery::Addresses(
+        AddressStateQuery::GetAddressesUTxOs { addresses },
+    )));
+    let utxo_identifiers = query_state(
+        &context,
+        &handlers_config.addresses_query_topic,
+        msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Addresses(
+                AddressStateQueryResponse::AddressesUTxOs(utxos),
+            )) => Ok(utxos),
+            Message::StateQueryResponse(StateQueryResponse::Addresses(
+                AddressStateQueryResponse::Error(e),
+            )) => Err(e),
+            _ => Err(QueryError::internal_error(
+                "Unexpected message type while retrieving account UTxOs",
+            )),
+        },
+    )
+    .await?;
+
+    // Get utxo balance sum from utxo state
+    let msg = Arc::new(Message::StateQuery(StateQuery::UTxOs(
+        UTxOStateQuery::GetUTxOsSum { utxo_identifiers },
+    )));
+    let utxos_balance = query_state(
+        &context,
+        &handlers_config.utxos_query_topic,
+        msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::UTxOs(
+                UTxOStateQueryResponse::UTxOsSum(sum),
+            )) => Ok(sum),
+            Message::StateQueryResponse(StateQueryResponse::UTxOs(
+                UTxOStateQueryResponse::Error(e),
+            )) => Err(e),
+            _ => Err(QueryError::internal_error(
+                "Unexpected message type while retrieving UTxO sum",
+            )),
+        },
+    )
+    .await?;
+
+    let mut rest_response = AmountList::from(utxos_balance).0;
+    if !rest_response.is_empty() {
+        rest_response.drain(..1);
+    }
+
+    let json = serde_json::to_string_pretty(&rest_response)?;
+    Ok(RESTResponse::with_json(200, &json))
 }
 
 /// Handle `/accounts/{stake_address}/addresses/total` Blockfrost-compatible endpoint
