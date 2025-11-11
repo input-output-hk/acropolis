@@ -1,0 +1,33 @@
+# Acropolis Block VRF Validator
+
+[package]
+name = "acropolis_module_block_vrf_validator"
+version = "0.1.0"
+edition = "2021"
+authors = ["Golddy <golddy@sundae.fi>"]
+description = "Validate the VRF calculation in the block header"
+license = "Apache-2.0"
+
+[dependencies]
+acropolis_common = { path = "../../common" }
+
+caryatid_sdk = { workspace = true }
+
+anyhow = { workspace = true }
+config = { workspace = true }
+hex = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+blake2 = "0.10.6"
+num-traits = "0.2"
+thiserror = "2.0.17"
+pallas = { workspace = true }
+pallas-math = { workspace = true }
+dashu-int = "0.4.1"
+
+# The vrf crate has not been fully tested in production environments and still has several upstream issues that are open PRs but not merged yet.
+vrf_dalek = { package = "pallas_vrf", git = "https://github.com/txpipe/vrf", rev = "62ef4c7252ed05df98611da191e20c0dd144f025" }
+
+[lib]
+path = "src/block_vrf_validator.rs"

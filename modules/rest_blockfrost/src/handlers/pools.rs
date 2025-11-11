@@ -177,7 +177,7 @@ async fn handle_pools_extended_blockfrost(
 
     // check optimal_pool_sizing is Some
     let Some(optimal_pool_sizing) = optimal_pool_sizing else {
-        // if it is before Shelly Era
+        // if it is before Shelley Era
         return Ok(RESTResponse::with_json(200, "[]"));
     };
 

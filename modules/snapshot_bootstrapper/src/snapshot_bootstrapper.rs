@@ -1,7 +1,8 @@
-use std::sync::Arc;
+use std::{str::FromStr, sync::Arc};
 
 use acropolis_common::{
     genesis_values::GenesisValues,
+    hash::Hash,
     messages::{CardanoMessage, GenesisCompleteMessage, Message},
     snapshot::{
         streaming_snapshot::{
@@ -11,7 +12,7 @@ use acropolis_common::{
         StreamingSnapshotParser,
     },
     stake_addresses::AccountState,
-    BlockHash, BlockInfo, BlockStatus, Era,
+    BlockHash, BlockInfo, BlockStatus, Era, GenesisDelegates,
 };
 use anyhow::Result;
 use caryatid_sdk::{module, Context, Module};
@@ -86,12 +87,12 @@ impl SnapshotHandler {
             byron_timestamp: 1506203091, // Byron mainnet genesis timestamp
             shelley_epoch: 208,          // Shelley started at epoch 208 on mainnet
             shelley_epoch_len: 432000,   // 5 days in seconds
-            shelley_genesis_hash: [
-                // Shelley mainnet genesis hash (placeholder - should be from config)
-                0x1a, 0x3d, 0x98, 0x7a, 0x95, 0xad, 0xd2, 0x3e, 0x4f, 0x4d, 0x2d, 0x78, 0x74, 0x9f,
-                0x96, 0x65, 0xd4, 0x1e, 0x48, 0x3e, 0xf2, 0xa2, 0x22, 0x9c, 0x4b, 0x0b, 0xf3, 0x9f,
-                0xad, 0x7d, 0x5e, 0x27,
-            ],
+            // Shelley mainnet genesis hash (placeholder - should be from config)
+            shelley_genesis_hash: Hash::<32>::from_str(
+                "1a3be38bcbb7911969283716ad7aa550250226b76a61fc51cc9a9a35d9276d81",
+            )
+            .unwrap(),
+            genesis_delegs: GenesisDelegates::try_from(vec![]).unwrap(),
         })
     }
 

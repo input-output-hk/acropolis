@@ -6,7 +6,7 @@
 use crate::commands::transactions::{TransactionsCommand, TransactionsCommandResponse};
 use crate::genesis_values::GenesisValues;
 use crate::ledger_state::SPOState;
-use crate::protocol_params::{NonceHash, ProtocolParams};
+use crate::protocol_params::{Nonce, ProtocolParams};
 use crate::queries::parameters::{ParametersStateQuery, ParametersStateQueryResponse};
 use crate::queries::spdd::{SPDDStateQuery, SPDDStateQueryResponse};
 use crate::queries::utxos::{UTxOStateQuery, UTxOStateQueryResponse};
@@ -182,7 +182,7 @@ pub struct EpochActivityMessage {
     pub spo_blocks: Vec<(PoolId, usize)>,
 
     /// Nonce
-    pub nonce: Option<NonceHash>,
+    pub nonce: Option<Nonce>,
 }
 
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]

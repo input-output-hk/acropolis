@@ -40,8 +40,8 @@ rayon = "1.11.0"
 cryptoxide = "0.5.1"
 thiserror = "2.0.17"
 sha2 = "0.10.8"
-caryatid_process.workspace = true
-config.workspace = true
+caryatid_process = { workspace = true }
+config = { workspace = true }
 
 [lib]
 crate-type = ["rlib"]
