@@ -389,6 +389,19 @@ pub struct ValueMap {
     pub assets: NativeAssetsMap,
 }
 
+impl AddAssign for ValueMap {
+    fn add_assign(&mut self, other: Self) {
+        self.lovelace += other.lovelace;
+
+        for (policy, assets) in other.assets {
+            let entry = self.assets.entry(policy).or_default();
+            for (asset_name, amount) in assets {
+                *entry.entry(asset_name).or_default() += amount;
+            }
+        }
+    }
+}
+
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ValueDelta {
     pub lovelace: i64,
@@ -2088,6 +2101,14 @@ pub struct AddressTotals {
     pub received: ValueMap,
     #[n(2)]
     pub tx_count: u64,
+}
+
+impl AddAssign for AddressTotals {
+    fn add_assign(&mut self, other: Self) {
+        self.sent += other.sent;
+        self.received += other.received;
+        self.tx_count += other.tx_count;
+    }
 }
 
 impl AddressTotals {

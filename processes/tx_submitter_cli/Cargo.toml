@@ -16,8 +16,6 @@ caryatid_process = { workspace = true}
 anyhow = { workspace = true }
 clap = { workspace = true }
 config = { workspace = true }
-hex = { workspace = true }
-pallas = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3.20", features = ["registry", "env-filter"] }

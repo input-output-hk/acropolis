@@ -1,7 +1,5 @@
 use crate::queries::errors::QueryError;
-use crate::{
-    Address, AddressTotals, NativeAssets, ShelleyAddress, TxIdentifier, UTxOIdentifier, ValueDelta,
-};
+use crate::{Address, AddressTotals, ShelleyAddress, TxIdentifier, UTxOIdentifier};
 
 pub const DEFAULT_ADDRESS_QUERY_TOPIC: (&str, &str) =
     ("address-state-query-topic", "cardano.query.address");
@@ -13,7 +11,6 @@ pub enum AddressStateQuery {
     GetAddressTransactions { address: Address },
 
     // Accounts related queries
-    GetAddressesAssets { addresses: Vec<ShelleyAddress> },
     GetAddressesTotals { addresses: Vec<ShelleyAddress> },
     GetAddressesUTxOs { addresses: Vec<ShelleyAddress> },
 }
@@ -25,8 +22,7 @@ pub enum AddressStateQueryResponse {
     AddressTransactions(Vec<TxIdentifier>),
 
     // Accounts related queries
-    AddressesAssets(NativeAssets),
-    AddressesTotals(ValueDelta),
+    AddressesTotals(AddressTotals),
     AddressesUTxOs(Vec<UTxOIdentifier>),
     Error(QueryError),
 }
