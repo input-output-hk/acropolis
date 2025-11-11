@@ -1,4 +1,7 @@
 //! REST handlers for Acropolis Blockfrost /blocks endpoints
+use crate::handlers_config::HandlersConfig;
+use crate::types::BlockInfoREST;
+use acropolis_common::rest_error::RESTError;
 use acropolis_common::{
     extract_strict_query_params,
     messages::{Message, RESTResponse, StateQuery, StateQueryResponse},
@@ -9,27 +12,28 @@ use acropolis_common::{
     },
     BlockHash,
 };
-use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::handlers_config::HandlersConfig;
-use crate::types::BlockInfoREST;
-
-fn parse_block_key(key: &str) -> Result<BlockKey> {
+fn parse_block_key(key: &str) -> Result<BlockKey, RESTError> {
     match key.len() {
-        64 => match hex::decode(key) {
-            Ok(key) => match BlockHash::try_from(key) {
-                Ok(block_hash) => Ok(BlockKey::Hash(block_hash)),
-                Err(_) => Err(anyhow::Error::msg("Invalid block hash")),
-            },
-            Err(error) => Err(error.into()),
-        },
-        _ => match key.parse::<u64>() {
-            Ok(key) => Ok(BlockKey::Number(key)),
-            Err(error) => Err(error.into()),
-        },
+        64 => {
+            let bytes = hex::decode(key)
+                .map_err(|_| RESTError::invalid_param("block", "invalid hex format"))?;
+            let block_hash = BlockHash::try_from(bytes)
+                .map_err(|_| RESTError::invalid_param("block", "invalid block hash"))?;
+            Ok(BlockKey::Hash(block_hash))
+        }
+        _ => {
+            let number = key.parse::<u64>().map_err(|_| {
+                RESTError::invalid_param(
+                    "block",
+                    "must be a valid block number or 64-character hex hash",
+                )
+            })?;
+            Ok(BlockKey::Number(number))
+        }
     }
 }
 
@@ -38,10 +42,10 @@ pub async fn handle_blocks_latest_hash_number_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
+) -> Result<RESTResponse, RESTError> {
     let param = match params.as_slice() {
         [param] => param,
-        _ => return Ok(RESTResponse::with_text(400, "Invalid parameters")),
+        _ => return Err(RESTError::BadRequest("Invalid parameters".to_string())),
     };
 
     match param.as_str() {
@@ -54,7 +58,7 @@ pub async fn handle_blocks_latest_hash_number_blockfrost(
 async fn handle_blocks_latest_blockfrost(
     context: Arc<Context<Message>>,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
+) -> Result<RESTResponse, RESTError> {
     let blocks_latest_msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
         BlocksStateQuery::GetLatestBlock,
     )));
@@ -65,10 +69,10 @@ async fn handle_blocks_latest_blockfrost(
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::LatestBlock(blocks_latest),
-            )) => Some(Ok(Some(BlockInfoREST(blocks_latest)))),
+            )) => Some(Ok(BlockInfoREST(blocks_latest))),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
-            )) => Some(Err(anyhow!(e))),
+            )) => Some(Err(e)),
             _ => None,
         },
     )
@@ -80,11 +84,8 @@ async fn handle_blocks_hash_number_blockfrost(
     context: Arc<Context<Message>>,
     hash_or_number: &str,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
-    let block_key = match parse_block_key(hash_or_number) {
-        Ok(block_key) => block_key,
-        Err(error) => return Err(error),
-    };
+) -> Result<RESTResponse, RESTError> {
+    let block_key = parse_block_key(hash_or_number)?;
 
     let block_info_msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
         BlocksStateQuery::GetBlockInfo { block_key },
@@ -96,13 +97,10 @@ async fn handle_blocks_hash_number_blockfrost(
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::BlockInfo(block_info),
-            )) => Some(Ok(Some(BlockInfoREST(block_info)))),
-            Message::StateQueryResponse(StateQueryResponse::Blocks(
-                BlocksStateQueryResponse::NotFound,
-            )) => Some(Ok(None)),
+            )) => Some(Ok(BlockInfoREST(block_info))),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
-            )) => Some(Err(anyhow!(e))),
+            )) => Some(Err(e)),
             _ => None,
         },
     )
@@ -115,10 +113,10 @@ pub async fn handle_blocks_latest_hash_number_transactions_blockfrost(
     params: Vec<String>,
     query_params: HashMap<String, String>,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
+) -> Result<RESTResponse, RESTError> {
     let param = match params.as_slice() {
         [param] => param,
-        _ => return Ok(RESTResponse::with_text(400, "Invalid parameters")),
+        _ => return Err(RESTError::BadRequest("Invalid parameters".to_string())),
     };
 
     extract_strict_query_params!(query_params, {
@@ -162,7 +160,7 @@ async fn handle_blocks_latest_transactions_blockfrost(
     skip: u64,
     order: Order,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
+) -> Result<RESTResponse, RESTError> {
     let blocks_latest_txs_msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
         BlocksStateQuery::GetLatestBlockTransactions { limit, skip, order },
     )));
@@ -173,10 +171,10 @@ async fn handle_blocks_latest_transactions_blockfrost(
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::LatestBlockTransactions(blocks_txs),
-            )) => Some(Ok(Some(blocks_txs))),
+            )) => Some(Ok(blocks_txs)),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
-            )) => Some(Err(anyhow!(e))),
+            )) => Some(Err(e)),
             _ => None,
         },
     )
@@ -191,11 +189,8 @@ async fn handle_blocks_hash_number_transactions_blockfrost(
     skip: u64,
     order: Order,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
-    let block_key = match parse_block_key(hash_or_number) {
-        Ok(block_key) => block_key,
-        Err(error) => return Err(error),
-    };
+) -> Result<RESTResponse, RESTError> {
+    let block_key = parse_block_key(hash_or_number)?;
 
     let block_txs_msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
         BlocksStateQuery::GetBlockTransactions {
@@ -212,13 +207,10 @@ async fn handle_blocks_hash_number_transactions_blockfrost(
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::BlockTransactions(block_txs),
-            )) => Some(Ok(Some(block_txs))),
-            Message::StateQueryResponse(StateQueryResponse::Blocks(
-                BlocksStateQueryResponse::NotFound,
-            )) => Some(Ok(None)),
+            )) => Some(Ok(block_txs)),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
-            )) => Some(Err(anyhow!(e))),
+            )) => Some(Err(e)),
             _ => None,
         },
     )
@@ -231,10 +223,10 @@ pub async fn handle_blocks_latest_hash_number_transactions_cbor_blockfrost(
     params: Vec<String>,
     query_params: HashMap<String, String>,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
+) -> Result<RESTResponse, RESTError> {
     let param = match params.as_slice() {
         [param] => param,
-        _ => return Ok(RESTResponse::with_text(400, "Invalid parameters")),
+        _ => return Err(RESTError::BadRequest("Invalid parameters".to_string())),
     };
 
     extract_strict_query_params!(query_params, {
@@ -278,7 +270,7 @@ async fn handle_blocks_latest_transactions_cbor_blockfrost(
     skip: u64,
     order: Order,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
+) -> Result<RESTResponse, RESTError> {
     let blocks_latest_txs_msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
         BlocksStateQuery::GetLatestBlockTransactionsCBOR { limit, skip, order },
     )));
@@ -289,10 +281,10 @@ async fn handle_blocks_latest_transactions_cbor_blockfrost(
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::LatestBlockTransactionsCBOR(blocks_txs),
-            )) => Some(Ok(Some(blocks_txs))),
+            )) => Some(Ok(blocks_txs)),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
-            )) => Some(Err(anyhow!(e))),
+            )) => Some(Err(e)),
             _ => None,
         },
     )
@@ -307,11 +299,8 @@ async fn handle_blocks_hash_number_transactions_cbor_blockfrost(
     skip: u64,
     order: Order,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
-    let block_key = match parse_block_key(hash_or_number) {
-        Ok(block_key) => block_key,
-        Err(error) => return Err(error),
-    };
+) -> Result<RESTResponse, RESTError> {
+    let block_key = parse_block_key(hash_or_number)?;
 
     let block_txs_cbor_msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
         BlocksStateQuery::GetBlockTransactionsCBOR {
@@ -328,13 +317,10 @@ async fn handle_blocks_hash_number_transactions_cbor_blockfrost(
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::BlockTransactionsCBOR(block_txs_cbor),
-            )) => Some(Ok(Some(block_txs_cbor))),
-            Message::StateQueryResponse(StateQueryResponse::Blocks(
-                BlocksStateQueryResponse::NotFound,
-            )) => Some(Ok(None)),
+            )) => Some(Ok(block_txs_cbor)),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
-            )) => Some(Err(anyhow!(e))),
+            )) => Some(Err(e)),
             _ => None,
         },
     )
@@ -347,16 +333,13 @@ pub async fn handle_blocks_hash_number_next_blockfrost(
     params: Vec<String>,
     query_params: HashMap<String, String>,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
+) -> Result<RESTResponse, RESTError> {
     let param = match params.as_slice() {
         [param] => param,
-        _ => return Ok(RESTResponse::with_text(400, "Invalid parameters")),
+        _ => return Err(RESTError::BadRequest("Invalid parameters".to_string())),
     };
 
-    let block_key = match parse_block_key(param) {
-        Ok(block_key) => block_key,
-        Err(error) => return Err(error),
-    };
+    let block_key = parse_block_key(param)?;
 
     extract_strict_query_params!(query_params, {
         "count" => limit: Option<u64>,
@@ -379,13 +362,10 @@ pub async fn handle_blocks_hash_number_next_blockfrost(
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::NextBlocks(blocks_next),
-            )) => Some(Ok(Some(blocks_next))),
-            Message::StateQueryResponse(StateQueryResponse::Blocks(
-                BlocksStateQueryResponse::NotFound,
-            )) => Some(Ok(None)),
+            )) => Some(Ok(blocks_next)),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
-            )) => Some(Err(anyhow!(e))),
+            )) => Some(Err(e)),
             _ => None,
         },
     )
@@ -398,16 +378,13 @@ pub async fn handle_blocks_hash_number_previous_blockfrost(
     params: Vec<String>,
     query_params: HashMap<String, String>,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
+) -> Result<RESTResponse, RESTError> {
     let param = match params.as_slice() {
         [param] => param,
-        _ => return Ok(RESTResponse::with_text(400, "Invalid parameters")),
+        _ => return Err(RESTError::BadRequest("Invalid parameters".to_string())),
     };
 
-    let block_key = match parse_block_key(param) {
-        Ok(block_key) => block_key,
-        Err(error) => return Err(error),
-    };
+    let block_key = parse_block_key(param)?;
 
     extract_strict_query_params!(query_params, {
         "count" => limit: Option<u64>,
@@ -430,13 +407,10 @@ pub async fn handle_blocks_hash_number_previous_blockfrost(
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::PreviousBlocks(blocks_previous),
-            )) => Some(Ok(Some(blocks_previous))),
-            Message::StateQueryResponse(StateQueryResponse::Blocks(
-                BlocksStateQueryResponse::NotFound,
-            )) => Some(Ok(None)),
+            )) => Some(Ok(blocks_previous)),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
-            )) => Some(Err(anyhow!(e))),
+            )) => Some(Err(e)),
             _ => None,
         },
     )
@@ -448,16 +422,15 @@ pub async fn handle_blocks_slot_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
+) -> Result<RESTResponse, RESTError> {
     let slot = match params.as_slice() {
         [param] => param,
-        _ => return Ok(RESTResponse::with_text(400, "Invalid parameters")),
+        _ => return Err(RESTError::BadRequest("Invalid parameters".to_string())),
     };
 
-    let slot = match slot.parse::<u64>() {
-        Ok(slot) => slot,
-        Err(error) => return Err(error.into()),
-    };
+    let slot = slot
+        .parse::<u64>()
+        .map_err(|_| RESTError::invalid_param("slot", "must be a valid number"))?;
 
     let block_slot_msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
         BlocksStateQuery::GetBlockBySlot { slot },
@@ -469,13 +442,10 @@ pub async fn handle_blocks_slot_blockfrost(
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::BlockBySlot(block_info),
-            )) => Some(Ok(Some(block_info))),
-            Message::StateQueryResponse(StateQueryResponse::Blocks(
-                BlocksStateQueryResponse::NotFound,
-            )) => Some(Ok(None)),
+            )) => Some(Ok(block_info)),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
-            )) => Some(Err(anyhow!(e))),
+            )) => Some(Err(e)),
             _ => None,
         },
     )
@@ -487,21 +457,19 @@ pub async fn handle_blocks_epoch_slot_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
+) -> Result<RESTResponse, RESTError> {
     let (epoch, slot) = match params.as_slice() {
         [param1, param2] => (param1, param2),
-        _ => return Ok(RESTResponse::with_text(400, "Invalid parameters")),
+        _ => return Err(RESTError::BadRequest("Invalid parameters".to_string())),
     };
 
-    let epoch = match epoch.parse::<u64>() {
-        Ok(epoch) => epoch,
-        Err(error) => return Err(error.into()),
-    };
+    let epoch = epoch
+        .parse::<u64>()
+        .map_err(|_| RESTError::invalid_param("epoch", "must be a valid number"))?;
 
-    let slot = match slot.parse::<u64>() {
-        Ok(slot) => slot,
-        Err(error) => return Err(error.into()),
-    };
+    let slot = slot
+        .parse::<u64>()
+        .map_err(|_| RESTError::invalid_param("slot", "must be a valid number"))?;
 
     let block_epoch_slot_msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
         BlocksStateQuery::GetBlockByEpochSlot { epoch, slot },
@@ -513,13 +481,10 @@ pub async fn handle_blocks_epoch_slot_blockfrost(
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::BlockByEpochSlot(block_info),
-            )) => Some(Ok(Some(block_info))),
-            Message::StateQueryResponse(StateQueryResponse::Blocks(
-                BlocksStateQueryResponse::NotFound,
-            )) => Some(Ok(None)),
+            )) => Some(Ok(block_info)),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
-            )) => Some(Err(anyhow!(e))),
+            )) => Some(Err(e)),
             _ => None,
         },
     )
@@ -532,16 +497,13 @@ pub async fn handle_blocks_hash_number_addresses_blockfrost(
     params: Vec<String>,
     query_params: HashMap<String, String>,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
+) -> Result<RESTResponse, RESTError> {
     let param = match params.as_slice() {
         [param] => param,
-        _ => return Ok(RESTResponse::with_text(400, "Invalid parameters")),
+        _ => return Err(RESTError::BadRequest("Invalid parameters".to_string())),
     };
 
-    let block_key = match parse_block_key(param) {
-        Ok(block_key) => block_key,
-        Err(error) => return Err(error),
-    };
+    let block_key = parse_block_key(param)?;
 
     extract_strict_query_params!(query_params, {
         "count" => limit: Option<u64>,
@@ -564,15 +526,63 @@ pub async fn handle_blocks_hash_number_addresses_blockfrost(
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::BlockInvolvedAddresses(block_addresses),
-            )) => Some(Ok(Some(block_addresses))),
-            Message::StateQueryResponse(StateQueryResponse::Blocks(
-                BlocksStateQueryResponse::NotFound,
-            )) => Some(Ok(None)),
+            )) => Some(Ok(block_addresses)),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
-            )) => Some(Err(anyhow!(e))),
+            )) => Some(Err(e)),
             _ => None,
         },
     )
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_valid_block_hash() {
+        let valid_hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        let result = parse_block_key(valid_hash);
+
+        let expected_bytes: [u8; 32] = [
+            0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab,
+            0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67,
+            0x89, 0xab, 0xcd, 0xef,
+        ];
+
+        match result.unwrap() {
+            BlockKey::Hash(hash) => assert_eq!(hash, BlockHash::from(expected_bytes)),
+            BlockKey::Number(_) => panic!("Expected BlockKey::Hash"),
+        }
+    }
+
+    #[test]
+    fn test_invalid_hex_format() {
+        let invalid_hex = "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz";
+        let result = parse_block_key(invalid_hex);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.status_code(), 400);
+        assert!(err.message().contains("invalid hex format"));
+    }
+
+    #[test]
+    fn test_valid_block_number() {
+        let result = parse_block_key("12345");
+        assert!(result.is_ok());
+        match result.unwrap() {
+            BlockKey::Number(n) => assert_eq!(n, 12345),
+            _ => panic!("Expected BlockKey::Number"),
+        }
+    }
+
+    #[test]
+    fn test_invalid_block_number() {
+        let result = parse_block_key("not_a_number");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.status_code(), 400);
+        assert!(err.message().contains("must be a valid block number or 64-character hex hash"));
+    }
 }

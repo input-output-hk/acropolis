@@ -1,11 +1,13 @@
 use std::{
+    collections::HashSet,
     path::{Path, PathBuf},
     sync::Arc,
 };
 
 use acropolis_common::{
     messages::{
-        AddressDeltasMessage, StakeRewardDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
+        StakeAddressDeltasMessage, StakeRewardDeltasMessage, TxCertificatesMessage,
+        WithdrawalsMessage,
     },
     queries::accounts::{
         AccountReward, AccountWithdrawal, DelegationUpdate, RegistrationStatus, RegistrationUpdate,
@@ -223,8 +225,16 @@ impl State {
         }
     }
 
-    pub fn handle_address_deltas(&mut self, _address_deltas: &AddressDeltasMessage) -> Result<()> {
-        Ok(())
+    pub fn handle_address_deltas(&mut self, stake_address_deltas: &StakeAddressDeltasMessage) {
+        let window = self.volatile.window.back_mut().expect("window should never be empty");
+        for delta in stake_address_deltas.deltas.iter() {
+            window
+                .entry(delta.stake_address.clone())
+                .or_default()
+                .addresses
+                .get_or_insert_with(Vec::new)
+                .extend(delta.addresses.clone());
+        }
     }
 
     pub fn handle_withdrawals(&mut self, withdrawals_msg: &WithdrawalsMessage) {
@@ -344,8 +354,26 @@ impl State {
         }
     }
 
-    pub async fn _get_addresses(&self, _account: StakeAddress) -> Result<Vec<ShelleyAddress>> {
-        Ok(Vec::new())
+    pub async fn get_addresses(
+        &self,
+        account: &StakeAddress,
+    ) -> Result<Option<Vec<ShelleyAddress>>> {
+        let mut addresses = self.immutable.get_addresses(account).await?.unwrap_or_default();
+
+        let mut seen: HashSet<ShelleyAddress> = addresses.iter().cloned().collect();
+        for block_map in self.volatile.window.iter() {
+            if let Some(entry) = block_map.get(account) {
+                if let Some(pending) = &entry.addresses {
+                    for addr in pending {
+                        if seen.insert(addr.clone()) {
+                            addresses.push(addr.clone());
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok((!addresses.is_empty()).then_some(addresses))
     }
 
     fn handle_stake_registration_change(

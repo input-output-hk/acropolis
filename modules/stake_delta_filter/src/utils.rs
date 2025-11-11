@@ -1,7 +1,7 @@
 use acropolis_common::{
     messages::{AddressDeltasMessage, StakeAddressDeltasMessage},
-    Address, AddressDelta, BlockInfo, Era, ShelleyAddressDelegationPart, ShelleyAddressPointer,
-    StakeAddress, StakeAddressDelta, StakeCredential,
+    Address, AddressDelta, BlockInfo, Era, ShelleyAddress, ShelleyAddressDelegationPart,
+    ShelleyAddressPointer, StakeAddress, StakeAddressDelta, StakeCredential,
 };
 use anyhow::{anyhow, Result};
 use serde_with::serde_as;
@@ -311,6 +311,13 @@ impl Tracker {
     }
 }
 
+/// Internal helper used during `process_message` aggregation for deduplication.
+struct StakeEntry {
+    delta: i64,
+    addresses: Vec<ShelleyAddress>,
+    seen: HashSet<ShelleyAddress>,
+}
+
 /// Iterates through all address deltas in `delta`, leaves only stake addresses
 /// (and removes all others). If the address is a pointer, tries to resolve it.
 /// If the pointer is incorrect, then filters it out too (incorrect pointers cannot
@@ -321,7 +328,7 @@ pub fn process_message(
     block: &BlockInfo,
     mut tracker: Option<&mut Tracker>,
 ) -> StakeAddressDeltasMessage {
-    let mut result = StakeAddressDeltasMessage { deltas: Vec::new() };
+    let mut grouped: HashMap<StakeAddress, StakeEntry> = HashMap::new();
 
     for d in delta.deltas.iter() {
         // Variants to be processed:
@@ -336,12 +343,12 @@ pub fn process_message(
 
         cache.ensure_up_to_date(block, &d.address).unwrap_or_else(|e| error!("{e}"));
 
-        let stake_address = match &d.address {
+        let (stake_address, shelley_opt) = match &d.address {
             // Not good for staking
             Address::None | Address::Byron(_) => continue,
 
             Address::Shelley(shelley) => {
-                match &shelley.delegation {
+                let stake_address = match &shelley.delegation {
                     // Base addresses (stake delegated to itself)
                     ShelleyAddressDelegationPart::StakeKeyHash(keyhash) => StakeAddress {
                         network: shelley.network.clone(),
@@ -382,20 +389,37 @@ pub fn process_message(
 
                     // Enterprise addresses, does not delegate stake
                     ShelleyAddressDelegationPart::None => continue,
-                }
+                };
+                (stake_address, Some(shelley))
             }
 
-            Address::Stake(stake_address) => stake_address.clone(),
+            Address::Stake(stake_address) => (stake_address.clone(), None),
         };
 
-        let stake_delta = StakeAddressDelta {
-            address: stake_address,
-            delta: d.value.lovelace,
-        };
-        result.deltas.push(stake_delta);
+        let entry = grouped.entry(stake_address).or_insert_with(|| StakeEntry {
+            delta: 0,
+            addresses: Vec::new(),
+            seen: HashSet::new(),
+        });
+        entry.delta += d.value.lovelace;
+
+        if let Some(shelley) = shelley_opt {
+            if entry.seen.insert(shelley.clone()) {
+                entry.addresses.push(shelley.clone());
+            }
+        }
     }
 
-    result
+    let deltas = grouped
+        .into_iter()
+        .map(|(stake_address, entry)| StakeAddressDelta {
+            stake_address,
+            addresses: entry.addresses,
+            delta: entry.delta,
+        })
+        .collect();
+
+    StakeAddressDeltasMessage { deltas }
 }
 
 #[cfg(test)]
@@ -564,50 +588,50 @@ mod test {
 
         let stake_delta = process_message(&cache, &delta, &block, None);
 
+        let stake_addr_entry = stake_delta
+            .deltas
+            .iter()
+            .find(|d| d.stake_address.to_string().unwrap() == stake_addr)
+            .expect("Expected stake_addr not found in deltas");
         assert_eq!(
-            stake_delta.deltas.first().unwrap().address.to_string().unwrap(),
-            stake_addr
+            stake_addr_entry.addresses.len(),
+            2,
+            "Expected 2 Shelley addresses grouped under stake_addr"
         );
+
+        let script_addr_entry = stake_delta
+            .deltas
+            .iter()
+            .find(|d| d.stake_address.to_string().unwrap() == script_addr)
+            .expect("Expected script_addr not found in deltas");
         assert_eq!(
-            stake_delta.deltas.get(1).unwrap().address.to_string().unwrap(),
-            stake_addr
+            script_addr_entry.addresses.len(),
+            2,
+            "Expected 2 Shelley addresses grouped under script_addr"
         );
-        assert_eq!(
-            stake_delta.deltas.get(2).unwrap().address.to_string().unwrap(),
-            script_addr
-        );
-        assert_eq!(
-            stake_delta.deltas.get(3).unwrap().address.to_string().unwrap(),
-            script_addr
-        );
-        assert_eq!(
-            stake_delta.deltas.get(4).unwrap().address.to_string().unwrap(),
-            pointed_addr
-        );
-        assert_eq!(
-            stake_delta.deltas.get(5).unwrap().address.to_string().unwrap(),
-            pointed_addr
-        );
-        assert_eq!(
-            stake_delta.deltas.get(6).unwrap().address.to_string().unwrap(),
-            stake_addr
-        );
-        assert_eq!(
-            stake_delta.deltas.get(7).unwrap().address.to_string().unwrap(),
-            script_addr
+
+        assert!(
+            stake_delta.deltas.iter().any(|d| d.stake_address.to_string().unwrap() == pointed_addr),
+            "Expected pointed_addr not found in deltas"
         );
 
         // additional check: payload conversion correctness
-        assert_eq!(
-            stake_delta.deltas.first().unwrap().address.credential.to_string().unwrap(),
-            stake_key_hash
+        assert!(
+            stake_delta
+                .deltas
+                .iter()
+                .any(|d| d.stake_address.credential.to_string().unwrap() == stake_key_hash),
+            "Expected stake_key_hash not found in deltas"
         );
-        assert_eq!(
-            stake_delta.deltas.get(2).unwrap().address.credential.to_string().unwrap(),
-            script_hash
+        assert!(
+            stake_delta
+                .deltas
+                .iter()
+                .any(|d| d.stake_address.credential.to_string().unwrap() == script_hash),
+            "Expected script_hash not found in deltas"
         );
 
-        assert_eq!(stake_delta.deltas.len(), 8);
+        assert_eq!(stake_delta.deltas.len(), 3);
 
         Ok(())
     }

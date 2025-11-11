@@ -4,6 +4,11 @@
 
 use std::sync::Arc;
 
+use crate::{
+    immutable_address_store::ImmutableAddressStore,
+    state::{AddressStorageConfig, State},
+};
+use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::addresses::{
@@ -16,11 +21,6 @@ use caryatid_sdk::{module, Context, Module, Subscription};
 use config::Config;
 use tokio::sync::{mpsc, Mutex};
 use tracing::{error, info};
-
-use crate::{
-    immutable_address_store::ImmutableAddressStore,
-    state::{AddressStorageConfig, State},
-};
 mod immutable_address_store;
 mod state;
 mod volatile_addresses;
@@ -194,15 +194,14 @@ impl AddressState {
         let state_mutex = Arc::new(Mutex::new(state));
         let state_run = state_mutex.clone();
 
-        // Query handler
         context.handle(&address_query_topic, move |message| {
             let state_mutex = state_mutex.clone();
             async move {
                 let Message::StateQuery(StateQuery::Addresses(query)) = message.as_ref() else {
                     return Arc::new(Message::StateQueryResponse(StateQueryResponse::Addresses(
-                        AddressStateQueryResponse::Error(
-                            "Invalid message for address-state".into(),
-                        ),
+                        AddressStateQueryResponse::Error(QueryError::internal_error(
+                            "Invalid message for address-state",
+                        )),
                     )));
                 };
 
@@ -211,21 +210,61 @@ impl AddressState {
                     AddressStateQuery::GetAddressUTxOs { address } => {
                         match state.get_address_utxos(address).await {
                             Ok(Some(utxos)) => AddressStateQueryResponse::AddressUTxOs(utxos),
-                            Ok(None) => AddressStateQueryResponse::NotFound,
-                            Err(e) => AddressStateQueryResponse::Error(e.to_string()),
+                            Ok(None) => match address.to_string() {
+                                Ok(addr_str) => AddressStateQueryResponse::Error(
+                                    QueryError::not_found(format!("Address {}", addr_str)),
+                                ),
+                                Err(e) => {
+                                    AddressStateQueryResponse::Error(QueryError::internal_error(
+                                        format!("Could not convert address to string: {}", e),
+                                    ))
+                                }
+                            },
+                            Err(e) => AddressStateQueryResponse::Error(QueryError::internal_error(
+                                e.to_string(),
+                            )),
                         }
                     }
                     AddressStateQuery::GetAddressTransactions { address } => {
                         match state.get_address_transactions(address).await {
                             Ok(Some(txs)) => AddressStateQueryResponse::AddressTransactions(txs),
-                            Ok(None) => AddressStateQueryResponse::NotFound,
-                            Err(e) => AddressStateQueryResponse::Error(e.to_string()),
+                            Ok(None) => match address.to_string() {
+                                Ok(addr_str) => AddressStateQueryResponse::Error(
+                                    QueryError::not_found(format!("Address {}", addr_str)),
+                                ),
+                                Err(e) => {
+                                    AddressStateQueryResponse::Error(QueryError::internal_error(
+                                        format!("Could not convert address to string: {}", e),
+                                    ))
+                                }
+                            },
+                            Err(e) => AddressStateQueryResponse::Error(QueryError::internal_error(
+                                e.to_string(),
+                            )),
                         }
                     }
                     AddressStateQuery::GetAddressTotals { address } => {
                         match state.get_address_totals(address).await {
                             Ok(totals) => AddressStateQueryResponse::AddressTotals(totals),
-                            Err(e) => AddressStateQueryResponse::Error(e.to_string()),
+                            Err(e) => AddressStateQueryResponse::Error(QueryError::internal_error(
+                                e.to_string(),
+                            )),
+                        }
+                    }
+                    AddressStateQuery::GetAddressesTotals { addresses } => {
+                        match state.get_addresses_totals(addresses).await {
+                            Ok(totals) => AddressStateQueryResponse::AddressesTotals(totals),
+                            Err(e) => AddressStateQueryResponse::Error(QueryError::internal_error(
+                                e.to_string(),
+                            )),
+                        }
+                    }
+                    AddressStateQuery::GetAddressesUTxOs { addresses } => {
+                        match state.get_addresses_utxos(addresses).await {
+                            Ok(utxos) => AddressStateQueryResponse::AddressesUTxOs(utxos),
+                            Err(e) => AddressStateQueryResponse::Error(QueryError::internal_error(
+                                e.to_string(),
+                            )),
                         }
                     }
                 };

@@ -1,7 +1,9 @@
+use crate::queries::errors::QueryError;
 use crate::{
     queries::misc::Order,
     serialization::{Bech32Conversion, Bech32WithHrp},
-    Address, BlockHash, GenesisDelegate, HeavyDelegate, KeyHash, TxHash, TxIdentifier, VrfKeyHash,
+    Address, BlockHash, GenesisDelegate, HeavyDelegate, KeyHash, TxHash, TxIdentifier,
+    UTxOIdentifier, VrfKeyHash,
 };
 use cryptoxide::hashing::blake2b::Blake2b;
 use serde::ser::{Serialize, SerializeStruct, Serializer};
@@ -67,6 +69,9 @@ pub enum BlocksStateQuery {
     GetTransactionHashes {
         tx_ids: Vec<TxIdentifier>,
     },
+    GetUTxOHashes {
+        utxo_ids: Vec<UTxOIdentifier>,
+    },
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -90,8 +95,8 @@ pub enum BlocksStateQueryResponse {
     BlockInvolvedAddresses(BlockInvolvedAddresses),
     BlockHashes(BlockHashes),
     TransactionHashes(TransactionHashes),
-    NotFound,
-    Error(String),
+    UTxOHashes(UTxOHashes),
+    Error(QueryError),
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -228,4 +233,10 @@ pub struct BlockHashes {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TransactionHashes {
     pub tx_hashes: HashMap<TxIdentifier, TxHash>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct UTxOHashes {
+    pub block_hashes: Vec<BlockHash>,
+    pub tx_hashes: Vec<TxHash>,
 }

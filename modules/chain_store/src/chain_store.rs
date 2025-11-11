@@ -1,16 +1,20 @@
 mod stores;
 
+use crate::stores::{fjall::FjallStore, Block, Store};
 use acropolis_codec::{block::map_to_block_issuer, map_parameters};
+use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
     crypto::keyhash_224,
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
-    queries::blocks::{
-        BlockHashes, BlockInfo, BlockInvolvedAddress, BlockInvolvedAddresses, BlockKey,
-        BlockTransaction, BlockTransactions, BlockTransactionsCBOR, BlocksStateQuery,
-        BlocksStateQueryResponse, NextBlocks, PreviousBlocks, TransactionHashes,
-        DEFAULT_BLOCKS_QUERY_TOPIC,
+    queries::{
+        blocks::{
+            BlockHashes, BlockInfo, BlockInvolvedAddress, BlockInvolvedAddresses, BlockKey,
+            BlockTransaction, BlockTransactions, BlockTransactionsCBOR, BlocksStateQuery,
+            BlocksStateQueryResponse, NextBlocks, PreviousBlocks, TransactionHashes, UTxOHashes,
+            DEFAULT_BLOCKS_QUERY_TOPIC,
+        },
+        misc::Order,
     },
-    queries::misc::Order,
     state_history::{StateHistory, StateHistoryStore},
     BechOrdAddress, BlockHash, GenesisDelegate, HeavyDelegate, PoolId, TxHash,
 };
@@ -21,8 +25,6 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::error;
-
-use crate::stores::{fjall::FjallStore, Block, Store};
 
 const DEFAULT_BLOCKS_TOPIC: &str = "cardano.block.available";
 const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: &str = "cardano.protocol.parameters";
@@ -66,16 +68,22 @@ impl ChainStore {
             async move {
                 let Message::StateQuery(StateQuery::Blocks(query)) = req.as_ref() else {
                     return Arc::new(Message::StateQueryResponse(StateQueryResponse::Blocks(
-                        BlocksStateQueryResponse::Error("Invalid message for blocks-state".into()),
+                        BlocksStateQueryResponse::Error(QueryError::internal_error(
+                            "Invalid message for blocks-state",
+                        )),
                     )));
                 };
                 let Some(state) = query_history.lock().await.current().cloned() else {
                     return Arc::new(Message::StateQueryResponse(StateQueryResponse::Blocks(
-                        BlocksStateQueryResponse::Error("unitialised state".to_string()),
+                        BlocksStateQueryResponse::Error(QueryError::internal_error(
+                            "uninitialized state",
+                        )),
                     )));
                 };
-                let res = Self::handle_blocks_query(&query_store, &state, query)
-                    .unwrap_or_else(|err| BlocksStateQueryResponse::Error(err.to_string()));
+                let res =
+                    Self::handle_blocks_query(&query_store, &state, query).unwrap_or_else(|err| {
+                        BlocksStateQueryResponse::Error(QueryError::internal_error(err.to_string()))
+                    });
                 Arc::new(Message::StateQueryResponse(StateQueryResponse::Blocks(res)))
             }
         });
@@ -132,42 +140,54 @@ impl ChainStore {
         match query {
             BlocksStateQuery::GetLatestBlock => {
                 let Some(block) = store.get_latest_block()? else {
-                    return Ok(BlocksStateQueryResponse::NotFound);
+                    return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
+                        "Latest block not found",
+                    )));
                 };
                 let info = Self::to_block_info(block, store, state, true)?;
                 Ok(BlocksStateQueryResponse::LatestBlock(info))
             }
             BlocksStateQuery::GetLatestBlockTransactions { limit, skip, order } => {
                 let Some(block) = store.get_latest_block()? else {
-                    return Ok(BlocksStateQueryResponse::NotFound);
+                    return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
+                        "Latest block not found",
+                    )));
                 };
                 let txs = Self::to_block_transactions(block, limit, skip, order)?;
                 Ok(BlocksStateQueryResponse::LatestBlockTransactions(txs))
             }
             BlocksStateQuery::GetLatestBlockTransactionsCBOR { limit, skip, order } => {
                 let Some(block) = store.get_latest_block()? else {
-                    return Ok(BlocksStateQueryResponse::NotFound);
+                    return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
+                        "Latest block not found",
+                    )));
                 };
                 let txs = Self::to_block_transactions_cbor(block, limit, skip, order)?;
                 Ok(BlocksStateQueryResponse::LatestBlockTransactionsCBOR(txs))
             }
             BlocksStateQuery::GetBlockInfo { block_key } => {
                 let Some(block) = Self::get_block_by_key(store, block_key)? else {
-                    return Ok(BlocksStateQueryResponse::NotFound);
+                    return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
+                        format!("Block {:?} not found", block_key),
+                    )));
                 };
                 let info = Self::to_block_info(block, store, state, false)?;
                 Ok(BlocksStateQueryResponse::BlockInfo(info))
             }
             BlocksStateQuery::GetBlockBySlot { slot } => {
                 let Some(block) = store.get_block_by_slot(*slot)? else {
-                    return Ok(BlocksStateQueryResponse::NotFound);
+                    return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
+                        format!("Block at slot {} not found", slot),
+                    )));
                 };
                 let info = Self::to_block_info(block, store, state, false)?;
                 Ok(BlocksStateQueryResponse::BlockBySlot(info))
             }
             BlocksStateQuery::GetBlockByEpochSlot { epoch, slot } => {
                 let Some(block) = store.get_block_by_epoch_slot(*epoch, *slot)? else {
-                    return Ok(BlocksStateQueryResponse::NotFound);
+                    return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
+                        format!("Block at epoch {} slot {} not found", epoch, slot),
+                    )));
                 };
                 let info = Self::to_block_info(block, store, state, false)?;
                 Ok(BlocksStateQueryResponse::BlockByEpochSlot(info))
@@ -183,7 +203,9 @@ impl ChainStore {
                     }));
                 }
                 let Some(block) = Self::get_block_by_key(store, block_key)? else {
-                    return Ok(BlocksStateQueryResponse::NotFound);
+                    return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
+                        format!("Block {:?} not found", block_key),
+                    )));
                 };
                 let number = match block_key {
                     BlockKey::Number(number) => *number,
@@ -208,7 +230,9 @@ impl ChainStore {
                     }));
                 }
                 let Some(block) = Self::get_block_by_key(store, block_key)? else {
-                    return Ok(BlocksStateQueryResponse::NotFound);
+                    return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
+                        format!("Block {:?} not found", block_key),
+                    )));
                 };
                 let number = match block_key {
                     BlockKey::Number(number) => *number,
@@ -233,7 +257,9 @@ impl ChainStore {
                 order,
             } => {
                 let Some(block) = Self::get_block_by_key(store, block_key)? else {
-                    return Ok(BlocksStateQueryResponse::NotFound);
+                    return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
+                        format!("Block {:?} not found", block_key),
+                    )));
                 };
                 let txs = Self::to_block_transactions(block, limit, skip, order)?;
                 Ok(BlocksStateQueryResponse::BlockTransactions(txs))
@@ -245,7 +271,9 @@ impl ChainStore {
                 order,
             } => {
                 let Some(block) = Self::get_block_by_key(store, block_key)? else {
-                    return Ok(BlocksStateQueryResponse::NotFound);
+                    return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
+                        format!("Block {:?} not found", block_key),
+                    )));
                 };
                 let txs = Self::to_block_transactions_cbor(block, limit, skip, order)?;
                 Ok(BlocksStateQueryResponse::BlockTransactionsCBOR(txs))
@@ -256,7 +284,9 @@ impl ChainStore {
                 skip,
             } => {
                 let Some(block) = Self::get_block_by_key(store, block_key)? else {
-                    return Ok(BlocksStateQueryResponse::NotFound);
+                    return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
+                        format!("Block {:?} not found", block_key),
+                    )));
                 };
                 let addresses = Self::to_block_involved_addresses(block, limit, skip)?;
                 Ok(BlocksStateQueryResponse::BlockInvolvedAddresses(addresses))
@@ -294,6 +324,32 @@ impl ChainStore {
                 Ok(BlocksStateQueryResponse::TransactionHashes(
                     TransactionHashes { tx_hashes },
                 ))
+            }
+            BlocksStateQuery::GetUTxOHashes { utxo_ids } => {
+                let mut tx_hashes = Vec::with_capacity(utxo_ids.len());
+                let mut block_hashes = Vec::with_capacity(utxo_ids.len());
+
+                for utxo in utxo_ids {
+                    if let Ok(Some(block)) = store.get_block_by_number(utxo.block_number().into()) {
+                        if let Ok(hash) = Self::get_block_hash(&block) {
+                            if let Ok(tx_hashes_in_block) =
+                                Self::to_block_transaction_hashes(&block)
+                            {
+                                if let Some(tx_hash) =
+                                    tx_hashes_in_block.get(utxo.tx_index() as usize)
+                                {
+                                    tx_hashes.push(*tx_hash);
+                                    block_hashes.push(hash);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Ok(BlocksStateQueryResponse::UTxOHashes(UTxOHashes {
+                    block_hashes,
+                    tx_hashes,
+                }))
             }
         }
     }

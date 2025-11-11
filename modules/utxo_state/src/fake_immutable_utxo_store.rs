@@ -1,7 +1,7 @@
 //! Fake store for immutable UTXOs
 
-use crate::state::{ImmutableUTXOStore, UTXOValue};
-use acropolis_common::{Address, UTxOIdentifier, Value};
+use crate::state::ImmutableUTXOStore;
+use acropolis_common::{Address, UTXOValue, UTxOIdentifier, Value};
 use anyhow::Result;
 use async_trait::async_trait;
 use config::Config;
@@ -53,6 +53,7 @@ impl ImmutableUTXOStore for FakeImmutableUTXOStore {
             address: Address::None,
             value: Value::new(42, Vec::new()),
             datum: None,
+            reference_script: None,
         }))
     }
 

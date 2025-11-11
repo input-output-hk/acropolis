@@ -5,6 +5,8 @@ use crate::{
         PolicyAssetRest,
     },
 };
+use acropolis_common::queries::errors::QueryError;
+use acropolis_common::rest_error::RESTError;
 use acropolis_common::{
     messages::{Message, RESTResponse, StateQuery, StateQueryResponse},
     queries::{
@@ -14,7 +16,6 @@ use acropolis_common::{
     serialization::Bech32WithHrp,
     AssetMetadataStandard, AssetName, PolicyId,
 };
-use anyhow::Result;
 use blake2::{digest::consts::U20, Blake2b, Digest};
 use caryatid_sdk::Context;
 use hex::FromHex;
@@ -27,394 +28,291 @@ pub async fn handle_assets_list_blockfrost(
     context: Arc<Context<Message>>,
     _params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
+) -> Result<RESTResponse, RESTError> {
     let assets_list_msg = Arc::new(Message::StateQuery(StateQuery::Assets(
         AssetsStateQuery::GetAssetsList,
     )));
 
-    let response = query_state(
+    let assets = query_state(
         &context,
         &handlers_config.assets_query_topic,
         assets_list_msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Assets(
                 AssetsStateQueryResponse::AssetsList(assets),
-            )) => {
-                let rest_assets: Vec<PolicyAssetRest> = assets.iter().map(Into::into).collect();
-                serde_json::to_string_pretty(&rest_assets)
-                    .map(|json| RESTResponse::with_json(200, &json))
-                    .map_err(|e| anyhow::anyhow!("Failed to serialize assets list: {e}"))
-            }
+            )) => Ok(assets),
             Message::StateQueryResponse(StateQueryResponse::Assets(
-                AssetsStateQueryResponse::Error(_),
-            )) => Ok(RESTResponse::with_text(
-                500,
-                "Asset storage is disabled in config",
-            )),
-            _ => Ok(RESTResponse::with_text(
-                500,
+                AssetsStateQueryResponse::Error(e),
+            )) => Err(e),
+            _ => Err(QueryError::internal_error(
                 "Unexpected response while retrieving asset list",
             )),
         },
     )
-    .await;
+    .await?;
 
-    match response {
-        Ok(rest) => Ok(rest),
-        Err(e) => Ok(RESTResponse::with_text(500, &format!("Query failed: {e}"))),
-    }
+    let rest_assets: Vec<PolicyAssetRest> = assets.iter().map(Into::into).collect();
+    let json = serde_json::to_string_pretty(&rest_assets)?;
+    Ok(RESTResponse::with_json(200, &json))
 }
 
 pub async fn handle_asset_single_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
+) -> Result<RESTResponse, RESTError> {
     let asset = params[0].clone();
-    let asset_query_msg = match split_policy_and_asset(&asset) {
-        Ok((policy, name)) => Arc::new(Message::StateQuery(StateQuery::Assets(
-            AssetsStateQuery::GetAssetInfo { policy, name },
-        ))),
-        Err(resp) => return Ok(resp),
-    };
+    let (policy, name) = split_policy_and_asset(&asset)?;
 
     let (policy_str, name_str) = asset.split_at(56);
 
-    let Ok(bytes) = hex::decode(&asset) else {
-        return Ok(RESTResponse::with_text(400, "Invalid asset hex"));
-    };
+    let bytes = hex::decode(&asset)?;
     let mut hasher = Blake2b::<U20>::new();
     hasher.update(&bytes);
     let hash: Vec<u8> = hasher.finalize().to_vec();
-    let Ok(fingerprint) = hash.to_bech32_with_hrp("asset") else {
-        return Ok(RESTResponse::with_text(
-            500,
-            "Failed to encode asset fingerprint",
-        ));
-    };
+    let fingerprint = hash
+        .to_bech32_with_hrp("asset")
+        .map_err(|e| RESTError::encoding_failed(&format!("asset fingerprint: {e}")))?;
+
     let off_chain_metadata =
         fetch_asset_metadata(&asset, &handlers_config.offchain_token_registry_url).await;
 
     let policy_id = policy_str.to_string();
     let asset_name = name_str.to_string();
 
-    let response = query_state(
+    let asset_query_msg = Arc::new(Message::StateQuery(StateQuery::Assets(
+        AssetsStateQuery::GetAssetInfo { policy, name },
+    )));
+
+    let (quantity, info) = query_state(
         &context,
         &handlers_config.assets_query_topic,
         asset_query_msg,
         move |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Assets(
                 AssetsStateQueryResponse::AssetInfo((quantity, info)),
-            )) => {
-                let (onchain_metadata_json, onchain_metadata_extra, cip68_version) = info
-                    .onchain_metadata
-                    .as_ref()
-                    .map(|raw_meta| normalize_onchain_metadata(raw_meta.as_slice()))
-                    .unwrap_or((None, None, None));
-
-                let onchain_metadata_standard = cip68_version.or(info.metadata_standard);
-
-                // TODO: Query transaction_state once implemented to fetch inital_mint_tx_hash based on TxIdentifier
-                let response = AssetInfoRest {
-                    asset,
-                    policy_id,
-                    asset_name,
-                    fingerprint,
-                    quantity: quantity.to_string(),
-                    initial_mint_tx_hash: "transaction_state not yet implemented".to_string(),
-                    mint_or_burn_count: info.mint_or_burn_count,
-                    onchain_metadata: onchain_metadata_json,
-                    onchain_metadata_standard,
-                    onchain_metadata_extra,
-                    metadata: off_chain_metadata,
-                };
-
-                serde_json::to_string_pretty(&response)
-                    .map(|json| RESTResponse::with_json(200, &json))
-                    .map_err(|e| anyhow::anyhow!("Failed to serialize asset info: {e}"))
-            }
+            )) => Ok((quantity, info)),
             Message::StateQueryResponse(StateQueryResponse::Assets(
-                AssetsStateQueryResponse::NotFound,
-            )) => Ok(RESTResponse::with_text(404, "Asset not found")),
+                AssetsStateQueryResponse::Error(QueryError::NotFound { .. }),
+            )) => Err(QueryError::not_found("Asset")),
             Message::StateQueryResponse(StateQueryResponse::Assets(
-                AssetsStateQueryResponse::Error(_),
-            )) => Ok(RESTResponse::with_text(
-                501,
-                "Asset info storage disabled in config",
-            )),
-            _ => Ok(RESTResponse::with_text(
-                500,
+                AssetsStateQueryResponse::Error(e),
+            )) => Err(e),
+            _ => Err(QueryError::internal_error(
                 "Unexpected response while retrieving asset info",
             )),
         },
     )
-    .await;
+    .await?;
 
-    match response {
-        Ok(rest) => Ok(rest),
-        Err(e) => Ok(RESTResponse::with_text(500, &format!("Query failed: {e}"))),
-    }
+    let (onchain_metadata_json, onchain_metadata_extra, cip68_version) = info
+        .onchain_metadata
+        .as_ref()
+        .map(|raw_meta| normalize_onchain_metadata(raw_meta.as_slice()))
+        .unwrap_or((None, None, None));
+
+    let onchain_metadata_standard = cip68_version.or(info.metadata_standard);
+
+    // TODO: Query transaction_state once implemented to fetch inital_mint_tx_hash based on TxIdentifier
+    let response = AssetInfoRest {
+        asset,
+        policy_id,
+        asset_name,
+        fingerprint,
+        quantity: quantity.to_string(),
+        initial_mint_tx_hash: "transaction_state not yet implemented".to_string(),
+        mint_or_burn_count: info.mint_or_burn_count,
+        onchain_metadata: onchain_metadata_json,
+        onchain_metadata_standard,
+        onchain_metadata_extra,
+        metadata: off_chain_metadata,
+    };
+
+    let json = serde_json::to_string_pretty(&response)?;
+    Ok(RESTResponse::with_json(200, &json))
 }
 
 pub async fn handle_asset_history_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
-    let (policy, name) = match split_policy_and_asset(&params[0]) {
-        Ok(pair) => pair,
-        Err(resp) => return Ok(resp),
-    };
+) -> Result<RESTResponse, RESTError> {
+    let (policy, name) = split_policy_and_asset(&params[0])?;
 
     let asset_query_msg = Arc::new(Message::StateQuery(StateQuery::Assets(
         AssetsStateQuery::GetAssetHistory { policy, name },
     )));
 
-    let response = match query_state(
+    let history = query_state(
         &context,
         &handlers_config.assets_query_topic,
         asset_query_msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Assets(
                 AssetsStateQueryResponse::AssetHistory(history),
-            )) => {
-                let rest_history: Vec<AssetMintRecordRest> =
-                    history.iter().map(Into::into).collect();
-                match serde_json::to_string_pretty(&rest_history) {
-                    Ok(json) => Ok(RESTResponse::with_json(200, &json)),
-                    Err(e) => Ok(RESTResponse::with_text(
-                        500,
-                        &format!("Failed to serialize asset history: {e}"),
-                    )),
-                }
-            }
+            )) => Ok(history),
             Message::StateQueryResponse(StateQueryResponse::Assets(
-                AssetsStateQueryResponse::NotFound,
-            )) => Ok(RESTResponse::with_text(404, "Asset history not found")),
+                AssetsStateQueryResponse::Error(QueryError::NotFound { .. }),
+            )) => Err(QueryError::not_found("Asset history")),
             Message::StateQueryResponse(StateQueryResponse::Assets(
-                AssetsStateQueryResponse::Error(_),
-            )) => Ok(RESTResponse::with_text(
-                501,
-                "Asset history storage is disabled in config",
-            )),
-            _ => Ok(RESTResponse::with_text(
-                500,
+                AssetsStateQueryResponse::Error(e),
+            )) => Err(e),
+            _ => Err(QueryError::internal_error(
                 "Unexpected response while retrieving asset history",
             )),
         },
     )
-    .await
-    {
-        Ok(rest) => rest,
-        Err(e) => RESTResponse::with_text(500, &format!("Query failed: {e}")),
-    };
+    .await?;
 
-    Ok(response)
+    let rest_history: Vec<AssetMintRecordRest> = history.iter().map(Into::into).collect();
+    let json = serde_json::to_string_pretty(&rest_history)?;
+    Ok(RESTResponse::with_json(200, &json))
 }
 
 pub async fn handle_asset_transactions_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
-    let (policy, name) = match split_policy_and_asset(&params[0]) {
-        Ok(pair) => pair,
-        Err(resp) => return Ok(resp),
-    };
+) -> Result<RESTResponse, RESTError> {
+    let (policy, name) = split_policy_and_asset(&params[0])?;
 
     let asset_query_msg = Arc::new(Message::StateQuery(StateQuery::Assets(
         AssetsStateQuery::GetAssetTransactions { policy, name },
     )));
 
-    let response = query_state(
+    let txs = query_state(
         &context,
         &handlers_config.assets_query_topic,
         asset_query_msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Assets(
                 AssetsStateQueryResponse::AssetTransactions(txs),
-            )) => {
-                // TODO: Query transaction_state once implemented to fetch tx_hash and block_time using TxIdentifier
-                let rest_txs: Vec<AssetTransactionRest> = txs
-                    .iter()
-                    .map(|identifier| AssetTransactionRest {
-                        tx_hash: "transaction_state not yet implemented".to_string(),
-                        tx_index: identifier.tx_index(),
-                        block_height: identifier.block_number(),
-                        block_time: "transaction_state not yet implemented".to_string(),
-                    })
-                    .collect();
-
-                serde_json::to_string_pretty(&rest_txs)
-                    .map(|json| RESTResponse::with_json(200, &json))
-                    .map_err(|e| anyhow::anyhow!("Failed to serialize asset transactions: {e}"))
-            }
+            )) => Ok(txs),
             Message::StateQueryResponse(StateQueryResponse::Assets(
-                AssetsStateQueryResponse::NotFound,
-            )) => Ok(RESTResponse::with_text(404, "Asset not found")),
+                AssetsStateQueryResponse::Error(QueryError::NotFound { .. }),
+            )) => Err(QueryError::not_found("Asset")),
             Message::StateQueryResponse(StateQueryResponse::Assets(
-                AssetsStateQueryResponse::Error(_),
-            )) => Ok(RESTResponse::with_text(
-                501,
-                "Asset transactions storage is disabled in config",
-            )),
-            _ => Ok(RESTResponse::with_text(
-                500,
+                AssetsStateQueryResponse::Error(e),
+            )) => Err(e),
+            _ => Err(QueryError::internal_error(
                 "Unexpected response while retrieving asset transactions",
             )),
         },
     )
-    .await;
+    .await?;
 
-    match response {
-        Ok(rest) => Ok(rest),
-        Err(e) => Ok(RESTResponse::with_text(500, &format!("Query failed: {e}"))),
-    }
+    // TODO: Query transaction_state once implemented to fetch tx_hash and block_time using TxIdentifier
+    let rest_txs: Vec<AssetTransactionRest> = txs
+        .iter()
+        .map(|identifier| AssetTransactionRest {
+            tx_hash: "transaction_state not yet implemented".to_string(),
+            tx_index: identifier.tx_index(),
+            block_height: identifier.block_number(),
+            block_time: "transaction_state not yet implemented".to_string(),
+        })
+        .collect();
+
+    let json = serde_json::to_string_pretty(&rest_txs)?;
+    Ok(RESTResponse::with_json(200, &json))
 }
 
 pub async fn handle_asset_addresses_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
-    let (policy, name) = match split_policy_and_asset(&params[0]) {
-        Ok(pair) => pair,
-        Err(resp) => return Ok(resp),
-    };
+) -> Result<RESTResponse, RESTError> {
+    let (policy, name) = split_policy_and_asset(&params[0])?;
 
     let asset_query_msg = Arc::new(Message::StateQuery(StateQuery::Assets(
         AssetsStateQuery::GetAssetAddresses { policy, name },
     )));
 
-    let response = query_state(
+    let addresses = query_state(
         &context,
         &handlers_config.assets_query_topic,
         asset_query_msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Assets(
                 AssetsStateQueryResponse::AssetAddresses(addresses),
-            )) => {
-                let rest_addrs: Result<Vec<_>, _> =
-                    addresses.iter().map(AssetAddressRest::try_from).collect();
-
-                match rest_addrs {
-                    Ok(rest_addrs) => match serde_json::to_string_pretty(&rest_addrs) {
-                        Ok(json) => Ok(RESTResponse::with_json(200, &json)),
-                        Err(e) => Ok(RESTResponse::with_text(
-                            500,
-                            &format!("Failed to serialize asset addresses: {e}"),
-                        )),
-                    },
-                    Err(e) => Ok(RESTResponse::with_text(
-                        500,
-                        &format!("Failed to convert address entry: {e}"),
-                    )),
-                }
-            }
+            )) => Ok(addresses),
             Message::StateQueryResponse(StateQueryResponse::Assets(
-                AssetsStateQueryResponse::NotFound,
-            )) => Ok(RESTResponse::with_text(404, "Asset not found")),
+                AssetsStateQueryResponse::Error(QueryError::NotFound { .. }),
+            )) => Err(QueryError::not_found("Asset")),
             Message::StateQueryResponse(StateQueryResponse::Assets(
-                AssetsStateQueryResponse::Error(_),
-            )) => Ok(RESTResponse::with_text(
-                501,
-                "Asset addresses storage is disabled in config",
-            )),
-            _ => Ok(RESTResponse::with_text(
-                500,
+                AssetsStateQueryResponse::Error(e),
+            )) => Err(e),
+            _ => Err(QueryError::internal_error(
                 "Unexpected response while retrieving asset addresses",
             )),
         },
     )
-    .await;
+    .await?;
 
-    match response {
-        Ok(rest) => Ok(rest),
-        Err(e) => Ok(RESTResponse::with_text(500, &format!("Query failed: {e}"))),
-    }
+    let rest_addrs =
+        addresses.iter().map(AssetAddressRest::try_from).collect::<Result<Vec<_>, _>>().map_err(
+            |e| RESTError::InternalServerError(format!("Failed to convert address entry: {e}")),
+        )?;
+
+    let json = serde_json::to_string_pretty(&rest_addrs)?;
+    Ok(RESTResponse::with_json(200, &json))
 }
 
 pub async fn handle_policy_assets_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
-    let policy: PolicyId = match <[u8; 28]>::from_hex(&params[0]) {
-        Ok(bytes) => bytes,
-        Err(_) => {
-            return Ok(RESTResponse::with_text(400, "Invalid policy_id parameter"));
-        }
-    };
+) -> Result<RESTResponse, RESTError> {
+    let policy: PolicyId = <[u8; 28]>::from_hex(&params[0])
+        .map_err(|_| RESTError::invalid_param("policy_id", "invalid hex"))?;
 
     let asset_query_msg = Arc::new(Message::StateQuery(StateQuery::Assets(
         AssetsStateQuery::GetPolicyIdAssets { policy },
     )));
 
-    let response = query_state(
+    let assets = query_state(
         &context,
         &handlers_config.assets_query_topic,
         asset_query_msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Assets(
                 AssetsStateQueryResponse::PolicyIdAssets(assets),
-            )) => {
-                let rest_assets: Vec<PolicyAssetRest> = assets.iter().map(Into::into).collect();
-                serde_json::to_string_pretty(&rest_assets)
-                    .map(|json| RESTResponse::with_json(200, &json))
-                    .map_err(|e| anyhow::anyhow!("Failed to serialize assets list: {e}"))
-            }
+            )) => Ok(assets),
             Message::StateQueryResponse(StateQueryResponse::Assets(
-                AssetsStateQueryResponse::NotFound,
-            )) => Ok(RESTResponse::with_text(404, "Policy assets not found")),
+                AssetsStateQueryResponse::Error(QueryError::NotFound { .. }),
+            )) => Err(QueryError::not_found("Policy assets")),
             Message::StateQueryResponse(StateQueryResponse::Assets(
-                AssetsStateQueryResponse::Error(_),
-            )) => Ok(RESTResponse::with_text(
-                501,
-                "Indexing by policy is disabled in config",
-            )),
-            _ => Ok(RESTResponse::with_text(
-                500,
+                AssetsStateQueryResponse::Error(e),
+            )) => Err(e),
+            _ => Err(QueryError::internal_error(
                 "Unexpected response while retrieving policy assets",
             )),
         },
     )
-    .await;
+    .await?;
 
-    match response {
-        Ok(rest) => Ok(rest),
-        Err(e) => Ok(RESTResponse::with_text(500, &format!("Query failed: {e}"))),
-    }
+    let rest_assets: Vec<PolicyAssetRest> = assets.iter().map(Into::into).collect();
+    let json = serde_json::to_string_pretty(&rest_assets)?;
+    Ok(RESTResponse::with_json(200, &json))
 }
 
-fn split_policy_and_asset(hex_str: &str) -> Result<(PolicyId, AssetName), RESTResponse> {
-    let decoded = match hex::decode(hex_str) {
-        Ok(bytes) => bytes,
-        Err(_) => return Err(RESTResponse::with_text(400, "Invalid hex string")),
-    };
+fn split_policy_and_asset(hex_str: &str) -> Result<(PolicyId, AssetName), RESTError> {
+    let decoded = hex::decode(hex_str)?;
 
     if decoded.len() < 28 {
-        return Err(RESTResponse::with_text(
-            400,
-            "Asset identifier must be at least 28 bytes",
+        return Err(RESTError::BadRequest(
+            "Asset identifier must be at least 28 bytes".to_string(),
         ));
     }
 
     let (policy_part, asset_part) = decoded.split_at(28);
 
-    let policy_id: PolicyId = match policy_part.try_into() {
-        Ok(arr) => arr,
-        Err(_) => return Err(RESTResponse::with_text(400, "Policy id must be 28 bytes")),
-    };
+    let policy_id: PolicyId = policy_part
+        .try_into()
+        .map_err(|_| RESTError::BadRequest("Policy id must be 28 bytes".to_string()))?;
 
-    let asset_name = match AssetName::new(asset_part) {
-        Some(asset_name) => asset_name,
-        None => {
-            return Err(RESTResponse::with_text(
-                400,
-                "Asset name must be less than 32 bytes",
-            ))
-        }
-    };
+    let asset_name = AssetName::new(asset_part).ok_or_else(|| {
+        RESTError::BadRequest("Asset name must be less than 32 bytes".to_string())
+    })?;
 
     Ok((policy_id, asset_name))
 }
@@ -570,8 +468,11 @@ mod tests {
         let result = split_policy_and_asset("zzzz");
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.code, 400);
-        assert_eq!(err.body, "Invalid hex string");
+        assert_eq!(err.status_code(), 400);
+        assert_eq!(
+            err.message(),
+            "Invalid hex string: Invalid character 'z' at position 0"
+        );
     }
 
     #[test]
@@ -580,8 +481,8 @@ mod tests {
         let result = split_policy_and_asset(&hex_str);
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.code, 400);
-        assert_eq!(err.body, "Asset identifier must be at least 28 bytes");
+        assert_eq!(err.status_code(), 400);
+        assert_eq!(err.message(), "Asset identifier must be at least 28 bytes");
     }
 
     #[test]
@@ -592,8 +493,8 @@ mod tests {
         let result = split_policy_and_asset(&hex_str);
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.code, 400);
-        assert_eq!(err.body, "Asset name must be less than 32 bytes");
+        assert_eq!(err.status_code(), 400);
+        assert_eq!(err.message(), "Asset name must be less than 32 bytes");
     }
 
     #[test]

@@ -202,8 +202,11 @@ pub struct AddressDelta {
 /// Stake balance change
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StakeAddressDelta {
-    /// Address
-    pub address: StakeAddress,
+    /// Stake address
+    pub stake_address: StakeAddress,
+
+    /// Shelley addresses contributing to the delta
+    pub addresses: Vec<ShelleyAddress>,
 
     /// Balance change
     pub delta: i64,
@@ -324,6 +327,15 @@ pub enum Datum {
     Inline(Vec<u8>),
 }
 
+// The full CBOR bytes of a reference script
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub enum ReferenceScript {
+    Native(Vec<u8>),
+    PlutusV1(Vec<u8>),
+    PlutusV2(Vec<u8>),
+    PlutusV3(Vec<u8>),
+}
+
 /// Value (lovelace + multiasset)
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Value {
@@ -374,6 +386,19 @@ pub struct ValueMap {
     pub lovelace: u64,
     #[n(1)]
     pub assets: NativeAssetsMap,
+}
+
+impl AddAssign for ValueMap {
+    fn add_assign(&mut self, other: Self) {
+        self.lovelace += other.lovelace;
+
+        for (policy, assets) in other.assets {
+            let entry = self.assets.entry(policy).or_default();
+            for (asset_name, amount) in assets {
+                *entry.entry(asset_name).or_default() += amount;
+            }
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
@@ -434,6 +459,22 @@ impl Neg for ValueDelta {
     }
 }
 
+/// Value stored in UTXO
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct UTXOValue {
+    /// Address in binary
+    pub address: Address,
+
+    /// Value in Lovelace
+    pub value: Value,
+
+    /// Datum
+    pub datum: Option<Datum>,
+
+    /// Reference script
+    pub reference_script: Option<ReferenceScript>,
+}
+
 /// Transaction output (UTXO)
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TxOutput {
@@ -448,6 +489,9 @@ pub struct TxOutput {
 
     /// Datum (Inline or Hash)
     pub datum: Option<Datum>,
+
+    /// Reference script
+    pub reference_script: Option<ReferenceScript>,
 }
 
 /// Transaction input (UTXO reference)
@@ -2030,6 +2074,14 @@ pub struct AddressTotals {
     pub received: ValueMap,
     #[n(2)]
     pub tx_count: u64,
+}
+
+impl AddAssign for AddressTotals {
+    fn add_assign(&mut self, other: Self) {
+        self.sent += other.sent;
+        self.received += other.received;
+        self.tx_count += other.tx_count;
+    }
 }
 
 impl AddressTotals {

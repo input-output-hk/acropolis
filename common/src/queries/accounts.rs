@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
-use crate::{DRepChoice, PoolId, PoolLiveStakeInfo, RewardType, StakeAddress, TxIdentifier};
+use crate::queries::errors::QueryError;
+use crate::{
+    DRepChoice, PoolId, PoolLiveStakeInfo, RewardType, ShelleyAddress, StakeAddress, TxIdentifier,
+};
 
 pub const DEFAULT_ACCOUNTS_QUERY_TOPIC: (&str, &str) =
     ("accounts-state-query-topic", "cardano.query.accounts");
@@ -13,20 +16,19 @@ pub const DEFAULT_HISTORICAL_ACCOUNTS_QUERY_TOPIC: (&str, &str) = (
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum AccountsStateQuery {
     GetAccountInfo { account: StakeAddress },
+    GetAccountsUtxoValuesMap { stake_addresses: Vec<StakeAddress> },
+    GetAccountsUtxoValuesSum { stake_addresses: Vec<StakeAddress> },
+    GetAccountsBalancesMap { stake_addresses: Vec<StakeAddress> },
+    GetAccountsBalancesSum { stake_addresses: Vec<StakeAddress> },
+
+    // Served from historical accounts state
     GetAccountRewardHistory { account: StakeAddress },
     GetAccountHistory { stake_key: Vec<u8> },
     GetAccountRegistrationHistory { account: StakeAddress },
     GetAccountDelegationHistory { account: StakeAddress },
     GetAccountMIRHistory { account: StakeAddress },
     GetAccountWithdrawalHistory { account: StakeAddress },
-    GetAccountAssociatedAddresses { stake_key: Vec<u8> },
-    GetAccountAssets { stake_key: Vec<u8> },
-    GetAccountAssetsTotals { stake_key: Vec<u8> },
-    GetAccountUTxOs { stake_key: Vec<u8> },
-    GetAccountsUtxoValuesMap { stake_addresses: Vec<StakeAddress> },
-    GetAccountsUtxoValuesSum { stake_addresses: Vec<StakeAddress> },
-    GetAccountsBalancesMap { stake_addresses: Vec<StakeAddress> },
-    GetAccountsBalancesSum { stake_addresses: Vec<StakeAddress> },
+    GetAccountAssociatedAddresses { account: StakeAddress },
 
     // Epochs-related queries
     GetActiveStakes {},
@@ -47,20 +49,19 @@ pub enum AccountsStateQuery {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum AccountsStateQueryResponse {
     AccountInfo(AccountInfo),
+    AccountsUtxoValuesMap(HashMap<StakeAddress, u64>),
+    AccountsUtxoValuesSum(u64),
+    AccountsBalancesMap(HashMap<StakeAddress, u64>),
+    AccountsBalancesSum(u64),
+
+    // Served from historical accounts state
     AccountRewardHistory(Vec<AccountReward>),
     AccountHistory(AccountHistory),
     AccountRegistrationHistory(Vec<RegistrationUpdate>),
     AccountDelegationHistory(Vec<DelegationUpdate>),
     AccountMIRHistory(Vec<AccountWithdrawal>),
     AccountWithdrawalHistory(Vec<AccountWithdrawal>),
-    AccountAssociatedAddresses(AccountAssociatedAddresses),
-    AccountAssets(AccountAssets),
-    AccountAssetsTotals(AccountAssetsTotals),
-    AccountUTxOs(AccountUTxOs),
-    AccountsUtxoValuesMap(HashMap<StakeAddress, u64>),
-    AccountsUtxoValuesSum(u64),
-    AccountsBalancesMap(HashMap<StakeAddress, u64>),
-    AccountsBalancesSum(u64),
+    AccountAssociatedAddresses(Vec<ShelleyAddress>),
 
     // Epochs-related responses
     ActiveStakes(u64),
@@ -78,9 +79,7 @@ pub enum AccountsStateQueryResponse {
     // DReps-related responses
     DrepDelegators(DrepDelegators),
     AccountsDrepDelegationsMap(HashMap<StakeAddress, Option<DRepChoice>>),
-
-    NotFound,
-    Error(String),
+    Error(QueryError),
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -160,21 +159,6 @@ pub struct AccountReward {
     #[n(3)]
     pub reward_type: RewardType,
 }
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct AccountWithdrawalHistory {}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct AccountAssociatedAddresses {}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct AccountAssets {}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct AccountAssetsTotals {}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct AccountUTxOs {}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct OptimalPoolSizing {

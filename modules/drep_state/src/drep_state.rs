@@ -1,6 +1,7 @@
 //! Acropolis DRep State module for Caryatid
 //! Accepts certificate events and derives the DRep State in memory
 
+use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::governance::{
@@ -265,9 +266,9 @@ impl DRepState {
             async move {
                 let Message::StateQuery(StateQuery::Governance(query)) = message.as_ref() else {
                     return Arc::new(Message::StateQueryResponse(StateQueryResponse::Governance(
-                        GovernanceStateQueryResponse::Error(
-                            "Invalid message for governance-state".into(),
-                        ),
+                        GovernanceStateQueryResponse::Error(QueryError::internal_error(
+                            "Invalid message for governance-state",
+                        )),
                     )));
                 };
 
@@ -279,7 +280,9 @@ impl DRepState {
                             let dreps = state.list();
                             GovernanceStateQueryResponse::DRepsList(DRepsList { dreps })
                         }
-                        None => GovernanceStateQueryResponse::Error("No current DRep state".into()),
+                        None => GovernanceStateQueryResponse::Error(QueryError::internal_error(
+                            "No current DRep state",
+                        )),
                     },
                     GovernanceStateQuery::GetDRepInfoWithDelegators { drep_credential } => {
                         match locked.current() {
@@ -303,19 +306,30 @@ impl DRepState {
                                             )
                                         }
 
-                                        Ok(None) => GovernanceStateQueryResponse::NotFound,
-                                        Err(msg) => {
-                                            GovernanceStateQueryResponse::Error(msg.to_string())
-                                        }
+                                        Ok(None) => GovernanceStateQueryResponse::Error(
+                                            QueryError::not_found(format!(
+                                                "DRep delegators for {:?}",
+                                                drep_credential
+                                            )),
+                                        ),
+                                        Err(msg) => GovernanceStateQueryResponse::Error(
+                                            QueryError::internal_error(msg),
+                                        ),
                                     }
                                 }
 
-                                Ok(None) => GovernanceStateQueryResponse::NotFound,
-                                Err(msg) => GovernanceStateQueryResponse::Error(msg.to_string()),
+                                Ok(None) => {
+                                    GovernanceStateQueryResponse::Error(QueryError::not_found(
+                                        format!("DRep {:?} not found", drep_credential),
+                                    ))
+                                }
+                                Err(msg) => GovernanceStateQueryResponse::Error(
+                                    QueryError::internal_error(msg),
+                                ),
                             },
-                            None => {
-                                GovernanceStateQueryResponse::Error("No current state".to_string())
-                            }
+                            None => GovernanceStateQueryResponse::Error(
+                                QueryError::internal_error("No current state"),
+                            ),
                         }
                     }
                     GovernanceStateQuery::GetDRepDelegators { drep_credential } => {
@@ -328,12 +342,19 @@ impl DRepState {
                                         },
                                     )
                                 }
-                                Ok(None) => GovernanceStateQueryResponse::NotFound,
-                                Err(msg) => GovernanceStateQueryResponse::Error(msg.to_string()),
+                                Ok(None) => GovernanceStateQueryResponse::Error(
+                                    QueryError::not_found(format!(
+                                        "DRep delegators for {:?} not found",
+                                        drep_credential
+                                    )),
+                                ),
+                                Err(msg) => GovernanceStateQueryResponse::Error(
+                                    QueryError::internal_error(msg),
+                                ),
                             },
-                            None => {
-                                GovernanceStateQueryResponse::Error("No current state".to_string())
-                            }
+                            None => GovernanceStateQueryResponse::Error(
+                                QueryError::internal_error("No current state"),
+                            ),
                         }
                     }
                     GovernanceStateQuery::GetDRepMetadata { drep_credential } => {
@@ -342,12 +363,19 @@ impl DRepState {
                                 Ok(Some(anchor)) => GovernanceStateQueryResponse::DRepMetadata(
                                     Some(Some(anchor.clone())),
                                 ),
-                                Ok(None) => GovernanceStateQueryResponse::NotFound,
-                                Err(msg) => GovernanceStateQueryResponse::Error(msg.to_string()),
+                                Ok(None) => GovernanceStateQueryResponse::Error(
+                                    QueryError::not_found(format!(
+                                        "DRep metadata for {:?} not found",
+                                        drep_credential
+                                    )),
+                                ),
+                                Err(msg) => GovernanceStateQueryResponse::Error(
+                                    QueryError::internal_error(msg),
+                                ),
                             },
-                            None => {
-                                GovernanceStateQueryResponse::Error("No current state".to_string())
-                            }
+                            None => GovernanceStateQueryResponse::Error(
+                                QueryError::internal_error("No current state"),
+                            ),
                         }
                     }
 
@@ -359,12 +387,18 @@ impl DRepState {
                                         updates: updates.to_vec(),
                                     })
                                 }
-                                Ok(None) => GovernanceStateQueryResponse::NotFound,
-                                Err(msg) => GovernanceStateQueryResponse::Error(msg.to_string()),
+                                Ok(None) => {
+                                    GovernanceStateQueryResponse::Error(QueryError::not_found(
+                                        format!("DRep updates for {:?} not found", drep_credential),
+                                    ))
+                                }
+                                Err(msg) => GovernanceStateQueryResponse::Error(
+                                    QueryError::internal_error(msg),
+                                ),
                             },
-                            None => {
-                                GovernanceStateQueryResponse::Error("No current state".to_string())
-                            }
+                            None => GovernanceStateQueryResponse::Error(
+                                QueryError::internal_error("No current state"),
+                            ),
                         }
                     }
                     GovernanceStateQuery::GetDRepVotes { drep_credential } => {
@@ -375,17 +409,23 @@ impl DRepState {
                                         votes: votes.to_vec(),
                                     })
                                 }
-                                Ok(None) => GovernanceStateQueryResponse::NotFound,
-                                Err(msg) => GovernanceStateQueryResponse::Error(msg.to_string()),
+                                Ok(None) => {
+                                    GovernanceStateQueryResponse::Error(QueryError::not_found(
+                                        format!("DRep votes for {:?}", drep_credential),
+                                    ))
+                                }
+                                Err(msg) => GovernanceStateQueryResponse::Error(
+                                    QueryError::internal_error(msg),
+                                ),
                             },
-                            None => {
-                                GovernanceStateQueryResponse::Error("No current state".to_string())
-                            }
+                            None => GovernanceStateQueryResponse::Error(
+                                QueryError::internal_error("No current state"),
+                            ),
                         }
                     }
-                    _ => GovernanceStateQueryResponse::Error(format!(
+                    _ => GovernanceStateQueryResponse::Error(QueryError::internal_error(format!(
                         "Unimplemented governance query: {query:?}"
-                    )),
+                    ))),
                 };
                 Arc::new(Message::StateQueryResponse(StateQueryResponse::Governance(
                     response,
