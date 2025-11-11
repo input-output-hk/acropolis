@@ -229,10 +229,12 @@ impl PartialEq for BadVrfProofError {
 /// https://github.com/IntersectMBO/ouroboros-consensus/blob/e3c52b7c583bdb6708fac4fdaa8bf0b9588f5a88/ouroboros-consensus-protocol/src/ouroboros-consensus-protocol/Ouroboros/Consensus/Protocol/Praos.hs#L342
 #[derive(Error, Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
 pub enum KesValidationError {
-    #[error("{0}")]
+    #[error("KES Signature Error: {0}")]
     KesSignatureError(#[from] KesSignatureError),
-    #[error("{0}")]
+    #[error("Operational Certificate Error: {0}")]
     OperationalCertificateError(#[from] OperationalCertificateError),
+    #[error("Other Kes Validation Error: {0}")]
+    Other(String),
 }
 
 #[derive(Error, Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
@@ -274,36 +276,35 @@ pub enum KesSignatureError {
 
 #[derive(Error, Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
 pub enum OperationalCertificateError {
+    /// **Cause:** The operational certificate is malformed.
+    #[error("Malformed Signature OCert: Reason={}", reason)]
+    MalformedSignatureOcert { reason: String },
+    /// **Cause:** The cold key signature on the operational certificate is invalid.
+    /// The OCert was not properly signed by the pool's cold key.
+    #[error("Invalid Signature OCert: Issuer={}", hex::encode(issuer))]
+    InvalidSignatureOcert { issuer: Vec<u8> },
     /// **Cause:** The operational certificate counter in the header is not greater
     /// than the last counter used by this pool.
     #[error(
-        "Counter Too Small OCert: Last Counter={}, Current Counter={}",
-        last_counter,
-        current_counter
+        "Counter Too Small OCert: Latest Counter={}, Declared Counter={}",
+        latest_counter,
+        declared_counter
     )]
     CounterTooSmallOcert {
-        last_counter: u64,
-        current_counter: u64,
+        latest_counter: u64,
+        declared_counter: u64,
     },
     /// **Cause:** OCert counter jumped by more than 1. While not strictly invalid,
     /// this is suspicious and may indicate key compromise. (Praos Only)
     #[error(
-        "Counter Over Incremented OCert: Last Counter={}, Current Counter={}",
-        last_counter,
-        current_counter
+        "Counter Over Incremented OCert: Latest Counter={}, Declared Counter={}",
+        latest_counter,
+        declared_counter
     )]
     CounterOverIncrementedOcert {
-        last_counter: u64,
-        current_counter: u64,
+        latest_counter: u64,
+        declared_counter: u64,
     },
-    /// **Cause:** The cold key signature on the operational certificate is invalid.
-    /// The OCert was not properly signed by the pool's cold key.
-    #[error(
-        "Invalid Signature OCert: Counter={}, KES Period={}",
-        counter,
-        kes_period
-    )]
-    InvalidSignatureOcert { counter: u64, kes_period: u64 },
     /// **Cause:** No counter found for this key hash (not a stake pool or genesis delegate)
     #[error("No Counter For Key Hash OCert: Pool ID={}", hex::encode(pool_id))]
     NoCounterForKeyHashOcert { pool_id: PoolId },

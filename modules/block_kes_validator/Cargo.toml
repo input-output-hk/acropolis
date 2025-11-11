@@ -21,9 +21,8 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 serde_json = { workspace = true }
 serde = { workspace = true }
-blake2 = "0.10.6"
-num-traits = "0.2"
 thiserror = "2.0.17"
+pallas = { workspace = true }
 
 kes-summed-ed25519 = { git = "https://github.com/txpipe/kes", rev = "f69fb357d46f6a18925543d785850059569d7e78" }
 
