@@ -288,10 +288,8 @@ dependencies = [
  "anyhow",
  "caryatid_sdk",
  "config",
- "crossbeam",
  "pallas 0.33.0",
  "serde",
- "serde_json",
  "tokio",
  "tracing",
 ]
@@ -419,7 +417,6 @@ dependencies = [
  "crossbeam",
  "pallas 0.33.0",
  "serde",
- "serde_json",
  "tokio",
  "tracing",
 ]
