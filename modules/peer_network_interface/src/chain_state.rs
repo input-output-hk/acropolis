@@ -204,7 +204,7 @@ impl ChainState {
             self.published_blocks.push_back(published);
             self.rolled_back = false;
             while self.published_blocks.len() > SECURITY_PARAMETER_K as usize {
-                let Some((slot, _)) = self.published_blocks.pop_back() else {
+                let Some((slot, _)) = self.published_blocks.pop_front() else {
                     break;
                 };
                 self.blocks.remove(&slot);

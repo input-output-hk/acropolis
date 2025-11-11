@@ -2,7 +2,7 @@
 
 The peer network interface module uses the ChainSync and BlockFetch protocols to fetch blocks from one of several upstream sources. It chooses one peer to treat as the "preferred" chain to follow, but will gracefully switch which peer it follows during network issues.
 
-It can either run independently, either from the origin or current tip, or
+It can either run independently, from the origin or current tip, or
 be triggered by a Mithril snapshot event (the default) where it starts from
 where the snapshot left off, and follows the chain from there.
 

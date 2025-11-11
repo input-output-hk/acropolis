@@ -81,9 +81,7 @@ impl NetworkManager {
             match event {
                 NetworkEvent::PeerUpdate { peer, event } => {
                     self.handle_peer_update(peer, event);
-                    if true {
-                        self.publish_blocks().await?;
-                    }
+                    self.publish_blocks().await?;
                 }
             }
         }
