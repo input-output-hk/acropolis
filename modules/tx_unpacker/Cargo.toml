@@ -15,14 +15,10 @@ acropolis_codec = { path = "../../codec" }
 caryatid_sdk = { workspace = true }
 
 anyhow = { workspace = true }
-async-trait = "0.1"
 config = { workspace = true }
 futures = "0.3.31"
 hex = { workspace = true }
 pallas = { workspace = true }
-serde = { version = "1.0.219", features = ["derive"] }
-serde_json = { workspace = true }
-tokio = { workspace = true }
 tracing = { workspace = true }
 
 [lib]

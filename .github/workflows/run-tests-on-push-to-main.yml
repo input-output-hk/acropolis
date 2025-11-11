@@ -20,11 +20,22 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Install Shear
+        run: cargo install cargo-shear
+
       - name: Run Format
         run: cargo fmt --all -- --check
 
       - name: Run Clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Run Shear
+        run: cargo shear
+
+      - name: Run Audit
+        uses: rustsec/audit-check@v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run Build
         run: cargo build --verbose

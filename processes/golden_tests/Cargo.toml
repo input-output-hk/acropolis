@@ -10,31 +10,13 @@ license = "Apache-2.0"
 [dependencies]
 acropolis_common = { path = "../../common" }
 acropolis_module_snapshot_bootstrapper = { path = "../../modules/snapshot_bootstrapper" }
-acropolis_module_mithril_snapshot_fetcher = { path = "../../modules/mithril_snapshot_fetcher" }
-acropolis_module_upstream_chain_fetcher = { path = "../../modules/upstream_chain_fetcher" }
-acropolis_module_block_unpacker = { path = "../../modules/block_unpacker" }
 acropolis_module_tx_unpacker = { path = "../../modules/tx_unpacker" }
-acropolis_module_utxo_state = { path = "../../modules/utxo_state" }
 acropolis_module_spo_state = { path = "../../modules/spo_state" }
-acropolis_module_drep_state = { path = "../../modules/drep_state" }
-acropolis_module_governance_state = { path = "../../modules/governance_state" }
-acropolis_module_parameters_state = { path = "../../modules/parameters_state" }
-acropolis_module_stake_delta_filter = { path = "../../modules/stake_delta_filter" }
-acropolis_module_epochs_state = { path = "../../modules/epochs_state" }
-acropolis_module_accounts_state = { path = "../../modules/accounts_state" }
 
 caryatid_process = { workspace = true }
 caryatid_sdk = { workspace = true }
-caryatid_module_clock = { workspace = true }
-caryatid_module_rest_server = { workspace = true }
-caryatid_module_spy = { workspace = true }
 
 anyhow = { workspace = true }
 config = { workspace = true }
-tracing = { workspace = true }
-tracing-subscriber = "0.3.20"
 tokio = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
-chrono = { workspace = true }
 hex = { workspace = true }
