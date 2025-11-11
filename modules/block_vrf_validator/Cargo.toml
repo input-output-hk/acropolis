@@ -16,10 +16,8 @@ caryatid_sdk = { workspace = true }
 anyhow = { workspace = true }
 config = { workspace = true }
 hex = { workspace = true }
-imbl = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
-serde_json = { workspace = true }
 serde = { workspace = true }
 blake2 = "0.10.6"
 num-traits = "0.2"
