@@ -229,10 +229,15 @@ impl PartialEq for BadVrfProofError {
 /// https://github.com/IntersectMBO/ouroboros-consensus/blob/e3c52b7c583bdb6708fac4fdaa8bf0b9588f5a88/ouroboros-consensus-protocol/src/ouroboros-consensus-protocol/Ouroboros/Consensus/Protocol/Praos.hs#L342
 #[derive(Error, Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
 pub enum KesValidationError {
+    /// **Cause:** The KES signature on the block header is invalid.
     #[error("KES Signature Error: {0}")]
     KesSignatureError(#[from] KesSignatureError),
+    /// **Cause:** The operational certificate is invalid.
     #[error("Operational Certificate Error: {0}")]
     OperationalCertificateError(#[from] OperationalCertificateError),
+    /// **Cause:** Some data has incorrect bytes
+    #[error("TryFromSlice: {0}")]
+    TryFromSlice(String),
     #[error("Other Kes Validation Error: {0}")]
     Other(String),
 }
@@ -264,13 +269,16 @@ pub enum KesSignatureError {
         max_kes_evolutions: u64,
     },
     /// **Cause:** The KES signature on the block header is cryptographically invalid.
-    #[error("Invalid KES Signature OCert: Current KES Period={}, KES Start Period={}, Expected Evolutions={}, Max KES Evolutions={}, Error Message={}", current_kes_period, kes_start_period, expected_evolutions, max_kes_evolutions, error_message)]
+    #[error(
+        "Invalid KES Signature OCert: Current Period={}, OCert Start Period={}, Reason={}",
+        current_period,
+        ocert_start_period,
+        reason
+    )]
     InvalidKesSignatureOcert {
-        current_kes_period: u64,
-        kes_start_period: u64,
-        expected_evolutions: u64,
-        max_kes_evolutions: u64,
-        error_message: String,
+        current_period: u64,
+        ocert_start_period: u64,
+        reason: String,
     },
 }
 

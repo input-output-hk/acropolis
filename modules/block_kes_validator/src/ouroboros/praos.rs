@@ -1,11 +1,49 @@
-use acropolis_common::validation::OperationalCertificateError;
+use acropolis_common::validation::{KesSignatureError, OperationalCertificateError};
 use pallas::crypto::key::ed25519;
+
+use crate::ouroboros::kes;
 
 pub struct OperationalCertificate<'a> {
     pub operational_cert_hot_vkey: &'a [u8],
     pub operational_cert_sequence_number: u64,
     pub operational_cert_kes_period: u64,
     pub operational_cert_sigma: &'a [u8],
+}
+
+pub fn validate_kes_signature<'a>(
+    slot_kes_period: u64,
+    opcert_kes_period: u64,
+    header_body: &[u8],
+    public_key: &kes::PublicKey,
+    signature: &kes::Signature,
+    max_kes_evolutions: u64,
+) -> Result<(), KesSignatureError> {
+    if opcert_kes_period > slot_kes_period {
+        return Err(KesSignatureError::KesBeforeStartOcert {
+            ocert_start_period: opcert_kes_period,
+            current_period: slot_kes_period,
+        });
+    }
+
+    if slot_kes_period >= opcert_kes_period + max_kes_evolutions {
+        return Err(KesSignatureError::KesAfterEndOcert {
+            current_period: slot_kes_period,
+            ocert_start_period: opcert_kes_period,
+            max_kes_evolutions,
+        });
+    }
+
+    let kes_period = (slot_kes_period - opcert_kes_period) as u32;
+
+    signature.verify(kes_period, public_key, header_body).map_err(|error| {
+        KesSignatureError::InvalidKesSignatureOcert {
+            current_period: slot_kes_period,
+            ocert_start_period: opcert_kes_period,
+            reason: error.to_string(),
+        }
+    })?;
+
+    Ok(())
 }
 
 pub fn validate_operational_certificate<'a>(
