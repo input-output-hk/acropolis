@@ -27,7 +27,7 @@ pallas-math = { workspace = true }
 dashu-int = "0.4.1"
 
 # The vrf crate has not been fully tested in production environments and still has several upstream issues that are open PRs but not merged yet.
-vrf_dalek = { git = "https://github.com/txpipe/vrf", rev = "044b45a1a919ba9d9c2471fc5c4d441f13086676" }
+vrf_dalek = { package = "pallas_vrf", git = "https://github.com/txpipe/vrf", rev = "62ef4c7252ed05df98611da191e20c0dd144f025" }
 
 [lib]
 path = "src/block_vrf_validator.rs"
