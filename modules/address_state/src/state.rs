@@ -175,7 +175,7 @@ impl State {
     pub fn apply_address_deltas(&mut self, deltas: &[AddressDelta]) {
         let addresses = self.volatile.window.back_mut().expect("window should never be empty");
 
-        // Keeps track of previous tx to avoid duplicating tx hashes or overcounting totals tx count
+        // Keeps track seen txs to avoid overcounting totals tx count and duplicating tx identifiers
         let mut seen: HashMap<Address, HashSet<TxIdentifier>> = HashMap::new();
 
         for delta in deltas {
@@ -191,30 +191,31 @@ impl State {
                 }
             }
 
-            if self.config.store_transactions {
-                let txs = entry.transactions.get_or_insert(Vec::new());
+            if self.config.store_transactions || self.config.store_totals {
                 let seen_for_addr = seen.entry(delta.address.clone()).or_default();
 
-                if !seen_for_addr.contains(&tx_id) {
-                    seen_for_addr.insert(tx_id);
-                    txs.push(tx_id);
-                }
-            }
-
-            if self.config.store_totals {
-                let totals = entry.totals.get_or_insert(Vec::new());
-                let seen_for_addr = seen.entry(delta.address.clone()).or_default();
-
-                if seen_for_addr.contains(&tx_id) {
-                    if let Some(last_total) = totals.last_mut() {
-                        // Create temporary map for summing same tx deltas efficently
-                        let mut map = ValueDeltaMap::from(last_total.clone());
-                        map += delta.value.clone();
-                        *last_total = ValueDelta::from(map);
+                if self.config.store_transactions {
+                    let txs = entry.transactions.get_or_insert(Vec::new());
+                    if !seen_for_addr.contains(&tx_id) {
+                        txs.push(tx_id);
                     }
-                } else {
-                    totals.push(delta.value.clone());
                 }
+                if self.config.store_totals {
+                    let totals = entry.totals.get_or_insert(Vec::new());
+
+                    if seen_for_addr.contains(&tx_id) {
+                        if let Some(last_total) = totals.last_mut() {
+                            // Create temporary map for summing same tx deltas efficiently
+                            // TODO: Potentially move upstream to address deltas publisher
+                            let mut map = ValueDeltaMap::from(last_total.clone());
+                            map += delta.value.clone();
+                            *last_total = ValueDelta::from(map);
+                        }
+                    } else {
+                        totals.push(delta.value.clone());
+                    }
+                }
+                seen_for_addr.insert(tx_id);
             }
         }
     }

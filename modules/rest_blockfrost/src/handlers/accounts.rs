@@ -680,6 +680,10 @@ pub async fn handle_account_totals_blockfrost(
     )
     .await?;
 
+    // TODO: Query historical accounts state to retrieve account tx count instead of
+    //       using the addresses totals as the addresses totals does not deduplicate
+    //       for multi-address transactions, overstating count
+
     let rest_response = AccountTotalsREST {
         stake_address: account.to_string()?,
         received_sum: totals.received.into(),
