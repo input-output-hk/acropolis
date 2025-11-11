@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -176,14 +176,11 @@ impl State {
         let addresses = self.volatile.window.back_mut().expect("window should never be empty");
 
         // Keeps track of previous tx to avoid duplicating tx hashes or overcounting totals tx count
-        let mut last_block: Option<u32> = None;
-        let mut last_tx_index: Option<u16> = None;
+        let mut seen: HashMap<Address, HashSet<TxIdentifier>> = HashMap::new();
 
         for delta in deltas {
+            let tx_id = TxIdentifier::from(delta.utxo);
             let entry = addresses.entry(delta.address.clone()).or_default();
-
-            let same_tx = last_block == Some(delta.utxo.block_number())
-                && last_tx_index == Some(delta.utxo.tx_index());
 
             if self.config.store_info {
                 let utxos = entry.utxos.get_or_insert(Vec::new());
@@ -196,16 +193,19 @@ impl State {
 
             if self.config.store_transactions {
                 let txs = entry.transactions.get_or_insert(Vec::new());
+                let seen_for_addr = seen.entry(delta.address.clone()).or_default();
 
-                if !same_tx {
-                    txs.push(TxIdentifier::from(delta.utxo));
+                if !seen_for_addr.contains(&tx_id) {
+                    seen_for_addr.insert(tx_id);
+                    txs.push(tx_id);
                 }
             }
 
             if self.config.store_totals {
                 let totals = entry.totals.get_or_insert(Vec::new());
+                let seen_for_addr = seen.entry(delta.address.clone()).or_default();
 
-                if same_tx {
+                if seen_for_addr.contains(&tx_id) {
                     if let Some(last_total) = totals.last_mut() {
                         // Create temporary map for summing same tx deltas efficently
                         let mut map = ValueDeltaMap::from(last_total.clone());
@@ -216,8 +216,6 @@ impl State {
                     totals.push(delta.value.clone());
                 }
             }
-            last_block = Some(delta.utxo.block_number());
-            last_tx_index = Some(delta.utxo.tx_index());
         }
     }
 
