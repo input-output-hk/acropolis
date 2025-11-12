@@ -15,7 +15,7 @@ pub enum ValidationError {
     #[error("VRF failure: {0}")]
     BadVRF(#[from] VrfValidationError),
 
-    #[error("KES failure")]
+    #[error("KES failure: {0}")]
     BadKES(#[from] KesValidationError),
 
     #[error("Doubly spent UTXO: {0}")]
