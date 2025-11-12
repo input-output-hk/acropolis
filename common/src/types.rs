@@ -208,6 +208,9 @@ pub struct StakeAddressDelta {
     /// Shelley addresses contributing to the delta
     pub addresses: Vec<ShelleyAddress>,
 
+    /// The number of transactions contributing to the delta
+    pub tx_count: u32,
+
     /// Balance change
     pub delta: i64,
 }

@@ -1012,6 +1012,7 @@ mod tests {
             deltas: vec![StakeAddressDelta {
                 stake_address: stake_address.clone(),
                 addresses: Vec::new(),
+                tx_count: 1,
                 delta: 42,
             }],
         };
@@ -1103,6 +1104,7 @@ mod tests {
             deltas: vec![StakeAddressDelta {
                 stake_address: addr1.clone(),
                 addresses: Vec::new(),
+                tx_count: 1,
                 delta: 42,
             }],
         };
@@ -1113,6 +1115,7 @@ mod tests {
             deltas: vec![StakeAddressDelta {
                 stake_address: addr2.clone(),
                 addresses: Vec::new(),
+                tx_count: 1,
                 delta: 21,
             }],
         };
@@ -1212,6 +1215,7 @@ mod tests {
             deltas: vec![StakeAddressDelta {
                 stake_address: stake_address.clone(),
                 addresses: Vec::new(),
+                tx_count: 1,
                 delta: 99,
             }],
         };
@@ -1259,6 +1263,7 @@ mod tests {
             deltas: vec![StakeAddressDelta {
                 stake_address: stake_address.clone(),
                 addresses: Vec::new(),
+                tx_count: 1,
                 delta: 99,
             }],
         };
@@ -1425,21 +1430,25 @@ mod tests {
             StakeAddressDelta {
                 stake_address: spo1,
                 addresses: Vec::new(),
+                tx_count: 1,
                 delta: 100,
             },
             StakeAddressDelta {
                 stake_address: spo2,
                 addresses: Vec::new(),
+                tx_count: 1,
                 delta: 1_000,
             },
             StakeAddressDelta {
                 stake_address: spo3,
                 addresses: Vec::new(),
+                tx_count: 1,
                 delta: 10_000,
             },
             StakeAddressDelta {
                 stake_address: spo4,
                 addresses: Vec::new(),
+                tx_count: 1,
                 delta: 100_000,
             },
         ];

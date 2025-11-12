@@ -943,7 +943,7 @@ pub struct AccountTotalsREST {
     pub stake_address: String,
     pub received_sum: AmountList,
     pub sent_sum: AmountList,
-    pub tx_count: u64,
+    pub tx_count: u32,
 }
 
 #[derive(serde::Serialize)]

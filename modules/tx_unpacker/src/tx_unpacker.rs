@@ -166,6 +166,7 @@ impl TxUnpacker {
 
                             for (tx_index , raw_tx) in txs_msg.txs.iter().enumerate() {
                                 let tx_index = tx_index as u16;
+                                let mut tx_utxo_deltas  = Vec::new();
 
                                 // Parse the tx
                                 match MultiEraTx::decode(raw_tx) {

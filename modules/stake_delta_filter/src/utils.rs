@@ -1,7 +1,7 @@
 use acropolis_common::{
     messages::{AddressDeltasMessage, StakeAddressDeltasMessage},
     Address, AddressDelta, BlockInfo, Era, ShelleyAddress, ShelleyAddressDelegationPart,
-    ShelleyAddressPointer, StakeAddress, StakeAddressDelta, StakeCredential,
+    ShelleyAddressPointer, StakeAddress, StakeAddressDelta, StakeCredential, TxIdentifier,
 };
 use anyhow::{anyhow, Result};
 use serde_with::serde_as;
@@ -315,7 +315,8 @@ impl Tracker {
 struct StakeEntry {
     delta: i64,
     addresses: Vec<ShelleyAddress>,
-    seen: HashSet<ShelleyAddress>,
+    addresses_seen: HashSet<ShelleyAddress>,
+    txs_seen: HashSet<TxIdentifier>,
 }
 
 /// Iterates through all address deltas in `delta`, leaves only stake addresses
@@ -399,12 +400,17 @@ pub fn process_message(
         let entry = grouped.entry(stake_address).or_insert_with(|| StakeEntry {
             delta: 0,
             addresses: Vec::new(),
-            seen: HashSet::new(),
+            addresses_seen: HashSet::new(),
+            txs_seen: HashSet::new(),
         });
         entry.delta += d.value.lovelace;
 
+        if d.value.lovelace > 0 {
+            entry.txs_seen.insert(TxIdentifier::from(d.utxo));
+        }
+
         if let Some(shelley) = shelley_opt {
-            if entry.seen.insert(shelley.clone()) {
+            if entry.addresses_seen.insert(shelley.clone()) {
                 entry.addresses.push(shelley.clone());
             }
         }
@@ -415,6 +421,7 @@ pub fn process_message(
         .map(|(stake_address, entry)| StakeAddressDelta {
             stake_address,
             addresses: entry.addresses,
+            tx_count: entry.txs_seen.len() as u32,
             delta: entry.delta,
         })
         .collect();
