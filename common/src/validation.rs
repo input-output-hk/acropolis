@@ -235,12 +235,18 @@ pub enum KesValidationError {
     /// **Cause:** The operational certificate is invalid.
     #[error("Operational Certificate Error: {0}")]
     OperationalCertificateError(#[from] OperationalCertificateError),
+    /// **Cause:** No OCert counter found for this issuer (not a stake pool or genesis delegate)
+    #[error("No OCert Counter For Issuer: Pool ID={}", hex::encode(pool_id))]
+    NoOCertCounter { pool_id: PoolId },
     /// **Cause:** Some data has incorrect bytes
     #[error("TryFromSlice: {0}")]
     TryFromSlice(String),
     #[error("Other Kes Validation Error: {0}")]
     Other(String),
 }
+
+/// Validation function for Kes
+pub type KesValidation<'a> = Box<dyn Fn() -> Result<(), KesValidationError> + Send + Sync + 'a>;
 
 #[derive(Error, Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
 pub enum KesSignatureError {

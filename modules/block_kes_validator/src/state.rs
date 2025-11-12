@@ -1,11 +1,12 @@
-use crate::ouroboros::praos::OperationalCertificate;
 use acropolis_common::{
     genesis_values::GenesisValues, messages::ProtocolParamsMessage, validation::KesValidationError,
     BlockInfo, PoolId,
 };
 use imbl::HashMap;
-use pallas::ledger::{primitives::babbage::OperationalCert, traverse::MultiEraHeader};
+use pallas::ledger::traverse::MultiEraHeader;
 use tracing::error;
+
+use crate::ouroboros;
 
 #[derive(Default, Debug, Clone)]
 pub struct State {
@@ -14,6 +15,8 @@ pub struct State {
     pub slots_per_kes_period: Option<u64>,
 
     pub max_kes_evolutions: Option<u64>,
+
+    pub active_spos: Vec<PoolId>,
 }
 
 impl State {
@@ -22,6 +25,7 @@ impl State {
             ocert_counters: HashMap::new(),
             slots_per_kes_period: None,
             max_kes_evolutions: None,
+            active_spos: Vec::new(),
         }
     }
 
@@ -65,34 +69,18 @@ impl State {
             )));
         };
 
-        let cert = operational_cert(&header).ok_or(Box::new(KesValidationError::Other(
-            "Can't get operational certificate".to_string(),
-        )))?;
+        let result = ouroboros::kes_validation::validate_block_kes(
+            &header,
+            &self.ocert_counters,
+            &self.active_spos,
+            &genesis.genesis_delegs,
+            slots_per_kes_period,
+            max_kes_evolutions,
+        )
+        .and_then(|kes_validations| {
+            kes_validations.iter().try_for_each(|assert| assert().map_err(Box::new))
+        });
 
-        Ok(())
-    }
-}
-
-fn operational_cert<'a>(header: &'a MultiEraHeader) -> Option<OperationalCertificate<'a>> {
-    match header {
-        MultiEraHeader::BabbageCompatible(x) => Some(OperationalCertificate {
-            operational_cert_hot_vkey: &x.header_body.operational_cert.operational_cert_hot_vkey,
-            operational_cert_sequence_number: x
-                .header_body
-                .operational_cert
-                .operational_cert_sequence_number,
-            operational_cert_kes_period: x.header_body.operational_cert.operational_cert_kes_period,
-            operational_cert_sigma: &x.header_body.operational_cert.operational_cert_sigma,
-        }),
-        MultiEraHeader::ShelleyCompatible(x) => {
-            let cert = OperationalCertificate {
-                operational_cert_hot_vkey: &x.header_body.operational_cert_hot_vkey,
-                operational_cert_sequence_number: x.header_body.operational_cert_sequence_number,
-                operational_cert_kes_period: x.header_body.operational_cert_kes_period,
-                operational_cert_sigma: &x.header_body.operational_cert_sigma,
-            };
-            Some(cert)
-        }
-        _ => None,
+        result
     }
 }
