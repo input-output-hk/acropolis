@@ -11,6 +11,7 @@ use tracing::info;
 use acropolis_module_accounts_state::AccountsState;
 use acropolis_module_address_state::AddressState;
 use acropolis_module_assets_state::AssetsState;
+use acropolis_module_block_kes_validator::BlockKesValidator;
 use acropolis_module_block_unpacker::BlockUnpacker;
 use acropolis_module_block_vrf_validator::BlockVrfValidator;
 use acropolis_module_chain_store::ChainStore;
@@ -121,6 +122,7 @@ pub async fn main() -> Result<()> {
     Consensus::register(&mut process);
     ChainStore::register(&mut process);
     BlockVrfValidator::register(&mut process);
+    BlockKesValidator::register(&mut process);
 
     Clock::<Message>::register(&mut process);
     RESTServer::<Message>::register(&mut process);
