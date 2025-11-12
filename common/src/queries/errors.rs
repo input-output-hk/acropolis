@@ -56,3 +56,11 @@ impl QueryError {
         }
     }
 }
+
+impl From<anyhow::Error> for QueryError {
+    fn from(err: anyhow::Error) -> Self {
+        Self::Internal {
+            message: err.to_string(),
+        }
+    }
+}

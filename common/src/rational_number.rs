@@ -159,7 +159,7 @@ mod tests {
     fn test_chameleon_serialization() -> Result<()> {
         for n in 0..=1000 {
             let ch = [
-                &ChameleonFraction::Float(f32::from_str(&format!("0.{:03}", n))?),
+                &ChameleonFraction::Float(f32::from_str(&format!("0.{n:03}"))?),
                 &ChameleonFraction::Fraction {
                     numerator: n,
                     denominator: 1000,

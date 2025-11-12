@@ -1,7 +1,4 @@
-use std::{
-    collections::{HashMap, HashSet},
-    path::Path,
-};
+use std::{collections::HashMap, path::Path};
 
 use crate::state::{AddressEntry, AddressStorageConfig, UtxoDelta};
 use acropolis_common::{Address, AddressTotals, TxIdentifier, UTxOIdentifier};
@@ -16,6 +13,14 @@ const ADDRESS_UTXOS_EPOCH_COUNTER: &[u8] = b"utxos_epoch_last";
 const ADDRESS_TXS_EPOCH_COUNTER: &[u8] = b"txs_epoch_last";
 const ADDRESS_TOTALS_EPOCH_COUNTER: &[u8] = b"totals_epoch_last";
 
+#[derive(Default)]
+struct MergedDeltas {
+    created_utxos: Vec<UTxOIdentifier>,
+    spent_utxos: Vec<UTxOIdentifier>,
+    txs: Vec<TxIdentifier>,
+    totals: AddressTotals,
+}
+
 pub struct ImmutableAddressStore {
     utxos: Partition,
     txs: Partition,
@@ -26,7 +31,7 @@ pub struct ImmutableAddressStore {
 
 impl ImmutableAddressStore {
     pub fn new(path: impl AsRef<Path>) -> Result<Self> {
-        let cfg = fjall::Config::new(path).max_write_buffer_size(512 * 1024 * 1024);
+        let cfg = fjall::Config::new(path).max_write_buffer_size(512 * 1024 * 1024).temporary(true);
         let keyspace = Keyspace::open(cfg)?;
 
         let utxos = keyspace.open_partition("address_utxos", PartitionCreateOptions::default())?;
@@ -43,8 +48,8 @@ impl ImmutableAddressStore {
         })
     }
 
-    /// Persists volatile UTxOs, transactions, and totals into their respective Fjall partitions for an entire epoch.
-    /// Skips any partitions that have already stored the given epoch.
+    /// Persists volatile UTxOs, transactions, and totals into their respective Fjall partitions
+    /// for an entire epoch. Skips any partitions that have already stored the given epoch.
     /// All writes are batched and committed atomically, preventing on-disk corruption in case of failure.
     pub async fn persist_epoch(&self, epoch: u64, config: &AddressStorageConfig) -> Result<()> {
         let persist_utxos = config.store_info
@@ -55,7 +60,7 @@ impl ImmutableAddressStore {
             && !self.epoch_exists(self.totals.clone(), ADDRESS_TOTALS_EPOCH_COUNTER, epoch).await?;
 
         if !(persist_utxos || persist_txs || persist_totals) {
-            debug!("no persistence needed for epoch {epoch} (already persisted or disabled)",);
+            debug!("no persistence needed for epoch {epoch} (already persisted or disabled)");
             return Ok(());
         }
 
@@ -67,70 +72,50 @@ impl ImmutableAddressStore {
         let mut batch = self.keyspace.batch();
         let mut change_count = 0;
 
-        for block_map in drained_blocks.into_iter() {
-            if block_map.is_empty() {
-                continue;
+        for (address, deltas) in Self::merge_block_deltas(drained_blocks) {
+            change_count += 1;
+            let addr_key = address.to_bytes_key()?;
+
+            if persist_utxos && (!deltas.created_utxos.is_empty() || !deltas.spent_utxos.is_empty())
+            {
+                let mut live: Vec<UTxOIdentifier> = self
+                    .utxos
+                    .get(&addr_key)?
+                    .map(|bytes| decode(&bytes))
+                    .transpose()?
+                    .unwrap_or_default();
+
+                live.extend(&deltas.created_utxos);
+
+                for u in &deltas.spent_utxos {
+                    live.retain(|x| x != u);
+                }
+
+                batch.insert(&self.utxos, &addr_key, to_vec(&live)?);
             }
 
-            for (addr, entry) in block_map {
-                change_count += 1;
-                let addr_key = addr.to_bytes_key()?;
+            if persist_txs && !deltas.txs.is_empty() {
+                let mut live: Vec<TxIdentifier> = self
+                    .txs
+                    .get(&addr_key)?
+                    .map(|bytes| decode(&bytes))
+                    .transpose()?
+                    .unwrap_or_default();
 
-                if persist_utxos {
-                    let mut live: HashSet<UTxOIdentifier> = self
-                        .utxos
-                        .get(&addr_key)?
-                        .map(|bytes| decode(&bytes))
-                        .transpose()?
-                        .unwrap_or_default();
+                live.extend(deltas.txs.iter().cloned());
+                batch.insert(&self.txs, &addr_key, to_vec(&live)?);
+            }
 
-                    if let Some(deltas) = &entry.utxos {
-                        for delta in deltas {
-                            match delta {
-                                UtxoDelta::Created(u) => {
-                                    live.insert(*u);
-                                }
-                                UtxoDelta::Spent(u) => {
-                                    live.remove(u);
-                                }
-                            }
-                        }
-                    }
+            if persist_totals && deltas.totals.tx_count != 0 {
+                let mut live: AddressTotals = self
+                    .totals
+                    .get(&addr_key)?
+                    .map(|bytes| decode(&bytes))
+                    .transpose()?
+                    .unwrap_or_default();
 
-                    batch.insert(&self.utxos, &addr_key, to_vec(&live)?);
-                }
-
-                if persist_txs {
-                    let mut live: Vec<TxIdentifier> = self
-                        .txs
-                        .get(&addr_key)?
-                        .map(|bytes| decode(&bytes))
-                        .transpose()?
-                        .unwrap_or_default();
-
-                    if let Some(txs_deltas) = &entry.transactions {
-                        live.extend(txs_deltas.iter().cloned());
-                    }
-
-                    batch.insert(&self.txs, &addr_key, to_vec(&live)?);
-                }
-
-                if persist_totals {
-                    let mut live: AddressTotals = self
-                        .totals
-                        .get(&addr_key)?
-                        .map(|bytes| decode(&bytes))
-                        .transpose()?
-                        .unwrap_or_default();
-
-                    if let Some(deltas) = &entry.totals {
-                        for delta in deltas {
-                            live.apply_delta(delta);
-                        }
-                    }
-
-                    batch.insert(&self.totals, &addr_key, to_vec(&live)?);
-                }
+                live += deltas.totals;
+                batch.insert(&self.totals, &addr_key, to_vec(&live)?);
             }
         }
 
@@ -173,7 +158,7 @@ impl ImmutableAddressStore {
     pub async fn get_utxos(&self, address: &Address) -> Result<Option<Vec<UTxOIdentifier>>> {
         let key = address.to_bytes_key()?;
 
-        let mut live: HashSet<UTxOIdentifier> =
+        let mut live: Vec<UTxOIdentifier> =
             self.utxos.get(&key)?.map(|bytes| decode(&bytes)).transpose()?.unwrap_or_default();
 
         let pending = self.pending.lock().await;
@@ -182,12 +167,8 @@ impl ImmutableAddressStore {
                 if let Some(deltas) = &entry.utxos {
                     for delta in deltas {
                         match delta {
-                            UtxoDelta::Created(u) => {
-                                live.insert(*u);
-                            }
-                            UtxoDelta::Spent(u) => {
-                                live.remove(u);
-                            }
+                            UtxoDelta::Created(u) => live.push(*u),
+                            UtxoDelta::Spent(u) => live.retain(|x| x != u),
                         }
                     }
                 }
@@ -197,8 +178,7 @@ impl ImmutableAddressStore {
         if live.is_empty() {
             Ok(None)
         } else {
-            let vec: Vec<_> = live.into_iter().collect();
-            Ok(Some(vec))
+            Ok(Some(live))
         }
     }
 
@@ -310,5 +290,47 @@ impl ImmutableAddressStore {
         }
 
         Ok(exists)
+    }
+
+    fn merge_block_deltas(
+        drained_blocks: Vec<HashMap<Address, AddressEntry>>,
+    ) -> HashMap<Address, MergedDeltas> {
+        let mut merged = HashMap::new();
+
+        for block_map in drained_blocks {
+            for (addr, entry) in block_map {
+                let target = merged.entry(addr.clone()).or_insert_with(MergedDeltas::default);
+
+                // Remove UTxOs that are spent in the same epoch
+                if let Some(deltas) = &entry.utxos {
+                    for delta in deltas {
+                        match delta {
+                            UtxoDelta::Created(u) => target.created_utxos.push(*u),
+                            UtxoDelta::Spent(u) => {
+                                if target.created_utxos.contains(u) {
+                                    target.created_utxos.retain(|x| x != u);
+                                } else {
+                                    target.spent_utxos.push(*u);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Merge Tx vectors
+                if let Some(txs) = &entry.transactions {
+                    target.txs.extend(txs.iter().cloned());
+                }
+
+                // Sum totals
+                if let Some(totals) = &entry.totals {
+                    for delta in totals {
+                        target.totals.apply_delta(delta);
+                    }
+                }
+            }
+        }
+
+        merged
     }
 }

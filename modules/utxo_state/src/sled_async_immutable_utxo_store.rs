@@ -1,7 +1,7 @@
 //! On-disk store using Sled for immutable UTXOs
 
-use crate::state::{ImmutableUTXOStore, UTXOValue};
-use acropolis_common::UTxOIdentifier;
+use crate::state::ImmutableUTXOStore;
+use acropolis_common::{UTXOValue, UTxOIdentifier};
 use anyhow::Result;
 use async_trait::async_trait;
 use config::Config;

@@ -251,6 +251,22 @@ impl AddressState {
                             )),
                         }
                     }
+                    AddressStateQuery::GetAddressesTotals { addresses } => {
+                        match state.get_addresses_totals(addresses).await {
+                            Ok(totals) => AddressStateQueryResponse::AddressesTotals(totals),
+                            Err(e) => AddressStateQueryResponse::Error(QueryError::internal_error(
+                                e.to_string(),
+                            )),
+                        }
+                    }
+                    AddressStateQuery::GetAddressesUTxOs { addresses } => {
+                        match state.get_addresses_utxos(addresses).await {
+                            Ok(utxos) => AddressStateQueryResponse::AddressesUTxOs(utxos),
+                            Err(e) => AddressStateQueryResponse::Error(QueryError::internal_error(
+                                e.to_string(),
+                            )),
+                        }
+                    }
                 };
                 Arc::new(Message::StateQueryResponse(StateQueryResponse::Addresses(
                     response,

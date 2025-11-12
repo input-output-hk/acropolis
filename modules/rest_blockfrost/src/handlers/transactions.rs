@@ -1,8 +1,10 @@
 //! REST handlers for Acropolis Blockfrost /txs endpoints
 use acropolis_cardano::transaction::calculate_deposit;
+use acropolis_common::rest_error::RESTError;
 use acropolis_common::{
     messages::{Message, RESTResponse, StateQuery, StateQueryResponse},
     queries::{
+        errors::QueryError,
         parameters::{ParametersStateQuery, ParametersStateQueryResponse},
         transactions::{
             TransactionDelegationCertificate, TransactionInfo, TransactionStakeCertificate,
@@ -12,7 +14,6 @@ use acropolis_common::{
     },
     Lovelace, TxHash,
 };
-use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
 use hex::FromHex;
 use serde::{
@@ -62,17 +63,17 @@ pub async fn handle_transactions_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
+) -> Result<RESTResponse, RESTError> {
     let (tx_hash, param, param2) = match params.as_slice() {
         [tx_hash] => (tx_hash, None, None),
         [tx_hash, param] => (tx_hash, Some(param.as_str()), None),
         [tx_hash, param, param2] => (tx_hash, Some(param.as_str()), Some(param2.as_str())),
-        _ => return Ok(RESTResponse::with_text(400, "Invalid parameters")),
+        _ => return Err(RESTError::BadRequest("Invalid parameters".to_string())),
     };
 
     let tx_hash = match TxHash::from_hex(tx_hash) {
         Ok(hash) => hash,
-        Err(_) => return Ok(RESTResponse::with_text(400, "Invalid transaction hash")),
+        Err(_) => return Err(RESTError::invalid_param("transaction", "Invalid transaction hash")),
     };
 
     match param {
@@ -105,7 +106,7 @@ async fn handle_transaction_query(
     context: Arc<Context<Message>>,
     tx_hash: TxHash,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
+) -> Result<RESTResponse, RESTError> {
     let txs_info_msg = Arc::new(Message::StateQuery(StateQuery::Transactions(
         TransactionsStateQuery::GetTransactionInfo { tx_hash },
     )));
@@ -132,8 +133,8 @@ async fn handle_transaction_query(
                         )) => Ok(params),
                         Message::StateQueryResponse(StateQueryResponse::Parameters(
                             ParametersStateQueryResponse::Error(e),
-                        )) => Err(anyhow!(e)),
-                        _ => Err(anyhow!("Unexpected response")),
+                        )) => Err(e),
+                        _ => Err(QueryError::internal_error("Unexpected response")),
                     },
                 )
                 .await
@@ -151,13 +152,13 @@ async fn handle_transaction_query(
                     &params,
                 ) {
                     Ok(deposit) => deposit,
-                    Err(e) => return Some(Err(e)),
+                    Err(e) => return Some(Err(QueryError::internal_error(e.to_string()))),
                 };
-                Some(Ok(Some(TxInfo(txs_info, fee, deposit))))
+                Some(Ok(TxInfo(txs_info, fee, deposit)))
             }
             Message::StateQueryResponse(StateQueryResponse::Transactions(
                 TransactionsStateQueryResponse::Error(e),
-            )) => Some(Err(anyhow!(e))),
+            )) => Some(Err(e)),
             _ => None,
         },
     )
@@ -187,7 +188,7 @@ async fn handle_transaction_stakes_query(
     context: Arc<Context<Message>>,
     tx_hash: TxHash,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
+) -> Result<RESTResponse, RESTError> {
     let txs_info_msg = Arc::new(Message::StateQuery(StateQuery::Transactions(
         TransactionsStateQuery::GetTransactionStakeCertificates { tx_hash },
     )));
@@ -203,7 +204,7 @@ async fn handle_transaction_stakes_query(
             ))),
             Message::StateQueryResponse(StateQueryResponse::Transactions(
                 TransactionsStateQueryResponse::Error(e),
-            )) => Some(Err(anyhow!(e))),
+            )) => Some(Err(e)),
             _ => None,
         },
     )
@@ -234,7 +235,7 @@ async fn handle_transaction_delegations_query(
     context: Arc<Context<Message>>,
     tx_hash: TxHash,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
+) -> Result<RESTResponse, RESTError> {
     let txs_info_msg = Arc::new(Message::StateQuery(StateQuery::Transactions(
         TransactionsStateQuery::GetTransactionDelegationCertificates { tx_hash },
     )));
@@ -250,7 +251,7 @@ async fn handle_transaction_delegations_query(
             ))),
             Message::StateQueryResponse(StateQueryResponse::Transactions(
                 TransactionsStateQueryResponse::Error(e),
-            )) => Some(Err(anyhow!(e))),
+            )) => Some(Err(e)),
             _ => None,
         },
     )
@@ -279,7 +280,7 @@ async fn handle_transaction_withdrawals_query(
     context: Arc<Context<Message>>,
     tx_hash: TxHash,
     handlers_config: Arc<HandlersConfig>,
-) -> Result<RESTResponse> {
+) -> Result<RESTResponse, RESTError> {
     let txs_info_msg = Arc::new(Message::StateQuery(StateQuery::Transactions(
         TransactionsStateQuery::GetTransactionWithdrawals { tx_hash },
     )));
@@ -295,7 +296,7 @@ async fn handle_transaction_withdrawals_query(
             ))),
             Message::StateQueryResponse(StateQueryResponse::Transactions(
                 TransactionsStateQueryResponse::Error(e),
-            )) => Some(Err(anyhow!(e))),
+            )) => Some(Err(e)),
             _ => None,
         },
     )

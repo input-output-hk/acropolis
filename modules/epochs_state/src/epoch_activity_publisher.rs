@@ -1,4 +1,7 @@
-use acropolis_common::messages::Message;
+use acropolis_common::{
+    messages::{CardanoMessage, EpochActivityMessage, Message},
+    BlockInfo,
+};
 use caryatid_sdk::Context;
 use std::sync::Arc;
 
@@ -17,8 +20,21 @@ impl EpochActivityPublisher {
         Self { context, topic }
     }
 
-    /// Publish the DRep Delegation Distribution
-    pub async fn publish(&mut self, message: Arc<Message>) -> anyhow::Result<()> {
-        self.context.message_bus.publish(&self.topic, message).await
+    /// Publish the Epoch Activity Message
+    pub async fn publish(
+        &mut self,
+        block_info: &BlockInfo,
+        ea: EpochActivityMessage,
+    ) -> anyhow::Result<()> {
+        self.context
+            .message_bus
+            .publish(
+                &self.topic,
+                Arc::new(Message::Cardano((
+                    block_info.clone(),
+                    CardanoMessage::EpochActivity(ea),
+                ))),
+            )
+            .await
     }
 }

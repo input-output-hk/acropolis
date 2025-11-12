@@ -12,11 +12,8 @@ license = "Apache-2.0"
 acropolis_common = { path = "../../common" }
 
 caryatid_sdk = { workspace = true }
-caryatid_module_rest_server = { workspace = true }
 
 anyhow = { workspace = true }
-async-trait = "0.1"
-bech32 = "0.11"
 blake2 = "0.10.6"
 config = { workspace = true }
 hex = { workspace = true }

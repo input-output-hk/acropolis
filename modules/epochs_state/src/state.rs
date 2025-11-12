@@ -1,4 +1,4 @@
-//! Acropolis epoch activity counter: state storage
+//! Acropolis epochs_state: state storage
 
 use acropolis_common::{
     crypto::keyhash_224,
@@ -54,7 +54,7 @@ pub struct State {
     // fees seen this epoch
     epoch_fees: u64,
 
-    // nonces will be set starting from Shelly Era
+    // nonces will be set starting from Shelley Era
     nonces: Option<Nonces>,
 
     // protocol parameter for Praos and TPraos
@@ -84,13 +84,13 @@ impl State {
 
     /// Handle protocol parameters updates
     pub fn handle_protocol_parameters(&mut self, msg: &ProtocolParamsMessage) {
-        if let Some(shelly_params) = msg.params.shelley.as_ref() {
-            self.praos_params = Some(shelly_params.into());
+        if let Some(shelley_params) = msg.params.shelley.as_ref() {
+            self.praos_params = Some(shelley_params.into());
         }
     }
 
-    // Handle a block header
-    pub fn handle_block_header(
+    /// Evolve Nonces
+    pub fn evolve_nonces(
         &mut self,
         genesis: &GenesisValues,
         block_info: &BlockInfo,
@@ -177,8 +177,7 @@ impl State {
             };
 
             self.nonces = Some(new_nonces);
-        };
-
+        }
         Ok(())
     }
 
@@ -251,7 +250,7 @@ impl State {
             total_outputs: self.epoch_outputs,
             total_fees: self.epoch_fees,
             spo_blocks: self.blocks_minted.iter().map(|(k, v)| (*k, *v)).collect(),
-            nonce: self.nonces.as_ref().and_then(|n| n.active.hash),
+            nonce: self.nonces.as_ref().map(|n| n.active.clone()),
         }
     }
 
@@ -525,7 +524,7 @@ mod tests {
             hex::decode(include_str!("../data/4490511.cbor")).unwrap();
         let block = make_new_epoch_block(208);
         let block_header = MultiEraHeader::decode(1, None, &e_208_first_block_header_cbor).unwrap();
-        assert!(state.handle_block_header(&genesis_value, &block, &block_header).is_ok());
+        assert!(state.evolve_nonces(&genesis_value, &block, &block_header).is_ok());
 
         let nonces = state.nonces.unwrap();
         let evolved = Nonce::from(
@@ -555,12 +554,12 @@ mod tests {
             hex::decode(include_str!("../data/4490512.cbor")).unwrap();
         let block = make_new_epoch_block(208);
         let block_header = MultiEraHeader::decode(1, None, &e_208_first_block_header_cbor).unwrap();
-        assert!(state.handle_block_header(&genesis_value, &block, &block_header).is_ok());
+        assert!(state.evolve_nonces(&genesis_value, &block, &block_header).is_ok());
 
         let block = make_block(208);
         let block_header =
             MultiEraHeader::decode(1, None, &e_208_second_block_header_cbor).unwrap();
-        assert!(state.handle_block_header(&genesis_value, &block, &block_header).is_ok());
+        assert!(state.evolve_nonces(&genesis_value, &block, &block_header).is_ok());
 
         let evolved = Nonce::from(
             NonceHash::try_from(
@@ -619,7 +618,7 @@ mod tests {
             hex::decode(include_str!("../data/4512067.cbor")).unwrap();
         let block = make_new_epoch_block(209);
         let block_header = MultiEraHeader::decode(1, None, &e_209_first_block_header_cbor).unwrap();
-        assert!(state.handle_block_header(&genesis_value, &block, &block_header).is_ok());
+        assert!(state.evolve_nonces(&genesis_value, &block, &block_header).is_ok());
 
         let nonces = state.nonces.unwrap();
         let evolved = Nonce::from(
@@ -691,7 +690,7 @@ mod tests {
             hex::decode(include_str!("../data/4533637.cbor")).unwrap();
         let block = make_new_epoch_block(209);
         let block_header = MultiEraHeader::decode(1, None, &e_210_first_block_header_cbor).unwrap();
-        assert!(state.handle_block_header(&genesis_value, &block, &block_header).is_ok());
+        assert!(state.evolve_nonces(&genesis_value, &block, &block_header).is_ok());
 
         let nonces = state.nonces.unwrap();
         let evolved = Nonce::from(
