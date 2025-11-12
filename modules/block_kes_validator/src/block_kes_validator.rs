@@ -26,12 +26,14 @@ const DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC: (&str, &str) = (
     "bootstrapped-subscribe-topic",
     "cardano.sequence.bootstrapped",
 );
+const DEFAULT_BLOCKS_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("blocks-subscribe-topic", "cardano.block.proposed");
 const DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC: (&str, &str) = (
     "protocol-parameters-subscribe-topic",
     "cardano.protocol.parameters",
 );
-const DEFAULT_BLOCKS_SUBSCRIBE_TOPIC: (&str, &str) =
-    ("blocks-subscribe-topic", "cardano.block.proposed");
+const DEFAULT_SPO_STATE_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("spo-state-subscribe-topic", "cardano.spo.state");
 
 /// Block KES Validator module
 #[module(
@@ -50,6 +52,7 @@ impl BlockKesValidator {
         mut bootstrapped_subscription: Box<dyn Subscription<Message>>,
         mut blocks_subscription: Box<dyn Subscription<Message>>,
         mut protocol_parameters_subscription: Box<dyn Subscription<Message>>,
+        mut spo_state_subscription: Box<dyn Subscription<Message>>,
     ) -> Result<()> {
         let (_, bootstrapped_message) = bootstrapped_subscription.read().await?;
         let genesis = match bootstrapped_message.as_ref() {
@@ -80,6 +83,7 @@ impl BlockKesValidator {
                     if is_new_epoch {
                         // read epoch boundary messages
                         let protocol_parameters_message_f = protocol_parameters_subscription.read();
+                        let spo_state_message_f = spo_state_subscription.read();
 
                         let (_, protocol_parameters_msg) = protocol_parameters_message_f.await?;
                         let span = info_span!(
@@ -92,6 +96,19 @@ impl BlockKesValidator {
                                 state.handle_protocol_parameters(msg);
                             }
                             _ => error!("Unexpected message type: {protocol_parameters_msg:?}"),
+                        });
+
+                        let (_, spo_state_msg) = spo_state_message_f.await?;
+                        let span = info_span!(
+                            "block_kes_validator.handle_spo_state",
+                            epoch = block_info.epoch
+                        );
+                        span.in_scope(|| match spo_state_msg.as_ref() {
+                            Message::Cardano((block_info, CardanoMessage::SPOState(msg))) => {
+                                Self::check_sync(&current_block, block_info);
+                                state.handle_spo_state(msg);
+                            }
+                            _ => error!("Unexpected message type: {spo_state_msg:?}"),
                         });
                     }
 
@@ -133,15 +150,21 @@ impl BlockKesValidator {
             .get_string(DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC.0)
             .unwrap_or(DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC.1.to_string());
         info!("Creating subscriber for bootstrapped on '{bootstrapped_subscribe_topic}'");
-        let protocol_parameters_subscribe_topic = config
-            .get_string(DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC.1.to_string());
-        info!("Creating subscriber for protocol parameters on '{protocol_parameters_subscribe_topic}'");
 
         let blocks_subscribe_topic = config
             .get_string(DEFAULT_BLOCKS_SUBSCRIBE_TOPIC.0)
             .unwrap_or(DEFAULT_BLOCKS_SUBSCRIBE_TOPIC.1.to_string());
         info!("Creating blocks subscription on '{blocks_subscribe_topic}'");
+
+        let protocol_parameters_subscribe_topic = config
+            .get_string(DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC.1.to_string());
+        info!("Creating subscriber for protocol parameters on '{protocol_parameters_subscribe_topic}'");
+
+        let spo_state_subscribe_topic = config
+            .get_string(DEFAULT_SPO_STATE_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_SPO_STATE_SUBSCRIBE_TOPIC.1.to_string());
+        info!("Creating spo state subscription on '{spo_state_subscribe_topic}'");
 
         // publishers
         let kes_validation_publisher =
@@ -149,9 +172,10 @@ impl BlockKesValidator {
 
         // Subscribers
         let bootstrapped_subscription = context.subscribe(&bootstrapped_subscribe_topic).await?;
+        let blocks_subscription = context.subscribe(&blocks_subscribe_topic).await?;
         let protocol_parameters_subscription =
             context.subscribe(&protocol_parameters_subscribe_topic).await?;
-        let blocks_subscription = context.subscribe(&blocks_subscribe_topic).await?;
+        let spo_state_subscription = context.subscribe(&spo_state_subscribe_topic).await?;
 
         // state history
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
@@ -167,6 +191,7 @@ impl BlockKesValidator {
                 bootstrapped_subscription,
                 blocks_subscription,
                 protocol_parameters_subscription,
+                spo_state_subscription,
             )
             .await
             .unwrap_or_else(|e| error!("Failed: {e}"));

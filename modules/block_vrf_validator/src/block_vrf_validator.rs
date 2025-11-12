@@ -27,12 +27,12 @@ const DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC: (&str, &str) = (
     "bootstrapped-subscribe-topic",
     "cardano.sequence.bootstrapped",
 );
+const DEFAULT_BLOCKS_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("blocks-subscribe-topic", "cardano.block.proposed");
 const DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC: (&str, &str) = (
     "protocol-parameters-subscribe-topic",
     "cardano.protocol.parameters",
 );
-const DEFAULT_BLOCKS_SUBSCRIBE_TOPIC: (&str, &str) =
-    ("blocks-subscribe-topic", "cardano.block.proposed");
 const DEFAULT_EPOCH_ACTIVITY_SUBSCRIBE_TOPIC: (&str, &str) =
     ("epoch-activity-subscribe-topic", "cardano.epoch.activity");
 const DEFAULT_SPO_STATE_SUBSCRIBE_TOPIC: (&str, &str) =

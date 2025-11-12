@@ -1,5 +1,7 @@
 use acropolis_common::{
-    genesis_values::GenesisValues, messages::ProtocolParamsMessage, validation::KesValidationError,
+    genesis_values::GenesisValues,
+    messages::{ProtocolParamsMessage, SPOStateMessage},
+    validation::KesValidationError,
     BlockInfo, PoolId,
 };
 use imbl::HashMap;
@@ -34,6 +36,10 @@ impl State {
             self.slots_per_kes_period = Some(shelley_params.slots_per_kes_period as u64);
             self.max_kes_evolutions = Some(shelley_params.max_kes_evolutions as u64);
         }
+    }
+
+    pub fn handle_spo_state(&mut self, msg: &SPOStateMessage) {
+        self.active_spos = msg.spos.iter().map(|spo| spo.operator).collect();
     }
 
     pub fn validate_block_kes(
