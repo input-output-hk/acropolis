@@ -196,7 +196,7 @@ fn body_signature<'a>(header: &'a MultiEraHeader) -> Option<&'a [u8]> {
 
 #[cfg(test)]
 mod tests {
-    use acropolis_common::{genesis_values::GenesisValues, Era};
+    use acropolis_common::{genesis_values::GenesisValues, serialization::Bech32Conversion, Era};
     use pallas::ledger::traverse::MultiEraHeader;
 
     use super::*;
@@ -213,7 +213,7 @@ mod tests {
             MultiEraHeader::decode(Era::Shelley as u8, None, &block_header_4490511).unwrap();
 
         let ocert_counters = HashMap::new();
-        let active_spos = Vec::new();
+        let active_spos = vec![];
 
         let result = validate_block_kes(
             &block_header,
@@ -227,5 +227,207 @@ mod tests {
             kes_validations.iter().try_for_each(|assert| assert().map_err(Box::new))
         });
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_4556956_block() {
+        let slots_per_kes_period = 129600;
+        let max_kes_evolutions = 62;
+        let genesis_values = GenesisValues::mainnet();
+
+        let block_header_4556956: Vec<u8> =
+            hex::decode(include_str!("./data/4556956.cbor")).unwrap();
+        let block_header =
+            MultiEraHeader::decode(Era::Shelley as u8, None, &block_header_4556956).unwrap();
+
+        let ocert_counters = HashMap::from_iter([(
+            PoolId::from_bech32("pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy")
+                .unwrap(),
+            1,
+        )]);
+        let active_spos =
+            vec![
+                PoolId::from_bech32("pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy")
+                    .unwrap(),
+            ];
+
+        let result = validate_block_kes(
+            &block_header,
+            &ocert_counters,
+            &active_spos,
+            &genesis_values.genesis_delegs,
+            slots_per_kes_period,
+            max_kes_evolutions,
+        )
+        .and_then(|kes_validations| {
+            kes_validations.iter().try_for_each(|assert| assert().map_err(Box::new))
+        });
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_4556956_block_with_wrong_ocert_counter() {
+        let slots_per_kes_period = 129600;
+        let max_kes_evolutions = 62;
+        let genesis_values = GenesisValues::mainnet();
+
+        let block_header_4556956: Vec<u8> =
+            hex::decode(include_str!("./data/4556956.cbor")).unwrap();
+        let block_header =
+            MultiEraHeader::decode(Era::Shelley as u8, None, &block_header_4556956).unwrap();
+
+        let ocert_counters = HashMap::from_iter([(
+            PoolId::from_bech32("pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy")
+                .unwrap(),
+            2,
+        )]);
+        let active_spos =
+            vec![
+                PoolId::from_bech32("pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy")
+                    .unwrap(),
+            ];
+
+        let result = validate_block_kes(
+            &block_header,
+            &ocert_counters,
+            &active_spos,
+            &genesis_values.genesis_delegs,
+            slots_per_kes_period,
+            max_kes_evolutions,
+        )
+        .and_then(|kes_validations| {
+            kes_validations.iter().try_for_each(|assert| assert().map_err(Box::new))
+        });
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            Box::new(KesValidationError::OperationalCertificateError(
+                OperationalCertificateError::CounterTooSmallOcert {
+                    latest_counter: 2,
+                    declared_counter: 1
+                }
+            ))
+        );
+    }
+
+    #[test]
+    fn test_4556956_block_with_missing_ocert_counter_and_active_spos() {
+        let slots_per_kes_period = 129600;
+        let max_kes_evolutions = 62;
+        let genesis_values = GenesisValues::mainnet();
+
+        let block_header_4556956: Vec<u8> =
+            hex::decode(include_str!("./data/4556956.cbor")).unwrap();
+        let block_header =
+            MultiEraHeader::decode(Era::Shelley as u8, None, &block_header_4556956).unwrap();
+
+        let ocert_counters = HashMap::new();
+        let active_spos = vec![];
+
+        let result = validate_block_kes(
+            &block_header,
+            &ocert_counters,
+            &active_spos,
+            &genesis_values.genesis_delegs,
+            slots_per_kes_period,
+            max_kes_evolutions,
+        )
+        .and_then(|kes_validations| {
+            kes_validations.iter().try_for_each(|assert| assert().map_err(Box::new))
+        });
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            Box::new(KesValidationError::NoOCertCounter {
+                pool_id: PoolId::from_bech32(
+                    "pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy"
+                )
+                .unwrap(),
+            })
+        );
+    }
+
+    #[test]
+    fn test_7854823_praos_block() {
+        let slots_per_kes_period = 129600;
+        let max_kes_evolutions = 62;
+        let genesis_values = GenesisValues::mainnet();
+
+        let block_header_7854823: Vec<u8> =
+            hex::decode(include_str!("./data/7854823.cbor")).unwrap();
+        let block_header =
+            MultiEraHeader::decode(Era::Babbage as u8, None, &block_header_7854823).unwrap();
+
+        let ocert_counters = HashMap::from_iter([(
+            PoolId::from_bech32("pool195gdnmj6smzuakm4etxsxw3fgh8asqc4awtcskpyfnkpcvh2v8t")
+                .unwrap(),
+            11,
+        )]);
+        let active_spos =
+            vec![
+                PoolId::from_bech32("pool195gdnmj6smzuakm4etxsxw3fgh8asqc4awtcskpyfnkpcvh2v8t")
+                    .unwrap(),
+            ];
+
+        let result = validate_block_kes(
+            &block_header,
+            &ocert_counters,
+            &active_spos,
+            &genesis_values.genesis_delegs,
+            slots_per_kes_period,
+            max_kes_evolutions,
+        )
+        .and_then(|kes_validations| {
+            kes_validations.iter().try_for_each(|assert| assert().map_err(Box::new))
+        });
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_7854823_praos_block_with_overincremented_ocert_counter() {
+        let slots_per_kes_period = 129600;
+        let max_kes_evolutions = 62;
+        let genesis_values = GenesisValues::mainnet();
+
+        let block_header_7854823: Vec<u8> =
+            hex::decode(include_str!("./data/7854823.cbor")).unwrap();
+        let block_header =
+            MultiEraHeader::decode(Era::Babbage as u8, None, &block_header_7854823).unwrap();
+
+        let ocert_counters = HashMap::from_iter([(
+            PoolId::from_bech32("pool195gdnmj6smzuakm4etxsxw3fgh8asqc4awtcskpyfnkpcvh2v8t")
+                .unwrap(),
+            // This is just for test case
+            // actual on-chain value is 11
+            // now ocert counter is incremented by 2
+            9,
+        )]);
+        let active_spos =
+            vec![
+                PoolId::from_bech32("pool195gdnmj6smzuakm4etxsxw3fgh8asqc4awtcskpyfnkpcvh2v8t")
+                    .unwrap(),
+            ];
+
+        let result = validate_block_kes(
+            &block_header,
+            &ocert_counters,
+            &active_spos,
+            &genesis_values.genesis_delegs,
+            slots_per_kes_period,
+            max_kes_evolutions,
+        )
+        .and_then(|kes_validations| {
+            kes_validations.iter().try_for_each(|assert| assert().map_err(Box::new))
+        });
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            Box::new(KesValidationError::OperationalCertificateError(
+                OperationalCertificateError::CounterOverIncrementedOcert {
+                    latest_counter: 9,
+                    declared_counter: 11,
+                }
+            ))
+        );
     }
 }
