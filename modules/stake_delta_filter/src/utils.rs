@@ -1,7 +1,7 @@
 use acropolis_common::{
     messages::{AddressDeltasMessage, StakeAddressDeltasMessage},
     Address, AddressDelta, BlockInfo, Era, ShelleyAddress, ShelleyAddressDelegationPart,
-    ShelleyAddressPointer, StakeAddress, StakeAddressDelta, StakeCredential,
+    ShelleyAddressPointer, StakeAddress, StakeAddressDelta, StakeCredential, TxIdentifier,
 };
 use anyhow::{anyhow, Result};
 use serde_with::serde_as;
@@ -318,7 +318,7 @@ struct StakeEntry {
     delta: i64,
     addresses: Vec<ShelleyAddress>,
     addresses_seen: HashSet<ShelleyAddress>,
-    tx_count: u32,
+    txs_seen: HashSet<TxIdentifier>,
 }
 
 /// Iterates through all address deltas in `delta`, leaves only stake addresses
@@ -403,7 +403,7 @@ pub fn process_message(
             delta: 0,
             addresses: Vec::new(),
             addresses_seen: HashSet::new(),
-            tx_count: 0,
+            txs_seen: HashSet::new(),
         });
         entry.delta += d.received.lovelace as i64 - d.sent.lovelace;
 
@@ -412,7 +412,7 @@ pub fn process_message(
                 entry.addresses.push(shelley.clone());
             }
         }
-        entry.tx_count += 1;
+        entry.txs_seen.insert(d.tx_identifier);
     }
 
     let deltas = grouped
@@ -420,7 +420,7 @@ pub fn process_message(
         .map(|(stake_address, entry)| StakeAddressDelta {
             stake_address,
             addresses: entry.addresses,
-            tx_count: entry.tx_count,
+            tx_count: entry.txs_seen.len() as u32,
             delta: entry.delta,
         })
         .collect();
