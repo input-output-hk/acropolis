@@ -1,10 +1,11 @@
 //! Acropolis UTXOState: State storage
 use crate::volatile_index::VolatileIndex;
 use acropolis_common::{
-    messages::UTXODeltasMessage, params::SECURITY_PARAMETER_K, BlockInfo, BlockStatus, TxInput,
-    TxOutput, UTXODelta,
+    messages::UTXODeltasMessage, params::SECURITY_PARAMETER_K, BlockInfo, BlockStatus, TxOutput,
 };
-use acropolis_common::{AddressDelta, UTXOValue, UTxOIdentifier, Value, ValueDelta};
+use acropolis_common::{
+    Address, AddressDelta, UTXOValue, UTxOIdentifier, Value, ValueDelta, ValueMap,
+};
 use anyhow::Result;
 use async_trait::async_trait;
 use std::collections::HashMap;
@@ -145,39 +146,14 @@ impl State {
             );
 
             // Delete all UTXOs created in or after this block
-            let utxos = self.volatile_created.prune_on_or_after(block.number);
-            for key in utxos {
-                if let Some(utxo) = self.volatile_utxos.remove(&key) {
-                    // Tell the observer to debit it
-                    if let Some(observer) = self.address_delta_observer.as_ref() {
-                        observer
-                            .observe_delta(&AddressDelta {
-                                address: utxo.address.clone(),
-                                utxo: key,
-                                value: -ValueDelta::from(&utxo.value),
-                            })
-                            .await;
-                    }
-                }
+            let created_after = self.volatile_created.prune_on_or_after(block.number);
+            for key in created_after {
+                self.volatile_utxos.remove(&key);
             }
 
             // Any remaining (which were necessarily created before this block)
             // that were spent in or after this block can be reinstated
-            let utxos = self.volatile_spent.prune_on_or_after(block.number);
-            for key in utxos {
-                if let Some(utxo) = self.volatile_utxos.get(&key) {
-                    // Tell the observer to recredit it
-                    if let Some(observer) = self.address_delta_observer.as_ref() {
-                        observer
-                            .observe_delta(&AddressDelta {
-                                address: utxo.address.clone(),
-                                utxo: key,
-                                value: ValueDelta::from(&utxo.value),
-                            })
-                            .await;
-                    }
-                }
-            }
+            self.volatile_spent.prune_on_or_after(block.number);
 
             // Let the pruner compress the map
         }
@@ -200,15 +176,13 @@ impl State {
     }
 
     /// Observe an input UTXO spend
-    pub async fn observe_input(&mut self, input: &TxInput, block: &BlockInfo) -> Result<()> {
-        let key = input.utxo_identifier;
-
+    pub async fn observe_input(&mut self, input: &UTxOIdentifier, block: &BlockInfo) -> Result<()> {
         if tracing::enabled!(tracing::Level::DEBUG) {
-            debug!("UTXO << {}", key);
+            debug!("UTXO << {}", input);
         }
 
         // UTXO exists?
-        match self.lookup_utxo(&key).await? {
+        match self.lookup_utxo(input).await? {
             Some(utxo) => {
                 if tracing::enabled!(tracing::Level::DEBUG) {
                     debug!(
@@ -218,33 +192,23 @@ impl State {
                     );
                 }
 
-                // Tell the observer it's spent
-                if let Some(obs) = &self.address_delta_observer {
-                    obs.observe_delta(&AddressDelta {
-                        address: utxo.address.clone(),
-                        utxo: key,
-                        value: -ValueDelta::from(&utxo.value),
-                    })
-                    .await;
-                }
-
                 match block.status {
                     BlockStatus::Volatile | BlockStatus::RolledBack => {
                         // Add to volatile spent index
-                        self.volatile_spent.add_utxo(&key);
+                        self.volatile_spent.add_utxo(input);
                     }
                     BlockStatus::Bootstrap | BlockStatus::Immutable => {
                         // Immutable - we can delete it immediately
-                        self.immutable_utxos.delete_utxo(&key).await?;
+                        self.immutable_utxos.delete_utxo(input).await?;
                     }
                 }
             }
             _ => {
                 error!(
                     "UTXO output {} unknown in transaction {} of block {}",
-                    &key.output_index(),
-                    key.tx_index(),
-                    key.block_number()
+                    &input.output_index(),
+                    input.tx_index(),
+                    input.block_number()
                 );
             }
         }
@@ -293,16 +257,6 @@ impl State {
                 // may double check this anyway
             }
         };
-
-        // Tell the observer
-        if let Some(obs) = &self.address_delta_observer {
-            obs.observe_delta(&AddressDelta {
-                address: output.address.clone(),
-                utxo: output.utxo_identifier,
-                value: ValueDelta::from(&output.value),
-            })
-            .await;
-        }
 
         Ok(())
     }
@@ -379,19 +333,48 @@ impl State {
         self.observe_block(block).await?;
 
         // Process the deltas
-        for delta in &deltas.deltas {
-            // UTXODelta
+        for tx in &deltas.deltas {
+            // Temporary map to sum UTxO deltas efficently
+            let mut address_map: HashMap<
+                Address,
+                (ValueMap, ValueMap, Vec<UTxOIdentifier>, Vec<UTxOIdentifier>),
+            > = HashMap::new();
 
-            match delta {
-                UTXODelta::Input(tx_input) => {
-                    self.observe_input(tx_input, block).await?;
+            for input in &tx.inputs {
+                if let Some(utxo) = self.lookup_utxo(input).await? {
+                    // Remove or mark spent
+                    self.observe_input(input, block).await?;
+
+                    let addr = utxo.address.clone();
+                    let (sent, _, spent_utxos, _) = address_map.entry(addr.clone()).or_default();
+
+                    spent_utxos.push(*input);
+                    sent.add_value(&utxo.value);
                 }
+            }
 
-                UTXODelta::Output(tx_output) => {
-                    self.observe_output(tx_output, block).await?;
+            for output in &tx.outputs {
+                self.observe_output(output, block).await?;
+
+                let addr = output.address.clone();
+                let (_, received, _, created_utxos) = address_map.entry(addr.clone()).or_default();
+
+                created_utxos.push(output.utxo_identifier);
+                received.add_value(&output.value);
+            }
+
+            for (addr, (sent, received, spent_utxos, created_utxos)) in address_map {
+                let delta = AddressDelta {
+                    address: addr,
+                    tx_identifier: tx.tx_identifier,
+                    spent_utxos,
+                    created_utxos,
+                    sent: ValueDelta::from(sent),
+                    received: Value::from(received),
+                };
+                if let Some(observer) = self.address_delta_observer.as_ref() {
+                    observer.observe_delta(&delta).await;
                 }
-
-                _ => {}
             }
         }
 
@@ -411,7 +394,7 @@ mod tests {
     use crate::InMemoryImmutableUTXOStore;
     use acropolis_common::{
         Address, AssetName, BlockHash, ByronAddress, Datum, Era, NativeAsset, ReferenceScript,
-        Value,
+        TxUTxODeltas, Value,
     };
     use config::Config;
     use tokio::sync::Mutex;
@@ -482,7 +465,16 @@ mod tests {
         };
 
         let block = create_block(BlockStatus::Immutable, 1, 1);
-        state.observe_output(&output, &block).await.unwrap();
+
+        let deltas = UTXODeltasMessage {
+            deltas: vec![TxUTxODeltas {
+                tx_identifier: Default::default(),
+                inputs: vec![],
+                outputs: vec![output.clone()],
+            }],
+        };
+
+        state.handle(&block, &deltas).await.unwrap();
         assert_eq!(1, state.immutable_utxos.len().await.unwrap());
         assert_eq!(1, state.count_valid_utxos().await);
 
@@ -551,13 +543,7 @@ mod tests {
         assert_eq!(1, state.immutable_utxos.len().await.unwrap());
         assert_eq!(1, state.count_valid_utxos().await);
 
-        let input = TxInput {
-            utxo_identifier: UTxOIdentifier::new(
-                output.utxo_identifier.block_number(),
-                output.utxo_identifier.tx_index(),
-                output.utxo_identifier.output_index(),
-            ),
-        };
+        let input = output.utxo_identifier;
 
         let block2 = create_block(BlockStatus::Immutable, 2, 2);
         state.observe_input(&input, &block2).await.unwrap();
@@ -639,13 +625,7 @@ mod tests {
         assert_eq!(1, state.count_valid_utxos().await);
 
         // Spend it in block 11
-        let input = TxInput {
-            utxo_identifier: UTxOIdentifier::new(
-                output.utxo_identifier.block_number(),
-                output.utxo_identifier.tx_index(),
-                output.utxo_identifier.output_index(),
-            ),
-        };
+        let input = output.utxo_identifier;
 
         let block11 = create_block(BlockStatus::Volatile, 11, 11);
         state.observe_block(&block11).await.unwrap();
@@ -742,13 +722,7 @@ mod tests {
         assert_eq!(1, state.volatile_utxos.len());
         assert_eq!(1, state.count_valid_utxos().await);
 
-        let input = TxInput {
-            utxo_identifier: UTxOIdentifier::new(
-                output.utxo_identifier.block_number(),
-                output.utxo_identifier.tx_index(),
-                output.utxo_identifier.output_index(),
-            ),
-        };
+        let input = output.utxo_identifier;
 
         let block2 = create_block(BlockStatus::Volatile, 2, 2);
         state.observe_block(&block2).await.unwrap();
@@ -792,23 +766,37 @@ mod tests {
                 &delta.address,
                 Address::Byron(ByronAddress { payload }) if payload[0] == 99
             ));
-            assert!(delta.value.lovelace == 42 || delta.value.lovelace == -42);
+            let lovelace_net = delta.received.lovelace as i64 - delta.sent.lovelace;
+            assert!(lovelace_net == 42 || lovelace_net == -42);
 
             let mut balance = self.balance.lock().await;
-            *balance += delta.value.lovelace;
+            *balance += lovelace_net;
 
             let mut asset_balances = self.asset_balances.lock().await;
-            for (policy, assets) in &delta.value.assets {
+
+            for (policy, assets) in &delta.received.assets {
                 assert_eq!([1u8; 28], *policy);
                 for asset in assets {
                     assert!(
-                        (asset.name == AssetName::new(b"TEST").unwrap()
-                            && (asset.amount == 100 || asset.amount == -100))
+                        (asset.name == AssetName::new(b"TEST").unwrap() && asset.amount == 100)
                             || (asset.name == AssetName::new(b"FOO").unwrap()
-                                && (asset.amount == 200 || asset.amount == -200))
+                                && asset.amount == 200)
                     );
                     let key = (*policy, asset.name);
-                    *asset_balances.entry(key).or_insert(0) += asset.amount;
+                    *asset_balances.entry(key).or_insert(0) += asset.amount as i64;
+                }
+            }
+
+            for (policy, assets) in &delta.sent.assets {
+                assert_eq!([1u8; 28], *policy);
+                for asset in assets {
+                    assert!(
+                        (asset.name == AssetName::new(b"TEST").unwrap() && asset.amount == 100)
+                            || (asset.name == AssetName::new(b"FOO").unwrap()
+                                && asset.amount == 200)
+                    );
+                    let key = (*policy, asset.name);
+                    *asset_balances.entry(key).or_insert(0) -= asset.amount;
                 }
             }
         }
@@ -846,21 +834,32 @@ mod tests {
         };
 
         let block1 = create_block(BlockStatus::Immutable, 1, 1);
-        state.observe_output(&output, &block1).await.unwrap();
+        let deltas1 = UTXODeltasMessage {
+            deltas: vec![TxUTxODeltas {
+                tx_identifier: Default::default(),
+                inputs: vec![],
+                outputs: vec![output.clone()],
+            }],
+        };
+
+        state.handle(&block1, &deltas1).await.unwrap();
         assert_eq!(1, state.immutable_utxos.len().await.unwrap());
         assert_eq!(1, state.count_valid_utxos().await);
         assert_eq!(42, *observer.balance.lock().await);
 
-        let input = TxInput {
-            utxo_identifier: UTxOIdentifier::new(
-                output.utxo_identifier.block_number(),
-                output.utxo_identifier.tx_index(),
-                output.utxo_identifier.output_index(),
-            ),
-        };
+        let input = output.utxo_identifier;
 
         let block2 = create_block(BlockStatus::Immutable, 2, 2);
-        state.observe_input(&input, &block2).await.unwrap();
+        let deltas2 = UTXODeltasMessage {
+            deltas: vec![TxUTxODeltas {
+                tx_identifier: Default::default(),
+                inputs: vec![input],
+                outputs: vec![],
+            }],
+        };
+
+        state.handle(&block2, &deltas2).await.unwrap();
+
         assert_eq!(0, state.immutable_utxos.len().await.unwrap());
         assert_eq!(0, state.count_valid_utxos().await);
         assert_eq!(0, *observer.balance.lock().await);
@@ -872,133 +871,6 @@ mod tests {
         assert_eq!(
             *ab.get(&([1u8; 28], AssetName::new(b"FOO").unwrap())).unwrap(),
             0
-        );
-    }
-
-    #[tokio::test]
-    async fn observe_rollback_notifies_balance_debit_on_future_created_utxos() {
-        let mut state = new_state();
-        let observer = Arc::new(TestDeltaObserver::new());
-        state.register_address_delta_observer(observer.clone());
-
-        let output = TxOutput {
-            utxo_identifier: UTxOIdentifier::new(0, 0, 0),
-            address: create_address(99),
-            value: Value::new(
-                42,
-                vec![(
-                    [1u8; 28],
-                    vec![
-                        NativeAsset {
-                            name: AssetName::new(b"TEST").unwrap(),
-                            amount: 100,
-                        },
-                        NativeAsset {
-                            name: AssetName::new(b"FOO").unwrap(),
-                            amount: 200,
-                        },
-                    ],
-                )],
-            ),
-            datum: None,
-            reference_script: None,
-        };
-
-        let block10 = create_block(BlockStatus::Volatile, 10, 10);
-        state.observe_block(&block10).await.unwrap();
-        state.observe_output(&output, &block10).await.unwrap();
-        assert_eq!(1, state.volatile_utxos.len());
-        assert_eq!(1, state.count_valid_utxos().await);
-        assert_eq!(42, *observer.balance.lock().await);
-
-        let block9 = create_block(BlockStatus::RolledBack, 200, 9);
-        state.observe_block(&block9).await.unwrap();
-
-        assert_eq!(0, state.volatile_utxos.len());
-        assert_eq!(0, state.count_valid_utxos().await);
-        assert_eq!(0, *observer.balance.lock().await);
-
-        let ab = observer.asset_balances.lock().await;
-        assert_eq!(
-            *ab.get(&([1u8; 28], AssetName::new(b"TEST").unwrap())).unwrap(),
-            0
-        );
-        assert_eq!(
-            *ab.get(&([1u8; 28], AssetName::new(b"FOO").unwrap())).unwrap(),
-            0
-        );
-    }
-
-    #[tokio::test]
-    async fn observe_rollback_notifies_balance_credit_on_future_spent_utxos() {
-        let mut state = new_state();
-        let observer = Arc::new(TestDeltaObserver::new());
-        state.register_address_delta_observer(observer.clone());
-
-        // Create the UTXO in block 10
-        let output = TxOutput {
-            utxo_identifier: UTxOIdentifier::new(0, 0, 0),
-            address: create_address(99),
-            value: Value::new(
-                42,
-                vec![(
-                    [1u8; 28],
-                    vec![
-                        NativeAsset {
-                            name: AssetName::new(b"TEST").unwrap(),
-                            amount: 100,
-                        },
-                        NativeAsset {
-                            name: AssetName::new(b"FOO").unwrap(),
-                            amount: 200,
-                        },
-                    ],
-                )],
-            ),
-            datum: None,
-            reference_script: None,
-        };
-
-        let block10 = create_block(BlockStatus::Volatile, 10, 10);
-        state.observe_block(&block10).await.unwrap();
-        state.observe_output(&output, &block10).await.unwrap();
-        assert_eq!(1, state.volatile_utxos.len());
-        assert_eq!(1, state.count_valid_utxos().await);
-        assert_eq!(42, *observer.balance.lock().await);
-
-        // Spend it in block 11
-        let input = TxInput {
-            utxo_identifier: UTxOIdentifier::new(
-                output.utxo_identifier.block_number(),
-                output.utxo_identifier.tx_index(),
-                output.utxo_identifier.output_index(),
-            ),
-        };
-
-        let block11 = create_block(BlockStatus::Volatile, 11, 11);
-        state.observe_block(&block11).await.unwrap();
-        state.observe_input(&input, &block11).await.unwrap();
-        assert_eq!(1, state.volatile_utxos.len());
-        assert_eq!(0, state.count_valid_utxos().await);
-        assert_eq!(0, *observer.balance.lock().await);
-
-        // Roll back to 11
-        let block11_2 = create_block(BlockStatus::RolledBack, 200, 11);
-        state.observe_block(&block11_2).await.unwrap();
-
-        // Should be reinstated
-        assert_eq!(1, state.volatile_utxos.len());
-        assert_eq!(1, state.count_valid_utxos().await);
-        assert_eq!(42, *observer.balance.lock().await);
-
-        let ab = observer.asset_balances.lock().await;
-        assert_eq!(
-            *ab.get(&([1u8; 28], AssetName::new(b"TEST").unwrap())).unwrap(),
-            100
-        );
-        assert_eq!(
-            *ab.get(&([1u8; 28], AssetName::new(b"FOO").unwrap())).unwrap(),
-            200
         );
     }
 }

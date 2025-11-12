@@ -8,7 +8,7 @@ use acropolis_common::{
         UTXODeltasMessage,
     },
     Address, BlockHash, BlockInfo, BlockStatus, ByronAddress, Era, Lovelace, LovelaceDelta, Pot,
-    PotDelta, TxHash, TxIdentifier, TxOutRef, TxOutput, UTXODelta, UTxOIdentifier, Value,
+    PotDelta, TxHash, TxIdentifier, TxOutRef, TxOutput, TxUTxODeltas, UTxOIdentifier, Value,
 };
 use anyhow::Result;
 use blake2::{digest::consts::U32, Blake2b, Digest};
@@ -155,7 +155,11 @@ impl GenesisBootstrapper {
                         reference_script: None,
                     };
 
-                    utxo_deltas_message.deltas.push(UTXODelta::Output(tx_output));
+                    utxo_deltas_message.deltas.push(TxUTxODeltas {
+                        tx_identifier,
+                        inputs: Vec::new(),
+                        outputs: vec![tx_output],
+                    });
                     total_allocated += amount;
                 }
 

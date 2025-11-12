@@ -166,13 +166,13 @@ impl TxUnpacker {
 
                             for (tx_index , raw_tx) in txs_msg.txs.iter().enumerate() {
                                 let tx_index = tx_index as u16;
-                                let mut tx_utxo_deltas  = Vec::new();
 
                                 // Parse the tx
                                 match MultiEraTx::decode(raw_tx) {
                                     Ok(tx) => {
                                         let tx_hash: TxHash = tx.hash().to_vec().try_into().expect("invalid tx hash length");
                                         let tx_identifier = TxIdentifier::new(block_number, tx_index);
+                                        let mut tx_utxo_deltas  = TxUTxODeltas::new(tx_identifier);
 
                                         let inputs = tx.consumes();
                                         let outputs = tx.produces();
@@ -196,13 +196,13 @@ impl TxUnpacker {
                                                 match utxo_registry.consume(&tx_ref) {
                                                     Ok(tx_identifier) => {
                                                         // Add TxInput to utxo_deltas
-                                                        utxo_deltas.push(UTXODelta::Input(TxInput {
-                                                            utxo_identifier: UTxOIdentifier::new(
+                                                        tx_utxo_deltas.inputs.push(
+                                                            UTxOIdentifier::new(
                                                                 tx_identifier.block_number(),
                                                                 tx_identifier.tx_index(),
                                                                 tx_ref.output_index,
                                                             ),
-                                                        }));
+                                                      );
                                                     }
                                                     Err(e) => {
                                                         error!("Failed to consume input {}: {e}", tx_ref.output_index);
@@ -226,13 +226,13 @@ impl TxUnpacker {
                                                             Ok(pallas_address) => match map_parameters::map_address(&pallas_address) {
                                                                 Ok(address) => {
                                                                     // Add TxOutput to utxo_deltas
-                                                                    utxo_deltas.push(UTXODelta::Output(TxOutput {
+                                                                    tx_utxo_deltas.outputs.push(TxOutput {
                                                                         utxo_identifier: utxo_id,
                                                                         address,
                                                                         value: map_parameters::map_value(&output.value()),
                                                                         datum: map_parameters::map_datum(&output.datum()),
                                                                         reference_script: map_parameters::map_reference_script(&output.script_ref())
-                                                                    }));
+                                                                    });
 
                                                                     // catch all output lovelaces
                                                                     total_output += output.value().coin() as u128;
@@ -247,6 +247,7 @@ impl TxUnpacker {
                                                     }
                                                 }
                                             }
+                                            utxo_deltas.push(tx_utxo_deltas);
                                         }
 
                                         if publish_asset_deltas_topic.is_some() {
