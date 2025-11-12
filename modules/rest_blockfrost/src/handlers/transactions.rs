@@ -7,8 +7,9 @@ use acropolis_common::{
         errors::QueryError,
         parameters::{ParametersStateQuery, ParametersStateQueryResponse},
         transactions::{
-            TransactionDelegationCertificate, TransactionInfo, TransactionStakeCertificate,
-            TransactionWithdrawal, TransactionsStateQuery, TransactionsStateQueryResponse,
+            TransactionDelegationCertificate, TransactionInfo, TransactionMIR,
+            TransactionStakeCertificate, TransactionWithdrawal, TransactionsStateQuery,
+            TransactionsStateQueryResponse,
         },
         utils::{query_state, rest_query_state_async},
     },
@@ -73,7 +74,12 @@ pub async fn handle_transactions_blockfrost(
 
     let tx_hash = match TxHash::from_hex(tx_hash) {
         Ok(hash) => hash,
-        Err(_) => return Err(RESTError::invalid_param("transaction", "Invalid transaction hash")),
+        Err(_) => {
+            return Err(RESTError::invalid_param(
+                "transaction",
+                "Invalid transaction hash",
+            ))
+        }
     };
 
     match param {
@@ -86,7 +92,7 @@ pub async fn handle_transactions_blockfrost(
         Some("withdrawals") => {
             handle_transaction_withdrawals_query(context, tx_hash, handlers_config).await
         }
-        Some("mirs") => Ok(RESTResponse::with_text(501, "Not implemented")),
+        Some("mirs") => handle_transaction_mirs_query(context, tx_hash, handlers_config).await,
         Some("pool_updates") => Ok(RESTResponse::with_text(501, "Not implemented")),
         Some("pool_retires") => Ok(RESTResponse::with_text(501, "Not implemented")),
         Some("metadata") => match param2 {
@@ -268,7 +274,7 @@ impl Serialize for TxWithdrawal {
         let Ok(address) = self.0.address.to_string() else {
             return Err(S::Error::custom("Can't stringify address"));
         };
-        let mut state = serializer.serialize_struct("TxWithdrawal", 4)?;
+        let mut state = serializer.serialize_struct("TxWithdrawal", 2)?;
         state.serialize_field("address", &address)?;
         state.serialize_field("amount", &self.0.amount.to_string())?;
         state.end()
@@ -293,6 +299,53 @@ async fn handle_transaction_withdrawals_query(
                 TransactionsStateQueryResponse::TransactionWithdrawals(withdrawals),
             )) => Some(Ok(Some(
                 withdrawals.withdrawals.into_iter().map(TxWithdrawal).collect::<Vec<_>>(),
+            ))),
+            Message::StateQueryResponse(StateQueryResponse::Transactions(
+                TransactionsStateQueryResponse::Error(e),
+            )) => Some(Err(e)),
+            _ => None,
+        },
+    )
+    .await
+}
+
+struct TxMIR(TransactionMIR);
+
+impl Serialize for TxMIR {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let Ok(address) = self.0.address.to_string() else {
+            return Err(S::Error::custom("Can't stringify address"));
+        };
+        let mut state = serializer.serialize_struct("TxMIR", 4)?;
+        state.serialize_field("cert_index", &self.0.cert_index)?;
+        state.serialize_field("pot", &self.0.pot.to_string().to_lowercase())?;
+        state.serialize_field("address", &address)?;
+        state.serialize_field("amount", &self.0.amount.to_string())?;
+        state.end()
+    }
+}
+
+/// Handle `/txs/{hash}/mirs`
+async fn handle_transaction_mirs_query(
+    context: Arc<Context<Message>>,
+    tx_hash: TxHash,
+    handlers_config: Arc<HandlersConfig>,
+) -> Result<RESTResponse, RESTError> {
+    let txs_info_msg = Arc::new(Message::StateQuery(StateQuery::Transactions(
+        TransactionsStateQuery::GetTransactionMIRs { tx_hash },
+    )));
+    rest_query_state_async(
+        &context.clone(),
+        &handlers_config.transactions_query_topic.clone(),
+        txs_info_msg,
+        async move |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Transactions(
+                TransactionsStateQueryResponse::TransactionMIRs(mirs),
+            )) => Some(Ok(Some(
+                mirs.mirs.into_iter().map(TxMIR).collect::<Vec<_>>(),
             ))),
             Message::StateQueryResponse(StateQueryResponse::Transactions(
                 TransactionsStateQueryResponse::Error(e),

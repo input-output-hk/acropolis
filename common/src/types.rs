@@ -712,6 +712,16 @@ pub enum Pot {
     Deposits,
 }
 
+impl fmt::Display for Pot {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Pot::Reserves => write!(f, "reserves"),
+            Pot::Treasury => write!(f, "treasury"),
+            Pot::Deposits => write!(f, "deposits"),
+        }
+    }
+}
+
 /// Pot Delta - internal change of pot values at genesis / era boundaries
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PotDelta {
@@ -1068,6 +1078,15 @@ pub struct GenesisKeyDelegation {
 pub enum InstantaneousRewardSource {
     Reserves,
     Treasury,
+}
+
+impl fmt::Display for InstantaneousRewardSource {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            InstantaneousRewardSource::Reserves => write!(f, "reserves"),
+            InstantaneousRewardSource::Treasury => write!(f, "treasury"),
+        }
+    }
 }
 
 /// Target of a MIR

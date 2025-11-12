@@ -9,6 +9,12 @@ use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
     crypto::keyhash_224,
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
+    queries::transactions::{
+        TransactionDelegationCertificate, TransactionDelegationCertificates, TransactionInfo,
+        TransactionMIR, TransactionMIRs, TransactionOutputAmount, TransactionStakeCertificate,
+        TransactionStakeCertificates, TransactionWithdrawal, TransactionWithdrawals,
+        TransactionsStateQuery, TransactionsStateQueryResponse, DEFAULT_TRANSACTIONS_QUERY_TOPIC,
+    },
     queries::{
         blocks::{
             BlockHashes, BlockInfo, BlockInvolvedAddress, BlockInvolvedAddresses, BlockKey,
@@ -18,15 +24,9 @@ use acropolis_common::{
         },
         misc::Order,
     },
-    queries::transactions::{
-        TransactionDelegationCertificate, TransactionDelegationCertificates, TransactionInfo,
-        TransactionOutputAmount, TransactionStakeCertificate, TransactionStakeCertificates,
-        TransactionWithdrawal, TransactionWithdrawals, TransactionsStateQuery,
-        TransactionsStateQueryResponse, DEFAULT_TRANSACTIONS_QUERY_TOPIC,
-    },
     state_history::{StateHistory, StateHistoryStore},
-    AssetName, BechOrdAddress, BlockHash, GenesisDelegate, HeavyDelegate, NativeAsset, NetworkId,
-    PoolId, StakeAddress, TxHash,
+    AssetName, BechOrdAddress, BlockHash, GenesisDelegate, HeavyDelegate,
+    InstantaneousRewardSource, NativeAsset, NetworkId, PoolId, StakeAddress, TxHash,
 };
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{module, Context, Module};
@@ -805,6 +805,49 @@ impl ChainStore {
         Ok(withdrawals)
     }
 
+    fn to_tx_mirs(tx: &Tx, network_id: NetworkId) -> Result<Vec<TransactionMIR>> {
+        let block = pallas_traverse::MultiEraBlock::decode(&tx.block.bytes)?;
+        let txs = block.txs();
+        let Some(tx_decoded) = txs.get(tx.index as usize) else {
+            return Err(anyhow!("Transaction not found in block for given index"));
+        };
+        let mut certs = Vec::new();
+        for (cert_index, cert) in tx_decoded.certs().iter().enumerate() {
+            match cert {
+                MultiEraCert::AlonzoCompatible(cert) => {
+                    if let alonzo::Certificate::MoveInstantaneousRewardsCert(cert) =
+                        cert.as_ref().as_ref()
+                    {
+                        match &cert.target {
+                            alonzo::InstantaneousRewardTarget::StakeCredentials(creds) => {
+                                for (cred, amount) in creds.clone().to_vec() {
+                                    certs.push(TransactionMIR {
+                                        cert_index: cert_index as u64,
+                                        pot: match cert.source {
+                                            alonzo::InstantaneousRewardSource::Reserves => {
+                                                InstantaneousRewardSource::Reserves
+                                            }
+                                            alonzo::InstantaneousRewardSource::Treasury => {
+                                                InstantaneousRewardSource::Treasury
+                                            }
+                                        },
+                                        address: map_stake_address(&cred, network_id.clone()),
+                                        amount: amount as u64,
+                                    });
+                                }
+                            }
+                            alonzo::InstantaneousRewardTarget::OtherAccountingPot(coin) => {
+                                // TODO
+                            }
+                        }
+                    }
+                }
+                _ => (),
+            }
+        }
+        Ok(certs)
+    }
+
     fn handle_txs_query(
         store: &Arc<dyn Store>,
         query: &TransactionsStateQuery,
@@ -858,6 +901,18 @@ impl ChainStore {
                 Ok(TransactionsStateQueryResponse::TransactionWithdrawals(
                     TransactionWithdrawals {
                         withdrawals: Self::to_tx_withdrawals(&tx)?,
+                    },
+                ))
+            }
+            TransactionsStateQuery::GetTransactionMIRs { tx_hash } => {
+                let Some(tx) = store.get_tx_by_hash(tx_hash.as_ref())? else {
+                    return Ok(TransactionsStateQueryResponse::Error(
+                        QueryError::not_found("Transaction not found"),
+                    ));
+                };
+                Ok(TransactionsStateQueryResponse::TransactionMIRs(
+                    TransactionMIRs {
+                        mirs: Self::to_tx_mirs(&tx, network_id)?,
                     },
                 ))
             }
