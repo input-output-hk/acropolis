@@ -1,7 +1,7 @@
 use acropolis_common::{
     messages::{CardanoMessage, Message},
     validation::{KesValidationError, ValidationError, ValidationStatus},
-    BlockInfo,
+    BlockInfo, PoolId,
 };
 use caryatid_sdk::Context;
 use std::sync::Arc;
@@ -25,7 +25,7 @@ impl KesValidationPublisher {
     pub async fn publish_kes_validation(
         &mut self,
         block: &BlockInfo,
-        validation_result: Result<(), KesValidationError>,
+        validation_result: Result<Option<(PoolId, u64)>, KesValidationError>,
     ) -> anyhow::Result<()> {
         let validation_status = match validation_result {
             Ok(_) => ValidationStatus::Go,

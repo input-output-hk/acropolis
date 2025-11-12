@@ -118,6 +118,15 @@ impl BlockKesValidator {
                         let result = state
                             .validate_block_kes(block_info, &block_msg.header, &genesis)
                             .map_err(|e| *e);
+
+                        // Update the operational certificate counter
+                        // When block is validated successfully
+                        // Reference
+                        // https://github.com/IntersectMBO/ouroboros-consensus/blob/e3c52b7c583bdb6708fac4fdaa8bf0b9588f5a88/ouroboros-consensus-protocol/src/ouroboros-consensus-protocol/Ouroboros/Consensus/Protocol/Praos.hs#L508
+                        if let Ok(Some((pool_id, updated_sequence_number))) = result.as_ref() {
+                            state.update_ocert_counter(*pool_id, *updated_sequence_number);
+                        }
+
                         if let Err(e) = kes_validation_publisher
                             .publish_kes_validation(block_info, result)
                             .await

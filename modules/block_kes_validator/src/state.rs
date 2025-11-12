@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use acropolis_common::{
     genesis_values::GenesisValues,
     messages::{ProtocolParamsMessage, SPOStateMessage},
@@ -12,13 +14,14 @@ use crate::ouroboros;
 
 #[derive(Default, Debug, Clone)]
 pub struct State {
+    /// Tracks the latest operational certificate counter for each pool
     pub ocert_counters: HashMap<PoolId, u64>,
 
     pub slots_per_kes_period: Option<u64>,
 
     pub max_kes_evolutions: Option<u64>,
 
-    pub active_spos: Vec<PoolId>,
+    pub active_spos: HashSet<PoolId>,
 }
 
 impl State {
@@ -27,7 +30,7 @@ impl State {
             ocert_counters: HashMap::new(),
             slots_per_kes_period: None,
             max_kes_evolutions: None,
-            active_spos: Vec::new(),
+            active_spos: HashSet::new(),
         }
     }
 
@@ -42,15 +45,19 @@ impl State {
         self.active_spos = msg.spos.iter().map(|spo| spo.operator).collect();
     }
 
+    pub fn update_ocert_counter(&mut self, pool_id: PoolId, declared_sequence_number: u64) {
+        self.ocert_counters.insert(pool_id, declared_sequence_number);
+    }
+
     pub fn validate_block_kes(
         &self,
         block_info: &BlockInfo,
         raw_header: &[u8],
         genesis: &GenesisValues,
-    ) -> Result<(), Box<KesValidationError>> {
+    ) -> Result<Option<(PoolId, u64)>, Box<KesValidationError>> {
         // Validation starts after Shelley Era
         if block_info.epoch < genesis.shelley_epoch {
-            return Ok(());
+            return Ok(None);
         }
 
         let header = match MultiEraHeader::decode(block_info.era as u8, None, raw_header) {
@@ -83,8 +90,9 @@ impl State {
             slots_per_kes_period,
             max_kes_evolutions,
         )
-        .and_then(|kes_validations| {
-            kes_validations.iter().try_for_each(|assert| assert().map_err(Box::new))
+        .and_then(|(kes_validations, pool_id, declared_sequence_number)| {
+            kes_validations.iter().try_for_each(|assert| assert().map_err(Box::new))?;
+            Ok(Some((pool_id, declared_sequence_number)))
         });
 
         result

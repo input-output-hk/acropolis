@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use acropolis_common::{
     crypto::keyhash_224,
     validation::{
@@ -12,9 +14,13 @@ use crate::ouroboros::{kes, praos, tpraos};
 
 #[derive(Copy, Clone)]
 pub struct OperationalCertificate<'a> {
+    /// The operational hot key
     pub operational_cert_hot_vkey: &'a [u8],
+    /// The sequence number of the operational certificate
     pub operational_cert_sequence_number: u64,
+    /// The KES period of the operational certificate
     pub operational_cert_kes_period: u64,
+    /// The signature of the operational certificate
     pub operational_cert_sigma: &'a [u8],
 }
 
@@ -88,6 +94,8 @@ pub fn validate_operational_certificate<'a>(
     }
 
     // The opcert message is a concatenation of the KES vkey, the sequence number, and the kes period
+    // Reference
+    // https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/libs/cardano-protocol-tpraos/src/Cardano/Protocol/TPraos/OCert.hs#L144
     let mut message = Vec::new();
     message.extend_from_slice(certificate.operational_cert_hot_vkey);
     message.extend_from_slice(&certificate.operational_cert_sequence_number.to_be_bytes());
@@ -101,36 +109,45 @@ pub fn validate_operational_certificate<'a>(
     Ok(())
 }
 
+/// This function check block header's KES signature and operational certificate
+/// return validation functions for KES signature and operational certificate
+/// and the pool id and declared sequence number (which will be used to update the operational certificate counter when validation is successful)
+/// Reference
+/// https://github.com/IntersectMBO/ouroboros-consensus/blob/e3c52b7c583bdb6708fac4fdaa8bf0b9588f5a88/ouroboros-consensus-protocol/src/ouroboros-consensus-protocol/Ouroboros/Consensus/Protocol/Praos.hs#L612
 pub fn validate_block_kes<'a>(
     header: &'a MultiEraHeader,
     ocert_counters: &'a HashMap<PoolId, u64>,
-    active_spos: &'a [PoolId],
+    active_spos: &'a HashSet<PoolId>,
     genesis_delegs: &'a GenesisDelegates,
     slots_per_kes_period: u64,
     max_kes_evolutions: u64,
-) -> Result<Vec<KesValidation<'a>>, Box<KesValidationError>> {
+) -> Result<(Vec<KesValidation<'a>>, PoolId, u64), Box<KesValidationError>> {
     let is_praos = matches!(header, MultiEraHeader::BabbageCompatible(_));
 
     let issuer_vkey = header.issuer_vkey().ok_or(Box::new(KesValidationError::Other(
-        "Issuer Key is not set".to_string(),
+        "Block header missing issuer verification key".to_string(),
     )))?;
     let issuer = ed25519::PublicKey::from(
-        <[u8; ed25519::PublicKey::SIZE]>::try_from(issuer_vkey)
-            .map_err(|_| Box::new(KesValidationError::Other("Invalid issuer key".to_string())))?,
+        <[u8; ed25519::PublicKey::SIZE]>::try_from(issuer_vkey).map_err(|_| {
+            Box::new(KesValidationError::Other(
+                "Issuer verification key has invalid length (expected 32 bytes)".to_string(),
+            ))
+        })?,
     );
     let pool_id = PoolId::from(keyhash_224(issuer_vkey));
 
     let slot_kes_period = header.slot() / slots_per_kes_period;
     let cert = operational_cert(header).ok_or(Box::new(KesValidationError::Other(
-        "Operational certificate is not set".to_string(),
+        "Block header missing operational certificate".to_string(),
     )))?;
     let body_sig = body_signature(header).ok_or(Box::new(KesValidationError::Other(
-        "Body signature is not set".to_string(),
+        "Block header missing KES body signature".to_string(),
     )))?;
     let raw_header_body = header.header_body_cbor().ok_or(Box::new(KesValidationError::Other(
-        "Header body is not set".to_string(),
+        "Block header body CBOR not available".to_string(),
     )))?;
 
+    let declared_sequence_number = cert.operational_cert_sequence_number;
     let latest_sequence_number = if is_praos {
         praos::latest_issue_no_praos(ocert_counters, active_spos, &pool_id)
     } else {
@@ -138,28 +155,33 @@ pub fn validate_block_kes<'a>(
     }
     .ok_or(Box::new(KesValidationError::NoOCertCounter { pool_id }))?;
 
-    Ok(vec![
-        Box::new(move || {
-            validate_kes_signature(
-                slot_kes_period,
-                cert.operational_cert_kes_period,
-                raw_header_body,
-                &kes::PublicKey::try_from(cert.operational_cert_hot_vkey).map_err(|_| {
-                    KesValidationError::Other(
-                        "Invalid operational certificate hot vkey".to_string(),
-                    )
-                })?,
-                &kes::Signature::try_from(body_sig)
-                    .map_err(|_| KesValidationError::Other("Invalid body signature".to_string()))?,
-                max_kes_evolutions,
-            )?;
-            Ok(())
-        }),
-        Box::new(move || {
-            validate_operational_certificate(cert, &issuer, latest_sequence_number, is_praos)?;
-            Ok(())
-        }),
-    ])
+    Ok((
+        vec![
+            Box::new(move || {
+                validate_kes_signature(
+                    slot_kes_period,
+                    cert.operational_cert_kes_period,
+                    raw_header_body,
+                    &kes::PublicKey::try_from(cert.operational_cert_hot_vkey).map_err(|_| {
+                        KesValidationError::Other(
+                            "Invalid operational certificate hot vkey".to_string(),
+                        )
+                    })?,
+                    &kes::Signature::try_from(body_sig).map_err(|_| {
+                        KesValidationError::Other("Invalid body signature".to_string())
+                    })?,
+                    max_kes_evolutions,
+                )?;
+                Ok(())
+            }),
+            Box::new(move || {
+                validate_operational_certificate(cert, &issuer, latest_sequence_number, is_praos)?;
+                Ok(())
+            }),
+        ],
+        pool_id,
+        declared_sequence_number,
+    ))
 }
 
 fn operational_cert<'a>(header: &'a MultiEraHeader) -> Option<OperationalCertificate<'a>> {
@@ -213,7 +235,7 @@ mod tests {
             MultiEraHeader::decode(Era::Shelley as u8, None, &block_header_4490511).unwrap();
 
         let ocert_counters = HashMap::new();
-        let active_spos = vec![];
+        let active_spos = HashSet::new();
 
         let result = validate_block_kes(
             &block_header,
@@ -223,10 +245,12 @@ mod tests {
             slots_per_kes_period,
             max_kes_evolutions,
         )
-        .and_then(|kes_validations| {
-            kes_validations.iter().try_for_each(|assert| assert().map_err(Box::new))
+        .and_then(|(kes_validations, pool_id, declared_sequence_number)| {
+            kes_validations.iter().try_for_each(|assert| assert().map_err(Box::new))?;
+            Ok((pool_id, declared_sequence_number))
         });
         assert!(result.is_ok());
+        assert_eq!(result.unwrap().1, 0);
     }
 
     #[test]
@@ -245,11 +269,10 @@ mod tests {
                 .unwrap(),
             1,
         )]);
-        let active_spos =
-            vec![
-                PoolId::from_bech32("pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy")
-                    .unwrap(),
-            ];
+        let active_spos = HashSet::from_iter([PoolId::from_bech32(
+            "pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy",
+        )
+        .unwrap()]);
 
         let result = validate_block_kes(
             &block_header,
@@ -259,10 +282,12 @@ mod tests {
             slots_per_kes_period,
             max_kes_evolutions,
         )
-        .and_then(|kes_validations| {
-            kes_validations.iter().try_for_each(|assert| assert().map_err(Box::new))
+        .and_then(|(kes_validations, pool_id, declared_sequence_number)| {
+            kes_validations.iter().try_for_each(|assert| assert().map_err(Box::new))?;
+            Ok((pool_id, declared_sequence_number))
         });
         assert!(result.is_ok());
+        assert_eq!(result.unwrap().1, 1);
     }
 
     #[test]
@@ -281,11 +306,10 @@ mod tests {
                 .unwrap(),
             2,
         )]);
-        let active_spos =
-            vec![
-                PoolId::from_bech32("pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy")
-                    .unwrap(),
-            ];
+        let active_spos = HashSet::from_iter([PoolId::from_bech32(
+            "pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy",
+        )
+        .unwrap()]);
 
         let result = validate_block_kes(
             &block_header,
@@ -295,8 +319,9 @@ mod tests {
             slots_per_kes_period,
             max_kes_evolutions,
         )
-        .and_then(|kes_validations| {
-            kes_validations.iter().try_for_each(|assert| assert().map_err(Box::new))
+        .and_then(|(kes_validations, pool_id, declared_sequence_number)| {
+            kes_validations.iter().try_for_each(|assert| assert().map_err(Box::new))?;
+            Ok((pool_id, declared_sequence_number))
         });
         assert!(result.is_err());
         assert_eq!(
@@ -322,7 +347,7 @@ mod tests {
             MultiEraHeader::decode(Era::Shelley as u8, None, &block_header_4556956).unwrap();
 
         let ocert_counters = HashMap::new();
-        let active_spos = vec![];
+        let active_spos = HashSet::new();
 
         let result = validate_block_kes(
             &block_header,
@@ -332,9 +357,11 @@ mod tests {
             slots_per_kes_period,
             max_kes_evolutions,
         )
-        .and_then(|kes_validations| {
-            kes_validations.iter().try_for_each(|assert| assert().map_err(Box::new))
+        .and_then(|(kes_validations, pool_id, declared_sequence_number)| {
+            kes_validations.iter().try_for_each(|assert| assert().map_err(Box::new))?;
+            Ok((pool_id, declared_sequence_number))
         });
+
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err(),
@@ -363,11 +390,10 @@ mod tests {
                 .unwrap(),
             11,
         )]);
-        let active_spos =
-            vec![
-                PoolId::from_bech32("pool195gdnmj6smzuakm4etxsxw3fgh8asqc4awtcskpyfnkpcvh2v8t")
-                    .unwrap(),
-            ];
+        let active_spos = HashSet::from_iter([PoolId::from_bech32(
+            "pool195gdnmj6smzuakm4etxsxw3fgh8asqc4awtcskpyfnkpcvh2v8t",
+        )
+        .unwrap()]);
 
         let result = validate_block_kes(
             &block_header,
@@ -377,8 +403,9 @@ mod tests {
             slots_per_kes_period,
             max_kes_evolutions,
         )
-        .and_then(|kes_validations| {
-            kes_validations.iter().try_for_each(|assert| assert().map_err(Box::new))
+        .and_then(|(kes_validations, pool_id, declared_sequence_number)| {
+            kes_validations.iter().try_for_each(|assert| assert().map_err(Box::new))?;
+            Ok((pool_id, declared_sequence_number))
         });
         assert!(result.is_ok());
     }
@@ -402,11 +429,10 @@ mod tests {
             // now ocert counter is incremented by 2
             9,
         )]);
-        let active_spos =
-            vec![
-                PoolId::from_bech32("pool195gdnmj6smzuakm4etxsxw3fgh8asqc4awtcskpyfnkpcvh2v8t")
-                    .unwrap(),
-            ];
+        let active_spos = HashSet::from_iter([PoolId::from_bech32(
+            "pool195gdnmj6smzuakm4etxsxw3fgh8asqc4awtcskpyfnkpcvh2v8t",
+        )
+        .unwrap()]);
 
         let result = validate_block_kes(
             &block_header,
@@ -416,8 +442,9 @@ mod tests {
             slots_per_kes_period,
             max_kes_evolutions,
         )
-        .and_then(|kes_validations| {
-            kes_validations.iter().try_for_each(|assert| assert().map_err(Box::new))
+        .and_then(|(kes_validations, pool_id, declared_sequence_number)| {
+            kes_validations.iter().try_for_each(|assert| assert().map_err(Box::new))?;
+            Ok((pool_id, declared_sequence_number))
         });
         assert!(result.is_err());
         assert_eq!(
