@@ -3,7 +3,7 @@ mod stores;
 use acropolis_codec::{
     block::map_to_block_issuer,
     map_parameters,
-    map_parameters::{map_stake_address, to_pool_id},
+    map_parameters::{map_relay, map_stake_address, to_hash, to_pool_id, to_vrf_key},
 };
 use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
@@ -11,7 +11,8 @@ use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::transactions::{
         TransactionDelegationCertificate, TransactionDelegationCertificates, TransactionInfo,
-        TransactionMIR, TransactionMIRs, TransactionOutputAmount, TransactionStakeCertificate,
+        TransactionMIR, TransactionMIRs, TransactionOutputAmount, TransactionPoolUpdateCertificate,
+        TransactionPoolUpdateCertificates, TransactionStakeCertificate,
         TransactionStakeCertificates, TransactionWithdrawal, TransactionWithdrawals,
         TransactionsStateQuery, TransactionsStateQueryResponse, DEFAULT_TRANSACTIONS_QUERY_TOPIC,
     },
@@ -26,12 +27,13 @@ use acropolis_common::{
     },
     state_history::{StateHistory, StateHistoryStore},
     AssetName, BechOrdAddress, BlockHash, GenesisDelegate, HeavyDelegate,
-    InstantaneousRewardSource, NativeAsset, NetworkId, PoolId, StakeAddress, TxHash,
+    InstantaneousRewardSource, NativeAsset, NetworkId, PoolId, PoolMetadata, PoolRegistration,
+    Ratio, StakeAddress, StakeCredential, TxHash,
 };
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{module, Context, Module};
 use config::Config;
-use pallas::ledger::primitives::{alonzo, conway};
+use pallas::ledger::primitives::{alonzo, conway, Nullable};
 use pallas_traverse::MultiEraCert;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
@@ -848,6 +850,70 @@ impl ChainStore {
         Ok(certs)
     }
 
+    fn to_tx_pool_updates(
+        tx: &Tx,
+        network_id: NetworkId,
+    ) -> Result<Vec<TransactionPoolUpdateCertificate>> {
+        let block = pallas_traverse::MultiEraBlock::decode(&tx.block.bytes)?;
+        let txs = block.txs();
+        let Some(tx_decoded) = txs.get(tx.index as usize) else {
+            return Err(anyhow!("Transaction not found in block for given index"));
+        };
+        let mut certs = Vec::new();
+        for (cert_index, cert) in tx_decoded.certs().iter().enumerate() {
+            match cert {
+                MultiEraCert::Conway(cert) => {
+                    if let conway::Certificate::PoolRegistration {
+                        operator,
+                        vrf_keyhash,
+                        pledge,
+                        cost,
+                        margin,
+                        reward_account,
+                        pool_owners,
+                        relays,
+                        pool_metadata,
+                    } = cert.as_ref().as_ref()
+                    {
+                        certs.push(TransactionPoolUpdateCertificate {
+                            cert_index: cert_index as u64,
+                            pool_reg: PoolRegistration {
+                                operator: to_pool_id(operator),
+                                vrf_key_hash: to_vrf_key(vrf_keyhash),
+                                pledge: *pledge,
+                                cost: *cost,
+                                margin: Ratio {
+                                    numerator: margin.numerator,
+                                    denominator: margin.denominator,
+                                },
+                                reward_account: StakeAddress::from_binary(reward_account)?,
+                                pool_owners: pool_owners
+                                    .into_iter()
+                                    .map(|v| {
+                                        StakeAddress::new(
+                                            StakeCredential::AddrKeyHash(to_hash(v)),
+                                            network_id.clone(),
+                                        )
+                                    })
+                                    .collect(),
+                                relays: relays.iter().map(map_relay).collect(),
+                                pool_metadata: match pool_metadata {
+                                    Nullable::Some(md) => Some(PoolMetadata {
+                                        url: md.url.clone(),
+                                        hash: md.hash.to_vec(),
+                                    }),
+                                    _ => None,
+                                },
+                            },
+                        });
+                    }
+                }
+                _ => (),
+            }
+        }
+        Ok(certs)
+    }
+
     fn handle_txs_query(
         store: &Arc<dyn Store>,
         query: &TransactionsStateQuery,
@@ -915,6 +981,20 @@ impl ChainStore {
                         mirs: Self::to_tx_mirs(&tx, network_id)?,
                     },
                 ))
+            }
+            TransactionsStateQuery::GetTransactionPoolUpdateCertificates { tx_hash } => {
+                let Some(tx) = store.get_tx_by_hash(tx_hash.as_ref())? else {
+                    return Ok(TransactionsStateQueryResponse::Error(
+                        QueryError::not_found("Transaction not found"),
+                    ));
+                };
+                Ok(
+                    TransactionsStateQueryResponse::TransactionPoolUpdateCertificates(
+                        TransactionPoolUpdateCertificates {
+                            pool_updates: Self::to_tx_pool_updates(&tx, network_id)?,
+                        },
+                    ),
+                )
             }
             _ => Ok(TransactionsStateQueryResponse::Error(
                 QueryError::not_implemented("Unimplemented".to_string()),

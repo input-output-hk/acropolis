@@ -204,7 +204,7 @@ fn map_constitution(constitution: &conway::Constitution) -> Constitution {
 }
 
 /// Map a Pallas Relay to ours
-fn map_relay(relay: &PallasRelay) -> Relay {
+pub fn map_relay(relay: &PallasRelay) -> Relay {
     match relay {
         PallasRelay::SingleHostAddr(port, ipv4, ipv6) => Relay::SingleHostAddr(SingleHostAddr {
             port: match port {
