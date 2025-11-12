@@ -177,11 +177,13 @@ impl NetworkManager {
         };
         warn!("disconnected from {}", peer.conn.address);
         let was_preferred = self.chain.preferred_upstream.is_some_and(|i| i == id);
-        if was_preferred && let Some(new_preferred) = self.peers.keys().next().copied() {
-            self.set_preferred_upstream(new_preferred);
-        }
-        if self.peers.is_empty() {
-            warn!("no upstream peers!");
+        if was_preferred {
+            if let Some(new_preferred) = self.peers.keys().next().copied() {
+                self.set_preferred_upstream(new_preferred);
+            } else {
+                warn!("no upstream peers!");
+                self.clear_preferred_upstream();
+            }
         }
         for (requested_hash, requested_slot) in peer.reqs {
             let announcers = self.chain.block_announcers(requested_slot, requested_hash);
@@ -212,6 +214,10 @@ impl NetworkManager {
         };
         info!("setting preferred upstream to {}", peer.conn.address);
         self.chain.handle_new_preferred_upstream(id);
+    }
+
+    fn clear_preferred_upstream(&mut self) {
+        self.chain.clear_preferred_upstream();
     }
 
     async fn publish_blocks(&mut self) -> Result<()> {

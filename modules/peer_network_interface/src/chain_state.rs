@@ -192,6 +192,10 @@ impl ChainState {
         }
     }
 
+    pub fn clear_preferred_upstream(&mut self) {
+        self.preferred_upstream = None;
+    }
+
     pub fn next_unpublished_block(&self) -> Option<(&Header, &[u8], bool)> {
         let (slot, hash) = self.unpublished_blocks.front()?;
         let slot_blocks = self.blocks.get(slot)?;
