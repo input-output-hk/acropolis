@@ -1,5 +1,7 @@
 //! Acropolis AssetsState: State storage
 
+use std::collections::HashSet;
+
 use crate::asset_registry::{AssetId, AssetRegistry};
 use acropolis_common::{
     math::update_value_with_delta,
@@ -370,24 +372,27 @@ impl State {
         let store_cfg = self.config.store_transactions;
 
         for tx in deltas {
+            let mut tx_asset_ids = HashSet::new();
             for output in &tx.outputs {
-                let tx_identifier = TxIdentifier::from(output.utxo_identifier);
                 for (policy_id, assets) in &output.value.assets {
                     for asset in assets {
                         if let Some(asset_id) = registry.lookup_id(policy_id, &asset.name) {
-                            let entry = txs_map.entry(asset_id).or_default();
+                            tx_asset_ids.insert(asset_id);
+                        }
+                    }
+                }
+            }
 
-                            let should_push = entry.back() != Some(&tx_identifier);
+            for asset_id in &tx_asset_ids {
+                let entry = txs_map.entry(*asset_id).or_default();
 
-                            if should_push {
-                                entry.push_back(tx_identifier);
+                let last = entry.back().copied();
+                if last != Some(tx.tx_identifier) {
+                    entry.push_back(tx.tx_identifier);
 
-                                if let StoreTransactions::Last(max) = store_cfg {
-                                    if entry.len() as u64 > max {
-                                        entry.pop_front();
-                                    }
-                                }
-                            }
+                    if let StoreTransactions::Last(max) = store_cfg {
+                        if entry.len() as u64 > max {
+                            entry.pop_front();
                         }
                     }
                 }

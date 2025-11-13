@@ -146,8 +146,7 @@ impl State {
             );
 
             // Delete all UTXOs created in or after this block
-            let created_after = self.volatile_created.prune_on_or_after(block.number);
-            for key in created_after {
+            for key in self.volatile_created.prune_on_or_after(block.number) {
                 self.volatile_utxos.remove(&key);
             }
 
@@ -334,11 +333,8 @@ impl State {
 
         // Process the deltas
         for tx in &deltas.deltas {
-            // Temporary map to sum UTxO deltas efficently
-            let mut address_map: HashMap<
-                Address,
-                (ValueMap, ValueMap, Vec<UTxOIdentifier>, Vec<UTxOIdentifier>),
-            > = HashMap::new();
+            // Temporary map to sum UTxO deltas efficiently
+            let mut address_map: HashMap<Address, AddressTxMap> = HashMap::new();
 
             for input in &tx.inputs {
                 if let Some(utxo) = self.lookup_utxo(input).await? {
@@ -346,10 +342,10 @@ impl State {
                     self.observe_input(input, block).await?;
 
                     let addr = utxo.address.clone();
-                    let (sent, _, spent_utxos, _) = address_map.entry(addr.clone()).or_default();
+                    let entry = address_map.entry(addr.clone()).or_default();
 
-                    spent_utxos.push(*input);
-                    sent.add_value(&utxo.value);
+                    entry.spent_utxos.push(*input);
+                    entry.sent.add_value(&utxo.value);
                 }
             }
 
@@ -357,20 +353,20 @@ impl State {
                 self.observe_output(output, block).await?;
 
                 let addr = output.address.clone();
-                let (_, received, _, created_utxos) = address_map.entry(addr.clone()).or_default();
+                let entry = address_map.entry(addr.clone()).or_default();
 
-                created_utxos.push(output.utxo_identifier);
-                received.add_value(&output.value);
+                entry.created_utxos.push(output.utxo_identifier);
+                entry.received.add_value(&output.value);
             }
 
-            for (addr, (sent, received, spent_utxos, created_utxos)) in address_map {
+            for (addr, entry) in address_map {
                 let delta = AddressDelta {
                     address: addr,
                     tx_identifier: tx.tx_identifier,
-                    spent_utxos,
-                    created_utxos,
-                    sent: ValueDelta::from(sent),
-                    received: Value::from(received),
+                    spent_utxos: entry.spent_utxos,
+                    created_utxos: entry.created_utxos,
+                    sent: ValueDelta::from(entry.sent),
+                    received: Value::from(entry.received),
                 };
                 if let Some(observer) = self.address_delta_observer.as_ref() {
                     observer.observe_delta(&delta).await;
@@ -385,6 +381,15 @@ impl State {
 
         Ok(())
     }
+}
+
+/// Internal helper used during `handle` aggregation for summing UTxO deltas.
+#[derive(Default)]
+struct AddressTxMap {
+    sent: ValueMap,
+    received: ValueMap,
+    spent_utxos: Vec<UTxOIdentifier>,
+    created_utxos: Vec<UTxOIdentifier>,
 }
 
 // -- Tests --

@@ -432,12 +432,12 @@ pub fn process_message(
 mod test {
     use crate::*;
     use acropolis_common::hash::Hash;
-    use acropolis_common::Value;
     use acropolis_common::{
         messages::AddressDeltasMessage, Address, AddressDelta, BlockHash, BlockInfo, BlockStatus,
         ByronAddress, Era, ShelleyAddress, ShelleyAddressDelegationPart, ShelleyAddressPaymentPart,
         ShelleyAddressPointer, StakeAddress, StakeCredential, ValueDelta,
     };
+    use acropolis_common::{TxIdentifier, Value};
     use bech32::{Bech32, Hrp};
     use pallas::ledger::addresses::{PaymentKeyHash, ScriptHash, StakeKeyHash};
 
@@ -445,7 +445,7 @@ mod test {
         let a = pallas::ledger::addresses::Address::from_bech32(s)?;
         Ok(AddressDelta {
             address: map_address(&a)?,
-            tx_identifier: Default::default(),
+            tx_identifier: TxIdentifier::default(),
             spent_utxos: Vec::new(),
             created_utxos: Vec::new(),
             sent: ValueDelta::default(),

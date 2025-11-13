@@ -172,7 +172,6 @@ impl TxUnpacker {
                                     Ok(tx) => {
                                         let tx_hash: TxHash = tx.hash().to_vec().try_into().expect("invalid tx hash length");
                                         let tx_identifier = TxIdentifier::new(block_number, tx_index);
-                                        let mut tx_utxo_deltas  = TxUTxODeltas::new(tx_identifier);
 
                                         let inputs = tx.consumes();
                                         let outputs = tx.produces();
@@ -187,15 +186,16 @@ impl TxUnpacker {
                                         }
 
                                         if publish_utxo_deltas_topic.is_some() {
-                                            // Add all the inputs
-                                            for input in inputs {  // MultiEraInput
-                                                // Lookup and remove UTxOIdentifier from registry 
+                                            // Group deltas by tx
+                                            let mut tx_utxo_deltas  = TxUTxODeltas {tx_identifier, inputs: Vec::new(), outputs: Vec::new()};
+
+                                            // Remove inputs from UTxORegistry and push to UTxOIdentifiers to delta
+                                            for input in inputs {
                                                 let oref = input.output_ref();
                                                 let tx_ref = TxOutRef::new(TxHash::from(**oref.hash()), oref.index() as u16);
 
                                                 match utxo_registry.consume(&tx_ref) {
                                                     Ok(tx_identifier) => {
-                                                        // Add TxInput to utxo_deltas
                                                         tx_utxo_deltas.inputs.push(
                                                             UTxOIdentifier::new(
                                                                 tx_identifier.block_number(),
@@ -210,9 +210,8 @@ impl TxUnpacker {
                                                 }
                                             }
 
-                                            // Add all the outputs
+                                            // Add outputs to UTxORegistry and push TxOutputs to delta
                                             for (index, output) in outputs {
-                                                // Add TxOutRef to registry
                                                 match utxo_registry.add(
                                                     block_number,
                                                     tx_index,
@@ -225,7 +224,6 @@ impl TxUnpacker {
                                                         match output.address() {
                                                             Ok(pallas_address) => match map_parameters::map_address(&pallas_address) {
                                                                 Ok(address) => {
-                                                                    // Add TxOutput to utxo_deltas
                                                                     tx_utxo_deltas.outputs.push(TxOutput {
                                                                         utxo_identifier: utxo_id,
                                                                         address,
