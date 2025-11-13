@@ -55,11 +55,16 @@ impl PeerNetworkInterface {
             };
 
             let mut upstream_cache = None;
+            let mut last_epoch = None;
             let mut cache_sync_point = Point::Origin;
             if cfg.sync_point == SyncPoint::Cache {
                 match Self::init_cache(&cfg.cache_dir, &cfg.block_topic, &context).await {
                     Ok((cache, sync_point)) => {
                         upstream_cache = Some(cache);
+                        if let Point::Specific(slot, _) = sync_point {
+                            let (epoch, _) = genesis_values.slot_to_epoch(slot);
+                            last_epoch = Some(epoch);
+                        }
                         cache_sync_point = sync_point;
                     }
                     Err(e) => {
@@ -73,7 +78,7 @@ impl PeerNetworkInterface {
                 topic: cfg.block_topic,
                 genesis_values,
                 upstream_cache,
-                last_epoch: None,
+                last_epoch,
             };
 
             let mut manager = NetworkManager::new(cfg.magic_number, events, events_sender, sink);
