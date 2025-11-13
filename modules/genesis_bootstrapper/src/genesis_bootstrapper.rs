@@ -3,12 +3,14 @@
 
 use acropolis_common::{
     genesis_values::GenesisValues,
+    hash::Hash,
     messages::{
         CardanoMessage, GenesisCompleteMessage, GenesisUTxOsMessage, Message, PotDeltasMessage,
         UTXODeltasMessage,
     },
-    Address, BlockHash, BlockInfo, BlockStatus, ByronAddress, Era, Lovelace, LovelaceDelta, Pot,
-    PotDelta, TxHash, TxIdentifier, TxOutRef, TxOutput, TxUTxODeltas, UTxOIdentifier, Value,
+    Address, BlockHash, BlockInfo, BlockStatus, ByronAddress, Era, GenesisDelegates, Lovelace,
+    LovelaceDelta, Pot, PotDelta, TxHash, TxIdentifier, TxOutRef, TxOutput, TxUTxODeltas,
+    UTxOIdentifier, Value,
 };
 use anyhow::Result;
 use blake2::{digest::consts::U32, Blake2b, Digest};
@@ -40,11 +42,11 @@ const SANCHONET_SHELLEY_START_EPOCH: u64 = 0;
 // Initial reserves (=maximum ever Lovelace supply)
 const INITIAL_RESERVES: Lovelace = 45_000_000_000_000_000;
 
-fn hash_genesis_bytes(raw_bytes: &[u8]) -> [u8; 32] {
+fn hash_genesis_bytes(raw_bytes: &[u8]) -> Hash<32> {
     let mut hasher = Blake2b::<U32>::new();
     hasher.update(raw_bytes);
     let hash: [u8; 32] = hasher.finalize().into();
-    hash
+    Hash::<32>::new(hash)
 }
 
 /// Genesis bootstrapper module
@@ -210,6 +212,23 @@ impl GenesisBootstrapper {
                     shelley_epoch: shelley_start_epoch,
                     shelley_epoch_len: shelley_genesis.epoch_length.unwrap() as u64,
                     shelley_genesis_hash,
+                    genesis_delegs: GenesisDelegates::try_from(
+                        shelley_genesis
+                            .gen_delegs
+                            .unwrap()
+                            .iter()
+                            .map(|(key, value)| {
+                                (
+                                    key.as_str(),
+                                    (
+                                        value.delegate.as_ref().unwrap().as_str(),
+                                        value.vrf.as_ref().unwrap().as_str(),
+                                    ),
+                                )
+                            })
+                            .collect::<Vec<(&str, (&str, &str))>>(),
+                    )
+                    .unwrap(),
                 };
 
                 // Send completion message

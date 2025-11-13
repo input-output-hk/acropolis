@@ -18,17 +18,15 @@ use pallas::ledger::traverse::MultiEraHeader;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, info_span};
-
 mod epoch_activity_publisher;
 mod epochs_history;
 mod state;
 mod store_config;
-use state::State;
-
 use crate::{
     epoch_activity_publisher::EpochActivityPublisher, epochs_history::EpochsHistoryState,
     store_config::StoreConfig,
 };
+use state::State;
 
 const DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC: (&str, &str) = (
     "bootstrapped-subscribe-topic",
@@ -130,32 +128,24 @@ impl EpochsState {
                         };
                     });
 
+                    let span = info_span!("epochs_state.evolve_nonces", block = block_info.number);
+                    span.in_scope(|| {
+                        if let Some(header) = header.as_ref() {
+                            if let Err(e) = state.evolve_nonces(&genesis, block_info, header) {
+                                error!("Error handling block header: {e}");
+                            }
+                        }
+                    });
+
                     if is_new_epoch {
                         let ea = state.end_epoch(block_info);
                         // update epochs history
                         epochs_history.handle_epoch_activity(block_info, &ea);
                         // publish epoch activity message
-                        epoch_activity_publisher
-                            .publish(Arc::new(Message::Cardano((
-                                block_info.clone(),
-                                CardanoMessage::EpochActivity(ea),
-                            ))))
-                            .await
-                            .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+                        epoch_activity_publisher.publish(block_info, ea).await.unwrap_or_else(
+                            |e| error!("Failed to publish epoch activity messages: {e}"),
+                        );
                     }
-
-                    let span = info_span!(
-                        "epochs_state.handle_block_header",
-                        block = block_info.number
-                    );
-                    span.in_scope(|| {
-                        if let Some(header) = header.as_ref() {
-                            match state.handle_block_header(&genesis, block_info, header) {
-                                Ok(()) => {}
-                                Err(e) => error!("Error handling block header: {e}"),
-                            }
-                        }
-                    });
 
                     let span = info_span!("epochs_state.handle_mint", block = block_info.number);
                     span.in_scope(|| {
@@ -219,7 +209,7 @@ impl EpochsState {
         let epoch_activity_publish_topic = config
             .get_string(DEFAULT_EPOCH_ACTIVITY_PUBLISH_TOPIC.0)
             .unwrap_or(DEFAULT_EPOCH_ACTIVITY_PUBLISH_TOPIC.1.to_string());
-        info!("Publishing on '{epoch_activity_publish_topic}'");
+        info!("Publishing EpochActivityMessage on '{epoch_activity_publish_topic}'");
 
         // query topic
         let epochs_query_topic = config
@@ -339,8 +329,7 @@ impl EpochsState {
                     }
 
                     _ => EpochsStateQueryResponse::Error(QueryError::not_implemented(format!(
-                        "Unimplemented query variant: {:?}",
-                        query
+                        "Unimplemented query variant: {query:?}"
                     ))),
                 };
                 Arc::new(Message::StateQueryResponse(StateQueryResponse::Epochs(
