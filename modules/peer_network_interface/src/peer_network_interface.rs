@@ -73,6 +73,7 @@ impl PeerNetworkInterface {
                 topic: cfg.block_topic,
                 genesis_values,
                 upstream_cache,
+                last_epoch: None,
             };
 
             let mut manager = NetworkManager::new(cfg.magic_number, events, events_sender, sink);
@@ -163,6 +164,7 @@ struct BlockSink {
     topic: String,
     genesis_values: GenesisValues,
     upstream_cache: Option<UpstreamCache>,
+    last_epoch: Option<u64>,
 }
 impl BlockSink {
     pub async fn announce(
@@ -190,10 +192,11 @@ impl BlockSink {
         self.context.publish(&self.topic, message).await
     }
 
-    fn make_block_info(&self, header: &Header, rolled_back: bool) -> BlockInfo {
+    fn make_block_info(&mut self, header: &Header, rolled_back: bool) -> BlockInfo {
         let slot = header.slot;
         let (epoch, epoch_slot) = self.genesis_values.slot_to_epoch(slot);
-        let new_epoch = slot == self.genesis_values.epoch_to_first_slot(epoch);
+        let new_epoch = self.last_epoch != Some(epoch);
+        self.last_epoch = Some(epoch);
         let timestamp = self.genesis_values.slot_to_timestamp(slot);
         BlockInfo {
             status: if rolled_back {
