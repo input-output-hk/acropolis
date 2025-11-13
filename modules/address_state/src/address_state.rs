@@ -209,9 +209,11 @@ impl AddressState {
                         match state.get_address_utxos(address).await {
                             Ok(Some(utxos)) => AddressStateQueryResponse::AddressUTxOs(utxos),
                             Ok(None) => match address.to_string() {
-                                Ok(addr_str) => AddressStateQueryResponse::Error(
-                                    QueryError::not_found(format!("Address {}", addr_str)),
-                                ),
+                                Ok(addr_str) => {
+                                    AddressStateQueryResponse::Error(QueryError::not_found(
+                                        format!("Address {} not found", addr_str),
+                                    ))
+                                }
                                 Err(e) => {
                                     AddressStateQueryResponse::Error(QueryError::internal_error(
                                         format!("Could not convert address to string: {}", e),
@@ -227,9 +229,11 @@ impl AddressState {
                         match state.get_address_transactions(address).await {
                             Ok(Some(txs)) => AddressStateQueryResponse::AddressTransactions(txs),
                             Ok(None) => match address.to_string() {
-                                Ok(addr_str) => AddressStateQueryResponse::Error(
-                                    QueryError::not_found(format!("Address {}", addr_str)),
-                                ),
+                                Ok(addr_str) => {
+                                    AddressStateQueryResponse::Error(QueryError::not_found(
+                                        format!("Address {} not found", addr_str),
+                                    ))
+                                }
                                 Err(e) => {
                                     AddressStateQueryResponse::Error(QueryError::internal_error(
                                         format!("Could not convert address to string: {}", e),

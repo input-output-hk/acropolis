@@ -927,7 +927,7 @@ pub struct AccountAddressREST {
 }
 
 #[derive(serde::Serialize)]
-pub struct AccountUTxOREST {
+pub struct UTxOREST {
     pub address: String,
     pub tx_hash: String,
     pub output_index: u16,
@@ -952,4 +952,12 @@ pub struct AddressTotalsREST {
     pub received_sum: AmountList,
     pub sent_sum: AmountList,
     pub tx_count: u64,
+}
+
+#[derive(Serialize)]
+pub struct TransactionInfoREST {
+    pub tx_hash: String,
+    pub tx_index: u16,
+    pub block_height: u32,
+    pub block_time: u64,
 }

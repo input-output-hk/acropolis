@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use crate::handlers_config::HandlersConfig;
 use crate::types::{
-    AccountAddressREST, AccountRewardREST, AccountTotalsREST, AccountUTxOREST,
-    AccountWithdrawalREST, AmountList, DelegationUpdateREST, RegistrationUpdateREST,
+    AccountAddressREST, AccountRewardREST, AccountTotalsREST, AccountWithdrawalREST, AmountList,
+    DelegationUpdateREST, RegistrationUpdateREST, UTxOREST,
 };
 use acropolis_common::messages::{Message, RESTResponse, StateQuery, StateQueryResponse};
 use acropolis_common::queries::accounts::{AccountsStateQuery, AccountsStateQueryResponse};
@@ -784,13 +784,13 @@ pub async fn handle_account_utxos_blockfrost(
         msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Blocks(
-                BlocksStateQueryResponse::UTxOHashes(utxos),
-            )) => Ok(utxos),
+                BlocksStateQueryResponse::UTxOHashes(hashes),
+            )) => Ok(hashes),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
             )) => Err(e),
             _ => Err(QueryError::internal_error(
-                "Unexpected message type while retrieving account UTxOs",
+                "Unexpected message type while retrieving UTxO hashes",
             )),
         },
     )
@@ -846,7 +846,7 @@ pub async fn handle_account_utxos_blockfrost(
             None => None,
         };
 
-        rest_response.push(AccountUTxOREST {
+        rest_response.push(UTxOREST {
             address: entry.address.to_string()?,
             tx_hash,
             output_index,

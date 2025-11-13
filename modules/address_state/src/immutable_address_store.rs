@@ -31,7 +31,11 @@ pub struct ImmutableAddressStore {
 
 impl ImmutableAddressStore {
     pub fn new(path: impl AsRef<Path>) -> Result<Self> {
-        let cfg = fjall::Config::new(path).max_write_buffer_size(512 * 1024 * 1024).temporary(true);
+        let path = path.as_ref();
+        if path.exists() {
+            std::fs::remove_dir_all(path)?;
+        }
+        let cfg = fjall::Config::new(path).max_write_buffer_size(512 * 1024 * 1024);
         let keyspace = Keyspace::open(cfg)?;
 
         let utxos = keyspace.open_partition("address_utxos", PartitionCreateOptions::default())?;
