@@ -212,7 +212,7 @@ pub struct AddressDelta {
     pub created_utxos: Vec<UTxOIdentifier>,
 
     // Sums of spent and created UTxOs
-    pub sent: ValueDelta,
+    pub sent: Value,
     pub received: Value,
 }
 
@@ -2156,7 +2156,7 @@ pub struct AssetAddressEntry {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TxTotals {
-    pub sent: ValueDelta,
+    pub sent: Value,
     pub received: Value,
 }
 
@@ -2183,7 +2183,7 @@ impl AddAssign for AddressTotals {
 impl AddressTotals {
     pub fn apply_delta(&mut self, delta: &TxTotals) {
         self.received.lovelace += delta.received.lovelace;
-        self.sent.lovelace += delta.sent.lovelace as u64;
+        self.sent.lovelace += delta.sent.lovelace;
 
         for (policy, assets) in &delta.received.assets {
             for asset in assets {
@@ -2193,12 +2193,7 @@ impl AddressTotals {
 
         for (policy, assets) in &delta.sent.assets {
             for asset in assets {
-                Self::apply_asset(
-                    &mut self.sent.assets,
-                    *policy,
-                    asset.name,
-                    asset.amount.unsigned_abs(),
-                );
+                Self::apply_asset(&mut self.sent.assets, *policy, asset.name, asset.amount);
             }
         }
 

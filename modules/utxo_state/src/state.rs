@@ -3,9 +3,7 @@ use crate::volatile_index::VolatileIndex;
 use acropolis_common::{
     messages::UTXODeltasMessage, params::SECURITY_PARAMETER_K, BlockInfo, BlockStatus, TxOutput,
 };
-use acropolis_common::{
-    Address, AddressDelta, UTXOValue, UTxOIdentifier, Value, ValueDelta, ValueMap,
-};
+use acropolis_common::{Address, AddressDelta, UTXOValue, UTxOIdentifier, Value, ValueMap};
 use anyhow::Result;
 use async_trait::async_trait;
 use std::collections::HashMap;
@@ -365,7 +363,7 @@ impl State {
                     tx_identifier: tx.tx_identifier,
                     spent_utxos: entry.spent_utxos,
                     created_utxos: entry.created_utxos,
-                    sent: ValueDelta::from(entry.sent),
+                    sent: Value::from(entry.sent),
                     received: Value::from(entry.received),
                 };
                 if let Some(observer) = self.address_delta_observer.as_ref() {
@@ -771,7 +769,7 @@ mod tests {
                 &delta.address,
                 Address::Byron(ByronAddress { payload }) if payload[0] == 99
             ));
-            let lovelace_net = delta.received.lovelace as i64 - delta.sent.lovelace;
+            let lovelace_net = (delta.received.lovelace as i64) - (delta.sent.lovelace as i64);
             assert!(lovelace_net == 42 || lovelace_net == -42);
 
             let mut balance = self.balance.lock().await;
@@ -801,7 +799,7 @@ mod tests {
                                 && asset.amount == 200)
                     );
                     let key = (*policy, asset.name);
-                    *asset_balances.entry(key).or_insert(0) -= asset.amount;
+                    *asset_balances.entry(key).or_insert(0) -= asset.amount as i64;
                 }
             }
         }

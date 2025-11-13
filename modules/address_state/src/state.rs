@@ -231,7 +231,7 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acropolis_common::{Address, AddressDelta, UTxOIdentifier, Value, ValueDelta};
+    use acropolis_common::{Address, AddressDelta, UTxOIdentifier, Value};
     use tempfile::tempdir;
 
     fn dummy_address() -> Address {
@@ -261,7 +261,7 @@ mod tests {
         tx_id: TxIdentifier,
         spent_utxos: Vec<UTxOIdentifier>,
         created_utxos: Vec<UTxOIdentifier>,
-        lovelace_sent: i64,
+        lovelace_sent: u64,
         lovelace_received: u64,
     ) -> AddressDelta {
         AddressDelta {
@@ -269,10 +269,7 @@ mod tests {
             tx_identifier: tx_id,
             spent_utxos,
             created_utxos,
-            sent: ValueDelta {
-                lovelace: lovelace_sent,
-                assets: Vec::new(),
-            },
+            sent: Value::new(lovelace_sent, Vec::new()),
             received: Value::new(lovelace_received, Vec::new()),
         }
     }
@@ -331,7 +328,7 @@ mod tests {
         let tx_id_spend = TxIdentifier::new(1, 0);
 
         let created = vec![delta(&addr, tx_id_create, vec![], vec![utxo], 0, 1)];
-        let spent = vec![delta(&addr, tx_id_spend, vec![utxo], vec![], -1, 0)];
+        let spent = vec![delta(&addr, tx_id_spend, vec![utxo], vec![], 1, 0)];
         // Apply delta to volatile
         state.apply_address_deltas(&created);
 
@@ -391,7 +388,7 @@ mod tests {
             tx_id_spend_old_create_new,
             vec![utxo_old],
             vec![utxo_new],
-            -1,
+            1,
             1,
         )]);
 

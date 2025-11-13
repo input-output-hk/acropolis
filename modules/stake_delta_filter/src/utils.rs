@@ -275,8 +275,8 @@ impl Tracker {
                     .map(|a| a.to_string())
                     .unwrap_or(Ok("(none)".to_owned()))
                     .unwrap_or("(???)".to_owned());
-                let lovelace_delta = event.address_delta.received.lovelace as i64
-                    - event.address_delta.sent.lovelace;
+                let lovelace_delta = (event.address_delta.received.lovelace as i64)
+                    - (event.address_delta.sent.lovelace as i64);
                 delta += lovelace_delta;
 
                 chunk.push(format!(
@@ -405,7 +405,7 @@ pub fn process_message(
             addresses_seen: HashSet::new(),
             txs_seen: HashSet::new(),
         });
-        entry.delta += d.received.lovelace as i64 - d.sent.lovelace;
+        entry.delta += (d.received.lovelace as i64) - (d.sent.lovelace as i64);
 
         if let Some(shelley) = shelley_opt {
             if entry.addresses_seen.insert(shelley.clone()) {
@@ -435,7 +435,7 @@ mod test {
     use acropolis_common::{
         messages::AddressDeltasMessage, Address, AddressDelta, BlockHash, BlockInfo, BlockStatus,
         ByronAddress, Era, ShelleyAddress, ShelleyAddressDelegationPart, ShelleyAddressPaymentPart,
-        ShelleyAddressPointer, StakeAddress, StakeCredential, ValueDelta,
+        ShelleyAddressPointer, StakeAddress, StakeCredential,
     };
     use acropolis_common::{TxIdentifier, Value};
     use bech32::{Bech32, Hrp};
@@ -448,7 +448,7 @@ mod test {
             tx_identifier: TxIdentifier::default(),
             spent_utxos: Vec::new(),
             created_utxos: Vec::new(),
-            sent: ValueDelta::default(),
+            sent: Value::default(),
             received: Value::default(),
         })
     }

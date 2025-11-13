@@ -4,7 +4,6 @@ use std::collections::HashSet;
 
 use crate::asset_registry::{AssetId, AssetRegistry};
 use acropolis_common::{
-    math::update_value_with_delta,
     queries::assets::{AssetHistory, PolicyAssets},
     Address, AddressDelta, AssetAddressEntry, AssetInfoRecord, AssetMetadataStandard,
     AssetMintRecord, AssetName, Datum, Lovelace, NativeAssetsDelta, PolicyAsset, PolicyId,
@@ -426,12 +425,7 @@ impl State {
                         if let Some(asset_id) = registry.lookup_id(policy_id, &asset.name) {
                             if let Some(holders) = addr_map.get_mut(&asset_id) {
                                 let current = holders.entry(shelley_addr.clone()).or_insert(0);
-                                if let Err(e) = update_value_with_delta(current, asset.amount) {
-                                    error!(
-                                        "Address balance update error for {:?}: {e}",
-                                        address_delta.address
-                                    );
-                                }
+                                *current = current.saturating_sub(asset.amount);
 
                                 if *current == 0 {
                                     holders.remove(shelley_addr);
@@ -642,7 +636,7 @@ mod tests {
     use acropolis_common::{
         Address, AddressDelta, AssetInfoRecord, AssetMetadataStandard, AssetName, Datum,
         NativeAsset, NativeAssetDelta, PolicyId, ShelleyAddress, TxIdentifier, TxOutput,
-        TxUTxODeltas, UTxOIdentifier, Value, ValueDelta,
+        TxUTxODeltas, UTxOIdentifier, Value,
     };
 
     fn dummy_policy(byte: u8) -> PolicyId {
@@ -740,19 +734,47 @@ mod tests {
         serde_cbor::to_vec(&serde_cbor::Value::Map(policy_map)).unwrap()
     }
 
-    fn make_address_delta(policy_id: PolicyId, name: AssetName, amount: i64) -> AddressDelta {
+    fn make_address_delta(
+        policy_id: PolicyId,
+        name: AssetName,
+        sent_amount: u64,
+        received_amount: u64,
+    ) -> AddressDelta {
         AddressDelta {
             address: dummy_address(),
             tx_identifier: TxIdentifier::new(0, 0),
             spent_utxos: Vec::new(),
             created_utxos: Vec::new(),
-            sent: ValueDelta {
-                lovelace: 0,
-                assets: vec![(policy_id, vec![NativeAssetDelta { name, amount }])]
-                    .into_iter()
-                    .collect(),
-            },
-            received: Value::default(),
+
+            sent: Value::new(
+                0,
+                if sent_amount > 0 {
+                    vec![(
+                        policy_id,
+                        vec![NativeAsset {
+                            name,
+                            amount: sent_amount,
+                        }],
+                    )]
+                } else {
+                    vec![]
+                },
+            ),
+
+            received: Value::new(
+                0,
+                if received_amount > 0 {
+                    vec![(
+                        policy_id,
+                        vec![NativeAsset {
+                            name,
+                            amount: received_amount,
+                        }],
+                    )]
+                } else {
+                    vec![]
+                },
+            ),
         }
     }
 
@@ -1442,8 +1464,8 @@ mod tests {
             StoreTransactions::None,
         );
 
-        let delta1 = make_address_delta(policy_id, asset_name, 10);
-        let delta2 = make_address_delta(policy_id, asset_name, 15);
+        let delta1 = make_address_delta(policy_id, asset_name, 0, 10);
+        let delta2 = make_address_delta(policy_id, asset_name, 0, 15);
 
         let new_state = state.handle_address_deltas(&[delta1, delta2], &registry).unwrap();
         let addr_map = new_state.addresses.unwrap();
@@ -1475,7 +1497,7 @@ mod tests {
             StoreTransactions::None,
         );
 
-        let add_delta = make_address_delta(policy_id, asset_name, 10);
+        let add_delta = make_address_delta(policy_id, asset_name, 0, 10);
         let state_after_add = state.handle_address_deltas(&[add_delta], &registry).unwrap();
         let addr_map = state_after_add.addresses.as_ref().unwrap();
         let holders = addr_map.get(&asset_id).unwrap();
@@ -1491,7 +1513,7 @@ mod tests {
             10
         );
 
-        let remove_delta = make_address_delta(policy_id, asset_name, -10);
+        let remove_delta = make_address_delta(policy_id, asset_name, 10, 0);
         let state_after_remove =
             state_after_add.handle_address_deltas(&[remove_delta], &registry).unwrap();
         let addr_map = state_after_remove.addresses.as_ref().unwrap();
