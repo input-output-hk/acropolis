@@ -117,9 +117,7 @@ impl AddressState {
                         }
 
                         // Add deltas to volatile
-                        if let Err(e) = state.apply_address_deltas(&address_deltas_msg.deltas) {
-                            error!("address deltas handling error: {e:#}");
-                        }
+                        state.apply_address_deltas(&address_deltas_msg.deltas);
 
                         store = state.immutable.clone();
                         config = state.config.clone();
