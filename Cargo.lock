@@ -302,6 +302,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "acropolis_module_peer_network_interface"
+version = "0.2.0"
+dependencies = [
+ "acropolis_common",
+ "anyhow",
+ "caryatid_sdk",
+ "config",
+ "pallas 0.33.0",
+ "serde",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "acropolis_module_rest_blockfrost"
 version = "0.1.0"
 dependencies = [
@@ -424,7 +438,6 @@ dependencies = [
  "crossbeam",
  "pallas 0.33.0",
  "serde",
- "serde_json",
  "tokio",
  "tracing",
 ]
@@ -466,6 +479,7 @@ dependencies = [
  "acropolis_module_historical_accounts_state",
  "acropolis_module_mithril_snapshot_fetcher",
  "acropolis_module_parameters_state",
+ "acropolis_module_peer_network_interface",
  "acropolis_module_rest_blockfrost",
  "acropolis_module_spdd_state",
  "acropolis_module_spo_state",

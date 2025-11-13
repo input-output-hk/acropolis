@@ -1,11 +1,11 @@
 # Acropolis upstream chain fetcher module
 
 [package]
-name = "acropolis_module_upstream_chain_fetcher"
+name = "acropolis_module_peer_network_interface"
 version = "0.2.0"
-edition = "2021"
-authors = ["Paul Clark <paul.clark@iohk.io>"]
-description = "Upstream chain fetcher Caryatid module for Acropolis"
+edition = "2024"
+authors = ["Simon Gellis <simon@sundae.fi>"]
+description = "Multiplexed chain fetcher Caryatid module for Acropolis"
 license = "Apache-2.0"
 
 [dependencies]
@@ -15,11 +15,10 @@ caryatid_sdk = { workspace = true }
 
 anyhow = { workspace = true }
 config = { workspace = true }
-crossbeam = "0.8.4"
 pallas = { workspace = true }
 serde = { workspace = true, features = ["rc"] }
 tokio = { workspace = true }
 tracing = { workspace = true }
 
 [lib]
-path = "src/upstream_chain_fetcher.rs"
+path = "src/peer_network_interface.rs"
