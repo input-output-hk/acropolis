@@ -43,7 +43,6 @@ impl PeerNetworkInterface {
             SyncPoint::Snapshot => Some(context.subscribe(&cfg.snapshot_completion_topic).await?),
             _ => None,
         };
-        let (events_sender, events) = mpsc::channel(1024);
 
         context.clone().run(async move {
             let genesis_values = if let Some(mut sub) = genesis_complete {
@@ -51,7 +50,7 @@ impl PeerNetworkInterface {
                     .await
                     .expect("could not fetch genesis values")
             } else {
-                cfg.genesis_values.expect("genesis values not found")
+                cfg.genesis_values.clone().expect("genesis values not found")
             };
 
             let mut upstream_cache = None;
@@ -73,40 +72,53 @@ impl PeerNetworkInterface {
                 }
             }
 
-            let sink = BlockSink {
+            let mut sink = BlockSink {
                 context,
-                topic: cfg.block_topic,
+                topic: cfg.block_topic.clone(),
                 genesis_values,
                 upstream_cache,
                 last_epoch,
             };
 
-            let mut manager = NetworkManager::new(cfg.magic_number, events, events_sender, sink);
-            for address in cfg.node_addresses {
-                manager.handle_new_connection(address, Duration::ZERO);
-            }
-
-            match cfg.sync_point {
-                SyncPoint::Origin => manager.sync_to_point(Point::Origin),
+            let manager = match cfg.sync_point {
+                SyncPoint::Origin => {
+                    let mut manager = Self::init_manager(cfg, sink);
+                    manager.sync_to_point(Point::Origin);
+                    manager
+                }
                 SyncPoint::Tip => {
+                    let mut manager = Self::init_manager(cfg, sink);
                     if let Err(error) = manager.sync_to_tip().await {
                         warn!("could not sync to tip: {error:#}");
                         return;
                     }
+                    manager
                 }
-                SyncPoint::Cache => manager.sync_to_point(cache_sync_point),
+                SyncPoint::Cache => {
+                    let mut manager = Self::init_manager(cfg, sink);
+                    manager.sync_to_point(cache_sync_point);
+                    manager
+                }
                 SyncPoint::Snapshot => {
                     let mut subscription =
                         snapshot_complete.expect("Snapshot topic subscription missing");
                     match Self::wait_snapshot_completion(&mut subscription).await {
-                        Ok(point) => manager.sync_to_point(point),
+                        Ok(point) => {
+                            if let Point::Specific(slot, _) = point {
+                                let (epoch, _) = sink.genesis_values.slot_to_epoch(slot);
+                                sink.last_epoch = Some(epoch);
+                            }
+                            let mut manager = Self::init_manager(cfg, sink);
+                            manager.sync_to_point(point);
+                            manager
+                        }
                         Err(error) => {
                             warn!("snapshot restoration never completed: {error:#}");
                             return;
                         }
                     }
                 }
-            }
+            };
 
             if let Err(err) = manager.run().await {
                 error!("chain sync failed: {err:#}");
@@ -114,6 +126,15 @@ impl PeerNetworkInterface {
         });
 
         Ok(())
+    }
+
+    fn init_manager(cfg: InterfaceConfig, sink: BlockSink) -> NetworkManager {
+        let (events_sender, events) = mpsc::channel(1024);
+        let mut manager = NetworkManager::new(cfg.magic_number, events, events_sender, sink);
+        for address in cfg.node_addresses {
+            manager.handle_new_connection(address, Duration::ZERO);
+        }
+        manager
     }
 
     async fn init_cache(
