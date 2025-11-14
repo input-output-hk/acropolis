@@ -81,14 +81,20 @@ impl State {
         }
 
         let store = self.immutable.clone();
+        let mut db_had_address = false;
         let mut combined: HashSet<UTxOIdentifier> = match store.get_utxos(address).await? {
-            Some(db) => db.into_iter().collect(),
+            Some(db) => {
+                db_had_address = true;
+                db.into_iter().collect()
+            }
             None => HashSet::new(),
         };
 
+        let mut pending_touched = false;
         for map in self.volatile.window.iter() {
             if let Some(entry) = map.get(address) {
                 if let Some(deltas) = &entry.utxos {
+                    pending_touched = true;
                     for delta in deltas {
                         match delta {
                             UtxoDelta::Created(u) => {
@@ -104,7 +110,11 @@ impl State {
         }
 
         if combined.is_empty() {
-            Ok(None)
+            if db_had_address || pending_touched {
+                Ok(Some(vec![]))
+            } else {
+                Ok(None)
+            }
         } else {
             Ok(Some(combined.into_iter().collect()))
         }

@@ -162,13 +162,18 @@ impl ImmutableAddressStore {
     pub async fn get_utxos(&self, address: &Address) -> Result<Option<Vec<UTxOIdentifier>>> {
         let key = address.to_bytes_key()?;
 
+        let db_raw = self.utxos.get(&key)?;
+        let db_had_key = db_raw.is_some();
+
         let mut live: Vec<UTxOIdentifier> =
-            self.utxos.get(&key)?.map(|bytes| decode(&bytes)).transpose()?.unwrap_or_default();
+            db_raw.map(|bytes| decode(&bytes)).transpose()?.unwrap_or_default();
 
         let pending = self.pending.lock().await;
+        let mut pending_touched = false;
         for block_map in pending.iter() {
             if let Some(entry) = block_map.get(address) {
                 if let Some(deltas) = &entry.utxos {
+                    pending_touched = true;
                     for delta in deltas {
                         match delta {
                             UtxoDelta::Created(u) => live.push(*u),
@@ -179,8 +184,13 @@ impl ImmutableAddressStore {
             }
         }
 
+        // Only return None if the address never existed
         if live.is_empty() {
-            Ok(None)
+            if db_had_key || pending_touched {
+                Ok(Some(vec![]))
+            } else {
+                Ok(None)
+            }
         } else {
             Ok(Some(live))
         }
