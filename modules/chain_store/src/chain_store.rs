@@ -889,6 +889,7 @@ impl ChainStore {
                                 network_id.clone(),
                                 false,
                             )?,
+                            active_epoch: tx.block.extra.epoch + 1,
                         });
                     }
                 }
@@ -920,6 +921,7 @@ impl ChainStore {
                                 network_id.clone(),
                                 false,
                             )?,
+                            active_epoch: tx.block.extra.epoch + 1,
                         });
                     }
                 }

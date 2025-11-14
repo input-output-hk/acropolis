@@ -158,6 +158,7 @@ pub struct TransactionMIRs {
 pub struct TransactionPoolUpdateCertificate {
     pub cert_index: u64,
     pub pool_reg: PoolRegistration,
+    pub active_epoch: u64,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

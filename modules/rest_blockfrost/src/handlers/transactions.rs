@@ -398,7 +398,7 @@ impl Serialize for TxPoolUpdateCertificate {
         let Ok(reward_account) = self.0.pool_reg.reward_account.to_string() else {
             return Err(S::Error::custom("Can't stringify reward account"));
         };
-        let mut state = serializer.serialize_struct("TxPoolUpdateCertificate", 4)?;
+        let mut state = serializer.serialize_struct("TxPoolUpdateCertificate", 11)?;
         state.serialize_field("cert_index", &self.0.cert_index)?;
         state.serialize_field("pool_id", &self.0.pool_reg.operator.to_string())?;
         state.serialize_field("vrf_key", &self.0.pool_reg.vrf_key_hash.to_string())?;
@@ -421,6 +421,7 @@ impl Serialize for TxPoolUpdateCertificate {
             "relays",
             &self.0.pool_reg.relays.clone().into_iter().map(TxRelay).collect::<Vec<_>>(),
         )?;
+        state.serialize_field("active_epoch", &self.0.active_epoch)?;
         state.end()
     }
 }
